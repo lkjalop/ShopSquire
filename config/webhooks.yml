@@ -1,0 +1,7 @@
+webhooks:
+  decision_events: []
+
+# Example (uncomment or add your own URLs):
+# webhooks:
+#   decision_events:
+#     - https://webhook.site/your-id-here
