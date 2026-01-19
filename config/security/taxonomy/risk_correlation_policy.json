@@ -1,0 +1,18 @@
+{
+  "weights": {
+    "mitre": 0.6,
+    "stride": 0.1,
+    "dread": 0.1,
+    "cvss": 0.2,
+    "kev": 0.0
+  },
+  "bands": {
+    "info": 0,
+    "warn": 5,
+    "high": 10,
+    "critical": 15
+  },
+  "context_multipliers": {
+    "default": 1.0
+  }
+}

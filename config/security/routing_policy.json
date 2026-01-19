@@ -1,0 +1,15 @@
+{
+  "channels": {
+    "p0": ["slack:oncall", "teams:oncall", "jira:P0"],
+    "p1": ["slack:security", "jira:P1"],
+    "p2": ["slack:triage"],
+    "p3": ["slack:info"]
+  },
+  "topics": {
+    "security": { "threshold": "p1" },
+    "payments": { "threshold": "p1" },
+    "inventory": { "threshold": "p2" },
+    "governance": { "threshold": "p2" }
+  },
+  "defaults": { "threshold": "p2" }
+}

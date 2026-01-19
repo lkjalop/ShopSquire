@@ -1,0 +1,6 @@
+{
+  "AML.T0043": {"name": "Craft Adversarial Data", "weight": 1.0},
+  "AML.T0020": {"name": "Supply Chain Compromise", "weight": 1.0},
+  "AML.T0048": {"name": "Exfiltration via Inference", "weight": 1.0},
+  "AML.T0015": {"name": "Model Evasion/Obfuscation", "weight": 0.8}
+}

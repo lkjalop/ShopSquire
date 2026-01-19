@@ -1,0 +1,8 @@
+{
+  "spoofing": 1,
+  "tampering": 1,
+  "repudiation": 1,
+  "information_disclosure": 1,
+  "denial_of_service": 1,
+  "elevation_of_privilege": 1
+}

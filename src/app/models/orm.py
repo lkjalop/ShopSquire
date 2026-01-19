@@ -1,0 +1,50 @@
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import TIMESTAMP, JSON, Boolean, Integer, Text, ForeignKey
+import uuid
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Product(Base):
+    __tablename__ = "products"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    sku: Mapped[str] = mapped_column(Text, unique=True)
+    name: Mapped[str] = mapped_column(Text)
+    price_cents: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(Text, default="USD")
+    specs: Mapped[dict | None] = mapped_column(JSON, default=None)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class Inventory(Base):
+    __tablename__ = "inventory"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    product_id: Mapped[str] = mapped_column(Text, ForeignKey("products.id", ondelete="CASCADE"))
+    stock: Mapped[int] = mapped_column(Integer)
+    warehouse: Mapped[str] = mapped_column(Text, default="default")
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class DraftOrder(Base):
+    __tablename__ = "draft_orders"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    customer_id: Mapped[str | None] = mapped_column(Text, ForeignKey("customers.id"), nullable=True)
+    line_items: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(Text, default="draft")
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    draft_order_id: Mapped[str | None] = mapped_column(Text, ForeignKey("draft_orders.id"), nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(Text, ForeignKey("customers.id"), nullable=True)
+    total_cents: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(Text, default="USD")
+    status: Mapped[str] = mapped_column(Text, default="pending_payment")
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)

@@ -1,0 +1,33 @@
+{
+  "title": "ShopSquire Incident & SLA",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Incident Alerts by Severity",
+      "targets": [
+        { "expr": "sum by(severity) (shopsquire_incident_alerts_total)" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Tickets Created by Priority",
+      "targets": [
+        { "expr": "sum by(priority) (shopsquire_tickets_created_total)" }
+      ]
+    },
+    {
+      "type": "histogram",
+      "title": "Pricing Suggest Latency",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(shopsquire_pricing_latency_seconds_bucket[5m])) by (le))" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Chaos Injections",
+      "targets": [
+        { "expr": "sum(shopsquire_chaos_injected_total)" }
+      ]
+    }
+  ]
+}
