@@ -7,6 +7,15 @@ class Base(DeclarativeBase):
     pass
 
 
+class Customer(Base):
+    __tablename__ = "customers"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
 class Product(Base):
     __tablename__ = "products"
     id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -14,6 +23,7 @@ class Product(Base):
     name: Mapped[str] = mapped_column(Text)
     price_cents: Mapped[int] = mapped_column(Integer)
     currency: Mapped[str] = mapped_column(Text, default="USD")
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     specs: Mapped[dict | None] = mapped_column(JSON, default=None)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
