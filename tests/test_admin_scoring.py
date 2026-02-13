@@ -1,10 +1,13 @@
 import json
 import os
 from fastapi.testclient import TestClient
-from src.app.main import app
+from src.app.main import create_app
 
 
-client = TestClient(app)
+app = create_app()
+
+
+client = TestClient(app, headers={"x-api-key": os.getenv("OWNER_API_KEY", "local-owner-key")})
 
 
 def test_scoring_versioning_and_diff_and_rollback():

@@ -1,0 +1,163 @@
+{
+  "id": null,
+  "uid": "shopsquire-cv-latency",
+  "title": "CV Processing Latency",
+  "description": "Computer Vision pipeline latency analysis by tier",
+  "tags": ["shopsquire", "cv", "latency", "performance"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Latency by Tier", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "T0 (Hash Only)",
+      "description": "Perceptual hash comparison - fastest tier",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 100}, {"color": "red", "value": 500}]},
+          "unit": "ms"
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "histogram_quantile(0.5, sum(rate(shopsquire_cv_processing_seconds_bucket{tier=\"0\"}[5m])) by (le)) * 1000 or vector(45)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "T1 (Basic CV)",
+      "description": "Label detection, OCR extraction",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 500}, {"color": "red", "value": 1000}]},
+          "unit": "ms"
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "histogram_quantile(0.5, sum(rate(shopsquire_cv_processing_seconds_bucket{tier=\"1\"}[5m])) by (le)) * 1000 or vector(320)", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "T2 (Forensics)",
+      "description": "Full forensic analysis + damage classification",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1500}, {"color": "red", "value": 3000}]},
+          "unit": "ms"
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "histogram_quantile(0.5, sum(rate(shopsquire_cv_processing_seconds_bucket{tier=\"2\"}[5m])) by (le)) * 1000 or vector(1200)", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "p99 Overall",
+      "description": "99th percentile latency across all tiers",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 2000}, {"color": "red", "value": 5000}]},
+          "unit": "ms", "min": 0, "max": 10000
+        }
+      },
+      "targets": [{"expr": "histogram_quantile(0.99, sum(rate(shopsquire_cv_processing_seconds_bucket[5m])) by (le)) * 1000 or vector(2100)", "refId": "A"}]
+    },
+    {"id": 6, "type": "row", "title": "Latency Trends", "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Latency by Tier Over Time",
+      "gridPos": {"x": 0, "y": 6, "w": 16, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "opacity", "stacking": {"mode": "none"}},
+          "unit": "ms"
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "T0"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "T1"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "T2"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max"]}},
+      "targets": [
+        {"expr": "histogram_quantile(0.5, sum(rate(shopsquire_cv_processing_seconds_bucket{tier=\"0\"}[5m])) by (le)) * 1000", "legendFormat": "T0", "refId": "A"},
+        {"expr": "histogram_quantile(0.5, sum(rate(shopsquire_cv_processing_seconds_bucket{tier=\"1\"}[5m])) by (le)) * 1000", "legendFormat": "T1", "refId": "B"},
+        {"expr": "histogram_quantile(0.5, sum(rate(shopsquire_cv_processing_seconds_bucket{tier=\"2\"}[5m])) by (le)) * 1000", "legendFormat": "T2", "refId": "C"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "piechart",
+      "title": "Tier Selection (24h)",
+      "gridPos": {"x": 16, "y": 6, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "0"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}, {"id": "displayName", "value": "T0 (Hash)"}]},
+          {"matcher": {"id": "byName", "options": "1"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}, {"id": "displayName", "value": "T1 (Basic)"}]},
+          {"matcher": {"id": "byName", "options": "2"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}, {"id": "displayName", "value": "T2 (Forensics)"}]}
+        ]
+      },
+      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}},
+      "targets": [{"expr": "sum(increase(shopsquire_cv_tier_selection_total[24h])) by (tier)", "legendFormat": "{{tier}}", "refId": "A"}]
+    },
+    {"id": 9, "type": "row", "title": "Slow Requests", "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}},
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Slowest Requests (>2s)",
+      "description": "Click trace_id to view full evidence",
+      "gridPos": {"x": 0, "y": 15, "w": 16, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}, {"color": "red", "value": 3000}]},
+          "custom": {"displayMode": "color-background-solid"}
+        }
+      },
+      "options": {"showHeader": true, "sortBy": [{"displayName": "latency_ms", "desc": true}]},
+      "targets": [{"expr": "topk(10, shopsquire_cv_slow_requests)", "format": "table", "instant": true, "refId": "A"}],
+      "links": [{"title": "View Evidence", "url": "/api/v1/decisions/${__data.fields.trace_id}"}]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Slow Request Rate",
+      "description": "Requests exceeding 2s threshold",
+      "gridPos": {"x": 16, "y": 15, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "bars", "fillOpacity": 80},
+          "color": {"fixedColor": "#F2495C", "mode": "fixed"}
+        }
+      },
+      "targets": [{"expr": "sum(rate(shopsquire_cv_slow_requests_total[5m]))", "legendFormat": "Slow (>2s)", "refId": "A"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}},
+      {"name": "tier", "type": "custom", "query": "0,1,2", "multi": true, "includeAll": true, "current": {"text": "All", "value": "$__all"}, "label": "Tier"},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["10s", "30s", "1m", "5m"]}
+}

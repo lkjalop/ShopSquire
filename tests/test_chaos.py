@@ -1,10 +1,13 @@
 import time
 from fastapi.testclient import TestClient
+from tests.utils import default_headers
 
-from src.app.main import app
+from src.app.main import create_app
 from src.app.config import get_settings
 
-client = TestClient(app)
+app = create_app()
+
+client = TestClient(app, headers=default_headers())
 
 
 def _write_flags(flags):

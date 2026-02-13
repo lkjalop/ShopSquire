@@ -1,0 +1,10 @@
+{
+  "default": {
+    "templates": [
+      {"id": "ask_budget_tier", "intent": "recommend", "product_category": "laptop", "text": "What's your budget range? (e.g., $800-$1200)", "goal": "clarify_details"},
+      {"id": "ask_use_case", "intent": "recommend", "product_category": "laptop", "text": "What will you use the laptop for (work, travel, gaming)?", "goal": "clarify_details"},
+      {"id": "ask_platform", "intent": "recommend", "product_category": "laptop", "text": "Do you prefer Windows, macOS, or Linux?", "goal": "clarify_details"},
+      {"id": "ask_brand_pref", "intent": "recommend", "product_category": "laptop", "text": "Any brand preferences or brands to avoid?", "goal": "clarify_details"}
+    ]
+  }
+}

@@ -1,10 +1,16 @@
 import json
 import uuid
 import re
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
+import sys
 
 from sqlalchemy import text
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.app.models.db import db_session
 
@@ -12,7 +18,7 @@ from src.app.models.db import db_session
 def _uuid() -> str:
     return str(uuid.uuid4())
 
-_PRICE_RE = re.compile(r"price\s*:?\s*\$?\s*(\d+)", re.IGNORECASE)
+_PRICE_RE = re.compile(r"price\s*:?\s*\$?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 _RAM_RE = re.compile(r"(\d+)\s*GB\s*RAM", re.IGNORECASE)
 _STORAGE_RE = re.compile(r"(\d+)\s*(TB|GB)\s*(?:SSD|storage|M\.2|HDD)", re.IGNORECASE)
 _BRACKET_STORAGE_RE = re.compile(r"\[(\d+)\s*(TB|GB)\]", re.IGNORECASE)
@@ -37,7 +43,7 @@ def _split_blocks(text: str) -> list[list[str]]:
     return blocks
 
 
-def parse_laptop_products(path: str = "docs/laptop-products.txt") -> list[dict]:
+def parse_laptop_products(path: str = "docs/laptop-products-exp.txt") -> list[dict]:
     p = Path(path)
     if not p.exists():
         return []
@@ -52,7 +58,7 @@ def parse_laptop_products(path: str = "docs/laptop-products.txt") -> list[dict]:
         for line in block[1:]:
             if _PRICE_RE.search(line):
                 m = _PRICE_RE.search(line)
-                price = int(m.group(1)) if m else price
+                price = float(m.group(1)) if m else price
                 continue
             if line.strip().lower().startswith("key features"):
                 continue
@@ -87,7 +93,7 @@ def parse_laptop_products(path: str = "docs/laptop-products.txt") -> list[dict]:
         products.append(
             {
                 "name": name.strip(),
-                "price_cents": int(price) * 100,
+                "price_cents": int(round(float(price) * 100)),
                 "specs": {
                     "display": display,
                     "screen": screen,
@@ -195,7 +201,8 @@ def seed_products(db):
         except Exception:
             pass
         return
-    parsed = parse_laptop_products()
+    source_path = os.getenv("PRODUCT_SOURCE_TXT", "docs/laptop-products-exp.txt")
+    parsed = parse_laptop_products(source_path)
     if not parsed:
         parsed = [
             {"name": "Dell XPS 13 Plus Laptop", "price_cents": 129900, "specs": {"ram_gb": 16, "storage": "512GB"}},
@@ -384,6 +391,32 @@ def seed_security_events(db):
         )
 
 
+def seed_rules(db):
+    existing = 0
+    try:
+        existing = db.execute(text("SELECT COUNT(*) FROM rule_definitions")).scalar() or 0
+    except Exception:
+        existing = 0
+    if existing > 0:
+        return
+    rules = [
+        {"id": "demo_return_request", "title": "return_request", "pattern": r"\\b(return|refund|exchange)\\b", "priority": 10},
+        {"id": "demo_order_status", "title": "order_status", "pattern": r"\\b(track|where\\s+is\\s+my\\s+order|order\\s+status)\\b", "priority": 20},
+        {"id": "demo_product_search", "title": "product_search", "pattern": r"\\b(show\\s+me|find|search\\s+for|looking\\s+for)\\b", "priority": 30},
+    ]
+    for r in rules:
+        try:
+            db.execute(
+                text(
+                    "INSERT INTO rule_definitions (id, tenant_id, title, pattern, expression, priority, active, created_by, version, created_at) "
+                    "VALUES (:id, NULL, :title, :pattern, NULL, :priority, 1, 'seed_demo', 'v1', CURRENT_TIMESTAMP)"
+                ),
+                r,
+            )
+        except Exception:
+            pass
+
+
 def main():
     with db_session() as db:
         seed_customers(db)
@@ -391,6 +424,7 @@ def main():
         seed_orders(db)
         seed_decisions(db)
         seed_security_events(db)
+        seed_rules(db)
         db.commit()
     print("Demo data seeded.")
 

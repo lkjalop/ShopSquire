@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  postgres-test:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: shopsquire
+      POSTGRES_DB: shopsquire_test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopsquire -d shopsquire_test -h localhost -p 5432"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

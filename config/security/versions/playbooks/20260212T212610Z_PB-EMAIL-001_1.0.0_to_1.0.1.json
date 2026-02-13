@@ -1,0 +1,69 @@
+{
+  "snapshot_at": "2026-02-12T21:26:10.007072+00:00",
+  "actor": "developer",
+  "playbook_id": "PB-EMAIL-001",
+  "before": {
+    "id": "PB-EMAIL-001",
+    "title": "Test Playbook",
+    "domain": "security",
+    "priority": 10,
+    "enabled": true,
+    "version": "1.0.0",
+    "trigger_logic": "any",
+    "entry_conditions": {},
+    "actions": [
+      {
+        "type": "notify_ops",
+        "params": {
+          "channel": "email"
+        }
+      }
+    ],
+    "sla_minutes": 30,
+    "risk_band_min": "low",
+    "owners": [
+      "owner@test"
+    ],
+    "checks": [],
+    "closure_criteria": [],
+    "rollback": {
+      "enabled": false,
+      "strategy": "manual"
+    },
+    "requires_approval_roles": [],
+    "severity": "medium"
+  },
+  "after": {
+    "id": "PB-EMAIL-001",
+    "title": "Vendor Payout Change Verification (Updated)",
+    "domain": "security",
+    "priority": 10,
+    "enabled": true,
+    "version": "1.0.1",
+    "trigger_logic": "any",
+    "entry_conditions": {},
+    "actions": [
+      {
+        "type": "notify_ops",
+        "params": {
+          "channel": "email"
+        }
+      }
+    ],
+    "sla_minutes": 30,
+    "risk_band_min": "low",
+    "owners": [
+      "owner@test"
+    ],
+    "checks": [],
+    "closure_criteria": [],
+    "rollback": {
+      "enabled": false,
+      "strategy": "manual"
+    },
+    "requires_approval_roles": [],
+    "severity": "medium",
+    "updated_by": "developer",
+    "updated_at": "2026-02-12T21:26:10.006072+00:00"
+  }
+}

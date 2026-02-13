@@ -1,0 +1,22 @@
+{
+  "id": null,
+  "uid": "shopsquire-cv-analytics",
+  "title": "ShopSquire CV Analytics",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Complaint Triage / min",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "sum(rate(shopsquire_complaint_triage_total[5m])) by (intent, severity)", "legendFormat": "{{intent}} {{severity}}" }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 }
+    }
+  ],
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] }
+}

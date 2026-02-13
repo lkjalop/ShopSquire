@@ -5,6 +5,12 @@ services:
     container_name: shopsquire_api
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: "1"
+      AUTO_MIGRATE: "1"
+      DB_MIGRATION_GUARD: "1"
     ports:
       - "8080:8080"
     depends_on:
@@ -23,12 +29,84 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     container_name: shopsquire_redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  sync-worker:
+    build: .
+    container_name: shopsquire_sync_worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      REDIS_URL: redis://redis:6379/0
+      DB_MIGRATION_GUARD: "1"
+      INVENTORY_SYNC_CONNECTORS: "csv,shopify"
+      INVENTORY_SYNC_INTERVAL_SEC: "300"
+      INVENTORY_SYNC_STARTUP_DELAY_SEC: "15"
+      INVENTORY_SYNC_DRY_RUN: "0"
+      INVENTORY_SYNC_UPSERT_PRODUCTS: "0"
+    depends_on:
+      - db
+      - redis
+    command: ["python", "scripts/sync_worker.py"]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: shopsquire_prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/observability/prometheus_rules.yml:/etc/prometheus/rules/prometheus_rules.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: shopsquire_alertmanager
+    environment:
+      # Local-dev defaults to keep Alertmanager config valid without external integrations.
+      SLACK_WEBHOOK_URL: "http://localhost:0/"
+      PAGERDUTY_KEY: "dummy"
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - ./config/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    depends_on:
+      - prometheus
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: shopsquire_grafana
+    environment:
+      GF_INSTALL_PLUGINS: simpod-json-datasource
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    ports:
+      - "3005:3000"
+    volumes:
+      - ./config/observability/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/observability/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
 
 volumes:
   pgdata:

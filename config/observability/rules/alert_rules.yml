@@ -1,0 +1,19 @@
+groups:
+  - name: shopsquire
+    rules:
+      - alert: HighErrorRate
+        expr: (sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High 5xx error rate
+          description: 5xx error rate above 5% over 5m.
+      - alert: HighAvgLatency
+        expr: (sum(rate(http_request_latency_seconds_sum[5m])) / sum(rate(http_request_latency_seconds_count[5m]))) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High average request latency
+          description: Average request latency > 500ms over 5m.

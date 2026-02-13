@@ -1,0 +1,20 @@
+{
+  "id": null,
+  "uid": "shopsquire-merchant-bi",
+  "title": "ShopSquire Merchant BI",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Orders (Daily)",
+      "datasource": { "type": "simpod-json-datasource", "uid": "shopsquire_analytics_json" },
+      "targets": [{ "target": "orders" }],
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 }
+    }
+  ],
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": { "list": [] }
+}

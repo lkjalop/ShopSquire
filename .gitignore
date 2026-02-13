@@ -1,0 +1,44 @@
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.env
+.env.*
+
+tmp/
+.tmp_test_reports/
+.tmp_pytest_*.log
+
+# Local runtime artifacts / recordings (keep only the compact summary JSON)
+runs/**
+!runs/docker_pytest_results.json
+
+# Local dumps, logs, and DB volumes (do not commit)
+dump/
+logs/
+pgdata/
+
+# Local model weights (download separately as needed)
+/yolov8*.pt
+/models/*.pt
+
+*.sqlite
+*.db
+*.sqlite-journal
+test.sqlite*
+
+node_modules/
+dist/
+build/
+
+.venv/
+venv/
+.venv_new/
+
+# Editor / tool local state
+.claude/settings.local.json

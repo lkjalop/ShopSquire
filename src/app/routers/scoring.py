@@ -3,11 +3,12 @@ import os
 import time
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
 
 
-router = APIRouter(prefix="/api/v1/admin/scoring", tags=["admin-scoring"])
+router = APIRouter(prefix="/api/v1/scoring", tags=["scoring"])
 
 
 def _policy_path() -> str:
@@ -21,13 +22,13 @@ def _versions_dir() -> str:
 
 
 @router.get("/weights")
-def get_scoring_weights() -> Dict:
+def get_scoring_weights(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with open(_policy_path(), "r", encoding="utf-8") as f:
         return json.load(f).get("weights", {})
 
 
 @router.post("/weights")
-def set_scoring_weights(weights: Dict) -> Dict:
+def set_scoring_weights(weights: Dict, role: str = Depends(require_role([ROLE_OWNER]))) -> Dict:
     path = _policy_path()
     with open(path, "r", encoding="utf-8") as f:
         current = json.load(f)
@@ -38,7 +39,7 @@ def set_scoring_weights(weights: Dict) -> Dict:
 
 
 @router.post("/update")
-def scoring_update(payload: Dict) -> Dict:
+def scoring_update(payload: Dict, role: str = Depends(require_role([ROLE_OWNER]))) -> Dict:
     # Update entire policy and write a version
     path = _policy_path()
     timestamp = int(time.time())
@@ -54,13 +55,13 @@ def scoring_update(payload: Dict) -> Dict:
 
 
 @router.get("/versions")
-def scoring_versions() -> Dict:
+def scoring_versions(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     files = [f for f in os.listdir(_versions_dir()) if f.startswith("risk_correlation_policy_")]
     return {"versions": files}
 
 
 @router.get("/diff")
-def scoring_diff(a: str, b: str) -> Dict:
+def scoring_diff(a: str, b: str, role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     dirp = _versions_dir()
     with open(os.path.join(dirp, a), "r", encoding="utf-8") as fa:
         pa = json.load(fa)
@@ -69,13 +70,12 @@ def scoring_diff(a: str, b: str) -> Dict:
     return {"diff": {k: {"a": pa.get(k), "b": pb.get(k)} for k in set(pa.keys()) | set(pb.keys())}}
 
 
-@router.post("/rollback")
 class RollbackReq(BaseModel):
     version_file: str
 
 
 @router.post("/rollback")
-def scoring_rollback(req: RollbackReq) -> Dict:
+def scoring_rollback(req: RollbackReq, role: str = Depends(require_role([ROLE_OWNER]))) -> Dict:
     dirp = _versions_dir()
     src = os.path.join(dirp, req.version_file)
     if not os.path.exists(src):

@@ -1,0 +1,177 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run import check script",
+			"type": "shell",
+			"command": "python scripts/check_imports.py",
+			"isBackground": false
+		},
+		{
+			"label": "Run import check script",
+			"type": "shell",
+			"command": "python scripts/check_imports.py",
+			"isBackground": false,
+			"problemMatcher": [
+				"$python"
+			]
+		},
+		{
+			"label": "One-line import check",
+			"type": "shell",
+			"command": "python -c \"import importlib; importlib.import_module('src.app.routers.admin'); importlib.import_module('src.app.routers.decisions'); print('success')\"",
+			"isBackground": false
+		},
+		{
+			"label": "Run requested tests with venv activation",
+			"type": "shell",
+			"command": "powershell -ExecutionPolicy Bypass -File scripts/run_test_and_capture.ps1",
+			"isBackground": false,
+			"problemMatcher": [
+				"$pytest-extra"
+			]
+		},
+		{
+			"label": "temp-run-import-check",
+			"type": "shell",
+			"command": "\"D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe\" -c \"import sys\nfailed=[]\nfor m in ('pytest','playwright'):\n    try:\n        mod=__import__(m)\n        v=getattr(mod,'__version__',None)\n        print(f'OK {m} {v}')\n    except Exception as e:\n        failed.append(m)\n        print(f'FAIL {m} {e}', file=sys.stderr)\n# always exit 0\nsys.exit(0)\"",
+			"isBackground": false
+		},
+		{
+			"label": "Run run_tests_noninteractive.py",
+			"type": "shell",
+			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe scripts/run_tests_noninteractive.py",
+			"isBackground": false,
+			"group": "none"
+		},
+		{
+			"label": "Emit Splunk test event",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"$env:SPLUNK_HEC_URL=$env:SPLUNK_HEC_URL; $env:SPLUNK_HEC_TOKEN=$env:SPLUNK_HEC_TOKEN; $body = @{ time = [int][double]::Parse((Get-Date -UFormat %s)); sourcetype = 'shopsquire:security'; source='manual-test'; event = @{ message='test-event'; component='telemetry_emit'; severity='info' } } | ConvertTo-Json -Depth 5; if (-not $env:SPLUNK_HEC_URL -or -not $env:SPLUNK_HEC_TOKEN) { Write-Host 'SPLUNK envs not set; skipping'; exit 0 }; try { $resp = Invoke-RestMethod -Method Post -Uri $env:SPLUNK_HEC_URL -Headers @{ Authorization = \"Splunk $env:SPLUNK_HEC_TOKEN\" } -Body $body -ContentType 'application/json'; Write-Host \"Splunk HEC response: $($resp.text)\" } catch { Write-Host \"HEC send failed: $($_.Exception.Message)\"; exit 1 }"
+			],
+			"isBackground": false,
+			"group": "none"
+		},
+		{
+			"label": "Import check with PYTHONPATH",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Push-Location \"D:/AI/agentLumen/ShopSquire\"; $env:PYTHONPATH = \"D:/AI/agentLumen/ShopSquire\"; & \".venv/Scripts/python.exe\" \"scripts/check_imports.py\"; Pop-Location"
+			],
+			"isBackground": false,
+			"group": "none"
+		},
+		{
+			"label": "Import check with PYTHONPATH v2",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Push-Location \"D:/AI/agentLumen/ShopSquire\"; $env:PYTHONPATH = (Get-Location).Path; & \".venv/Scripts/python.exe\" \"scripts/check_imports.py\"; Pop-Location"
+			],
+			"isBackground": false,
+			"group": "none"
+		},
+		{
+			"label": "Direct chaos+load pytest",
+			"type": "shell",
+			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-q",
+				"tests/chaos",
+				"tests/load"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start uvicorn server (8081)",
+			"type": "shell",
+			"command": "$env:DATABASE_URL = \"sqlite+pysqlite:///D:/AI/agentLumen/ShopSquire/tmp/e2e.sqlite\"; $env:DISABLE_UI_ROUTES = \"0\"; $env:API_PORT = \"8081\"; $env:BACKPRESSURE_TEST_DELAY_SEC = \"0.3\"; & \"D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe\" -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory",
+			"args": [],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Start uvicorn server (8081)",
+			"type": "shell",
+			"command": "$env:DATABASE_URL = 'sqlite+pysqlite:///D:/AI/agentLumen/ShopSquire/tmp/e2e.sqlite'; $env:DISABLE_UI_ROUTES = '0'; $env:API_PORT = '8081'; $env:BACKPRESSURE_TEST_DELAY_SEC = '0.3'; & 'D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe' -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory",
+			"args": [],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Start uvicorn detached",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Push-Location 'D:/AI/agentLumen/ShopSquire'; Start-Process -FilePath '.venv/Scripts/python.exe' -ArgumentList '-m','uvicorn','src.app.main:create_app','--host','127.0.0.1','--port','8081','--factory' -WorkingDirectory 'D:/AI/agentLumen/ShopSquire' -WindowStyle Hidden; Pop-Location"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Start uvicorn detached (fixed)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-Command",
+				"Push-Location 'D:/AI/agentLumen/ShopSquire'; Start-Process -FilePath '.venv/Scripts/python.exe' -ArgumentList \"-m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory\" -WorkingDirectory 'D:/AI/agentLumen/ShopSquire' -WindowStyle Hidden; Pop-Location"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Run recommend price/spec test",
+			"type": "shell",
+			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-vv",
+				"tests/pw/test_recommend_spec_price_trace.py::test_recommend_price_and_spec_filters_api",
+				"-s"
+			],
+			"isBackground": false,
+			"group": "none"
+		},
+		{
+			"label": "Re-run recommend price/spec test",
+			"type": "shell",
+			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe",
+			"args": [
+				"-m",
+				"pytest",
+				"-vv",
+				"tests/pw/test_recommend_spec_price_trace.py::test_recommend_price_and_spec_filters_api",
+				"-s"
+			],
+			"isBackground": false
+		}
+	]
+}

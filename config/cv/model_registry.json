@@ -1,0 +1,21 @@
+{
+  "default": {
+    "enabled": true,
+    "detector": {
+      "enabled": true,
+      "allowed_models": ["yolov8n.pt", "yolov8s.pt"]
+    },
+    "ocr": {
+      "enabled": true,
+      "allowed_providers": ["tesseract", "paddle", "embedded"],
+      "default_provider": "tesseract",
+      "fallback_provider": "tesseract"
+    },
+    "normalizer": {
+      "enabled": true,
+      "max_dim": 1280
+    }
+  },
+  "tenants": {}
+}
+

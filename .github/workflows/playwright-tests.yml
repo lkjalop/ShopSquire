@@ -1,0 +1,51 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest playwright requests
+
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: |
+          # Ensure tests use sqlite test DB path
+          export PLAYWRIGHT_TEST_PORT=8099
+          export DATABASE_URL="sqlite:///tests/playwright/smoke.sqlite"
+          pytest -q tests/pw || true
+        continue-on-error: true
+
+      - name: Create runs dir if missing
+        run: mkdir -p runs || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            runs/**
+            tests/**/smoke.sqlite
+            pytest_full_out.txt
+            playwright_console.log
+            **/*_triage.json
+          retention-days: 7

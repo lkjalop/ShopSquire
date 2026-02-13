@@ -1,0 +1,39 @@
+{
+  "id": "luxury",
+  "version": "2026-02-05",
+  "name": "Luxury Returns (Conservative Defaults)",
+  "strict_required_views": true,
+  "required_views": {
+    "views": ["front", "back", "serial", "tag", "receipt"],
+    "keywords": {
+      "front": ["front", "overview", "product"],
+      "back": ["back", "rear"],
+      "serial": ["serial", "sn", "s_n"],
+      "tag": ["tag", "label", "barcode"],
+      "receipt": ["receipt", "invoice", "order"]
+    },
+    "min_images": 2
+  },
+  "taxonomy": {
+    "categories": ["apparel", "accessory", "handbag", "jewelry", "receipt_document"],
+    "damage_types": ["stain", "tear", "scratch", "missing_item", "unknown"]
+  },
+  "allowed_substitutions": {
+    "category_substitutions": {
+      "bag": "handbag"
+    }
+  },
+  "thresholds": {
+    "auto_approve_max_score": 20,
+    "human_review_max_score": 60,
+    "escalate_security_min_score": 60,
+    "image_quality_min": 0.7,
+    "return_window_days": 14
+  },
+  "ocr_patterns": {
+    "order_id": ["Order[:\\s#]*([A-Z0-9\\-]{6,32})", "Invoice[:\\s#]*([A-Z0-9\\-]{6,32})"],
+    "serial": ["Serial[:\\s]*([A-Z0-9\\-]{6,24})", "Ref[:\\s]*([A-Z0-9\\-]{4,24})"]
+  },
+  "roi_allowlist": ["product", "serial_plate", "tag_label", "barcode", "receipt_document"]
+}
+

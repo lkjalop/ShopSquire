@@ -22,6 +22,14 @@ scrape_configs:
 - Import `config/observability/grafana_dashboard.json`.
 - Set Prometheus as a data source; the panels reference the metric names above.
 
+## Alerting Rules
+- See `config/observability/prometheus_rules.yml` for starter alert rules:
+  - P95 HTTP latency and pricing latency thresholds
+  - 5xx error rate > 5%
+  - Compliance control failures spike
+  - P1 incident alerts present
+- Load these into Alertmanager/Prometheus via your deployment pipeline.
+
 ## Notes
 - In local/test, `DECISION_LOG_WRITES_ENABLED=false` avoids DB writes; metrics still work.
 - Chaos injection metrics increment when `CHAOS.enabled=true` and probability thresholds are met.

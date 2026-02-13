@@ -1,0 +1,47 @@
+{
+  "title": "ShopSquire Security Geo",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "type": "barchart",
+      "title": "Top ASNs by risk (24h)",
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "topk(20, sum by (asn, org) (increase(shopsquire_geo_asn_risk_total[24h])))",
+          "legendFormat": "{{asn}} {{org}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Velocity anomalies (ASN, 24h)",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+      "targets": [
+        {
+          "expr": "sum by (asn, country) (increase(shopsquire_geo_velocity_anomalies_total[24h]))",
+          "legendFormat": "{{asn}} {{country}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "geomap",
+      "title": "Geo risk heatmap (24h)",
+      "gridPos": {"x": 0, "y": 8, "w": 24, "h": 10},
+      "options": {
+        "view": {"id": "default"}
+      },
+      "targets": [
+        {
+          "expr": "sum by (country) (increase(shopsquire_geo_asn_risk_total[24h]))",
+          "legendFormat": "{{country}}",
+          "refId": "C"
+        }
+      ]
+    }
+  ]
+}

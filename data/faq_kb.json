@@ -1,0 +1,74 @@
+[
+  {
+    "id": "faq_001",
+    "intent": "display_flicker",
+    "title": "Display flicker or backlight issue",
+    "description": "Screen flickers or backlight intermittently. Ask for screenshots or video, serial number, OS and driver versions.",
+    "troubleshooting_steps": [
+      "Ask user to reproduce and record short video of the flicker.",
+      "Request serial number and OS version (Windows/macOS) and display driver version.",
+      "On Windows: instruct user to update GPU drivers and check Device Manager for display adapter errors.",
+      "On macOS: request system report and advise SMC/PRAM reset steps.",
+      "If under warranty and hardware evidence present, escalate for RMA with photos and video."
+    ],
+    "evidence_requirements": ["video.mp4", "screenshot.png", "serial_number", "purchase_receipt"],
+    "auto_approve_threshold_cents": 20000
+  },
+  {
+    "id": "faq_002",
+    "intent": "touch_unresponsive",
+    "title": "Touchscreen unresponsive",
+    "description": "Touch input not registering. Clarify recent drops/liquid exposure and ask for reproducing steps.",
+    "troubleshooting_steps": [
+      "Ask whether the device is in tablet/portrait mode and if a stylus is paired.",
+      "On Windows: check HID-compliant touch screen in Device Manager, roll back or reinstall drivers.",
+      "On macOS (e.g., Touch Bar or touchscreen-like devices): request system profiler and logs.",
+      "Ask to reboot into safe mode to rule out third-party drivers.",
+      "If hardware fault suspected, collect photos and escalate."
+    ],
+    "evidence_requirements": ["video.mp4", "serial_number"],
+    "auto_approve_threshold_cents": 15000
+  },
+  {
+    "id": "faq_003",
+    "intent": "battery_drain",
+    "title": "Battery drains quickly",
+    "description": "Device battery discharges faster than expected. Gather OS, battery health, and background app info.",
+    "troubleshooting_steps": [
+      "Ask user for estimated battery cycles and battery health (Windows PowerShell or macOS System Report).",
+      "Request a screenshot of battery health and recent activity.",
+      "Advise updating firmware/BIOS and OS to latest version.",
+      "If battery health below threshold and device under warranty, create RMA."
+    ],
+    "evidence_requirements": ["battery_report.html", "screenshot.png", "serial_number"],
+    "auto_approve_threshold_cents": 10000
+  },
+  {
+    "id": "faq_004",
+    "intent": "overheating_throttle",
+    "title": "Overheating / performance throttling",
+    "description": "Device gets hot or throttles under load. Collect logs, temps, and reproduction steps.",
+    "troubleshooting_steps": [
+      "Ask for exact workloads (e.g., game title + settings, CAD export step).",
+      "Request temps (HWMonitor on Windows or iStat on macOS) and a short video of fans/behavior.",
+      "Advise running a stress test to capture thermal profile and FPS logs.",
+      "If thermal paste / fan failure suspected, escalate to repair."
+    ],
+    "evidence_requirements": ["temp_log.csv", "video.mp4", "serial_number"],
+    "auto_approve_threshold_cents": 0
+  },
+  {
+    "id": "faq_005",
+    "intent": "wifi_disconnect",
+    "title": "Wi-Fi disconnects frequently",
+    "description": "Intermittent Wi-Fi issues. Determine whether it's device or network.",
+    "troubleshooting_steps": [
+      "Ask whether other devices are affected and request router model.",
+      "Ask for OS and driver version, and advise re-installing Wi-Fi driver.",
+      "Collect system logs and a short capture of disconnection event.",
+      "If hardware NIC failure suspected, escalate."
+    ],
+    "evidence_requirements": ["system_logs.txt", "router_model"],
+    "auto_approve_threshold_cents": 5000
+  }
+]

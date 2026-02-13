@@ -1,0 +1,32 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  display: grid;
+  place-items: center;
+  z-index: 60;
+}
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  width: 680px;
+  max-width: 94vw;
+  box-shadow: 0 10px 40px rgba(0,0,0,.2);
+  overflow: hidden;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #152a43;
+  color: #fff;
+}
+.title { font-weight: 600; }
+.body { padding: 12px; max-height: 56vh; overflow: auto; }
+.footer { padding: 12px; display: flex; gap: 8px; border-top: 1px solid #eee; }
+.input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+.sendBtn { padding: 8px 12px; }
+.msg { border-bottom: 1px solid #f1f1f1; padding: 8px 0; }
+.meta { font-size: 11px; color: #6b7280; }
+.closeBtn { background: transparent; color: #fff; border: none; cursor: pointer; }

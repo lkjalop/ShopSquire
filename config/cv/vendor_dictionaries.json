@@ -1,0 +1,9 @@
+{
+  "corrections": {
+    "0": "O",
+    "1": "I",
+    "l": "I"
+  },
+  "notes": "Roadmap-referenced config; placeholder for vendor-specific OCR correction dictionaries."
+}
+

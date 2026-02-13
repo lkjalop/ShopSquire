@@ -1,15 +1,13 @@
 import json
 import unicodedata
 import re
-from typing import Dict, Generator
+import hashlib
+from typing import Dict, Generator, Any
 
 import redis
 from fastapi import Depends
 
 from src.app.config import get_settings, load_feature_flags
-
-
-_settings = get_settings()
 
 
 class DummyRedis:
@@ -19,14 +17,27 @@ class DummyRedis:
     def setex(self, *_args, **_kwargs):
         return None
 
+    def delete(self, *_args, **_kwargs):
+        return 0
+
+    def incrby(self, *_args, **_kwargs):
+        return 0
+
+    def incrbyfloat(self, *_args, **_kwargs):
+        return 0.0
+
+    def expire(self, *_args, **_kwargs):
+        return False
+
 
 _lazy_redis: redis.Redis | None = None
 
 
 def _create_redis_client() -> redis.Redis | None:
     try:
+        settings = get_settings()
         cli = redis.from_url(
-            _settings.redis_url,
+            settings.redis_url,
             decode_responses=True,
             socket_connect_timeout=0.01,
             socket_timeout=0.01,
@@ -54,7 +65,7 @@ def get_redis() -> redis.Redis:
 
 
 def get_flags() -> Dict:
-    return load_feature_flags(_settings.feature_flags_path)
+    return load_feature_flags((get_settings().feature_flags_path))
 
 
 def unicode_normalize(text: str) -> str:
@@ -63,20 +74,109 @@ def unicode_normalize(text: str) -> str:
 
 PII_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PII_PHONE = re.compile(r"\b(\+?\d[\d\-\s]{7,}\d)\b")
-JAILBREAK_PAT = re.compile(r"(?i)(ignore\s+previous|disregard\s+rules|do\s+anything\s+now)")
+PII_SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+PII_IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+API_KEY_PAT = re.compile(r"(?i)\b(sk|rk|pk)_(live|test)?_[a-z0-9]{12,}\b")
+JAILBREAK_PAT = re.compile(
+    r"(?i)(ignore\s+previous|disregard\s+rules|do\s+anything\s+now|system\s+prompt|developer\s+message|bypass|jailbreak|reveal\s+prompt|override\s+policy|act\s+as\s+system|role\s*play|simulate|prompt\s*injection|instruction\s*hierarchy)"
+)
 
 
 def scrub_pii(text: str) -> str:
+    if not text:
+        return text
+    protected = {}
+
+    def _protect(m: re.Match) -> str:
+        key = f"__PROTECT_{len(protected)}__"
+        protected[key] = m.group(0)
+        return key
+
+    # Preserve known system IDs that can look like phone numbers.
+    text = re.sub(r"\b(?:TKT|INC|CASE|ORD|ORDER|REQ|DEC|TRACE|EVT|EVENT)-\d{6,}\b", _protect, text, flags=re.I)
     text = PII_EMAIL.sub("[REDACTED_EMAIL]", text)
     text = PII_PHONE.sub("[REDACTED_PHONE]", text)
+    text = PII_SSN.sub("[REDACTED_SSN]", text)
+    text = PII_IP.sub("[REDACTED_IP]", text)
+    text = API_KEY_PAT.sub("[REDACTED_API_KEY]", text)
+    for key, val in protected.items():
+        text = text.replace(key, val)
     return text
 
 
+def hash_uid(uid: str) -> str:
+    return hashlib.sha256((uid or "").encode("utf-8")).hexdigest()[:16]
+
+
+def hash_value(value: str) -> str:
+    return hashlib.sha256((value or "").encode("utf-8")).hexdigest()[:16]
+
+
 def security_sanitize(payload: Dict) -> Dict:
-    s = json.dumps(payload, ensure_ascii=False)
-    s = unicode_normalize(s)
-    s = scrub_pii(s)
-    return json.loads(s)
+    # Recursively sanitize Python objects to avoid JSON serialization edge-cases
+    def _sanitize_value(v):
+        if isinstance(v, str):
+            v2 = unicode_normalize(v)
+            v2 = scrub_pii(v2)
+            return v2
+        if isinstance(v, dict):
+            return {k: _sanitize_value(vv) for k, vv in v.items()}
+        if isinstance(v, list):
+            return [_sanitize_value(x) for x in v]
+        return v
+
+    try:
+        return _sanitize_value(payload if payload else {})
+    except Exception:
+        # Fallback to original JSON approach if unexpected types encountered
+        s = json.dumps(payload, ensure_ascii=False)
+        s = unicode_normalize(s)
+        s = scrub_pii(s)
+        try:
+            return json.loads(s)
+        except Exception:
+            return {}
+
+
+def _looks_like_base64(value: str) -> bool:
+    if not value:
+        return False
+    if len(value) < 200:
+        return False
+    # Heuristic: base64-like chars only and length multiple of 4 (often).
+    if len(value) % 4 != 0:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9+/=]+", value))
+
+
+def redact_for_trace(payload: Any) -> Any:
+    """Redact sensitive or bulky payloads for trace persistence."""
+    def _redact(v):
+        if isinstance(v, str):
+            v2 = unicode_normalize(v)
+            v2 = scrub_pii(v2)
+            if _looks_like_base64(v2):
+                return "[REDACTED_BASE64]"
+            if len(v2) > 512:
+                return f"[REDACTED_LEN:{len(v2)}]"
+            return v2
+        if isinstance(v, dict):
+            out = {}
+            for k, vv in v.items():
+                key = str(k).lower()
+                if any(tok in key for tok in ("image", "photo", "file", "bytes", "blob", "data_url", "base64", "attachment")):
+                    out[k] = "[REDACTED_BLOB]"
+                else:
+                    out[k] = _redact(vv)
+            return out
+        if isinstance(v, list):
+            return [_redact(x) for x in v]
+        return v
+
+    try:
+        return _redact(payload)
+    except Exception:
+        return {}
 
 
 def get_security_context(payload: Dict = Depends(lambda: {})) -> Dict:

@@ -1,0 +1,12 @@
+{
+  "USE_AGENT_CAPABILITIES": true,
+  "AGENT_ROLLOUT_PERCENT": 100,
+  "CAPABILITIES": {
+    "pricing": {
+      "enabled": true,
+      "rollout_percent": 100
+    }
+  },
+  "KILL_SWITCH": false,
+  "DECISION_LOG_WRITES_ENABLED": false
+}

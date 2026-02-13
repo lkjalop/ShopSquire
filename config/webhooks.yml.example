@@ -1,0 +1,7 @@
+# Example webhooks configuration for ShopSquire
+# Point security_events to the local test connector
+webhooks:
+  security_events:
+    - http://localhost:8000/api/v1/admin/connectors/test
+  decision_events:
+    - http://localhost:8000/api/v1/admin/connectors/test

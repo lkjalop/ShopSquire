@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+  db:
+    image: timescale/timescaledb:2.14.2-pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: shopsquire
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/timescale:/docker-entrypoint-initdb.d:ro
+

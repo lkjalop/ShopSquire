@@ -1,0 +1,25 @@
+{
+  "title": "ShopSquire Minimal Ops",
+  "layout_type": "ordered",
+  "is_read_only": false,
+  "widgets": [
+    {
+      "definition": {
+        "type": "event_stream",
+        "query": "sources:shopsquire tags:(sourcetype:shopsquire:security) status:error OR warning",
+        "tags_execution": "and",
+        "event_flow": "cluster"
+      },
+      "layout": { "x": 0, "y": 0, "w": 47, "h": 15 }
+    },
+    {
+      "definition": {
+        "type": "note",
+        "content": "Minimal dashboard. To chart metrics, ensure Datadog metrics integration ingests Prometheus counters (http_requests_total) and summaries (http_request_latency_seconds).",
+        "background_color": "gray",
+        "font_size": "14"
+      },
+      "layout": { "x": 0, "y": 16, "w": 47, "h": 5 }
+    }
+  ]
+}

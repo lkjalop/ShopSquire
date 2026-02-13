@@ -1,0 +1,2 @@
+# Daily KEV catalog refresh (02:15 UTC)
+15 2 * * * cd /srv/shopsquire && python scripts/update_kev_catalog.py >> dump/kev_update.log 2>&1

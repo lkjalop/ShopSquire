@@ -1,0 +1,252 @@
+groups:
+- name: shopsquire-api
+  rules:
+  - alert: HighRequestLatencyP95
+    expr: histogram_quantile(0.95, sum(rate(shopsquire_http_request_duration_seconds_bucket[5m])) by (le)) > 0.75
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "P95 HTTP latency is high"
+      description: "P95 HTTP request latency > 750ms for 5m"
+  - alert: ErrorRateHigh
+    expr: sum(rate(shopsquire_http_requests_total{status=~"5.."}[5m])) / sum(rate(shopsquire_http_requests_total[5m])) > 0.05
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "HTTP 5xx error rate high"
+      description: "5xx responses exceed 5% over last 5 minutes"
+  - alert: PricingLatencyHighP95
+    expr: histogram_quantile(0.95, sum(rate(shopsquire_pricing_latency_seconds_bucket[5m])) by (le)) > 0.5
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Pricing suggest latency elevated"
+      description: "P95 pricing latency > 500ms for 10m"
+  - alert: ControlFailuresSpiking
+    expr: sum(rate(shopsquire_control_failures_total[10m])) > 10
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Compliance control failures increasing"
+      description: "More than 10 control failures in 10 minutes"
+  - alert: IncidentAlertsP1
+    expr: sum(rate(shopsquire_incident_alerts_total{severity="p1"}[5m])) > 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "P1 incidents detected"
+      description: "Incident alerts with severity p1 occurring in the last 5 minutes"
+      runbook: "docs/runbooks/IncidentAlertsP1.md"
+
+  - alert: WebhookSignatureFailureSpike
+    expr: sum(rate(shopsquire_webhook_verifications_total{status="invalid_signature"}[5m])) > 5
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Multiple webhook signature failures"
+      description: "Invalid webhook signatures spiking; potential spoofing or secret mismatch"
+      runbook: "docs/runbooks/WebhookSignatureFailureSpike.md"
+
+  - alert: SLOLatencyBreachedP95
+    expr: histogram_quantile(0.95, sum(rate(shopsquire_http_request_duration_seconds_bucket[10m])) by (le)) > 0.5
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "SLO p95 latency breached"
+      description: "Request latency p95 exceeded 500ms for 10m"
+      runbook: "docs/runbooks/HighRequestLatencyP95.md"
+  - alert: WebhookSignatureFailures
+    expr: sum(rate(shopsquire_webhook_verifications_total{status="invalid_signature"}[5m])) > 0
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Webhook signature verification failures detected"
+      description: "Invalid webhook signatures observed in the last 2 minutes"
+
+  - alert: RateLimitExceededSpike
+    expr: sum(rate(shopsquire_rate_limit_exceeded_total[5m])) > 20
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Rate-limit exceed events spiking"
+      description: "Exceed events > 20 over 2 minutes; investigate burst traffic or misconfiguration"
+      runbook: "docs/runbooks/RateLimitExceededSpike.md"
+
+  - alert: ChaosErrorInjectionDetected
+    expr: sum(rate(shopsquire_chaos_errors_total[1m])) > 0
+    for: 1m
+    labels:
+      severity: info
+    annotations:
+      summary: "Chaos error injections active"
+      description: "Chaos error injections observed; ensure running in staging or planned window"
+
+  - alert: ConcurrencySaturation
+    expr: shopsquire_inflight_requests{service="api"} > 200
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "In-flight requests near saturation"
+      description: "Current in-flight requests exceed 200 for 5 minutes; enable degradation or scale up"
+
+  - alert: LLMTokenBudgetExhausted
+    expr: sum(rate(shopsquire_llm_tokens_total[1h])) by (endpoint) > 10000
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "User token budget nearly exhausted"
+
+  - alert: AgentEscalationRateHigh
+    expr: sum(rate(shopsquire_agent_escalations_total[5m])) / sum(rate(shopsquire_agent_invocations_total[5m])) > 0.3
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Agent escalation rate exceeds 30%"
+
+  - alert: CVFraudSpike
+    expr: sum(rate(shopsquire_cv_fraud_detected_total[5m])) > 5
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "CV fraud detections spiking"
+
+  - alert: JailbreakAttemptSpike
+    expr: sum(rate(shopsquire_jailbreak_attempts_total[5m])) > 10
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Multiple jailbreak attempts detected"
+
+  - alert: LLMLatencyHigh
+    expr: histogram_quantile(0.95, sum(rate(shopsquire_llm_latency_seconds_bucket[5m])) by (le)) > 5
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "LLM response time exceeds 5s"
+  - alert: CVAutoDecisionsObserved
+    expr: sum(rate(shopsquire_cv_auto_decisions_total[5m])) > 0
+    for: 1m
+    labels:
+      severity: warning
+    annotations:
+      summary: "CV auto-decisions observed"
+      description: "Automatic CV decisions have been emitted; verify policy and allowlist settings before enabling auto-execute in production"
+
+  - alert: CVEscalationsSpike
+    expr: sum(rate(shopsquire_cv_escalations_total[5m])) > 1
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "CV escalations to human reviewers increasing"
+      description: "Increased rate of CV escalations observed; investigate potential false-positives or workload spikes"
+      runbook: "docs/runbooks/CVEscalations.md"
+
+  - alert: NLPQualityGateReviewSpike
+    expr: sum(rate(shopsquire_nlp_quality_gate_decisions_total{decision="review"}[10m])) > 10
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "NLP quality gate review decisions elevated"
+      description: "Review decisions exceeded threshold over last 10 minutes"
+      runbook: "docs/runbooks/NLPQualityGate.md"
+
+  - alert: NLPQualityGateAbstainSpike
+    expr: sum(rate(shopsquire_nlp_quality_gate_decisions_total{decision="abstain"}[10m])) > 5
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: "NLP quality gate abstain decisions elevated"
+      description: "Abstain decisions exceeded threshold over last 10 minutes"
+      runbook: "docs/runbooks/NLPQualityGate.md"
+
+  - alert: ReplicaLagP95High
+    expr: histogram_quantile(0.95, sum(rate(shopsquire_db_replica_lag_seconds_bucket[10m])) by (le)) > 1
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Replica lag p95 breached"
+      description: "DB replica lag p95 > 1s for 10m"
+      runbook: "docs/runbooks/ReplicaLag.md"
+
+  - alert: ReplicaLagP99Critical
+    expr: histogram_quantile(0.99, sum(rate(shopsquire_db_replica_lag_seconds_bucket[5m])) by (le)) > 3
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Replica lag p99 critical"
+      description: "DB replica lag p99 > 3s for 5m"
+      runbook: "docs/runbooks/ReplicaLag.md"
+
+  - alert: EmailEscalationRateHigh
+    expr: sum(rate(shopsquire_email_security_routes_total{route=~"human_review|security_review"}[15m])) / clamp_min(sum(rate(shopsquire_email_security_routes_total[15m])), 0.000001) > 0.35
+    for: 15m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Email escalation rate elevated"
+      description: "More than 35% of email security decisions are escalating over 15m"
+
+  - alert: EmailFalsePositiveTrendHigh
+    expr: sum(rate(shopsquire_email_security_false_positives_total[1h])) / clamp_min(sum(rate(shopsquire_email_security_routes_total[1h])), 0.000001) > 0.10
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: "False positive trend elevated"
+      description: "Posthoc false-positive ratio exceeds 10% over 1h"
+
+  - alert: SecurityHandoffFailuresDetected
+    expr: sum(rate(shopsquire_security_handoff_total{status="failed"}[10m])) > 0
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: "SIEM/security handoff failures detected"
+      description: "One or more security handoff connectors are failing"
+
+  - alert: EmailDetonationLatencyHighP95
+    expr: histogram_quantile(0.95, sum(rate(shopsquire_email_detonation_latency_seconds_bucket[10m])) by (le)) > 2
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Email detonation latency high"
+      description: "P95 detonation latency exceeds 2s"
+
+  - alert: EmailEnrichmentLatencyHighP95
+    expr: histogram_quantile(0.95, sum(rate(shopsquire_email_enrichment_latency_seconds_bucket[10m])) by (le)) > 1
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Email enrichment latency high"
+      description: "P95 enrichment latency exceeds 1s"
+
+  - alert: DecisionTraceWriteFailuresDetected
+    expr: sum(rate(shopsquire_decision_trace_write_failures_total[5m])) > 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Decision trace write failures detected"
+      description: "Trace event persistence or outbox writes are failing"

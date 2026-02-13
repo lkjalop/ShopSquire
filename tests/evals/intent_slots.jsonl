@@ -1,0 +1,3 @@
+{"query":"show me laptops between $1400 and $2000 with 32gb ram","expected_intents":["price_range","spec_minimums","product_search"],"expected_slots":{"price_min":1400,"price_max":2000}}
+{"query":"need a gaming laptop under $1800 with 1tb storage","expected_intents":["budget_hard_cap","spec_minimums","product_search"],"expected_slots":{"price_max":1800}}
+{"query":"compare macbook vs lenovo around $1500","expected_intents":["compare_two_specific","budget_soft"],"expected_slots":{"budget":1500}}

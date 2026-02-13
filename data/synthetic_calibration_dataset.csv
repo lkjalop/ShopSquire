@@ -1,0 +1,91 @@
+trace_id,agent_type,task_type,query,raw_confidence,label,decision,tool_calls,tool_outcomes,reviewer_id,review_timestamp,notes
+0ec59c77-dd49-43f6-8a6f-5417a415c06d,orchestrator,order_status,Where is my order #10021?,0.73,correct,escalate,retrieve_context,order_missing,r128,2026-02-03T12:00:00Z,order not found
+c7eb65fb-2975-471a-9381-0295d602845a,orchestrator,refund_decision,I want a refund for a cracked screen,0.72,partial,escalate,retrieve_context > check_policy,policy_review_required,r111,2026-02-03T12:07:00Z,needs human review
+6852f542-f8aa-4788-827c-2488f5c068b7,orchestrator,order_status,Track order #10045,0.68,correct,approve,retrieve_context,order_found,r129,2026-02-03T12:14:00Z,order located
+3859cfaa-b32b-4439-9779-c97db210dff1,orchestrator,inventory,Do you have 20 units of LPT-13?,0.71,correct,escalate,retrieve_context,stock_low,r183,2026-02-03T12:21:00Z,supplier check needed
+a1b69472-70b7-4e60-a3af-18f3bd960a3b,orchestrator,policy_check,Policy check: expedited return,0.78,correct,approve,check_policy,policy_allowed,r135,2026-02-03T12:28:00Z,policy ok
+7018c73f-4ff8-4c62-8e67-0e1bb6acd094,orchestrator,policy_check,Can we apply a 25% discount?,0.5,partial,deny,check_policy,policy_denied,r154,2026-02-03T12:35:00Z,policy violation
+da806118-3f8d-4bf3-9ee9-d5ebba50f0f9,orchestrator,recommendation,Best ultrabook for travel,0.94,correct,approve,get_recommendations,ranked_candidates,r143,2026-02-03T12:42:00Z,top 3 results
+354637d5-8850-41b8-b74e-1a3b24b633a2,orchestrator,refund_decision,I want a refund for a cracked screen,0.76,correct,deny,retrieve_context > check_policy,policy_denied,r144,2026-02-03T12:49:00Z,refund denied
+c8e42043-7ef9-44a5-8de1-7238009b966a,orchestrator,order_status,Track order #10045,0.66,incorrect,approve,retrieve_context,order_found,r148,2026-02-03T12:56:00Z,order located
+62823567-c735-4ece-8c68-e4a2a43d19bd,orchestrator,refund_decision,Requesting refund for wrong item,0.61,incorrect,deny,retrieve_context > check_policy,policy_denied,r173,2026-02-03T13:03:00Z,refund denied
+73a1e379-12e2-4eec-b7ed-8b112e5e1e50,orchestrator,fraud_check,Multiple refunds on same order,0.72,correct,deny,retrieve_context > check_policy,fraud_signals_high,r137,2026-02-03T13:10:00Z,fraud risk high
+8080f5fd-8918-410c-998e-6791a150c567,orchestrator,refund_decision,Return request: device arrived damaged,0.49,incorrect,deny,retrieve_context > check_policy,policy_denied,r146,2026-02-03T13:17:00Z,refund denied
+ab184dac-43b3-41d3-a1ad-7802eb53a6ed,orchestrator,refund_decision,Requesting refund for wrong item,0.85,correct,escalate,retrieve_context > check_policy,policy_review_required,r189,2026-02-03T13:24:00Z,needs human review
+80067d78-1226-4a2b-9d2b-f2305722d900,orchestrator,order_status,Order status for #10087,0.84,correct,escalate,retrieve_context,order_missing,r168,2026-02-03T13:31:00Z,order not found
+2d791aa5-70b5-4381-8de1-d87ee295749e,orchestrator,policy_check,Can we apply a 25% discount?,0.76,correct,approve,check_policy,policy_allowed,r181,2026-02-03T13:38:00Z,policy ok
+4c5b2585-bfeb-4de8-b176-1cd62d44cdbf,orchestrator,policy_check,Policy check: expedited return,0.75,correct,approve,check_policy,policy_allowed,r198,2026-02-03T13:45:00Z,policy ok
+74a3988f-05d7-41dc-a80e-7b7c76534cf9,orchestrator,policy_check,Can we apply a 25% discount?,0.66,correct,deny,check_policy,policy_denied,r140,2026-02-03T13:52:00Z,policy violation
+8145e0dc-f038-4147-b37d-a96a84eb6624,orchestrator,recommendation,Best ultrabook for travel,0.92,correct,partial,get_recommendations,ranked_candidates,r172,2026-02-03T13:59:00Z,one SKU removed
+04a0d925-dd76-46b5-9b5c-f7bd50e9c1c1,orchestrator,policy_check,Is refund allowed after 45 days?,0.8,correct,approve,check_policy,policy_allowed,r182,2026-02-03T14:06:00Z,policy ok
+2ba74a7c-d75f-4478-94e5-64d39932885d,orchestrator,inventory,Is SKU LPT-14 in stock?,0.72,correct,approve,retrieve_context,stock_ok,r171,2026-02-03T14:13:00Z,stock confirmed
+269e9771-cc67-40e4-a428-25dacf4142fa,orchestrator,inventory,Stock check for SKU LPT-15,0.58,partial,escalate,retrieve_context,stock_low,r174,2026-02-03T14:20:00Z,supplier check needed
+3cc17426-4d08-4c9f-b75e-666712969064,orchestrator,recommendation,Best ultrabook for travel,0.95,correct,partial,get_recommendations,ranked_candidates,r165,2026-02-03T14:27:00Z,one SKU removed
+f4f176b2-7b12-4377-b195-5b25034314d6,orchestrator,inventory,Is SKU LPT-14 in stock?,0.71,partial,approve,retrieve_context,stock_ok,r119,2026-02-03T14:34:00Z,stock confirmed
+671025ff-7933-47f9-a7cc-a4e006a445eb,orchestrator,order_status,Where is my order #10021?,0.81,incorrect,escalate,retrieve_context,order_missing,r159,2026-02-03T14:41:00Z,order not found
+a705b654-8001-4339-8cca-935f10c9fe0a,orchestrator,inventory,Stock check for SKU LPT-15,0.54,abstain,escalate,retrieve_context,stock_low,r101,2026-02-03T14:48:00Z,supplier check needed
+e31ca912-552e-4a33-9c17-4a7c55233b6c,orchestrator,order_status,Order status for #10087,0.92,correct,escalate,retrieve_context,order_missing,r196,2026-02-03T14:55:00Z,order not found
+26bc27fe-bdf3-41c2-b8f0-8774c75502b8,orchestrator,fraud_check,Claimed damage but photo looks reused,0.78,correct,approve,retrieve_context > check_policy,fraud_signals_low,r158,2026-02-03T15:02:00Z,fraud risk low
+5084f34e-30d4-4bb2-a004-1aa4f8c469a0,orchestrator,refund_decision,Requesting refund for wrong item,0.5,abstain,approve,retrieve_context > check_policy,policy_allowed,r164,2026-02-03T15:09:00Z,refund approved
+63762433-3a0a-46e6-9d09-d89a7d2cf94a,orchestrator,refund_decision,Requesting refund for wrong item,0.81,incorrect,deny,retrieve_context > check_policy,policy_denied,r120,2026-02-03T15:16:00Z,refund denied
+51b90bd4-a007-4c8f-9abc-675fc99da4e1,orchestrator,inventory,Do you have 20 units of LPT-13?,0.6,incorrect,escalate,retrieve_context,stock_low,r114,2026-02-03T15:23:00Z,supplier check needed
+bbb36730-588a-44f8-8bb5-7ea048b523a4,orchestrator,recommendation,Best ultrabook for travel,0.72,correct,approve,get_recommendations,ranked_candidates,r172,2026-02-03T15:30:00Z,top 3 results
+76aa7f64-320c-48de-b07f-b24c9489de34,orchestrator,refund_decision,I want a refund for a cracked screen,0.69,partial,deny,retrieve_context > check_policy,policy_denied,r197,2026-02-03T15:37:00Z,refund denied
+a5c41f81-d389-42f9-816e-8654ab66ee86,orchestrator,inventory,Is SKU LPT-14 in stock?,0.79,correct,escalate,retrieve_context,stock_low,r170,2026-02-03T15:44:00Z,supplier check needed
+8e2244df-26b0-4089-8d84-4f046bf3df11,orchestrator,refund_decision,Requesting refund for wrong item,0.83,correct,escalate,retrieve_context > check_policy,policy_review_required,r127,2026-02-03T15:51:00Z,needs human review
+5e362832-f11c-4be8-af8b-29917766998a,orchestrator,inventory,Do you have 20 units of LPT-13?,0.66,partial,escalate,retrieve_context,stock_low,r151,2026-02-03T15:58:00Z,supplier check needed
+961d993a-641b-47cd-9e17-932fbd5249b3,orchestrator,order_status,Order status for #10087,0.92,correct,escalate,retrieve_context,order_missing,r157,2026-02-03T16:05:00Z,order not found
+35727d53-2d79-4c4a-8501-6c790673fd20,orchestrator,refund_decision,Return request: device arrived damaged,0.75,correct,deny,retrieve_context > check_policy,policy_denied,r175,2026-02-03T16:12:00Z,refund denied
+2b6bfde0-e3cf-4049-bb24-5392fd70f862,orchestrator,inventory,Is SKU LPT-14 in stock?,0.45,partial,escalate,retrieve_context,stock_low,r190,2026-02-03T16:19:00Z,supplier check needed
+c2b347e5-178a-465b-953a-497377ce06a1,orchestrator,order_status,Where is my order #10021?,0.92,correct,escalate,retrieve_context,order_missing,r142,2026-02-03T16:26:00Z,order not found
+640d7c83-db8c-4f25-a4c1-059c13cb387c,orchestrator,refund_decision,Return request: device arrived damaged,0.8,correct,deny,retrieve_context > check_policy,policy_denied,r169,2026-02-03T16:33:00Z,refund denied
+a7f941a7-4bf8-4870-b390-10822e7606c7,orchestrator,refund_decision,Refund for late delivery,0.79,correct,escalate,retrieve_context > check_policy,policy_review_required,r152,2026-02-03T16:40:00Z,needs human review
+0b2321ea-3728-49fb-951b-61b19be658e8,orchestrator,fraud_check,Multiple refunds on same order,0.78,correct,deny,retrieve_context > check_policy,fraud_signals_high,r154,2026-02-03T16:47:00Z,fraud risk high
+2f920cac-3478-4846-94f1-d89c78e1906d,orchestrator,recommendation,Looking for a budget 14-inch laptop,0.33,incorrect,partial,get_recommendations,ranked_candidates,r182,2026-02-03T16:54:00Z,one SKU removed
+d1ea417a-cf62-4197-a37e-bc1444ca420b,orchestrator,refund_decision,I want a refund for a cracked screen,0.75,correct,deny,retrieve_context > check_policy,policy_denied,r113,2026-02-03T17:01:00Z,refund denied
+890bf581-69fb-4883-bf59-c9cdd584626d,orchestrator,fraud_check,Suspicious refund claim,0.78,correct,deny,retrieve_context > check_policy,fraud_signals_high,r154,2026-02-03T17:08:00Z,fraud risk high
+fac4ba57-e598-4bfd-b30c-c7a556c97ff2,orchestrator,refund_decision,Requesting refund for wrong item,0.91,correct,escalate,retrieve_context > check_policy,policy_review_required,r109,2026-02-03T17:15:00Z,needs human review
+63208f35-434e-4ccf-a2d7-0e2222517c96,orchestrator,inventory,Do you have 20 units of LPT-13?,0.85,correct,approve,retrieve_context,stock_ok,r169,2026-02-03T17:22:00Z,stock confirmed
+e2bf1895-af13-4b84-92af-43c09a5ad840,orchestrator,refund_decision,I want a refund for a cracked screen,0.54,abstain,approve,retrieve_context > check_policy,policy_allowed,r121,2026-02-03T17:29:00Z,refund approved
+f3c2f089-16cf-456d-98e1-906daa84d16a,orchestrator,recommendation,Looking for a budget 14-inch laptop,0.91,correct,partial,get_recommendations,ranked_candidates,r107,2026-02-03T17:36:00Z,one SKU removed
+79de37e0-6e42-4f14-8601-fc1c6064f38e,orchestrator,refund_decision,Refund for late delivery,0.77,correct,escalate,retrieve_context > check_policy,policy_review_required,r158,2026-02-03T17:43:00Z,needs human review
+3264457b-dc72-4e2a-a56a-c8b964b7b814,orchestrator,fraud_check,High-value refund request,0.67,partial,approve,retrieve_context > check_policy,fraud_signals_low,r171,2026-02-03T17:50:00Z,fraud risk low
+4d12b3a3-dc19-4164-8422-088b69f740ce,orchestrator,order_status,Order status for #10087,0.71,correct,escalate,retrieve_context,order_missing,r127,2026-02-03T17:57:00Z,order not found
+175bd022-1673-40c7-96af-9ae4f19a96a3,orchestrator,refund_decision,I want a refund for a cracked screen,0.47,partial,approve,retrieve_context > check_policy,policy_allowed,r174,2026-02-03T18:04:00Z,refund approved
+272fb3cd-0275-4718-91af-f535761272ed,orchestrator,inventory,Do you have 20 units of LPT-13?,0.84,incorrect,approve,retrieve_context,stock_ok,r123,2026-02-03T18:11:00Z,stock confirmed
+c65078c1-ef10-4bb4-b258-dbd1c486ffa9,orchestrator,refund_decision,I want a refund for a cracked screen,0.52,partial,deny,retrieve_context > check_policy,policy_denied,r115,2026-02-03T18:18:00Z,refund denied
+7017f538-077f-4dd8-9c07-0d7277ad91dc,orchestrator,order_status,Where is my order #10021?,0.46,partial,approve,retrieve_context,order_found,r110,2026-02-03T18:25:00Z,order located
+ebb231f7-49bd-48cc-a7f8-29bbb48f036b,orchestrator,recommendation,Best ultrabook for travel,0.28,abstain,partial,get_recommendations,ranked_candidates,r191,2026-02-03T18:32:00Z,one SKU removed
+4f69c3a3-eacd-43c9-b0bf-f4399da386c9,orchestrator,recommendation,Recommend a gaming laptop,0.69,correct,approve,get_recommendations,ranked_candidates,r182,2026-02-03T18:39:00Z,top 3 results
+32978cee-a03b-49dd-b01f-f1078ff45fb6,orchestrator,fraud_check,High-value refund request,0.88,correct,approve,retrieve_context > check_policy,fraud_signals_low,r109,2026-02-03T18:46:00Z,fraud risk low
+b25847a2-b3d0-4354-a745-a99876abfd6e,orchestrator,refund_decision,Refund for late delivery,0.62,partial,approve,retrieve_context > check_policy,policy_allowed,r112,2026-02-03T18:53:00Z,refund approved
+d39c24bc-5c04-4356-abfd-ff3ceee22d6f,orchestrator,refund_decision,Return request: device arrived damaged,0.69,correct,deny,retrieve_context > check_policy,policy_denied,r144,2026-02-03T19:00:00Z,refund denied
+10894522-68d3-497e-b8fb-d5bd1ee5f567,orchestrator,refund_decision,Return request: device arrived damaged,0.7,correct,deny,retrieve_context > check_policy,policy_denied,r169,2026-02-03T19:07:00Z,refund denied
+c7a51fb8-d568-4ba0-955f-d05ea9beefe6,orchestrator,policy_check,Is refund allowed after 45 days?,0.75,partial,approve,check_policy,policy_allowed,r183,2026-02-03T19:14:00Z,policy ok
+069e88cb-3bc1-4b3c-8799-d8e0b4197468,orchestrator,inventory,Is SKU LPT-14 in stock?,0.62,partial,escalate,retrieve_context,stock_low,r184,2026-02-03T19:21:00Z,supplier check needed
+14950cc4-f373-4eb6-80b4-1aa3e44477c7,orchestrator,refund_decision,Return request: device arrived damaged,0.92,correct,deny,retrieve_context > check_policy,policy_denied,r195,2026-02-03T19:28:00Z,refund denied
+b0ea5094-f882-4b16-bcc7-c21d9f58c56c,orchestrator,inventory,Is SKU LPT-14 in stock?,0.83,correct,escalate,retrieve_context,stock_low,r191,2026-02-03T19:35:00Z,supplier check needed
+64397f7b-042b-4925-ad67-61391565a37c,orchestrator,recommendation,Recommend a gaming laptop,0.71,partial,approve,get_recommendations,ranked_candidates,r164,2026-02-03T19:42:00Z,top 3 results
+c6bcab20-0c92-4348-92c3-ddfa09d07a1f,orchestrator,inventory,Stock check for SKU LPT-15,0.82,incorrect,approve,retrieve_context,stock_ok,r135,2026-02-03T19:49:00Z,stock confirmed
+bf95cd83-1c5e-434d-ab2e-9f1331abc46a,orchestrator,refund_decision,I want a refund for a cracked screen,0.69,correct,approve,retrieve_context > check_policy,policy_allowed,r133,2026-02-03T19:56:00Z,refund approved
+7d0e5181-6216-41d7-8d9c-c3bdfe0b435f,orchestrator,refund_decision,Refund for late delivery,0.58,partial,escalate,retrieve_context > check_policy,policy_review_required,r101,2026-02-03T20:03:00Z,needs human review
+15ac8a08-fe99-47cb-a006-a445edb59877,cv,cv_damage_assess,Photo shows a cracked screen on returned device,0.43,abstain,deny,cv_analyze > cv_damage_classify,no_damage_detected,r209,2026-02-03T20:10:00Z,no visible damage
+1e8ad021-de0e-4084-84f9-d5ff9017d52f,cv,cv_invoice_verify,Verify invoice in image,0.74,incorrect,deny,cv_ocr_extract > cv_invoice_match,invoice_mismatch,r219,2026-02-03T20:17:00Z,invoice mismatch
+cb1221a0-b89d-4eff-b8b4-31310b21063f,cv,cv_fraud_check,Check if damage photo reused,0.74,incorrect,escalate,cv_image_forensics > cv_splice_detect,tampering_suspected,r249,2026-02-03T20:24:00Z,possible manipulation
+de86a85f-24cc-4a00-a2ec-63332891c9bd,cv,cv_invoice_verify,Match invoice from receipt,0.45,abstain,deny,cv_ocr_extract > cv_invoice_match,invoice_mismatch,r215,2026-02-03T20:31:00Z,invoice mismatch
+71d6148c-fafb-40a3-ae17-7f1f8a811b32,cv,cv_serial_verify,Verify serial number from receipt photo,0.26,incorrect,approve,cv_ocr_extract > cv_verify_serial,serial_match,r221,2026-02-03T20:38:00Z,serial verified
+f2b04dab-f6a9-4801-b587-4707fa8590c6,cv,cv_quality,"Image is blurry, can we proceed?",0.86,correct,abstain,cv_quality_score > cv_blur_detect,image_low_quality,r206,2026-02-03T20:45:00Z,image too blurry
+8acfd54e-9fed-4d61-abc1-645c0d9cc156,cv,cv_quality,"Image is blurry, can we proceed?",0.37,incorrect,abstain,cv_quality_score > cv_blur_detect,image_low_quality,r229,2026-02-03T20:52:00Z,image too blurry
+9891851b-1c43-4d6f-947a-698ea8e644c6,cv,cv_fraud_check,Detect fraudulent image use,0.84,incorrect,escalate,cv_image_forensics > cv_splice_detect,tampering_suspected,r225,2026-02-03T20:59:00Z,possible manipulation
+f812f3cd-c8f5-4e7c-8159-0eb29e0aeafc,cv,cv_fraud_check,Detect fraudulent image use,0.84,incorrect,escalate,cv_image_forensics > cv_splice_detect,tampering_suspected,r225,2026-02-03T21:06:00Z,possible manipulation
+69073281-fc5f-4de9-bd02-d5843e906aa4,cv,cv_evidence,Bundle evidence for dispute,0.2,abstain,approve,cv_evidence_tags > cv_hash_index,evidence_bundle_created,r216,2026-02-03T21:13:00Z,evidence tags generated
+16044d2d-9c28-4258-b053-3edffc84a5ba,cv,cv_serial_verify,Check serial in device image,0.8,correct,approve,cv_ocr_extract > cv_verify_serial,serial_match,r222,2026-02-03T21:20:00Z,serial verified
+960b70f4-1602-4611-b461-25995c04fbe3,cv,cv_fraud_check,Detect fraudulent image use,0.56,partial,escalate,cv_image_forensics > cv_splice_detect,tampering_suspected,r224,2026-02-03T21:27:00Z,possible manipulation
+138d221b-a4e4-4576-a0c8-5c195d7b06b9,cv,cv_metadata,Check image metadata for tampering,0.83,correct,escalate,cv_metadata_inspect > cv_geo_tag_check,geo_inconsistent,r200,2026-02-03T21:34:00Z,metadata inconsistent
+6fa29f93-b573-4b4f-8382-da26228719f1,cv,cv_invoice_verify,Verify invoice in image,0.62,correct,deny,cv_ocr_extract > cv_invoice_match,invoice_mismatch,r242,2026-02-03T21:41:00Z,invoice mismatch
+a3b50035-84de-49d8-bde7-31b5cf706bb6,cv,cv_fraud_check,Detect fraudulent image use,0.44,partial,escalate,cv_image_forensics > cv_splice_detect,tampering_suspected,r219,2026-02-03T21:48:00Z,possible manipulation
+b0be1bf6-6fd4-43b6-bd37-1eff935be9b1,cv,cv_invoice_verify,Match invoice from receipt,0.5,partial,deny,cv_ocr_extract > cv_invoice_match,invoice_mismatch,r244,2026-02-03T21:55:00Z,invoice mismatch
+50faecb8-28ce-492c-9d6f-064e8d6f9ca9,cv,cv_fraud_check,Check if damage photo reused,0.82,correct,deny,cv_check_phash > cv_reverse_image_search,image_reused,r224,2026-02-03T22:02:00Z,image reuse detected
+da72bee3-9e2d-43fb-8d15-b7be9dab613c,cv,cv_evidence,Generate evidence tags from image,0.5,partial,approve,cv_evidence_tags > cv_hash_index,evidence_bundle_created,r235,2026-02-03T22:09:00Z,evidence tags generated
+27e4d122-58df-4cef-adbe-7c1fa84ecffa,cv,cv_damage_assess,Assess damage from uploaded image,0.74,correct,approve,cv_analyze > cv_damage_classify > cv_damage_severity,damage_confirmed,r237,2026-02-03T22:16:00Z,damage matches claim
+7268437e-7957-4edc-8739-68a3df653f52,cv,cv_metadata,Validate geo tag for claim,0.75,correct,escalate,cv_metadata_inspect > cv_geo_tag_check,geo_inconsistent,r213,2026-02-03T22:23:00Z,metadata inconsistent

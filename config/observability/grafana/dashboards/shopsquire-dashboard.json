@@ -1,0 +1,392 @@
+{
+  "id": null,
+  "uid": "shopsquire-overview",
+  "title": "ShopSquire Overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Decision Events / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rate(shopsquire_decision_events_total[5m])",
+          "legendFormat": "decisions"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Incident Alerts / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rate(shopsquire_incident_alerts_total[5m])",
+          "legendFormat": "{{topic}} {{severity}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+          {
+            "type": "timeseries",
+            "title": "Complaint Triage / min by Intent+Severity",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "Prometheus"
+            },
+            "targets": [
+              {
+                "expr": "sum(rate(shopsquire_complaint_triage_total[5m])) by (intent, severity)",
+                "legendFormat": "{{intent}} {{severity}}"
+              }
+            ],
+            "gridPos": {
+              "x": 0,
+              "y": 73,
+              "w": 24,
+              "h": 6
+            }
+          },
+          {
+            "type": "nodeGraph",
+            "title": "Complaint Flow (Intent → Action)",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "Prometheus"
+            },
+            "options": {
+              "edges": [],
+              "nodes": []
+            },
+            "description": "Expert view: visualize how intents map to actions; populate via JSON data source or backend plugin in future.",
+            "gridPos": {
+              "x": 0,
+              "y": 79,
+              "w": 24,
+              "h": 10
+            }
+          }
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pricing Latency (p50/p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(shopsquire_pricing_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(shopsquire_pricing_latency_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tickets Created / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rate(shopsquire_tickets_created_total[5m])",
+          "legendFormat": "{{topic}} {{priority}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Chaos Injections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "rate(shopsquire_chaos_injected_total[5m])",
+          "legendFormat": "{{latency_ms}}ms"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Orders (Daily)",
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "shopsquire_analytics_json"
+      },
+      "targets": [
+        {
+          "target": "orders"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Decisions (Daily)",
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "shopsquire_analytics_json"
+      },
+      "targets": [
+        {
+          "target": "decisions"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Security Events (Daily)",
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "shopsquire_analytics_json"
+      },
+      "targets": [
+        {
+          "target": "security"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Security Events by Severity / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shopsquire_security_events_total[5m])) by (severity)",
+          "legendFormat": "{{severity}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Supply Chain Events / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shopsquire_security_events_total{category=\"supply_chain\"}[5m]))",
+          "legendFormat": "supply_chain"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool Invocations / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shopsquire_tool_invocations_total[5m])) by (tool, status)",
+          "legendFormat": "{{tool}} {{status}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 46,
+        "w": 24,
+        "h": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Webhook Verification Failures / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shopsquire_webhook_verifications_total{status!=\"ok\"}[5m])) by (vendor, status)",
+          "legendFormat": "{{vendor}} {{status}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 24,
+        "h": 6
+      }
+    },
+    {
+      "type": "table",
+      "title": "Compliance Live Feed",
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "shopsquire_compliance_live"
+      },
+      "targets": [
+        {
+          "target": "compliance_live_feed"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 58,
+        "w": 24,
+        "h": 10
+      }
+    },
+    {
+      "type": "stat",
+      "title": "AlertManager Test Alert",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "max(shopsquire_alertmanager_test_last_ts)",
+          "legendFormat": "last_test"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso",
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "Never"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "links": [
+        {
+          "title": "Open AlertManager",
+          "url": "http://localhost:9093/#/alerts?filter=alertname%3DShopsquireAlertmanagerTest",
+          "targetBlank": true
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 24,
+        "h": 5
+      },
+      "id": 25
+    }
+    ,
+    {
+      "type": "timeseries",
+      "title": "UI Actions / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(shopsquire_ui_actions_total[5m])) by (action)",
+          "legendFormat": "{{action}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 73,
+        "w": 24,
+        "h": 6
+      }
+    }
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  }
+}

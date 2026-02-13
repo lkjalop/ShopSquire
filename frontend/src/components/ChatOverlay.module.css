@@ -1,0 +1,270 @@
+/* Floating Chat Panel */
+.wrap {
+  position: fixed;
+  bottom: 100px;
+  right: 24px;
+  width: 380px;
+  max-height: 600px;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(20px) scale(0.95);
+  transition: all 0.25s ease-out;
+}
+
+.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Header */
+.header {
+  background: linear-gradient(135deg, #1e3a5f 0%, #152a45 100%);
+  color: #fff;
+  padding: 16px;
+  border-radius: 16px 16px 0 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.headerTitle {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.closeBtn {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.closeBtn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Body */
+.body {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+/* Quick Action Buttons */
+.quickActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.quickBtn {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.quickBtn:hover {
+  background: #ea580c;
+  color: #fff;
+  border-color: #ea580c;
+}
+
+/* Product Card in Chat */
+.card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  display: flex;
+  gap: 12px;
+  transition: box-shadow 0.2s;
+}
+
+.card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.cardImage {
+  width: 80px;
+  height: 60px;
+  background: #f9fafb;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cardImage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.cardContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardName {
+  font-weight: 600;
+  font-size: 13px;
+  color: #111827;
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardPrice {
+  font-weight: 700;
+  color: #ea580c;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.cardFeatures {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.addBtn {
+  background: #ea580c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background 0.2s;
+}
+
+.addBtn:hover {
+  background: #c2410c;
+}
+
+/* Trace Button */
+.traceBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.2s;
+  width: 100%;
+  justify-content: center;
+}
+
+.traceBtn:hover {
+  background: #e5e7eb;
+}
+
+.traceIcon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Empty State */
+.emptyState {
+  text-align: center;
+  padding: 32px 16px;
+  color: #6b7280;
+}
+
+.emptyIcon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.emptyText {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.emptyHint {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* Footer Input */
+.footer {
+  border-top: 1px solid #e5e7eb;
+  padding: 12px 16px;
+  display: flex;
+  gap: 8px;
+  background: #f9fafb;
+  border-radius: 0 0 16px 16px;
+}
+
+.input {
+  flex: 1;
+  border: 1px solid #d1d5db;
+  border-radius: 24px;
+  padding: 10px 16px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  border-color: #ea580c;
+}
+
+.sendBtn {
+  background: #ea580c;
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  padding: 10px 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.sendBtn:hover {
+  background: #c2410c;
+}
+
+/* Mobile Full Screen */
+@media (max-width: 500px) {
+  .wrap {
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    max-height: 80vh;
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+  }
+
+  .open {
+    transform: translateY(0);
+  }
+}

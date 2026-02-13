@@ -1,0 +1,6 @@
+{
+  "method": "platt",
+  "params": { "a": 1.0, "b": 0.0 },
+  "notes": "Roadmap-referenced config for Phase 2 confidence calibration."
+}
+

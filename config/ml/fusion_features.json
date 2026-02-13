@@ -1,0 +1,11 @@
+{
+  "features": [
+    { "name": "image_quality_score", "type": "float", "source": "tier0" },
+    { "name": "phash_reuse", "type": "bool", "source": "tier0" },
+    { "name": "ocr_has_serial", "type": "bool", "source": "cv" },
+    { "name": "ocr_has_order_id", "type": "bool", "source": "cv" },
+    { "name": "customer_trust_score", "type": "float", "source": "trust" }
+  ],
+  "notes": "Roadmap-referenced config for Phase 2. Not yet used by a trained model."
+}
+

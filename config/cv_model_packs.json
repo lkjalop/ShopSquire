@@ -1,0 +1,41 @@
+{
+  "default": "agnostic_v1",
+  "packs": {
+    "agnostic_v1": {
+      "title": "Agnostic CV Pack v1",
+      "description": "General-purpose CV pack for returns/refunds/warranty across categories.",
+      "detector": {
+        "type": "yolo",
+        "model": "yolov8s.pt"
+      },
+      "ocr": {
+        "provider": "tesseract",
+        "fallback": "tesseract"
+      },
+      "quality": {
+        "type": "clip",
+        "labels": ["damaged device", "undamaged device", "blurry photo", "invoice document", "serial sticker"]
+      },
+      "forensics": true,
+      "phash": true
+    },
+    "agnostic_doc_v1": {
+      "title": "Agnostic Document Pack v1",
+      "description": "Document-heavy CV pack optimized for receipts, labels, invoices.",
+      "detector": {
+        "type": "yolo",
+        "model": "yolov8s.pt"
+      },
+      "ocr": {
+        "provider": "tesseract",
+        "fallback": "tesseract"
+      },
+      "quality": {
+        "type": "clip",
+        "labels": ["invoice document", "shipping label", "receipt", "blurry photo"]
+      },
+      "forensics": true,
+      "phash": true
+    }
+  }
+}

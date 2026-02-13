@@ -1,0 +1,36 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+  - name: ShopSquire Analytics JSON
+    uid: shopsquire_analytics_json
+    type: simpod-json-datasource
+    access: proxy
+    url: http://grafana-json:3333
+  - name: ShopSquire Postgres
+    uid: shopsquire_postgres
+    type: postgres
+    access: proxy
+    url: shopsquire_db:5432
+    database: shopsquire
+    user: postgres
+    secureJsonData:
+      password: postgres
+    jsonData:
+      sslmode: "disable"
+      postgresVersion: 1500
+  - name: ShopSquire Compliance Live
+    uid: shopsquire_compliance_live
+    type: simpod-json-datasource
+    access: proxy
+    url: http://grafana-livefeed:3334
+  - name: Loki
+    uid: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100

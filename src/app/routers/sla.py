@@ -1,7 +1,8 @@
 import os
 from typing import Dict
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from prometheus_client import generate_latest, REGISTRY
+from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 
 router = APIRouter(prefix="/api/v1/sla", tags=["sla"])
 
@@ -19,7 +20,7 @@ def _parse_total(metric_prefix: str, body: str) -> float:
 
 
 @router.get("/summary")
-def summary() -> Dict:
+def summary(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     # Parse current metrics text to compute basic aggregates
     body = generate_latest(REGISTRY).decode("utf-8", errors="ignore")
     incidents = _parse_total("shopsquire_incident_alerts_total", body)

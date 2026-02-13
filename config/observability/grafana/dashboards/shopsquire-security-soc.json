@@ -1,0 +1,76 @@
+{
+  "id": null,
+  "uid": "shopsquire-security-soc",
+  "title": "ShopSquire Security SOC",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "panels": [
+    { "id": 1, "type": "row", "title": "Events Overview", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }},
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Security Events / min",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "sum(rate(shopsquire_security_events_total[5m])) by (severity)", "legendFormat": "{{severity}}" }
+      ],
+      "gridPos": { "x": 0, "y": 1, "w": 16, "h": 8 }
+    },
+    {
+      "id": 3,
+      "type": "piechart",
+      "title": "Events by Category (24h)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum(increase(shopsquire_security_events_total[24h])) by (category)", "legendFormat": "{{category}}" } ],
+      "gridPos": { "x": 16, "y": 1, "w": 8, "h": 8 }
+    },
+    { "id": 4, "type": "row", "title": "Escalations & Blocks", "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 }},
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Escalations (1h buckets)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum(increase(shopsquire_agent_escalations_total[1h])) by (agent, reason)", "legendFormat": "{{agent}}: {{reason}}" } ],
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 }
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Top Security Paths (24h)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "topk(10, sum by (path) (increase(shopsquire_security_events_total[24h])))", "format": "table", "instant": true } ],
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+      "transformations": [ { "id": "organize", "options": { "renameByName": { "metric": "path", "Value": "count" } } } ]
+    },
+    { "id": 7, "type": "row", "title": "Risk & Drift", "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 }},
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Geo Risk Anomalies (5m)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum(rate(shopsquire_geo_velocity_anomalies_total[5m])) by (asn)", "legendFormat": "ASN {{asn}}" } ],
+      "gridPos": { "x": 0, "y": 19, "w": 12, "h": 8 }
+    },
+    {
+      "id": 9,
+      "type": "gauge",
+      "title": "Cluster Drift Score",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "shopsquire_cluster_drift_score", "refId": "A" } ],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{"color":"green"},{"color":"yellow","value":0.2},{"color":"red","value":0.4}] } } },
+      "gridPos": { "x": 12, "y": 19, "w": 12, "h": 8 }
+    },
+    { "id": 10, "type": "row", "title": "Drill-downs", "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 }},
+    {
+      "id": 11,
+      "type": "text",
+      "title": "Links",
+      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 4 },
+      "options": { "content": "- [Executive Overview](#/d/shopsquire-exec-overview)\n- [Escalation Rates](#/d/shopsquire-escalation-rates)\n- [Query Cluster Drift](#/d/shopsquire-query-cluster-drift)" }
+    }
+  ],
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] }
+}

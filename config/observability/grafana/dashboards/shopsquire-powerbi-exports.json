@@ -1,0 +1,101 @@
+{
+  "id": null,
+  "uid": "shopsquire-powerbi-exports",
+  "title": "PowerBI Exports SLA",
+  "description": "Latency and availability of PowerBI export endpoints",
+  "tags": ["shopsquire", "powerbi", "sla"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Latency (p95)", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "p95 CSV",
+      "description": "p95 latency for CSV export",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms", "min": 0, "max": 2000, "thresholds": {"mode": "absolute", "steps": [{"color":"green"},{"color":"yellow","value":500},{"color":"red","value":1500}]}}},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(shopsquire_powerbi_export_duration_seconds_bucket{format=\"csv\"}[5m])) by (le, dataset)) * 1000", "refId": "A"}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "p95 NDJSON",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms", "min": 0, "max": 2000, "thresholds": {"mode": "absolute", "steps": [{"color":"green"},{"color":"yellow","value":500},{"color":"red","value":1500}]}}},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(shopsquire_powerbi_export_duration_seconds_bucket{format=\"ndjson\"}[5m])) by (le, dataset)) * 1000", "refId": "A"}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "p95 ZIP",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "fieldConfig": {"defaults": {"unit": "ms", "min": 0, "max": 4000, "thresholds": {"mode": "absolute", "steps": [{"color":"green"},{"color":"yellow","value":1000},{"color":"red","value":3000}]}}},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(shopsquire_powerbi_export_duration_seconds_bucket{format=\"zip\"}[5m])) by (le)) * 1000", "refId": "A"}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "p95 Latency by Dataset",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(shopsquire_powerbi_export_duration_seconds_bucket[5m])) by (le, dataset)) * 1000", "legendFormat": "{{dataset}}", "refId": "A"}
+      ]
+    },
+    {"id": 6, "type": "row", "title": "Availability (Requests & Errors)", "gridPos": {"x": 0, "y": 6, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Error Rate (5m)",
+      "gridPos": {"x": 0, "y": 7, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percent", "thresholds": {"mode": "absolute", "steps": [{"color":"green"},{"color":"yellow","value":1},{"color":"red","value":5}]}}},
+      "targets": [
+        {"expr": "100 * (sum(rate(shopsquire_powerbi_export_requests_total{status=~\"5..|4..\"}[5m])) / sum(rate(shopsquire_powerbi_export_requests_total[5m])))", "refId": "A"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Requests by Status (5m)",
+      "gridPos": {"x": 6, "y": 7, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "targets": [
+        {"expr": "sum(rate(shopsquire_powerbi_export_requests_total[5m])) by (status, format)", "legendFormat": "{{format}} {{status}}", "refId": "A"}
+      ]
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Slow Exports (Top p95 by Dataset)",
+      "gridPos": {"x": 18, "y": 7, "w": 6, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "targets": [
+        {"expr": "topk(5, histogram_quantile(0.95, sum(rate(shopsquire_powerbi_export_duration_seconds_bucket[10m])) by (le, dataset))) * 1000", "format": "table", "instant": true, "refId": "A"}
+      ],
+      "transformations": [{"id": "organize", "options": {"renameByName": {"Value": "p95_ms"}}}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}}
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["10s", "30s", "1m", "5m"]}
+}

@@ -1,0 +1,16 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^cmd\\.exe /c \"set PYTHONPATH=%CD%&& \\.venv\\\\Scripts\\\\python\\.exe scripts\\\\debug_orchestrator\\.py\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cmd\\.exe /c \"set PYTHONPATH=%CD%&& set DATABASE_URL=sqlite\\+pysqlite:///D:/AI/agentLumen/ShopSquire/tmp/e2e\\.sqlite&& \\.venv\\\\Scripts\\\\python\\.exe scripts\\\\debug_orchestrator\\.py\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cmd\\.exe /c \"set PYTHONPATH=%CD%&& set DATABASE_URL=sqlite\\+pysqlite:///D:/AI/agentLumen/ShopSquire/tmp/e2e\\.sqlite&& \\.venv\\\\Scripts\\\\python\\.exe scripts/run_targeted_api_tests\\.py\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

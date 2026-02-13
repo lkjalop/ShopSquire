@@ -1,0 +1,9 @@
+{
+  "default": {
+    "interval_seconds": 300,
+    "conflict_strategy": "prefer_erp",
+    "max_records_per_run": 10000
+  },
+  "notes": "Roadmap-referenced config for Phase 5 sync cadence and conflict policies."
+}
+

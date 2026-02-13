@@ -1,0 +1,38 @@
+groups:
+  - name: shopsquire-core
+    rules:
+      - alert: RAGASFaithfulnessDrop
+        expr: avg_over_time(shopsquire_ragas_faithfulness_score[7d]) < 0.7
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAGAS faithfulness average dropped below 0.7"
+          description: "Investigate retrieval quality and model responses."
+
+      - alert: WSDisconnectSpike
+        expr: sum(rate(shopsquire_ws_disconnects_total[5m])) > 50
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High WebSocket disconnect rate"
+          description: "Check broker and network stability."
+
+      - alert: IncidentSpike
+        expr: sum(increase(shopsquire_security_events_total[30m])) > 20
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Security events spiking"
+          description: "Review escalations and anomaly detection."
+
+      - alert: HumanReviewBacklog
+        expr: (sum(human_review_queued) - sum(human_review_completed)) > 100
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Human review backlog exceeded threshold"
+          description: "Staff intervention or adjust automation confidence."

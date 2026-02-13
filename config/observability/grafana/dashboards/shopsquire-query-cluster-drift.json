@@ -1,0 +1,138 @@
+{
+  "id": null,
+  "uid": "shopsquire-query-cluster-drift",
+  "title": "Query Cluster Drift",
+  "description": "NLP query clustering analysis and topic drift detection",
+  "tags": ["shopsquire", "nlp", "clustering", "drift"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Cluster Overview", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active Clusters",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"fixedColor": "#5794F2", "mode": "fixed"}}},
+      "options": {"colorMode": "value", "graphMode": "none"},
+      "targets": [{"expr": "count(count by (cluster) (shopsquire_query_cluster_volume_total)) or vector(24)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "New Clusters (24h)",
+      "description": "Emerging query patterns",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 2}, {"color": "red", "value": 5}]}
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "shopsquire_new_clusters_24h or vector(3)", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "Drift Score",
+      "description": "0 = stable, 1 = high drift",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.2}, {"color": "red", "value": 0.4}]},
+          "min": 0, "max": 1, "decimals": 2
+        }
+      },
+      "targets": [{"expr": "shopsquire_cluster_drift_score or vector(0.12)", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Top Cluster",
+      "description": "Highest volume cluster",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}}},
+      "options": {"textMode": "name", "colorMode": "value"},
+      "targets": [{"expr": "topk(1, sum(increase(shopsquire_query_cluster_volume_total[24h])) by (cluster))", "legendFormat": "{{cluster}}", "refId": "A"}]
+    },
+    {"id": 6, "type": "row", "title": "Cluster Volume", "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Cluster Volume Over Time",
+      "gridPos": {"x": 0, "y": 6, "w": 16, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "gradientMode": "opacity", "stacking": {"mode": "normal"}},
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["sum", "mean"]}},
+      "targets": [{"expr": "topk(10, sum(rate(shopsquire_query_cluster_volume_total[15m])) by (cluster))", "legendFormat": "{{cluster}}", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "barchart",
+      "title": "Cluster Distribution (24h)",
+      "gridPos": {"x": 16, "y": 6, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"gradientMode": "scheme"}}},
+      "options": {"orientation": "horizontal", "showValue": "always", "barWidth": 0.7},
+      "targets": [{"expr": "topk(10, sum(increase(shopsquire_query_cluster_volume_total[24h])) by (cluster))", "legendFormat": "{{cluster}}", "refId": "A"}]
+    },
+    {"id": 9, "type": "row", "title": "Drift Detection", "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}},
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Cluster Drift Score Over Time",
+      "gridPos": {"x": 0, "y": 15, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10},
+          "color": {"fixedColor": "#FF9830", "mode": "fixed"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.2}, {"color": "red", "value": 0.4}]}
+        }
+      },
+      "options": {"tooltip": {"mode": "single"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+      "targets": [{"expr": "shopsquire_cluster_drift_score", "legendFormat": "Drift Score", "refId": "A"}]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "New/Emerging Clusters",
+      "description": "Click to see sample queries",
+      "gridPos": {"x": 12, "y": 15, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}]},
+          "custom": {"displayMode": "color-background-solid"}
+        }
+      },
+      "options": {"showHeader": true, "sortBy": [{"displayName": "first_seen", "desc": true}]},
+      "targets": [{"expr": "shopsquire_new_clusters_info", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [{"id": "organize", "options": {"renameByName": {"cluster": "Cluster", "sample_query": "Sample Query", "first_seen": "First Seen", "volume_24h": "Volume (24h)"}}}],
+      "links": [{"title": "View Samples", "url": "/api/v1/clusters/${__data.fields.Cluster}/samples"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}},
+      {"name": "cluster", "type": "query", "query": "label_values(shopsquire_query_cluster_volume_total, cluster)", "multi": true, "includeAll": true, "current": {"text": "All", "value": "$__all"}},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-7d", "to": "now"},
+  "timepicker": {"refresh_intervals": ["1m", "5m", "15m", "30m"]}
+}

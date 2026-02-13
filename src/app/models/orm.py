@@ -58,3 +58,38 @@ class Order(Base):
     status: Mapped[str] = mapped_column(Text, default="pending_payment")
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class ReturnCase(Base):
+    __tablename__ = "cases"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    order_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guest_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issue_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, default="open")
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class EvidenceBundle(Base):
+    __tablename__ = "evidence_bundles"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(Text, ForeignKey("cases.id", ondelete="CASCADE"))
+    bundle_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+
+
+class HumanReviewTask(Base):
+    __tablename__ = "human_review_tasks"
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    case_id: Mapped[str] = mapped_column(Text, ForeignKey("cases.id", ondelete="CASCADE"))
+    decision_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ticket_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    reviewer_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)

@@ -1,0 +1,39 @@
+{
+  "id": "sports",
+  "version": "2026-02-05",
+  "name": "Sports/Outdoors Returns (Rules-First)",
+  "strict_required_views": false,
+  "required_views": {
+    "views": ["front", "back", "label", "receipt"],
+    "keywords": {
+      "front": ["front", "overview", "product"],
+      "back": ["back", "rear"],
+      "label": ["label", "shipping", "tracking"],
+      "receipt": ["receipt", "invoice", "order"]
+    },
+    "min_images": 1
+  },
+  "taxonomy": {
+    "categories": ["apparel", "equipment", "footwear", "accessory", "receipt_document"],
+    "damage_types": ["tear", "broken", "missing_item", "wrong_item", "unknown"]
+  },
+  "allowed_substitutions": {
+    "category_substitutions": {
+      "boots": "footwear",
+      "bike": "equipment"
+    }
+  },
+  "thresholds": {
+    "auto_approve_max_score": 30,
+    "human_review_max_score": 70,
+    "escalate_security_min_score": 70,
+    "image_quality_min": 0.6,
+    "return_window_days": 30
+  },
+  "ocr_patterns": {
+    "order_id": ["Order[:\\s#]*([A-Z0-9\\-]{6,32})", "Invoice[:\\s#]*([A-Z0-9\\-]{6,32})"],
+    "serial": ["SKU[:\\s]*([A-Z0-9\\-]{4,32})", "Style[:\\s]*([A-Z0-9\\-]{4,32})"]
+  },
+  "roi_allowlist": ["product", "tag_label", "barcode", "receipt_document"]
+}
+

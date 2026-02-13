@@ -1,0 +1,81 @@
+groups:
+  - name: shopsquire-geo
+    interval: 1m
+    rules:
+      - alert: HighRiskASNSpike
+        expr: sum by (asn) (increase(shopsquire_geo_asn_risk_total{band=~"med|high"}[15m])) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Spike in high-risk ASN activity"
+          description: "ASN {{ $labels.asn }} exceeds threshold in last 15m"
+      - alert: VelocityAnomalyBurst
+        expr: sum(increase(shopsquire_geo_velocity_anomalies_total[10m])) > 5
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Burst of velocity anomalies"
+          description: "Distinct users per ASN exceeded burst threshold"
+  - name: shopsquire-ragas
+    interval: 5m
+    rules:
+      - alert: RagasQualityDrop
+        expr: avg_over_time(shopsquire_ragas_evaluations_total[1h]) < (0.8 * avg_over_time(shopsquire_ragas_evaluations_total[24h]))
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "RAGAS evaluations trending down"
+          description: "Recent RAGAS evaluation success counts are lower vs 24h baseline"
+      - alert: RagasBaselineDrop
+        expr: shopsquire_ragas_quality_avg < (0.9 * shopsquire_ragas_baseline)
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "RAGAS moving average dropped vs baseline"
+          description: "Quality avg is below 90% of baseline for 30m"
+          runbook: "https://docs.shopsquire.local/ops/ragas-baseline"  # optional runbook link
+  - name: shopsquire-faq
+    interval: 5m
+    rules:
+      - alert: FAQClusterSurge
+        expr: topk(1, sum by (label) (increase(shopsquire_query_cluster_volume_total[30m]))) > 200
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Cluster surge detected"
+          description: "Label {{ $labels.label }} has surged in last 30m"
+  - name: shopsquire-powerbi
+    interval: 1m
+    rules:
+      - alert: PowerBIExportsLatencyP95High
+        expr: histogram_quantile(0.95, sum(rate(shopsquire_powerbi_export_duration_seconds_bucket[5m])) by (le)) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PowerBI export p95 latency high"
+          description: "p95 export latency exceeded 500ms over 5m"
+      - alert: PowerBIExportsErrorRateHigh
+        expr: sum(rate(shopsquire_powerbi_export_requests_total{status=~"5..|4.."}[5m])) / sum(rate(shopsquire_powerbi_export_requests_total[5m])) > 0.01
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PowerBI export error rate high"
+          description: "4xx/5xx > 1% over last 10m"
+  - name: shopsquire-drift
+    interval: 5m
+    rules:
+      - alert: QueryClusterDriftElevated
+        expr: shopsquire_cluster_drift_score > 0.4
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Query cluster drift elevated"
+          description: "Drift score above threshold for 15m"

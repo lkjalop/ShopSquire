@@ -1,0 +1,32 @@
+[
+    {
+        "suite":  "unit",
+        "log":  "runs/docker_pytest_unit.log",
+        "exit":  0
+    },
+    {
+        "suite":  "api",
+        "log":  "runs/docker_pytest_api.log",
+        "exit":  0
+    },
+    {
+        "suite":  "security",
+        "log":  "runs/docker_pytest_security.log",
+        "exit":  1
+    },
+    {
+        "suite":  "chaos",
+        "log":  "runs/docker_pytest_chaos.log",
+        "exit":  0
+    },
+    {
+        "suite":  "load",
+        "log":  "runs/docker_pytest_load.log",
+        "exit":  0
+    },
+    {
+        "suite":  "integration",
+        "log":  "runs/docker_pytest_integration.log",
+        "exit":  1
+    }
+]

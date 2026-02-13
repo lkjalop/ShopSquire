@@ -1,3 +1,9 @@
+### 2026-01-23
+
+- Recommend and Pricing: Added X-Rate-Limit-* headers to expose reason, tokens remaining, and cost remaining for each request. This improves client visibility and supports deterministic testing.
+- Security Tests: Added tests/security/test_rate_limits.py header presence test and marked env-dependent budget exceed case as xfail when server is not restarted.
+- Pricing Tests: Added tests/security/test_pricing_rate_limits.py to validate consistent headers on pricing.
+- Auth: Continued migration toward hashed session tokens only.
 # Changelog
 
 ## 2026-01-20

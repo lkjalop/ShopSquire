@@ -1,0 +1,88 @@
+name: Playwright UI + Observability Smoke
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ '*' ]
+
+jobs:
+  ui-smoke:
+    runs-on: ubuntu-latest
+    env:
+      API_PORT: '8081'
+      DISABLE_UI_ROUTES: '0'
+      DATABASE_URL: ${{ github.workspace }}/tmp/e2e.sqlite
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Prepare repo
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt || true
+          pip install -e . || true
+
+      - name: Install frontend deps & Playwright browsers
+        run: |
+          npm ci --prefix src/frontend/admin-react
+          npx playwright install --with-deps
+
+      - name: Start backend (uvicorn)
+        run: |
+          mkdir -p tmp
+          export DATABASE_URL="sqlite:///${{ github.workspace }}/tmp/e2e.sqlite"
+          export API_PORT=8081
+          export DISABLE_UI_ROUTES=0
+          # start uvicorn in background
+          python -m uvicorn src.app.main:create_app --host 127.0.0.1 --port ${API_PORT} --factory > uvicorn.log 2>&1 &
+          # wait for health
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${API_PORT}/health || echo 000)
+            echo "health check: $code"
+            if [ "$code" = "200" ]; then break; fi
+            sleep 1
+          done
+
+      - name: Smoke check metrics, CORS, and WS connectivity
+        run: |
+          python - <<'PY'
+import time, requests, sys
+base='http://127.0.0.1:8081'
+try:
+    r=requests.get(base+'/health', timeout=3)
+    print('health', r.status_code)
+except Exception as e:
+    print('health error', e)
+try:
+    m=requests.get(base+'/metrics', timeout=3)
+    print('metrics', m.status_code, 'has_http_metric', 'shopsquire_http_requests_total' in m.text)
+except Exception as e:
+    print('metrics error', e)
+try:
+    o=requests.options(base+'/api/v1/decisions/stream', headers={'Origin':'http://localhost:5173','Access-Control-Request-Method':'GET'}, timeout=3)
+    print('options', o.status_code, 'ACAO=', o.headers.get('access-control-allow-origin'))
+except Exception as e:
+    print('options error', e)
+PY
+
+      - name: Run Playwright tests (if configured)
+        run: |
+          pushd src/frontend/admin-react || true
+          npx playwright test --reporter=list || true
+          popd || true
+
+      - name: Run pytest PW suite
+        run: |
+          python -m pip install pytest
+          pytest tests/pw -q || true

@@ -1,0 +1,4 @@
+PRETEST DATABASE_URL= sqlite:///test.sqlite
+PRETEST sqlite file= test.sqlite
+PRETEST TABLE security_events COUNT=0
+PRETEST TABLE incidents COUNT=0

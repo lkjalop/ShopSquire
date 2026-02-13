@@ -29,3 +29,23 @@ class FeatureFlags(BaseModel):
     AGENT_ROLLOUT_PERCENT: int = 20
     CAPABILITIES: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     KILL_SWITCH: bool = False
+
+
+class SessionEvent(BaseModel):
+    """Lightweight session-level event with privacy-safe fields.
+
+    - uid: raw user identifier (hashed server-side)
+    - session_id: client session identifier (hashed server-side)
+    - device_id: client device identifier (hashed server-side)
+    - action: event name (e.g., 'view', 'search', 'add_to_cart', 'return_request')
+    - properties: arbitrary event properties (sanitized server-side)
+    - ip: client IP (never stored raw; used for coarse GeoIP/ASN then discarded)
+    - ts: ISO timestamp supplied by client; if missing, server will use current time
+    """
+    uid: Optional[str] = None
+    session_id: Optional[str] = None
+    device_id: Optional[str] = None
+    action: str
+    properties: Dict[str, Any] = Field(default_factory=dict)
+    ip: Optional[str] = None
+    ts: Optional[str] = None

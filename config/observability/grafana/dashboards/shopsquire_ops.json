@@ -1,0 +1,45 @@
+{
+  "title": "ShopSquire Ops",
+  "tags": ["shopsquire", "ops"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "HTTP Requests - Total",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total[5m]))",
+          "legendFormat": "req/s"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8}
+    },
+    {
+      "type": "graph",
+      "title": "HTTP 5xx Error Rate",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+          "legendFormat": "5xx rate"
+        }
+      ],
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8}
+    },
+    {
+      "type": "graph",
+      "title": "Avg Request Latency (s)",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_request_latency_seconds_sum[5m])) / sum(rate(http_request_latency_seconds_count[5m]))",
+          "legendFormat": "avg latency"
+        }
+      ],
+      "gridPos": {"x": 0, "y": 8, "w": 24, "h": 8}
+    }
+  ],
+  "schemaVersion": 36,
+  "version": 1
+}

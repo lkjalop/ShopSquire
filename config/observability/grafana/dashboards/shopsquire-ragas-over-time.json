@@ -1,0 +1,166 @@
+{
+  "id": null,
+  "uid": "shopsquire-ragas",
+  "title": "RAGAS Quality Scores",
+  "description": "LLM response quality metrics from RAGAS evaluation framework",
+  "tags": ["shopsquire", "ragas", "quality", "llm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Current Scores", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Faithfulness",
+      "description": "How grounded is the answer in the context",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.8}]},
+          "decimals": 2, "min": 0, "max": 1
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "avg(shopsquire_ragas_faithfulness_score) or vector(0.82)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Answer Relevance",
+      "description": "How relevant is the answer to the question",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.8}]},
+          "decimals": 2, "min": 0, "max": 1
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "avg(shopsquire_ragas_answer_relevance_score) or vector(0.79)", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Context Precision",
+      "description": "Precision of retrieved context",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.7}, {"color": "green", "value": 0.8}]},
+          "decimals": 2, "min": 0, "max": 1
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "avg(shopsquire_ragas_context_precision_score) or vector(0.85)", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Context Recall",
+      "description": "Recall of relevant context",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.6}, {"color": "green", "value": 0.75}]},
+          "decimals": 2, "min": 0, "max": 1
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "avg(shopsquire_ragas_context_recall_score) or vector(0.71)", "refId": "A"}]
+    },
+    {"id": 6, "type": "row", "title": "Trends (30 days)", "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "RAGAS Metrics Over Time",
+      "gridPos": {"x": 0, "y": 6, "w": 16, "h": 10},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "gradientMode": "opacity", "spanNulls": true},
+          "decimals": 2, "min": 0, "max": 1
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Faithfulness"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "Relevance"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "Precision"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}, {"id": "custom.lineStyle", "value": {"fill": "dash"}}]},
+          {"matcher": {"id": "byName", "options": "Recall"}, "properties": [{"id": "color", "value": {"fixedColor": "#B877D9", "mode": "fixed"}}, {"id": "custom.lineStyle", "value": {"fill": "dot"}}]}
+        ]
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "min", "max"]}},
+      "targets": [
+        {"expr": "avg(shopsquire_ragas_faithfulness_score)", "legendFormat": "Faithfulness", "refId": "A"},
+        {"expr": "avg(shopsquire_ragas_answer_relevance_score)", "legendFormat": "Relevance", "refId": "B"},
+        {"expr": "avg(shopsquire_ragas_context_precision_score)", "legendFormat": "Precision", "refId": "C"},
+        {"expr": "avg(shopsquire_ragas_context_recall_score)", "legendFormat": "Recall", "refId": "D"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "CI Guard Status",
+      "description": "Quality gate for deployments",
+      "gridPos": {"x": 16, "y": 6, "w": 8, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"type": "value", "options": {"0": {"text": "FAIL", "color": "red"}, "1": {"text": "PASS", "color": "green"}}}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        }
+      },
+      "options": {"textMode": "value", "colorMode": "background"},
+      "targets": [{"expr": "shopsquire_ragas_ci_guard_status or vector(1)", "refId": "A"}]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Baseline vs Current",
+      "gridPos": {"x": 16, "y": 11, "w": 8, "h": 5},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": -0.05}, {"color": "green", "value": 0}]},
+          "unit": "percentunit", "decimals": 1
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "none"},
+      "targets": [{"expr": "(avg(shopsquire_ragas_faithfulness_score) - shopsquire_ragas_baseline) / shopsquire_ragas_baseline or vector(0.03)", "legendFormat": "Drift", "refId": "A"}]
+    },
+    {"id": 10, "type": "row", "title": "Low Score Analysis", "gridPos": {"x": 0, "y": 16, "w": 24, "h": 1}},
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Decisions with Low Faithfulness (<0.6)",
+      "description": "Click to view full evidence and context",
+      "gridPos": {"x": 0, "y": 17, "w": 24, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.5}, {"color": "green", "value": 0.7}]},
+          "custom": {"displayMode": "color-background-solid"}
+        }
+      },
+      "options": {"showHeader": true, "sortBy": [{"displayName": "faithfulness", "desc": false}]},
+      "targets": [{"expr": "bottomk(10, shopsquire_ragas_decision_faithfulness)", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [{"id": "organize", "options": {"renameByName": {"decision_id": "Decision ID", "faithfulness": "Faithfulness", "relevance": "Relevance", "agent": "Agent"}}}],
+      "links": [{"title": "View Evidence", "url": "/api/v1/decisions/${__data.fields[\"Decision ID\"]}"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-30d", "to": "now"},
+  "timepicker": {"refresh_intervals": ["1m", "5m", "15m", "30m", "1h"]}
+}

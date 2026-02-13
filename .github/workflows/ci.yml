@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.10, 3.11]
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shopsquire_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: shopsquire_test
+      PGPORT: 5432
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shopsquire_test
+      SPLUNK_HEC_URL: ${{ secrets.SPLUNK_HEC_URL }}
+      SPLUNK_HEC_TOKEN: ${{ secrets.SPLUNK_HEC_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f pyproject.toml ]; then
+            python -m pip install poetry
+            poetry config virtualenvs.create false
+            poetry install --no-interaction --no-ansi
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install pytest psycopg2-binary sqlalchemy alembic
+          fi
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U postgres && break || sleep 1
+          done
+      - name: Apply migrations
+        run: |
+          set -e
+          if [ -f pyproject.toml ]; then
+            poetry run alembic -c alembic.ini upgrade head
+          else
+            alembic -c alembic.ini upgrade head
+          fi
+      - name: Shadow migration check
+        run: |
+          python scripts/shadow_migration_check.py --db-url "${{ env.DATABASE_URL }}"
+      - name: Install Playwright browsers
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps
+      - name: Run tests
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: |
+          python -m pytest -q
+      - name: Emit Splunk test event (optional)
+        if: env.SPLUNK_HEC_URL != '' && env.SPLUNK_HEC_TOKEN != ''
+        run: |
+          set -e
+          echo "Posting Splunk HEC test event to $SPLUNK_HEC_URL"
+          body=$(jq -cn --arg msg "ci-test-event" --arg comp "ci" --arg sev "info" '{time:(now|floor), sourcetype:"shopsquire:security", event:{message:$msg, component:$comp, severity:$sev}}')
+          resp=$(curl -sS -X POST "$SPLUNK_HEC_URL" -H "Authorization: Splunk $SPLUNK_HEC_TOKEN" -H "Content-Type: application/json" -d "$body" || true)
+          echo "Splunk HEC response: $resp"

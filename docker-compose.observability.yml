@@ -1,0 +1,104 @@
+version: "3.9"
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: shopsquire_prometheus
+    volumes:
+      - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/observability/rules:/etc/prometheus/rules:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - alertmanager
+
+  grafana-json:
+    image: node:20-alpine
+    container_name: shopsquire_grafana_json
+    working_dir: /srv
+    volumes:
+      - ./config/observability/grafana/json-datasource:/srv
+    command: ["node", "server.js"]
+    environment:
+      API_BASE: http://host.docker.internal:8080
+      API_KEY: local-merchant-key
+      PORT: 3333
+    ports:
+      - "3333:3333"
+
+  grafana-livefeed:
+    image: node:20-alpine
+    container_name: shopsquire_grafana_livefeed
+    working_dir: /srv
+    volumes:
+      - ./config/observability/grafana/json-datasource:/srv
+    command: ["node", "livefeed.js"]
+    environment:
+      API_BASE: http://host.docker.internal:8080
+      API_KEY: local-owner-key
+      PORT: 3334
+    ports:
+      - "3334:3334"
+
+  kev-cron:
+    image: python:3.12-alpine
+    container_name: shopsquire_kev_cron
+    working_dir: /srv/shopsquire
+    volumes:
+      - ./:/srv/shopsquire
+    command: ["sh", "-c", "crontab config/observability/cron/update_kev_cron.txt && crond -f -l 8"]
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: shopsquire_grafana
+    ports:
+      - "3005:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./config/observability/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./config/observability/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/observability/grafana/alerting:/etc/grafana/provisioning/alerting:ro
+    depends_on:
+      - prometheus
+      - grafana-json
+      - grafana-livefeed
+      - loki
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: shopsquire_alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./config/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: shopsquire_jaeger
+    ports:
+      - "6831:6831/udp"
+      - "16686:16686"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: shopsquire_loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./config/observability/loki/loki-config.yml:/etc/loki/config.yml:ro
+    command: ["-config.file=/etc/loki/config.yml"]
+
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: shopsquire_promtail
+    volumes:
+      - ./config/observability/loki/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./logs:/var/log/shopsquire
+    command: ["-config.file=/etc/promtail/config.yml"]
+    depends_on:
+      - loki

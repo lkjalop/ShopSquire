@@ -1,0 +1,20 @@
+{
+  "title": "ShopSquire FAQ Clustering",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "panels": [
+    {
+      "type": "barchart",
+      "title": "Clustered query volume by label (24h)",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 8},
+      "targets": [
+        {
+          "expr": "topk(15, sum by (label) (increase(shopsquire_query_cluster_volume_total[24h])))",
+          "legendFormat": "{{label}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

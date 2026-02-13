@@ -1,0 +1,121 @@
+{
+  "snapshot_at": "2026-02-10T10:36:26.173715+00:00",
+  "actor": "owner",
+  "playbook_id": "PB-PAYMENT-FRAUD",
+  "before": {
+    "id": "PB-PAYMENT-FRAUD",
+    "title": "Payment Fraud Multi-Stage Response",
+    "domain": "security",
+    "priority": 10,
+    "enabled": true,
+    "version": "1.0.29",
+    "trigger_logic": "any",
+    "entry_conditions": {
+      "min_score": 0.6,
+      "channels": [
+        "checkout",
+        "payments",
+        "api"
+      ]
+    },
+    "actions": [
+      {
+        "type": "hold_payment",
+        "mode": "automatic",
+        "params": {
+          "hold_minutes": 30
+        }
+      },
+      {
+        "type": "create_ticket",
+        "mode": "automatic",
+        "params": {
+          "queue": "fraud"
+        }
+      },
+      {
+        "type": "notify_ops",
+        "mode": "automatic",
+        "params": {
+          "channel": "oncall"
+        }
+      }
+    ],
+    "sla_minutes": 15,
+    "risk_band_min": "high",
+    "owners": [
+      "FraudOps",
+      "SecurityOps"
+    ],
+    "checks": [],
+    "closure_criteria": [],
+    "rollback": {
+      "enabled": true,
+      "strategy": "release_hold_after_manual_approval"
+    },
+    "requires_approval_roles": [
+      "owner",
+      "developer"
+    ],
+    "severity": "critical"
+  },
+  "after": {
+    "id": "PB-PAYMENT-FRAUD",
+    "title": "Payment Fraud Multi-Stage Response",
+    "domain": "security",
+    "priority": 10,
+    "enabled": true,
+    "version": "1.0.30",
+    "trigger_logic": "any",
+    "entry_conditions": {
+      "min_score": 0.6,
+      "channels": [
+        "checkout",
+        "payments",
+        "api"
+      ]
+    },
+    "actions": [
+      {
+        "type": "hold_payment",
+        "mode": "automatic",
+        "params": {
+          "hold_minutes": 30
+        }
+      },
+      {
+        "type": "create_ticket",
+        "mode": "automatic",
+        "params": {
+          "queue": "fraud"
+        }
+      },
+      {
+        "type": "notify_ops",
+        "mode": "automatic",
+        "params": {
+          "channel": "oncall"
+        }
+      }
+    ],
+    "sla_minutes": 15,
+    "risk_band_min": "high",
+    "owners": [
+      "FraudOps",
+      "SecurityOps"
+    ],
+    "checks": [],
+    "closure_criteria": [],
+    "rollback": {
+      "enabled": true,
+      "strategy": "release_hold_after_manual_approval"
+    },
+    "requires_approval_roles": [
+      "owner",
+      "developer"
+    ],
+    "severity": "critical",
+    "updated_by": "owner",
+    "updated_at": "2026-02-10T10:36:26.173715+00:00"
+  }
+}

@@ -1,0 +1,96 @@
+# Agent Policy (Policy-as-Code) — ShopSquire
+# Define allowed actions, approval requirements, data scopes, and guardrails per agent role.
+
+version: 1
+roles:
+  detection_agent:
+    description: "Analyzes inputs (email/web/connector) and emits findings; no direct state changes."
+    allowed_actions:
+      - emit_security_event
+      - quarantine_request
+      - annotate_evidence
+    approvals_required: []
+    data_scope:
+      - pii_min
+      - telemetry
+    rate_limits:
+      per_minute: 600
+      burst: 100
+
+  email_agent:
+    description: "Handles email-specific workflows (classification, quarantine suggestions)."
+    allowed_actions:
+      - recommend_quarantine
+      - release_request
+      - update_email_policy
+    approvals_required:
+      - release_high_severity
+    data_scope:
+      - pii_min
+      - headers
+    constraints:
+      - no_send_external
+
+  supplier_agent:
+    description: "Interacts with supplier data (onboarding, updates) via safe APIs."
+    allowed_actions:
+      - suggest_update
+      - flag_anomaly
+      - request_verification
+    approvals_required:
+      - critical_profile_change
+    data_scope:
+      - supplier_profile
+      - audit_logs
+
+  payments_agent:
+    description: "Engages with payment workflows under strict controls."
+    allowed_actions:
+      - prepare_disbursement
+      - verify_beneficiary
+      - hold_payment
+    approvals_required:
+      - any_disbursement
+      - beneficiary_change
+    data_scope:
+      - finance_min
+      - audit_logs
+
+severities:
+  low:
+    auto_actions:
+      - log_only
+  medium:
+    auto_actions:
+      - quarantine_if_email
+      - require_soft_approval
+  high:
+    auto_actions: []
+    required_human_approvals: 1
+  critical:
+    auto_actions: []
+    required_human_approvals: 2
+
+constraints:
+  prompt_sanitization: true
+  pii_redaction: true
+  external_calls_allowed: false
+  allowed_domains:
+    - shopsquire.local
+    - api.shopsquire.example
+
+backpressure:
+  enabled: true
+  max_concurrent_actions: 10
+  retry_strategy:
+    type: exponential_backoff
+    max_retries: 5
+    base_delay_ms: 200
+
+audit:
+  evidence_required: true
+  fields:
+    - inputs_hash
+    - policy_version
+    - rationale
+    - approvals

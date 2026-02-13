@@ -76,7 +76,18 @@ def run_migrations_online():
         poolclass=pool.NullPool,
     )
 
+    hooks_enabled = os.getenv("ALEMBIC_HOOKS_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+
     with connectable.connect() as connection:
+        # Run pre-migration hook if present
+        try:
+            if hooks_enabled:
+                import subprocess
+                pre = os.path.join(os.path.dirname(__file__), "pre_migration_hook.sh")
+                if os.path.exists(pre) and os.access(pre, os.X_OK):
+                    subprocess.run([pre], check=False)
+        except Exception:
+            pass
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
@@ -86,6 +97,15 @@ def run_migrations_online():
 
         with context.begin_transaction():
             context.run_migrations()
+        # Run post-migration hook if present
+        try:
+            if hooks_enabled:
+                import subprocess
+                post = os.path.join(os.path.dirname(__file__), "post_migration_hook.sh")
+                if os.path.exists(post) and os.access(post, os.X_OK):
+                    subprocess.run([post], check=False)
+        except Exception:
+            pass
 
 
 if context.is_offline_mode():

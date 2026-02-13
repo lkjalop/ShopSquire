@@ -1,0 +1,137 @@
+{
+  "snapshot_at": "2026-02-08T14:47:21.706209+00:00",
+  "actor": "owner",
+  "playbook_id": "PB-PAYMENT-FRAUD",
+  "before": {
+    "owners": [
+      "FraudOps",
+      "SecurityOps"
+    ],
+    "enabled": true,
+    "risk_band_min": "high",
+    "actions": [
+      {
+        "mode": "automatic",
+        "params": {
+          "hold_minutes": 30
+        },
+        "type": "hold_payment"
+      },
+      {
+        "mode": "automatic",
+        "params": {
+          "queue": "fraud"
+        },
+        "type": "create_ticket"
+      },
+      {
+        "mode": "automatic",
+        "params": {
+          "channel": "oncall"
+        },
+        "type": "notify_ops"
+      }
+    ],
+    "priority": 10,
+    "severity": "critical",
+    "checks": [
+      "Validate card velocity and device fingerprint",
+      "Correlate geo-ip mismatch and BIN risk",
+      "Cross-check historical chargeback profile"
+    ],
+    "requires_approval_roles": [
+      "owner",
+      "developer"
+    ],
+    "closure_criteria": [
+      "Fraud decision recorded",
+      "Customer notification sent if required"
+    ],
+    "domain": "security",
+    "trigger_logic": "any",
+    "rollback": {
+      "strategy": "release_hold_after_manual_approval",
+      "enabled": true
+    },
+    "entry_conditions": {
+      "min_score": 0.6,
+      "channels": [
+        "checkout",
+        "payments",
+        "api"
+      ]
+    },
+    "version": "1.0.15",
+    "sla_minutes": 15,
+    "title": "Payment Fraud Multi-Stage Response",
+    "id": "PB-PAYMENT-FRAUD",
+    "updated_by": "owner",
+    "updated_at": "2026-02-08T14:45:02.619076+00:00"
+  },
+  "after": {
+    "owners": [
+      "FraudOps",
+      "SecurityOps"
+    ],
+    "enabled": true,
+    "risk_band_min": "high",
+    "actions": [
+      {
+        "mode": "automatic",
+        "params": {
+          "hold_minutes": 30
+        },
+        "type": "hold_payment"
+      },
+      {
+        "mode": "automatic",
+        "params": {
+          "queue": "fraud"
+        },
+        "type": "create_ticket"
+      },
+      {
+        "mode": "automatic",
+        "params": {
+          "channel": "oncall"
+        },
+        "type": "notify_ops"
+      }
+    ],
+    "priority": 10,
+    "severity": "critical",
+    "checks": [
+      "Validate card velocity and device fingerprint",
+      "Correlate geo-ip mismatch and BIN risk",
+      "Cross-check historical chargeback profile"
+    ],
+    "requires_approval_roles": [
+      "owner",
+      "developer"
+    ],
+    "closure_criteria": [
+      "Fraud decision recorded",
+      "Customer notification sent if required"
+    ],
+    "domain": "security",
+    "trigger_logic": "any",
+    "rollback": {
+      "strategy": "release_hold_after_manual_approval",
+      "enabled": true
+    },
+    "entry_conditions": {
+      "min_score": 0.6,
+      "channels": [
+        "checkout",
+        "payments",
+        "api"
+      ]
+    },
+    "version": "1.0.16",
+    "sla_minutes": 15,
+    "title": "Payment Fraud Multi-Stage Response",
+    "id": "PB-PAYMENT-FRAUD",
+    "updated_by": "owner",
+    "updated_at": "2026-02-08T14:47:21.706209+00:00"
+  }
+}

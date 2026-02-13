@@ -1,0 +1,18 @@
+{
+  "alerts": [
+    {
+      "id": "db_migration_guard_failed",
+      "severity": "critical",
+      "condition": "shopsquire_db_migrated == 0",
+      "action": "page_oncall"
+    },
+    {
+      "id": "trace_broker_backpressure",
+      "severity": "warning",
+      "condition": "shopsquire_trace_broker_dropped_events_total > 0",
+      "action": "investigate"
+    }
+  ],
+  "notes": "Roadmap-referenced placeholder; Prometheus rules/alerts are under config/observability/*."
+}
+

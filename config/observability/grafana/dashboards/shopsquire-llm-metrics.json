@@ -1,0 +1,22 @@
+{
+  "id": null,
+  "uid": "shopsquire-llm-metrics",
+  "title": "ShopSquire LLM Metrics",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Token Budget Used / min",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "rate(shopsquire_token_budget_used_total[5m])", "legendFormat": "{{tier}} {{endpoint}}" }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 }
+    }
+  ],
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] }
+}

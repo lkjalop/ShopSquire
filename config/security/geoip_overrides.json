@@ -1,0 +1,22 @@
+{
+  "overrides": [
+    {
+      "cidr": "185.220.100.0/22",
+      "asn": 200000,
+      "org": "Tor Exit Nodes",
+      "country": "DE",
+      "is_vpn": false,
+      "is_hosting": true,
+      "risk": 0.95
+    },
+    {
+      "cidr": "104.244.72.0/22",
+      "asn": 202425,
+      "org": "M247 VPN",
+      "country": "GB",
+      "is_vpn": true,
+      "is_hosting": true,
+      "risk": 0.9
+    }
+  ]
+}

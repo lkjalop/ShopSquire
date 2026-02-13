@@ -1,0 +1,7 @@
+{
+  "default_return_window_days": 30,
+  "sku_blacklist": [],
+  "issue_type_allowlist": ["return", "refund", "exchange"],
+  "notes": "Optional config referenced by the roadmap; Tier0 eligibility currently derives from VerticalPack.thresholds/taxonomy."
+}
+

@@ -1,0 +1,70 @@
+{
+  "id": null,
+  "uid": "shopsquire-agent-analytics",
+  "title": "ShopSquire Agent Analytics",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "panels": [
+    { "id": 1, "type": "row", "title": "Overview", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }},
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Agent Invocations (5m rate)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "sum(rate(shopsquire_agent_invocations_total[5m])) by (agent)", "legendFormat": "{{agent}}", "refId": "A" }
+      ],
+      "gridPos": { "x": 0, "y": 1, "w": 12, "h": 8 },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["sum", "mean"] }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Escalation Rate (24h)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "100 * sum(increase(shopsquire_agent_escalations_total[24h])) / (sum(increase(shopsquire_agent_invocations_total[24h])) + 1)", "refId": "A" }
+      ],
+      "gridPos": { "x": 12, "y": 1, "w": 6, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100, "thresholds": { "mode": "absolute", "steps": [{"color":"green"},{"color":"yellow","value":10},{"color":"red","value":25}] } } }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Avg Confidence",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "avg(shopsquire_agent_confidence)", "refId": "A" } ],
+      "gridPos": { "x": 18, "y": 1, "w": 6, "h": 8 },
+      "fieldConfig": { "defaults": { "decimals": 2, "thresholds": { "mode": "absolute", "steps": [{"color":"red"},{"color":"yellow","value":0.6},{"color":"green","value":0.75}] } } }
+    },
+    { "id": 5, "type": "row", "title": "Confidence & Tokens", "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 }},
+    {
+      "id": 6,
+      "type": "histogram",
+      "title": "Confidence Histogram",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum(increase(shopsquire_agent_confidence_bucket[$__range])) by (le)", "legendFormat": "{{le}}", "refId": "A" } ],
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Token Usage (5m)",
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "sum(rate(shopsquire_llm_tokens_total[5m])) by (endpoint, tier)", "legendFormat": "{{endpoint}} {{tier}}", "refId": "A" } ],
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 }
+    },
+    { "id": 8, "type": "row", "title": "Drill-downs", "gridPos": { "x": 0, "y": 18, "w": 24, "h": 1 }},
+    {
+      "id": 9,
+      "type": "text",
+      "title": "Links",
+      "gridPos": { "x": 0, "y": 19, "w": 24, "h": 4 },
+      "options": { "content": "- [Agent Confidence](#/d/shopsquire-agent-confidence)\n- [LLM Metrics](#/d/shopsquire-llm-metrics)\n- [Escalation Rates](#/d/shopsquire-escalation-rates)" }
+    }
+  ],
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] }
+}

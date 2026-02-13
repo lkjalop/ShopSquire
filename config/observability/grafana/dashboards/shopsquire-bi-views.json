@@ -1,0 +1,61 @@
+{
+  "id": null,
+  "uid": "shopsquire-bi-views",
+  "title": "ShopSquire BI Views (Postgres)",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Orders Daily (by Status)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "shopsquire_postgres"
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day::timestamp AS \"time\", order_count as value, status as metric FROM public.bi_orders_daily ORDER BY day",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Decisions Daily",
+      "datasource": {
+        "type": "postgres",
+        "uid": "shopsquire_postgres"
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day::timestamp AS \"time\", decision_count as value, agent_name as metric FROM public.bi_decisions_daily ORDER BY day",
+          "refId": "B"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Security Events Daily (by Severity)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "shopsquire_postgres"
+      },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT day::timestamp AS \"time\", event_count as value, severity as metric FROM public.bi_security_daily ORDER BY day",
+          "refId": "C"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 }
+    }
+  ],
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": { "list": [] }
+}

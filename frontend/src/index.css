@@ -1,0 +1,48 @@
+/* Global styles for ShopSquire frontend */
+:root {
+  --accent: #ea580c;
+  --border: #d6e0ec;
+  --muted: #4f5d72;
+  --foreground: #111827;
+  --surface-1: #e8eef5;
+  --surface-2: #f7fafc;
+  --surface-3: #edf3f9;
+  --surface-4: #e4ecf5;
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top, #f3f7fc 0%, var(--surface-1) 45%, #dbe6f2 100%);
+  color: var(--foreground);
+}
+
+/* Global icon class for heroicons */
+.icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  vertical-align: middle;
+  display: inline-block;
+}
+
+/* Reset button styles */
+button {
+  cursor: pointer;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-2);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}

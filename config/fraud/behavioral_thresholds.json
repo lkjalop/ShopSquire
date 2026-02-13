@@ -1,0 +1,9 @@
+{
+  "thresholds": {
+    "max_returns_per_30d": 3,
+    "max_refunds_per_30d": 2,
+    "high_risk_score_min": 0.8
+  },
+  "notes": "Roadmap-referenced config for Phase 4 behavioral scoring."
+}
+

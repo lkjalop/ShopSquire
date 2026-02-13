@@ -1,0 +1,44 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: compliance-control-failures
+    folder: ShopSquire
+    interval: 1m
+    rules:
+      - uid: pci-3-4-failure
+        title: PCI 3.4 Control Failure
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: increase(shopsquire_control_failures_total{control="PCI-3.4"}[5m]) > 0
+              interval: ""
+              legendFormat: ""
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "PCI 3.4 control failure detected in last 5 minutes."
+      - uid: eu-ai-act-art-14-failure
+        title: EU AI Act Art.14 Control Failure
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: increase(shopsquire_control_failures_total{control="EU-AI-ACT-Art-14"}[5m]) > 0
+              interval: ""
+              legendFormat: ""
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "EU AI Act Art.14 control failure detected in last 5 minutes."

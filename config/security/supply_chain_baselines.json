@@ -1,0 +1,14 @@
+{
+  "openai": {
+    "endpoint": "api.openai.com",
+    "expected_headers": ["x-request-id", "openai-organization"]
+  },
+  "stripe": {
+    "endpoint": "api.stripe.com",
+    "expected_headers": ["stripe-version", "request-id"]
+  },
+  "paypal": {
+    "endpoint": "api-m.paypal.com",
+    "expected_headers": ["paypal-debug-id"]
+  }
+}

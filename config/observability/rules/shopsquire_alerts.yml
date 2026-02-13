@@ -1,0 +1,31 @@
+groups:
+  - name: shopsquire
+    rules:
+      - alert: ShopSquireAPIDown
+        expr: up{job="shopsquire"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ShopSquire API is down"
+      - alert: ShopSquireSecurityHighEvents
+        expr: sum(rate(shopsquire_security_events_total{severity=~"high|critical"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High severity security events detected"
+      - alert: ShopSquireSecurityCriticalEvent
+        expr: sum(rate(shopsquire_security_events_total{severity="critical"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical security event detected"
+      - alert: ShopSquireSupplyChainAnomaly
+        expr: sum(rate(shopsquire_security_events_total{category="supply_chain"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Supply chain anomaly detected"

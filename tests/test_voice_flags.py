@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
-from src.app.main import app
+from src.app.main import create_app
+from tests.utils import default_headers
 
-client = TestClient(app)
+app = create_app()
+client = TestClient(app, headers=default_headers())
 
 
 def test_voice_asr_disabled():

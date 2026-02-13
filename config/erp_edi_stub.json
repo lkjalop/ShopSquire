@@ -1,0 +1,12 @@
+{
+  "orders": {
+    "TY890-4321": {
+      "supplier_verified": true,
+      "edi_status": "ok",
+      "restock_eta_days": 5,
+      "backorder": false,
+      "invoice_verified": true,
+      "price_cents": 149900
+    }
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "id": null,
+  "uid": "shopsquire-agent-confidence",
+  "title": "Agent Confidence Distribution",
+  "description": "Analyze agent decision confidence levels and calibration effectiveness",
+  "tags": ["shopsquire", "agents", "confidence"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Confidence Overview", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Avg Confidence",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.6}, {"color": "green", "value": 0.75}]},
+          "decimals": 2, "unit": "short"
+        }
+      },
+      "targets": [{"expr": "avg(shopsquire_agent_confidence) or vector(0.75)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Low Confidence (<0.5)",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 20}]},
+          "unit": "percent"
+        }
+      },
+      "targets": [{"expr": "100 * sum(shopsquire_agent_confidence_bucket{le=\"0.5\"}) / sum(shopsquire_agent_confidence_count) or vector(8)", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "High Confidence (>0.8)",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 40}, {"color": "green", "value": 60}]},
+          "unit": "percent"
+        }
+      },
+      "targets": [{"expr": "100 * (1 - sum(shopsquire_agent_confidence_bucket{le=\"0.8\"}) / sum(shopsquire_agent_confidence_count)) or vector(50)", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "Calibration Error",
+      "description": "Lower is better - measures prediction vs actual accuracy",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.1}, {"color": "red", "value": 0.2}]},
+          "min": 0, "max": 0.5, "decimals": 3
+        }
+      },
+      "targets": [{"expr": "shopsquire_calibration_error or vector(0.05)", "refId": "A"}]
+    },
+    {"id": 6, "type": "row", "title": "Distribution by Agent", "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "barchart",
+      "title": "Confidence by Agent",
+      "description": "Average confidence score per agent type",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0.6}, {"color": "green", "value": 0.75}]},
+          "custom": {"gradientMode": "scheme"}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "InventoryAgent"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "CVProvider"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "PricingAgent"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"orientation": "horizontal", "showValue": "always", "barWidth": 0.8, "groupWidth": 0.7},
+      "targets": [{"expr": "avg(shopsquire_agent_confidence) by (agent)", "legendFormat": "{{agent}}", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "histogram",
+      "title": "Confidence Histogram",
+      "gridPos": {"x": 12, "y": 6, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}},
+      "options": {"bucketSize": 0.1, "combine": false},
+      "targets": [{"expr": "sum(increase(shopsquire_agent_confidence_bucket[$__range])) by (le)", "legendFormat": "{{le}}", "refId": "A"}]
+    },
+    {"id": 9, "type": "row", "title": "Trend Analysis", "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}},
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Confidence Over Time (7d)",
+      "gridPos": {"x": 0, "y": 15, "w": 16, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "gradientMode": "opacity"},
+          "color": {"mode": "palette-classic"}, "decimals": 2
+        }
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "min", "max"]}},
+      "targets": [{"expr": "avg(shopsquire_agent_confidence) by (agent)", "legendFormat": "{{agent}}", "refId": "A"}]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Calibration Method",
+      "gridPos": {"x": 16, "y": 15, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "Identity"}, "1": {"text": "Platt"}, "2": {"text": "Isotonic"}}}]}},
+      "options": {"textMode": "value", "colorMode": "background"},
+      "targets": [{"expr": "shopsquire_calibration_method or vector(1)", "refId": "A"}]
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Low Confidence Decisions (Evidence)",
+      "description": "Click to drill down to full decision trace",
+      "gridPos": {"x": 16, "y": 19, "w": 8, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"displayMode": "color-text"}}},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "Confidence", "desc": false}]},
+      "targets": [{"expr": "bottomk(5, shopsquire_agent_confidence)", "format": "table", "instant": true, "refId": "A"}],
+      "links": [{"title": "View Decision Trace", "url": "/api/v1/decisions/${__data.fields.trace_id}/events"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}},
+      {"name": "agent", "type": "query", "query": "label_values(shopsquire_agent_confidence, agent)", "multi": true, "includeAll": true, "current": {"text": "All", "value": "$__all"}},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-7d", "to": "now"},
+  "timepicker": {"refresh_intervals": ["10s", "30s", "1m", "5m"]}
+}

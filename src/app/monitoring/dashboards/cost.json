@@ -1,0 +1,9 @@
+{
+  "title": "Cost Dashboard (Placeholder)",
+  "widgets": [
+    { "id": "llm_tokens_total", "type": "timeseries", "metric": "shopsquire_llm_tokens_total" },
+    { "id": "cv_ms_p95", "type": "timeseries", "metric": "shopsquire_cv_latency_ms_p95" }
+  ],
+  "notes": "Roadmap-referenced placeholder; Grafana dashboards live under config/observability/grafana/*."
+}
+

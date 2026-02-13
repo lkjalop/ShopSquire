@@ -1,0 +1,137 @@
+{
+  "id": null,
+  "uid": "shopsquire-escalation-rates",
+  "title": "Escalation Rates",
+  "description": "Human escalation analysis by agent and reason",
+  "tags": ["shopsquire", "escalation", "human-review"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Escalation Overview", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total (24h)",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 20}, {"color": "red", "value": 50}]}
+        }
+      },
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "sum(increase(shopsquire_agent_escalations_total[24h])) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Top Agent",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}}},
+      "options": {"textMode": "name", "colorMode": "value"},
+      "targets": [{"expr": "topk(1, sum(increase(shopsquire_agent_escalations_total[24h])) by (agent))", "legendFormat": "{{agent}}", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Top Reason",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}}},
+      "options": {"textMode": "name", "colorMode": "value"},
+      "targets": [{"expr": "topk(1, sum(increase(shopsquire_agent_escalations_total[24h])) by (reason))", "legendFormat": "{{reason}}", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "Escalation Rate",
+      "description": "% of decisions requiring human review",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 25}]},
+          "unit": "percent", "min": 0, "max": 100
+        }
+      },
+      "targets": [{"expr": "100 * sum(increase(shopsquire_agent_escalations_total[24h])) / (sum(increase(shopsquire_agent_invocations_total[24h])) + 1) or vector(0)", "refId": "A"}]
+    },
+    {"id": 6, "type": "row", "title": "By Agent & Reason", "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Escalations by Agent Over Time",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "bars", "fillOpacity": 80, "stacking": {"mode": "normal"}},
+          "color": {"mode": "palette-classic"}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "CVProvider"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "InventoryAgent"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "PricingAgent"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["sum"]}},
+      "targets": [{"expr": "sum(increase(shopsquire_agent_escalations_total[1h])) by (agent)", "legendFormat": "{{agent}}", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "piechart",
+      "title": "Escalation Reasons (24h)",
+      "gridPos": {"x": 12, "y": 6, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "low_confidence"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "policy_deny"}, "properties": [{"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "geo_risk"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "fraud_signal"}, "properties": [{"id": "color", "value": {"fixedColor": "#B877D9", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"pieType": "pie", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}},
+      "targets": [{"expr": "sum(increase(shopsquire_agent_escalations_total[24h])) by (reason)", "legendFormat": "{{reason}}", "refId": "A"}]
+    },
+    {"id": 9, "type": "row", "title": "Pending Escalations", "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}},
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Pending Reviews (Live)",
+      "description": "Click row to review and approve/reject",
+      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"displayMode": "color-text"}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "priority"}, "properties": [
+            {"id": "mappings", "value": [{"type": "value", "options": {"high": {"text": "HIGH", "color": "red"}, "medium": {"text": "MEDIUM", "color": "yellow"}, "low": {"text": "LOW", "color": "green"}}}]}
+          ]}
+        ]
+      },
+      "options": {"showHeader": true, "sortBy": [{"displayName": "age_minutes", "desc": true}]},
+      "targets": [{"expr": "shopsquire_pending_escalations", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [{"id": "organize", "options": {"renameByName": {"trace_id": "Trace ID", "agent": "Agent", "reason": "Reason", "age_minutes": "Age (min)", "priority": "Priority"}}}],
+      "links": [{"title": "Review & Approve", "url": "/api/v1/decisions/${__data.fields[\"Trace ID\"]}/review"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}},
+      {"name": "agent", "type": "query", "query": "label_values(shopsquire_agent_escalations_total, agent)", "multi": true, "includeAll": true, "current": {"text": "All", "value": "$__all"}},
+      {"name": "reason", "type": "query", "query": "label_values(shopsquire_agent_escalations_total, reason)", "multi": true, "includeAll": true, "current": {"text": "All", "value": "$__all"}},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["10s", "30s", "1m", "5m"]}
+}

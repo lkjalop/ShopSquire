@@ -1,0 +1,12 @@
+C:\AI\ShopSquire\.venv\Lib\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+  import multipart
+..                                                                       [100%]
+============================== warnings summary ===============================
+src\app\observability\init.py:48
+tests/load/test_smoke_load.py::test_smoke_recommend_suggest_load
+tests/load/test_smoke_load.py::test_smoke_admin_overview_load
+  C:\AI\ShopSquire\src\app\observability\init.py:48: DeprecationWarning: Call to deprecated method __init__. (Since v1.35, the Jaeger supports OTLP natively. Please use the OTLP exporter instead. Support for this exporter will end July 2023.) -- Deprecated since version 1.16.0.
+    exporter = JaegerExporter(agent_host_name=jaeger_host, agent_port=jaeger_port)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+Data exceeds the max UDP packet size; size 138309, max 65000

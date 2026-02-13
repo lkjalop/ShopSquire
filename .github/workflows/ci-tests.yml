@@ -1,0 +1,33 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+      - name: Create venv
+        run: python -m venv .venv && . .venv/bin/activate
+      - name: Install dependencies + pytest
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry export -f requirements.txt --without-hashes -o requirements.txt || true
+          pip install -r requirements.txt || true
+          pip install pytest requests pyyaml playwright
+          python -m playwright install
+      - name: Run tests
+        run: |
+          pytest -q
+        env:
+          RUN_INTEGRATION: 1

@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+import os
+import json
+import time
+from typing import Any, Dict
+
+import httpx
+
+from src.app.observability.metrics import record_tool_invocation, record_mcp_security_block
+from src.app.observability.tracing import get_tracer
+from src.app.policy.gate import evaluate_policy_gate
+from src.app.repositories.catalog import CatalogRepository
+from src.app.security.agent_events import log_mcp_tool_invocation
+from src.app.services.decision_log import log_trace_event
+from src.app.routers.approvals import enqueue_approval
+
+
+class ToolRunner:
+    def __init__(self):
+        self.bridge_url = os.getenv("TOOL_BRIDGE_URL", "http://localhost:9001")
+        self.bridge_timeout = float(os.getenv("TOOL_BRIDGE_TIMEOUT", "2.0"))
+        self.repo = CatalogRepository()
+        self.tracer = get_tracer("tool-runner")
+
+    def _bridge_call(self, tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        with self.tracer.start_as_current_span("tools.bridge_call") as span:
+            span.set_attribute("tools.bridge_url", self.bridge_url)
+            span.set_attribute("tools.name", tool)
+            with httpx.Client(timeout=self.bridge_timeout) as client:
+                resp = client.post(
+                    f"{self.bridge_url.rstrip('/')}/tools/run",
+                    json={"tool": tool, "params": params},
+                )
+                resp.raise_for_status()
+                return resp.json()
+
+    def _local_tool(self, tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        if tool == "catalog.search":
+            query = str(params.get("query") or "")
+            limit = int(params.get("limit") or 5)
+            with self.tracer.start_as_current_span("tools.catalog_search") as span:
+                span.set_attribute("tools.query_len", len(query))
+                span.set_attribute("tools.limit", limit)
+                products = self.repo.search_products(query, limit=limit)
+            return {
+                "results": [
+                    {
+                        "sku": p.sku,
+                        "name": p.name,
+                        "price_cents": p.price_cents,
+                        "currency": p.currency,
+                    }
+                    for p in products
+                ]
+            }
+        if tool == "inventory.check":
+            sku = str(params.get("sku") or "")
+            with self.tracer.start_as_current_span("tools.inventory_check") as span:
+                span.set_attribute("tools.sku", sku)
+                product = self.repo.get_product_by_sku(sku) if sku else None
+                stock = self.repo.get_stock_by_product_id(product.id) if product else None
+            return {"sku": sku, "stock": stock}
+        if tool == "shipping.quote":
+            subtotal = int(params.get("subtotal_cents") or 0)
+            return {
+                "carrier": "UPS",
+                "service": "2-day",
+                "cost_cents": max(799, int(subtotal * 0.05)),
+                "eta_days": 2,
+            }
+        return {"error": "unknown_tool"}
+
+    def run(self, tool: str, params: Dict[str, Any], source: str = "demo-user", trace_id: str | None = None) -> Dict[str, Any]:
+        with self.tracer.start_as_current_span("tools.run") as span:
+            span.set_attribute("tools.name", tool)
+            start = time.perf_counter()
+            status = "ok"
+            result: Dict[str, Any] = {}
+            source_mode = "bridge"
+            try:
+                gate_ctx = {
+                    "tool": tool,
+                    "params": params,
+                    "policy_version": "2026-01-27",
+                    "buyer_type": params.get("buyer_type"),
+                    "compliance_provided": params.get("compliance_provided"),
+                }
+                gate = evaluate_policy_gate(gate_ctx)
+                approval_id = None
+                if gate.approval_required:
+                    try:
+                        approval_id = enqueue_approval(f"tool:{tool}", {"tool": tool, "params": params}, reason="policy_gate")
+                    except Exception:
+                        approval_id = None
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="policy_gate",
+                    source_type="agent",
+                    source_id="Policy_Gate_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "decision": gate.decision,
+                        "reasons": gate.reasons,
+                        "rule_hits": gate.rule_hits,
+                        "policy_version": gate.policy_version,
+                        "compliance_tags": gate.compliance_tags,
+                        "action": gate.action,
+                        "approval_required": gate.approval_required,
+                        "approval_id": approval_id,
+                        "tool": tool,
+                    },
+                )
+                if gate.decision == "deny":
+                    status = "blocked"
+                    record_tool_invocation(tool, status, 0.0)
+                    return {
+                        "tool": tool,
+                        "status": status,
+                        "source": "policy_gate",
+                        "policy_gate": {
+                            "decision": gate.decision,
+                            "reasons": gate.reasons,
+                            "rule_hits": gate.rule_hits,
+                            "policy_version": gate.policy_version,
+                            "compliance_tags": gate.compliance_tags,
+                            "action": gate.action,
+                            "approval_required": gate.approval_required,
+                            "approval_id": approval_id,
+                        },
+                        "result": {"error": "blocked_by_policy"},
+                        "duration_seconds": 0.0,
+                    }
+                if gate.decision == "review":
+                    status = "review_required"
+                    record_tool_invocation(tool, status, 0.0)
+                    return {
+                        "tool": tool,
+                        "status": status,
+                        "source": "policy_gate",
+                        "policy_gate": {
+                            "decision": gate.decision,
+                            "reasons": gate.reasons,
+                            "rule_hits": gate.rule_hits,
+                            "policy_version": gate.policy_version,
+                            "compliance_tags": gate.compliance_tags,
+                            "action": gate.action,
+                            "approval_required": gate.approval_required,
+                            "approval_id": approval_id,
+                        },
+                        "result": {"error": "review_required"},
+                        "duration_seconds": 0.0,
+                    }
+            except Exception:
+                pass
+            # Pre-invocation security check (demo): block obvious injection markers
+            try:
+                params_str = json.dumps(params, ensure_ascii=False)
+                import re
+                injection = [
+                    r"(?i)ignore\s+instructions",
+                    r"(?i)\broot\b",
+                    r"(?i)rm\s+-rf",
+                ]
+                if any(re.search(p, params_str) for p in injection):
+                    record_mcp_security_block(tool, "prompt_injection")
+                    status = "blocked"
+                    record_tool_invocation(tool, status, 0.0)
+                    try:
+                        log_mcp_tool_invocation(
+                            tool_name=tool,
+                            source=source,
+                            destination="blocked",
+                            details={"status": status, "reason": "prompt_injection", "params": params},
+                        )
+                    except Exception:
+                        pass
+                    return {"tool": tool, "status": status, "source": "blocked", "result": {"error": "blocked_by_security"}, "duration_seconds": 0.0}
+            except Exception:
+                pass
+            try:
+                result = self._bridge_call(tool, params)
+            except Exception:
+                source_mode = "local"
+                try:
+                    result = self._local_tool(tool, params)
+                    if result.get("error"):
+                        status = "error"
+                except Exception as exc:
+                    status = "error"
+                    result = {"error": str(exc)}
+            duration = time.perf_counter() - start
+            record_tool_invocation(tool, status, duration)
+            try:
+                log_mcp_tool_invocation(
+                    tool_name=tool,
+                    source=source,
+                    destination=source_mode,
+                    details={"status": status, "duration_seconds": duration, "params": params},
+                )
+            except Exception:
+                pass
+            return {"tool": tool, "status": status, "source": source_mode, "result": result, "duration_seconds": duration}

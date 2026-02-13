@@ -1,0 +1,9 @@
+{
+  "default": {
+    "auto_approve_max_score": 30,
+    "human_review_max_score": 70,
+    "escalate_security_min_score": 70
+  },
+  "notes": "Roadmap-referenced config; today thresholds are primarily in vertical packs (config/verticals/*.json)."
+}
+

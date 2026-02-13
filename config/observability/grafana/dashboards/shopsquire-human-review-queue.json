@@ -1,0 +1,138 @@
+{
+  "id": null,
+  "uid": "shopsquire-human-review",
+  "title": "Human Review Queue",
+  "description": "Human-in-the-loop review queue management and analytics",
+  "tags": ["shopsquire", "human-review", "escalation", "queue"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Queue Status", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Pending",
+      "description": "Items awaiting review",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 25}]}
+        }
+      },
+      "options": {"colorMode": "background", "graphMode": "area"},
+      "targets": [{"expr": "sum(shopsquire_human_review_pending) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "In Review",
+      "description": "Currently being reviewed",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"fixedColor": "#5794F2", "mode": "fixed"}}},
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "sum(shopsquire_human_review_in_progress) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Completed (24h)",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"fixedColor": "#73BF69", "mode": "fixed"}}},
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "sum(increase(shopsquire_human_review_completed_total[24h])) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "Avg Review Time",
+      "description": "Target: < 5 min",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 15}]},
+          "unit": "m", "min": 0, "max": 30
+        }
+      },
+      "targets": [{"expr": "avg(shopsquire_human_review_latency_minutes) or vector(8)", "refId": "A"}]
+    },
+    {"id": 6, "type": "row", "title": "Queue Trends", "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Queue Depth Over Time",
+      "gridPos": {"x": 0, "y": 6, "w": 16, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 30, "gradientMode": "opacity"},
+          "color": {"fixedColor": "#FF9830", "mode": "fixed"},
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 25}]}
+        }
+      },
+      "options": {"tooltip": {"mode": "single"}, "legend": {"displayMode": "list", "placement": "bottom"}},
+      "targets": [{"expr": "sum(shopsquire_human_review_pending)", "legendFormat": "Pending", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "piechart",
+      "title": "Review Outcomes (24h)",
+      "gridPos": {"x": 16, "y": 6, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "approved"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "rejected"}, "properties": [{"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "escalated"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}},
+      "targets": [{"expr": "sum(increase(shopsquire_human_review_completed_total[24h])) by (outcome)", "legendFormat": "{{outcome}}", "refId": "A"}]
+    },
+    {"id": 9, "type": "row", "title": "Pending Items", "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}},
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Pending Reviews (Live)",
+      "description": "Click row to expand evidence and take action",
+      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 10},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"custom": {"displayMode": "auto"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "Priority"}, "properties": [
+            {"id": "custom.displayMode", "value": "color-background-solid"},
+            {"id": "mappings", "value": [{"type": "value", "options": {"HIGH": {"color": "red"}, "MEDIUM": {"color": "yellow"}, "LOW": {"color": "green"}}}]}
+          ]},
+          {"matcher": {"id": "byName", "options": "Age (min)"}, "properties": [
+            {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 10}, {"color": "red", "value": 30}]}},
+            {"id": "custom.displayMode", "value": "color-background-solid"}
+          ]}
+        ]
+      },
+      "options": {"showHeader": true, "sortBy": [{"displayName": "Age (min)", "desc": true}], "footer": {"show": true, "reducer": ["count"]}},
+      "targets": [{"expr": "shopsquire_pending_reviews", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [
+        {"id": "organize", "options": {"renameByName": {"trace_id": "Trace ID", "type": "Type", "agent": "Agent", "reason": "Reason", "age_minutes": "Age (min)", "priority": "Priority"}}}
+      ],
+      "links": [{"title": "Review & Decide", "url": "/api/v1/decisions/${__data.fields[\"Trace ID\"]}/review"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}},
+      {"name": "priority", "type": "custom", "query": "HIGH,MEDIUM,LOW", "multi": true, "includeAll": true, "current": {"text": "All", "value": "$__all"}, "label": "Priority"},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["5s", "10s", "30s", "1m"]}
+}

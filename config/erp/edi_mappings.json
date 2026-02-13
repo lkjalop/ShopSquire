@@ -1,0 +1,8 @@
+{
+  "mappings": {
+    "Product": { "sku": "SKU", "name": "NAME" },
+    "StockLevel": { "sku": "SKU", "warehouse": "WH", "stock": "QTY" }
+  },
+  "notes": "Roadmap-referenced config for Phase 5 EDI connector mappings."
+}
+

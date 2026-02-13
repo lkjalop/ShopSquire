@@ -29,5 +29,64 @@
         { "expr": "sum(shopsquire_chaos_injected_total)" }
       ]
     }
+    ,
+    {
+      "type": "graph",
+      "title": "HTTP Requests (rate by status)",
+      "targets": [
+        { "expr": "sum by(status) (rate(shopsquire_http_requests_total[5m]))" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Decision Events (5m rate)",
+      "targets": [
+        { "expr": "rate(shopsquire_decision_events_total[5m])" }
+      ]
+    }
+    ,
+    {
+      "type": "graph",
+      "title": "In-flight Requests",
+      "targets": [
+        { "expr": "shopsquire_inflight_requests{service=\"api\"}" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Email Escalation Rate",
+      "targets": [
+        { "expr": "sum(rate(shopsquire_email_security_routes_total{route=~\"human_review|security_review\"}[15m])) / clamp_min(sum(rate(shopsquire_email_security_routes_total[15m])), 0.000001)" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "False Positive Trend (1h)",
+      "targets": [
+        { "expr": "sum(rate(shopsquire_email_security_false_positives_total[1h])) / clamp_min(sum(rate(shopsquire_email_security_routes_total[1h])), 0.000001)" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Security Handoff Failures",
+      "targets": [
+        { "expr": "sum by(target) (rate(shopsquire_security_handoff_total{status=\"failed\"}[10m]))" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Detonation/Enrichment Latency P95",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(shopsquire_email_detonation_latency_seconds_bucket[10m])) by (le))" },
+        { "expr": "histogram_quantile(0.95, sum(rate(shopsquire_email_enrichment_latency_seconds_bucket[10m])) by (le))" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Decision Trace Write Failures",
+      "targets": [
+        { "expr": "sum by(stage) (rate(shopsquire_decision_trace_write_failures_total[5m]))" }
+      ]
+    }
   ]
 }

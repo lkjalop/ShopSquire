@@ -1,0 +1,37 @@
+[
+  {
+    "doc_id": "policy_returns_v1",
+    "title": "Returns Policy",
+    "source": "policy",
+    "tags": ["returns", "refund", "exchange", "policy"],
+    "content": "Returns are accepted within 14 days of delivery for eligible items. Items must be in original condition with all accessories. Refunds may be denied for missing serials or tampered packaging. High-value items require photo evidence and serial verification."
+  },
+  {
+    "doc_id": "policy_refunds_v1",
+    "title": "Refund Eligibility",
+    "source": "policy",
+    "tags": ["refund", "eligibility", "policy"],
+    "content": "Refunds are approved when order ID is verified, proof of purchase is provided, and the product matches the catalog listing. For claims of wrong item shipped, upload photos of the item, packaging, and invoice."
+  },
+  {
+    "doc_id": "troubleshooting_laptops_v1",
+    "title": "Laptop Troubleshooting Guide",
+    "source": "troubleshooting",
+    "tags": ["laptop", "troubleshooting", "defect"],
+    "content": "For laptop issues, verify power adapter function, check for screen damage, and note any error codes. Photos should include the full device, serial label, and close-up of the defect."
+  },
+  {
+    "doc_id": "complaints_evidence_v1",
+    "title": "Complaint Evidence Checklist",
+    "source": "support",
+    "tags": ["complaint", "evidence", "support"],
+    "content": "To speed up review, provide: order ID, brief description of the issue, photos or video evidence, and any error messages. For shipping issues, include the tracking number and packaging photos."
+  },
+  {
+    "doc_id": "shipping_investigation_v1",
+    "title": "Shipping Investigation Playbook",
+    "source": "support",
+    "tags": ["shipping", "lost", "delivery"],
+    "content": "For delivery issues, confirm delivery address, check carrier scans, and request a photo of the shipping label if available. Escalate if multiple failed delivery attempts are recorded."
+  }
+]

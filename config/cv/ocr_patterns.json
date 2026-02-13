@@ -1,0 +1,23 @@
+{
+  "shared": {
+    "tracking_number": [
+      "(?:Tracking|Track|AWB)[:\\s#]*([A-Z0-9\\-]{8,32})"
+    ]
+  },
+  "electronics": {
+    "serial": [
+      "S/?N[:\\s-]*([A-Z0-9\\-]{6,24})",
+      "Serial[:\\s]*([A-Z0-9\\-]{6,24})",
+      "IMEI[:\\s]*([0-9]{14,17})"
+    ],
+    "order_id": [
+      "Order[:\\s#]*([A-Z0-9\\-]{6,32})",
+      "Invoice[:\\s#]*([A-Z0-9\\-]{6,32})"
+    ]
+  },
+  "fashion": {
+    "order_id": ["Order[:\\s#]*([A-Z0-9\\-]{6,32})", "Invoice[:\\s#]*([A-Z0-9\\-]{6,32})"]
+  },
+  "notes": "Optional patterns merged into VerticalPack.ocr_patterns when keys are missing."
+}
+

@@ -1,11 +1,15 @@
 from fastapi.testclient import TestClient
 import json
 import os
+from tests.utils import default_headers
 
-from src.app.main import app
+from src.app.main import create_app
 
 
-client = TestClient(app)
+app = create_app()
+
+
+client = TestClient(app, headers=default_headers())
 
 
 def _write_flags(flags: dict):

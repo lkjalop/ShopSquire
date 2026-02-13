@@ -1,0 +1,6 @@
+text,label
+"I need a cheaper TV",price_filter
+"Find laptops under $1000",price_filter
+"Show me 13-inch MacBooks",spec_filter
+"Is this safe to buy?",fraud_concern
+"Do you have this in stock?",inventory_check

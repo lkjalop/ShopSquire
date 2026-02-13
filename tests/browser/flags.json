@@ -1,0 +1,1 @@
+{"USE_AGENT_CAPABILITIES": true, "AGENT_ROLLOUT_PERCENT": 100, "CAPABILITIES": {"recommend": {"enabled": true, "rollout_percent": 100}}, "KILL_SWITCH": false, "DECISION_LOG_WRITES_ENABLED": false, "DEGRADATION": {"enabled": false}, "TEST_FORCE_BAD_SKU": false}

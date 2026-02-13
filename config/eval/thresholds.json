@@ -1,0 +1,9 @@
+{
+  "thresholds": {
+    "min_precision": 0.9,
+    "min_recall": 0.7,
+    "max_false_positive_rate": 0.05
+  },
+  "notes": "Roadmap-referenced config for Phase 6 offline evaluation pass/fail."
+}
+

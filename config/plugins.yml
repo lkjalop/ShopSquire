@@ -1,0 +1,7 @@
+agents:
+  InventoryAgent: "src.app.services.inventory_agent:create_agent"
+  RecommendationAgent: "src.app.services.recommendations:create_agent"
+
+tools:
+  catalog.search: "src.app.tools.catalog:search"
+  cv_forensics_check: "src.app.services.image_forensics:run_forensics"

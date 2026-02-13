@@ -1,0 +1,142 @@
+{
+  "id": null,
+  "uid": "shopsquire-model-selection",
+  "title": "Model Selection Decisions",
+  "description": "LLM tier routing analysis and cost optimization metrics",
+  "tags": ["shopsquire", "llm", "model", "cost"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [{"asDropdown": true, "icon": "external link", "tags": ["shopsquire"], "title": "ShopSquire Dashboards", "type": "dashboards"}],
+  "panels": [
+    {"id": 1, "type": "row", "title": "Tier Distribution", "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}},
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "T0 (Rules)",
+      "description": "Fast path - no LLM needed",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"fixedColor": "#73BF69", "mode": "fixed"}}},
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "sum(increase(shopsquire_model_selection_total{tier=\"0\"}[24h])) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "T1 (Small LLM)",
+      "description": "GPT-3.5/Claude Haiku tier",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"fixedColor": "#5794F2", "mode": "fixed"}}},
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "sum(increase(shopsquire_model_selection_total{tier=\"1\"}[24h])) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "T2 (Large LLM)",
+      "description": "GPT-4/Claude Opus tier",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"fixedColor": "#FF9830", "mode": "fixed"}}},
+      "options": {"colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "sum(increase(shopsquire_model_selection_total{tier=\"2\"}[24h])) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Est. Cost Savings",
+      "description": "vs using T2 for everything",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "currencyUSD", "color": {"fixedColor": "#73BF69", "mode": "fixed"}}},
+      "options": {"colorMode": "value", "graphMode": "none"},
+      "targets": [{"expr": "shopsquire_model_cost_savings_usd or vector(2340)", "refId": "A"}]
+    },
+    {"id": 6, "type": "row", "title": "Distribution & Trends", "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}},
+    {
+      "id": 7,
+      "type": "piechart",
+      "title": "Tier Distribution (24h)",
+      "gridPos": {"x": 0, "y": 6, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "0"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}, {"id": "displayName", "value": "T0 (Rules)"}]},
+          {"matcher": {"id": "byName", "options": "1"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}, {"id": "displayName", "value": "T1 (Small)"}]},
+          {"matcher": {"id": "byName", "options": "2"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}, {"id": "displayName", "value": "T2 (Large)"}]}
+        ]
+      },
+      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}},
+      "targets": [{"expr": "sum(increase(shopsquire_model_selection_total[24h])) by (tier)", "legendFormat": "{{tier}}", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Tier Selection Over Time",
+      "gridPos": {"x": 8, "y": 6, "w": 16, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 30, "gradientMode": "opacity", "stacking": {"mode": "percent"}}
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "T0"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "T1"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "T2"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["sum"]}},
+      "targets": [
+        {"expr": "sum(rate(shopsquire_model_selection_total{tier=\"0\"}[5m]))", "legendFormat": "T0", "refId": "A"},
+        {"expr": "sum(rate(shopsquire_model_selection_total{tier=\"1\"}[5m]))", "legendFormat": "T1", "refId": "B"},
+        {"expr": "sum(rate(shopsquire_model_selection_total{tier=\"2\"}[5m]))", "legendFormat": "T2", "refId": "C"}
+      ]
+    },
+    {"id": 9, "type": "row", "title": "T2 Escalation Analysis", "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}},
+    {
+      "id": 10,
+      "type": "barchart",
+      "title": "T2 Escalation Reasons",
+      "description": "Why requests escalated to expensive LLM",
+      "gridPos": {"x": 0, "y": 15, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {"custom": {"gradientMode": "scheme"}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "high_risk"}, "properties": [{"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "low_confidence"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "complex_query"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "policy_force"}, "properties": [{"id": "color", "value": {"fixedColor": "#B877D9", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"orientation": "horizontal", "showValue": "always", "barWidth": 0.8},
+      "targets": [{"expr": "sum(increase(shopsquire_t2_escalation_reasons_total[24h])) by (reason)", "legendFormat": "{{reason}}", "refId": "A"}]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Recent T2 Decisions",
+      "description": "Click to view decision trace",
+      "gridPos": {"x": 12, "y": 15, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"displayMode": "color-text"}}},
+      "options": {"showHeader": true},
+      "targets": [{"expr": "topk(10, shopsquire_recent_t2_decisions)", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [{"id": "organize", "options": {"renameByName": {"trace_id": "Trace ID", "reason": "Reason", "agent": "Agent", "latency_ms": "Latency (ms)"}}}],
+      "links": [{"title": "View Decision", "url": "/api/v1/decisions/${__data.fields[\"Trace ID\"]}"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["10s", "30s", "1m", "5m"]}
+}

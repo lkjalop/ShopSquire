@@ -1,0 +1,10 @@
+{
+  "signals": {
+    "image_reuse": { "score_delta": 70, "severity": "high" },
+    "ocr_category_mismatch": { "score_delta": 30, "severity": "medium" },
+    "ocr_sku_mismatch": { "score_delta": 20, "severity": "medium" },
+    "no_ocr": { "score_delta": 10, "severity": "low" }
+  },
+  "notes": "Roadmap-referenced config; current implementation lives in src/app/services/returns.py compute_return_score()."
+}
+

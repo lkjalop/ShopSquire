@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShopSquire Widget Demo</title>
+    <style>
+      body { font-family: Inter, system-ui, sans-serif; margin:0; }
+      header { padding: 12px 16px; border-bottom: 1px solid #eee; display:flex; justify-content:space-between; }
+      .grid { display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 16px; }
+      .card { border:1px solid #e5e7eb; border-radius:8px; padding:12px; }
+      .img { background:#f3f4f6; height:120px; border-radius:6px; margin-bottom:8px; }
+      .title { font-weight:600; }
+      .sub { color:#6b7280; font-size:12px; }
+      @media (max-width: 767px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>SHOPSQUIRE STORE</div>
+      <div>[Search] [🛒 Cart]</div>
+    </header>
+    <main>
+      <div class="grid">
+        <div class="card"><div class="img"></div><div class="title">Dell XPS 13+</div><div class="sub">$1,299 • ★★★★☆</div></div>
+        <div class="card"><div class="img"></div><div class="title">ThinkPad X1</div><div class="sub">$1,899 • ★★★★★</div></div>
+        <div class="card"><div class="img"></div><div class="title">MacBook Pro 14</div><div class="sub">$2,099 • ★★★★☆</div></div>
+        <div class="card"><div class="img"></div><div class="title">HP EliteBook 840</div><div class="sub">$1,499 • ★★★★☆</div></div>
+      </div>
+    </main>
+
+    <shopsquire-widget></shopsquire-widget>
+    <script src="./shopsquire-widget.js"></script>
+    <script>
+      // Configure API base if backend is running (e.g., http://localhost:8000)
+      // Change apiBase to your FastAPI origin; uid can be any session/user id.
+      try { window.ShopSquireWidget.init({ apiBase: window.location.origin, uid: 'demo-user-1' }); } catch {}
+    </script>
+  </body>
+</html>

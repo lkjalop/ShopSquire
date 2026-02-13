@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>ShopSquire Admin</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 12px }
+      .row { display:flex; gap:12px }
+      .card { border:1px solid #ddd; padding:12px; border-radius:6px; width:260px }
+      iframe { width:100%; height:520px; border:1px solid #ccc }
+    </style>
+  </head>
+  <body>
+    <div id="root">Loading admin UI...</div>
+    <script>
+      const e = React.createElement;
+      function App(){
+        const [top, setTop] = React.useState(null);
+        const [heat, setHeat] = React.useState(null);
+        const [vel, setVel] = React.useState(null);
+        React.useEffect(()=>{
+          fetch('/api/v1/analytics/fraud/geo/top_asns').then(r=>r.json()).then(j=>setTop(j)).catch(()=>setTop('err'));
+          fetch('/api/v1/analytics/fraud/geo/country_heatmap').then(r=>r.json()).then(j=>setHeat(j)).catch(()=>setHeat('err'));
+          fetch('/api/v1/analytics/fraud/geo/velocity_anomalies').then(r=>r.json()).then(j=>setVel(j)).catch(()=>setVel('err'));
+        },[])
+        return e('div',null,
+          e('h2',null,'Admin Analytics (React)'),
+          e('div',{className:'row'},
+            e('div',{className:'card'}, e('h4',null,'Top ASNs'), e('div',null, top? (top.top_asns? top.top_asns.length : JSON.stringify(top)) : 'loading')),
+            e('div',{className:'card'}, e('h4',null,'Countries'), e('div',null, heat? (heat.countries? heat.countries.length : JSON.stringify(heat)) : 'loading')),
+            e('div',{className:'card'}, e('h4',null,'Velocity'), e('div',null, vel? (vel.velocity_anomalies||0) : 'loading'))
+          ),
+          e('h3',null,'Grafana Preview'),
+          e('iframe',{src:(new URL('/d-solo/shopsquire/security-geo?orgId=1&panelId=1', window.location.origin)).toString(), title:'grafana'})
+        )
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(e(App));
+    </script>
+  </body>
+</html>

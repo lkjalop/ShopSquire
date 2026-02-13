@@ -1,0 +1,39 @@
+global:
+  # Alertmanager does not reliably expand env vars in this file in all deploy modes.
+  # Keep a safe local-dev default; override by editing this file for real Slack/PagerDuty.
+  slack_api_url: 'http://localhost:0/'
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+
+receivers:
+  - name: 'default'
+    slack_configs:
+      - channel: '#shopsquire-alerts'
+        title: '{{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+  - name: 'critical-alerts'
+    slack_configs:
+      - channel: '#shopsquire-critical'
+        title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+    pagerduty_configs:
+      - service_key: 'dummy'
+
+  - name: 'warning-alerts'
+    slack_configs:
+      - channel: '#shopsquire-warnings'
+        title: '{{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'

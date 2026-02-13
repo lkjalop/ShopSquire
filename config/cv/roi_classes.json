@@ -1,0 +1,14 @@
+{
+  "classes": [
+    "product",
+    "packaging_box",
+    "shipping_label",
+    "barcode",
+    "qr_code",
+    "serial_plate",
+    "receipt_document",
+    "tag_label"
+  ],
+  "notes": "Optional fallback allowlist used when a vertical pack omits roi_allowlist."
+}
+

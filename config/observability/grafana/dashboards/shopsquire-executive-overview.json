@@ -1,0 +1,282 @@
+{
+  "id": null,
+  "uid": "shopsquire-exec-overview",
+  "title": "ShopSquire Executive Overview",
+  "description": "High-level KPIs and real-time agent activity monitoring",
+  "tags": ["shopsquire", "executive", "overview"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": ["shopsquire"],
+      "targetBlank": true,
+      "title": "ShopSquire Dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Key Performance Indicators",
+      "collapsed": false,
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Security Incidents (24h)",
+      "description": "Total security events requiring attention",
+      "gridPos": {"x": 0, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 5},
+              {"color": "red", "value": 15}
+            ]
+          },
+          "unit": "short",
+          "color": {"mode": "thresholds"}
+        }
+      },
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(shopsquire_security_events_total{severity=~\"high|critical\"}[$__range])) or vector(0)",
+          "legendFormat": "Incidents",
+          "refId": "A"
+        }
+      ],
+      "links": [{"title": "Drill to Security SOC", "url": "/d/shopsquire-security-soc?${__url_time_range}"}]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Autonomy Rate",
+      "description": "Decisions made without human intervention",
+      "gridPos": {"x": 6, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 70},
+              {"color": "green", "value": 85}
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * (1 - (sum(increase(shopsquire_agent_escalations_total[$__range])) / (sum(increase(shopsquire_agent_invocations_total[$__range])) + 1)))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "RAGAS Quality",
+      "description": "Average faithfulness score",
+      "gridPos": {"x": 12, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 0.7},
+              {"color": "green", "value": 0.8}
+            ]
+          },
+          "decimals": 2
+        }
+      },
+      "options": {"reduceOptions": {"calcs": ["mean"]}, "colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "avg(shopsquire_ragas_faithfulness_score) or vector(0.85)", "refId": "A"}],
+      "links": [{"title": "RAGAS Details", "url": "/d/shopsquire-ragas?${__url_time_range}"}]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Pending Reviews",
+      "description": "Items awaiting human review",
+      "gridPos": {"x": 18, "y": 1, "w": 6, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 15}]
+          }
+        }
+      },
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value", "graphMode": "area"},
+      "targets": [{"expr": "sum(shopsquire_human_review_pending) or vector(0)", "refId": "A"}],
+      "links": [{"title": "Review Queue", "url": "/d/shopsquire-human-review?${__url_time_range}"}]
+    },
+    {
+      "id": 6,
+      "type": "row",
+      "title": "Agent Activity",
+      "collapsed": false,
+      "gridPos": {"x": 0, "y": 5, "w": 24, "h": 1}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Agent Invocations (5m rate)",
+      "gridPos": {"x": 0, "y": 6, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "gradientMode": "opacity",
+            "stacking": {"mode": "normal"}
+          },
+          "color": {"mode": "palette-classic"},
+          "unit": "reqps"
+        },
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "InventoryAgent"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "CVProvider"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "PricingAgent"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "SecurityObserver"}, "properties": [{"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"tooltip": {"mode": "multi"}, "legend": {"displayMode": "table", "placement": "right", "calcs": ["sum", "mean"]}},
+      "targets": [{"expr": "sum(rate(shopsquire_agent_invocations_total[5m])) by (agent)", "legendFormat": "{{agent}}", "refId": "A"}],
+      "links": [{"title": "Agent Confidence", "url": "/d/shopsquire-agent-confidence?var-agent=${__field.labels.agent}"}]
+    },
+    {
+      "id": 8,
+      "type": "piechart",
+      "title": "Decision Outcomes (24h)",
+      "gridPos": {"x": 12, "y": 6, "w": 6, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "approved"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "denied"}, "properties": [{"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "escalated"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}]}
+        ]
+      },
+      "options": {"pieType": "donut", "legend": {"displayMode": "table", "placement": "right", "values": ["percent"]}},
+      "targets": [{"expr": "sum(increase(shopsquire_decision_events_total[24h])) by (result)", "legendFormat": "{{result}}", "refId": "A"}]
+    },
+    {
+      "id": 9,
+      "type": "bargauge",
+      "title": "Model Tier Usage",
+      "gridPos": {"x": 18, "y": 6, "w": 6, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "0"}, "properties": [{"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}, {"id": "displayName", "value": "T0 (Rules)"}]},
+          {"matcher": {"id": "byName", "options": "1"}, "properties": [{"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}, {"id": "displayName", "value": "T1 (Small)"}]},
+          {"matcher": {"id": "byName", "options": "2"}, "properties": [{"id": "color", "value": {"fixedColor": "#FF9830", "mode": "fixed"}}, {"id": "displayName", "value": "T2 (Large)"}]}
+        ]
+      },
+      "options": {"orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true},
+      "targets": [{"expr": "sum(increase(shopsquire_cv_tier_selection_total[24h])) by (tier)", "legendFormat": "{{tier}}", "refId": "A"}],
+      "links": [{"title": "Model Selection", "url": "/d/shopsquire-model-selection"}]
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Security & Trace Events",
+      "collapsed": false,
+      "gridPos": {"x": 0, "y": 14, "w": 24, "h": 1}
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Top Security Events (1h)",
+      "gridPos": {"x": 0, "y": 15, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 10}]},
+          "custom": {"displayMode": "color-background-solid"}
+        }
+      },
+      "options": {"showHeader": true, "sortBy": [{"displayName": "Count", "desc": true}]},
+      "targets": [{"expr": "topk(10, sum(increase(shopsquire_security_events_total[1h])) by (event_type, severity))", "format": "table", "instant": true, "refId": "A"}],
+      "transformations": [{"id": "organize", "options": {"excludeByName": {"Time": true}, "renameByName": {"event_type": "Event Type", "severity": "Severity", "Value": "Count"}}}],
+      "links": [{"title": "Security SOC", "url": "/d/shopsquire-security-soc?var-event_type=${__data.fields[\"Event Type\"]}"}]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Escalations Over Time",
+      "gridPos": {"x": 12, "y": 15, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"drawStyle": "bars", "fillOpacity": 80},
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "targets": [{"expr": "sum(increase(shopsquire_agent_escalations_total[1h])) by (agent, reason)", "legendFormat": "{{agent}}: {{reason}}", "refId": "A"}],
+      "links": [{"title": "Escalation Rates", "url": "/d/shopsquire-escalation-rates"}]
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "System Health",
+      "collapsed": false,
+      "gridPos": {"x": 0, "y": 23, "w": 24, "h": 1}
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Agent Health Status",
+      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 3},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        }
+      },
+      "options": {"orientation": "horizontal", "textMode": "value_and_name", "colorMode": "background"},
+      "targets": [{"expr": "up{job=~\"shopsquire.*\"}", "legendFormat": "{{job}}", "refId": "A"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "current": {"text": "Prometheus", "value": "Prometheus"}, "hide": 0},
+      {"name": "DS_LOKI", "type": "datasource", "query": "loki", "current": {"text": "Loki", "value": "Loki"}, "hide": 0},
+      {"name": "theme", "type": "custom", "query": "dark,light", "current": {"text": "dark", "value": "dark"}, "hide": 0, "label": "Theme"}
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["5s", "10s", "30s", "1m", "5m"]}
+}
