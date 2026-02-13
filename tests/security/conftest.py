@@ -48,17 +48,15 @@ def security_test_server():
             return
 
     host = os.getenv("SECURITY_TEST_HOST", "127.0.0.1")
-    port = int(os.getenv("SECURITY_TEST_PORT", "8082"))
+    # Pick a free port deterministically to avoid races with TIME_WAIT / parallel runs.
+    requested = int(os.getenv("SECURITY_TEST_PORT", "8082"))
+    port = _find_free_port(requested)
     base_url = f"http://{host}:{port}"
 
     if _wait_ready(base_url, timeout=2):
         os.environ["E2E_BASE_URL"] = base_url
         yield {"base_url": base_url}
         return
-
-    if _is_port_open(host, port):
-        port = _find_free_port(port + 1)
-        base_url = f"http://{host}:{port}"
 
     db_path = os.path.join("tests", "security", "redteam.sqlite")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)

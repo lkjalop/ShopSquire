@@ -1,0 +1,101 @@
+{
+  "snapshot_at": "2026-02-13T09:34:34.005885+00:00",
+  "actor": "owner",
+  "playbook_id": "PB-PAYMENT-FRAUD",
+  "before": {
+    "id": "PB-PAYMENT-FRAUD",
+    "title": "Payment Fraud Containment",
+    "domain": "security",
+    "priority": 10,
+    "enabled": true,
+    "version": "1.0.0",
+    "trigger_logic": "any",
+    "entry_conditions": {},
+    "actions": [
+      {
+        "type": "hold_payment",
+        "mode": "automatic",
+        "params": {
+          "hold_minutes": 30
+        }
+      },
+      {
+        "type": "create_ticket",
+        "mode": "automatic",
+        "params": {
+          "queue": "fraud"
+        }
+      },
+      {
+        "type": "notify_ops",
+        "mode": "automatic",
+        "params": {
+          "channel": "oncall"
+        }
+      }
+    ],
+    "sla_minutes": 60,
+    "risk_band_min": "high",
+    "owners": [
+      "FraudOps",
+      "SecurityOps"
+    ],
+    "checks": [],
+    "closure_criteria": [],
+    "rollback": {
+      "enabled": false,
+      "strategy": "manual"
+    },
+    "requires_approval_roles": [],
+    "severity": "critical"
+  },
+  "after": {
+    "id": "PB-PAYMENT-FRAUD",
+    "title": "Payment Fraud Containment",
+    "domain": "security",
+    "priority": 10,
+    "enabled": true,
+    "version": "1.0.1",
+    "trigger_logic": "any",
+    "entry_conditions": {},
+    "actions": [
+      {
+        "type": "hold_payment",
+        "mode": "automatic",
+        "params": {
+          "hold_minutes": 30
+        }
+      },
+      {
+        "type": "create_ticket",
+        "mode": "automatic",
+        "params": {
+          "queue": "fraud"
+        }
+      },
+      {
+        "type": "notify_ops",
+        "mode": "automatic",
+        "params": {
+          "channel": "oncall"
+        }
+      }
+    ],
+    "sla_minutes": 60,
+    "risk_band_min": "high",
+    "owners": [
+      "FraudOps",
+      "SecurityOps"
+    ],
+    "checks": [],
+    "closure_criteria": [],
+    "rollback": {
+      "enabled": false,
+      "strategy": "manual"
+    },
+    "requires_approval_roles": [],
+    "severity": "critical",
+    "updated_by": "owner",
+    "updated_at": "2026-02-13T09:34:34.005885+00:00"
+  }
+}

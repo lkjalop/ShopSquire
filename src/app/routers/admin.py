@@ -1066,14 +1066,27 @@ def get_security_events(
     """
     q_filters = []
     params = {}
+    create_sql = """
+    CREATE TABLE IF NOT EXISTS security_events (
+      id TEXT PRIMARY KEY,
+      event_time TEXT NOT NULL,
+      path TEXT,
+      severity TEXT,
+      verdict_score REAL,
+      details TEXT,
+      escalated INTEGER NOT NULL DEFAULT 0,
+      blocked INTEGER NOT NULL DEFAULT 0
+    )
+    """
     sql = "SELECT id, event_time, path, severity, verdict_score, details FROM security_events"
     where_clauses = []
     if severity:
         where_clauses.append("severity = :severity")
         params["severity"] = severity
     if path_contains:
-        where_clauses.append("path ILIKE :path")
-        params["path"] = f"%{path_contains}%"
+        # Use LOWER(... ) LIKE for sqlite+postgres compatibility (ILIKE isn't portable).
+        where_clauses.append("LOWER(path) LIKE :path")
+        params["path"] = f"%{str(path_contains).lower()}%"
     if since:
         try:
             # validate ISO timestamp
@@ -1100,6 +1113,11 @@ def get_security_events(
     try:
         rows: list[dict] = []
         with db_session() as db:
+            try:
+                db.execute(create_sql)
+                db.commit()
+            except Exception:
+                pass
             cur = db.execute(sql, params)
             rows = [dict(r) for r in cur.mappings().all()]
         # Debug: report rows from injected session

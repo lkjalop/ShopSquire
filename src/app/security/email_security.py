@@ -23,6 +23,8 @@ from src.app.security.email_attachment_parser import hydrate_attachments_from_by
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
 import time
+from src.app.services.intake_gate import normalize_email_intake
+from src.app.services.playbook_engine import start_playbook_run, append_playbook_step, execute_typed_actions, complete_playbook_run
 
 _RATE_BUCKETS: dict[str, list[float]] = {}
 
@@ -482,6 +484,12 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     per_min = int(rt_cfg.get("per_min", 5))
     enabled = bool(rt_cfg.get("enabled", False))
 
+    # Intake-only normalization (no detection). Keeps downstream logic deterministic.
+    try:
+        email, intake_meta = normalize_email_intake(email)
+    except Exception:
+        intake_meta = {"gate": "intake_only", "error": "normalize_failed"}
+
     # Accept raw base64 attachment bytes in the evaluate path and hydrate deterministic metadata/text.
     try:
         email = hydrate_attachments_from_bytes(email)
@@ -738,6 +746,11 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         }
     except Exception:
         pass
+    try:
+        if isinstance(v.get("evidence_snapshot"), dict):
+            v["evidence_snapshot"]["intake_gate"] = intake_meta
+    except Exception:
+        pass
     # Metrics: verdict
     try:
         from src.app.observability.metrics import record_email_security_verdict
@@ -978,6 +991,32 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
 
     v["decision_id"] = decision_id
     v["decision_trace_id"] = decision_id
+
+    # Playbook-driven response (best-effort): start a run and execute typed automatic actions.
+    # Manual approval actions are skipped by execute_typed_actions() and land in "skipped".
+    try:
+        autorun = str(os.getenv("PLAYBOOK_AUTORUN_ENABLED", "1")).strip().lower() in ("1", "true", "yes")
+    except Exception:
+        autorun = True
+    try:
+        if autorun and decision_id and isinstance(pb_info, dict) and pb_info.get("id"):
+            run_id = start_playbook_run(
+                trace_id=decision_id,
+                decision_id=decision_id,
+                tenant_id=tenant_id,
+                playbook=pb_info,
+                owner="Email_Security_Agent",
+                metadata={"tags": v.get("tags") or [], "severity": v.get("severity"), "route": v.get("route")},
+            )
+            if run_id:
+                append_playbook_step(run_id=run_id, event_type="selected", status="completed", evidence={"playbook_id": pb_info.get("id")})
+                actions = pb_info.get("actions") if isinstance(pb_info.get("actions"), list) else []
+                action_exec = execute_typed_actions(run_id=run_id, actions=actions, context={"channel": "email", "decision_id": decision_id})
+                append_playbook_step(run_id=run_id, event_type="actions", status="completed", evidence={"result": action_exec})
+                complete_playbook_run(run_id=run_id, status="completed", outcome="executed")
+                v["playbook_run"] = {"run_id": run_id, "actions": action_exec}
+    except Exception:
+        pass
 
     # Persist incident (redacted) for admin drilldown/grouping
     try:

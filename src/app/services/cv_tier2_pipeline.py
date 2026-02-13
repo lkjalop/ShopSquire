@@ -8,6 +8,14 @@ from src.app.services.cv_ocr import extract_text
 from src.app.services.cv_quality import score_quality
 from src.app.services.image_forensics import ImageForensicsService, ForensicsResult
 from src.app.services.forensics_policy import evaluate as evaluate_forensics_policy
+from src.app.observability.metrics import record_cv_fraud
+
+import difflib
+import math
+import re
+
+
+_URL_RE = re.compile(r"https?://[^\s<>()\"']+")
 
 
 def _detect_document_like(ocr_boxes: List[Dict[str, Any]]) -> bool:
@@ -15,6 +23,50 @@ def _detect_document_like(ocr_boxes: List[Dict[str, Any]]) -> bool:
         return False
     # Heuristic: many text boxes in a compact layout suggests document/label.
     return len(ocr_boxes) >= 8
+
+
+def _similarity(a: str, b: str) -> float:
+    try:
+        return float(difflib.SequenceMatcher(None, a or "", b or "").ratio())
+    except Exception:
+        return 0.0
+
+
+def _shannon_entropy(s: str) -> float:
+    s = str(s or "")
+    if not s:
+        return 0.0
+    freq: dict[str, int] = {}
+    for ch in s:
+        freq[ch] = freq.get(ch, 0) + 1
+    n = float(len(s))
+    ent = 0.0
+    for c in freq.values():
+        p = float(c) / n
+        ent -= p * math.log2(p)
+    return float(ent)
+
+
+def _extract_qr_payloads(image_bytes: bytes) -> Dict[str, Any]:
+    # Best-effort QR/barcode extraction. If dependencies are missing, return empty.
+    try:
+        from PIL import Image  # type: ignore
+        from pyzbar.pyzbar import decode  # type: ignore
+        import io
+
+        img = Image.open(io.BytesIO(image_bytes))
+        decoded = decode(img)
+        payloads: List[Dict[str, Any]] = []
+        for d in decoded or []:
+            try:
+                val = (d.data.decode("utf-8", errors="ignore") if getattr(d, "data", None) else "") or ""
+                if val.strip():
+                    payloads.append({"type": str(getattr(d, "type", "unknown")), "value": val.strip()[:4096]})
+            except Exception:
+                continue
+        return {"provider": "pyzbar", "items": payloads}
+    except Exception as exc:
+        return {"provider": "none", "items": [], "error": str(exc)}
 
 
 def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: str | None = None) -> Dict[str, Any]:
@@ -42,6 +94,34 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     ocr_text = ocr.get("text") or ""
     ocr_boxes = ocr.get("boxes") or []
     document_like = _detect_document_like(ocr_boxes)
+
+    # Dual OCR robustness (optional). Helps detect OCR-adversarial typography and disagreement.
+    dual_ocr = None
+    try:
+        enabled = str(ocr_cfg.get("dual_enabled") or "").strip().lower() in ("1", "true", "yes") or str(__import__("os").getenv("CV_DUAL_OCR_ENABLED", "0")).lower() in ("1", "true", "yes")
+    except Exception:
+        enabled = False
+    try:
+        dual_providers = ocr_cfg.get("dual_providers") if isinstance(ocr_cfg.get("dual_providers"), list) else []
+    except Exception:
+        dual_providers = []
+    if enabled and len(dual_providers) >= 2:
+        try:
+            ocr_a = extract_text(image_bytes, provider=str(dual_providers[0]), fallback=None)
+            ocr_b = extract_text(image_bytes, provider=str(dual_providers[1]), fallback=None)
+            ta = str(ocr_a.get("text") or "")
+            tb = str(ocr_b.get("text") or "")
+            sim = _similarity(ta[:2000], tb[:2000])
+            dual_ocr = {
+                "providers": [ocr_a.get("provider"), ocr_b.get("provider")],
+                "similarity": round(sim, 4),
+                "a_conf": ocr_a.get("confidence"),
+                "b_conf": ocr_b.get("confidence"),
+            }
+            if ta.strip() and tb.strip() and sim < 0.6:
+                record_cv_fraud("robustness_ocr_dual_disagreement")
+        except Exception:
+            dual_ocr = {"error": "dual_ocr_failed"}
 
     forensics: Dict[str, Any] = {}
     forensics_obj: ForensicsResult | None = None
@@ -90,6 +170,20 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     except Exception:
         pass
 
+    # QR/barcode extraction gate: extract payloads and evaluate URL-like values.
+    qr = _extract_qr_payloads(image_bytes)
+    qr_urls: List[str] = []
+    try:
+        for item in (qr.get("items") or []):
+            v = str((item or {}).get("value") or "")
+            if _URL_RE.search(v):
+                qr_urls.append(_URL_RE.search(v).group(0))  # type: ignore[union-attr]
+    except Exception:
+        qr_urls = []
+    if qr_urls:
+        evidence_tags.append("qr_url_present")
+        record_cv_fraud("robustness_qr_url_present")
+
     # Compute ELA mask area ratio for verdict policy
     ela_area_ratio = 0.0
     try:
@@ -128,4 +222,10 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         },
         "evidence_tags": evidence_tags,
         "verdict": verdict,
+        "robustness": {
+            "dual_ocr": dual_ocr,
+            "qr": qr,
+            "qr_url_count": len(qr_urls),
+            "ocr_text_entropy": round(_shannon_entropy(ocr_text[:800]), 4),
+        },
     }

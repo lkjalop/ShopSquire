@@ -1128,3 +1128,71 @@ def threat_intel_upsert(
     if not ok:
         raise HTTPException(status_code=500, detail="threat_intel_upsert_failed")
     return {"ok": True, "id": item_id}
+
+
+# --- Outbound C2 / beaconing monitor (agentic comms) ---
+
+
+@router.get("/outbound/anomalies")
+def outbound_anomalies(
+    limit: int = 100,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    from src.app.services.outbound_email_monitor import list_outbound_anomalies
+
+    _ = role
+    return {"items": list_outbound_anomalies(limit=limit), "count": len(list_outbound_anomalies(limit=limit))}
+
+
+@router.post("/outbound/simulate")
+def outbound_simulate(
+    payload: Dict[str, Any] = Body(default={}),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Simulate outbound agent email events to exercise C2/beacon detection safely."""
+    from src.app.services.outbound_email_monitor import (
+        record_outbound_email_event,
+        analyze_agent_outbound_email,
+        store_outbound_anomaly,
+    )
+
+    _ = role
+    tenant_id = (payload or {}).get("tenant_id")
+    agent_id = str((payload or {}).get("agent_id") or "agent-demo")
+    to = str((payload or {}).get("to") or "c2@example.invalid")
+    subject = str((payload or {}).get("subject") or "ping")
+    body = str((payload or {}).get("body") or "ok")
+    count = int((payload or {}).get("count") or 6)
+    interval_sec = float((payload or {}).get("interval_sec") or 10.0)
+    decision_id = str((payload or {}).get("decision_id") or "")
+
+    events = []
+    for _i in range(max(1, min(count, 50))):
+        ev = record_outbound_email_event(
+            tenant_id=str(tenant_id) if tenant_id is not None else None,
+            agent_id=agent_id,
+            to=to,
+            subject=subject,
+            body=body,
+            thread_id=str((payload or {}).get("thread_id") or ""),
+            decision_id=(decision_id or None),
+            meta={"simulated": True},
+        )
+        events.append(ev)
+        try:
+            import time as _time
+
+            _time.sleep(max(0.0, min(interval_sec, 2.0)))
+        except Exception:
+            pass
+    analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int((payload or {}).get("minutes") or 60))
+    an_id = None
+    if analysis.get("anomalous"):
+        an_id = store_outbound_anomaly(
+            tenant_id=str(tenant_id) if tenant_id is not None else None,
+            agent_id=agent_id,
+            event_id=str((events[-1] or {}).get("id") or ""),
+            analysis=analysis,
+            severity="high",
+        )
+    return {"ok": True, "events": events, "analysis": analysis, "anomaly_id": an_id}
