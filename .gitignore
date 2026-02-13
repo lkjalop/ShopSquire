@@ -23,6 +23,12 @@ dump/
 logs/
 pgdata/
 
+# Local scripted run outputs (keep scripts, not their outputs)
+scripts/runs/
+
+# One-off local collection artifacts
+collected_*
+
 # Local model weights (download separately as needed)
 /yolov8*.pt
 /models/*.pt
