@@ -130,6 +130,12 @@ def resolve_secret(value_or_ref: str | None, *, default: str | None = None) -> s
     raw = str(value_or_ref)
     if "://" not in raw:
         return raw
+    # Only treat a value as a secret reference when it uses a supported scheme.
+    # This prevents accidentally interpreting ordinary URIs (e.g. `postgresql://`,
+    # `redis://`, `https://`) as secret references and falling back to defaults.
+    scheme = raw.split("://", 1)[0].lower()
+    if scheme not in ("vault", "aws-sm", "aws-secretsmanager", "env"):
+        return raw
     cache_key = f"ref:{raw}"
     cached = _cache_get(cache_key)
     if cached is not None:
