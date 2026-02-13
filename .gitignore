@@ -36,6 +36,9 @@ collected_*
 # Playbook version snapshots can be noisy in dev; keep curated ones only.
 config/security/versions/playbooks/*.json
 
+# Risk correlation policy snapshots are local artifacts (frequently regenerated)
+config/security/versions/risk_correlation_policy_*.json
+
 *.sqlite
 *.db
 *.sqlite-journal

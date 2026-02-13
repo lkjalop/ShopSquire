@@ -7,10 +7,9 @@
     "kev": 0.0
   },
   "bands": {
-    "info": 0,
-    "warn": 5,
-    "high": 10,
-    "critical": 15
+    "warn": 10,
+    "high": 40,
+    "critical": 70
   },
   "context_multipliers": {
     "default": 1.0
