@@ -48,6 +48,106 @@
       "severity": "critical"
     },
     {
+      "id": "PB-SEC-001",
+      "title": "Prompt Injection Containment",
+      "domain": "security",
+      "priority": 9,
+      "enabled": true,
+      "version": "1.0.0",
+      "trigger_logic": "any",
+      "entry_conditions": {},
+      "actions": [
+        {
+          "type": "create_ticket",
+          "mode": "automatic",
+          "params": { "queue": "soc" }
+        }
+      ],
+      "sla_minutes": 30,
+      "risk_band_min": "high",
+      "owners": ["SecurityOps"],
+      "checks": [],
+      "closure_criteria": [],
+      "rollback": { "enabled": false, "strategy": "manual" },
+      "requires_approval_roles": [],
+      "severity": "high"
+    },
+    {
+      "id": "PB-SEC-002",
+      "title": "Data Exfiltration Investigation",
+      "domain": "security",
+      "priority": 8,
+      "enabled": true,
+      "version": "1.0.0",
+      "trigger_logic": "any",
+      "entry_conditions": {},
+      "actions": [
+        {
+          "type": "create_ticket",
+          "mode": "automatic",
+          "params": { "queue": "soc" }
+        }
+      ],
+      "sla_minutes": 60,
+      "risk_band_min": "critical",
+      "owners": ["SecurityOps"],
+      "checks": [],
+      "closure_criteria": [],
+      "rollback": { "enabled": false, "strategy": "manual" },
+      "requires_approval_roles": [],
+      "severity": "critical"
+    },
+    {
+      "id": "PB-CV-SERIAL-001",
+      "title": "Serial Number Mismatch Review",
+      "domain": "cv",
+      "priority": 30,
+      "enabled": true,
+      "version": "1.0.0",
+      "trigger_logic": "any",
+      "entry_conditions": {},
+      "actions": [
+        {
+          "type": "create_ticket",
+          "mode": "automatic",
+          "params": { "queue": "fraud" }
+        }
+      ],
+      "sla_minutes": 120,
+      "risk_band_min": "medium",
+      "owners": ["FraudOps"],
+      "checks": [],
+      "closure_criteria": [],
+      "rollback": { "enabled": false, "strategy": "manual" },
+      "requires_approval_roles": [],
+      "severity": "high"
+    },
+    {
+      "id": "PB-DATA-001",
+      "title": "Data Readiness Hold",
+      "domain": "governance",
+      "priority": 40,
+      "enabled": true,
+      "version": "1.0.0",
+      "trigger_logic": "any",
+      "entry_conditions": {},
+      "actions": [
+        {
+          "type": "create_ticket",
+          "mode": "automatic",
+          "params": { "queue": "ops" }
+        }
+      ],
+      "sla_minutes": 240,
+      "risk_band_min": "low",
+      "owners": ["Ops"],
+      "checks": [],
+      "closure_criteria": [],
+      "rollback": { "enabled": false, "strategy": "manual" },
+      "requires_approval_roles": [],
+      "severity": "low"
+    },
+    {
       "id": "PB-EMAIL-001",
       "title": "Email Security Review",
       "domain": "security",
@@ -212,7 +312,10 @@
       "severity": "high"
     }
   ],
-  "signal_map": {},
+  "signal_map": {
+    "prompt_injection": ["PB-SEC-001"],
+    "data_exfiltration": ["PB-SEC-002"]
+  },
   "tag_map": {
     "payment_fraud": ["PB-PAYMENT-FRAUD"],
     "email_security": ["PB-EMAIL-001"],
@@ -220,7 +323,9 @@
     "brand_impersonation": ["PB-EMAIL-002"],
     "invoice_attachment": ["PB-EMAIL-003"],
     "bank_details_change": ["PB-EMAIL-004"],
-    "dmarc": ["PB-EMAIL-005"]
+    "dmarc": ["PB-EMAIL-005"],
+    "serial_mismatch": ["PB-CV-SERIAL-001"],
+    "data_not_ready": ["PB-DATA-001"]
   }
 }
 
