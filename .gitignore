@@ -51,3 +51,7 @@ venv/
 
 # Editor / tool local state
 .claude/settings.local.json
+
+# Local Docker/backup artifacts
+compose.effective.yml
+*.bundle
