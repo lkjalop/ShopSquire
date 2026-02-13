@@ -48,6 +48,12 @@ Invoke-JsonPost "$BaseUrl/api/v1/admin/email_security/outbound/simulate" $outbou
 Write-Host "`n3) List outbound anomalies"
 curl.exe -sS "$BaseUrl/api/v1/admin/email_security/outbound/anomalies?limit=20" -H "x-api-key: $ApiKey" | Out-Host
 
-Write-Host "`n4) Security events (admin)"
-curl.exe -sS "$BaseUrl/api/v1/admin/security/events?limit=50" -H "x-api-key: $ApiKey" | Out-Host
+Write-Host "`n4) Containments (enforcement evidence)"
+curl.exe -sS "$BaseUrl/api/v1/admin/email_security/containments?limit=20" -H "x-api-key: $ApiKey" | Out-Host
 
+Write-Host "`n5) Prove tool route is disabled for contained agent (tool_run)"
+$toolReq = @{ tool = "catalog.search"; params = @{ query = "laptop"; limit = 2 }; uid = "agent-demo" }
+Invoke-JsonPost "$BaseUrl/api/v1/tools/run" $toolReq | Out-Host
+
+Write-Host "`n6) Security events (admin)"
+curl.exe -sS "$BaseUrl/api/v1/admin/security/events?limit=50" -H "x-api-key: $ApiKey" | Out-Host

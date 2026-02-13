@@ -3,6 +3,7 @@ import re
 from typing import Dict, Any
 from src.app.services.safe_links import create_safe_link
 from src.app.services.outbound_email_monitor import record_outbound_email_event, analyze_agent_outbound_email, store_outbound_anomaly
+from src.app.services.agent_containment import contain_agent, is_contained
 
 
 _URL_PAT = re.compile(r"https?://[^\s<>()\"']+")
@@ -53,6 +54,8 @@ class SendGridProvider(BaseEmailProvider):
             tenant_id = str(kwargs.get("tenant_id")) if kwargs.get("tenant_id") is not None else None
             thread_id = str(kwargs.get("thread_id")) if kwargs.get("thread_id") is not None else None
             decision_id = str(kwargs.get("decision_id")) if kwargs.get("decision_id") is not None else None
+            if is_contained(agent_id=agent_id, capability="email_send"):
+                return {"ok": False, "blocked": True, "error": "agent_contained", "agent_id": agent_id, "capability": "email_send"}
             ev = record_outbound_email_event(
                 tenant_id=tenant_id,
                 agent_id=agent_id,
@@ -65,6 +68,34 @@ class SendGridProvider(BaseEmailProvider):
             )
             analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
             store_outbound_anomaly(tenant_id=tenant_id, agent_id=agent_id, event_id=str(ev.get("id") or ""), analysis=analysis, severity=("high" if analysis.get("anomalous") else "info"))
+            try:
+                thr = float(os.getenv("OUTBOUND_CONTAINMENT_SCORE_THRESHOLD", "0.75") or 0.75)
+            except Exception:
+                thr = 0.75
+            if analysis.get("anomalous") and float(analysis.get("score") or 0.0) >= thr:
+                # Contain both sending and tool execution to demonstrate enforcement.
+                contain_agent(
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    capability="email_send",
+                    score=float(analysis.get("score") or 0.0),
+                    reasons=list(analysis.get("reasons") or []),
+                    actor="Outbound_Comms_Monitor",
+                    decision_id=decision_id,
+                    trace_id=decision_id,
+                    ttl_seconds=int(os.getenv("OUTBOUND_CONTAINMENT_TTL_SEC", "3600") or 3600),
+                )
+                contain_agent(
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    capability="tool_run",
+                    score=float(analysis.get("score") or 0.0),
+                    reasons=list(analysis.get("reasons") or []),
+                    actor="Outbound_Comms_Monitor",
+                    decision_id=decision_id,
+                    trace_id=decision_id,
+                    ttl_seconds=int(os.getenv("OUTBOUND_CONTAINMENT_TTL_SEC", "3600") or 3600),
+                )
         except Exception:
             pass
         if not self.api_key:
@@ -107,6 +138,8 @@ class SESProvider(BaseEmailProvider):
             tenant_id = str(kwargs.get("tenant_id")) if kwargs.get("tenant_id") is not None else None
             thread_id = str(kwargs.get("thread_id")) if kwargs.get("thread_id") is not None else None
             decision_id = str(kwargs.get("decision_id")) if kwargs.get("decision_id") is not None else None
+            if is_contained(agent_id=agent_id, capability="email_send"):
+                return {"ok": False, "blocked": True, "error": "agent_contained", "agent_id": agent_id, "capability": "email_send"}
             ev = record_outbound_email_event(
                 tenant_id=tenant_id,
                 agent_id=agent_id,
@@ -119,6 +152,33 @@ class SESProvider(BaseEmailProvider):
             )
             analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
             store_outbound_anomaly(tenant_id=tenant_id, agent_id=agent_id, event_id=str(ev.get("id") or ""), analysis=analysis, severity=("high" if analysis.get("anomalous") else "info"))
+            try:
+                thr = float(os.getenv("OUTBOUND_CONTAINMENT_SCORE_THRESHOLD", "0.75") or 0.75)
+            except Exception:
+                thr = 0.75
+            if analysis.get("anomalous") and float(analysis.get("score") or 0.0) >= thr:
+                contain_agent(
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    capability="email_send",
+                    score=float(analysis.get("score") or 0.0),
+                    reasons=list(analysis.get("reasons") or []),
+                    actor="Outbound_Comms_Monitor",
+                    decision_id=decision_id,
+                    trace_id=decision_id,
+                    ttl_seconds=int(os.getenv("OUTBOUND_CONTAINMENT_TTL_SEC", "3600") or 3600),
+                )
+                contain_agent(
+                    tenant_id=tenant_id,
+                    agent_id=agent_id,
+                    capability="tool_run",
+                    score=float(analysis.get("score") or 0.0),
+                    reasons=list(analysis.get("reasons") or []),
+                    actor="Outbound_Comms_Monitor",
+                    decision_id=decision_id,
+                    trace_id=decision_id,
+                    ttl_seconds=int(os.getenv("OUTBOUND_CONTAINMENT_TTL_SEC", "3600") or 3600),
+                )
         except Exception:
             pass
         if not self.enabled:

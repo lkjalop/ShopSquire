@@ -14,6 +14,7 @@ from src.app.repositories.catalog import CatalogRepository
 from src.app.security.agent_events import log_mcp_tool_invocation
 from src.app.services.decision_log import log_trace_event
 from src.app.routers.approvals import enqueue_approval
+from src.app.services.agent_containment import is_contained
 
 
 class ToolRunner:
@@ -78,6 +79,32 @@ class ToolRunner:
             status = "ok"
             result: Dict[str, Any] = {}
             source_mode = "bridge"
+            # Enforcement: contained agents cannot execute tools (disable tool route).
+            try:
+                if is_contained(agent_id=str(source or ""), capability="tool_run"):
+                    status = "blocked"
+                    record_tool_invocation(tool, status, 0.0)
+                    try:
+                        log_trace_event(
+                            trace_id=trace_id,
+                            event_type="agent_containment_enforced",
+                            source_type="agent",
+                            source_id="ToolRunner",
+                            target_type="agent",
+                            target_id=str(source or ""),
+                            payload={"capability": "tool_run", "tool": tool, "status": "blocked"},
+                        )
+                    except Exception:
+                        pass
+                    return {
+                        "tool": tool,
+                        "status": status,
+                        "source": "agent_containment",
+                        "result": {"error": "agent_contained"},
+                        "duration_seconds": 0.0,
+                    }
+            except Exception:
+                pass
             try:
                 gate_ctx = {
                     "tool": tool,

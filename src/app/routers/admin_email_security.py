@@ -1195,4 +1195,61 @@ def outbound_simulate(
             analysis=analysis,
             severity="high",
         )
+        # Enforcement: contain agent when score crosses threshold.
+        try:
+            from src.app.services.agent_containment import contain_agent
+
+            thr = float(os.getenv("OUTBOUND_CONTAINMENT_SCORE_THRESHOLD", "0.75") or 0.75)
+            if float(analysis.get("score") or 0.0) >= thr:
+                contain_agent(
+                    tenant_id=str(tenant_id) if tenant_id is not None else None,
+                    agent_id=agent_id,
+                    capability="email_send",
+                    score=float(analysis.get("score") or 0.0),
+                    reasons=list(analysis.get("reasons") or []),
+                    actor="Outbound_Comms_Monitor",
+                    decision_id=str((payload or {}).get("decision_id") or "") or None,
+                    trace_id=str((payload or {}).get("decision_id") or "") or None,
+                    ttl_seconds=int(os.getenv("OUTBOUND_CONTAINMENT_TTL_SEC", "3600") or 3600),
+                )
+                contain_agent(
+                    tenant_id=str(tenant_id) if tenant_id is not None else None,
+                    agent_id=agent_id,
+                    capability="tool_run",
+                    score=float(analysis.get("score") or 0.0),
+                    reasons=list(analysis.get("reasons") or []),
+                    actor="Outbound_Comms_Monitor",
+                    decision_id=str((payload or {}).get("decision_id") or "") or None,
+                    trace_id=str((payload or {}).get("decision_id") or "") or None,
+                    ttl_seconds=int(os.getenv("OUTBOUND_CONTAINMENT_TTL_SEC", "3600") or 3600),
+                )
+        except Exception:
+            pass
     return {"ok": True, "events": events, "analysis": analysis, "anomaly_id": an_id}
+
+
+@router.get("/containments")
+def list_containments(
+    limit: int = 100,
+    status: str | None = None,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    from src.app.services.agent_containment import list_containments as _list
+
+    _ = role
+    items = _list(limit=limit, status=status)
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/containments/lift")
+def lift_containment(
+    payload: Dict[str, Any] = Body(default={}),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    from src.app.services.agent_containment import lift_containment as _lift
+
+    agent_id = str((payload or {}).get("agent_id") or "").strip()
+    capability = str((payload or {}).get("capability") or "").strip()
+    if not agent_id or not capability:
+        raise HTTPException(status_code=400, detail="agent_id_and_capability_required")
+    return _lift(agent_id=agent_id, capability=capability, actor=str(role), decision_id=str((payload or {}).get("decision_id") or "") or None, trace_id=str((payload or {}).get("trace_id") or "") or None)

@@ -33,6 +33,9 @@ collected_*
 /yolov8*.pt
 /models/*.pt
 
+# Playbook version snapshots can be noisy in dev; keep curated ones only.
+config/security/versions/playbooks/*.json
+
 *.sqlite
 *.db
 *.sqlite-journal
