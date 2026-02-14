@@ -6,6 +6,15 @@ ENV POETRY_VERSION=1.7.1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        libzbar0 \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir --retries 10 --timeout 120 poetry==${POETRY_VERSION}
 
 WORKDIR /app
