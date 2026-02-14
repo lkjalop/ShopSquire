@@ -247,6 +247,8 @@ def _mitre_tags(signals: Dict[str, bool], cv_signals: Dict[str, Any] | None = No
     cv_signals = cv_signals or {}
     if cv_signals.get("ocr_prompt_injection"):
         tags.append("AML.T0043")
+    if cv_signals.get("qr_code_detected") or cv_signals.get("qr_external_url_detected") or cv_signals.get("qr_prompt_injection"):
+        tags.append("AML.T0043")
     if cv_signals.get("duplicate_image_detected") or cv_signals.get("manipulation_detected"):
         tags.append("AML.T0015")
     return tags
@@ -287,6 +289,8 @@ def _owasp_llm_tags(signals: Dict[str, bool], cv_signals: Dict[str, Any] | None 
     cv_signals = cv_signals or {}
     if cv_signals.get("ocr_prompt_injection"):
         tags.append("LLM01:PromptInjection")
+    if cv_signals.get("qr_code_detected") or cv_signals.get("qr_external_url_detected") or cv_signals.get("qr_prompt_injection"):
+        tags.append("LLM01:PromptInjection")
     if cv_signals.get("duplicate_image_detected") or cv_signals.get("manipulation_detected"):
         tags.append("LLM05:SupplyChainVulnerabilities")
     return tags
@@ -320,6 +324,8 @@ def _owasp_agentic_tags(signals: Dict[str, bool], cv_signals: Dict[str, Any] | N
         tags.append("ASI10:RogueAgents")
     cv_signals = cv_signals or {}
     if cv_signals.get("ocr_prompt_injection"):
+        tags.append("ASI01:GoalHijack")
+    if cv_signals.get("qr_code_detected") or cv_signals.get("qr_external_url_detected") or cv_signals.get("qr_prompt_injection"):
         tags.append("ASI01:GoalHijack")
     if cv_signals.get("duplicate_image_detected") or cv_signals.get("manipulation_detected"):
         tags.append("ASI04:AgenticSupplyChainVulnerabilities")
@@ -438,6 +444,14 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         mitre_score += float(mitre.get("AML.T0020", {}).get("weight", 1.0)) * 90
     if signals.get("model_drift"):
         mitre_score += float(mitre.get("AML.T0015", {}).get("weight", 0.8)) * 50
+    # CV lane: encoded prompts / QR indirection / image manipulation raise MITRE score as well.
+    try:
+        if cv_signals.get("ocr_prompt_injection") or cv_signals.get("qr_prompt_injection") or cv_signals.get("qr_external_url_detected"):
+            mitre_score += float(mitre.get("AML.T0043", {}).get("weight", 1.0)) * 70
+        if cv_signals.get("duplicate_image_detected") or cv_signals.get("manipulation_detected"):
+            mitre_score += float(mitre.get("AML.T0015", {}).get("weight", 0.8)) * 60
+    except Exception:
+        pass
 
     stride_sum = 0.0
     if signals.get("pii") or signals.get("pci"):
@@ -457,7 +471,16 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
 
     dread_avg = sum(dread.values()) / max(len(dread.values()) or 1, 1)
     cvss_score = cvss.get("LOW", 0.2)
-    if signals.get("jailbreak") or signals.get("prompt_injection") or signals.get("pci") or signals.get("data_exfiltration") or signals.get("agentic_tool_abuse"):
+    if (
+        signals.get("jailbreak")
+        or signals.get("prompt_injection")
+        or signals.get("pci")
+        or signals.get("data_exfiltration")
+        or signals.get("agentic_tool_abuse")
+        or cv_signals.get("ocr_prompt_injection")
+        or cv_signals.get("qr_prompt_injection")
+        or cv_signals.get("qr_external_url_detected")
+    ):
         cvss_score = cvss.get("HIGH", 0.8)
     kev_catalog = _kev_catalog()
     kev_ids = []
@@ -532,6 +555,7 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         "stride_categories": _stride_tags(signals),
         "stride_score": stride_sum,
         "dread_avg": dread_avg,
+        "dread": dread,
         "cvss_score": cvss_score,
         "kev_ids": kev_ids,
         "risk_raw": risk_raw,

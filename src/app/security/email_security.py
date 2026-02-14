@@ -576,6 +576,23 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["verdict_action"] = "security_review"
         v["escalation"] = "security_middleware"
         v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["auth_alignment_failed_under_dmarc_policy"]))
+
+    # Prefer allow when auth passes and sender is trusted (unless critical signals present).
+    try:
+        auth_all_pass = (spf_result == "pass" and dkim_result == "pass" and (dmarc_result in ("pass", "", None)) and not bool(dmarc_fail))
+        external_sender = bool(email.get("external_sender", False))
+        from_domain = str((extracted.get("meta") or {}).get("from_domain") or "")
+        trusted_domains = set([str(x).lower() for x in ((ff.get("SECURITY_THRESHOLDS") or {}).get("TRUSTED_SENDER_DOMAINS", []))])
+        ind_types_set = {str((x or {}).get("type") or "") for x in (v.get("indicators") or [])}
+        critical = {"dangerous_tool_intent", "prompt_injection", "lolbin_command", "c2_beacon_pattern", "data_exfil_intent"}
+        if auth_all_pass and ((from_domain.lower() in trusted_domains) or (external_sender is False)):
+            if not (ind_types_set & critical) and v.get("route") in ("human_review", None):
+                v["severity"] = "info"
+                v["route"] = "auto_resolve"
+                v["verdict_action"] = v.get("verdict_action") or "allow"
+                v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["auth_pass_trusted_sender_allow"]))
+    except Exception:
+        pass
     v.setdefault("evidence_snapshot", {})
     if isinstance(v.get("evidence_snapshot"), dict):
         v["evidence_snapshot"]["auth_verdicts"] = {

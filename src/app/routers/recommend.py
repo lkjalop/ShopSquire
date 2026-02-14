@@ -366,6 +366,70 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
         return f"Found {len(results)} options above ${budget_min}.{spec_note} Want a detailed list or comparison?"
     return f"Found {len(results)} options.{spec_note} Want a detailed list or comparison?"
 
+def _humanize_positive_factor_tokens(items: list[Any]) -> list[str]:
+    """Convert internal scoring tags into short user-facing phrases.
+
+    The scoring pipeline often emits machine-friendly tokens like:
+      +in_stock, +use_case_match:software_development, +use_case_tag:content_creation
+    These are useful for trace/debug but look like gibberish in chat.
+    """
+    out: list[str] = []
+
+    def add(s: str):
+        s = (s or "").strip()
+        if not s:
+            return
+        if s not in out:
+            out.append(s)
+
+    for raw in (items or []):
+        if raw is None:
+            continue
+        if not isinstance(raw, str):
+            try:
+                raw = str(raw)
+            except Exception:
+                continue
+        # Some entries are a single string containing multiple +tags.
+        tokens = [t for t in raw.replace(",", " ").split() if t]
+        for tok in tokens:
+            t = tok.strip()
+            if t.startswith("+"):
+                t = t[1:]
+            if not t:
+                continue
+
+            key = t
+            val = None
+            if ":" in t:
+                key, val = t.split(":", 1)
+                key = (key or "").strip()
+                val = (val or "").strip()
+
+            k = (key or "").lower()
+            if k in ("in_stock", "instock"):
+                add("In stock")
+            elif k in ("use_case_match", "use_case_tag", "use_case_tags"):
+                vv = (val or "").replace("_", " ").strip()
+                if vv:
+                    add(f"Good for {vv}")
+            elif k in ("budget_match", "price_match"):
+                add("Fits your budget")
+            elif k in ("spec_match", "specs_match"):
+                add("Meets your specs")
+            elif k in ("gpu_match", "gpu"):
+                vv = (val or "").replace("_", " ").strip()
+                add(f"GPU: {vv.upper()}" if vv else "GPU match")
+            elif k in ("cpu_match", "cpu"):
+                vv = (val or "").replace("_", " ").strip()
+                add(f"CPU: {vv}" if vv else "CPU match")
+            else:
+                # Fallback: normalize token to something readable.
+                add((t or "").replace("_", " ").strip())
+
+    # Keep it short in chat; detailed factors belong in Decision Trace.
+    return out[:4]
+
 
 def _emit_inventory_brand_notice(
     *,
@@ -2436,7 +2500,9 @@ def suggest(request: Request, uid: str, query: str, budget_max: Optional[int] = 
             for i, r in enumerate(top):
                 pros = (r.get("factors") or {}).get("positive", [])
                 price = int(r.get("price_cents") or 0) // 100 if r.get("price_cents") is not None else r.get("price")
-                lines.append(f"{i+1}. {r.get('name')} (${price}): " + ", ".join([str(p) for p in pros[:3]]))
+                pros_h = _humanize_positive_factor_tokens(pros)
+                why = (" - " + "; ".join(pros_h)) if pros_h else ""
+                lines.append(f"{i+1}. {r.get('name')} (${price}){why}")
             assistant_message = (
                 "Based on your criteria and our current inventory:\n\n" +
                 "\n".join(lines) +
@@ -2514,7 +2580,21 @@ def suggest(request: Request, uid: str, query: str, budget_max: Optional[int] = 
         if skip_recommend_observer:
             final_out = {"severity": "info", "details": {"signals": {}, "reason": "observer_skipped"}}
         else:
-            final_out = analyze_payload({"uid": uid, "proposal": redacted.get("proposal")})
+            # IMPORTANT: only scan user-facing output. Scanning the internal `proposal` blob can
+            # self-trigger (e.g., OWASP/MITRE tag strings contain "prompt injection", "supply chain", etc.)
+            # and cause false blocks on otherwise safe queries.
+            final_out = analyze_payload(
+                {
+                    "uid": uid,
+                    "assistant_message": redacted.get("assistant_message"),
+                    "next_questions": redacted.get("next_questions") or [],
+                    "results": [
+                        {"sku": r.get("sku"), "name": r.get("name"), "price": r.get("price")}
+                        for r in (redacted.get("results") or [])
+                        if isinstance(r, dict)
+                    ][:8],
+                }
+            )
     try:
         if not skip_recommend_observer:
             emit_security_event(

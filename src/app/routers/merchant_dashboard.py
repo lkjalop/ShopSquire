@@ -23,7 +23,7 @@ def merchant_dashboard(request: Request, role: str = Depends(require_role([ROLE_
         </style>
       </head>
       <body>
-        <h2>Merchant Dashboard — Suggested FAQs</h2>
+        <h2>Merchant Dashboard - Suggested FAQs</h2>
         <div id="list">Loading...</div>
         <script>
           async function load(){

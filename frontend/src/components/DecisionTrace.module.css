@@ -12,7 +12,8 @@
   background: #fff;
   border-radius: 12px;
   width: 700px;
-  max-height: 70vh;
+  height: 70vh;
+  max-height: 92vh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
@@ -20,7 +21,7 @@
   resize: both;
   overflow: hidden;
   min-width: 400px;
-  min-height: 200px;
+  min-height: 260px;
 }
 
 .modal.minimized {
@@ -76,12 +77,35 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
+.iconBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .tier {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
   background: #ea580c;
   color: #fff;
+}
+
+.traceId {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.95);
+  font-family: 'SF Mono', Monaco, monospace;
+}
+
+.traceIdMuted {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.72);
+  font-family: 'SF Mono', Monaco, monospace;
 }
 
 .updating {

@@ -73,7 +73,9 @@ def unicode_normalize(text: str) -> str:
 
 
 PII_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-PII_PHONE = re.compile(r"\b(\+?\d[\d\-\s]{7,}\d)\b")
+# Phone-like digit strings, but avoid short numeric ranges like "900-1300".
+# Require at least 10 digits total (E.164 / typical national numbers).
+PII_PHONE = re.compile(r"\b(?=(?:\D*\d){10,})(\+?\d[\d\-\s]{7,}\d)\b")
 PII_SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 PII_IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 API_KEY_PAT = re.compile(r"(?i)\b(sk|rk|pk)_(live|test)?_[a-z0-9]{12,}\b")

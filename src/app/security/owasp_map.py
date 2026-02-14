@@ -6,11 +6,19 @@ from typing import Dict, Any, List
 OWASP_LLM_MAP = {
     "prompt_injection": "LLM01:PromptInjection",
     "jailbreak": "LLM01:PromptInjection",
+    # CV lane: treat QR indirection and injected overlay text as prompt-injection attempts.
+    "qr_url_present": "LLM01:PromptInjection",
+    "qr_url_suspicious": "LLM01:PromptInjection",
+    "prompt_injection_text": "LLM01:PromptInjection",
     "pii": "LLM06:SensitiveInformationDisclosure",
     "pci": "LLM06:SensitiveInformationDisclosure",
     "api_key": "LLM06:SensitiveInformationDisclosure",
     "agentic_tool_abuse": "LLM08:ExcessiveAgency",
     "data_exfiltration": "LLM06:SensitiveInformationDisclosure",
+    # Broader mappings used by observer/correlation.
+    "supply_chain": "LLM05:SupplyChainVulnerabilities",
+    "training_poisoning": "LLM03:TrainingDataPoisoning",
+    "poisoning_attempt": "LLM03:TrainingDataPoisoning",
 }
 
 

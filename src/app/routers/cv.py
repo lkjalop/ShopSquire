@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 import time
+import base64
 
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.cv_triage_basic import BasicCVTriage
@@ -32,11 +33,13 @@ router = APIRouter(prefix="/api/v1/cv", tags=["cv"])
 
 class CVAnalyzeRequest(BaseModel):
     case_id: Optional[str] = None
+    order_id: Optional[str] = None
     labels: List[str] = []
     extracted_text: Optional[str] = None
     provider: str = "basic"
     model: str = "cv_triage_basic"
     images: Optional[List[Dict[str, Any]]] = None  # sanitized image metadata (mime, size, sha256, phash)
+    images_b64: Optional[List[str]] = None  # optional raw images for real analysis (base64 or data: URLs)
     description: Optional[str] = None
     issue_type: Optional[str] = None
 
@@ -82,24 +85,157 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
                     }
         except Exception:
             pass
-        # Prefer Tiered CV provider which chooses analysis tier based on signals
-        try:
-            triager = TieredCVProvider(flags={})
-        except Exception:
-            triager = BasicCVTriage()
-        started = time.time()
-        analysis = call_with_resilience(
-            "cv.analyze",
-            lambda: __import__("asyncio").run(
-                triager.analyze(
-                    req.labels or [],
-                    req.extracted_text or "",
-                    context={"query": req.description or "", "risk_adj": 0.0},
+        # If raw images are provided, do real CV/OCR + consistency checks.
+        # Otherwise, this endpoint is metadata-only and cannot validate mismatched images.
+        sanitized_images: List[Dict[str, Any]] = []
+        image_consistency: Optional[Dict[str, Any]] = None
+        qr_decode_hits: List[Dict[str, Any]] = []
+        qr_prompt_injection = False
+        labels = list(req.labels or [])
+        extracted_text = (req.extracted_text or "") if req.extracted_text is not None else ""
+
+        if req.images_b64:
+            try:
+                from src.app.services.image_intake import sanitize_image
+
+                for idx, b64 in enumerate((req.images_b64 or [])[:8]):
+                    s = (b64 or "").strip()
+                    if not s:
+                        continue
+                    # Support both plain base64 strings and data URLs.
+                    if s.startswith("data:") and "," in s:
+                        s = s.split(",", 1)[1]
+                    try:
+                        content = base64.b64decode(s, validate=False)
+                    except Exception:
+                        content = b""
+                    meta = sanitize_image(content)
+                    try:
+                        meta["filename"] = f"analyze_{idx + 1}.jpg"
+                    except Exception:
+                        pass
+                    sanitized_images.append(meta)
+            except Exception:
+                sanitized_images = []
+
+            # OCR/labels from the first sanitized image (best-effort).
+            try:
+                if sanitized_images and str(sanitized_images[0].get("status") or "") == "sanitized":
+                    from src.app.services.cv_provider import ManagedCVProvider
+
+                    labels, extracted_text = await ManagedCVProvider().get_labels_and_text(
+                        sanitized_images[0].get("bytes") or b""
+                    )
+            except Exception:
+                pass
+
+            # Image consistency (mismatch, suspicious overlays, low evidence).
+            try:
+                # Import locally to avoid heavy import/cycle at module load time.
+                from src.app.routers.support_complaints import _evaluate_uploaded_images_consistency
+
+                image_consistency = await _evaluate_uploaded_images_consistency(
+                    sanitized_images=sanitized_images,
+                    description=req.description,
+                    issue_type=req.issue_type,
+                    order_id=req.order_id,
                 )
-            ),
-            timeout_s=6.0,
-            retries=1,
-        )
+            except Exception:
+                image_consistency = None
+
+            # Barcode/QR payload scan (best-effort) to catch encoded prompt-injection text.
+            try:
+                from src.app.rules.barcode_decode import decode_barcodes
+                from src.app.routers.support_complaints import _detect_ocr_prompt_injection  # type: ignore
+
+                qr = decode_barcodes(
+                    [
+                        (str(s.get("filename") or f"img_{i + 1}.jpg"), s.get("bytes") or b"")
+                        for i, s in enumerate(sanitized_images or [])
+                        if str(s.get("status") or "") == "sanitized"
+                    ]
+                )
+                qr_decode_hits = qr.codes or []
+                for c in qr_decode_hits:
+                    if _detect_ocr_prompt_injection(str(c.get("data") or "")):
+                        qr_prompt_injection = True
+                        break
+            except Exception:
+                qr_decode_hits = []
+                qr_prompt_injection = False
+
+            # Fold QR findings into image-consistency UX so the buyer is prompted to reupload
+            # unedited photos without codes/overlays (mirrors support_complaints behavior).
+            try:
+                qr_external_url = False
+                if qr_decode_hits:
+                    try:
+                        from urllib.parse import urlparse
+                        allow_hosts = {"127.0.0.1", "localhost"}
+                        for c in qr_decode_hits:
+                            data = str(c.get("data") or "").strip()
+                            if data.lower().startswith(("http://", "https://")):
+                                host = (urlparse(data).hostname or "").lower()
+                                if host and host not in allow_hosts:
+                                    qr_external_url = True
+                                    break
+                    except Exception:
+                        qr_external_url = False
+
+                if isinstance(image_consistency, dict) and isinstance(image_consistency.get("images"), list) and qr_decode_hits:
+                    images_out = image_consistency.get("images") or []
+                    for im in images_out:
+                        try:
+                            if int(im.get("index", -1)) != 0:
+                                continue
+                        except Exception:
+                            continue
+                        reasons = im.get("reasons")
+                        if not isinstance(reasons, list):
+                            reasons = []
+                        if "qr_code_detected" not in reasons:
+                            reasons.append("qr_code_detected")
+                        if qr_external_url and "qr_external_url_detected" not in reasons:
+                            reasons.append("qr_external_url_detected")
+                        im["reasons"] = reasons[:6]
+                        if str(im.get("status") or "match") == "match":
+                            im["status"] = "suspicious"
+                        break
+
+                    mismatch_count = 0
+                    needs_better_count = 0
+                    suspicious_count = 0
+                    for im in images_out:
+                        st = str(im.get("status") or "").lower()
+                        if st in ("mismatch", "suspicious"):
+                            mismatch_count += 1
+                        if st == "needs_better_image":
+                            needs_better_count += 1
+                        if st == "suspicious":
+                            suspicious_count += 1
+                    image_consistency["mismatch_count"] = mismatch_count
+                    image_consistency["needs_better_count"] = needs_better_count
+                    image_consistency["suspicious_count"] = suspicious_count
+                    image_consistency["status"] = "mismatch" if mismatch_count > 0 else ("needs_better_image" if needs_better_count > 0 else "match")
+                    image_consistency["soft_verify_required"] = bool(image_consistency["status"] in ("mismatch", "needs_better_image"))
+                    image_consistency["prompt"] = (
+                        "For your security, we can't accept photos that include QR codes or external links. "
+                        "Please upload a new, unedited photo of the item and the damaged area (no stickers, overlays, or QR codes)."
+                        if qr_external_url
+                        else "For your security, please reupload a new, unedited photo without any QR codes or overlays."
+                    )
+            except Exception:
+                pass
+
+        started = time.time()
+        triage = BasicCVTriage()
+        res = triage.analyze(labels=labels or [], extracted_text=extracted_text or "")
+        try:
+            import inspect as _inspect
+
+            analysis = await res if _inspect.isawaitable(res) else res
+        except Exception:
+            analysis = res
         processing_ms = int((time.time() - started) * 1000)
 
         case_id = req.case_id or __import__("uuid").uuid4().hex
@@ -109,8 +245,8 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
                 image_sha256=None,
                 image_phash=None,
                 analysis=analysis,
-                labels=req.labels or [],
-                extracted_text=req.extracted_text or "",
+                labels=labels or [],
+                extracted_text=extracted_text or "",
                 provider=req.provider,
                 model=req.model,
                 processing_time_ms=processing_ms,
@@ -121,9 +257,9 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
         # Build and persist evidence bundle
         bundle = build_evidence_bundle(
             case_id=case_id,
-            sanitized_images=req.images or [],
-            labels=req.labels or [],
-            extracted_text=req.extracted_text or "",
+            sanitized_images=(sanitized_images if sanitized_images else (req.images or [])),
+            labels=labels or [],
+            extracted_text=extracted_text or "",
             analysis=analysis,
             reverse_hits=[],
             provider=req.provider,
@@ -135,6 +271,15 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
             issue_type=req.issue_type,
             description=req.description,
         )
+        try:
+            if image_consistency is not None:
+                bundle["image_consistency"] = image_consistency
+            if qr_decode_hits:
+                bundle["qr_codes"] = qr_decode_hits[:10]
+            if qr_prompt_injection:
+                bundle["qr_prompt_injection"] = True
+        except Exception:
+            pass
         evidence_id = persist_evidence_bundle(case_id, bundle)
 
         # Attach decision trace event best-effort
@@ -146,7 +291,13 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
                 source_id="cv_basic",
                 target_type="complaint",
                 target_id=case_id,
-                payload={"analysis": analysis, "evidence_id": evidence_id, "processing_ms": processing_ms},
+                payload={
+                    "analysis": analysis,
+                    "evidence_id": evidence_id,
+                    "processing_ms": processing_ms,
+                    "image_consistency": image_consistency,
+                    "qr_prompt_injection": qr_prompt_injection,
+                },
             )
         except Exception:
             pass
@@ -182,6 +333,10 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
             "case_id": case_id,
             "cv_analysis": analysis,
             "evidence_id": evidence_id,
+            "trace_id": case_id,
+            "image_consistency": image_consistency,
+            "qr_codes": qr_decode_hits[:10],
+            "qr_prompt_injection": qr_prompt_injection,
         }
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -214,6 +369,8 @@ async def upload(
     image: UploadFile = File(...),
     nonce: str | None = None,
     order_id: str | None = Query(default=None),
+    customer_id: str | None = Query(default=None),
+    guest_email: str | None = Query(default=None),
     sku: str | None = Query(default=None),
     expected_label: str | None = Query(default=None),
     issue_type: str | None = Query(default=None),
@@ -260,6 +417,24 @@ async def upload(
                     order_ctx = {"found": False, "id": order_id}
             except Exception:
                 order_ctx = {"found": None, "id": order_id}
+        # Enforce ownership when order context exists: require matching customer_id or guest_email.
+        try:
+            if isinstance(order_ctx, dict) and order_ctx.get("found") is True:
+                provided_cust = (customer_id or "").strip()
+                provided_guest = str(guest_email or "").strip().lower()
+                match_ok = False
+                if provided_cust and str(order_ctx.get("customer_id") or "").strip() == provided_cust:
+                    match_ok = True
+                if provided_guest and str(order_ctx.get("guest_email") or "").strip().lower() == provided_guest:
+                    match_ok = True
+                if not match_ok:
+                    if not provided_cust and not provided_guest:
+                        raise HTTPException(status_code=400, detail={"error": "ownership_info_required", "message": "Provide customer_id or guest_email matching order"})
+                    raise HTTPException(status_code=403, detail={"error": "ownership_mismatch", "order_id": order_id})
+        except HTTPException:
+            raise
+        except Exception:
+            pass
         # Optional per-environment S3 upload: when enabled, store sanitized image and pass URL into pipeline
         storage_url = None
         try:

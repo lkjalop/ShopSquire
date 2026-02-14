@@ -35,10 +35,8 @@ def query_clusters(body: ClusterRequest, role: str = Depends(require_role([ROLE_
         try:
             with db_session() as db:
                 try:
-                    if getattr(db.bind, "dialect", None) is not None and db.bind.dialect.name != "sqlite":
-                        # Alembic is the source of truth for non-SQLite DBs.
-                        pass
-                    else:
+                    # SQLite tests/dev may not have migrations; create table best-effort.
+                    if getattr(db.bind, "dialect", None) is not None and db.bind.dialect.name == "sqlite":
                         db.execute(
                             sql_text(
                                 """
@@ -57,12 +55,35 @@ def query_clusters(body: ClusterRequest, role: str = Depends(require_role([ROLE_
                 for c in clusters:
                     import json as _json
                     exemplars = _json.dumps(c.members[:5], ensure_ascii=False)
-                    db.execute(
-                        sql_text(
-                            "INSERT OR REPLACE INTO query_clusters (id, label, size, top_exemplars) VALUES (:id, :label, :size, :ex)"
-                        ),
-                        {"id": c.id, "label": c.label or "unknown", "size": int(c.size or 0), "ex": exemplars},
-                    )
+                    try:
+                        dialect = getattr(getattr(db, "bind", None), "dialect", None)
+                        dname = (dialect.name if dialect is not None else "")
+                    except Exception:
+                        dname = ""
+
+                    if dname == "sqlite":
+                        db.execute(
+                            sql_text(
+                                "INSERT OR REPLACE INTO query_clusters (id, label, size, top_exemplars) VALUES (:id, :label, :size, :ex)"
+                            ),
+                            {"id": c.id, "label": c.label or "unknown", "size": int(c.size or 0), "ex": exemplars},
+                        )
+                    else:
+                        # Postgres/others: upsert on primary key.
+                        db.execute(
+                            sql_text(
+                                """
+                                INSERT INTO query_clusters (id, label, size, top_exemplars)
+                                VALUES (:id, :label, :size, :ex)
+                                ON CONFLICT (id) DO UPDATE SET
+                                  label = EXCLUDED.label,
+                                  size = EXCLUDED.size,
+                                  top_exemplars = EXCLUDED.top_exemplars,
+                                  created_at = CURRENT_TIMESTAMP
+                                """
+                            ),
+                            {"id": c.id, "label": c.label or "unknown", "size": int(c.size or 0), "ex": exemplars},
+                        )
                 try:
                     db.commit()
                 except Exception:

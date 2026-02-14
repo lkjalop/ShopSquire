@@ -1,6 +1,6 @@
 # ShopSquire Frontend (Mobile-first React + CSS Modules)
 
-- Dev server: Vite React on port 3000 (proxy to backend 8081)
+- Dev server: Vite React on port 5173 (proxy to backend 8081)
 - Styling: CSS Modules (no Tailwind)
 - Data: Consumes `/ui/products.json` and `/api/v1/decisions/{trace_id}`
 
@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 and:
+Open http://127.0.0.1:5173 and:
 - Use the header input or "Ask AI" to open the chat and run queries.
 - Compare mode triggers on queries with "compare" or when multiple results.
 - Click the gear (in a real flow) to open the Decision Trace; this demo fetches `/api/v1/decisions/{trace_id}`.

@@ -339,6 +339,35 @@ async def _evaluate_uploaded_images_consistency(
     issue_type: str | None,
     order_id: str | None,
 ) -> Dict[str, Any]:
+    def _detect_unrelated_overlay_text(text: str) -> bool:
+        """Heuristic: flag obvious stock/sticker/overlay text that isn't evidence.
+
+        This is not "prompt injection" detection; it helps catch demos/tests where
+        images contain arbitrary overlay text (e.g., "Hello World" + emojis) that
+        should not be treated as a valid product/damage photo.
+        """
+        t = (text or "").strip()
+        if not t:
+            return False
+        tl = t.lower()
+        if "hello world" in tl or "lorem ipsum" in tl:
+            return True
+        # Emoji/unicode-heavy overlays (common in stock photos or adversarial stickers).
+        try:
+            non_ascii = sum(1 for c in t if ord(c) > 127)
+            if non_ascii >= 2:
+                return True
+        except Exception:
+            pass
+        # If it's mostly symbols/punctuation, it's likely an overlay rather than an order id or serial.
+        try:
+            alnum = sum(1 for c in t if c.isalnum())
+            if len(t) >= 12 and (alnum / max(1, len(t))) < 0.35:
+                return True
+        except Exception:
+            pass
+        return False
+
     expected_family = _expected_product_family(description, issue_type)
     images_out: List[Dict[str, Any]] = []
     mismatch_count = 0
@@ -425,6 +454,10 @@ async def _evaluate_uploaded_images_consistency(
                 if status == "match":
                     status = "suspicious"
                 reasons.append("ocr_prompt_pattern_detected")
+            elif _detect_unrelated_overlay_text(ocr_text):
+                if status == "match":
+                    status = "suspicious"
+                reasons.append("ocr_unrelated_overlay_detected")
 
             if order_id and ocr_text:
                 lt = ocr_text.lower()
@@ -1079,6 +1112,7 @@ async def submit_complaint(
     # Barcode/QR payload scan (best-effort) to catch encoded prompt-injection text.
     qr_decode_hits: List[Dict[str, Any]] = []
     qr_prompt_injection = False
+    qr_external_url = False
     try:
         from src.app.rules.barcode_decode import decode_barcodes
 
@@ -1094,9 +1128,74 @@ async def submit_complaint(
             if _detect_ocr_prompt_injection(str(c.get("data") or "")):
                 qr_prompt_injection = True
                 break
+        # External URL indirection (common for indirect prompt injection / phishing).
+        try:
+            from urllib.parse import urlparse
+            allow_hosts = {"127.0.0.1", "localhost"}
+            for c in qr_decode_hits:
+                data = str(c.get("data") or "").strip()
+                if data.lower().startswith(("http://", "https://")):
+                    host = (urlparse(data).hostname or "").lower()
+                    if host and host not in allow_hosts:
+                        qr_external_url = True
+                        break
+        except Exception:
+            qr_external_url = False
     except Exception:
         qr_decode_hits = []
         qr_prompt_injection = False
+        qr_external_url = False
+
+    # Fold QR findings into image-consistency UX (soft verification) so the user is prompted
+    # to reupload unedited images without codes/overlays.
+    try:
+        if isinstance(image_consistency, dict) and isinstance(image_consistency.get("images"), list) and qr_decode_hits:
+            images_out = image_consistency.get("images") or []
+            # Prefer tagging the first sanitized image; this flow is typically single-image.
+            for im in images_out:
+                try:
+                    if int(im.get("index", -1)) != 0:
+                        continue
+                except Exception:
+                    continue
+                reasons = im.get("reasons")
+                if not isinstance(reasons, list):
+                    reasons = []
+                if "qr_code_detected" not in reasons:
+                    reasons.append("qr_code_detected")
+                if qr_external_url and "qr_external_url_detected" not in reasons:
+                    reasons.append("qr_external_url_detected")
+                im["reasons"] = reasons[:6]
+                # Elevate status for security review of the evidence itself.
+                if str(im.get("status") or "match") == "match":
+                    im["status"] = "suspicious"
+                break
+            # Recompute counts from per-image statuses
+            mismatch_count = 0
+            needs_better_count = 0
+            suspicious_count = 0
+            for im in images_out:
+                st = str(im.get("status") or "").lower()
+                if st in ("mismatch", "suspicious"):
+                    mismatch_count += 1
+                if st == "needs_better_image":
+                    needs_better_count += 1
+                if st == "suspicious":
+                    suspicious_count += 1
+            image_consistency["mismatch_count"] = mismatch_count
+            image_consistency["needs_better_count"] = needs_better_count
+            image_consistency["suspicious_count"] = suspicious_count
+            image_consistency["status"] = "mismatch" if mismatch_count > 0 else ("needs_better_image" if needs_better_count > 0 else "match")
+            image_consistency["soft_verify_required"] = bool(image_consistency["status"] in ("mismatch", "needs_better_image"))
+            # Stronger (but still polite) user prompt when codes are present.
+            image_consistency["prompt"] = (
+                "For your security, we can't accept photos that include QR codes or external links. "
+                "Please upload a new, unedited photo of the item and the damaged area (no stickers, overlays, or QR codes)."
+                if qr_external_url
+                else "For your security, please reupload a new, unedited photo without any QR codes or overlays."
+            )
+    except Exception:
+        pass
 
     # Determine tenant from request header if present
     tenant_id = None
@@ -1312,6 +1411,12 @@ async def submit_complaint(
     if bool(image_consistency.get("ocr_prompt_injection")) or bool(qr_prompt_injection):
         rule_eval["rules"].append({"id": "CV41", "name": "ocr_prompt_injection", "severity": "high", "reason": "encoded_prompt_injection"})
         rule_eval["signals"]["ocr_prompt_injection"] = True
+    if qr_decode_hits:
+        rule_eval["signals"]["qr_code_detected"] = True
+    if qr_external_url:
+        rule_eval["signals"]["qr_external_url_detected"] = True
+    if qr_prompt_injection:
+        rule_eval["signals"]["qr_prompt_injection"] = True
     if order_id and order_exists is False:
         # Severity is finalized after risk quantification thresholding.
         rule_eval["signals"]["order_id_not_found"] = True
@@ -1335,7 +1440,9 @@ async def submit_complaint(
             "qr_codes": qr_decode_hits,
             "supplier_signals": supplier_signals,
             "cv_rules": rule_eval.get("rules"),
-            "cv_signals": rule_eval.get("signals"),
+            # Merge CV rule signals with fraud/forensics signals so the observer can map them
+            # into MITRE/OWASP and raise severity when appropriate.
+            "cv_signals": {**(rule_eval.get("signals") or {}), **(signals or {})},
         }
         security_analysis = analyze_payload(security_payload)
         security_details = security_analysis.get("details") or {}

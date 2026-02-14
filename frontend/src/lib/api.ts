@@ -37,11 +37,13 @@ export async function safeJson(response: Response): Promise<any | null> {
 
 export async function cvAnalyze(payload: {
   case_id?: string;
+  order_id?: string;
   labels?: string[];
   extracted_text?: string | null;
   provider?: string;
   model?: string;
   images?: Array<{ name: string; size: number; type: string; width?: number; height?: number; sha256?: string; phash?: string }>;
+  images_b64?: string[];
   description?: string;
   issue_type?: string;
 }) {

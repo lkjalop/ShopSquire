@@ -95,13 +95,13 @@ function humanizeKey(key: string): string {
 }
 
 function renderValue(value: any) {
-  if (value === null || value === undefined) return <span className={styles.muted}>—</span>;
+  if (value === null || value === undefined) return <span className={styles.muted}>--</span>;
   if (typeof value === 'boolean') {
     return <span className={value ? styles.booleanYes : styles.booleanNo}>{value ? 'Yes' : 'No'}</span>;
   }
   if (typeof value === 'number') return <span className={styles.mono}>{value}</span>;
   if (typeof value === 'string') {
-    const trimmed = value.length > 220 ? `${value.slice(0, 220)}…` : value;
+    const trimmed = value.length > 220 ? `${value.slice(0, 220)}...` : value;
     return <span className={styles.valueText} title={value}>{trimmed}</span>;
   }
   if (Array.isArray(value)) {
@@ -118,7 +118,7 @@ function renderValue(value: any) {
   return <span className={styles.valueText}>{String(value)}</span>;
 }
 
-export default function DecisionTrace({ traceId, onClose }: { traceId: string; onClose: () => void }) {
+export default function DecisionTrace({ traceId, onClose }: { traceId: string | null; onClose: () => void }) {
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
@@ -154,8 +154,11 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string; o
     if (!isDragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const newX = Math.max(0, Math.min(window.innerWidth - 400, e.clientX - dragStartPos.current.x));
-      const newY = Math.max(0, Math.min(window.innerHeight - 100, e.clientY - dragStartPos.current.y));
+      const rect = modalRef.current?.getBoundingClientRect();
+      const w = rect?.width ?? 400;
+      const h = rect?.height ?? 100;
+      const newX = Math.max(0, Math.min(window.innerWidth - w, e.clientX - dragStartPos.current.x));
+      const newY = Math.max(0, Math.min(window.innerHeight - h, e.clientY - dragStartPos.current.y));
       setPosition({ x: newX, y: newY });
     };
 
@@ -171,6 +174,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string; o
 
   // Detach to new window
   const handleDetach = () => {
+    if (!traceId) return;
     const width = 750;
     const height = 600;
     const left = window.screenX + (window.innerWidth - width) / 2;
@@ -232,6 +236,15 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string; o
   };
 
   useEffect(() => {
+    if (!traceId) {
+      setTrace(null);
+      setEvents([]);
+      setExplain(null);
+      setReplay(null);
+      setUpdating(false);
+      setStreamMode('poll');
+      return;
+    }
     let mounted = true;
     const ctl = new AbortController();
     let es: EventSource | null = null;
@@ -503,11 +516,16 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string; o
         >
           <div className={styles.headerLeft}>
             <strong>Decision Trace</strong>
+            {traceId ? (
+              <span className={styles.traceId} title={traceId}>{traceId.slice(0, 12)}</span>
+            ) : (
+              <span className={styles.traceIdMuted} title="No trace id yet">no trace id</span>
+            )}
             {ms.tier != null && <span className={styles.tier}>Tier {ms.tier}</span>}
             {/* Show NLP gate quick badge when available */}
             {qualityPayload && (
-              <span className={`${styles.gateBadge} ${qualityPayload.decision === 'allow' ? styles.gateAllow : (qualityPayload.decision === 'review' ? styles.gateReview : styles.gateAbstain)}`} title={`NLP gate: ${qualityPayload.decision || '—'}`}>
-                NLP: {qualityPayload.decision?.toUpperCase() || '—'}
+              <span className={`${styles.gateBadge} ${qualityPayload.decision === 'allow' ? styles.gateAllow : (qualityPayload.decision === 'review' ? styles.gateReview : styles.gateAbstain)}`} title={`NLP gate: ${qualityPayload.decision || '--'}`}>
+                NLP: {qualityPayload.decision?.toUpperCase() || '--'}
               </span>
             )}
             {updating && <span className={styles.updating}>updating</span>}
@@ -519,7 +537,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string; o
             <button className={styles.iconBtn} onClick={() => setMinimized(!minimized)} title={minimized ? 'Expand' : 'Minimize'}>
               <MinimizeIcon />
             </button>
-            <button className={styles.iconBtn} onClick={handleDetach} title="Pop-out to new window">
+            <button className={styles.iconBtn} onClick={handleDetach} disabled={!traceId} title={traceId ? 'Pop-out to new window' : 'Pop-out available after a trace id is created'}>
               <DetachIcon />
             </button>
             <button className={styles.iconBtn} onClick={onClose} title="Close">
@@ -540,6 +558,11 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string; o
 
             {/* Content */}
             <div className={styles.body}>
+              {!traceId && (
+                <div className={styles.empty} style={{ marginBottom: 10 }}>
+                  No decision trace yet. Run a query (chat) or submit/analyze a CV case to generate a trace id.
+                </div>
+              )}
               {activeTab === 'events' && (
                 <table className={styles.table}>
                   <thead>
@@ -612,11 +635,11 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string; o
                 <div className={styles.summaryPane}>
                   <div className={styles.kvRow}><span>Decision ID</span><span>{trace.decision_id}</span></div>
                   <div className={styles.kvRow}><span>Timestamp</span><span>{trace.timestamp}</span></div>
-                  <div className={styles.kvRow}><span>Query</span><span>{trace.input_query || '—'}</span></div>
-                  <div className={styles.kvRow}><span>Model</span><span>{ms.selected || '—'}</span></div>
-                  <div className={styles.kvRow}><span>Path</span><span>{Array.isArray(ms.path) ? ms.path.join(' → ') : '—'}</span></div>
-                  <div className={styles.kvRow}><span>Latency</span><span>{ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '—'}</span></div>
-                  <div className={styles.kvRow}><span>Intent</span><span>{ms.intent_summary || '—'}</span></div>
+                  <div className={styles.kvRow}><span>Query</span><span>{trace.input_query || '--'}</span></div>
+                  <div className={styles.kvRow}><span>Model</span><span>{ms.selected || '--'}</span></div>
+                  <div className={styles.kvRow}><span>Path</span><span>{Array.isArray(ms.path) ? ms.path.join(' -> ') : '--'}</span></div>
+                  <div className={styles.kvRow}><span>Latency</span><span>{ms.latency_ms != null ? `${Math.round(ms.latency_ms)}ms` : '--'}</span></div>
+                  <div className={styles.kvRow}><span>Intent</span><span>{ms.intent_summary || '--'}</span></div>
                   <div className={styles.kvRow}>
                     <span>Tier Decision</span>
                     <span>

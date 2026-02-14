@@ -309,6 +309,13 @@ if 'pytest' in globals() and pytest is not None:
 
         Mocks both async (`httpx.AsyncClient.post`) and sync (`httpx.Client.post`) usage.
         """
+        # Allow disabling global httpx mocking when tests need real client behavior.
+        try:
+            if os.getenv("DISABLE_GLOBAL_HTTPX_MOCK", "0").lower() in ("1", "true", "yes"):
+                yield
+                return
+        except Exception:
+            pass
         try:
             import httpx
         except Exception:
@@ -377,6 +384,13 @@ if 'pytest' in globals() and pytest is not None:
     @pytest.fixture(autouse=True)
     def _mock_heavy_services(monkeypatch):
         """Mock heavy CV and reverse search services to speed up tests and avoid external calls."""
+        # Allow disabling heavy service mocks for targeted integration tests.
+        try:
+            if os.getenv("DISABLE_HEAVY_SERVICE_MOCK", "0").lower() in ("1", "true", "yes"):
+                yield
+                return
+        except Exception:
+            pass
         try:
             from src.app.services.cv_provider import ManagedCVProvider
         except Exception:

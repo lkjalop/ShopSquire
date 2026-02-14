@@ -20,6 +20,13 @@ export type Product = {
 type RightPanelMode = 'none' | 'grid' | 'list' | 'compare' | 'cv' | 'cart' | 'faq' | 'security';
 type ChatMessage = { role: 'user' | 'assistant'; content: string; timestamp: Date };
 
+type BackendStatus = {
+  ok: boolean;
+  latencyMs: number | null;
+  checkedAt: Date | null;
+  error?: string | null;
+};
+
 
 function useProducts() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -59,11 +66,26 @@ function detectPII(text: string): PIIMatch {
   const cardMatch = text.match(/\b(?:\d[ -]*?){13,19}\b/);
   if (cardMatch) {
     const digits = cardMatch[0].replace(/\D/g, '');
-    if (digits.length >= 13 && digits.length <= 19 && luhnCheck(digits)) {
-      return {
-        type: 'credit card number',
-        advice: 'Never share payment card details in chat. Use our secure checkout instead.'
-      };
+    if (digits.length >= 13 && digits.length <= 19) {
+      // If it's a real-looking PAN (passes Luhn), block immediately.
+      if (luhnCheck(digits)) {
+        return {
+          type: 'credit card number',
+          advice: 'Never share payment card details in chat. Use our secure checkout instead.'
+        };
+      }
+
+      // Demo/real-world: users often paste fake/test numbers that fail Luhn.
+      // If strong card context is present (keywords or expiry), treat as PCI anyway.
+      const hasCardHint = /\b(card|credit|debit|visa|mastercard|amex|american\s+express|discover)\b/i.test(text);
+      const hasCvvHint = /\b(cvv|cvc|security\s*code|card\s*verification)\b/i.test(text);
+      const hasExpiry = /\b(0[1-9]|1[0-2])\s*[/\-]\s*(\d{2}|\d{4})\b/.test(text);
+      if (hasCardHint || hasCvvHint || hasExpiry) {
+        return {
+          type: 'payment card details',
+          advice: 'Never share card numbers, expiry dates, or CVV in chat. Use secure checkout instead.'
+        };
+      }
     }
   }
 
@@ -139,6 +161,7 @@ export default function App() {
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>({ ok: false, latencyMs: null, checkedAt: null, error: null });
   const [escalationOpen, setEscalationOpen] = useState(false);
   const [escalationIncidentId, setEscalationIncidentId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -146,8 +169,47 @@ export default function App() {
   const [isThinking, setIsThinking] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [cvPrefillImages, setCvPrefillImages] = useState<File[]>([]);
+  const [lastCvSecurityNoteKey, setLastCvSecurityNoteKey] = useState<string | null>(null);
   const uid = (localStorage.getItem('uid') || 'demo-user');
   const [cart, setCart] = useState<any | null>(null);
+
+  const maybeAppendCvSecurityNote = (cvResult: any) => {
+    if (!cvResult || typeof cvResult !== 'object') return;
+
+    const tags = Array.isArray(cvResult.evidence_tags) ? cvResult.evidence_tags.map(String) : [];
+    const ic = (cvResult.image_consistency && typeof cvResult.image_consistency === 'object') ? cvResult.image_consistency : null;
+
+    const reasons = new Set<string>();
+    try {
+      const imgs = Array.isArray(ic?.images) ? ic.images : [];
+      for (const it of imgs) {
+        const rs = Array.isArray(it?.reasons) ? it.reasons : [];
+        rs.forEach((r: any) => reasons.add(String(r)));
+      }
+    } catch {
+      // ignore
+    }
+
+    const hasQr = tags.includes('qr_url_present') || reasons.has('qr_code_detected') || reasons.has('qr_external_url_detected');
+    const hasManipulation = tags.includes('manipulation_detected') || reasons.has('manipulation_detected');
+    if (!hasQr && !hasManipulation) return;
+
+    const noteKey = String(cvResult.case_id || cvResult.trace_id || cvResult.decision_id || '') + `|qr=${hasQr}|manip=${hasManipulation}`;
+    if (noteKey && noteKey === lastCvSecurityNoteKey) return;
+
+    const parts: string[] = [];
+    if (hasQr) parts.push('a QR code or external link');
+    if (hasManipulation) parts.push('signs the photo may be edited or altered');
+
+    const what = parts.length === 2 ? `${parts[0]} and ${parts[1]}` : parts[0];
+    const msg =
+      `Security note: One of your photos appears to include ${what}.\n\n` +
+      `For your safety, we do not follow links or accept photos with added overlays for verification. ` +
+      `Please re-upload a new, unedited photo of the item and the damage (no stickers, text overlays, or QR codes).`;
+
+    setLastCvSecurityNoteKey(noteKey || null);
+    setMessages(prev => [...prev, { role: 'assistant', content: msg, timestamp: new Date() }]);
+  };
 
   const refreshCart = async () => {
     try {
@@ -261,6 +323,38 @@ export default function App() {
       document.body.style.overflow = '';
     }
     return () => { document.body.style.overflow = ''; };
+  }, [chatOpen]);
+
+  // Lightweight backend liveness indicator (dev UX). Uses Vite proxy for /healthz.
+  useEffect(() => {
+    if (!chatOpen) return;
+    let mounted = true;
+    let iv: any = null;
+
+    const ping = async () => {
+      const ctl = new AbortController();
+      const t0 = performance.now();
+      const to = setTimeout(() => ctl.abort(), 2500);
+      try {
+        const r = await fetch(apiUrl('/healthz'), { signal: ctl.signal });
+        const ms = Math.round(performance.now() - t0);
+        if (!mounted) return;
+        setBackendStatus({ ok: r.ok, latencyMs: ms, checkedAt: new Date(), error: r.ok ? null : `http_${r.status}` });
+      } catch (e: any) {
+        const ms = Math.round(performance.now() - t0);
+        if (!mounted) return;
+        setBackendStatus({ ok: false, latencyMs: ms, checkedAt: new Date(), error: e?.name === 'AbortError' ? 'timeout' : (e?.message || 'fetch_failed') });
+      } finally {
+        clearTimeout(to);
+      }
+    };
+
+    ping();
+    iv = setInterval(ping, 5000);
+    return () => {
+      mounted = false;
+      if (iv) clearInterval(iv);
+    };
   }, [chatOpen]);
 
   const handleSend = async () => {
@@ -380,12 +474,13 @@ export default function App() {
           setMessages(prev => [...prev, assistantMsg]);
         }
       }
-    } catch {
+    } catch (e: any) {
       setTraceId(null);
       setRightPanelMode('none');
+      const errMsg = (e && (e.message || String(e))) ? (e.message || String(e)) : 'unknown_error';
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Backend unavailable. Decision Trace was not recorded. Please check the API connection and try again.',
+        content: `Backend unavailable. Decision Trace was not recorded.\n\nTroubleshooting:\n- Confirm FastAPI is running (default: http://127.0.0.1:8081).\n- Vite proxy should forward /api to the backend.\n- Error: ${errMsg}`,
         timestamp: new Date(),
       }]);
       return;
@@ -447,13 +542,25 @@ export default function App() {
             {/* Chat Panel */}
             <div className={styles.chatPanel}>
               <div className={styles.chatHeader}>
-                <span className={styles.chatTitle}>ShopSquire Assistant</span>
+                <div className={styles.chatHeaderLeft}>
+                  <span className={styles.chatTitle}>ShopSquire Assistant</span>
+                  <span
+                    className={`${styles.backendPill} ${backendStatus.ok ? styles.backendUp : styles.backendDown}`}
+                    title={
+                      backendStatus.checkedAt
+                        ? `Backend: ${backendStatus.ok ? 'UP' : 'DOWN'}${backendStatus.latencyMs != null ? ` (${backendStatus.latencyMs}ms)` : ''}${backendStatus.error ? ` | ${backendStatus.error}` : ''}`
+                        : 'Backend: unknown'
+                    }
+                  >
+                    <span className={styles.backendDot} />
+                    {backendStatus.ok ? `API ${backendStatus.latencyMs != null ? `${backendStatus.latencyMs}ms` : 'up'}` : 'API down'}
+                  </span>
+                </div>
                 <div className={styles.chatHeaderActions}>
                   <button
                     className={styles.iconBtn}
-                    onClick={() => traceId && setTraceOpen(true)}
-                    title={traceId ? 'Decision Trace' : 'Decision Trace (available after first routed decision)'}
-                    disabled={!traceId}
+                    onClick={() => setTraceOpen(true)}
+                    title={traceId ? 'Decision Trace' : 'Decision Trace (opens after a routed decision creates a trace id)'}
                     aria-label="Decision Trace"
                   >
                     <GearIcon />
@@ -548,7 +655,10 @@ export default function App() {
                         setMessages(prev => [...prev, { role: 'assistant', content: 'Escalated to human review. Opening escalation room...', timestamp: new Date() }]);
                       }}
                       onTraceId={(tid) => setTraceId(tid)}
-                      onResult={() => setCvPrefillImages([])}
+                      onResult={(cvRes: any) => {
+                        setCvPrefillImages([]);
+                        maybeAppendCvSecurityNote(cvRes);
+                      }}
                     />
                   ) : rightPanelMode === 'compare' && displayProducts.length > 0 ? (
                     <div className={styles.compareTable}>
@@ -597,7 +707,7 @@ export default function App() {
       )}
 
       {/* Decision Trace Modal */}
-      {traceOpen && traceId && <DecisionTrace traceId={traceId} onClose={() => setTraceOpen(false)} />}
+      {traceOpen && <DecisionTrace traceId={traceId} onClose={() => setTraceOpen(false)} />}
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (

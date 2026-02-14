@@ -49,8 +49,39 @@ async def chat_query(
             headers["x-api-key"] = "local-merchant-key"
         async with httpx.AsyncClient(timeout=8.0) as client:
             r = await client.get(url, params=params, headers=headers)
+            data = {}
+            try:
+                data = r.json()
+            except Exception:
+                data = {}
+            if r.status_code == 403 and isinstance(data, dict):
+                # Safety/policy blocks are a normal outcome; surface them as a friendly chat response.
+                blocked = data.get("detail") if isinstance(data.get("detail"), dict) else data
+                decision_trace_id = (
+                    blocked.get("trace_id")
+                    or blocked.get("decision_trace_id")
+                    or blocked.get("decision_id")
+                    or blocked.get("approval_id")
+                )
+                msg = blocked.get("message") or "This request was blocked due to safety checks. A human will review it."
+                followups = [
+                    {"id": "remove_sensitive", "text": "Can you rephrase without any personal info, order numbers, or long digit strings?", "goal": "safety_rephrase"},
+                    {"id": "use_budget_words", "text": "If you meant a price range, try: 'budget between $900 and $1300'.", "goal": "clarify_details"},
+                ]
+                return {
+                    "products": [],
+                    "view_mode": "cards",
+                    "confidence": None,
+                    "decision_trace_id": decision_trace_id,
+                    "trace_id": decision_trace_id,
+                    "assistant_message": msg,
+                    "next_questions": followups,
+                    "llm_model": blocked.get("llm_model"),
+                    "model_tier": blocked.get("model_tier") or blocked.get("tier"),
+                    "blocked": True,
+                    "blocked_detail": blocked,
+                }
             r.raise_for_status()
-            data = r.json()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"recommend_unavailable: {e}")
 

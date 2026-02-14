@@ -227,6 +227,27 @@ def analyze_agent_outbound_email(
                 reasons.append("periodic_beacon_like_timing")
                 score += 0.55
 
+        # Destination drift: many distinct domains in short window
+        try:
+            uniq_domains = len({e.get("to_domain_hash") for e in events if e.get("to_domain_hash")})
+            if uniq_domains >= 3:
+                reasons.append("destination_drift")
+                score += 0.3
+        except Exception:
+            pass
+
+    # Thread coherence: frequent thread_id changes within short window indicate automation vs conversation.
+    try:
+        thread_ids = [e.get("thread_id_hash") for e in events if e.get("thread_id_hash")]
+        uniq_threads = len(set([t for t in thread_ids if t]))
+        if uniq_threads >= 4:
+            ratio = float(uniq_threads) / float(max(1, len(events)))
+            if ratio >= 0.6:
+                reasons.append("thread_coherence_low")
+                score += 0.25
+    except Exception:
+        pass
+
     anomalous = bool(reasons) and score >= 0.6
     return {
         "agent_id": agent_id,
@@ -247,6 +268,7 @@ def store_outbound_anomaly(
     analysis: Dict[str, Any],
     severity: str = "high",
     now_ts: int | None = None,
+    decision_id: str | None = None,
 ) -> Optional[str]:
     _ensure_tables()
     if not analysis.get("anomalous"):
@@ -279,6 +301,64 @@ def store_outbound_anomaly(
             db.commit()
     except Exception:
         return None
+    # Emit trace events best-effort for anomaly containment and visibility.
+    try:
+        if decision_id:
+            try:
+                log_trace_event(
+                    trace_id=decision_id,
+                    event_type="outbound_email_anomaly_detected",
+                    source_type="agent",
+                    source_id="Outbound_Comms_Monitor",
+                    target_type="email",
+                    target_id=event_id,
+                    payload={
+                        "anomaly_id": an_id,
+                        "severity": severity,
+                        "reasons": reasons,
+                        "score": float(analysis.get("score") or 0.0),
+                    },
+                )
+            except Exception:
+                pass
+            try:
+                contain_env = str(__import__("os").getenv("OUTBOUND_CONTAIN_ON_ANOMALY", "0")).strip().lower() in ("1", "true", "yes")
+            except Exception:
+                contain_env = False
+            try:
+                if contain_env and (severity in ("high", "critical") or float(analysis.get("score") or 0.0) >= 0.7):
+                    log_trace_event(
+                        trace_id=decision_id,
+                        event_type="agent_contained",
+                        source_type="agent",
+                        source_id="Outbound_Comms_Monitor",
+                        target_type="agent",
+                        target_id=agent_id,
+                        payload={
+                            "mechanism": "outbound_email_monitor",
+                            "scope": "email_outbound",
+                            "reasons": reasons,
+                            "severity": severity,
+                        },
+                    )
+                    # Hook: inform policy gate/controls to revoke outbound email capability for this agent.
+                    log_trace_event(
+                        trace_id=decision_id,
+                        event_type="policy_capability_revoked",
+                        source_type="agent",
+                        source_id="Outbound_Comms_Monitor",
+                        target_type="policy",
+                        target_id="capability:email_outbound",
+                        payload={
+                            "agent_id": agent_id,
+                            "capability": "email_outbound",
+                            "reason": "anomaly_detected",
+                        },
+                    )
+            except Exception:
+                pass
+    except Exception:
+        pass
     return an_id
 
 
@@ -318,4 +398,51 @@ def list_outbound_anomalies(*, limit: int = 100) -> List[Dict[str, Any]]:
             )
         return out
     except Exception:
-        return []
+            try:
+                contain_env = str(__import__("os").getenv("OUTBOUND_CONTAIN_ON_ANOMALY", "0")).strip().lower() in ("1", "true", "yes")
+            except Exception:
+                contain_env = False
+            try:
+                if contain_env and (severity in ("high", "critical") or float(analysis.get("score") or 0.0) >= 0.7):
+                    # Persist capability revoke via agent_containment service (policy-style control)
+                    try:
+                        from src.app.services.agent_containment import contain_agent
+                        ttl_env = __import__("os").getenv("OUTBOUND_CONTAIN_TTL_SECONDS", "900")
+                        ttl = None
+                        try:
+                            ttl = int(ttl_env)
+                        except Exception:
+                            ttl = None
+                        contain_agent(
+                            tenant_id=tenant_id,
+                            agent_id=agent_id,
+                            capability="email_outbound",
+                            score=float(analysis.get("score") or 0.0),
+                            reasons=reasons,
+                            actor="Outbound_Comms_Monitor",
+                            decision_id=decision_id,
+                            trace_id=decision_id,
+                            ttl_seconds=ttl,
+                        )
+                    except Exception:
+                        pass
+                    # Also emit a lightweight containment trace for UIs that don’t read containment table yet.
+                    try:
+                        log_trace_event(
+                            trace_id=decision_id,
+                            event_type="agent_contained",
+                            source_type="agent",
+                            source_id="Outbound_Comms_Monitor",
+                            target_type="agent",
+                            target_id=agent_id,
+                            payload={
+                                "mechanism": "outbound_email_monitor",
+                                "scope": "email_outbound",
+                                "reasons": reasons,
+                                "severity": severity,
+                            },
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass

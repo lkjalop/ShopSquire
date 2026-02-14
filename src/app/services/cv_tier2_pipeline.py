@@ -389,9 +389,24 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         sig = {}
     try:
         # CV lane doesn't always have DREAD/CVSS; reuse threat_enrichment when ATLAS tags apply.
-        # For now, map manipulation/QR into ATLAS evasion/obfuscation.
+        # Map manipulation/QR/overlay-text into ATLAS tags so CV produces non-empty taxonomies.
+        mitre_attack: List[str] = []
+        if sig.get("manipulation_detected") or sig.get("ocr_adversarial_typography"):
+            mitre_attack.append("AML.T0015")  # evasion/obfuscation via visual manipulation
+        if sig.get("qr_url_present") or sig.get("prompt_injection_text") or sig.get("qr_url_suspicious"):
+            mitre_attack.append("AML.T0043")  # adversarial data / prompt injection via indirection
+
+        # For OWASP mapping, expose canonical signal names the map understands.
+        try:
+            if sig.get("qr_url_present") or sig.get("prompt_injection_text") or sig.get("qr_url_suspicious"):
+                sig.setdefault("prompt_injection", True)
+            if sig.get("manipulation_detected"):
+                sig.setdefault("supply_chain", True)
+        except Exception:
+            pass
+
         tc = {
-            "mitre_attack": ["AML.T0015"] if (sig.get("manipulation_detected") or sig.get("ocr_adversarial_typography")) else [],
+            "mitre_attack": mitre_attack,
             "dread": {"damage": 6.5, "reproducibility": 6.0, "exploitability": 5.8, "affected_users": 4.8, "discoverability": 6.2, "avg": 5.86},
             "cvss": {"score": 6.4, "severity": "medium", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:M/I:M/A:L"},
             "kev": [],

@@ -138,6 +138,7 @@ export default function RightPanelExtras({
     if (status === 'needs_better_image') return { label: 'needs better image', bg: '#fff8e1', fg: '#8a6100' };
     if (status === 'mismatch') return { label: 'mismatch', bg: '#ffebee', fg: '#8b0000' };
     if (status === 'suspicious') return { label: 'suspicious', bg: '#fce4ec', fg: '#880e4f' };
+    if (status === 'not_analyzed') return { label: 'not analyzed', bg: '#eef2ff', fg: '#3730a3' };
     return { label: 'pending', bg: '#f3f4f6', fg: '#374151' };
   };
 
@@ -148,6 +149,9 @@ export default function RightPanelExtras({
     if (r.includes('low_visual_evidence')) return 'Retake in bright light, close focus, and steady framing.';
     if (r.includes('invalid_or_unsupported_image')) return 'Use JPG/PNG/WebP under size limits and re-upload.';
     if (r.includes('ocr_prompt_pattern_detected')) return 'Remove overlays, text stickers, or encoded instructions.';
+    if (r.includes('ocr_unrelated_overlay_detected')) return 'Avoid stock photos or images with overlay text/stickers; upload a real photo of the item.';
+    if (r.includes('qr_external_url_detected')) return 'Remove QR codes/external links; upload a clean photo of the item and damage (no codes or overlays).';
+    if (r.includes('qr_code_detected')) return 'Upload a new photo without any QR codes or overlays.';
     if (r.includes('order_id_not_visible_or_mismatch')) return 'Add receipt/invoice photo showing the same order ID.';
     return 'Provide a clearer product-focused image for verification.';
   };
@@ -248,12 +252,16 @@ export default function RightPanelExtras({
     onResult?.(null);
     try {
       const sanitized = await buildSanitizedImages(images);
+      const imageB64s = images.length > 0 ? await Promise.all(images.map(fileToBase64)) : [];
       const resp = await cvAnalyze({
         images: sanitized,
+        images_b64: imageB64s,
+        order_id: orderId,
         description,
         issue_type: issueType,
       });
       const resolvedTraceId = (resp as any)?.trace_id || resp.case_id || null;
+      const ic = (resp as any)?.image_consistency || null;
       const cvRes: CVSubmitResult = {
         decision_id: undefined,
         trace_id: resolvedTraceId || undefined,
@@ -264,17 +272,17 @@ export default function RightPanelExtras({
         human_review: false,
         evidence_tags: [],
         playbook_preview: undefined,
-        image_consistency: {
-          status: 'match',
+        image_consistency: ic || {
+          status: 'not_analyzed',
           mismatch_count: 0,
           suspicious_count: 0,
           needs_better_count: 0,
           repeat_mismatch: false,
-          images: imageUrls.map((_, idx) => ({ index: idx, status: 'pending', reasons: [] })),
+          images: imageUrls.map((_, idx) => ({ index: idx, status: 'not_analyzed', reasons: [] })),
           prompt: null,
         },
         order_validation: null,
-        user_prompt: null,
+        user_prompt: ic?.prompt || null,
         ui_actions: { chat_with_admin: false },
       };
       onTraceId?.(resolvedTraceId);
@@ -392,10 +400,13 @@ export default function RightPanelExtras({
           <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Evidence Rail</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto', paddingRight: 4 }}>
             {imageUrls.map((u, i) => {
-              const evidence = imageStatusByIndex.get(i);
-              const badge = statusMeta(evidence?.status);
-              const reason = evidence?.reasons && evidence.reasons.length > 0 ? evidence.reasons[0] : 'awaiting verification';
-              const hint = remediationHint(reason);
+              const hasIc = Boolean(result?.image_consistency && Array.isArray((result as any).image_consistency?.images));
+              const evidence = hasIc ? imageStatusByIndex.get(i) : undefined;
+              const badge = statusMeta(hasIc ? evidence?.status : 'not_analyzed');
+              const reason = hasIc
+                ? (evidence?.reasons && evidence.reasons.length > 0 ? evidence.reasons[0] : 'awaiting verification')
+                : 'not analyzed yet';
+              const hint = hasIc ? remediationHint(reason) : 'Click Analyze or Submit to validate these photos.';
               return (
                 <div
                   key={i}
@@ -435,7 +446,7 @@ export default function RightPanelExtras({
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: '#4b5563', marginTop: 4 }}>
-                      Why flagged: {reason.replaceAll('_', ' ')}
+                      {hasIc ? `Why flagged: ${reason.replaceAll('_', ' ')}` : `Status: ${reason}`}
                     </div>
                     <div style={{ fontSize: 11, color: '#065f46', marginTop: 2 }}>
                       How to fix: {hint}
