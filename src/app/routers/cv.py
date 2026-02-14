@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 import time
@@ -23,6 +23,8 @@ from src.app.services.tenant_quota import TenantQuotaGuard
 from src.app.policy.vertical_pack import load_vertical_pack, resolve_pack_id
 from src.app.rules.image_quality import assess_image_quality
 from src.app.services.dependency_resilience import call_with_resilience
+from src.app.models.db import db_session
+from sqlalchemy import text as sql_text
 
 
 router = APIRouter(prefix="/api/v1/cv", tags=["cv"])
@@ -208,7 +210,16 @@ def issue_nonce(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROL
 
 
 @router.post("/upload")
-async def upload(image: UploadFile = File(...), nonce: str | None = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict[str, Any]:
+async def upload(
+    image: UploadFile = File(...),
+    nonce: str | None = None,
+    order_id: str | None = Query(default=None),
+    sku: str | None = Query(default=None),
+    expected_label: str | None = Query(default=None),
+    issue_type: str | None = Query(default=None),
+    description: str | None = Query(default=None),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
     """Upload an image, run Tier 2 CV including forensics verdict, and return a decision hint.
 
     If `nonce` is provided, it is checked for recent issuance (best-effort).
@@ -224,6 +235,31 @@ async def upload(image: UploadFile = File(...), nonce: str | None = None, role: 
         except Exception:
             pass
         content = await image.read()
+        # Always allocate a unique case id for this upload so evidence/decisions don't collide on filename.
+        case_id = uuid.uuid4().hex
+
+        order_ctx = None
+        if order_id:
+            try:
+                with db_session() as db:
+                    row = db.execute(
+                        sql_text("SELECT id, customer_id, guest_email, status, total_cents, created_at FROM orders WHERE id = :id LIMIT 1"),
+                        {"id": order_id},
+                    ).fetchone()
+                if row:
+                    order_ctx = {
+                        "found": True,
+                        "id": row[0],
+                        "customer_id": row[1],
+                        "guest_email": row[2],
+                        "status": row[3],
+                        "total_cents": row[4],
+                        "created_at": str(row[5]),
+                    }
+                else:
+                    order_ctx = {"found": False, "id": order_id}
+            except Exception:
+                order_ctx = {"found": None, "id": order_id}
         # Optional per-environment S3 upload: when enabled, store sanitized image and pass URL into pipeline
         storage_url = None
         try:
@@ -284,7 +320,17 @@ async def upload(image: UploadFile = File(...), nonce: str | None = None, role: 
             "cv.tier2",
             lambda: run_tier2(
                 content,
-                meta={"filename": image.filename, "content_type": image.content_type},
+                meta={
+                    "case_id": case_id,
+                    "filename": image.filename,
+                    "content_type": image.content_type,
+                    "order_id": order_id,
+                    "order_ctx": order_ctx,
+                    "sku": sku,
+                    "expected_label": expected_label,
+                    "issue_type": issue_type,
+                    "description": description,
+                },
                 pack_id=pack_id,
             ),
             timeout_s=8.0,
@@ -298,7 +344,7 @@ async def upload(image: UploadFile = File(...), nonce: str | None = None, role: 
         # Minimal hints derived from verdict
         verdict = t2.get("verdict") or {}
         actions = verdict.get("required_actions") or []
-        trace_id = str(t2.get("trace_id") or t2.get("case_id") or image.filename or "cv-upload")
+        trace_id = str(t2.get("trace_id") or t2.get("case_id") or case_id)
         try:
             handoff_needed = any(
                 action in {"human_review", "manual_approval", "policy_escalation"}
@@ -323,7 +369,7 @@ async def upload(image: UploadFile = File(...), nonce: str | None = None, role: 
             actions.append("get_nonce_and_live_capture")
         # Best-effort persistence and trace for upload path (mirror analyze behavior)
         try:
-            case_id = trace_id or __import__("uuid").uuid4().hex
+            case_id = trace_id or case_id or __import__("uuid").uuid4().hex
             try:
                 persist_cv_analysis(
                     case_id=case_id,
@@ -370,35 +416,42 @@ async def upload(image: UploadFile = File(...), nonce: str | None = None, role: 
                 )
             except Exception:
                 pass
-            # Persist minimal decision when CV verdict indicates high severity
+            # Persist a decision log for the upload path so the UI always has a trace id to drill into.
+            # Approval is required only when actions imply human intervention; otherwise we record as completed.
             try:
                 verdict = (t2 or {}).get("verdict") or {}
                 required_actions = verdict.get("required_actions") or []
-                sev = (verdict.get("severity") or "").lower()
-                critical_actions = {"human_review", "manual_approval", "policy_escalation", "nonce_live_capture"}
-                if sev in ("high", "critical") or any(a in critical_actions for a in required_actions):
-                    try:
-                        input_payload = {"case_id": case_id, "filename": image.filename}
-                        retrieved_context = {"cv_analysis": t2, "evidence_id": evidence_id}
-                        proposed_action = {"required_actions": required_actions, "verdict": verdict}
-                        log_decision(
-                            agent_name="cv_forensics",
-                            input_data=input_payload,
-                            retrieved_context=retrieved_context,
-                            proposed_action=proposed_action,
-                            policy_version="v1",
-                            approval_required=True,
-                            execution_status="review_required",
-                            decision_id=case_id,
-                        )
-                    except Exception:
-                        pass
+                approval_actions = {"human_review", "manual_approval", "policy_escalation"}
+                approval_required = any(a in approval_actions for a in required_actions)
+                exec_status = "review_required" if approval_required else "completed"
+                try:
+                    input_payload = {"case_id": case_id, "filename": image.filename}
+                    retrieved_context = {"cv_analysis": t2, "evidence_id": evidence_id}
+                    proposed_action = {"required_actions": required_actions, "verdict": verdict}
+                    log_decision(
+                        agent_name="cv_forensics",
+                        input_data=input_payload,
+                        retrieved_context=retrieved_context,
+                        proposed_action=proposed_action,
+                        policy_version="v1",
+                        approval_required=approval_required,
+                        execution_status=exec_status,
+                        decision_id=case_id,
+                    )
+                except Exception:
+                    pass
             except Exception:
                 pass
         except Exception:
             pass
 
-        return {"status": "ok", "cv_tier2": t2, "nonce_ok": nonce_ok, "next_actions": actions[:6]}
+        return {
+            "status": "ok",
+            "case_id": case_id,
+            "cv_tier2": t2,
+            "nonce_ok": nonce_ok,
+            "next_actions": actions[:6],
+        }
     except Exception:
         # Avoid leaking internal exception details in HTTP response
         raise HTTPException(status_code=400, detail="upload failed: processing error")

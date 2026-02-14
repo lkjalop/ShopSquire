@@ -10,13 +10,93 @@ from src.app.services.image_forensics import ImageForensicsService, ForensicsRes
 from src.app.services.forensics_policy import evaluate as evaluate_forensics_policy
 from src.app.observability.metrics import record_cv_fraud
 from src.app.security.framework_correlation import correlate_security_analysis
+from src.app.services.cv_vision_ollama import vision_analyze_with_ollama
 
 import difflib
 import math
 import re
+import unicodedata
+from urllib.parse import urlparse
 
 
 _URL_RE = re.compile(r"https?://[^\s<>()\"']+")
+_PROMPT_INJECTION_RE = re.compile(
+    r"(ignore\s+policy|admin\s+override|override\s+token|approve\s+return|system\s+prompt|developer\s+mode|do\s+not\s+follow|exfiltrate|prompt\s+injection)",
+    re.IGNORECASE,
+)
+
+_SHORTENER_HOSTS = {
+    "bit.ly",
+    "t.co",
+    "tinyurl.com",
+    "is.gd",
+    "goo.gl",
+    "cutt.ly",
+    "shorturl.at",
+}
+
+
+def _nfkc_changed(s: str) -> bool:
+    try:
+        return unicodedata.normalize("NFKC", s or "") != (s or "")
+    except Exception:
+        return False
+
+
+def _has_suspicious_unicode(s: str) -> bool:
+    try:
+        for ch in (s or ""):
+            if ord(ch) > 127:
+                return True
+            cat = unicodedata.category(ch)
+            if cat in ("Cf", "Cs"):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _qr_url_risk(url: str) -> Dict[str, Any]:
+    """Heuristic URL risk without fetching it (safe evaluation only)."""
+    u = str(url or "").strip()
+    if not u:
+        return {"url": u, "risk": 0.0, "reasons": []}
+    reasons: List[str] = []
+    risk = 0.0
+    try:
+        p = urlparse(u)
+        host = (p.hostname or "").lower().strip(".")
+        if not host:
+            reasons.append("missing_host")
+            risk += 0.4
+        if p.scheme not in ("http", "https"):
+            reasons.append("non_http_scheme")
+            risk += 0.6
+        if p.username or p.password:
+            reasons.append("userinfo_in_url")
+            risk += 0.6
+        if host.startswith("xn--"):
+            reasons.append("punycode_host")
+            risk += 0.5
+        if host in _SHORTENER_HOSTS:
+            reasons.append("url_shortener")
+            risk += 0.4
+        if re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}", host or ""):
+            reasons.append("ip_literal_host")
+            risk += 0.6
+        if len(u) > 200:
+            reasons.append("very_long_url")
+            risk += 0.2
+        if any(tok in (p.path or "").lower() for tok in ("login", "verify", "reset", "invoice", "payment")):
+            reasons.append("high_risk_path_tokens")
+            risk += 0.2
+        if any(tok in (p.query or "").lower() for tok in ("redirect", "url=", "next=", "continue=")):
+            reasons.append("redirector_params")
+            risk += 0.2
+    except Exception:
+        reasons.append("parse_error")
+        risk += 0.4
+    return {"url": u[:2048], "risk": float(min(1.0, risk)), "reasons": reasons}
 
 
 def _detect_document_like(ocr_boxes: List[Dict[str, Any]]) -> bool:
@@ -96,6 +176,16 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     ocr_boxes = ocr.get("boxes") or []
     document_like = _detect_document_like(ocr_boxes)
 
+    filename = str(meta.get("filename") or "")
+    filename_unicode_nfkc = _nfkc_changed(filename)
+    filename_unicode_any = _has_suspicious_unicode(filename)
+
+    injection_phrases = []
+    try:
+        injection_phrases = sorted(list(set([m.group(0) for m in _PROMPT_INJECTION_RE.finditer(ocr_text or "")])))
+    except Exception:
+        injection_phrases = []
+
     # Dual OCR robustness (optional). Helps detect OCR-adversarial typography and disagreement.
     dual_ocr = None
     try:
@@ -156,6 +246,18 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
 
     # Evidence tags derived from tier2 signals
     evidence_tags: List[str] = []
+    try:
+        oc = meta.get("order_ctx")
+        if isinstance(oc, dict) and oc.get("found") is False:
+            evidence_tags.append("order_id_not_found")
+    except Exception:
+        pass
+    if filename_unicode_nfkc:
+        evidence_tags.append("filename_nfkc_changed")
+    if filename_unicode_any:
+        evidence_tags.append("filename_unicode_suspicious")
+    if injection_phrases:
+        evidence_tags.append("prompt_injection_text_suspected")
     if float(forensics.get("manipulation_score") or 0.0) >= 0.6:
         evidence_tags.append("manipulation_detected")
     if document_like:
@@ -185,6 +287,58 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         evidence_tags.append("qr_url_present")
         record_cv_fraud("robustness_qr_url_present")
 
+    qr_risks = []
+    try:
+        qr_risks = [_qr_url_risk(u) for u in qr_urls[:5]]
+    except Exception:
+        qr_risks = []
+    try:
+        if any(float(r.get("risk") or 0.0) >= 0.6 for r in (qr_risks or [])):
+            evidence_tags.append("qr_url_suspicious")
+    except Exception:
+        pass
+
+    # Optional vision lane (Ollama) for coarse category checks (laptop vs non-laptop) and visible damage.
+    vision = None
+    try:
+        v_enabled = str(__import__("os").getenv("CV_VISION_ENABLED", "0")).strip().lower() in ("1", "true", "yes")
+    except Exception:
+        v_enabled = False
+    if v_enabled:
+        try:
+            v_timeout = float(__import__("os").getenv("CV_VISION_TIMEOUT_SEC", "10") or 10.0)
+        except Exception:
+            v_timeout = 10.0
+        vision = vision_analyze_with_ollama(
+            image_bytes,
+            prompt_context=str(meta.get("description") or meta.get("issue_type") or ""),
+            model=str(__import__("os").getenv("CV_VISION_MODEL") or "").strip() or None,
+            timeout_s=v_timeout,
+        )
+        try:
+            if isinstance(vision, dict) and vision.get("ok") and isinstance(vision.get("result"), dict):
+                r = vision.get("result") or {}
+                ptype = str(r.get("product_type") or "unknown").lower()
+                cond = str(r.get("device_condition") or "unknown").lower()
+                v_inject = bool(r.get("prompt_injection_suspected")) or bool((r.get("prompt_injection_phrases") or []))
+                if ptype and ptype not in ("unknown", "other"):
+                    evidence_tags.append(f"vision_product_type:{ptype}")
+                if cond in ("cracked", "damaged"):
+                    evidence_tags.append("vision_damage_detected")
+                if v_inject:
+                    evidence_tags.append("prompt_injection_text_suspected")
+                # Filename expectation heuristic: if filename says mac/lenovo/laptop but model says fruit/document, flag mismatch.
+                fn_l = filename.lower()
+                if any(tok in fn_l for tok in ("mac", "macbook", "lenovo", "legion", "laptop")) and ptype in ("fruit", "document", "phone", "other"):
+                    evidence_tags.append("image_category_mismatch_filename")
+                # Expected label hint: if caller expects laptop but vision says non-laptop, flag mismatch.
+                exp = str(meta.get("expected_label") or "").lower().strip()
+                if exp:
+                    if ("laptop" in exp or "macbook" in exp or "computer" in exp) and ptype in ("fruit", "document", "phone", "other"):
+                        evidence_tags.append("image_category_mismatch_expected")
+        except Exception:
+            pass
+
     # Compute ELA mask area ratio for verdict policy
     ela_area_ratio = 0.0
     try:
@@ -203,7 +357,18 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     verdict = None
     try:
         if forensics_obj:
-            verdict = evaluate_forensics_policy(forensics_obj, context={"ocr_text": ocr_text, "cv_meta": meta}, ela_mask_area_ratio=ela_area_ratio)
+            verdict = evaluate_forensics_policy(
+                forensics_obj,
+                context={
+                    "ocr_text": ocr_text,
+                    "cv_meta": meta,
+                    "evidence_tags": evidence_tags,
+                    "prompt_injection_phrases": injection_phrases,
+                    "qr_risks": qr_risks,
+                    "vision": vision,
+                },
+                ela_mask_area_ratio=ela_area_ratio,
+            )
     except Exception:
         verdict = {"verdict": "request_more_data", "reasons": ["policy_error"], "required_actions": ["manual_review"], "score": 0.0}
 
@@ -215,6 +380,10 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "qr_url_present": "qr_url_present" in evidence_tags,
             "layout_text_divergence": False,  # reserved for PDF layout diff lane
             "ocr_adversarial_typography": bool(dual_ocr and isinstance(dual_ocr, dict) and float(dual_ocr.get("similarity") or 1.0) < 0.6),
+            "prompt_injection_text": "prompt_injection_text_suspected" in evidence_tags,
+            "filename_unicode_suspicious": ("filename_nfkc_changed" in evidence_tags) or ("filename_unicode_suspicious" in evidence_tags),
+            "qr_url_suspicious": "qr_url_suspicious" in evidence_tags,
+            "image_category_mismatch": ("image_category_mismatch_filename" in evidence_tags) or ("image_category_mismatch_expected" in evidence_tags),
         }
     except Exception:
         sig = {}
@@ -237,13 +406,15 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             reasons=list((verdict or {}).get("reasons") or []),
             threat_correlation=tc,
             signals=sig,
-            evidence={"robustness": {"dual_ocr": dual_ocr, "qr": qr}},
+            evidence={"robustness": {"dual_ocr": dual_ocr, "qr": qr, "qr_risks": qr_risks, "vision": vision}},
         )
     except Exception:
         sec = None
 
     return {
         "model_pack": pack.get("id"),
+        "trace_id": str(meta.get("case_id") or ""),
+        "case_id": str(meta.get("case_id") or ""),
         "detector": {"model": model_path, "detections": detections, "summary": det_summary},
         "ocr": ocr,
         "quality": quality,
@@ -263,6 +434,10 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "dual_ocr": dual_ocr,
             "qr": qr,
             "qr_url_count": len(qr_urls),
+            "qr_risks": qr_risks,
             "ocr_text_entropy": round(_shannon_entropy(ocr_text[:800]), 4),
+            "prompt_injection_phrases": injection_phrases,
+            "filename": {"value": filename[:200], "nfkc_changed": filename_unicode_nfkc, "unicode_suspicious": filename_unicode_any},
+            "vision": vision,
         },
     }
