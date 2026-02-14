@@ -1,0 +1,264 @@
+from __future__ import annotations
+
+import hashlib
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.app.security.owasp_map import map_signals_to_owasp
+
+
+def _sha256_file(path: str) -> Optional[str]:
+    try:
+        p = Path(path)
+        if not p.exists() or not p.is_file():
+            return None
+        h = hashlib.sha256()
+        with p.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+def _split_mitre(techniques: List[str] | None) -> Tuple[List[str], List[str]]:
+    atlas: List[str] = []
+    attack: List[str] = []
+    for t in (techniques or []):
+        s = str(t or "").strip()
+        if not s:
+            continue
+        if s.upper().startswith("AML."):
+            atlas.append(s)
+        elif s.upper().startswith("T"):
+            attack.append(s)
+        else:
+            attack.append(s)
+    # stable dedupe
+    def _uniq(items: List[str]) -> List[str]:
+        out: List[str] = []
+        seen = set()
+        for x in items:
+            if x and x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
+
+    return _uniq(atlas), _uniq(attack)
+
+
+def _stride_from_signals(signals: Dict[str, Any], tags: List[str]) -> List[str]:
+    tset = {str(t or "").lower() for t in (tags or [])}
+    s = signals or {}
+    out: List[str] = []
+
+    # Spoofing: impersonation, lookalikes, auth alignment failure.
+    if any(k in tset for k in ("bec", "brand_impersonation", "lookalike_domain", "reply_to_mismatch")):
+        out.append("Spoofing")
+    if bool(s.get("dmarc_fail")) or bool(s.get("auth_alignment_failed")):
+        out.append("Spoofing")
+    if bool(s.get("homoglyph")) or bool(s.get("unicode_confusable")):
+        out.append("Spoofing")
+
+    # Tampering: document/image manipulation, layout/text divergence.
+    if bool(s.get("manipulation_detected")) or bool(s.get("layout_text_divergence")):
+        out.append("Tampering")
+
+    # Repudiation: covert channels / missing audit linkage.
+    if bool(s.get("email_c2_beaconing")) or bool(s.get("thread_hijack")):
+        out.append("Repudiation")
+
+    # Information disclosure: exfil / secrets / PII.
+    if bool(s.get("data_exfiltration")) or bool(s.get("pii")) or bool(s.get("api_key")):
+        out.append("InformationDisclosure")
+
+    # Denial of service: burst, lock contention, rate anomalies.
+    if bool(s.get("scanner_burst")) or bool(s.get("rate_anomaly")):
+        out.append("DenialOfService")
+
+    # Elevation of privilege: tool abuse / bypass attempts.
+    if bool(s.get("agentic_tool_abuse")) or bool(s.get("prompt_injection")) or bool(s.get("dangerous_tool_intent")):
+        out.append("ElevationOfPrivilege")
+
+    # stable dedupe
+    seen = set()
+    return [x for x in out if x and (x not in seen and not seen.add(x))]
+
+
+def _pasta(signals: Dict[str, Any], severity: str | None) -> Dict[str, Any]:
+    # Mirror the observer's staging logic for consistent trace drilldowns.
+    stages = [
+        {"id": "Stage1", "name": "DefineObjectives"},
+        {"id": "Stage2", "name": "DefineTechnicalScope"},
+        {"id": "Stage3", "name": "ApplicationDecomposition"},
+        {"id": "Stage4", "name": "ThreatAnalysis"},
+        {"id": "Stage5", "name": "VulnerabilityAnalysis"},
+        {"id": "Stage6", "name": "RiskResponse"},
+        {"id": "Stage7", "name": "MitigationVerification"},
+    ]
+    current = "Stage1"
+    try:
+        if any(bool(v) for v in (signals or {}).values()):
+            current = "Stage2"
+        if bool(signals.get("supply_chain")) or bool(signals.get("training_poisoning")):
+            current = "Stage3"
+        if bool(signals.get("jailbreak")) or bool(signals.get("prompt_injection")) or bool(signals.get("agentic_tool_abuse")):
+            current = "Stage4"
+        if bool(signals.get("data_exfiltration")) or bool(signals.get("pci")) or bool(signals.get("pii")):
+            current = "Stage5"
+        if str(severity or "").lower() in ("high", "critical", "error"):
+            current = "Stage6"
+    except Exception:
+        pass
+    workflow: List[Dict[str, Any]] = []
+    reached = False
+    for s in stages:
+        if s["id"] == current:
+            workflow.append({**s, "status": "current"})
+            reached = True
+        elif not reached:
+            workflow.append({**s, "status": "complete"})
+        else:
+            workflow.append({**s, "status": "pending"})
+    name = next((x["name"] for x in stages if x["id"] == current), "DefineObjectives")
+    return {"current_stage": current, "pasta_stage": f"{current}:{name}", "stages": workflow}
+
+
+def _lev(dread: Dict[str, Any] | None, cvss: Dict[str, Any] | None) -> Dict[str, Any]:
+    # Lightweight "LEV" proxy for demo: Likelihood, Exposure, Value (0..1).
+    # Derived deterministically from DREAD/CVSS to make cross-framework drilldown consistent.
+    try:
+        dread_avg = float((dread or {}).get("avg") or 0.0) / 10.0
+    except Exception:
+        dread_avg = 0.0
+    try:
+        cvss_score = float((cvss or {}).get("score") or 0.0) / 10.0
+    except Exception:
+        cvss_score = 0.0
+    likelihood = max(0.0, min(1.0, (dread_avg * 0.7) + (cvss_score * 0.3)))
+    exposure = max(0.0, min(1.0, (cvss_score * 0.8) + (dread_avg * 0.2)))
+    value = max(0.0, min(1.0, (dread_avg * 0.5) + (cvss_score * 0.5)))
+    score = max(0.0, min(1.0, (likelihood + exposure + value) / 3.0))
+    return {
+        "likelihood": round(likelihood, 3),
+        "exposure": round(exposure, 3),
+        "value": round(value, 3),
+        "score": round(score, 3),
+    }
+
+
+def _sbom_snapshot() -> Dict[str, Any]:
+    sbom_path = os.getenv("SBOM_PATH") or ("sbom.json" if Path("sbom.json").exists() else None)
+    return {
+        "slsa_level": (os.getenv("SLSA_LEVEL") or "").strip() or None,
+        "sbom_path": sbom_path,
+        "python_manifest": {"path": "pyproject.toml", "sha256": _sha256_file("pyproject.toml")},
+        "node_manifest": {"path": "frontend/package-lock.json", "sha256": _sha256_file(os.path.join("frontend", "package-lock.json"))},
+    }
+
+
+def _compliance(signals: Dict[str, Any], tags: List[str]) -> Dict[str, Any]:
+    # Defensive-only: map to a small set of common security program frameworks.
+    # This is intended for evidence and routing, not certification claims.
+    tset = {str(t or "").lower() for t in (tags or [])}
+    s = signals or {}
+    nist_csf: List[str] = []
+    iso27001: List[str] = []
+    soc2: List[str] = []
+
+    # Detect/Respond are common to most security incidents.
+    if any(bool(v) for v in s.values()) or tset:
+        nist_csf.extend(["DE.CM", "RS.MI"])
+        soc2.extend(["CC7.2", "CC7.3"])
+
+    if bool(s.get("dmarc_fail")) or "dmarc" in tset or "bec" in tset:
+        nist_csf.extend(["PR.AA", "DE.CM"])
+        iso27001.extend(["A.5.16", "A.5.17"])  # Identity/access + auth info (approximate)
+        soc2.extend(["CC6.1", "CC6.2"])
+
+    if bool(s.get("prompt_injection")) or bool(s.get("agentic_tool_abuse")):
+        nist_csf.extend(["PR.AA", "PR.DS", "DE.CM", "RS.MI"])
+        iso27001.extend(["A.5.8", "A.8.7"])  # Information security in PM + malware protection (approximate)
+        soc2.extend(["CC6.6", "CC7.2"])
+
+    if bool(s.get("data_exfiltration")) or bool(s.get("pii")) or bool(s.get("api_key")):
+        nist_csf.extend(["PR.DS", "DE.CM", "RS.MI"])
+        iso27001.extend(["A.8.12", "A.5.34"])  # DLP + privacy/PII (approximate)
+        soc2.extend(["CC6.7", "CC7.3"])
+
+    if bool(s.get("supply_chain")):
+        nist_csf.extend(["ID.SC", "PR.SR"])
+        iso27001.extend(["A.5.19", "A.5.21"])  # Supplier relationships
+        soc2.extend(["CC8.1"])
+
+    # stable dedupe
+    def _uniq(xs: List[str]) -> List[str]:
+        out: List[str] = []
+        seen = set()
+        for x in xs:
+            if x and x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
+
+    return {
+        "frameworks": [
+            {"framework": "NIST_CSF", "controls": _uniq(nist_csf)},
+            {"framework": "ISO27001", "controls": _uniq(iso27001)},
+            {"framework": "SOC2", "controls": _uniq(soc2)},
+        ]
+    }
+
+
+def correlate_security_analysis(
+    *,
+    channel: str,
+    severity: str | None,
+    tags: List[str] | None,
+    reasons: List[str] | None,
+    threat_correlation: Dict[str, Any] | None,
+    signals: Dict[str, Any] | None,
+    evidence: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    tags_l = list(tags or [])
+    signals_l = dict(signals or {})
+    threat = threat_correlation or {}
+
+    # Carry some common booleans into signals so mappings are consistent.
+    try:
+        if "dmarc" in {str(t).lower() for t in tags_l}:
+            signals_l.setdefault("dmarc_fail", True)
+    except Exception:
+        pass
+
+    mitre_in = threat.get("mitre_attack") if isinstance(threat.get("mitre_attack"), list) else []
+    atlas, attack = _split_mitre([str(x) for x in mitre_in])
+    owasp_llm = map_signals_to_owasp({k: bool(v) for k, v in signals_l.items()})
+    stride = _stride_from_signals(signals_l, tags_l)
+    pasta = _pasta(signals_l, severity)
+    cvss = threat.get("cvss") if isinstance(threat.get("cvss"), dict) else None
+    dread = threat.get("dread") if isinstance(threat.get("dread"), dict) else None
+    kev = threat.get("kev") if isinstance(threat.get("kev"), list) else []
+
+    return {
+        "severity": severity,
+        "channel": channel,
+        "signals": signals_l,
+        "tags": tags_l,
+        "reasons": list(reasons or []),
+        "mitre_atlas": atlas,
+        "mitre_attack": attack,
+        "owasp_llm_top10": owasp_llm,
+        "stride_categories": stride,
+        "pasta": pasta,
+        "pasta_stage": pasta.get("pasta_stage"),
+        "cvss": cvss,
+        "dread": dread,
+        "kev_ids": kev,
+        "lev": _lev(dread, cvss),
+        "sbom": _sbom_snapshot(),
+        "compliance": _compliance(signals_l, tags_l),
+        "evidence": evidence or {},
+    }
+

@@ -233,6 +233,7 @@ def _build_security_payload(details: Dict | None) -> Dict:
     if pasta_val is None and sec.get("pasta_stage") is not None:
         pasta_val = {"current_stage": sec.get("pasta_stage")}
     mitre_tags = sec.get("mitre_atlas", []) or []
+    mitre_attack = sec.get("mitre_attack", []) or []
     mitre_catalog = _load_mitre_atlas()
     evidence = (sec.get("evidence") if isinstance(sec, dict) else None) or {}
     matched = evidence.get("matched_patterns") or []
@@ -251,6 +252,7 @@ def _build_security_payload(details: Dict | None) -> Dict:
     return {
         "severity": sec.get("severity"),
         "mitre": mitre_tags,
+        "mitre_attack": mitre_attack,
         "mitre_details": mitre_details,
         "owasp_llm": sec.get("owasp_llm_top10", []),
         "owasp_agentic": sec.get("owasp_agentic_top10", []),
@@ -263,6 +265,9 @@ def _build_security_payload(details: Dict | None) -> Dict:
         "dread": dread_val,
         "pasta": pasta_val,
         "kev": sec.get("kev_ids"),
+        "lev": sec.get("lev"),
+        "sbom": sec.get("sbom"),
+        "compliance": sec.get("compliance"),
         "evidence": evidence,
     }
 

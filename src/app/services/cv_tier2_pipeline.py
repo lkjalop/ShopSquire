@@ -9,6 +9,7 @@ from src.app.services.cv_quality import score_quality
 from src.app.services.image_forensics import ImageForensicsService, ForensicsResult
 from src.app.services.forensics_policy import evaluate as evaluate_forensics_policy
 from src.app.observability.metrics import record_cv_fraud
+from src.app.security.framework_correlation import correlate_security_analysis
 
 import difflib
 import math
@@ -206,6 +207,41 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     except Exception:
         verdict = {"verdict": "request_more_data", "reasons": ["policy_error"], "required_actions": ["manual_review"], "score": 0.0}
 
+    # Framework correlation for decision trace drilldown (CV lane).
+    # Keep conservative: only use derived signals/tags and policy verdict.
+    try:
+        sig = {
+            "manipulation_detected": "manipulation_detected" in evidence_tags,
+            "qr_url_present": "qr_url_present" in evidence_tags,
+            "layout_text_divergence": False,  # reserved for PDF layout diff lane
+            "ocr_adversarial_typography": bool(dual_ocr and isinstance(dual_ocr, dict) and float(dual_ocr.get("similarity") or 1.0) < 0.6),
+        }
+    except Exception:
+        sig = {}
+    try:
+        # CV lane doesn't always have DREAD/CVSS; reuse threat_enrichment when ATLAS tags apply.
+        # For now, map manipulation/QR into ATLAS evasion/obfuscation.
+        tc = {
+            "mitre_attack": ["AML.T0015"] if (sig.get("manipulation_detected") or sig.get("ocr_adversarial_typography")) else [],
+            "dread": {"damage": 6.5, "reproducibility": 6.0, "exploitability": 5.8, "affected_users": 4.8, "discoverability": 6.2, "avg": 5.86},
+            "cvss": {"score": 6.4, "severity": "medium", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:M/I:M/A:L"},
+            "kev": [],
+        }
+    except Exception:
+        tc = {}
+    try:
+        sec = correlate_security_analysis(
+            channel="cv",
+            severity=str((verdict or {}).get("verdict") or ""),
+            tags=evidence_tags,
+            reasons=list((verdict or {}).get("reasons") or []),
+            threat_correlation=tc,
+            signals=sig,
+            evidence={"robustness": {"dual_ocr": dual_ocr, "qr": qr}},
+        )
+    except Exception:
+        sec = None
+
     return {
         "model_pack": pack.get("id"),
         "detector": {"model": model_path, "detections": detections, "summary": det_summary},
@@ -222,6 +258,7 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         },
         "evidence_tags": evidence_tags,
         "verdict": verdict,
+        "security_analysis": sec,
         "robustness": {
             "dual_ocr": dual_ocr,
             "qr": qr,

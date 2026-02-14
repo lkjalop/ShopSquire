@@ -25,6 +25,7 @@ from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_
 import time
 from src.app.services.intake_gate import normalize_email_intake
 from src.app.services.playbook_engine import start_playbook_run, append_playbook_step, execute_typed_actions, complete_playbook_run
+from src.app.security.framework_correlation import correlate_security_analysis
 
 _RATE_BUCKETS: dict[str, list[float]] = {}
 
@@ -852,6 +853,39 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
 
     # Bitemporal decision + trace events
     decision_id = None
+    security_analysis: Dict[str, Any] | None = None
+    try:
+        # Correlate to frameworks for decision-trace drilldown (why it was flagged).
+        # Keep deterministic and defensive-only; used for audit/reporting and UI panels.
+        try:
+            # Minimal signal map for downstream correlation; avoid leaking raw email.
+            sig = {
+                "dmarc_fail": bool(dmarc_fail),
+                "prompt_injection": any(str((i or {}).get("type") or "") == "prompt_injection" for i in (v.get("indicators") or [])),
+                "dangerous_tool_intent": any(str((i or {}).get("type") or "") == "dangerous_tool_intent" for i in (v.get("indicators") or [])),
+                "data_exfiltration": any(str((i or {}).get("type") or "") in ("data_exfil_intent",) for i in (v.get("indicators") or [])),
+                "email_c2_beaconing": any(str((i or {}).get("type") or "") == "c2_beacon_pattern" for i in (v.get("indicators") or [])),
+                "unicode_confusable": any(str((i or {}).get("type") or "") in ("confusable_homoglyph_domain", "vendor_homoglyph_impersonation") for i in (v.get("indicators") or [])),
+                "thread_hijack": bool(email.get("prior_reply_chain_id")) and bool(email.get("reply_chain_id")) and str(email.get("prior_reply_chain_id")) != str(email.get("reply_chain_id")),
+            }
+        except Exception:
+            sig = {"dmarc_fail": bool(dmarc_fail)}
+        security_analysis = correlate_security_analysis(
+            channel="email",
+            severity=str(v.get("severity") or ""),
+            tags=list(v.get("tags") or []),
+            reasons=list(v.get("reasons") or []),
+            threat_correlation=(v.get("threat_correlation") or {}) if isinstance(v.get("threat_correlation"), dict) else None,
+            signals=sig,
+            evidence={
+                "ioc_counts": (v.get("evidence_snapshot") or {}).get("ioc_counts"),
+                "artifact_intel": (v.get("evidence_snapshot") or {}).get("artifact_intel"),
+                "intake_gate": (v.get("evidence_snapshot") or {}).get("intake_gate"),
+            },
+        )
+    except Exception:
+        security_analysis = None
+
     try:
         decision_id = log_decision(
             agent_name="email_security_agent",
@@ -870,6 +904,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "llm_controls": llm_controls,
                 "fuzzy_signals": v.get("fuzzy_signals"),
                 "ticket_id": ticket_id,
+                "security_analysis": security_analysis,
             },
             proposed_action={
                 "severity": v.get("severity"),
@@ -907,6 +942,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "dread": (v.get("threat_correlation") or {}).get("dread"),
                     "cvss": (v.get("threat_correlation") or {}).get("cvss"),
                     "kev": (v.get("threat_correlation") or {}).get("kev"),
+                    "frameworks": security_analysis,
                     "ioc_counts": (v.get("evidence_snapshot") or {}).get("ioc_counts"),
                     "tags": v.get("tags"),
                     "detonation": v.get("detonation"),
