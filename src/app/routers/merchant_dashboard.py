@@ -71,15 +71,25 @@ def merchant_dashboard(
           async function load(){
             try{
               const r = await fetch('/api/v1/analytics/query_clusters/latest?limit=10');
-              const j = await r.json();
               const container = document.getElementById('list');
+              if(!r.ok){
+                const t = await r.text();
+                container.innerText = `Unable to load data (${r.status}).` + (t ? (' ' + t) : '');
+                return;
+              }
+              const j = await r.json();
+              const items = (j && j.items) ? j.items : [];
               container.innerHTML = '';
-              for(const it of j.items || []){
+              if(!items.length){
+                container.innerText = 'No dashboard data yet. Seed query clusters via POST /api/v1/analytics/query_clusters.';
+                return;
+              }
+              for(const it of items){
                 const d = document.createElement('div'); d.className='faq';
-                d.innerHTML = `<strong>${it.label}</strong> — ${it.size} examples<br/><em>${(it.top_k_exemplars||[]).slice(0,2).join(' | ')}</em>`;
+                d.innerHTML = `<strong>${it.label}</strong> - ${it.size} examples<br/><em>${(it.top_k_exemplars||[]).slice(0,2).join(' | ')}</em>`;
                 container.appendChild(d);
               }
-            }catch(e){ document.getElementById('list').innerText = 'error' }
+            }catch(e){ document.getElementById('list').innerText = 'Unable to load dashboard data.' }
           }
           load();
         </script>

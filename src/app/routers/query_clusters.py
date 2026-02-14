@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel
 
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
@@ -97,9 +98,44 @@ def query_clusters(body: ClusterRequest, role: str = Depends(require_role([ROLE_
         {"id": c.id, "size": c.size, "centroid_text": c.centroid_text, "label": c.label, "top_k_exemplars": c.members[:5]} for c in clusters
     ]}
 
+def _is_loopback_or_localhost(req: Request) -> bool:
+    try:
+        host = str((req.headers.get("host") or "")).lower()
+        # Docker port mapping means req.client.host may be a bridge address. Host header is what we want here.
+        return host.startswith("127.0.0.1") or host.startswith("localhost") or host.startswith("[::1]")
+    except Exception:
+        return False
+
+
+def _allow_unauth_merchant_analytics(req: Request) -> bool:
+    """Local-only convenience so the browser dashboard can call analytics APIs without custom headers.
+
+    This is gated by:
+      - APP_ENV in local/dev/development (default)
+      - Host header indicating loopback
+    OR an explicit ALLOW_UNAUTH_MERCHANT_DASHBOARD toggle.
+    """
+    env = str(os.getenv("APP_ENV", "") or "").lower()
+    explicit = str(os.getenv("ALLOW_UNAUTH_MERCHANT_DASHBOARD", "") or "").strip().lower()
+    if explicit in ("1", "true", "yes", "on"):
+        return _is_loopback_or_localhost(req)
+    if explicit in ("0", "false", "no", "off"):
+        return False
+    return env in ("local", "dev", "development") and _is_loopback_or_localhost(req)
+
 
 @router.get("/query_clusters/latest")
-def query_clusters_latest(limit: int = 50, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])) ) -> Dict[str, Any]:
+def query_clusters_latest(
+    request: Request,
+    limit: int = 50,
+    x_api_key: str | None = Header(default=None, alias="x-api-key"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> Dict[str, Any]:
+    if not _allow_unauth_merchant_analytics(request):
+        # Preserve normal auth semantics for non-local callers.
+        _ = require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])(
+            x_api_key=x_api_key, authorization=authorization, request=request
+        )  # type: ignore[misc]
     items: List[Dict[str, Any]] = []
     try:
         with read_session(read_class="timeline") as db:
