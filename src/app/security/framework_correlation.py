@@ -211,6 +211,107 @@ def _compliance(signals: Dict[str, Any], tags: List[str]) -> Dict[str, Any]:
     }
 
 
+def _scenario_catalog() -> Dict[str, Dict[str, Any]]:
+    # Small, deterministic library for demo. This is used to provide a per-scenario
+    # breakdown of scores and mappings in decision traces.
+    return {
+        "email_bec": {
+            "title": "Business Email Compromise / Supplier Impersonation",
+            "dread_avg": 7.2,
+            "cvss": {"score": 7.6, "severity": "high", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:M"},
+            "stride": ["Spoofing", "Tampering"],
+        },
+        "email_c2": {
+            "title": "Email-based C2 Beaconing",
+            "dread_avg": 8.1,
+            "cvss": {"score": 8.2, "severity": "high", "vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:M"},
+            "stride": ["Repudiation", "InformationDisclosure"],
+        },
+        "prompt_injection": {
+            "title": "Prompt Injection / Excessive Agency Attempt",
+            "dread_avg": 7.8,
+            "cvss": {"score": 8.0, "severity": "high", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:L"},
+            "stride": ["ElevationOfPrivilege", "InformationDisclosure"],
+        },
+        "cv_doc_tamper": {
+            "title": "Document/Image Manipulation (returns/invoice)",
+            "dread_avg": 5.9,
+            "cvss": {"score": 6.4, "severity": "medium", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:M/I:M/A:L"},
+            "stride": ["Tampering"],
+        },
+        "cv_qr_injection": {
+            "title": "QR/Barcode URL Injection",
+            "dread_avg": 6.6,
+            "cvss": {"score": 7.1, "severity": "high", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:M/I:H/A:L"},
+            "stride": ["Spoofing", "Tampering"],
+        },
+        "cv_ocr_adversarial": {
+            "title": "OCR Adversarial Typography / Dual-OCR Disagreement",
+            "dread_avg": 6.2,
+            "cvss": {"score": 6.8, "severity": "medium", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:M/I:M/A:N"},
+            "stride": ["Tampering"],
+        },
+    }
+
+
+def _pick_scenarios(*, channel: str, signals: Dict[str, Any], tags: List[str]) -> List[str]:
+    tset = {str(t or "").lower() for t in (tags or [])}
+    out: List[str] = []
+    if channel == "email":
+        if "bec" in tset or "brand_impersonation" in tset or "reply_to_mismatch" in tset:
+            out.append("email_bec")
+        if bool(signals.get("email_c2_beaconing")):
+            out.append("email_c2")
+        if bool(signals.get("prompt_injection")) or bool(signals.get("agentic_tool_abuse")):
+            out.append("prompt_injection")
+    elif channel == "cv":
+        if bool(signals.get("manipulation_detected")):
+            out.append("cv_doc_tamper")
+        if bool(signals.get("qr_url_present")):
+            out.append("cv_qr_injection")
+        if bool(signals.get("ocr_adversarial_typography")):
+            out.append("cv_ocr_adversarial")
+    # stable dedupe
+    seen = set()
+    return [x for x in out if x and (x not in seen and not seen.add(x))]
+
+
+def _dread_from_avg(avg: float) -> Dict[str, Any]:
+    # Keep similar shape to threat_enrichment._dread
+    avg = max(0.0, min(10.0, float(avg)))
+    return {
+        "damage": round(min(10.0, avg + 1.0), 2),
+        "reproducibility": round(avg, 2),
+        "exploitability": round(min(10.0, avg + 0.5), 2),
+        "affected_users": round(max(1.0, avg - 0.5), 2),
+        "discoverability": round(min(10.0, avg + 0.75), 2),
+        "avg": round(avg, 2),
+    }
+
+
+def _scenario_breakdown(*, ids: List[str], mitre_atlas: List[str], mitre_attack: List[str], owasp_llm: List[str], compliance: Dict[str, Any]) -> List[Dict[str, Any]]:
+    cat = _scenario_catalog()
+    out: List[Dict[str, Any]] = []
+    for sid in ids:
+        meta = cat.get(sid) or {}
+        dread = _dread_from_avg(float(meta.get("dread_avg") or 0.0)) if meta.get("dread_avg") is not None else None
+        cvss = meta.get("cvss") if isinstance(meta.get("cvss"), dict) else None
+        out.append(
+            {
+                "id": sid,
+                "title": meta.get("title"),
+                "mitre_attack": mitre_attack,
+                "mitre_atlas": mitre_atlas,
+                "owasp_llm_top10": owasp_llm,
+                "stride": meta.get("stride") or [],
+                "dread": dread,
+                "cvss": cvss,
+                "compliance": compliance,
+            }
+        )
+    return out
+
+
 def correlate_security_analysis(
     *,
     channel: str,
@@ -241,6 +342,10 @@ def correlate_security_analysis(
     dread = threat.get("dread") if isinstance(threat.get("dread"), dict) else None
     kev = threat.get("kev") if isinstance(threat.get("kev"), list) else []
 
+    comp = _compliance(signals_l, tags_l)
+    scenario_ids = _pick_scenarios(channel=channel, signals=signals_l, tags=tags_l)
+    scenarios = _scenario_breakdown(ids=scenario_ids, mitre_atlas=atlas, mitre_attack=attack, owasp_llm=owasp_llm, compliance=comp)
+
     return {
         "severity": severity,
         "channel": channel,
@@ -251,6 +356,7 @@ def correlate_security_analysis(
         "mitre_attack": attack,
         "owasp_llm_top10": owasp_llm,
         "stride_categories": stride,
+        "scenarios": scenarios,
         "pasta": pasta,
         "pasta_stage": pasta.get("pasta_stage"),
         "cvss": cvss,
@@ -258,7 +364,6 @@ def correlate_security_analysis(
         "kev_ids": kev,
         "lev": _lev(dread, cvss),
         "sbom": _sbom_snapshot(),
-        "compliance": _compliance(signals_l, tags_l),
+        "compliance": comp,
         "evidence": evidence or {},
     }
-

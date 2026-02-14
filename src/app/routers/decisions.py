@@ -268,6 +268,7 @@ def _build_security_payload(details: Dict | None) -> Dict:
         "lev": sec.get("lev"),
         "sbom": sec.get("sbom"),
         "compliance": sec.get("compliance"),
+        "scenarios": sec.get("scenarios"),
         "evidence": evidence,
     }
 
