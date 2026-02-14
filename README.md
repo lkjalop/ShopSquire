@@ -1,138 +1,206 @@
-## Staging Profile and Backpressure/Chaos Controls
+# ShopSquire
 
-Below are environment toggles to harden the API under load while avoiding false positives in tests. Recommended staging profile is shown first, followed by production guidance.
+ShopSquire is an autonomous, agentic AI e-commerce platform designed to be product- and vendor-agnostic.
+It orchestrates specialized agent "teams" in parallel (NLP, CV/OCR, inventory, security, governance) to turn
+untrusted inputs (customers, suppliers, third-party systems) into enforced decisions with an audit trail.
 
-### Staging Profile (copy/paste)
+From a business perspective, ShopSquire aims to reduce operational cost and fraud loss while increasing
+conversion by automating the highest-volume workflows (product discovery, order support, returns, supplier
+communications) with guardrails and traceability.
 
-```
-# Core
-DATABASE_URL=postgresql+psycopg2://shopsquire:shopsquire@localhost:5433/shopsquire_test
-DISABLE_TRACING=1
-SECURITY_OBSERVER_SYNC=1
-SECURITY_OBSERVER_SAMPLE_RATE=0
-SKIP_OBSERVER_ENDPOINTS=/health,/metrics
+## What It Does
 
-# Backpressure & Rate-Limits
-MAX_CONCURRENCY=256
-DEGRADE_ON_CONCURRENCY=1
-DEGRADE_CONCURRENCY_THRESHOLD=200
-RATE_LIMIT_PER_IP_PER_MIN=120
-RATE_LIMIT_WINDOW_SECONDS=30
+- Product- and vendor-agnostic commerce API (catalog, inventory, orders, returns/support flows).
+- Scenario-based agent orchestration: spawn parallel agent teams depending on the request/risk context.
+- Security-first enforcement: deterministic detection tags -> playbook selection -> actions/approvals -> audit.
+- Decision traceability: bitemporal decision logs + real-time trace events (SSE/WS) for drilldown and replay.
+- Observability: Prometheus metrics + Grafana dashboards for ops and security lanes.
 
-# Chaos (staging only)
-CHAOS_ERROR_PROB=0.02
-CHAOS_ERROR_PREFIXES=/api/v1/recommend,/api/v1/admin
+## Design Inspiration (Pragmatic, Not Magical)
 
-# Pricing circuit breaker (feature flags in config/feature_flags.json)
-# DEGRADATION.window_seconds=300
-# DEGRADATION.min_requests=50
-# DEGRADATION.error_rate_threshold=0.15
-# DEGRADATION.open_seconds=90
-```
+- Interleaved "thinking" and routing patterns inspired by GLM-style interleaving and tool planning.
+- Recursive context refresh to mitigate "context rot": decisions and evidence are persisted and pulled back
+  into traces and downstream workflows rather than relying on long prompts.
+- Parallel agent swarms/teams: specialized agents run concurrently, and a policy gate selects/blocks actions.
 
-### Production Guidance
+## High-Level Architecture (System)
 
-- MAX_CONCURRENCY: 256–512 depending on CPU cores; keep `DEGRADE_ON_CONCURRENCY=1` and set threshold to ~75–85% of peak.
-- RATE_LIMIT_PER_IP_PER_MIN: tune per hot path; 60–180 per minute typical for suggest endpoints; set window to 10–30s.
-- CHAOS_ERROR_PROB: 0 in production; use 0.01–0.05 only in staging with `CHAOS_ERROR_PREFIXES`.
-- Pricing CB: adjust `DEGRADATION` in feature flags to reflect real error budgets (min_requests, thresholds, open_seconds).
-
-### Observability & Alerts
-
-- Prometheus rules include:
-	- 5xx error rate (`ErrorRateHigh`)
-	- Rate-limit exceed spikes (`RateLimitExceededSpike`)
-	- Chaos error injection detection (`ChaosErrorInjectionDetected`)
-	- Concurrency saturation (`ConcurrencySaturation`)
-- Grafana dashboard now has panels for HTTP rate by status, Decision Events rate, and In-flight Requests saturation.
-
-### Silent Failure Mitigation
-
-- Global exception handler captures unhandled errors, returns sanitized 500 JSON, and increments `shopsquire_exceptions_total{endpoint=...}`.
-- Backpressure middleware records `shopsquire_inflight_requests{service="api"}` for saturation; rate-limit and chaos errors increment dedicated counters.
-- Security observer logs high/critical events; escalation endpoint writes incidents and can dispatch webhooks.
-- Decision logging persists proposals and policy metadata; optional RAGAS evaluation can be enabled via `RAGAS_EVAL_ENABLED` in feature flags to score outputs and flag anomalies.
-
-### Advanced Stores (TimescaleDB, Graph)
-
-- TimescaleDB: convert `decision_logs` and `security_events` to hypertables for fast time-window queries and retention policies; use continuous aggregates for latency/error SLOs.
-- Context Graph: model `users`, `orders`, `decisions`, `events` as nodes; edges like `user->decision (initiated)`, `decision->incident (related)` enable root-cause tracing; secure with role-based access and field-level redaction.
-- Security & Privacy: validate inputs (OWASP LLM Top 10), redact PII in logs, enforce per-tenant scoping; run differential privacy sampling for analytics when possible.
-
-### Try It Locally
-
-```
-# Disable backpressure for test suites
-$env:DATABASE_URL = "sqlite:///test.sqlite"
-$env:DISABLE_TRACING = "1"
-$env:SECURITY_OBSERVER_SYNC = "1"
-$env:SECURITY_OBSERVER_SAMPLE_RATE = "0"
-$env:RATE_LIMIT_PER_IP_PER_MIN = "0"
-$env:MAX_CONCURRENCY = "0"
-$env:CHAOS_ERROR_PROB = "0"
-$env:SKIP_OBSERVER_ENDPOINTS = "/api/v1/recommend,/api/v1/admin"
-& ".venv/Scripts/python.exe" -m pytest -q tests/chaos tests/load
+```text
+Clients (Storefront / Admin / Integrations)
+            |
+            v
+     +-------------+         +---------------------+
+     |  FastAPI    |<------->|  Redis (Agent Bus)  |
+     |  Routers    |         |  Handoffs / Cache   |
+     +------+------+         +----------+----------+
+            |                           |
+            v                           v
+  +-------------------+       +---------------------+
+  | Orchestrator      |       | Worker (optional)   |
+  | Scenario Planner  |       | async CV / sync     |
+  +----+--------+-----+       +---------------------+
+       |        |
+       |        +----------------------------+
+       |                                     \
+       v                                      v
+ +-------------+  +-------------+  +------------------+
+ | NLP Agents  |  | CV/OCR      |  | Inventory/ERP    |
+ | Intent/RAG  |  | Forensics   |  | Sync Agents      |
+ +------+------+  +------+------+  +--------+---------+
+        \            /                      /
+         \          /                      /
+          v        v                      v
+             +-------------------------------+
+             | Policy Gate + Playbook Engine |
+             | (enforcement + approvals)     |
+             +---------------+---------------+
+                             |
+                             v
+               +-----------------------------+
+               | Postgres (OLTP + Audit)     |
+               | orders/products/decision_*  |
+               +-----------------------------+
+                             |
+                             v
+               +-----------------------------+
+               | Decision Trace (SSE/WS)     |
+               | Evidence + Framework Maps   |
+               +-----------------------------+
 ```
 
-# ShopSquire API (MVP Scaffold)
+## Security Architecture (Threat Mitigation and Enforcement)
 
-Agentic commerce service scaffold implementing the core patterns from PRD v2 and SECURITY:
-- FastAPI service with DI providers
-- Orchestrator (validate → retrieve → reason → policy → execute/escalate)
-- Transaction Firewall (caps, thresholds, idempotency, circuit breakers)
-- Security Observer (lite): unicode normalize, PII mask, jailbreak regex, severity bands
-- Redis CacheRAG memory (summary, kv_state, recent_retrieval)
-- PostgreSQL schema (customers, products, inventory, draft_orders, orders, decision_logs)
-- Governance: feature flags, rollout percentage, kill switches
-- Medusa webhooks & payments (Stripe test stub)
+ShopSquire treats every external input as untrusted: customers, suppliers, attachments, images, and API responses.
+It uses "intake-only" gates (sanitize/normalize only) followed by dedicated detection agents, correlation, and
+enforced playbook-driven response.
+
+```text
+Untrusted Inputs
+(web, email, images, supplier APIs)
+           |
+           v
+ +--------------------+
+ | Intake Gate        |
+ | - normalize (NFKC) |
+ | - strip/parse only |
+ | - no actions       |
+ +---------+----------+
+           |
+           v
+ +--------------------+     +---------------------+     +----------------------+
+ | Email Security     |     | CV/OCR Robustness   |     | Supply Chain Guards  |
+ | - DMARC/SPF/DKIM   |     | - manipulation      |     | - baseline drift     |
+ | - homoglyph scan   |     | - QR URL extraction |     | - connector hygiene  |
+ | - invoice language |     | - dual OCR checks   |     | - replay controls    |
+ +----------+---------+     +----------+----------+     +----------+-----------+
+            \                       |                        /
+             \                      |                       /
+              v                     v                      v
+                 +--------------------------------------+
+                 | Correlation + Policy Gate            |
+                 | - deterministic route/verdict        |
+                 | - playbook selection                 |
+                 | - contain/suspend when needed        |
+                 +------------------+-------------------+
+                                    |
+                                    v
+                 +--------------------------------------+
+                 | Actions (typed, audited)             |
+                 | - hold/quarantine/escalate           |
+                 | - create ticket                      |
+                 | - SIEM handoff (optional)            |
+                 +--------------------------------------+
+```
+
+### "Prove Why It Was Flagged" (Decision Trace)
+
+For high-signal decisions, traces include framework correlations intended for evidence and routing:
+
+- MITRE ATT&CK technique tags (e.g. `T1566.002`)
+- MITRE ATLAS tags for AI-specific threat categories (e.g. `AML.T0043`)
+- DREAD breakdown + CVSS summary
+- STRIDE categories
+- OWASP LLM Top 10 (when applicable)
+- PASTA stage marker
+- SBOM posture snapshot (manifest hashes, optional `SBOM_PATH`)
+- Compliance mappings (evidence/routing aid, not a certification claim): NIST CSF, ISO27001, SOC2
+- Per-scenario breakdown (BEC, email-C2, CV tamper, QR injection, OCR adversarial, etc.)
+
+## Agents (Quick Intro)
+
+This repo contains a practical agent roster (names are conceptual, implementations live under `src/app/...`):
+
+- Orchestrator: scenario routing, parallel agent invocation, policy-first control flow.
+- Email Security Agent: BEC/phishing/ransomware patterns, auth alignment checks, ticket/playbook execution.
+- CV Forensics Agent: manipulation detection, robustness signals (dual OCR, QR extraction), policy gating.
+- Threat Correlation Agent: kill-chain stage + MITRE/DREAD/CVSS enrichment.
+- Playbook Engine: playbook selection and typed action execution with audit linkage.
+- Outbound Comms Monitor: detects email C2-like patterns (rate/entropy/periodicity) and triggers containment.
+- Agent Containment: enforcement (suspend capabilities) + audit + trace events.
+- Inventory Agent + Sync Worker: connectors, reorder recommendations, inventory drift and readiness.
+- SIEM Adapter: normalized event handoff + reliability/DLQ endpoints (demo-friendly).
 
 ## Quick Start (Docker)
 
-```bash
+```powershell
 cp .env.example .env
-# Optionally edit DATABASE_URL/REDIS_URL in .env
-docker compose up -d db redis
-# Apply DB migrations (Alembic is the source of truth)
-poetry run alembic -c alembic.ini upgrade head
-# Build & run API (requires Dockerfile if building container) or run locally:
+docker compose up -d --build
+curl http://127.0.0.1:8080/healthz
 ```
 
-## Quick Start (Local Python)
+Open:
+- API docs: `http://127.0.0.1:8080/docs`
+- Storefront (server-rendered): `http://127.0.0.1:8080/ui/`
+- Grafana: `http://127.0.0.1:3005`
+- Prometheus: `http://127.0.0.1:9090`
 
-```bash
-# Python 3.10+
-pip install pipx
-pipx install poetry
-poetry install
-cp .env.example .env
-# Start API
-poetry run uvicorn src.app.main:app --host 0.0.0.0 --port 8080
+## Demo Scripts
+
+- Bring up stack + warmups (CV + Ollama): `scripts/start_live_demo.ps1`
+- Agentic security demo (containment + trace + ops drilldown): `scripts/run_agentic_security_demo.ps1`
+
+## Seed Demo Data (Dashboards and Backfill)
+
+Seed baseline entities:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/shopsquire"
+python scripts/seed_demo_data.py
 ```
 
-OpenAPI docs: http://localhost:8080/docs
+Seed a large order history for dashboard/backfill testing (700+ orders):
 
-## Run Tests
-
-```bash
-poetry run pytest -q
+```powershell
+$env:DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/shopsquire"
+python scripts/seed_bulk_orders.py --count 700 --uid merchant-demo --days 120
 ```
 
-## Database Setup (Detailed)
+## Tests
 
-See `docs/DB_SETUP.md:1` for the exact local flow (Postgres + Alembic) and the optional TimescaleDB override.
+Unit/integration:
 
-## Project Layout
+```powershell
+python -m pytest -q
+```
 
-- src/app/main.py — FastAPI app, routers, middleware
-- src/app/services/* — orchestrator, memory, payments
-- src/app/security/* — observer middleware, firewall
-- src/app/routers/* — domain routers and admin/flags
-- src/app/models/* — SQLAlchemy session and Pydantic schemas
-- config/feature_flags.json — flags + rollout
-- config/security/taxonomy/* — risk scoring taxonomy stubs
-- db/schema.sql — PostgreSQL schema
-- db/seed.sql — Minimal seed data
+Playwright UI tests exist but are opt-in on Windows (they are skipped unless explicitly enabled).
+See `tests/e2e/` and `scripts/run_full_test_report.ps1`.
 
-## Notes
-- This scaffold is MVP-friendly. Replace stubs and TODOs as you integrate real logic and Medusa/Stripe accounts.
-- The default settings assume local Postgres and Redis.
+## Roadmap (Practical Next Steps)
+
+From the TOGAF/SABSA and red-team gap analyses in `docs/`:
+
+- P0: configure a real external SIEM receiver for demo evidence (`SIEM_WEBHOOK_URL` / Splunk HEC) and record delivery.
+- P0: centralize RBAC/MFA for staff/suppliers and service identities; lock down admin lanes.
+- P1: add correction-time truth loop (`ground_truth`, `analyst_verdict`, etc.) and surface deltas in drilldowns.
+- P1: mutation-based red-team runner + trend API (>= 50 mutated payloads/run) for measurable improvement.
+- P2: scale-out orchestration (multi-instance), Redis clustering, read replicas, and stronger SLO tooling.
+
+## Documentation
+
+Key docs referenced by the current demo plan:
+
+- `docs/Demo_Checklist_Real_Time_Trace.md`
+- `docs/Red_Team_Gap_Analysis.md`
+- `docs/TOGAF_SABSA_Production_Readiness.md`
+
