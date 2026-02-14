@@ -91,9 +91,10 @@ def record_outbound_email_event(
     thread_id: str | None = None,
     decision_id: str | None = None,
     meta: Optional[Dict[str, Any]] = None,
+    now_ts: int | None = None,
 ) -> Dict[str, Any]:
     _ensure_tables()
-    now = int(time.time())
+    now = int(now_ts) if now_ts is not None else int(time.time())
     ev_id = f"oev-{uuid.uuid4().hex}"
     to_s = str(to or "")
     dom = None
@@ -157,9 +158,10 @@ def record_outbound_email_event(
     return {"id": ev_id, **{k: row[k] for k in ("tenant_id", "agent_id", "to_domain_hash", "thread_id_hash", "subject_entropy", "body_entropy", "created_at")}}
 
 
-def _recent_events(*, agent_id: str, minutes: int = 60) -> List[Dict[str, Any]]:
+def _recent_events(*, agent_id: str, minutes: int = 60, now_ts: int | None = None) -> List[Dict[str, Any]]:
     _ensure_tables()
-    since = int(time.time()) - int(max(1, minutes)) * 60
+    now = int(now_ts) if now_ts is not None else int(time.time())
+    since = now - int(max(1, minutes)) * 60
     try:
         with db_session() as db:
             rows = db.execute(
@@ -197,8 +199,9 @@ def analyze_agent_outbound_email(
     entropy_subject_threshold: float = 4.0,
     periodic_min_events: int = 6,
     periodic_cv_threshold: float = 0.15,
+    now_ts: int | None = None,
 ) -> Dict[str, Any]:
-    events = _recent_events(agent_id=agent_id, minutes=minutes)
+    events = _recent_events(agent_id=agent_id, minutes=minutes, now_ts=now_ts)
     reasons: List[str] = []
     score = 0.0
 
@@ -243,11 +246,12 @@ def store_outbound_anomaly(
     event_id: str,
     analysis: Dict[str, Any],
     severity: str = "high",
+    now_ts: int | None = None,
 ) -> Optional[str]:
     _ensure_tables()
     if not analysis.get("anomalous"):
         return None
-    now = int(time.time())
+    now = int(now_ts) if now_ts is not None else int(time.time())
     an_id = f"oan-{uuid.uuid4().hex}"
     reasons = analysis.get("reasons") if isinstance(analysis.get("reasons"), list) else []
     try:
@@ -315,4 +319,3 @@ def list_outbound_anomalies(*, limit: int = 100) -> List[Dict[str, Any]]:
         return out
     except Exception:
         return []
-

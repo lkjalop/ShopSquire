@@ -337,23 +337,17 @@ if 'pytest' in globals() and pytest is not None:
             def raise_for_status(self):
                 return None
 
-        async def _async_post(self, url, json=None, **kwargs):
-            try:
-                # Call original for non-LLM endpoints (preserve TestClient behavior)
-                if url and "/api/generate" not in str(url):
-                    return await _orig_async_post(self, url, json=json, **kwargs)
-            except Exception:
-                pass
+        async def _async_post(self, url, *args, **kwargs):
+            # Preserve TestClient/internal httpx behavior: do not inject/override kwargs like `json=None`.
+            if url and "/api/generate" not in str(url):
+                return await _orig_async_post(self, url, *args, **kwargs)
             if url and "/api/generate" in str(url):
                 return DummyResp({"response": "mocked response"})
             return DummyResp({})
 
-        def _sync_post(self, url, json=None, **kwargs):
-            try:
-                if url and "/api/generate" not in str(url):
-                    return _orig_sync_post(self, url, json=json, **kwargs)
-            except Exception:
-                pass
+        def _sync_post(self, url, *args, **kwargs):
+            if url and "/api/generate" not in str(url):
+                return _orig_sync_post(self, url, *args, **kwargs)
             if url and "/api/generate" in str(url):
                 return DummyResp({"response": "mocked response"})
             return DummyResp({})
