@@ -10,7 +10,7 @@ type RoomEvent = {
   time?: string;
 };
 
-export default function EscalationRoom({ incidentId, onClose }: { incidentId: string; onClose: () => void }) {
+export default function EscalationRoom({ incidentId, buyerToken, staffToken, onClose }: { incidentId: string; buyerToken?: string | null; staffToken?: string | null; onClose: () => void }) {
   const [events, setEvents] = useState<RoomEvent[]>([]);
   const [mode, setMode] = useState<'ws' | 'sse' | 'poll'>('poll');
   const [input, setInput] = useState('');
@@ -48,9 +48,32 @@ export default function EscalationRoom({ incidentId, onClose }: { incidentId: st
       }
     };
 
-    const connectSSE = () => {
+    const connectSSE = async () => {
       try {
-        es = new EventSource(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/stream`));
+        // Prefer public token-based SSE if buyer/staff token is available
+        const token = buyerToken || staffToken || null;
+        let useToken = token;
+        // If no token provided but admin key exists, issue a staff token
+        if (!useToken) {
+          const key = localStorage.getItem('x-api-key') || 'local-owner-key';
+          if (key) {
+            try {
+              const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/token`), {
+                method: 'POST',
+                headers: { 'x-api-key': key },
+              });
+              const j = await safeJson(r);
+              if (j && j.staff_token) useToken = String(j.staff_token);
+            } catch {}
+          }
+        }
+        if (useToken) {
+          const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream`), window.location.href);
+          u.searchParams.set('token', useToken);
+          es = new EventSource(u.toString());
+        } else {
+          es = new EventSource(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/stream`));
+        }
         es.onopen = () => { if (mounted) setMode('sse'); };
         es.onmessage = (ev: MessageEvent) => {
           try {
@@ -65,8 +88,9 @@ export default function EscalationRoom({ incidentId, onClose }: { incidentId: st
       }
     };
 
-    connectWS();
-    if (!ws) connectSSE();
+    // If we have tokens, skip admin WS and use public SSE to mirror buyer experience.
+    if (!buyerToken && !staffToken) connectWS();
+    connectSSE();
     if (!ws && !es) {
       setMode('poll');
       fetchSnapshot();
@@ -90,15 +114,27 @@ export default function EscalationRoom({ incidentId, onClose }: { incidentId: st
     if (!msg) return;
     setInput('');
     try {
-      const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/message`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': localStorage.getItem('x-api-key') || 'local-owner-key',
-        },
-        body: JSON.stringify({ message: msg }),
-      });
-      await safeJson(r);
+      const token = buyerToken || staffToken || null;
+      if (token) {
+        const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/message`), window.location.href);
+        u.searchParams.set('token', token);
+        const r = await fetch(u.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg }),
+        });
+        await safeJson(r);
+      } else {
+        const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/message`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': localStorage.getItem('x-api-key') || 'local-owner-key',
+          },
+          body: JSON.stringify({ message: msg }),
+        });
+        await safeJson(r);
+      }
     } catch {}
   };
 

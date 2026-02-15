@@ -302,31 +302,69 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
         except Exception:
             pass
 
-        # Persist a minimal decision_logs entry when CV forensics indicates high severity
+        # Emit security_scan trace event for Decision Trace Security Matrix
+        try:
+            sec_signals = {}
+            if qr_prompt_injection:
+                sec_signals["qr_prompt_injection"] = True
+            if qr_decode_hits:
+                sec_signals["qr_code_detected"] = True
+            ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
+            if ic_status in ("mismatch", "suspicious"):
+                sec_signals["image_consistency_mismatch"] = True
+            if sec_signals:
+                log_trace_event(
+                    trace_id=case_id,
+                    event_type="security_scan",
+                    source_type="agent",
+                    source_id="cv_forensics",
+                    target_type="complaint",
+                    target_id=case_id,
+                    payload={"details": sec_signals, "severity": "high" if qr_prompt_injection else "medium"},
+                )
+        except Exception:
+            pass
+
+        # Persist a decision log for analyze path so UI always has a trace id.
+        # Approval is required when signals suggest human intervention (QR/prompt injection or mismatch/suspicious).
         try:
             verdict = (analysis or {}).get("verdict") or {}
             required_actions = verdict.get("required_actions") or []
-            sev = (verdict.get("severity") or "").lower()
-            critical_actions = {"human_review", "manual_approval", "policy_escalation", "nonce_live_capture"}
-            if sev in ("high", "critical") or any(a in critical_actions for a in required_actions):
-                try:
-                    input_payload = {"case_id": case_id, "extract_sample": (req.extracted_text or "")[:1024]}
-                    retrieved_context = {"cv_analysis": analysis, "evidence_id": evidence_id}
-                    proposed_action = {"required_actions": required_actions, "verdict": verdict}
-                    log_decision(
-                        agent_name="cv_forensics",
-                        input_data=input_payload,
-                        retrieved_context=retrieved_context,
-                        proposed_action=proposed_action,
-                        policy_version="v1",
-                        approval_required=True,
-                        execution_status="review_required",
-                        decision_id=case_id,
-                    )
-                except Exception:
-                    pass
+            ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
+            approval_actions = {"human_review", "manual_approval", "policy_escalation"}
+            signal_review = bool(qr_prompt_injection or (ic_status in ("mismatch", "suspicious")))
+            approval_required = signal_review or any(a in approval_actions for a in required_actions)
+            exec_status = "review_required" if approval_required else "completed"
+            try:
+                # Derive minimal proposed actions when signals are present
+                derived_actions = list(required_actions)
+                if signal_review and "human_review" not in derived_actions:
+                    derived_actions.append("human_review")
+                if ic_status == "needs_better_image" and "needs_better_image" not in derived_actions:
+                    derived_actions.append("needs_better_image")
+                input_payload = {"case_id": case_id, "extract_sample": (req.extracted_text or "")[:1024]}
+                retrieved_context = {"cv_analysis": analysis, "evidence_id": evidence_id}
+                proposed_action = {"required_actions": derived_actions[:6], "verdict": verdict}
+                log_decision(
+                    agent_name="cv_forensics",
+                    input_data=input_payload,
+                    retrieved_context=retrieved_context,
+                    proposed_action=proposed_action,
+                    policy_version="v1",
+                    approval_required=approval_required,
+                    execution_status=exec_status,
+                    decision_id=case_id,
+                )
+            except Exception:
+                pass
         except Exception:
             pass
+
+        # Derive ui_actions based on evidence signals
+        _needs_chat = bool(
+            qr_prompt_injection
+            or (isinstance(image_consistency, dict) and image_consistency.get("status") in ("mismatch", "suspicious"))
+        )
 
         return {
             "status": "ok",
@@ -337,6 +375,8 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
             "image_consistency": image_consistency,
             "qr_codes": qr_decode_hits[:10],
             "qr_prompt_injection": qr_prompt_injection,
+            "ui_actions": {"chat_with_admin": _needs_chat},
+            "suggested_routing": "security_review" if _needs_chat else "standard_queue",
         }
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -381,6 +421,7 @@ async def upload(
 
     If `nonce` is provided, it is checked for recent issuance (best-effort).
     """
+    fallback_case_id = uuid.uuid4().hex
     try:
         try:
             quota = TenantQuotaGuard(get_redis())
@@ -393,7 +434,7 @@ async def upload(
             pass
         content = await image.read()
         # Always allocate a unique case id for this upload so evidence/decisions don't collide on filename.
-        case_id = uuid.uuid4().hex
+        case_id = uuid.uuid4().hex or fallback_case_id
 
         order_ctx = None
         if order_id:
@@ -491,26 +532,54 @@ async def upload(
             if not iq.ok:
                 raise HTTPException(status_code=400, detail={"error": "image_quality_failed", "reasons": iq.reasons, "details": iq.details})
         pack_id = None
-        t2 = call_with_resilience(
-            "cv.tier2",
-            lambda: run_tier2(
-                content,
-                meta={
-                    "case_id": case_id,
-                    "filename": image.filename,
-                    "content_type": image.content_type,
-                    "order_id": order_id,
-                    "order_ctx": order_ctx,
-                    "sku": sku,
-                    "expected_label": expected_label,
-                    "issue_type": issue_type,
-                    "description": description,
+        # Tier 2 can fail when optional deps (OCR/vision/QR libs) are missing or the
+        # Ollama endpoint/model is not available. Degrade gracefully instead of 400'ing.
+        try:
+            t2 = call_with_resilience(
+                "cv.tier2",
+                lambda: run_tier2(
+                    content,
+                    meta={
+                        "case_id": case_id,
+                        "filename": image.filename,
+                        "content_type": image.content_type,
+                        "order_id": order_id,
+                        "order_ctx": order_ctx,
+                        "sku": sku,
+                        "expected_label": expected_label,
+                        "issue_type": issue_type,
+                        "description": description,
+                    },
+                    pack_id=pack_id,
+                ),
+                timeout_s=8.0,
+                retries=1,
+            )
+        except Exception as exc:
+            t2 = {
+                "trace_id": case_id,
+                "case_id": case_id,
+                "model_pack": pack_id or "agnostic_v1",
+                "evidence_tags": ["tier2_unavailable"],
+                "verdict": {
+                    "verdict": "request_more_data",
+                    "required_actions": ["needs_better_image"],
+                    "severity": "warn",
                 },
-                pack_id=pack_id,
-            ),
-            timeout_s=8.0,
-            retries=1,
-        )
+                "security_analysis": {
+                    "severity": "warn",
+                    "channel": "cv",
+                    "signals": {"tier2_unavailable": True},
+                    "tags": ["tier2_unavailable"],
+                    "reasons": [str(exc)[:160]],
+                    "mitre_atlas": [],
+                    "mitre_attack": [],
+                    "owasp_llm_top10": [],
+                    "stride_categories": [],
+                    "dread": {"avg": 0.0},
+                    "pasta": {"current_stage": "Stage4"},
+                },
+            }
         # Policy verdict already in t2; attach nonce status and a minimal next-actions hint
         nonce_ok = False
         if nonce and nonce in _NONCE_STORE:
@@ -591,6 +660,30 @@ async def upload(
                 )
             except Exception:
                 pass
+            # Emit security_scan trace event for Decision Trace Security Matrix
+            try:
+                t2_security = (t2 or {}).get("security_analysis")
+                t2_evidence = (t2 or {}).get("evidence_tags") or []
+                sec_signals = {}
+                if t2_security:
+                    sec_signals = t2_security
+                elif t2_evidence:
+                    sec_signals = {"evidence_tags": t2_evidence}
+                if sec_signals or t2_evidence:
+                    sev = "high" if any(
+                        t in t2_evidence for t in ("qr_url_present", "prompt_injection_text_suspected", "manipulation_detected")
+                    ) else "medium"
+                    log_trace_event(
+                        trace_id=case_id,
+                        event_type="security_scan",
+                        source_type="agent",
+                        source_id="cv_forensics",
+                        target_type="complaint",
+                        target_id=case_id,
+                        payload={"security": sec_signals, "details": sec_signals, "severity": sev},
+                    )
+            except Exception:
+                pass
             # Persist a decision log for the upload path so the UI always has a trace id to drill into.
             # Approval is required only when actions imply human intervention; otherwise we record as completed.
             try:
@@ -627,6 +720,50 @@ async def upload(
             "nonce_ok": nonce_ok,
             "next_actions": actions[:6],
         }
+    except HTTPException:
+        raise
     except Exception:
-        # Avoid leaking internal exception details in HTTP response
+        # Degrade gracefully: this route is a demo/triage path and should not "do nothing"
+        # when optional dependencies (vision/OCR/QR libs) or persistence are unavailable.
+        import os as _os
+        try:
+            env = str(_os.getenv("APP_ENV", "")).strip().lower()
+        except Exception:
+            env = ""
+        if env in ("local", "dev", "development"):
+            try:
+                import traceback as _tb
+                _tb.print_exc()
+            except Exception:
+                pass
+            return {
+                "status": "ok",
+                "case_id": fallback_case_id,
+                "cv_tier2": {
+                    "trace_id": fallback_case_id,
+                    "case_id": fallback_case_id,
+                    "model_pack": "agnostic_v1",
+                    "evidence_tags": ["tier2_unavailable", "cv_upload_exception"],
+                    "verdict": {
+                        "verdict": "request_more_data",
+                        "required_actions": ["needs_better_image"],
+                        "severity": "warn",
+                    },
+                    "security_analysis": {
+                        "severity": "warn",
+                        "channel": "cv",
+                        "signals": {"cv_upload_exception": True},
+                        "tags": ["cv_upload_exception"],
+                        "reasons": [],
+                        "mitre_atlas": [],
+                        "mitre_attack": [],
+                        "owasp_llm_top10": [],
+                        "stride_categories": [],
+                        "dread": {"avg": 0.0},
+                        "pasta": {"current_stage": "Stage4"},
+                    },
+                },
+                "nonce_ok": False,
+                "next_actions": ["needs_better_image"],
+            }
         raise HTTPException(status_code=400, detail="upload failed: processing error")

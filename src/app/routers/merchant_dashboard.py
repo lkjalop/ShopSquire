@@ -4,7 +4,7 @@ import json
 import os
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from src.app.security.auth import ROLE_MERCHANT, require_role
 from src.app.services.nlp_query_clustering import QueryClusterer
@@ -42,7 +42,55 @@ def _allow_unauth_dashboard(req: Request) -> bool:
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-def merchant_dashboard(
+def merchant_dashboard(request: Request):
+    """Merchant dashboard entrypoint (local demo).
+
+    We serve a built React app at `/merchant/app` (mounted by `src/app/main.py`).
+    This route exists as a stable demo URL and simply deep-links into the BI tab.
+    """
+    if not (_is_loopback(request) or _is_local_demo_host(request)):
+        # Keep the "merchant pages are local-only" stance for now.
+        raise HTTPException(status_code=403, detail="merchant_dashboard_local_only")
+
+    html = """
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Merchant Dashboard</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 24px; }
+          .card { border: 1px solid #eee; border-radius: 12px; padding: 14px; max-width: 720px; }
+          .btn { display:inline-block; padding: 8px 12px; border-radius: 10px; background: #0b61d6; color: #fff; text-decoration:none; }
+          .muted { color: #666; font-size: 12px; margin-top: 8px; }
+          code { background: #f6f7f9; padding: 2px 6px; border-radius: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2 style="margin:0 0 8px 0;">Merchant Dashboard</h2>
+          <div class="muted">Opening BI charts and queues…</div>
+          <div style="margin-top: 12px;">
+            <a class="btn" href="/merchant/app/index.html?tab=merchant-bi">Open now</a>
+          </div>
+          <div class="muted">Local demo convenience: we set <code>localStorage.shopsquire_api_key</code> to <code>local-merchant-key</code> if missing.</div>
+        </div>
+        <script>
+          try {
+            const k = (localStorage.getItem('shopsquire_api_key') || '').trim();
+            if(!k) localStorage.setItem('shopsquire_api_key', 'local-merchant-key');
+          } catch (e) {}
+          window.location.href = '/merchant/app/index.html?tab=merchant-bi';
+        </script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
+@router.get("/dashboard-faq", response_class=HTMLResponse)
+def merchant_dashboard_faq(
     request: Request,
     x_api_key: str | None = Header(default=None, alias="x-api-key"),
 ):
@@ -183,7 +231,38 @@ def merchant_bi(request: Request):
 
 
 @router.get("/incident-room", response_class=HTMLResponse)
-def merchant_incident_room(request: Request, incident_id: str | None = None, token: str | None = None):
+def merchant_incident_room(request: Request):
+    """Human escalation console entrypoint (local demo).
+
+    Deep-links into the React escalation console (queue + chat + context).
+    """
+    if not (_is_loopback(request) or _is_local_demo_host(request)):
+        raise HTTPException(status_code=403, detail="incident_room_local_only")
+
+    html = """
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Incident Console</title>
+      </head>
+      <body>
+        <script>
+          try {
+            const k = (localStorage.getItem('shopsquire_api_key') || '').trim();
+            if(!k) localStorage.setItem('shopsquire_api_key', 'local-merchant-key');
+          } catch (e) {}
+          window.location.href = '/merchant/app/index.html?tab=escalations';
+        </script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
+@router.get("/incident-room-lite", response_class=HTMLResponse)
+def merchant_incident_room_lite(request: Request, incident_id: str | None = None, token: str | None = None):
     """Lightweight staff incident room UI (local demo).
 
     Use `token` from `/api/v1/incidents/escalate` (staff_token) to join.
@@ -200,9 +279,20 @@ def merchant_incident_room(request: Request, incident_id: str | None = None, tok
           body {{ font-family: Arial, sans-serif; margin: 0; background:#0b1220; color:#e5e7eb; }}
           header {{ padding: 12px 14px; border-bottom:1px solid rgba(148,163,184,0.18); background:#0f172a; }}
           .row {{ display:flex; gap:10px; padding: 12px 14px; align-items:center; flex-wrap:wrap; }}
+          .card {{ margin: 12px 14px; border:1px solid rgba(148,163,184,0.18); border-radius: 14px; background: rgba(15,23,42,0.45); }}
+          .card h4 {{ margin: 0; padding: 10px 12px; border-bottom:1px solid rgba(148,163,184,0.14); font-size: 13px; color: #cbd5e1; }}
+          .card .body {{ padding: 10px 12px; }}
           input {{ padding:8px 10px; border-radius:10px; border:1px solid rgba(148,163,184,0.25); background:#0b1220; color:#e5e7eb; min-width: 280px; }}
           button {{ padding:8px 10px; border-radius:10px; border:1px solid rgba(148,163,184,0.25); background:#111827; color:#e5e7eb; cursor:pointer; }}
           button:hover {{ border-color: rgba(249,115,22,0.6); }}
+          .pill {{ display:inline-flex; align-items:center; gap:8px; padding: 6px 10px; border:1px solid rgba(148,163,184,0.18); border-radius: 999px; background: rgba(2,6,23,0.35); font-size: 12px; color:#cbd5e1; }}
+          .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace; }}
+          .inc-list {{ display:flex; flex-direction:column; gap:8px; max-height: 160px; overflow:auto; }}
+          .inc-item {{ display:flex; justify-content:space-between; gap: 10px; padding: 8px 10px; border:1px solid rgba(148,163,184,0.16); border-radius: 12px; cursor:pointer; background: rgba(2,6,23,0.2); }}
+          .inc-item:hover {{ border-color: rgba(249,115,22,0.55); }}
+          .inc-left {{ display:flex; flex-direction:column; gap:4px; }}
+          .inc-right {{ display:flex; flex-direction:column; gap:4px; align-items:flex-end; }}
+          .small {{ font-size: 11px; color: #94a3b8; }}
           .log {{ height: calc(100vh - 170px); overflow:auto; padding: 12px 14px; }}
           .msg {{ margin-bottom:10px; padding:10px 12px; border-radius:12px; background: rgba(15,23,42,0.7); border:1px solid rgba(148,163,184,0.18);}}
           .meta {{ font-size: 11px; color:#94a3b8; margin-bottom:4px; }}
@@ -216,6 +306,17 @@ def merchant_incident_room(request: Request, incident_id: str | None = None, tok
           <div style="font-weight:700">Incident Room (Staff)</div>
           <div style="color:#94a3b8; font-size:12px;">Join with incident_id + staff token. This is a local demo UI.</div>
         </header>
+        <div class="card">
+          <h4>Open Incidents</h4>
+          <div class="body">
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+              <span class="pill"><span>API Key</span> <span class="mono" id="apikey_hint">(uses localStorage or local-merchant-key)</span></span>
+              <button onclick="loadIncidents()">Load Open Incidents</button>
+              <span class="small" id="inc_status"></span>
+            </div>
+            <div class="inc-list" id="inc_list"></div>
+          </div>
+        </div>
         <div class="row">
           <div>Incident ID</div><input id="incident" value="{inc}" placeholder="incident_id" />
           <div>Token</div><input id="token" value="{tok}" placeholder="staff_token" />
@@ -228,6 +329,13 @@ def merchant_incident_room(request: Request, incident_id: str | None = None, tok
         </div>
         <script>
           let es = null;
+          function getApiKey(){{
+            try {{
+              return (localStorage.getItem('x-api-key') || localStorage.getItem('api_key') || '').trim() || 'local-merchant-key';
+            }} catch(e) {{
+              return 'local-merchant-key';
+            }}
+          }}
           function append(rec){{
             const log = document.getElementById('log');
             const d = document.createElement('div');
@@ -236,6 +344,59 @@ def merchant_incident_room(request: Request, incident_id: str | None = None, tok
             d.innerHTML = `<div class='meta'>${{ts.toLocaleTimeString()}} | ${{rec.role || 'unknown'}}</div><div>${{(rec.message||'').replace(/</g,'&lt;')}}</div>`;
             log.appendChild(d);
             log.scrollTop = log.scrollHeight;
+          }}
+          async function loadIncidents(){{
+            const status = document.getElementById('inc_status');
+            const list = document.getElementById('inc_list');
+            status.textContent = 'Loading...';
+            list.innerHTML = '';
+            try {{
+              const r = await fetch('/api/v1/admin/incidents/', {{
+                headers: {{ 'x-api-key': getApiKey() }}
+              }});
+              const j = await r.json();
+              const incs = (j && j.incidents) ? j.incidents : [];
+              if (!Array.isArray(incs) || incs.length === 0) {{
+                status.textContent = 'No open incidents found.';
+                return;
+              }}
+              status.textContent = `${{incs.length}} open incident(s)`;
+              for (const it of incs) {{
+                const row = document.createElement('div');
+                row.className = 'inc-item';
+                const created = it.created_at ? new Date(it.created_at) : null;
+                row.innerHTML = `
+                  <div class='inc-left'>
+                    <div class='mono'>${{it.id || ''}}</div>
+                    <div class='small'>${{(it.title || 'Incident').toString().slice(0, 90)}}</div>
+                  </div>
+                  <div class='inc-right'>
+                    <div class='pill'>${{(it.severity || 'unknown').toString()}}</div>
+                    <div class='small'>${{created ? created.toLocaleString() : ''}}</div>
+                  </div>
+                `;
+                row.onclick = async () => {{
+                  try {{
+                    const incId = (it.id || '').toString();
+                    if(!incId) return;
+                    document.getElementById('incident').value = incId;
+                    // Issue/rotate a staff token so EventSource can connect (no headers).
+                    const tr = await fetch(`/api/v1/admin/incidents/${{encodeURIComponent(incId)}}/room/token`, {{
+                      method: 'POST',
+                      headers: {{ 'x-api-key': getApiKey() }},
+                    }});
+                    const tj = await tr.json();
+                    if (tj && tj.staff_token) {{
+                      document.getElementById('token').value = tj.staff_token;
+                    }}
+                    connect();
+                  }} catch(e) {{}}
+                }};
+                list.appendChild(row);
+              }}
+            }} catch (e) {{
+              status.textContent = 'Failed to load incidents.';
+            }}
           }}
           function connect(){{
             const inc = document.getElementById('incident').value.trim();
@@ -268,7 +429,15 @@ def merchant_incident_room(request: Request, incident_id: str | None = None, tok
               }});
             }}catch(e){{}}
           }}
-          if("{inc}" && "{tok}") connect();
+          try {{
+            document.getElementById('apikey_hint').textContent = getApiKey();
+          }} catch(e) {{}}
+          if("{inc}" && "{tok}") {{
+            connect();
+          }} else {{
+            // Auto-load list for convenience in demos.
+            loadIncidents();
+          }}
         </script>
       </body>
     </html>

@@ -164,6 +164,7 @@ export default function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>({ ok: false, latencyMs: null, checkedAt: null, error: null });
   const [escalationOpen, setEscalationOpen] = useState(false);
   const [escalationIncidentId, setEscalationIncidentId] = useState<string | null>(null);
+  const [escalationBuyerToken, setEscalationBuyerToken] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isRecording, setIsRecording] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -190,16 +191,18 @@ export default function App() {
       // ignore
     }
 
-    const hasQr = tags.includes('qr_url_present') || reasons.has('qr_code_detected') || reasons.has('qr_external_url_detected');
+    const hasQr = tags.includes('qr_url_present') || tags.includes('ocr_prompt_injection') || reasons.has('qr_code_detected') || reasons.has('qr_external_url_detected') || Boolean(cvResult.qr_prompt_injection);
     const hasManipulation = tags.includes('manipulation_detected') || reasons.has('manipulation_detected');
-    if (!hasQr && !hasManipulation) return;
+    const hasPromptInjection = tags.includes('prompt_injection_text_suspected') || tags.includes('ocr_prompt_injection') || reasons.has('ocr_prompt_pattern_detected');
+    if (!hasQr && !hasManipulation && !hasPromptInjection) return;
 
-    const noteKey = String(cvResult.case_id || cvResult.trace_id || cvResult.decision_id || '') + `|qr=${hasQr}|manip=${hasManipulation}`;
+    const noteKey = String(cvResult.case_id || cvResult.trace_id || cvResult.decision_id || '') + `|qr=${hasQr}|manip=${hasManipulation}|pi=${hasPromptInjection}`;
     if (noteKey && noteKey === lastCvSecurityNoteKey) return;
 
     const parts: string[] = [];
     if (hasQr) parts.push('a QR code or external link');
     if (hasManipulation) parts.push('signs the photo may be edited or altered');
+    if (hasPromptInjection && !hasQr) parts.push('embedded text that resembles an instruction or command');
 
     const what = parts.length === 2 ? `${parts[0]} and ${parts[1]}` : parts[0];
     const msg =
@@ -649,8 +652,9 @@ export default function App() {
                       mode="cv"
                       initialImages={cvPrefillImages}
                       onEscalate={(payload) => {
-                        const incId = payload?.case_id || payload?.decision_id || 'incident-demo';
+                        const incId = payload?.incident_id || payload?.case_id || payload?.decision_id || 'incident-demo';
                         setEscalationIncidentId(incId);
+                        if (payload?.buyer_token) setEscalationBuyerToken(String(payload.buyer_token)); else setEscalationBuyerToken(null);
                         setEscalationOpen(true);
                         setMessages(prev => [...prev, { role: 'assistant', content: 'Escalated to human review. Opening escalation room...', timestamp: new Date() }]);
                       }}
@@ -711,7 +715,7 @@ export default function App() {
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (
-        <EscalationRoom incidentId={escalationIncidentId} onClose={() => setEscalationOpen(false)} />
+        <EscalationRoom incidentId={escalationIncidentId} buyerToken={escalationBuyerToken} onClose={() => setEscalationOpen(false)} />
       )}
     </div>
   );

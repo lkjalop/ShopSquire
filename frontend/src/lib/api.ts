@@ -66,6 +66,47 @@ export async function cvAnalyze(payload: {
   return j;
 }
 
+export async function cvIssueNonce(): Promise<{ nonce: string; expires_in: number } | null> {
+  const r = await fetch(apiUrl('/api/v1/cv/nonce'), {
+    headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+  });
+  const j = await safeJson(r);
+  if (!r.ok || !j) return null;
+  return j;
+}
+
+export async function cvUpload(params: {
+  file: File;
+  nonce: string;
+  order_id?: string;
+  customer_id?: string;
+  guest_email?: string;
+  sku?: string;
+  expected_label?: string;
+  issue_type?: string;
+  description?: string;
+}) {
+  const fd = new FormData();
+  fd.append('image', params.file);
+  const u = new URL(apiUrl('/api/v1/cv/upload'), window.location.href);
+  u.searchParams.set('nonce', params.nonce);
+  if (params.order_id) u.searchParams.set('order_id', params.order_id);
+  if (params.customer_id) u.searchParams.set('customer_id', params.customer_id);
+  if (params.guest_email) u.searchParams.set('guest_email', params.guest_email);
+  if (params.sku) u.searchParams.set('sku', params.sku);
+  if (params.expected_label) u.searchParams.set('expected_label', params.expected_label);
+  if (params.issue_type) u.searchParams.set('issue_type', params.issue_type);
+  if (params.description) u.searchParams.set('description', params.description);
+  const r = await fetch(u.toString(), {
+    method: 'POST',
+    body: fd,
+    headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+  });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cv_upload_failed (${r.status})`);
+  return j;
+}
+
 export async function getCart(uid: string) {
   const u = new URL(apiUrl('/api/v1/cart'), window.location.href);
   u.searchParams.set('uid', uid || 'demo-user');

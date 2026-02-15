@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import ORJSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.app.routers import admin, pricing, inventory, support, events, payments
@@ -867,6 +867,164 @@ def create_app() -> FastAPI:
         code = 200 if ok else 503
         return ORJSONResponse({"status": status, "reasons": reasons}, status_code=code)
 
+    @app.get("/status/summary")
+    def status_summary():
+        """Public demo-friendly summary of key Email XDR counts.
+
+        Returns counts for incidents (warning/error) and outbound anomalies
+        without requiring an admin API key.
+        """
+        warn_count = 0
+        err_count = 0
+        outbound_count = 0
+        try:
+            eng = getattr(app.state, "engine", None)
+            if eng is not None:
+                with eng.connect() as conn:
+                    try:
+                        warn_count = int(
+                            conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'warning'"))
+                            .scalar()
+                            or 0
+                        )
+                    except Exception:
+                        warn_count = 0
+                    try:
+                        err_count = int(
+                            conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'error'"))
+                            .scalar()
+                            or 0
+                        )
+                    except Exception:
+                        err_count = 0
+                    try:
+                        outbound_count = int(
+                            conn.execute(sql_text("SELECT COUNT(1) FROM outbound_email_anomalies"))
+                            .scalar()
+                            or 0
+                        )
+                    except Exception:
+                        outbound_count = 0
+        except Exception:
+            pass
+
+        return ORJSONResponse(
+            {
+                "status": "ok",
+                "email_xdr": {"warnings": warn_count, "errors": err_count},
+                "outbound_anomalies": outbound_count,
+            }
+        )
+
+    @app.get("/demo", response_class=HTMLResponse)
+    @app.get("/demo/links", response_class=HTMLResponse)
+    def demo_links():
+        """Lightweight landing page with useful links and live counts."""
+        # Gather quick counts for Email XDR + outbound anomalies
+        warn_count = 0
+        err_count = 0
+        outbound_count = 0
+        try:
+            eng = getattr(app.state, "engine", None)
+            if eng is not None:
+                with eng.connect() as conn:
+                    try:
+                        warn_count = int(
+                            conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'warning'"))
+                            .scalar()
+                            or 0
+                        )
+                    except Exception:
+                        warn_count = 0
+                    try:
+                        err_count = int(
+                            conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'error'"))
+                            .scalar()
+                            or 0
+                        )
+                    except Exception:
+                        err_count = 0
+                    try:
+                        outbound_count = int(
+                            conn.execute(sql_text("SELECT COUNT(1) FROM outbound_email_anomalies"))
+                            .scalar()
+                            or 0
+                        )
+                    except Exception:
+                        outbound_count = 0
+        except Exception:
+            pass
+
+        html = f"""
+        <!doctype html>
+        <html>
+            <head>
+                <meta charset='utf-8' />
+                <title>ShopSquire Demo Links</title>
+                <style>
+                    body {{ font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; color: #222; }}
+                    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }}
+                    .card {{ border: 1px solid #eee; border-radius: 12px; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }}
+                    .title {{ font-size: 18px; margin: 0 0 8px; }}
+                    .sub {{ color: #666; font-size: 12px; margin-top: 6px; }}
+                    .badge {{ display: inline-block; background: #f5f5f5; border: 1px solid #ddd; border-radius: 999px; padding: 2px 8px; font-size: 12px; margin-left: 8px; }}
+                    a.btn {{ display: inline-block; padding: 6px 10px; border-radius: 8px; background: #0b61d6; color: white; text-decoration: none; margin-top: 8px; }}
+                    a.btn.secondary {{ background: #555; }}
+                </style>
+            </head>
+            <body>
+                <h1>ShopSquire Demo Links</h1>
+                <div class='grid'>
+                    <div class='card'>
+                        <div class='title'>Buyer Site <span class='badge'>vite dev</span></div>
+                        <div class='sub'>Storefront UX for checkout + recommendations</div>
+                        <a class='btn' href='http://127.0.0.1:5173/' target='_blank' rel='noreferrer'>Open</a>
+                    </div>
+                    <div class='card'>
+                        <div class='title'>Backend Health</div>
+                        <div class='sub'>System dependencies snapshot (+ readyz/liveness)</div>
+                        <a class='btn' href='http://127.0.0.1:8080/health' target='_blank' rel='noreferrer'>/health</a>
+                        <a class='btn secondary' href='/readyz' target='_blank' rel='noreferrer'>/readyz</a>
+                        <a class='btn secondary' href='/healthz' target='_blank' rel='noreferrer'>/healthz</a>
+                    </div>
+                    <div class='card'>
+                        <div class='title'>Merchant Dashboard</div>
+                        <div class='sub'>Owner-facing, no API key required (dev only)</div>
+                        <a class='btn' href='http://127.0.0.1:8080/merchant/dashboard' target='_blank' rel='noreferrer'>Open</a>
+                    </div>
+                    <div class='card'>
+                        <div class='title'>Admin React</div>
+                        <div class='sub'>Custom BI + Email XDR + Escalations</div>
+                        <a class='btn' href='http://127.0.0.1:3001/' target='_blank' rel='noreferrer'>Open</a>
+                    </div>
+                    <div class='card'>
+                        <div class='title'>Email XDR</div>
+                        <div class='sub'>Incidents (warning/error); Outbound anomalies <span class='badge'>admin API key</span></div>
+                        <div>
+                            <span class='badge'>warnings: {warn_count}</span>
+                            <span class='badge'>errors: {err_count}</span>
+                            <span class='badge'>outbound anomalies: {outbound_count}</span>
+                        </div>
+                        <a class='btn secondary' href='/api/v1/admin/email_security/incidents?severity=warning&limit=50' target='_blank' rel='noreferrer'>Incidents (warn)</a>
+                        <a class='btn secondary' href='/api/v1/admin/email_security/incidents?severity=error&limit=50' target='_blank' rel='noreferrer'>Incidents (error)</a>
+                        <a class='btn secondary' href='/api/v1/admin/email_security/outbound/anomalies' target='_blank' rel='noreferrer'>Outbound anomalies</a>
+                    </div>
+                    <div class='card'>
+                        <div class='title'>API Docs</div>
+                        <div class='sub'>OpenAPI schema for REST endpoints</div>
+                        <a class='btn secondary' href='/openapi.json' target='_blank' rel='noreferrer'>openapi.json</a>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html)
+
+    @app.get("/", response_class=RedirectResponse)
+    def root_redirect():
+        """Convenience redirect to demo links."""
+        return RedirectResponse(url="/demo/links")
+
     # Conditionally import and include UI routes; prefer lightweight storefront
     ui_router = None
     try:
@@ -1191,6 +1349,16 @@ def create_app() -> FastAPI:
         static_dir = os.path.join(os.getcwd(), "static")
         if os.path.isdir(static_dir):
             app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    except Exception:
+        pass
+
+    # Serve the built merchant/admin React UI from inside the repository so demo URLs
+    # like `/merchant/dashboard` can show real BI + escalation consoles without
+    # running a separate dev server.
+    try:
+        merchant_dist = os.path.join(os.getcwd(), "src", "frontend", "admin-react", "dist")
+        if os.path.isdir(merchant_dist):
+            app.mount("/merchant/app", StaticFiles(directory=merchant_dist, html=True), name="merchant_app")
     except Exception:
         pass
     app.include_router(cart_router)

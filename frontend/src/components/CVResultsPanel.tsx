@@ -18,6 +18,7 @@ export type CVResult = {
   order_validation?: { provided?: boolean; exists?: boolean | null; triggered_security?: boolean } | null;
   user_prompt?: string | null;
   ui_actions?: { chat_with_admin?: boolean };
+  qr_prompt_injection?: boolean;
 };
 
 export default function CVResultsPanel({

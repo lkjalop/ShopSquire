@@ -101,52 +101,6 @@
 			"problemMatcher": []
 		},
 		{
-			"label": "Start uvicorn server (8081)",
-			"type": "shell",
-			"command": "$env:DATABASE_URL = \"sqlite+pysqlite:///D:/AI/agentLumen/ShopSquire/tmp/e2e.sqlite\"; $env:DISABLE_UI_ROUTES = \"0\"; $env:API_PORT = \"8081\"; $env:BACKPRESSURE_TEST_DELAY_SEC = \"0.3\"; & \"D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe\" -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory",
-			"args": [],
-			"isBackground": true,
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "Start uvicorn server (8081)",
-			"type": "shell",
-			"command": "$env:DATABASE_URL = 'sqlite+pysqlite:///D:/AI/agentLumen/ShopSquire/tmp/e2e.sqlite'; $env:DISABLE_UI_ROUTES = '0'; $env:API_PORT = '8081'; $env:BACKPRESSURE_TEST_DELAY_SEC = '0.3'; & 'D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe' -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory",
-			"args": [],
-			"isBackground": true,
-			"problemMatcher": [],
-			"group": "build"
-		},
-		{
-			"label": "Start uvicorn detached",
-			"type": "shell",
-			"command": "powershell",
-			"args": [
-				"-NoProfile",
-				"-ExecutionPolicy",
-				"Bypass",
-				"-Command",
-				"Push-Location 'D:/AI/agentLumen/ShopSquire'; Start-Process -FilePath '.venv/Scripts/python.exe' -ArgumentList '-m','uvicorn','src.app.main:create_app','--host','127.0.0.1','--port','8081','--factory' -WorkingDirectory 'D:/AI/agentLumen/ShopSquire' -WindowStyle Hidden; Pop-Location"
-			],
-			"isBackground": false,
-			"group": "build"
-		},
-		{
-			"label": "Start uvicorn detached (fixed)",
-			"type": "shell",
-			"command": "powershell",
-			"args": [
-				"-NoProfile",
-				"-ExecutionPolicy",
-				"Bypass",
-				"-Command",
-				"Push-Location 'D:/AI/agentLumen/ShopSquire'; Start-Process -FilePath '.venv/Scripts/python.exe' -ArgumentList \"-m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory\" -WorkingDirectory 'D:/AI/agentLumen/ShopSquire' -WindowStyle Hidden; Pop-Location"
-			],
-			"isBackground": false,
-			"group": "build"
-		},
-		{
 			"label": "Run recommend price/spec test",
 			"type": "shell",
 			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe",
@@ -172,6 +126,13 @@
 				"-s"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "Start uvicorn (8080 via system Python)",
+			"type": "shell",
+			"command": "$env:DATABASE_URL = 'sqlite+pysqlite:///C:/AI/ShopSquire/tmp/e2e.sqlite'; $env:DISABLE_UI_ROUTES = '0'; $env:API_PORT = '8080'; $env:BACKPRESSURE_TEST_DELAY_SEC = '0.3'; & 'c:/Users/leoma/AppData/Local/Programs/Python/PYTHON311/python.exe' -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8080 --factory",
+			"isBackground": true,
+			"group": "build"
 		}
 	]
 }

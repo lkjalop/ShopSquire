@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request, Body
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import requests
+from sqlalchemy import text as sql_text
 
 from src.app.config import get_settings, load_feature_flags
 from src.app.models.db import db_session, get_db
@@ -2080,13 +2081,15 @@ def security_attacks_timeseries(
             # Prefer pre-aggregated Timescale continuous aggregate when available.
             try:
                 rows_cagg = db.execute(
-                    """
-                    SELECT bucket, security_type, threat, vector, count
-                    FROM security_attacks_hourly
-                    WHERE bucket >= :since
-                    ORDER BY bucket ASC
-                    LIMIT :limit
-                    """,
+                    sql_text(
+                        """
+                        SELECT bucket, security_type, threat, vector, count
+                        FROM security_attacks_hourly
+                        WHERE bucket >= :since
+                        ORDER BY bucket ASC
+                        LIMIT :limit
+                        """
+                    ),
                     {"since": since_sql, "limit": limit},
                 ).fetchall()
                 if rows_cagg:
@@ -2098,16 +2101,22 @@ def security_attacks_timeseries(
                         totals_by_type[str(sec_type)] = int(totals_by_type.get(str(sec_type), 0)) + c
             except Exception:
                 used_timescale_cagg = False
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
 
             if not used_timescale_cagg:
                 rows = db.execute(
-                    """
-                    SELECT event_time, path, severity, verdict_score, details
-                    FROM security_events
-                    WHERE event_time >= :since
-                    ORDER BY event_time DESC
-                    LIMIT :limit
-                    """,
+                    sql_text(
+                        """
+                        SELECT event_time, path, severity, verdict_score, details
+                        FROM security_events
+                        WHERE event_time >= :since
+                        ORDER BY event_time DESC
+                        LIMIT :limit
+                        """
+                    ),
                     {"since": since_sql, "limit": limit},
                 ).fetchall()
                 for event_time, path, _severity, _score, details_raw in rows or []:
@@ -2121,8 +2130,14 @@ def security_attacks_timeseries(
                     key = (ts_hour, sec_type, threat, vector)
                     grouped[key] = int(grouped.get(key, 0)) + 1
                     totals_by_type[sec_type] = int(totals_by_type.get(sec_type, 0)) + 1
-    except Exception:
-        return {"hours": hours, "buckets": [], "totals_by_type": {}, "source": "raw_fallback_error"}
+    except Exception as e:
+        out = {"hours": hours, "buckets": [], "totals_by_type": {}, "source": "raw_fallback_error"}
+        try:
+            if str(os.getenv("APP_ENV", "") or "").lower() in ("local", "dev", "development"):
+                out["error"] = str(e)
+        except Exception:
+            pass
+        return out
 
     buckets = [
         {

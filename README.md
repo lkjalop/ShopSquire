@@ -154,6 +154,60 @@ Open:
 - Grafana: `http://127.0.0.1:3005`
 - Prometheus: `http://127.0.0.1:9090`
 
+## Local Demo (Windows)
+
+- Backend landing: http://127.0.0.1:8080/demo/links
+       - Health: http://127.0.0.1:8080/health
+       - Merchant dashboard: http://127.0.0.1:8080/merchant/dashboard
+       - Admin React: http://127.0.0.1:3001/ (enter API key: local-owner-key)
+- Buyer site: http://127.0.0.1:5173/
+
+Setup:
+
+1) Python venv and packages
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -U pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install pyzbar pytesseract
+```
+
+2) Tesseract OCR
+- Install: https://github.com/UB-Mannheim/tesseract/wiki
+- Add to .env:
+```powershell
+Add-Content ".env" "CV_OCR_PROVIDER=tesseract"
+Add-Content ".env" "TESSERACT_PATH=C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+```
+
+3) Ollama vision model
+```powershell
+ollama pull llava
+```
+- Ensure in .env:
+```powershell
+Add-Content ".env" "OLLAMA_URL=http://127.0.0.1:11434"
+Add-Content ".env" "CV_VISION_MODEL=llava:latest"
+Add-Content ".env" "CV_VISION_ENABLED=1"
+```
+
+4) Redis (optional for agent bus/tokens)
+```powershell
+docker compose up -d redis
+```
+
+Run backend on 8080:
+```powershell
+.venv\Scripts\python.exe -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8080 --factory
+```
+
+CV triage smoke test:
+```powershell
+$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("dump/test-cv/macbook-QR.png"))
+$payload = @{ case_id = "case-demo-qr"; images_b64 = @($b64) } | ConvertTo-Json -Depth 6
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8080/api/v1/cv/analyze" -Headers @{"x-api-key"="local-merchant-key";"Content-Type"="application/json"} -Body $payload
+```
+
 ## Demo Scripts
 
 - Bring up stack + warmups (CV + Ollama): `scripts/start_live_demo.ps1`

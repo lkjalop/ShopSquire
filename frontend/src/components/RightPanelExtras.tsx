@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiUrl, safeJson, cvAnalyze } from '../lib/api';
+import { apiUrl, safeJson, cvAnalyze, cvIssueNonce, cvUpload } from '../lib/api';
 import CVResultsPanel, { CVResult } from './CVResultsPanel';
 import { fileToBase64, buildSanitizedImages } from '../utils/imageProcessing';
 import CameraButton from './CameraButton';
@@ -129,7 +129,11 @@ export default function RightPanelExtras({
   const showChatWithAdmin = Boolean(
     result?.ui_actions?.chat_with_admin
     || result?.suggested_routing === 'security_review'
-    || (typeof result?.human_review !== 'boolean' && result?.human_review?.status === 'pending'),
+    || (typeof result?.human_review !== 'boolean' && result?.human_review?.status === 'pending')
+    || Boolean((result as any)?.qr_prompt_injection)
+    || (result?.evidence_tags || []).some((t: string) =>
+      ['qr_url_present', 'prompt_injection_text_suspected', 'manipulation_detected', 'qr_url_suspicious', 'ocr_prompt_injection', 'fraud_score_high'].includes(t),
+    ),
   );
 
   const statusMeta = (rawStatus?: string) => {
@@ -268,7 +272,7 @@ export default function RightPanelExtras({
         case_id: resp.case_id,
         analysis: resp.cv_analysis,
         cv_tiered_analysis: undefined,
-        suggested_routing: undefined,
+        suggested_routing: (resp as any)?.suggested_routing || undefined,
         human_review: false,
         evidence_tags: [],
         playbook_preview: undefined,
@@ -283,7 +287,7 @@ export default function RightPanelExtras({
         },
         order_validation: null,
         user_prompt: ic?.prompt || null,
-        ui_actions: { chat_with_admin: false },
+        ui_actions: (resp as any)?.ui_actions || { chat_with_admin: false },
       };
       onTraceId?.(resolvedTraceId);
       setResult(cvRes);
@@ -300,6 +304,7 @@ export default function RightPanelExtras({
         order_validation: cvRes.order_validation,
         user_prompt: cvRes.user_prompt,
         ui_actions: cvRes.ui_actions,
+        qr_prompt_injection: (resp as any)?.qr_prompt_injection,
       });
     } catch (e: any) {
       setError(e?.message || 'Analyze failed');
@@ -326,9 +331,86 @@ export default function RightPanelExtras({
     }).then(() => {}).catch(() => {});
   };
 
-  const escalate = () => {
+  const escalate = async () => {
+    try {
+      const resp = await fetch(apiUrl('/api/v1/incidents/escalate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          case_id: result?.case_id,
+          trace_id: result?.trace_id,
+          reason: 'buyer_requested_human_review',
+          context: { decision_id: result?.decision_id, evidence_tags: result?.evidence_tags },
+        }),
+      });
+      const data = await safeJson(resp);
+      if (data?.ok && data?.incident_id) {
+        onEscalate?.({
+          case_id: result?.case_id,
+          decision_id: result?.decision_id,
+          incident_id: data.incident_id,
+          buyer_token: data.buyer_token,
+        });
+        return;
+      }
+    } catch {
+      // Fallback: open escalation room with case_id as incident proxy
+    }
     onEscalate?.({ case_id: result?.case_id, decision_id: result?.decision_id });
-    // Backend already creates tickets when needed; nothing to do here for MVP
+  };
+
+  const uploadWithNonce = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (!images || images.length === 0) throw new Error('no_images_selected');
+      const nonceRes = await cvIssueNonce();
+      if (!nonceRes?.nonce) throw new Error('nonce_issue_failed');
+      const first = images[0];
+      const up = await cvUpload({
+        file: first,
+        nonce: nonceRes.nonce,
+        order_id: orderId || undefined,
+        issue_type: issueType || undefined,
+        description: description || undefined,
+      });
+      const resolvedTraceId = (up as any)?.case_id || (up as any)?.trace_id || null;
+      onTraceId?.(resolvedTraceId);
+      const actions = (up as any)?.next_actions || [];
+      setResult({
+        decision_id: (up as any)?.case_id,
+        trace_id: resolvedTraceId || undefined,
+        case_id: (up as any)?.case_id,
+        analysis: (up as any)?.cv_tier2 || (up as any)?.cv_analysis,
+        cv_tiered_analysis: (up as any)?.cv_tier2 ? { tier2: (up as any)?.cv_tier2 } : undefined,
+        suggested_routing: actions.includes('human_review') ? 'security_review' : 'standard_queue',
+        human_review: actions.includes('human_review') ? { status: 'pending', ticket_id: null } : false,
+        evidence_tags: (up as any)?.evidence_tags || [],
+        playbook_preview: undefined,
+        image_consistency: undefined,
+        order_validation: null,
+        user_prompt: null,
+        ui_actions: { chat_with_admin: actions.includes('human_review') },
+      });
+      onResult?.({
+        decision_id: (up as any)?.case_id,
+        case_id: (up as any)?.case_id,
+        suggested_routing: actions.includes('human_review') ? 'security_review' : 'standard_queue',
+        analysis: (up as any)?.cv_tier2 || (up as any)?.cv_analysis,
+        cv_tiered_analysis: (up as any)?.cv_tier2 ? { tier2: (up as any)?.cv_tier2 } : undefined,
+        human_review: actions.includes('human_review') ? { status: 'pending', ticket_id: null } : false,
+        evidence_tags: (up as any)?.evidence_tags || [],
+        playbook_preview: undefined,
+        image_consistency: undefined,
+        order_validation: null,
+        user_prompt: null,
+        ui_actions: { chat_with_admin: actions.includes('human_review') },
+      });
+    } catch (e: any) {
+      setError(e?.message || 'Upload via nonce failed');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (mode === 'faq') {
@@ -460,6 +542,7 @@ export default function RightPanelExtras({
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
         <button onClick={submitCV} disabled={submitting}>{submitting ? 'Submitting...' : 'Submit (upload)'}</button>
+        <button onClick={uploadWithNonce} disabled={submitting}>{submitting ? 'Uploading...' : 'Upload (nonce)'}</button>
         <button onClick={analyzeSafely} disabled={submitting}>{submitting ? 'Analyzing...' : 'Analyze (no upload)'}</button>
         {result && (
           <>

@@ -135,6 +135,36 @@ def _append_chat(incident_id: str, role: str, message: str, meta: Dict | None = 
         pass
 
 
+@router.get("/")
+def list_incidents(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+    """List open incidents for the escalation console."""
+    _ = role
+    try:
+        eng = get_engine()
+        with eng.begin() as conn:
+            rows = conn.execute(
+                sql_text(
+                    "SELECT id, event_id, severity, title, status, created_at "
+                    "FROM incidents WHERE status IN ('open', 'review') "
+                    "ORDER BY created_at DESC LIMIT 50"
+                )
+            ).fetchall()
+        incidents = [
+            {
+                "id": r[0],
+                "event_id": r[1],
+                "severity": r[2],
+                "title": r[3],
+                "status": r[4],
+                "created_at": str(r[5]),
+            }
+            for r in rows
+        ]
+        return {"incidents": incidents}
+    except Exception:
+        return {"incidents": []}
+
+
 @router.websocket("/{incident_id}/room/ws")
 async def ws_room(incident_id: str, websocket: WebSocket):
     await websocket.accept()
