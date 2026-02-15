@@ -48,6 +48,7 @@ from src.app.routers.health import router as health_router
 from src.app.routers.trace_debug import router as trace_debug_router
 from src.app.routers.admin_chat_tools import router as admin_chat_tools_router
 from src.app.routers.escalation_room import router as escalation_room_router
+from src.app.routers.escalation_room import public_router as public_incidents_router
 from src.app.routers.data_readiness import router as data_readiness_router
 from src.app.services.retention import start_retention_loop, stop_retention_loop
 from src.app.models.init_db import ensure_metadata
@@ -1113,6 +1114,11 @@ def create_app() -> FastAPI:
     # Escalation room (admin ↔ shopper chat stream per incident)
     try:
         app.include_router(escalation_room_router)
+    except Exception:
+        pass
+    # Public incident chat endpoints (token-protected, local-dev demo only)
+    try:
+        app.include_router(public_incidents_router)
     except Exception:
         pass
     # Privacy-safe session events ingestion

@@ -475,6 +475,126 @@ const CVImageGallery = ({ images, onRemove }) => {
   );
 };
 
+const IncidentChatPanel = ({ incidentId, token }) => {
+  const [items, setItems] = useState([]);
+  const [connected, setConnected] = useState(false);
+  const [err, setErr] = useState(null);
+  const [text, setText] = useState('');
+  const endRef = useRef(null);
+
+  useEffect(() => {
+    if (!incidentId || !token) return;
+    setItems([]);
+    setErr(null);
+    setConnected(false);
+
+    const url = `${API_BASE}/incidents/${encodeURIComponent(incidentId)}/room/stream?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+    es.onopen = () => setConnected(true);
+    es.onerror = () => {
+      // Browser will auto-reconnect; keep UI calm.
+      setConnected(false);
+    };
+    es.onmessage = (ev) => {
+      try {
+        const arr = JSON.parse(ev.data || '[]');
+        if (!Array.isArray(arr)) return;
+        setItems((prev) => {
+          const next = [...prev];
+          for (const rec of arr) {
+            if (!rec || typeof rec !== 'object') continue;
+            next.push(rec);
+          }
+          return next.slice(-200);
+        });
+      } catch (e) {
+        // ignore
+      }
+    };
+    return () => {
+      try { es.close(); } catch (e) { /* ignore */ }
+    };
+  }, [incidentId, token]);
+
+  useEffect(() => {
+    try {
+      if (endRef.current) endRef.current.scrollIntoView({ behavior: 'smooth' });
+    } catch (e) {
+      // ignore
+    }
+  }, [items.length]);
+
+  const send = async () => {
+    const msg = (text || '').trim();
+    if (!msg) return;
+    setText('');
+    setErr(null);
+    try {
+      const res = await fetchWithTimeout(
+        `${API_BASE}/incidents/${encodeURIComponent(incidentId)}/room/message`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-incident-token': token },
+          body: JSON.stringify({ message: msg }),
+        },
+        6000
+      );
+      if (!res.ok) throw new Error('send_failed');
+    } catch (e) {
+      setErr('Unable to send message. Please try again.');
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3" style={{ height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+        <div>
+          <div className="text-sm text-gray-700" style={{ fontWeight: 600 }}>Live support chat</div>
+          <div className="text-xs text-gray-500">Incident: <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{incidentId}</span></div>
+        </div>
+        <span className={`badge ${connected ? 'success' : 'warning'}`}>{connected ? 'Connected' : 'Reconnecting…'}</span>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', background: '#f9fafb' }}>
+        {items.length === 0 && (
+          <div className="text-sm text-gray-600">
+            A human agent will join shortly. You can add extra details here (no payment details).
+          </div>
+        )}
+        {items.map((rec, idx) => {
+          const role = rec.role || 'system';
+          const isBuyer = role === 'buyer';
+          const ts = rec.ts ? new Date(rec.ts) : null;
+          return (
+            <div key={`m-${idx}`} style={{ display: 'flex', justifyContent: isBuyer ? 'flex-end' : 'flex-start', marginBottom: '8px' }}>
+              <div style={{ maxWidth: '85%', padding: '10px 12px', borderRadius: '12px', border: '1px solid #e5e7eb', background: isBuyer ? '#111827' : '#fff', color: isBuyer ? '#fff' : '#111827' }}>
+                <div style={{ fontSize: '11px', opacity: 0.75, marginBottom: '4px' }}>
+                  {role}{ts ? ` • ${ts.toLocaleTimeString()}` : ''}
+                </div>
+                <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap' }}>{String(rec.message || '')}</div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={endRef} />
+      </div>
+
+      {err && <div className="text-sm" style={{ color: '#dc2626' }}>{err}</div>}
+
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+          placeholder="Type a message…"
+          style={{ flex: 1, padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: '10px' }}
+        />
+        <button className="contrast" onClick={send} disabled={!text.trim()}>Send</button>
+      </div>
+    </div>
+  );
+};
+
 const RightPanel = ({
   type,
   data,
@@ -611,6 +731,7 @@ const RightPanel = ({
             {type === 'product_detail' && 'Product Detail'}
             {type === 'checkout' && 'Order Confirmed'}
             {type === 'approval' && 'Human Review'}
+            {type === 'incident_chat' && 'Support Chat'}
           </h2>
           {type === 'products' && Array.isArray(data) && (
             <span className="text-sm text-gray-500">({data.length})</span>
@@ -653,6 +774,9 @@ const RightPanel = ({
       <div className="panel-scroll" style={{ padding: '1rem', flex: 1, minHeight: 0 }}>
         {type === 'products' && (
           <ProductGrid products={data} viewMode={viewMode} onAddToCart={onAddToCart} onViewDetail={onViewDetail} isLoading={!!isLoading} />
+        )}
+        {type === 'incident_chat' && (
+          <IncidentChatPanel incidentId={data?.incident_id} token={data?.token} />
         )}
         {type === 'product_detail' && data && (
           <div className="flex flex-col gap-3">
@@ -3196,8 +3320,29 @@ const ShopSquireApp = () => {
               onCheckout={(cartData) => { handleCheckout(cartData); setCheckoutStep(3); }}
               onApprovalAction={handleApprovalAction}
               onEscalate={(caseId) => {
-                setRightPanel({ type: 'approval', data: { approval_id: `ESC-${caseId}`, reason: 'human_escalation', case_id: caseId } });
-                setMessages((prev) => [...prev, { role: 'assistant', content: 'Your case has been escalated to a human agent. You will receive a response shortly.', timestamp: new Date() }]);
+                (async () => {
+                  try {
+                    const res = await fetchWithTimeout(
+                      `${API_BASE}/incidents/escalate`,
+                      {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ case_id: caseId, reason: 'cv_human_review', context: { surface: 'storefront', uid: uid || 'guest_user' } }),
+                      },
+                      8000
+                    );
+                    if (!res.ok) throw new Error('escalate_failed');
+                    const j = await res.json();
+                    setRightPanel({ type: 'incident_chat', data: { incident_id: j.incident_id, token: j.buyer_token }, meta: {} });
+                    setMessages((prev) => [
+                      ...prev,
+                      { role: 'assistant', content: 'I have escalated this to a human support specialist. You can continue the conversation in the Support Chat panel.', timestamp: new Date() },
+                    ]);
+                  } catch (e) {
+                    setRightPanel({ type: 'approval', data: { approval_id: `ESC-${caseId}`, reason: 'human_escalation', case_id: caseId } });
+                    setMessages((prev) => [...prev, { role: 'assistant', content: 'Escalation is temporarily unavailable. Please try again or contact support.', timestamp: new Date() }]);
+                  }
+                })();
               }}
               cvStatus={cvStatus}
               cvImages={cvImages}
