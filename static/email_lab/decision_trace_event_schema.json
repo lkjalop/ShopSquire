@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DecisionTraceEvent",
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "seq": { "type": ["integer", "null"] },
+    "trace_id": { "type": "string" },
+    "event_type": { "type": "string" },
+    "source_type": { "type": "string" },
+    "source_id": { "type": ["string", "null"] },
+    "target_type": { "type": ["string", "null"] },
+    "target_id": { "type": ["string", "null"] },
+    "payload": { "type": ["object", "string", "null"] },
+    "created_at": { "type": ["string", "null"], "description": "ISO 8601 timestamp" }
+  },
+  "required": ["trace_id", "event_type", "source_type"],
+  "additionalProperties": true
+}

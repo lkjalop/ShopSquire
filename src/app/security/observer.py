@@ -1,6 +1,6 @@
 import json
 import uuid
-from typing import Any, Dict, Tuple, List
+from typing import Any, Dict, Tuple, List, Optional
 import os
 
 from src.app.deps import (
@@ -712,7 +712,7 @@ def compute_severity(payload: Dict[str, Any]) -> str:
     return severity
 
 
-def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | None = None, request: Request | None = None) -> None:
+def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | None = None, request: Optional[Request] = None) -> None:
     # Global skip list to avoid overhead on hot paths during load/chaos tests
     try:
         skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")

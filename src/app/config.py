@@ -210,7 +210,9 @@ def load_feature_flags(path: str) -> dict:
                     if get_settings().app_env.lower() not in ("production", "prod"):
                         merged["DECISION_LOG_WRITES_ENABLED"] = True
             except Exception:
-                pass
+                import logging
+
+                logging.getLogger("shopsquire.config").exception("Failed merging feature flags from effective path")
             # If BOM detected, rewrite without BOM in dev to prevent silent flag drift.
             try:
                 if has_bom and get_settings().app_env.lower() not in ("production", "prod"):
@@ -248,8 +250,12 @@ def load_feature_flags(path: str) -> dict:
                             if get_settings().app_env.lower() not in ("production", "prod"):
                                 merged["DECISION_LOG_WRITES_ENABLED"] = True
                     except Exception:
-                        pass
+                        import logging
+
+                        logging.getLogger("shopsquire.config").exception("Failed checking DECISION_LOG_WRITES_ENABLED env logic")
                     return merged
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger("shopsquire.config").exception("Failed loading fallback feature flags file")
         return defaults

@@ -42,14 +42,14 @@ class ManagedCVProvider:
                 return self._ollama_labels_and_text(image_bytes)
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.
-                logging.getLogger(__name__).warning("cv_provider.ollama_failed", exc_info=True)
+                logging.getLogger(__name__).exception("cv_provider.ollama_failed")
         # Degradation path: if managed providers fail/misconfigured, use local OCR (tesseract)
         try:
             text = self._tesseract_text(image_bytes)
             if text:
                 return [], text
         except Exception:
-            logging.getLogger(__name__).warning("cv_provider.tesseract_failed", exc_info=True)
+            logging.getLogger(__name__).exception("cv_provider.tesseract_failed")
         # Fallback: no provider
         return [], ""
 
@@ -120,6 +120,7 @@ class ManagedCVProvider:
                 continue
             except Exception as e:
                 last_err = f"error {type(e).__name__}: {e}"
+                logging.getLogger(__name__).exception("cv_provider.ollama_call_failed model=%s err=%s", model_name, last_err)
                 continue
         else:
             logging.getLogger(__name__).warning("cv_provider.ollama_unreachable url=%s err=%s", url, last_err)
@@ -151,6 +152,7 @@ class ManagedCVProvider:
                 text = str(obj.get("text", "") or "")
                 return labels, text
         except Exception:
+            logging.getLogger(__name__).exception("cv_provider.ollama_parse_failed output=%s", output)
             pass
         # Fallback: heuristics (split by punctuation/space and pick known tokens)
         tokens = [t.strip().lower() for t in output.replace("\n", " ").split(" ") if t.strip()]
@@ -169,4 +171,5 @@ class ManagedCVProvider:
             txt = " ".join(txt.split())
             return txt[:2000]
         except Exception:
+            logging.getLogger(__name__).exception("tesseract OCR failed")
             return ""

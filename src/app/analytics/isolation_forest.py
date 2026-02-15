@@ -211,7 +211,9 @@ def features_from_fraud_signals(session: Dict[str, Any], cv: Dict[str, Any], pol
         vals.append(1.0 if cv.get("phash_duplicate") else 0.0)
         vals.append(1.0 if (policy.get("approval_required") or False) else 0.0)
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger("shopsquire.analytics.isoforest").exception("Failed building features_from_fraud_signals")
     return vals or [0.0]
 
 
@@ -222,7 +224,9 @@ def features_from_inventory(series: Dict[str, Any]) -> List[float]:
         vals.append(float(series.get("stock_velocity", 0.0)))
         vals.append(float(series.get("daily_variance", 0.0)))
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger("shopsquire.analytics.isoforest").exception("Failed building features_from_inventory")
     return vals or [0.0]
 
 
@@ -234,7 +238,9 @@ def features_from_agent_behavior(stats: Dict[str, Any]) -> List[float]:
         vals.append(float(stats.get("escalation_rate", 0.0)))
         vals.append(float(stats.get("errors", 0)))
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger("shopsquire.analytics.isoforest").exception("Failed building features_from_agent_behavior")
     return vals or [0.0]
 
 
@@ -244,7 +250,9 @@ def score_fraud(session: Dict[str, Any], cv: Dict[str, Any], policy: Dict[str, A
     try:
         model.fit(X)
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger("shopsquire.analytics.isoforest").exception("Failed fitting IsoForest model")
     s = model.score(X)
     sc = float(s[0]) if s else 0.0
     return ScoreResult(score=sc, label=IsoForestDetector.label(sc), details={"features": X[0]})
@@ -256,7 +264,9 @@ def score_inventory(series: Dict[str, Any], model: Optional[IsoForestDetector] =
     try:
         model.fit(X)
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger("shopsquire.analytics.isoforest").exception("Failed fitting IsoForest model for inventory")
     s = model.score(X)
     sc = float(s[0]) if s else 0.0
     return ScoreResult(score=sc, label=IsoForestDetector.label(sc), details={"features": X[0]})
@@ -268,7 +278,9 @@ def score_agent_behavior(stats: Dict[str, Any], model: Optional[IsoForestDetecto
     try:
         model.fit(X)
     except Exception:
-        pass
+        import logging
+
+        logging.getLogger("shopsquire.analytics.isoforest").exception("Failed fitting IsoForest model for agent behavior")
     s = model.score(X)
     sc = float(s[0]) if s else 0.0
     return ScoreResult(score=sc, label=IsoForestDetector.label(sc), details={"features": X[0]})

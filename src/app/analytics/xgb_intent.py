@@ -88,6 +88,9 @@ def infer_intent(text: str) -> Dict[str, Any]:
         intent = labels[best_idx]
         return {"intent": intent, "proba": {labels[i]: float(proba[i]) for i in range(len(labels))}}
     except Exception:
+        import logging
+
+        logging.getLogger("shopsquire.analytics.xgb_intent").exception("Failed inferring intent; falling back to default")
         return {"intent": "browse", "proba": {"browse": 0.5}}
 
 
@@ -129,7 +132,12 @@ def train(dataset: List[Tuple[str, str]]) -> Dict[str, Any]:
             os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
             joblib.dump(obj, MODEL_PATH)
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger("shopsquire.analytics.xgb_intent").exception("Failed saving trained xgb intent model")
         return {"labels": labels, "vocab_size": len(vocab)}
     except Exception:
+        import logging
+
+        logging.getLogger("shopsquire.analytics.xgb_intent").exception("Failed training xgb intent model")
         return {"error": True}

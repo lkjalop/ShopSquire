@@ -420,7 +420,18 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   const extractSecurity = () => {
     if (trace && (trace as any).security) return (trace as any).security;
     const secEvent = events.find(e => e.event_type === 'security_scan');
-    if (secEvent?.payload?.details) return secEvent.payload.details;
+    // Many producers emit { details: <analysis>, severity: <band> }. Merge them so the UI can
+    // reliably render severity/risk fields without requiring all keys to live inside `details`.
+    if (secEvent?.payload?.details && typeof secEvent.payload.details === 'object') {
+      const det: any = secEvent.payload.details;
+      const merged: any = { ...det };
+      if (secEvent.payload.severity != null && merged.severity == null) merged.severity = secEvent.payload.severity;
+      if (secEvent.payload.risk_adj != null && merged.risk_adj == null) merged.risk_adj = secEvent.payload.risk_adj;
+      if (secEvent.payload.risk_raw != null && merged.risk_raw == null) merged.risk_raw = secEvent.payload.risk_raw;
+      if (secEvent.payload.dread_avg != null && merged.dread_avg == null) merged.dread_avg = secEvent.payload.dread_avg;
+      if (secEvent.payload.cvss_score != null && merged.cvss_score == null) merged.cvss_score = secEvent.payload.cvss_score;
+      return merged;
+    }
     if (secEvent?.payload?.security) return secEvent.payload.security;
     if (secEvent?.payload) return secEvent.payload;
     return null;

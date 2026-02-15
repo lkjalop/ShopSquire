@@ -13,7 +13,8 @@ from pydantic import BaseModel
 from sqlalchemy import text as sql_text
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
-from src.app.deps import get_redis
+from src.app.deps import get_redis, DummyRedis
+import logging
 from src.app.models.db import get_engine
 
 
@@ -23,6 +24,9 @@ public_router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 _ROOM_SUBSCRIBERS: Dict[str, list[asyncio.Queue]] = {}
 _CHAT_DIR = Path("tmp/incidents_chat")
 _CHAT_DIR.mkdir(parents=True, exist_ok=True)
+
+_TOKENS_DIR = _CHAT_DIR / "tokens"
+_TOKENS_DIR.mkdir(parents=True, exist_ok=True)
 
 _TOKEN_TTL_SECONDS = int(os.getenv("INCIDENT_CHAT_TOKEN_TTL_SECONDS", "86400") or 86400)
 
@@ -54,10 +58,21 @@ def _issue_tokens(incident_id: str) -> dict:
     staff = str(uuid.uuid4())
     r = get_redis()
     try:
+        if isinstance(r, DummyRedis):
+            raise RuntimeError("using DummyRedis")
         r.setex(_token_key("buyer", incident_id), _TOKEN_TTL_SECONDS, buyer)
         r.setex(_token_key("staff", incident_id), _TOKEN_TTL_SECONDS, staff)
     except Exception:
-        pass
+        try:
+            import time as _time
+            import json as _json
+
+            p = _TOKENS_DIR / f"{incident_id}.json"
+            exp = int(_time.time()) + _TOKEN_TTL_SECONDS
+            _json.dump({"buyer": buyer, "staff": staff, "exp": exp}, p.open("w", encoding="utf-8"))
+            logging.getLogger("shopsquire.startup").warning("Redis unavailable; using file-backed tokens for incident %s", incident_id)
+        except Exception:
+            logging.getLogger(__name__).exception("failed to persist incident tokens to file")
     return {"buyer_token": buyer, "staff_token": staff, "ttl_seconds": _TOKEN_TTL_SECONDS}
 
 
@@ -66,9 +81,27 @@ def _issue_staff_token(incident_id: str) -> dict:
     staff = str(uuid.uuid4())
     r = get_redis()
     try:
+        if isinstance(r, DummyRedis):
+            raise RuntimeError("using DummyRedis")
         r.setex(_token_key("staff", incident_id), _TOKEN_TTL_SECONDS, staff)
     except Exception:
-        pass
+        try:
+            import time as _time
+            import json as _json
+
+            p = _TOKENS_DIR / f"{incident_id}.json"
+            data = {}
+            if p.exists():
+                try:
+                    data = _json.loads(p.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            exp = int(_time.time()) + _TOKEN_TTL_SECONDS
+            data.update({"staff": staff, "exp": exp})
+            _json.dump(data, p.open("w", encoding="utf-8"))
+            logging.getLogger("shopsquire.startup").warning("Redis unavailable; rotating file-backed staff token for %s", incident_id)
+        except Exception:
+            logging.getLogger(__name__).exception("failed to persist staff token to file")
     return {"staff_token": staff, "ttl_seconds": _TOKEN_TTL_SECONDS}
 
 
@@ -84,13 +117,35 @@ def _role_for_token(incident_id: str, token: str | None) -> str | None:
         if buyer and str(buyer) == t:
             return "buyer"
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("redis get buyer token failed, falling back to file")
     try:
         staff = r.get(_token_key("staff", incident_id))
         if staff and str(staff) == t:
             return ROLE_MERCHANT
     except Exception:
-        pass
+        logging.getLogger(__name__).debug("redis get staff token failed, falling back to file")
+
+    # File-backed fallback when Redis unavailable
+    try:
+        p = _TOKENS_DIR / f"{incident_id}.json"
+        if p.exists():
+            import json as _json, time as _time
+
+            try:
+                data = _json.loads(p.read_text(encoding="utf-8") or "{}")
+            except Exception:
+                data = {}
+            exp = int(data.get("exp") or 0)
+            if exp and exp < int(_time.time()):
+                return None
+            b = data.get("buyer")
+            s = data.get("staff")
+            if b and str(b) == t:
+                return "buyer"
+            if s and str(s) == t:
+                return ROLE_MERCHANT
+    except Exception:
+        logging.getLogger(__name__).exception("file-backed token check failed")
     return None
 
 
@@ -121,7 +176,7 @@ def _append_chat(incident_id: str, role: str, message: str, meta: Dict | None = 
         with p.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception:
-        pass
+        logging.getLogger(__name__).exception("failed to append chat to disk for %s", incident_id)
 
     # Publish to subscribers
     try:
@@ -130,24 +185,43 @@ def _append_chat(incident_id: str, role: str, message: str, meta: Dict | None = 
             try:
                 q.put_nowait(rec)
             except Exception:
-                pass
+                logging.getLogger(__name__).exception("failed to publish chat to subscriber queue")
     except Exception:
-        pass
+        logging.getLogger(__name__).exception("failed to publish chat to subscribers for %s", incident_id)
 
 
+@router.get("")
 @router.get("/")
-def list_incidents(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    """List open incidents for the escalation console."""
+def list_incidents(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    status: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
+) -> Dict:
+    """List incidents for the escalation console."""
     _ = role
     try:
         eng = get_engine()
+        clauses = []
+        params: dict = {"lim": limit, "off": offset}
+        if status:
+            clauses.append("status = :status")
+            params["status"] = status
+        else:
+            clauses.append("status IN ('open', 'review')")
+        if severity:
+            clauses.append("severity = :severity")
+            params["severity"] = severity
+        where = " AND ".join(clauses) if clauses else "1=1"
         with eng.begin() as conn:
             rows = conn.execute(
                 sql_text(
-                    "SELECT id, event_id, severity, title, status, created_at "
-                    "FROM incidents WHERE status IN ('open', 'review') "
-                    "ORDER BY created_at DESC LIMIT 50"
-                )
+                    f"SELECT id, event_id, severity, title, status, created_at "
+                    f"FROM incidents WHERE {where} "
+                    f"ORDER BY created_at DESC LIMIT :lim OFFSET :off"
+                ),
+                params,
             ).fetchall()
         incidents = [
             {
@@ -163,6 +237,55 @@ def list_incidents(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, 
         return {"incidents": incidents}
     except Exception:
         return {"incidents": []}
+
+
+@router.get("/{incident_id}")
+def get_incident(incident_id: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+    """Return a single incident by ID."""
+    _ = role
+    try:
+        eng = get_engine()
+        with eng.begin() as conn:
+            row = conn.execute(
+                sql_text(
+                    "SELECT id, event_id, severity, title, description, status, created_at, created_by "
+                    "FROM incidents WHERE id = :id LIMIT 1"
+                ),
+                {"id": incident_id},
+            ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="incident_not_found")
+        return {
+            "id": row[0], "event_id": row[1], "severity": row[2], "title": row[3],
+            "description": row[4], "status": row[5], "created_at": str(row[6]), "created_by": row[7],
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="db_error")
+
+
+@router.post("/{incident_id}/status")
+def update_incident_status(
+    incident_id: str,
+    status: str = Query(...),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    """Update an incident's status (open/review/triaged/resolved)."""
+    _ = role
+    allowed = {"open", "review", "triaged", "resolved", "closed"}
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail=f"status must be one of {allowed}")
+    try:
+        eng = get_engine()
+        with eng.begin() as conn:
+            conn.execute(
+                sql_text("UPDATE incidents SET status = :status WHERE id = :id"),
+                {"status": status, "id": incident_id},
+            )
+        return {"ok": True, "incident_id": incident_id, "status": status}
+    except Exception:
+        raise HTTPException(status_code=500, detail="db_error")
 
 
 @router.websocket("/{incident_id}/room/ws")

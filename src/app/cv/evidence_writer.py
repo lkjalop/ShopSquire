@@ -29,7 +29,9 @@ class EvidenceWriter:
             with open(os.path.join(base, "package.json"), "w", encoding="utf-8") as f:
                 json.dump(evidence or {}, f, ensure_ascii=False, indent=2)
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger("shopsquire.cv.evidence_writer").exception("Failed writing evidence package to disk")
 
         # Persist to DB (best-effort). Prefer using a provided evidence id so disk + DB align.
         try:
@@ -44,6 +46,9 @@ class EvidenceWriter:
                 )
                 db.commit()
         except Exception:
+            import logging
+
+            logging.getLogger("shopsquire.cv.evidence_writer").exception("Failed inserting evidence bundle into DB; attempting update")
             # If the row already exists, do a best-effort update.
             try:
                 payload = json.dumps(evidence or {}, ensure_ascii=False)
@@ -54,6 +59,8 @@ class EvidenceWriter:
                     )
                     db.commit()
             except Exception:
-                pass
+                import logging as _logging
+
+                _logging.getLogger("shopsquire.cv.evidence_writer").exception("Failed updating existing evidence bundle in DB")
 
         return str(eid)

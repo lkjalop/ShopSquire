@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text as sql_text
 from sqlalchemy.sql.elements import TextClause
 from fastapi import Request
+from typing import Any
 import contextvars
 
 from src.app.config import get_settings
@@ -1038,7 +1039,7 @@ def get_engine():
     return engine
 
 
-def get_db_for_request(request: Request = None):
+def get_db_for_request(request: Any = None):
     """Return a sessionmaker-bound session using the request.app.state.engine
     if available, otherwise fall back to the module-level engine. This helper
     is intended for use as a FastAPI dependency `Depends(get_db)`.
@@ -1075,7 +1076,7 @@ def get_db_for_request(request: Request = None):
         session.close()
 
 
-def get_db(request: Request = None):
+def get_db(request: Any = None):
     """FastAPI-friendly dependency: `Depends(get_db)` or `Depends(lambda req: get_db(req))`.
     When FastAPI injects the Request object it will be passed here automatically.
     """

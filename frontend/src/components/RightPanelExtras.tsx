@@ -160,6 +160,22 @@ export default function RightPanelExtras({
     return 'Provide a clearer product-focused image for verification.';
   };
 
+  const humanReason = (reason?: string) => {
+    const r = (reason || '').toLowerCase();
+    if (!r) return '';
+    if (r.includes('qr_external_url_detected')) return 'QR code / external link detected';
+    if (r.includes('qr_code_detected')) return 'QR code detected';
+    if (r.includes('qr_prompt_injection')) return 'Suspicious QR content detected';
+    if (r.includes('ocr_unrelated_overlay_detected')) return 'Text overlay detected';
+    if (r.includes('ocr_prompt_pattern_detected')) return 'Hidden instruction pattern detected';
+    if (r.includes('unrelated_object_detected')) return 'Unrelated object detected';
+    if (r.includes('no_laptop_signal_detected')) return 'Product not clearly visible';
+    if (r.includes('low_visual_evidence')) return 'Photo is too unclear to verify';
+    if (r.includes('invalid_or_unsupported_image')) return 'Unsupported image format';
+    if (r.includes('order_id_not_visible_or_mismatch')) return 'Order ID not visible or mismatched';
+    return reason.replaceAll('_', ' ');
+  };
+
   const submitCV = async () => {
     setSubmitting(true);
     setError(null);
@@ -485,10 +501,15 @@ export default function RightPanelExtras({
               const hasIc = Boolean(result?.image_consistency && Array.isArray((result as any).image_consistency?.images));
               const evidence = hasIc ? imageStatusByIndex.get(i) : undefined;
               const badge = statusMeta(hasIc ? evidence?.status : 'not_analyzed');
-              const reason = hasIc
-                ? (evidence?.reasons && evidence.reasons.length > 0 ? evidence.reasons[0] : 'awaiting verification')
-                : 'not analyzed yet';
-              const hint = hasIc ? remediationHint(reason) : 'Click Analyze or Submit to validate these photos.';
+              const rawReason = hasIc
+                ? (evidence?.reasons && evidence.reasons.length > 0 ? String(evidence.reasons[0]) : '')
+                : '';
+              const status = String((hasIc ? evidence?.status : 'not_analyzed') || 'not_analyzed').toLowerCase();
+              const shouldExplain = hasIc && status !== 'match' && status !== 'not_analyzed';
+              const reason = shouldExplain
+                ? (humanReason(rawReason) || 'Needs verification')
+                : (hasIc ? (status === 'match' ? 'Looks ok' : 'Not analyzed yet') : 'Not analyzed yet');
+              const hint = shouldExplain ? remediationHint(rawReason) : (hasIc ? 'If this looks correct, you can proceed.' : 'Click Analyze or Submit to validate these photos.');
               return (
                 <div
                   key={i}
@@ -528,7 +549,7 @@ export default function RightPanelExtras({
                       </span>
                     </div>
                     <div style={{ fontSize: 11, color: '#4b5563', marginTop: 4 }}>
-                      {hasIc ? `Why flagged: ${reason.replaceAll('_', ' ')}` : `Status: ${reason}`}
+                      {shouldExplain ? `Why flagged: ${reason}` : `Status: ${reason}`}
                     </div>
                     <div style={{ fontSize: 11, color: '#065f46', marginTop: 2 }}>
                       How to fix: {hint}
@@ -561,6 +582,28 @@ export default function RightPanelExtras({
           {result.user_prompt && (
             <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 8, padding: '8px 10px' }}>
               <strong>Verify photos:</strong> {result.user_prompt}
+            </div>
+          )}
+          {result.image_consistency?.images && (
+            <div style={{ marginTop: 8, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 10px' }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Why this was paused</div>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {result.image_consistency.images
+                  .filter((im) => {
+                    const st = String(im?.status || '').toLowerCase();
+                    return st && st !== 'match' && st !== 'not_analyzed';
+                  })
+                  .slice(0, 5)
+                  .map((im) => {
+                    const first = (im?.reasons && im.reasons.length) ? String(im.reasons[0]) : '';
+                    const why = humanReason(first) || 'Needs verification';
+                    const name = (im?.filename || images[im.index || 0]?.name || `upload_${(im.index ?? 0) + 1}.jpg`) as string;
+                    return <li key={`${im.index}:${name}`}>{name}: {why}</li>;
+                  })}
+                {result.image_consistency.images.filter((im) => String(im?.status || '').toLowerCase() !== 'match').length === 0 && (
+                  <li>We did not detect any obvious issues in the photos.</li>
+                )}
+              </ul>
             </div>
           )}
           {result.image_consistency && (

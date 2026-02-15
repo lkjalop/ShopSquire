@@ -110,7 +110,7 @@ def _parse_mfa_verified_at(value: str | None) -> float | None:
         return None
 
 
-def _emit_abac_deny_trace(request: Request | None, role: str | None, reason: str, details: dict) -> None:
+def _emit_abac_deny_trace(request: Optional[Request], role: str | None, reason: str, details: dict) -> None:
     try:
         from src.app.services.decision_log import log_trace_event
         rid = (
@@ -143,7 +143,7 @@ def _emit_abac_deny_trace(request: Request | None, role: str | None, reason: str
 def _evaluate_abac(
     *,
     role: str,
-    request: Request | None,
+    request: Optional[Request],
 ) -> tuple[bool, str | None, dict]:
     path = getattr(getattr(request, "url", None), "path", "") if request else ""
     method = getattr(request, "method", "") if request else ""

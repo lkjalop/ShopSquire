@@ -5,6 +5,7 @@ import hashlib
 from typing import Dict, Generator, Any
 
 import redis
+import logging
 from fastapi import Depends
 
 from src.app.config import get_settings, load_feature_flags
@@ -31,6 +32,7 @@ class DummyRedis:
 
 
 _lazy_redis: redis.Redis | None = None
+_redis_warned = False
 
 
 def _create_redis_client() -> redis.Redis | None:
@@ -59,6 +61,15 @@ def get_redis() -> redis.Redis:
     cli = _create_redis_client()
     if cli is None:
         _lazy_redis = DummyRedis()
+        global _redis_warned
+        if not _redis_warned:
+            try:
+                settings = get_settings()
+                url = getattr(settings, 'redis_url', None)
+            except Exception:
+                url = None
+            logging.getLogger("shopsquire.startup").warning("Redis not available%s; using DummyRedis", (f' at {url}' if url else ''))
+            _redis_warned = True
     else:
         _lazy_redis = cli
     return _lazy_redis

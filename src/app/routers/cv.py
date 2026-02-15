@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 import time
@@ -45,7 +45,11 @@ class CVAnalyzeRequest(BaseModel):
 
 
 @router.post("/analyze")
-async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict[str, Any]:
+async def analyze(
+    req: CVAnalyzeRequest,
+    request: Any = None,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
     """Analyze complaint images/text and persist CV evidence bundle.
 
     Accepts sanitized image metadata, labels, and extracted text; returns analysis summary
@@ -156,6 +160,7 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
                     ]
                 )
                 qr_decode_hits = qr.codes or []
+                qr_decode_reasons = getattr(qr, "reasons", []) or []
                 for c in qr_decode_hits:
                     if _detect_ocr_prompt_injection(str(c.get("data") or "")):
                         qr_prompt_injection = True
@@ -184,11 +189,30 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
 
                 if isinstance(image_consistency, dict) and isinstance(image_consistency.get("images"), list) and qr_decode_hits:
                     images_out = image_consistency.get("images") or []
+                    qr_files = set()
+                    try:
+                        for c in qr_decode_hits:
+                            fn = str(c.get("filename") or "").strip()
+                            if fn:
+                                qr_files.add(fn)
+                    except Exception:
+                        qr_files = set()
+                    # Tag all matching images (by filename). Fall back to index 0 if filenames are missing.
+                    tagged_any = False
                     for im in images_out:
                         try:
-                            if int(im.get("index", -1)) != 0:
-                                continue
+                            fn = str(im.get("filename") or "").strip()
                         except Exception:
+                            fn = ""
+                        match = False
+                        if qr_files and fn and fn in qr_files:
+                            match = True
+                        if not qr_files:
+                            try:
+                                match = int(im.get("index", -1)) == 0
+                            except Exception:
+                                match = False
+                        if not match:
                             continue
                         reasons = im.get("reasons")
                         if not isinstance(reasons, list):
@@ -197,10 +221,29 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
                             reasons.append("qr_code_detected")
                         if qr_external_url and "qr_external_url_detected" not in reasons:
                             reasons.append("qr_external_url_detected")
+                        if qr_prompt_injection and "qr_prompt_injection" not in reasons:
+                            reasons.append("qr_prompt_injection")
                         im["reasons"] = reasons[:6]
                         if str(im.get("status") or "match") == "match":
                             im["status"] = "suspicious"
-                        break
+                        tagged_any = True
+                    if not tagged_any and images_out:
+                        try:
+                            im = images_out[0]
+                            reasons = im.get("reasons")
+                            if not isinstance(reasons, list):
+                                reasons = []
+                            if "qr_code_detected" not in reasons:
+                                reasons.append("qr_code_detected")
+                            if qr_external_url and "qr_external_url_detected" not in reasons:
+                                reasons.append("qr_external_url_detected")
+                            if qr_prompt_injection and "qr_prompt_injection" not in reasons:
+                                reasons.append("qr_prompt_injection")
+                            im["reasons"] = reasons[:6]
+                            if str(im.get("status") or "match") == "match":
+                                im["status"] = "suspicious"
+                        except Exception:
+                            pass
 
                     mismatch_count = 0
                     needs_better_count = 0
@@ -226,6 +269,40 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
                     )
             except Exception:
                 pass
+        # Security observer scan for CV evidence (DREAD/STRIDE/PASTA/OWASP etc.) for Decision Trace Security Matrix.
+        security_details = {}
+        security_sev = None
+        try:
+            from src.app.security.observer import analyze_payload, emit_security_event
+
+            ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
+            cv_signals = {
+                "qr_code_detected": bool(qr_decode_hits),
+                "qr_prompt_injection": bool(qr_prompt_injection),
+                "image_consistency_mismatch": bool(ic_status in ("mismatch", "suspicious")),
+                "ocr_prompt_injection": bool((image_consistency or {}).get("ocr_prompt_injection")) if isinstance(image_consistency, dict) else False,
+            }
+            security_payload = {
+                "description": req.description,
+                "issue_type": req.issue_type,
+                "ocr_text": extracted_text,
+                "labels": labels,
+                "image_consistency": image_consistency,
+                "qr_codes": qr_decode_hits,
+                "diagnostics": {"qr_decoder": qr_decode_reasons if 'qr_decode_reasons' in locals() else []},
+                "cv_signals": cv_signals,
+                "endpoint": "/api/v1/cv/analyze",
+            }
+            analysis = analyze_payload(security_payload)
+            security_details = analysis.get("details") or {}
+            security_sev = analysis.get("severity")
+            try:
+                emit_security_event("/api/v1/cv/analyze", {"payload": security_payload, "analysis": security_details}, request=request)
+            except Exception:
+                pass
+        except Exception:
+            security_details = {}
+            security_sev = None
 
         started = time.time()
         triage = BasicCVTriage()
@@ -304,24 +381,43 @@ async def analyze(req: CVAnalyzeRequest, role: str = Depends(require_role([ROLE_
 
         # Emit security_scan trace event for Decision Trace Security Matrix
         try:
-            sec_signals = {}
-            if qr_prompt_injection:
-                sec_signals["qr_prompt_injection"] = True
-            if qr_decode_hits:
-                sec_signals["qr_code_detected"] = True
-            ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
-            if ic_status in ("mismatch", "suspicious"):
-                sec_signals["image_consistency_mismatch"] = True
-            if sec_signals:
+            if security_details:
                 log_trace_event(
                     trace_id=case_id,
                     event_type="security_scan",
                     source_type="agent",
-                    source_id="cv_forensics",
-                    target_type="complaint",
-                    target_id=case_id,
-                    payload={"details": sec_signals, "severity": "high" if qr_prompt_injection else "medium"},
+                    source_id="Security_Observer_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "details": security_details,
+                        "severity": security_sev or ("high" if qr_prompt_injection else "medium"),
+                        "diagnostics": {"qr_decoder": qr_decode_reasons if 'qr_decode_reasons' in locals() else []},
+                    },
                 )
+            else:
+                sec_signals = {}
+                if qr_prompt_injection:
+                    sec_signals["qr_prompt_injection"] = True
+                if qr_decode_hits:
+                    sec_signals["qr_code_detected"] = True
+                ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
+                if ic_status in ("mismatch", "suspicious"):
+                    sec_signals["image_consistency_mismatch"] = True
+                if sec_signals or ('qr_decode_reasons' in locals() and qr_decode_reasons):
+                    payload = {"details": sec_signals, "severity": "high" if qr_prompt_injection else "medium"}
+                    # Attach diagnostics when available
+                    if 'qr_decode_reasons' in locals():
+                        payload.setdefault("diagnostics", {})["qr_decoder"] = qr_decode_reasons
+                    log_trace_event(
+                        trace_id=case_id,
+                        event_type="security_scan",
+                        source_type="agent",
+                        source_id="cv_forensics",
+                        target_type="complaint",
+                        target_id=case_id,
+                        payload=payload,
+                    )
         except Exception:
             pass
 

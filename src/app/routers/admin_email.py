@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Any
 from fastapi import APIRouter, Depends, Query, HTTPException
 from src.app.security.auth import require_role_or_oidc, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.email_sendgrid import SendGridClient
@@ -14,7 +14,7 @@ def send_test(
     subject: str = Query("ShopSquire Test"),
     content: str = Query("This is a test email from ShopSquire."),
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     cli = SendGridClient()
     res = cli.send_email(to_email, subject, content)
     if not res.get("ok"):

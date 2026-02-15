@@ -93,5 +93,16 @@ def run_tier0_gate(
     # Barcode/QR decode: cheap attempt before OCR; non-blocking.
     bc = decode_barcodes(images)
     details["barcode_decode"] = {"ok": bc.ok, "codes": bc.codes, "reasons": bc.reasons}
+    # Surface decoder diagnostics into the gate details for downstream visibility
+    try:
+        qr_reasons = getattr(bc, "reasons", []) or []
+        if qr_reasons:
+            diag = details.get("diagnostics") or {}
+            diag.setdefault("qr_decoder", []).extend(qr_reasons)
+            details["diagnostics"] = diag
+    except Exception:
+        import logging
+
+        logging.getLogger("shopsquire.tier0_gate").exception("Failed to attach barcode decoder diagnostics")
 
     return Tier0GateResult(decision="proceed", reasons=reasons, details=details, missing_views=missing_views)

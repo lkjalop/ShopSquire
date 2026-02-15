@@ -1161,67 +1161,89 @@ def create_app() -> FastAPI:
     try:
         from src.app.routers.admin_supply_chain import router as admin_supply_chain_router
         app.include_router(admin_supply_chain_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_supply_chain router: %s", e)
     # Admin fairness audit endpoint (demographic parity)
     try:
         from src.app.routers.admin_fairness import router as admin_fairness_router
         app.include_router(admin_fairness_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_fairness router: %s", e)
     # Email security admin endpoint
     try:
         from src.app.routers.email_security_admin import router as email_security_admin_router
         app.include_router(email_security_admin_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include email_security_admin router: %s", e)
     # Email security evaluation endpoint (owner/developer)
     try:
         from src.app.routers.email_security import router as email_security_router
         app.include_router(email_security_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include email_security router: %s", e)
     # Email connector webhooks (Gmail/M365) - shared-secret auth
     try:
         from src.app.routers.ingest_gmail import router as gmail_ingest_router
         app.include_router(gmail_ingest_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include gmail_ingest router: %s", e)
     try:
         from src.app.routers.ingest_m365 import router as m365_ingest_router
         app.include_router(m365_ingest_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include m365_ingest router: %s", e)
     # Admin drilldown for email incidents
     try:
         from src.app.routers.admin_email_security import router as admin_email_security_router
         app.include_router(admin_email_security_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_email_security router: %s", e)
     # Playbook editor/admin APIs (validate/publish/rollback/dry-run/diff)
     try:
         from src.app.routers.admin_playbooks import router as admin_playbooks_router
         app.include_router(admin_playbooks_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_playbooks router: %s", e)
     # Admin storage health
     try:
         from src.app.routers.admin_storage import router as admin_storage_router
         app.include_router(admin_storage_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_storage router: %s", e)
     # Grafana proxy for embedding dashboards without exposing API key
     try:
         from src.app.routers.admin_grafana_proxy import router as admin_grafana_proxy_router
         app.include_router(admin_grafana_proxy_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_grafana_proxy router: %s", e)
     # Admin email test endpoint
     try:
         from src.app.routers.admin_email import router as admin_email_router
         app.include_router(admin_email_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_email router: %s", e)
     # Inventory sync/admin endpoints (Phase 5 MVP)
     try:
         from src.app.routers.admin_inventory import router as admin_inventory_router
@@ -1236,8 +1258,10 @@ def create_app() -> FastAPI:
     try:
         from src.app.routers.merchant_dashboard import router as merchant_dashboard_router
         app.include_router(merchant_dashboard_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include merchant_dashboard router: %s", e)
     app.include_router(security_integrations_router)
     app.include_router(support_complaints_router)
     app.include_router(chat_router)
@@ -1252,105 +1276,141 @@ def create_app() -> FastAPI:
     try:
         from src.app.routers.dmarc import router as dmarc_router
         app.include_router(dmarc_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include dmarc router: %s", e)
     # Admin DMARC dashboard + Splunk alerts
     try:
         from src.app.routers.admin_dmarc import router as admin_dmarc_router
         app.include_router(admin_dmarc_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_dmarc router: %s", e)
     try:
         from src.app.routers.admin_compliance_reports import router as admin_compliance_reports_router
         app.include_router(admin_compliance_reports_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_compliance_reports router: %s", e)
     # Admin chat tools (rules eval, policy, tickets)
     try:
         app.include_router(admin_chat_tools_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_chat_tools router: %s", e)
     # Custom BI endpoints used by the admin-react dashboard (no Grafana required)
     try:
         app.include_router(admin_bi_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_bi router: %s", e)
     # Escalation room (admin ↔ shopper chat stream per incident)
     try:
         app.include_router(escalation_room_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include escalation_room router: %s", e)
     # Public incident chat endpoints (token-protected, local-dev demo only)
     try:
         app.include_router(public_incidents_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include public_incidents router: %s", e)
     # Privacy-safe session events ingestion
     app.include_router(session_events_router)
     try:
         from src.app.routers.consumer_signals import router as consumer_signals_router
         app.include_router(consumer_signals_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include consumer_signals router: %s", e)
     try:
         from src.app.routers.decision_trace_events import router as decision_trace_events_router
         app.include_router(decision_trace_events_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include decision_trace_events router: %s", e)
     try:
         from src.app.routers.decision_replay import router as decision_replay_router
         app.include_router(decision_replay_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include decision_replay router: %s", e)
     # Admin interleaving/budget summary endpoint
     try:
         from src.app.routers.admin_interleaving import router as admin_interleaving_router
         app.include_router(admin_interleaving_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_interleaving router: %s", e)
     # Admin interleaving static UI route (redirect to static page)
     try:
         from src.app.routers.admin_interleaving_ui import router as admin_interleaving_ui_router
         app.include_router(admin_interleaving_ui_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_interleaving_ui router: %s", e)
     # Job status endpoint for background workers
     try:
         from src.app.routers.jobs import router as jobs_router
         app.include_router(jobs_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include jobs router: %s", e)
     # Admin compliance registry endpoints (upload/list CI artifacts)
     try:
         from src.app.routers.admin_compliance_registry import router as admin_compliance_registry_router
         app.include_router(admin_compliance_registry_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_compliance_registry router: %s", e)
     # GRC risk register and report endpoints
     try:
         from src.app.routers.admin_grc import router as admin_grc_router
         app.include_router(admin_grc_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_grc router: %s", e)
     # Include rules admin API (tenant-scoped rule management)
     try:
         from src.app.routers.rules import router as rules_router
         app.include_router(rules_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include rules router: %s", e)
     # Tenant-scoped config override API
     try:
         from src.app.routers.tenant_config import router as tenant_config_router
         app.include_router(tenant_config_router)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include tenant_config router: %s", e)
     # Serve local static assets (images, css, demo assets)
     try:
         static_dir = os.path.join(os.getcwd(), "static")
         if os.path.isdir(static_dir):
             app.mount("/static", StaticFiles(directory=static_dir), name="static")
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to mount static dir: %s", e)
 
     # Serve the built merchant/admin React UI from inside the repository so demo URLs
     # like `/merchant/dashboard` can show real BI + escalation consoles without

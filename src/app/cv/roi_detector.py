@@ -42,7 +42,9 @@ class ROIDetector:
             if out:
                 return out
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger("shopsquire.cv.roi_detector").exception("ROI detector failed, falling back to full_image")
 
         # Fallback ROI: run the rest of the pipeline on the full image.
         return [{"label": "full_image", "confidence": 1.0, "xyxy": None, "source": "fallback"}]

@@ -27,12 +27,17 @@ class HumanReviewQueue:
         try:
             _metrics.incr("human_review_queued")
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger("shopsquire.human_review").exception("Failed incrementing human_review_queued metric")
         try:
             from src.app.observability.metrics import record_human_review_queued
+
             record_human_review_queued()
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger("shopsquire.human_review").exception("Failed recording human_review_queued observability metric")
         return str(path)
 
     def list_pending(self) -> List[str]:
@@ -68,10 +73,15 @@ class HumanReviewQueue:
                 _metrics.timing("human_review_latency_s", latency)
                 try:
                     from src.app.observability.metrics import record_human_review_completed, record_human_review_latency
+
                     record_human_review_completed()
                     record_human_review_latency(latency)
                 except Exception:
-                    pass
+                    import logging
+
+                    logging.getLogger("shopsquire.human_review").exception("Failed recording human_review completion metrics")
         except Exception:
-            pass
+            import logging
+
+            logging.getLogger("shopsquire.human_review").exception("Failed handling review completion metrics and latency")
         return str(dest)

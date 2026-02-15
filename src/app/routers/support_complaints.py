@@ -487,8 +487,39 @@ async def _evaluate_uploaded_images_consistency(
     elif needs_better_count > 0:
         summary_status = "needs_better_image"
 
+    # User-facing prompt (non-technical, polite) derived from the actual reasons.
     prompt = None
-    if summary_status == "mismatch":
+    try:
+        all_reasons: set[str] = set()
+        for im in images_out:
+            rs = im.get("reasons") if isinstance(im, dict) else None
+            if isinstance(rs, list):
+                for r in rs:
+                    if r:
+                        all_reasons.add(str(r))
+    except Exception:
+        all_reasons = set()
+    if any(r in all_reasons for r in ("qr_external_url_detected",)):
+        prompt = (
+            "For your security, we can't accept photos that include QR codes or external links. "
+            "Please upload a new, unedited photo of the item and the damaged area (no stickers, text overlays, or QR codes)."
+        )
+    elif any(r in all_reasons for r in ("qr_code_detected",)):
+        prompt = (
+            "For your security, we can't accept photos that include QR codes. "
+            "Please upload a new, unedited photo of the item and the damaged area (no text overlays or QR codes)."
+        )
+    elif any(r in all_reasons for r in ("ocr_prompt_pattern_detected",)):
+        prompt = (
+            "We couldn't verify one or more photos because they appear to include hidden instructions or unrelated text. "
+            "Please upload a new, unedited photo of the item and the damaged area (no stickers or text overlays)."
+        )
+    elif any(r in all_reasons for r in ("ocr_unrelated_overlay_detected",)):
+        prompt = (
+            "We couldn't verify one or more photos because they appear to include text overlays or stickers. "
+            "Please upload a new, unedited photo of the item and the damaged area (no overlays)."
+        )
+    elif summary_status == "mismatch":
         prompt = "Some uploaded photos do not appear to match your return request. Please verify or replace mismatched images."
     elif summary_status == "needs_better_image":
         prompt = "Some photos are unclear. Please upload sharper images before proceeding."
@@ -1123,6 +1154,20 @@ async def submit_complaint(
                 if str(s.get("status") or "") == "sanitized"
             ]
         )
+        # Attach QR decoder diagnostics to the security payload so traces and decision logs show reasons
+        try:
+            qr_reasons = getattr(qr, "reasons", []) or []
+            if qr_reasons:
+                # Ensure image_consistency carries per-upload reasons already; surface at security_payload level
+                security_payload = locals().get("security_payload") or {}
+                diagnostics = security_payload.get("diagnostics", {}) if isinstance(security_payload, dict) else {}
+                diagnostics.setdefault("qr_decoder", []).extend(qr_reasons)
+                security_payload["diagnostics"] = diagnostics
+                # write back into local scope for subsequent observer use
+                locals()["security_payload"] = security_payload
+        except Exception:
+            logger = logging.getLogger("shopsquire.support_complaints")
+            logger.exception("Failed to attach qr decoder diagnostics")
         qr_decode_hits = qr.codes or []
         for c in qr_decode_hits:
             if _detect_ocr_prompt_injection(str(c.get("data") or "")):
@@ -1151,12 +1196,29 @@ async def submit_complaint(
     try:
         if isinstance(image_consistency, dict) and isinstance(image_consistency.get("images"), list) and qr_decode_hits:
             images_out = image_consistency.get("images") or []
-            # Prefer tagging the first sanitized image; this flow is typically single-image.
+            qr_files = set()
+            try:
+                for c in qr_decode_hits:
+                    fn = str(c.get("filename") or "").strip()
+                    if fn:
+                        qr_files.add(fn)
+            except Exception:
+                qr_files = set()
+            tagged_any = False
             for im in images_out:
                 try:
-                    if int(im.get("index", -1)) != 0:
-                        continue
+                    fn = str(im.get("filename") or "").strip()
                 except Exception:
+                    fn = ""
+                match = False
+                if qr_files and fn and fn in qr_files:
+                    match = True
+                if not qr_files:
+                    try:
+                        match = int(im.get("index", -1)) == 0
+                    except Exception:
+                        match = False
+                if not match:
                     continue
                 reasons = im.get("reasons")
                 if not isinstance(reasons, list):
@@ -1165,11 +1227,30 @@ async def submit_complaint(
                     reasons.append("qr_code_detected")
                 if qr_external_url and "qr_external_url_detected" not in reasons:
                     reasons.append("qr_external_url_detected")
+                if qr_prompt_injection and "qr_prompt_injection" not in reasons:
+                    reasons.append("qr_prompt_injection")
                 im["reasons"] = reasons[:6]
                 # Elevate status for security review of the evidence itself.
                 if str(im.get("status") or "match") == "match":
                     im["status"] = "suspicious"
-                break
+                tagged_any = True
+            if not tagged_any and images_out:
+                try:
+                    im = images_out[0]
+                    reasons = im.get("reasons")
+                    if not isinstance(reasons, list):
+                        reasons = []
+                    if "qr_code_detected" not in reasons:
+                        reasons.append("qr_code_detected")
+                    if qr_external_url and "qr_external_url_detected" not in reasons:
+                        reasons.append("qr_external_url_detected")
+                    if qr_prompt_injection and "qr_prompt_injection" not in reasons:
+                        reasons.append("qr_prompt_injection")
+                    im["reasons"] = reasons[:6]
+                    if str(im.get("status") or "match") == "match":
+                        im["status"] = "suspicious"
+                except Exception:
+                    pass
             # Recompute counts from per-image statuses
             mismatch_count = 0
             needs_better_count = 0
@@ -1190,9 +1271,9 @@ async def submit_complaint(
             # Stronger (but still polite) user prompt when codes are present.
             image_consistency["prompt"] = (
                 "For your security, we can't accept photos that include QR codes or external links. "
-                "Please upload a new, unedited photo of the item and the damaged area (no stickers, overlays, or QR codes)."
+                "Please upload a new, unedited photo of the item and the damaged area (no stickers, text overlays, or QR codes)."
                 if qr_external_url
-                else "For your security, please reupload a new, unedited photo without any QR codes or overlays."
+                else "For your security, we can't accept photos that include QR codes. Please upload a new, unedited photo (no overlays)."
             )
     except Exception:
         pass

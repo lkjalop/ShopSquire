@@ -144,6 +144,15 @@ export default function EscalationRoom({ incidentId, buyerToken, staffToken, onC
         <div className={styles.header}>
           <div className={styles.title}>Escalation Room · {incidentId}</div>
           <div>
+            <a
+              href={`/merchant/app/index.html?tab=escalations&incident_id=${encodeURIComponent(incidentId)}`}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontSize: 12, opacity: 0.85, marginRight: 10, color: '#111827' }}
+              title="Open in Merchant Admin Console"
+            >
+              Open admin console
+            </a>
             <span style={{ fontSize: 12, opacity: 0.8, marginRight: 8 }}>{mode}</span>
             <button className={styles.closeBtn} onClick={onClose}>Close</button>
           </div>
