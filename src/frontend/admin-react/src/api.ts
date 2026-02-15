@@ -81,6 +81,30 @@ export async function fetchAnalytics(days: number): Promise<{ days: number; seri
   return http(`/api/v1/admin/analytics?days=${days}`);
 }
 
+export type TransactionTimeseriesPoint = {
+  bucket: string | null;
+  orders: number;
+  revenue: number;
+  paid: number;
+  refunded: number;
+  chargeback: number;
+  pending_payment: number;
+};
+
+export async function fetchTransactionTimeseries(params: { granularity: 'day' | 'month'; start: string; end: string }): Promise<{
+  granularity: 'day' | 'month';
+  start: string;
+  end: string;
+  series: TransactionTimeseriesPoint[];
+  totals: { orders: number; revenue: number; aov: number; paid: number; refunded: number; chargeback: number; pending_payment: number };
+}> {
+  const q = new URLSearchParams();
+  q.set('granularity', params.granularity);
+  q.set('start', params.start);
+  q.set('end', params.end);
+  return http(`/api/v1/admin/bi/transactions/timeseries?${q.toString()}`);
+}
+
 export async function fetchComplianceOverview(days = 7): Promise<any> {
   return http(`/api/v1/admin/compliance/overview?days=${days}`);
 }
@@ -559,6 +583,10 @@ export async function fetchIncidents(params?: { limit?: number; offset?: number;
 
 export async function updateIncidentStatus(id: string, status: string): Promise<void> {
   await http(`/api/v1/admin/incidents/${encodeURIComponent(id)}/status?status=${encodeURIComponent(status)}`, { method: 'POST' });
+}
+
+export async function issueIncidentStaffToken(id: string): Promise<{ ok: boolean; staff_token: string; ttl_seconds: number }> {
+  return http(`/api/v1/admin/incidents/${encodeURIComponent(id)}/room/token`, { method: 'POST' });
 }
 
 export async function getIncident(id: string): Promise<IncidentRow> {

@@ -61,6 +61,17 @@ def _issue_tokens(incident_id: str) -> dict:
     return {"buyer_token": buyer, "staff_token": staff, "ttl_seconds": _TOKEN_TTL_SECONDS}
 
 
+def _issue_staff_token(incident_id: str) -> dict:
+    """Issue/rotate a staff token for an incident without changing the buyer token."""
+    staff = str(uuid.uuid4())
+    r = get_redis()
+    try:
+        r.setex(_token_key("staff", incident_id), _TOKEN_TTL_SECONDS, staff)
+    except Exception:
+        pass
+    return {"staff_token": staff, "ttl_seconds": _TOKEN_TTL_SECONDS}
+
+
 def _role_for_token(incident_id: str, token: str | None) -> str | None:
     if not token:
         return None
@@ -202,6 +213,24 @@ def send_message(incident_id: str, message: str, role: str = Depends(require_rol
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
     return {"sent": True}
+
+
+@router.post("/{incident_id}/room/token")
+def issue_staff_token(incident_id: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+    """Create/rotate a staff token for the public SSE room (so EventSource can connect without headers)."""
+    _ = role
+    # Verify incident exists best-effort (demo is tolerant).
+    try:
+        eng = get_engine()
+        with eng.begin() as conn:
+            row = conn.execute(sql_text("SELECT id FROM incidents WHERE id = :id LIMIT 1"), {"id": incident_id}).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="incident_not_found")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    return {"ok": True, **_issue_staff_token(incident_id)}
 
 
 class EscalateRequest(BaseModel):
