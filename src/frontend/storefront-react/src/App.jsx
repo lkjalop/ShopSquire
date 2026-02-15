@@ -475,12 +475,32 @@ const CVImageGallery = ({ images, onRemove }) => {
   );
 };
 
-const IncidentChatPanel = ({ incidentId, token }) => {
+const IncidentChatPanel = ({ incidentId, token, staffToken }) => {
   const [items, setItems] = useState([]);
   const [connected, setConnected] = useState(false);
   const [err, setErr] = useState(null);
   const [text, setText] = useState('');
   const endRef = useRef(null);
+
+  const devMode = (() => {
+    try {
+      const qs = new URLSearchParams(window.location.search || '');
+      if (qs.get('dev') === '1') return true;
+      return localStorage.getItem('shopsquire_dev_mode') === '1';
+    } catch (e) {
+      return false;
+    }
+  })();
+
+  const staffRoomLink = (() => {
+    if (!devMode || !incidentId || !staffToken) return null;
+    try {
+      const base = String(API_BASE || '').split('/api/v1')[0].replace(/\/+$/, '');
+      return `${base}/merchant/incident-room?incident_id=${encodeURIComponent(incidentId)}&token=${encodeURIComponent(staffToken)}`;
+    } catch (e) {
+      return null;
+    }
+  })();
 
   useEffect(() => {
     if (!incidentId || !token) return;
@@ -554,6 +574,30 @@ const IncidentChatPanel = ({ incidentId, token }) => {
         </div>
         <span className={`badge ${connected ? 'success' : 'warning'}`}>{connected ? 'Connected' : 'Reconnecting…'}</span>
       </div>
+
+      {staffRoomLink && (
+        <div style={{ padding: '10px 12px', border: '1px solid #fde68a', borderRadius: '12px', background: '#fffbeb', color: '#92400e' }}>
+          <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>Demo (staff room link)</div>
+          <div style={{ fontSize: '12px' }}>
+            Open in the merchant window to reply in real time:
+          </div>
+          <div style={{ marginTop: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input readOnly value={staffRoomLink} style={{ flex: 1, padding: '8px 10px', borderRadius: '10px', border: '1px solid #fde68a', background: '#fff', color: '#111827' }} />
+            <button
+              className="secondary sm"
+              onClick={() => {
+                try {
+                  navigator.clipboard.writeText(staffRoomLink);
+                } catch (e) {
+                  // ignore
+                }
+              }}
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', background: '#f9fafb' }}>
         {items.length === 0 && (
@@ -776,7 +820,7 @@ const RightPanel = ({
           <ProductGrid products={data} viewMode={viewMode} onAddToCart={onAddToCart} onViewDetail={onViewDetail} isLoading={!!isLoading} />
         )}
         {type === 'incident_chat' && (
-          <IncidentChatPanel incidentId={data?.incident_id} token={data?.token} />
+          <IncidentChatPanel incidentId={data?.incident_id} token={data?.token} staffToken={data?.staff_token} />
         )}
         {type === 'product_detail' && data && (
           <div className="flex flex-col gap-3">
@@ -3333,7 +3377,7 @@ const ShopSquireApp = () => {
                     );
                     if (!res.ok) throw new Error('escalate_failed');
                     const j = await res.json();
-                    setRightPanel({ type: 'incident_chat', data: { incident_id: j.incident_id, token: j.buyer_token }, meta: {} });
+                    setRightPanel({ type: 'incident_chat', data: { incident_id: j.incident_id, token: j.buyer_token, staff_token: j.staff_token }, meta: {} });
                     setMessages((prev) => [
                       ...prev,
                       { role: 'assistant', content: 'I have escalated this to a human support specialist. You can continue the conversation in the Support Chat panel.', timestamp: new Date() },
