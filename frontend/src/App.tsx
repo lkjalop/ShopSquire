@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+﻿import { useEffect, useMemo, useState, useRef } from 'react';
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
 import DecisionTrace from './components/DecisionTrace';
@@ -391,7 +391,7 @@ export default function App() {
       if (mode === 'cv' || complaintIntent) {
         const r = await fetch(apiUrl('/api/v1/orchestrate'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
           body: JSON.stringify({
             uid: localStorage.getItem('uid') || 'demo-user',
             cart_total_cents: 0,
@@ -445,7 +445,7 @@ export default function App() {
       } else {
         const r = await fetch(apiUrl('/api/v1/chat/query'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
           body: JSON.stringify({ query: q }),
         });
         const data = await safeJson(r);
@@ -483,7 +483,7 @@ export default function App() {
       const errMsg = (e && (e.message || String(e))) ? (e.message || String(e)) : 'unknown_error';
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Backend unavailable. Decision Trace was not recorded.\n\nTroubleshooting:\n- Confirm FastAPI is running (default: http://127.0.0.1:8081).\n- Vite proxy should forward /api to the backend.\n- Error: ${errMsg}`,
+        content: `Backend unavailable. Decision Trace was not recorded.\n\nTroubleshooting:\n- Confirm FastAPI is running (default: http://127.0.0.1:8080).\n- Vite proxy should forward /api to the backend.\n- Error: ${errMsg}`,
         timestamp: new Date(),
       }]);
       return;
@@ -652,7 +652,15 @@ export default function App() {
                       mode="cv"
                       initialImages={cvPrefillImages}
                       onEscalate={(payload) => {
-                        const incId = payload?.incident_id || payload?.case_id || payload?.decision_id || 'incident-demo';
+                        const incId = payload?.incident_id;
+                        if (!incId) {
+                          setMessages(prev => [...prev, {
+                            role: 'assistant',
+                            content: 'Escalation failed: incident id was not returned by /api/v1/incidents/escalate.',
+                            timestamp: new Date(),
+                          }]);
+                          return;
+                        }
                         setEscalationIncidentId(incId);
                         if (payload?.buyer_token) setEscalationBuyerToken(String(payload.buyer_token)); else setEscalationBuyerToken(null);
                         setEscalationOpen(true);

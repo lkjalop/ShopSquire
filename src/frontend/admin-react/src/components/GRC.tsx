@@ -13,7 +13,7 @@ type Props = { role: 'merchant' | 'owner' | 'developer' };
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
 
 function apiKey(): string {
-  return (import.meta.env.VITE_API_KEY as string) || localStorage.getItem('shopsquire_api_key') || '';
+  return (import.meta.env.VITE_API_KEY as string) || '';
 }
 
 export function GRC({ role }: Props) {
@@ -67,7 +67,7 @@ export function GRC({ role }: Props) {
     const headers: Record<string, string> = {};
     const k = apiKey();
     if (k) headers['x-api-key'] = k;
-    const r = await fetch(url, { headers });
+    const r = await fetch(url, { headers, credentials: 'include' });
     if (!r.ok) return;
     const blob = await r.blob();
     const dl = document.createElement('a');

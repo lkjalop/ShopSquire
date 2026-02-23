@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 from typing import Dict
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, HTTPException, Request, Response, Cookie
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
 
 from src.app.models.db import db_session
@@ -20,6 +20,67 @@ import httpx
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 tracer = get_tracer("auth-router")
+
+SESSION_COOKIE_NAME = "shopsquire_session"
+API_KEY_COOKIE_NAME = "shopsquire_api_key"
+
+
+def _is_https_request(request: Request | None) -> bool:
+    try:
+        if request is None:
+            return False
+        proto = str(request.headers.get("x-forwarded-proto") or "").lower()
+        if proto:
+            return proto == "https"
+        return str(request.url.scheme).lower() == "https"
+    except Exception:
+        return False
+
+
+def _set_session_cookie(resp: Response, token: str, request: Request | None) -> None:
+    try:
+        secure = _is_https_request(request)
+        resp.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=str(token or ""),
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            max_age=7 * 24 * 60 * 60,
+            path="/",
+        )
+    except Exception:
+        pass
+
+
+def _clear_session_cookie(resp: Response) -> None:
+    try:
+        resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    except Exception:
+        pass
+
+
+def _set_api_key_cookie(resp: Response, key: str, request: Request | None) -> None:
+    try:
+        secure = _is_https_request(request)
+        resp.set_cookie(
+            key=API_KEY_COOKIE_NAME,
+            value=str(key or ""),
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            max_age=24 * 60 * 60,
+            path="/",
+        )
+    except Exception:
+        pass
+
+
+def _clear_api_key_cookie(resp: Response) -> None:
+    try:
+        resp.delete_cookie(API_KEY_COOKIE_NAME, path="/")
+    except Exception:
+        pass
 
 
 def _ensure_auth_tables():
@@ -111,6 +172,54 @@ def _ensure_auth_tables():
         db.commit()
 
 
+def _is_forced_reauth(user_id: str | None = None, email: str | None = None) -> bool:
+    uid = str(user_id or "").strip()
+    em = str(email or "").strip().lower()
+    if not uid and not em:
+        return False
+    try:
+        with db_session() as db:
+            if uid:
+                row = db.execute(
+                    "SELECT 1 FROM security_forced_reauth_flags WHERE target_type = 'user_id' AND target_value = :v LIMIT 1",
+                    {"v": uid},
+                ).fetchone()
+                if row:
+                    return True
+            if em:
+                row = db.execute(
+                    "SELECT 1 FROM security_forced_reauth_flags WHERE target_type = 'email' AND lower(target_value) = :v LIMIT 1",
+                    {"v": em},
+                ).fetchone()
+                if row:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def _clear_forced_reauth(user_id: str | None = None, email: str | None = None) -> None:
+    uid = str(user_id or "").strip()
+    em = str(email or "").strip().lower()
+    if not uid and not em:
+        return
+    try:
+        with db_session() as db:
+            if uid:
+                db.execute(
+                    "DELETE FROM security_forced_reauth_flags WHERE target_type = 'user_id' AND target_value = :v",
+                    {"v": uid},
+                )
+            if em:
+                db.execute(
+                    "DELETE FROM security_forced_reauth_flags WHERE target_type = 'email' AND lower(target_value) = :v",
+                    {"v": em},
+                )
+            db.commit()
+    except Exception:
+        pass
+
+
 def _hash_password(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
 
@@ -127,9 +236,10 @@ def _issue_token(user_id: str) -> Dict:
                 {"id": secrets.token_hex(16), "user_id": user_id, "token_hash": token_hash, "expires_at": expires_at},
             )
         except Exception:
+            # Backward-compatibility for older schemas where `token` is required.
             db.execute(
                 "INSERT INTO session_tokens (id, user_id, token, token_hash, expires_at) VALUES (:id, :user_id, :token, :token_hash, :expires_at)",
-                {"id": secrets.token_hex(16), "user_id": user_id, "token": None, "token_hash": token_hash, "expires_at": expires_at},
+                {"id": secrets.token_hex(16), "user_id": user_id, "token": token, "token_hash": token_hash, "expires_at": expires_at},
             )
         db.commit()
     return {"token": token, "expires_at": expires_at}
@@ -163,6 +273,20 @@ def _user_from_token(token: str):
                 return None
         except Exception:
             pass
+        # Enforce post-incident forced reauth: session token is no longer valid
+        # until login completes step-up flow.
+        try:
+            user_id = row[0]
+            user_email = row[1]
+            if _is_forced_reauth(user_id=str(user_id or ""), email=str(user_email or "")):
+                try:
+                    db.execute("DELETE FROM session_tokens WHERE user_id = :uid", {"uid": str(user_id)})
+                except Exception:
+                    pass
+                db.commit()
+                return None
+        except Exception:
+            pass
         return row
 
 
@@ -188,10 +312,15 @@ class RegisterPayload(BaseModel):
 class LoginPayload(BaseModel):
     email: EmailStr
     password: str
+    mfa_stepup_token: str | None = None
+
+
+class ApiKeyCookiePayload(BaseModel):
+    api_key: str
 
 
 @router.post("/register")
-def register(payload: RegisterPayload) -> Dict:
+def register(payload: RegisterPayload, request: Request, response: Response) -> Dict:
     with tracer.start_as_current_span("auth.register") as span:
         _ensure_auth_tables()
         email = payload.email.strip().lower()
@@ -225,11 +354,12 @@ def register(payload: RegisterPayload) -> Dict:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
         token = _issue_token(user_id)
+        _set_session_cookie(response, str(token.get("token") or ""), request)
         return {"user_id": user_id, "email": email, "name": payload.name, **token}
 
 
 @router.post("/login")
-def login(payload: LoginPayload, request: Request) -> Dict:
+def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
     with tracer.start_as_current_span("auth.login") as span:
         _ensure_auth_tables()
         email = payload.email.strip().lower()
@@ -258,7 +388,15 @@ def login(payload: LoginPayload, request: Request) -> Dict:
                 except Exception:
                     pass
                 raise HTTPException(status_code=401, detail="Invalid credentials")
+        # Forced reauth policy requires explicit step-up token before issuing a new session.
+        if _is_forced_reauth(user_id=str(user_id or ""), email=email):
+            provided = str(payload.mfa_stepup_token or "").strip()
+            expected = str(os.getenv("LOCAL_MFA_STEPUP_TOKEN", "stepup-ok")).strip()
+            if not provided or provided != expected:
+                raise HTTPException(status_code=403, detail="mfa_stepup_required")
+            _clear_forced_reauth(user_id=str(user_id or ""), email=email)
         token = _issue_token(user_id)
+        _set_session_cookie(response, str(token.get("token") or ""), request)
         try:
             log_iam_event("login_success", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), True, {"user_id": user_id})
             reason = check_impossible_travel(email, request.client.host if request.client else "unknown")
@@ -270,28 +408,49 @@ def login(payload: LoginPayload, request: Request) -> Dict:
 
 
 @router.post("/logout")
-def logout(token: str) -> Dict:
+def logout(
+    response: Response,
+    token: str | None = None,
+    shopsquire_session: str | None = Cookie(default=None),
+) -> Dict:
     with tracer.start_as_current_span("auth.logout"):
         _ensure_auth_tables()
-        token_hash = hashlib.sha256((token or "").encode("utf-8")).hexdigest() if token else ""
+        token_value = str(token or shopsquire_session or "")
+        token_hash = hashlib.sha256(token_value.encode("utf-8")).hexdigest() if token_value else ""
         with db_session() as db:
             # Delete by hash if present, else token
             try:
                 db.execute("DELETE FROM session_tokens WHERE token_hash = :th", {"th": token_hash})
             except Exception:
-                db.execute("DELETE FROM session_tokens WHERE token = :t", {"t": token})
+                db.execute("DELETE FROM session_tokens WHERE token = :t", {"t": token_value})
             db.commit()
+        _clear_session_cookie(response)
         return {"logged_out": True}
 
 
 @router.get("/me")
-def me(token: str) -> Dict:
+def me(token: str | None = None, shopsquire_session: str | None = Cookie(default=None)) -> Dict:
     with tracer.start_as_current_span("auth.me"):
         _ensure_auth_tables()
-        row = _user_from_token(token)
+        row = _user_from_token(str(token or shopsquire_session or ""))
         if not row:
             raise HTTPException(status_code=401, detail="Invalid token")
         return {"user_id": row[0], "email": row[1], "name": row[2]}
+
+
+@router.post("/api-key-cookie")
+def set_api_key_cookie(payload: ApiKeyCookiePayload, request: Request, response: Response) -> Dict:
+    key = str(payload.api_key or "").strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="api_key_required")
+    _set_api_key_cookie(response, key, request)
+    return {"ok": True}
+
+
+@router.delete("/api-key-cookie")
+def clear_api_key_cookie(response: Response) -> Dict:
+    _clear_api_key_cookie(response)
+    return {"ok": True}
 
 
 @router.get("/google/authorize")
@@ -452,18 +611,6 @@ def google_callback(code: str | None = None, state: str | None = None):
             db.commit()
 
         token = _issue_token(user_id)
-        html = f"""
-        <!doctype html>
-        <html lang="en">
-        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-        <body>
-          <script>
-            localStorage.setItem('shopsquire_session_token', '{token["token"]}');
-            localStorage.setItem('shopsquire_session_expires', '{token["expires_at"]}');
-            window.location.href = '{return_to}';
-          </script>
-          <p>Signing you in...</p>
-        </body>
-        </html>
-        """
-        return HTMLResponse(content=html)
+        resp = RedirectResponse(url=return_to, status_code=302)
+        _set_session_cookie(resp, str(token.get("token") or ""), None)
+        return resp

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchIncidents, getIncident, issueIncidentStaffToken, updateIncidentStatus } from '../api';
 
-type Props = { role: 'merchant' | 'owner' | 'developer' };
+type Props = { role: 'merchant' | 'owner' | 'developer'; initialIncidentId?: string | null };
 
 type ChatRec = { incident_id?: string; role?: string; message?: string; ts?: number; meta?: any };
 
@@ -22,16 +22,18 @@ function formatTsMs(ms?: number) {
   }
 }
 
-export function EscalationsConsole({ role }: Props) {
-  const [status, setStatus] = useState<'all' | 'open' | 'review' | 'triaged' | 'resolved'>('open');
+export function EscalationsConsole({ role, initialIncidentId }: Props) {
+  const [status, setStatus] = useState<'all' | 'open' | 'review' | 'triaged' | 'resolved'>(initialIncidentId ? 'all' : 'open');
   const [severity, setSeverity] = useState<'all' | 'critical' | 'high' | 'warn' | 'info'>('all');
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
   const [selected, setSelected] = useState<any | null>(null);
+  const [prefillApplied, setPrefillApplied] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<any | null>(null);
   const [staffToken, setStaffToken] = useState<string | null>(null);
   const [chat, setChat] = useState<ChatRec[]>([]);
   const [chatErr, setChatErr] = useState<string | null>(null);
+  const [statusErr, setStatusErr] = useState<string | null>(null);
   const [msg, setMsg] = useState('');
   const esRef = useRef<EventSource | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -46,8 +48,10 @@ export function EscalationsConsole({ role }: Props) {
         severity: severity === 'all' ? undefined : severity,
       });
       setRows(Array.isArray(inc) ? inc : []);
+      setStatusErr(null);
     } catch (e: any) {
       setRows([]);
+      setStatusErr(`Unable to load incidents${e?.message ? `: ${String(e.message)}` : ''}`);
     } finally {
       setLoading(false);
     }
@@ -59,6 +63,29 @@ export function EscalationsConsole({ role }: Props) {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, severity]);
+
+  useEffect(() => {
+    setPrefillApplied(false);
+  }, [initialIncidentId]);
+
+  useEffect(() => {
+    const requested = String(initialIncidentId || '').trim();
+    if (!requested || prefillApplied) return;
+    const fromRows = rows.find((r) => String(r?.id || '') === requested);
+    if (fromRows) {
+      setSelected(fromRows);
+      setPrefillApplied(true);
+      return;
+    }
+    getIncident(requested)
+      .then((d) => {
+        setSelected(d);
+      })
+      .catch(() => {
+        setChatErr(`Incident ${requested} not found or not accessible.`);
+      })
+      .finally(() => setPrefillApplied(true));
+  }, [initialIncidentId, rows, prefillApplied]);
 
   const connectRoom = async (incidentId: string) => {
     setChat([]);
@@ -200,7 +227,15 @@ export function EscalationsConsole({ role }: Props) {
                       await updateIncidentStatus(selected.id, s);
                       await load();
                       setSelected((prev: any) => ({ ...(prev || {}), status: s }));
-                    } catch {}
+                      setStatusErr(null);
+                    } catch (e: any) {
+                      const msg = String(e?.message || '');
+                      if (msg.includes('matrix_completeness_required') || e?.status === 409) {
+                        setStatusErr('Cannot close incident yet: Security Matrix is incomplete for this trace.');
+                      } else {
+                        setStatusErr(`Status update failed${msg ? `: ${msg}` : ''}`);
+                      }
+                    }
                   }}
                 >
                   Mark {s}
@@ -208,6 +243,11 @@ export function EscalationsConsole({ role }: Props) {
               ))}
             </div>
           </div>
+          {statusErr && (
+            <div style={{ marginTop: 8, border: '1px solid #fecaca', background: '#fff1f2', color: '#9f1239', borderRadius: 10, padding: '8px 10px', fontSize: 12 }}>
+              {statusErr}
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: 12, marginTop: 10, flex: 1, minHeight: 0 }}>
             <div style={{ border: '1px solid var(--border)', borderRadius: 14, background: '#fff', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -280,4 +320,3 @@ export function EscalationsConsole({ role }: Props) {
     </div>
   );
 }
-

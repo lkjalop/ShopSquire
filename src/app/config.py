@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from src.app.services.secrets_manager import get_secret
+from typing import Any
 
 
 @dataclass
@@ -64,13 +65,22 @@ def _settings_env_sig() -> tuple:
     )
 
 
+def _default_database_url() -> str:
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    if env in ("local", "dev", "development", "test"):
+        # Local default should be self-contained and deterministic when DATABASE_URL
+        # is not explicitly configured.
+        return "sqlite:///test.sqlite"
+    return "postgresql+psycopg2://postgres:postgres@localhost:5432/shopsquire"
+
+
 @lru_cache(maxsize=8)
 def _get_settings_cached(_sig: tuple) -> Settings:
     return Settings(
         app_env=os.getenv("APP_ENV", "local"),
         api_host=os.getenv("API_HOST", "0.0.0.0"),
         api_port=int(os.getenv("API_PORT", "8080")),
-        database_url=_resolved_secret("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/shopsquire"),
+        database_url=_resolved_secret("DATABASE_URL", _default_database_url()),
         redis_url=_resolved_secret("REDIS_URL", "redis://localhost:6379/0"),
         stripe_api_key=_resolved_secret("STRIPE_API_KEY", "sk_test_xxx"),
         paypal_client_id=_resolved_secret("PAYPAL_CLIENT_ID", ""),
@@ -91,6 +101,45 @@ try:
     get_settings.cache_clear = _get_settings_cached.cache_clear  # type: ignore[attr-defined]
 except Exception:
     pass
+
+
+def canonical_runtime_contract() -> dict[str, Any]:
+    """Canonical runtime env contract used by `/readyz` config reporting."""
+    s = get_settings()
+    api_base = os.getenv("API_BASE_URL", "").strip()
+    if not api_base:
+        host = (s.api_host or "127.0.0.1").strip()
+        if host in ("0.0.0.0", "::"):
+            host = "127.0.0.1"
+        api_base = f"http://{host}:{int(s.api_port)}"
+    return {
+        "API_BASE_URL": api_base,
+        "API_PORT": int(s.api_port),
+        "DATABASE_URL": str(s.database_url or "").strip(),
+        "REDIS_URL": str(s.redis_url or "").strip(),
+        "FEATURE_FLAGS_PATH": str(s.feature_flags_path or "").strip(),
+        "MERCHANT_API_KEY": str(os.getenv("MERCHANT_API_KEY", "")).strip(),
+        "OWNER_API_KEY": str(os.getenv("OWNER_API_KEY", "")).strip(),
+        "DEVELOPER_API_KEY": str(os.getenv("DEVELOPER_API_KEY", "")).strip(),
+    }
+
+
+def validate_runtime_contract() -> dict[str, Any]:
+    contract = canonical_runtime_contract()
+    required = ["API_BASE_URL", "API_PORT", "DATABASE_URL", "REDIS_URL", "FEATURE_FLAGS_PATH"]
+    missing = [k for k in required if not contract.get(k)]
+    warnings: list[str] = []
+    if str(contract.get("API_PORT")) != "8080":
+        warnings.append("API_PORT_noncanonical_expected_8080")
+    for key in ("MERCHANT_API_KEY", "OWNER_API_KEY", "DEVELOPER_API_KEY"):
+        if not contract.get(key):
+            warnings.append(f"{key}_not_set_using_defaults_or_auth_failures_possible")
+    return {
+        "ok": len(missing) == 0,
+        "missing": missing,
+        "warnings": warnings,
+        "contract": contract,
+    }
 
 
 def load_feature_flags(path: str) -> dict:

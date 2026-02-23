@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 import io
 import re
+import os
 
 from src.app.observability.telemetry import telemetry_emit
 from src.app.config import load_feature_flags, get_settings
@@ -23,9 +24,14 @@ from src.app.security.email_attachment_parser import hydrate_attachments_from_by
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
 import time
-from src.app.services.intake_gate import normalize_email_intake
+from src.app.services.intake_gate import (
+    normalize_email_intake,
+    sanitize_attachment_ocr_for_llm,
+    strict_attachment_ingest_gate,
+)
 from src.app.services.playbook_engine import start_playbook_run, append_playbook_step, execute_typed_actions, complete_playbook_run
 from src.app.security.framework_correlation import correlate_security_analysis
+from src.app.services.trust_routing import fuse_security_trust_score
 
 _RATE_BUCKETS: dict[str, list[float]] = {}
 
@@ -108,6 +114,90 @@ def _within_rate_limit(key: str, per_min: int, enabled: bool) -> tuple[bool, int
     _RATE_BUCKETS[key] = bucket
     return allowed, len(bucket)
 
+
+def _spoof_flood_load_shed_state(ff: Dict[str, Any], tenant_id: str | None, indicators: list[dict] | None) -> Dict[str, Any]:
+    cfg = ff.get("SPOOF_FLOOD_LOAD_SHED", {}) if isinstance(ff, dict) else {}
+    enabled = bool(cfg.get("enabled", False))
+    per_min = int(cfg.get("per_min", 60))
+    queue_limit = int(cfg.get("tenant_queue_limit", 120))
+    fast_path_threshold = int(cfg.get("fast_path_threshold", max(1, int(per_min * 0.6))))
+    budget_cap_per_day = int(cfg.get("budget_cap_per_day", 0))
+    require_spoof_signals = bool(cfg.get("require_spoof_signals", True))
+    indicator_types = {str((i or {}).get("type") or "") for i in (indicators or [])}
+    spoof_signals = {
+        "reply_to_mismatch",
+        "lookalike_domain",
+        "confusable_homoglyph_domain",
+        "vendor_homoglyph_impersonation",
+        "auth_enforcement",
+        "vendor_domain_mismatch",
+        "reply_chain_hijack",
+    }
+    has_spoof_signals = bool(indicator_types & spoof_signals)
+    should_count = enabled and (has_spoof_signals or not require_spoof_signals)
+    if not should_count:
+        return {
+            "active": False,
+            "enabled": enabled,
+            "reason": "not_applicable",
+            "has_spoof_signals": has_spoof_signals,
+            "per_min": per_min,
+            "queue_limit": queue_limit,
+            "fast_path_only": False,
+            "budget_exceeded": False,
+            "observed_per_min": 0,
+        }
+    tenant_key = tenant_id or "default"
+    allowed, count = _within_rate_limit(f"spoof_flood:{tenant_key}", per_min=per_min, enabled=True)
+
+    # Best-effort per-tenant queue depth and daily budget checks.
+    queue_depth = int(count)
+    budget_used = 0
+    budget_exceeded = False
+    try:
+        from src.app.deps import get_redis
+
+        r = get_redis()
+        if r.__class__.__name__ != "DummyRedis":
+            queue_depth = int(r.incrby(f"email_security:queue_depth:{tenant_key}", 1) or 0)
+            r.expire(f"email_security:queue_depth:{tenant_key}", 120)
+            if budget_cap_per_day > 0:
+                day_key = time.strftime("%Y%m%d", time.gmtime())
+                bkey = f"email_security:cost:{tenant_key}:{day_key}"
+                budget_used = int(r.incrby(bkey, 1) or 0)
+                r.expire(bkey, 172800)
+                budget_exceeded = budget_used > budget_cap_per_day
+    except Exception:
+        budget_used = int(count)
+        budget_exceeded = bool(budget_cap_per_day > 0 and budget_used > budget_cap_per_day)
+
+    queue_exceeded = queue_limit > 0 and queue_depth > queue_limit
+    fast_path_only = bool(queue_depth >= fast_path_threshold or budget_exceeded)
+    active = (not bool(allowed)) or queue_exceeded or budget_exceeded
+    if budget_exceeded:
+        reason = "budget_cap_exceeded"
+    elif queue_exceeded:
+        reason = "tenant_queue_limit_exceeded"
+    elif active:
+        reason = "flood_threshold_exceeded"
+    else:
+        reason = "below_threshold"
+    return {
+        "active": active,
+        "enabled": enabled,
+        "reason": reason,
+        "has_spoof_signals": has_spoof_signals,
+        "per_min": per_min,
+        "queue_limit": queue_limit,
+        "queue_depth": queue_depth,
+        "fast_path_only": fast_path_only,
+        "fast_path_threshold": fast_path_threshold,
+        "budget_cap_per_day": budget_cap_per_day,
+        "budget_used": budget_used,
+        "budget_exceeded": budget_exceeded,
+        "observed_per_min": int(count),
+    }
+
 def _dedupe_ok(message_id: str | None, tenant_id: str | None) -> bool:
     """Return True if we should proceed with side-effects (tickets) for this message.
 
@@ -175,6 +265,25 @@ def _ioc_quality(iocs: list[dict], *, block_thr: float = 0.8, allow_thr: float =
         "resolution": resolution,
         "thresholds": {"block": float(block_thr), "allow": float(allow_thr), "margin": float(margin)},
         "ioc_type_counts": by_type_counts,
+    }
+
+
+def _sandbox_ioc_stage(enrichment: Dict[str, Any], detonation: Dict[str, Any], ioc_quality: Dict[str, Any]) -> Dict[str, Any]:
+    enr = enrichment if isinstance(enrichment, dict) else {}
+    det = detonation if isinstance(detonation, dict) else {}
+    iq = ioc_quality if isinstance(ioc_quality, dict) else {}
+    findings = list(det.get("findings") or [])
+    return {
+        "stage": "sandbox_ioc_fusion",
+        "provider": str(det.get("provider") or "none"),
+        "detonation_malicious": bool(det.get("malicious")),
+        "detonation_score": float(det.get("score") or 0.0),
+        "detonation_findings": findings[:20],
+        "ioc_malicious_hits": int(enr.get("malicious_hits") or 0),
+        "ioc_conflicts": int(iq.get("conflicts") or 0),
+        "ioc_deny_score": float(iq.get("deny_score") or 0.0),
+        "ioc_allow_score": float(iq.get("allow_score") or 0.0),
+        "resolution": str(iq.get("resolution") or "review"),
     }
 
 
@@ -485,11 +594,35 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     per_min = int(rt_cfg.get("per_min", 5))
     enabled = bool(rt_cfg.get("enabled", False))
 
+    # Normalize auth fields from both flat and nested payload styles.
+    try:
+        auth_spf = email.get("spf") if isinstance(email.get("spf"), dict) else {}
+        auth_dkim = email.get("dkim") if isinstance(email.get("dkim"), dict) else {}
+        auth_dmarc = email.get("dmarc") if isinstance(email.get("dmarc"), dict) else {}
+        if not email.get("spf_result"):
+            email["spf_result"] = auth_spf.get("result")
+        if not email.get("dkim_result"):
+            email["dkim_result"] = auth_dkim.get("result")
+        if not email.get("dmarc_result"):
+            email["dmarc_result"] = auth_dmarc.get("result")
+        if not email.get("dmarc_policy"):
+            email["dmarc_policy"] = auth_dmarc.get("policy") or auth_dmarc.get("p")
+        if "dmarc_fail" not in email and str(email.get("dmarc_result") or "").lower() in ("fail", "reject", "quarantine"):
+            email["dmarc_fail"] = True
+    except Exception:
+        pass
+
     # Intake-only normalization (no detection). Keeps downstream logic deterministic.
     try:
         email, intake_meta = normalize_email_intake(email)
     except Exception:
         intake_meta = {"gate": "intake_only", "error": "normalize_failed"}
+
+    # Strict ingest controls before deep parsing: MIME/ext/size/archive/AV.
+    try:
+        email, ingest_gate_meta = strict_attachment_ingest_gate(email)
+    except Exception:
+        ingest_gate_meta = {"gate": "strict_attachment_ingest", "blocked": False, "error": "ingest_gate_failed"}
 
     # Accept raw base64 attachment bytes in the evaluate path and hydrate deterministic metadata/text.
     try:
@@ -497,7 +630,43 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     except Exception:
         email = dict(email)
 
+    # OCR text sanitization + QR URL allowlist enforcement before any model-assisted processing.
+    try:
+        email, ocr_sanitization_meta = sanitize_attachment_ocr_for_llm(email)
+    except Exception:
+        ocr_sanitization_meta = {"gate": "ocr_qr_sanitization", "blocked_qr_url_count": 0, "error": "ocr_sanitize_failed"}
+
     extracted = extract_indicators(email, tenant_id=tenant_id)
+    try:
+        extra_inds = []
+        if bool((ingest_gate_meta or {}).get("blocked")):
+            extra_inds.append(
+                {
+                    "type": "ingest_gate_blocked_attachment",
+                    "value": True,
+                    "reason": ",".join((ingest_gate_meta or {}).get("block_reasons") or ["attachment_blocked"]),
+                }
+            )
+        if int((ocr_sanitization_meta or {}).get("blocked_qr_url_count") or 0) > 0:
+            extra_inds.append(
+                {
+                    "type": "qr_url_not_allowlisted",
+                    "value": True,
+                    "reason": "Attachment OCR/QR contains non-allowlisted URLs",
+                }
+            )
+        if int((ocr_sanitization_meta or {}).get("prompt_instruction_hits") or 0) > 0:
+            extra_inds.append(
+                {
+                    "type": "ocr_prompt_instruction_sanitized",
+                    "value": int((ocr_sanitization_meta or {}).get("prompt_instruction_hits") or 0),
+                    "reason": "Untrusted OCR prompt-instruction text was sanitized",
+                }
+            )
+        if extra_inds:
+            extracted["indicators"] = list(extracted.get("indicators") or []) + extra_inds
+    except Exception:
+        pass
     artifact_intel = {}
     try:
         artifact_intel = analyze_email_artifacts(email)
@@ -569,6 +738,25 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["verdict_action"] = "quarantine"
         v["escalation"] = "human_review"
         v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["ioc_confidence_conflict_review"]))
+    # Intake gate hard-stop: deny clearly unsafe attachments before downstream actions.
+    if bool((ingest_gate_meta or {}).get("blocked")):
+        v["severity"] = "error"
+        v["route"] = "security_review"
+        v["verdict_action"] = "security_review"
+        v["escalation"] = "security_middleware"
+        v["reasons"] = list(
+            dict.fromkeys(
+                (v.get("reasons") or [])
+                + ["ingest_gate_blocked_attachment"]
+                + [str(x) for x in ((ingest_gate_meta or {}).get("global_reasons") or [])]
+            )
+        )
+    if int((ocr_sanitization_meta or {}).get("blocked_qr_url_count") or 0) > 0 and v.get("route") != "security_review":
+        v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+        v["route"] = "human_review"
+        v["verdict_action"] = "quarantine"
+        v["escalation"] = "human_review"
+        v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["qr_url_not_allowlisted"]))
     # Enforce auth-verdict gate: when sender policy is quarantine/reject and alignment fails, force security review.
     if (dmarc_result in ("fail", "reject", "quarantine") or dmarc_fail) and dmarc_policy in ("reject", "p=reject", "quarantine", "p=quarantine"):
         v["severity"] = "error"
@@ -577,6 +765,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["escalation"] = "security_middleware"
         v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["auth_alignment_failed_under_dmarc_policy"]))
 
+    auth_pass_trusted_preferred = False
     # Prefer allow when auth passes and sender is trusted (unless critical signals present).
     try:
         auth_all_pass = (spf_result == "pass" and dkim_result == "pass" and (dmarc_result in ("pass", "", None)) and not bool(dmarc_fail))
@@ -587,9 +776,10 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         critical = {"dangerous_tool_intent", "prompt_injection", "lolbin_command", "c2_beacon_pattern", "data_exfil_intent"}
         if auth_all_pass and ((from_domain.lower() in trusted_domains) or (external_sender is False)):
             if not (ind_types_set & critical) and v.get("route") in ("human_review", None):
+                auth_pass_trusted_preferred = True
                 v["severity"] = "info"
                 v["route"] = "auto_resolve"
-                v["verdict_action"] = v.get("verdict_action") or "allow"
+                v["verdict_action"] = "allow"
                 v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["auth_pass_trusted_sender_allow"]))
     except Exception:
         pass
@@ -612,6 +802,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             }
         except Exception:
             pass
+        v["evidence_snapshot"]["intake_gate"] = intake_meta
+        v["evidence_snapshot"]["attachment_ingest_gate"] = ingest_gate_meta
+        v["evidence_snapshot"]["ocr_qr_sanitization"] = ocr_sanitization_meta
     try:
         sig = ((artifact_intel or {}).get("signal_scores") or {})
         band = str(sig.get("band") or "auto-allow")
@@ -638,40 +831,71 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     if isinstance(v.get("evidence_snapshot"), dict):
         v["evidence_snapshot"]["kill_chain_stage"] = threat.get("kill_chain_stage")
         v["evidence_snapshot"]["threat_correlation"] = threat
-    # P1 enrichment and safe detonation (best-effort, non-blocking).
-    enrichment_t0 = time.perf_counter()
-    enrichment_error = None
-    try:
+    load_shed = _spoof_flood_load_shed_state(ff, tenant_id, v.get("indicators") or [])
+    if isinstance(v.get("evidence_snapshot"), dict):
+        v["evidence_snapshot"]["load_shed"] = load_shed
+    if bool(load_shed.get("active")):
+        v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["spoof_flood_load_shed_active"]))
+    elif bool(load_shed.get("fast_path_only")):
+        v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["spoof_flood_fast_path_only"]))
+    if bool(load_shed.get("active") or load_shed.get("fast_path_only")):
         try:
-            enrichment = enrich_iocs(v.get("iocs") or [], tenant_id=tenant_id)
-        except TypeError:
-            enrichment = enrich_iocs(v.get("iocs") or [])
-    except Exception as e:
-        enrichment = {"items": [], "malicious_hits": 0}
-        enrichment_error = str(e)
-    enrichment_t1 = time.perf_counter()
-    try:
-        from src.app.observability.metrics import record_email_enrichment_latency
-
-        record_email_enrichment_latency("local_cache", max(0.0, enrichment_t1 - enrichment_t0))
-    except Exception:
-        pass
-    detonation_t0 = time.perf_counter()
+            telemetry_emit(
+                {
+                    "type": "email_security",
+                    "subtype": "spoof_flood_load_shed",
+                    "tenant_id": tenant_id,
+                    "load_shed": load_shed,
+                },
+                severity="warning",
+                sourcetype="shopsquire:security",
+            )
+        except Exception:
+            pass
+    # P1 enrichment and safe detonation (best-effort, non-blocking) with flood load-shed.
+    enrichment_error = None
     detonation_error = None
-    try:
-        urls = [str(x.get("value") or "") for x in (v.get("iocs") or []) if str(x.get("type") or "") == "url" and x.get("value")]
-        attachment_hashes = [str(a.get("sha256") or "") for a in (email.get("attachments") or []) if a.get("sha256")]
-        detonation = detonate_targets(urls, attachment_hashes)
-    except Exception as e:
-        detonation = {"provider": "none", "malicious": False, "score": 0.0, "findings": []}
-        detonation_error = str(e)
-    detonation_t1 = time.perf_counter()
-    try:
-        from src.app.observability.metrics import record_email_detonation_latency
+    if bool(load_shed.get("active") or load_shed.get("fast_path_only")):
+        now = time.perf_counter()
+        enrichment_t0 = now
+        enrichment_t1 = now
+        detonation_t0 = now
+        detonation_t1 = now
+        mode = "active" if bool(load_shed.get("active")) else "fast_path_only"
+        enrichment = {"items": [], "malicious_hits": 0, "provider": "load_shed", "skipped": True, "mode": mode}
+        detonation = {"provider": "load_shed", "malicious": False, "score": 0.0, "findings": [], "skipped": True, "mode": mode}
+    else:
+        enrichment_t0 = time.perf_counter()
+        try:
+            try:
+                enrichment = enrich_iocs(v.get("iocs") or [], tenant_id=tenant_id)
+            except TypeError:
+                enrichment = enrich_iocs(v.get("iocs") or [])
+        except Exception as e:
+            enrichment = {"items": [], "malicious_hits": 0}
+            enrichment_error = str(e)
+        enrichment_t1 = time.perf_counter()
+        try:
+            from src.app.observability.metrics import record_email_enrichment_latency
 
-        record_email_detonation_latency(str(detonation.get("provider") or "none"), max(0.0, detonation_t1 - detonation_t0))
-    except Exception:
-        pass
+            record_email_enrichment_latency("local_cache", max(0.0, enrichment_t1 - enrichment_t0))
+        except Exception:
+            pass
+        detonation_t0 = time.perf_counter()
+        try:
+            urls = [str(x.get("value") or "") for x in (v.get("iocs") or []) if str(x.get("type") or "") == "url" and x.get("value")]
+            attachment_hashes = [str(a.get("sha256") or "") for a in (email.get("attachments") or []) if a.get("sha256")]
+            detonation = detonate_targets(urls, attachment_hashes)
+        except Exception as e:
+            detonation = {"provider": "none", "malicious": False, "score": 0.0, "findings": []}
+            detonation_error = str(e)
+        detonation_t1 = time.perf_counter()
+        try:
+            from src.app.observability.metrics import record_email_detonation_latency
+
+            record_email_detonation_latency(str(detonation.get("provider") or "none"), max(0.0, detonation_t1 - detonation_t0))
+        except Exception:
+            pass
     try:
         v["enrichment"] = enrichment
         v["detonation"] = detonation
@@ -714,6 +938,64 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     except Exception:
         pass
 
+    # Trust-score fusion: sender trust + IOC + sandbox + ingest controls -> progressive access policy.
+    trust_case = None
+    access_policy = None
+    sandbox_ioc = _sandbox_ioc_stage(enrichment, detonation, ioc_quality)
+    try:
+        auth_failed = bool(
+            dmarc_fail
+            or dmarc_result in ("fail", "quarantine", "reject")
+            or (spf_result in ("fail", "softfail") and dkim_result in ("fail", "neutral", ""))
+        )
+        base_sender_trust = float((trust or {}).get("sender_trust_score") or 0.5)
+        trust_case_dec = fuse_security_trust_score(
+            base_trust_score=base_sender_trust,
+            sender_trust=trust if isinstance(trust, dict) else {},
+            ioc_malicious_hits=int((enrichment or {}).get("malicious_hits") or 0),
+            detonation=detonation if isinstance(detonation, dict) else {},
+            ingest_blocked=bool((ingest_gate_meta or {}).get("blocked")) or int((ocr_sanitization_meta or {}).get("blocked_qr_url_count") or 0) > 0,
+            auth_failed=auth_failed,
+            load_shed_active=bool((load_shed or {}).get("active")),
+        )
+        trust_case = {
+            "score": float(trust_case_dec.trust_score),
+            "level": trust_case_dec.trust_level,
+            "progressive_access": trust_case_dec.progressive_access,
+            "forced_reauth": bool(trust_case_dec.forced_reauth),
+            "actions": trust_case_dec.actions,
+            "reasons": trust_case_dec.reasons,
+            "factors": trust_case_dec.factors,
+        }
+        access_policy = {
+            "progressive_access": trust_case_dec.progressive_access,
+            "forced_reauth": bool(trust_case_dec.forced_reauth),
+            "actions": trust_case_dec.actions,
+            "decision_source": "trust_score_fusion_v1",
+        }
+        v["trust_case"] = trust_case
+        v["access_policy"] = access_policy
+        v["policy_actions"] = trust_case_dec.actions
+        if bool(trust_case_dec.forced_reauth):
+            v["severity"] = "error"
+            v["route"] = "security_review"
+            v["verdict_action"] = "security_review"
+            v["escalation"] = "security_middleware"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["forced_reauth_required"]))
+        elif trust_case_dec.progressive_access in ("restricted", "challenge") and v.get("route") == "auto_resolve" and not auth_pass_trusted_preferred:
+            v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+            v["route"] = "human_review"
+            v["verdict_action"] = "quarantine"
+            v["escalation"] = "human_review"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + [f"progressive_access_{trust_case_dec.progressive_access}"]))
+        if isinstance(v.get("evidence_snapshot"), dict):
+            v["evidence_snapshot"]["sandbox_ioc_stage"] = sandbox_ioc
+            v["evidence_snapshot"]["trust_case"] = trust_case
+            v["evidence_snapshot"]["access_policy"] = access_policy
+    except Exception:
+        trust_case = None
+        access_policy = None
+
     # P1 LLM assist: summary/secondary signal only (non-authoritative).
     llm_assist = _llm_assist_summary(email, extracted, v, ff=ff)
     llm_controls = _llm_control_policy(extracted, ff=ff)
@@ -744,6 +1026,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 rt_thr.get("sender_trust_low_threshold", (thr or {}).get("SENDER_TRUST_LOW_THRESHOLD", 0.35))
             ),
             "ioc_fusion_malicious_threshold": float(rt_thr.get("ioc_fusion_malicious_threshold", 0.7)),
+            "spoof_flood_per_min": int((load_shed or {}).get("per_min") or 0),
+            "spoof_flood_load_shed_active": bool((load_shed or {}).get("active")),
+            "force_reauth_below": float(((ff.get("TRUST_THRESHOLDS") or {}).get("force_reauth_below", 0.35)) if isinstance(ff, dict) else 0.35),
         }
         v["policy_gate"] = {
             "decision": "deny" if (v.get("route") == "security_review") else ("review" if v.get("route") == "human_review" else "allow"),
@@ -767,6 +1052,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     try:
         if isinstance(v.get("evidence_snapshot"), dict):
             v["evidence_snapshot"]["intake_gate"] = intake_meta
+            v["evidence_snapshot"]["attachment_ingest_gate"] = ingest_gate_meta
+            v["evidence_snapshot"]["ocr_qr_sanitization"] = ocr_sanitization_meta
     except Exception:
         pass
     # Metrics: verdict
@@ -803,8 +1090,11 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         "fuzzy_signals": v.get("fuzzy_signals"),
         "enrichment": v.get("enrichment"),
         "detonation": v.get("detonation"),
+        "sandbox_ioc_stage": sandbox_ioc,
         "llm_assist": llm_assist,
         "sender_trust": trust,
+        "trust_case": trust_case,
+        "access_policy": access_policy,
         "threat_correlation": threat,
     }
     try:
@@ -898,6 +1188,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "ioc_counts": (v.get("evidence_snapshot") or {}).get("ioc_counts"),
                 "artifact_intel": (v.get("evidence_snapshot") or {}).get("artifact_intel"),
                 "intake_gate": (v.get("evidence_snapshot") or {}).get("intake_gate"),
+                "attachment_ingest_gate": (v.get("evidence_snapshot") or {}).get("attachment_ingest_gate"),
+                "ocr_qr_sanitization": (v.get("evidence_snapshot") or {}).get("ocr_qr_sanitization"),
+                "trust_case": trust_case,
             },
         )
     except Exception:
@@ -922,6 +1215,10 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "fuzzy_signals": v.get("fuzzy_signals"),
                 "ticket_id": ticket_id,
                 "security_analysis": security_analysis,
+                "attachment_ingest_gate": ingest_gate_meta,
+                "ocr_qr_sanitization": ocr_sanitization_meta,
+                "sandbox_ioc_stage": sandbox_ioc,
+                "trust_case": trust_case,
             },
             proposed_action={
                 "severity": v.get("severity"),
@@ -930,6 +1227,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "escalation": v.get("escalation"),
                 "policy_gate": v.get("policy_gate"),
                 "risk_band": v.get("risk_band"),
+                "access_policy": access_policy,
                 "reasons": v.get("reasons"),
             },
             agent_reasoning="rule_first_email_security",
@@ -966,6 +1264,12 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "enrichment": v.get("enrichment"),
                     "sender_trust": trust,
                     "artifact_intel": (v.get("evidence_snapshot") or {}).get("artifact_intel"),
+                    "load_shed": load_shed,
+                    "attachment_ingest_gate": ingest_gate_meta,
+                    "ocr_qr_sanitization": ocr_sanitization_meta,
+                    "sandbox_ioc_stage": sandbox_ioc,
+                    "trust_case": trust_case,
+                    "access_policy": access_policy,
                 },
             )
             log_trace_event(
@@ -999,6 +1303,19 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 target_type="system",
                 target_id=None,
                 payload=v.get("policy_gate") or {},
+            )
+            log_trace_event(
+                trace_id=decision_id,
+                event_type="trust_policy",
+                source_type="agent",
+                source_id="Trust_Policy_Agent",
+                target_type="identity",
+                target_id=(v.get("evidence_snapshot") or {}).get("from_domain_hash"),
+                payload={
+                    "trust_case": trust_case or {},
+                    "access_policy": access_policy or {},
+                    "sandbox_ioc_stage": sandbox_ioc or {},
+                },
             )
             if v.get("fuzzy_signals", {}).get("canary_triggered"):
                 log_trace_event(
@@ -1130,6 +1447,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "detonation": v.get("detonation"),
                     "enrichment": {"malicious_hits": (v.get("enrichment") or {}).get("malicious_hits")},
                     "policy_gate": v.get("policy_gate"),
+                    "trust_case": v.get("trust_case"),
+                    "access_policy": v.get("access_policy"),
                 },
             )
             handoff = emit_security_handoff(normalized)

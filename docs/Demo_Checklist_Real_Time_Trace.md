@@ -7,12 +7,12 @@
 - Health: `curl http://localhost:8080/healthz`, `readyz`, `metrics`
 
 ### Alt quick start (Windows/VS Code Tasks)
-- Start backend on 8081 via task: Terminal → Run Task → "Start uvicorn server (8081)".
-- Health (8081):
+- Start backend on 8080 via task: Terminal → Run Task → "Start uvicorn server (8080)".
+- Health (8080):
 ```powershell
-curl http://127.0.0.1:8081/health
-curl http://127.0.0.1:8081/readyz
-curl http://127.0.0.1:8081/metrics
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/readyz
+curl http://127.0.0.1:8080/metrics
 ```
 
 ## Lane 1: Prompt Injection
@@ -74,7 +74,7 @@ curl http://localhost:8080/api/v1/scoring/versions
 
 ### A. Product Recommendation w/ Budget Filter
 ```powershell
-curl -G "http://127.0.0.1:8081/api/v1/recommend/suggest" `
+curl -G "http://127.0.0.1:8080/api/v1/recommend/suggest" `
   --data-urlencode "uid=demo-user" `
   --data-urlencode "query=Show me laptops under $1200" `
   --data-urlencode "budget_max=1200"
@@ -83,14 +83,14 @@ curl -G "http://127.0.0.1:8081/api/v1/recommend/suggest" `
 
 ### B. Observability Signal from UI
 ```powershell
-curl -X POST "http://127.0.0.1:8081/observability/ui_action" -d "action=recommend_click"
+curl -X POST "http://127.0.0.1:8080/observability/ui_action" -d "action=recommend_click"
 ```
 - Proof: `/metrics` increases corresponding counter; correlate request ID/trace ID if enabled.
 
 ### C. Inventory/Analytics Health
 ```powershell
-curl http://127.0.0.1:8081/api/v1/inventory/health
-curl "http://127.0.0.1:8081/api/v1/analytics/fraud_graph?limit=5"
+curl http://127.0.0.1:8080/api/v1/inventory/health
+curl "http://127.0.0.1:8080/api/v1/analytics/fraud_graph?limit=5"
 ```
 - Proof: 200 JSON; verify OpenAPI lists endpoints in `openapi.json`.
 
@@ -99,7 +99,7 @@ curl "http://127.0.0.1:8081/api/v1/analytics/fraud_graph?limit=5"
 ### 1) Security Headers & Cookie Flags
 Use the helper scanner:
 ```powershell
-python scripts/security/fingerprint_scan.py headers http://127.0.0.1:8081/
+python scripts/security/fingerprint_scan.py headers http://127.0.0.1:8080/
 ```
 - Proof: JSON lists `present`/`missing` headers, `Server`, `X-Powered-By`, cookie flags; capture output for the demo deck.
 
@@ -129,9 +129,9 @@ python scripts/security/fingerprint_scan.py ssh supplier.example.com
 
 ### 5) Security Integrations Health & Admin Metrics
 ```powershell
-curl http://127.0.0.1:8081/api/v1/security/health
-curl "http://127.0.0.1:8081/api/v1/admin/security/metrics?hours=24"
-curl http://127.0.0.1:8081/api/v1/admin/security/events
+curl http://127.0.0.1:8080/api/v1/security/health
+curl "http://127.0.0.1:8080/api/v1/admin/security/metrics?hours=24"
+curl http://127.0.0.1:8080/api/v1/admin/security/events
 ```
 - Proof: 200 JSON with integration statuses and summarized counts.
 
@@ -151,7 +151,7 @@ python -m pytest -q tests/chaos tests/load
 
 # Backpressure flag (example)
 $env:BACKPRESSURE_TEST_DELAY_SEC = "0.3"; 
-python -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory
+python -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8080 --factory
 ```
 - Proof: Elevated latencies observed but successful responses; no error cascades; metrics record increased latency and throttling events.
 

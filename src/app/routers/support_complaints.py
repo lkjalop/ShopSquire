@@ -6,7 +6,7 @@ import re
 import json
 import ast
 
-from fastapi import APIRouter, Depends, UploadFile, File, Request, Form
+from fastapi import APIRouter, Depends, UploadFile, File, Request, Form, HTTPException
 from pydantic import BaseModel
 
 from src.app.models.db import get_db
@@ -27,6 +27,7 @@ from src.app.services.risk_quantification import quantify as quantify_risk
 from src.app.services.security_playbooks import select_playbook, build_evidence_snapshot, select_cv_playbook, get_cv_playbook_by_id
 from src.app.services.cv_evidence import build_evidence_bundle, persist_evidence_bundle, get_evidence_bundle
 from src.app.services.erp_edi import ERPEDIConnector
+from src.app.services.intake_gate import strict_binary_ingest_gate
 from src.app.flows.nqe import NextQuestionEngine, NQEInput
 from src.app.flows.catalog import QuestionTemplateCatalog
 from src.app.rag.retrieve import Retriever
@@ -1104,14 +1105,40 @@ async def submit_complaint(
     except Exception:
         sanitize_t0 = None
     sanitized = []
+    blocked_uploads: List[Dict[str, Any]] = []
     for idx, img in enumerate(images or []):
         content = await img.read()
+        gate = strict_binary_ingest_gate(
+            filename=_safe_filename(getattr(img, "filename", None), idx),
+            content_type=getattr(img, "content_type", None),
+            blob=content,
+            size_bytes=len(content),
+        )
+        if bool(gate.get("blocked")):
+            blocked_uploads.append(
+                {
+                    "index": idx,
+                    "filename": _safe_filename(getattr(img, "filename", None), idx),
+                    "reasons": list(gate.get("block_reasons") or []),
+                    "ingest_gate": gate.get("ingest_gate"),
+                }
+            )
+            continue
         s = sanitize_image(content)
         try:
             s["filename"] = _safe_filename(getattr(img, "filename", None), idx)
         except Exception:
             s["filename"] = _safe_filename(None, idx)
         sanitized.append(s)
+    if blocked_uploads:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "ingest_gate_blocked",
+                "message": "One or more uploaded images failed strict ingest checks.",
+                "blocked_uploads": blocked_uploads[:8],
+            },
+        )
     sanitize_ms = None
     try:
         if sanitize_t0 is not None:
@@ -2111,10 +2138,60 @@ async def submit_complaint_guest(
         sanitize_t0 = _t.perf_counter()
     except Exception:
         sanitize_t0 = None
-    rec = sanitize_image(await receipt_image.read())
+    rec_bytes = await receipt_image.read()
+    rec_gate = strict_binary_ingest_gate(
+        filename=_safe_filename(getattr(receipt_image, "filename", None), 0),
+        content_type=getattr(receipt_image, "content_type", None),
+        blob=rec_bytes,
+        size_bytes=len(rec_bytes),
+    )
+    if bool(rec_gate.get("blocked")):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "ingest_gate_blocked",
+                "message": "Receipt image failed strict ingest checks.",
+                "blocked_uploads": [
+                    {
+                        "index": 0,
+                        "filename": _safe_filename(getattr(receipt_image, "filename", None), 0),
+                        "reasons": list(rec_gate.get("block_reasons") or []),
+                        "ingest_gate": rec_gate.get("ingest_gate"),
+                    }
+                ],
+            },
+        )
+    rec = sanitize_image(rec_bytes)
     dmg_sanitized = []
-    for img in damage_images or []:
-        dmg_sanitized.append(sanitize_image(await img.read()))
+    blocked_uploads: List[Dict[str, Any]] = []
+    for idx, img in enumerate(damage_images or []):
+        raw = await img.read()
+        gate = strict_binary_ingest_gate(
+            filename=_safe_filename(getattr(img, "filename", None), idx),
+            content_type=getattr(img, "content_type", None),
+            blob=raw,
+            size_bytes=len(raw),
+        )
+        if bool(gate.get("blocked")):
+            blocked_uploads.append(
+                {
+                    "index": idx,
+                    "filename": _safe_filename(getattr(img, "filename", None), idx),
+                    "reasons": list(gate.get("block_reasons") or []),
+                    "ingest_gate": gate.get("ingest_gate"),
+                }
+            )
+            continue
+        dmg_sanitized.append(sanitize_image(raw))
+    if blocked_uploads:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "ingest_gate_blocked",
+                "message": "One or more damage images failed strict ingest checks.",
+                "blocked_uploads": blocked_uploads[:8],
+            },
+        )
     sanitize_ms = None
     try:
         if sanitize_t0 is not None:
@@ -2735,8 +2812,35 @@ async def add_images(case_id: str, images: list[UploadFile] = File(...), db=Depe
     except Exception:
         sanitize_t0 = None
     sanitized = []
-    for img in images or []:
-        sanitized.append(sanitize_image(await img.read()))
+    blocked_uploads: List[Dict[str, Any]] = []
+    for idx, img in enumerate(images or []):
+        raw = await img.read()
+        gate = strict_binary_ingest_gate(
+            filename=_safe_filename(getattr(img, "filename", None), idx),
+            content_type=getattr(img, "content_type", None),
+            blob=raw,
+            size_bytes=len(raw),
+        )
+        if bool(gate.get("blocked")):
+            blocked_uploads.append(
+                {
+                    "index": idx,
+                    "filename": _safe_filename(getattr(img, "filename", None), idx),
+                    "reasons": list(gate.get("block_reasons") or []),
+                    "ingest_gate": gate.get("ingest_gate"),
+                }
+            )
+            continue
+        sanitized.append(sanitize_image(raw))
+    if blocked_uploads:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "ingest_gate_blocked",
+                "message": "One or more uploaded images failed strict ingest checks.",
+                "blocked_uploads": blocked_uploads[:8],
+            },
+        )
     sanitize_ms = None
     try:
         if sanitize_t0 is not None:

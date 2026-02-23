@@ -212,17 +212,17 @@ The backend calculates complexity based on:
 **Test Script:**
 ```bash
 # Test Fast tier (simple query)
-curl "http://localhost:8000/api/v1/recommend/suggest?uid=test&query=laptops" \
+curl "http://localhost:8080/api/v1/recommend/suggest?uid=test&query=laptops" \
   -H "x-api-key: local-developer-key"
 # Expect: model_tier: "fast"
 
 # Test Standard tier (price range)
-curl "http://localhost:8000/api/v1/recommend/suggest?uid=test&query=gaming+laptops+under+2000" \
+curl "http://localhost:8080/api/v1/recommend/suggest?uid=test&query=gaming+laptops+under+2000" \
   -H "x-api-key: local-developer-key"
 # Expect: model_tier: "standard"
 
 # Test Advanced tier (complex comparison)
-curl "http://localhost:8000/api/v1/recommend/suggest?uid=test&query=compare+ThinkPad+X1+vs+Dell+XPS+15+battery+life+performance+thermals" \
+curl "http://localhost:8080/api/v1/recommend/suggest?uid=test&query=compare+ThinkPad+X1+vs+Dell+XPS+15+battery+life+performance+thermals" \
   -H "x-api-key: local-developer-key"
 # Expect: model_tier: "advanced"
 ```
@@ -502,7 +502,7 @@ When clicked:
 
 ```bash
 # Frontend (.env)
-VITE_API_BASE=http://localhost:8000/api/v1
+VITE_API_BASE=http://localhost:8080/api/v1
 VITE_API_KEY=local-developer-key
 VITE_STRIPE_PUBLISHABLE_KEY=pk_test_xxx
 

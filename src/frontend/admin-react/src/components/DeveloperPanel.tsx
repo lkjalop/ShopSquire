@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchMe, fetchToolInvocations, fetchDbReadiness, ensureTimescale, fetchCVReadiness, fetchTenantConfig, putTenantConfig } from '../api';
+import { fetchMe, fetchToolInvocations, fetchDbReadiness, ensureTimescale, fetchCVReadiness, fetchTenantConfig, putTenantConfig, setApiKeyCookie, clearApiKeyCookie, setClientApiKey } from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
 
@@ -24,7 +24,7 @@ export function DeveloperPanel({ role }: Props) {
   const [cvRegistry, setCvRegistry] = useState<any | null>(null);
   const [cvRegistryText, setCvRegistryText] = useState('');
   const [cvStatus, setCvStatus] = useState('');
-  const currentKey = localStorage.getItem('shopsquire_api_key') || '';
+  const [currentKey, setCurrentKey] = useState('');
   const masked = currentKey ? `${currentKey.slice(0, 6)}...${currentKey.slice(-4)}` : 'Not set';
 
   useEffect(() => {
@@ -46,12 +46,20 @@ export function DeveloperPanel({ role }: Props) {
         setCvRegistry({});
         setCvRegistryText('{}');
       });
+    try {
+      const k = (import.meta.env.VITE_API_KEY as string) || '';
+      if (k) {
+        setClientApiKey(k);
+        setCurrentKey(k);
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
     if (!showPrefs) return;
     fetch(`${(import.meta.env.VITE_API_BASE as string) || window.location.origin}/api/v1/preferences?uid=demo-user`, {
-      headers: { 'Content-Type': 'application/json', 'x-api-key': localStorage.getItem('shopsquire_api_key') || '' },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setPrefs(data?.preferences || {}))
@@ -114,8 +122,11 @@ export function DeveloperPanel({ role }: Props) {
                 className="btn"
                 onClick={async () => {
                   if (!keyInput.trim()) return;
-                  localStorage.setItem('shopsquire_api_key', keyInput.trim());
-                  setStatus('Saved. Reload to apply.');
+                  const next = keyInput.trim();
+                  setClientApiKey(next);
+                  try { await setApiKeyCookie(next); } catch {}
+                  setCurrentKey(next);
+                  setStatus('Saved to secure session cookie.');
                   setKeyInput('');
                 }}
               >
@@ -123,8 +134,10 @@ export function DeveloperPanel({ role }: Props) {
               </button>
               <button
                 className="btn secondary"
-                onClick={() => {
-                  localStorage.removeItem('shopsquire_api_key');
+                onClick={async () => {
+                  setClientApiKey('');
+                  try { await clearApiKeyCookie(); } catch {}
+                  setCurrentKey('');
                   setStatus('Key cleared.');
                 }}
               >

@@ -128,7 +128,7 @@ else:
             env4 = os.environ.copy()
             env4["DISABLE_UI_ROUTES"] = "0"
             # Allow base URL override; default to local dev server
-            env4.setdefault("PLAYWRIGHT_BASE_URL", "http://127.0.0.1:8081")
+            env4.setdefault("PLAYWRIGHT_BASE_URL", "http://127.0.0.1:8080")
             rc4, out4 = run([sys.executable, "-m", "pytest", "-q", "tests/pw"], capture_file=PYTEST_LOG, env=env4)
             print("Phase 4 (playwright) exit code:", rc4)
             final_rc = 0 if (final_rc == 0 and rc4 == 0) else 1

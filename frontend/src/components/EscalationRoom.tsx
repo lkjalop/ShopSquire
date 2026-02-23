@@ -10,39 +10,71 @@ type RoomEvent = {
   time?: string;
 };
 
-export default function EscalationRoom({ incidentId, buyerToken, staffToken, onClose }: { incidentId: string; buyerToken?: string | null; staffToken?: string | null; onClose: () => void }) {
+function parseError(status: number, body: any, fallback: string) {
+  if (body && typeof body === 'object') {
+    const detail = (body as any).detail || (body as any).error;
+    if (detail) return String(detail);
+  }
+  return `${fallback} (${status})`;
+}
+
+export default function EscalationRoom({
+  incidentId,
+  buyerToken,
+  staffToken,
+  onClose,
+}: {
+  incidentId: string;
+  buyerToken?: string | null;
+  staffToken?: string | null;
+  onClose: () => void;
+}) {
+  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
+  const OWNER_API_KEY = ((import.meta as any).env?.VITE_OWNER_API_KEY as string | undefined) || API_KEY;
   const [events, setEvents] = useState<RoomEvent[]>([]);
   const [mode, setMode] = useState<'ws' | 'sse' | 'poll'>('poll');
   const [input, setInput] = useState('');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let mounted = true;
     let ws: WebSocket | null = null;
     let es: EventSource | null = null;
+    setConnectionError(null);
+    setSendError(null);
 
-    const fetchSnapshot = async () => {
-      try {
-        const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/stream`), {
-          headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-owner-key' },
-        });
-        const j = await safeJson(r);
-        if (mounted && j && Array.isArray(j.events)) setEvents(j.events);
-      } catch {}
+    const appendIncoming = (raw: any) => {
+      const incoming = Array.isArray(raw) ? raw : (Array.isArray(raw?.events) ? raw.events : [raw]);
+      if (!mounted || !Array.isArray(incoming)) return;
+      setEvents((prev) => [...prev, ...incoming]);
     };
 
     const connectWS = () => {
       try {
         ws = new WebSocket(wsUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/ws`));
-        ws.onopen = () => { if (mounted) setMode('ws'); };
+        ws.onopen = () => {
+          if (!mounted) return;
+          setMode('ws');
+          setConnectionError(null);
+        };
         ws.onmessage = (ev) => {
           try {
-            const data = JSON.parse(ev.data);
-            const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-            if (mounted && Array.isArray(incoming)) setEvents((prev) => [...prev, ...incoming]);
-          } catch {}
+            appendIncoming(JSON.parse(ev.data));
+          } catch {
+            // ignore malformed message
+          }
         };
-        ws.onerror = () => { try { ws && ws.close(); } catch {}; ws = null; };
+        ws.onerror = () => {
+          if (mounted) setConnectionError('WebSocket connection failed. Falling back to SSE.');
+          try {
+            ws && ws.close();
+          } catch {
+            // ignore close errors
+          }
+          ws = null;
+        };
       } catch {
         ws = null;
       }
@@ -50,60 +82,73 @@ export default function EscalationRoom({ incidentId, buyerToken, staffToken, onC
 
     const connectSSE = async () => {
       try {
-        // Prefer public token-based SSE if buyer/staff token is available
         const token = buyerToken || staffToken || null;
         let useToken = token;
-        // If no token provided but admin key exists, issue a staff token
         if (!useToken) {
-          const key = localStorage.getItem('x-api-key') || 'local-owner-key';
+          const key = OWNER_API_KEY || '';
           if (key) {
-            try {
-              const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/token`), {
-                method: 'POST',
-                headers: { 'x-api-key': key },
-              });
-              const j = await safeJson(r);
-              if (j && j.staff_token) useToken = String(j.staff_token);
-            } catch {}
+            const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/token`), {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'x-api-key': key },
+            });
+            const j = await safeJson(r);
+            if (!r.ok) {
+              throw new Error(parseError(r.status, j, 'token_issue_failed'));
+            }
+            if (j && j.staff_token) useToken = String(j.staff_token);
           }
         }
+
         if (useToken) {
           const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream`), window.location.href);
           u.searchParams.set('token', useToken);
           es = new EventSource(u.toString());
         } else {
-          es = new EventSource(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/stream`));
+          setConnectionError('No incident token available.');
+          return;
         }
-        es.onopen = () => { if (mounted) setMode('sse'); };
+
+        es.onopen = () => {
+          if (!mounted) return;
+          setMode('sse');
+          setConnectionError(null);
+        };
         es.onmessage = (ev: MessageEvent) => {
           try {
-            const data = JSON.parse((ev as any).data);
-            const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-            if (mounted && Array.isArray(incoming)) setEvents((prev) => [...prev, ...incoming]);
-          } catch {}
+            appendIncoming(JSON.parse((ev as any).data));
+          } catch {
+            // ignore malformed message
+          }
         };
-        (es as any).onerror = () => { try { es && es.close(); } catch {}; es = null; };
-      } catch {
-        es = null;
+        (es as any).onerror = () => {
+          if (mounted) setConnectionError('Incident stream disconnected. Reconnecting...');
+        };
+      } catch (e: any) {
+        if (mounted) {
+          setMode('poll');
+          setConnectionError(`Room connection failed: ${e?.message || 'unknown_error'}.`);
+        }
       }
     };
 
-    // If we have tokens, skip admin WS and use public SSE to mirror buyer experience.
     if (!buyerToken && !staffToken) connectWS();
     connectSSE();
-    if (!ws && !es) {
-      setMode('poll');
-      fetchSnapshot();
-      const iv = setInterval(fetchSnapshot, 5000);
-      return () => { clearInterval(iv); };
-    }
 
     return () => {
       mounted = false;
-      try { ws && ws.close(); } catch {}
-      try { es && es.close(); } catch {}
+      try {
+        ws && ws.close();
+      } catch {
+        // ignore close errors
+      }
+      try {
+        es && es.close();
+      } catch {
+        // ignore close errors
+      }
     };
-  }, [incidentId]);
+  }, [OWNER_API_KEY, incidentId, buyerToken, staffToken]);
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' });
@@ -113,6 +158,7 @@ export default function EscalationRoom({ incidentId, buyerToken, staffToken, onC
     const msg = input.trim();
     if (!msg) return;
     setInput('');
+    setSendError(null);
     try {
       const token = buyerToken || staffToken || null;
       if (token) {
@@ -120,29 +166,35 @@ export default function EscalationRoom({ incidentId, buyerToken, staffToken, onC
         u.searchParams.set('token', token);
         const r = await fetch(u.toString(), {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: msg }),
         });
-        await safeJson(r);
+        const j = await safeJson(r);
+        if (!r.ok) throw new Error(parseError(r.status, j, 'send_failed'));
       } else {
         const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/message`), {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': localStorage.getItem('x-api-key') || 'local-owner-key',
+            ...(OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : {}),
           },
           body: JSON.stringify({ message: msg }),
         });
-        await safeJson(r);
+        const j = await safeJson(r);
+        if (!r.ok) throw new Error(parseError(r.status, j, 'send_failed'));
       }
-    } catch {}
+    } catch (e: any) {
+      setSendError(`Send failed: ${e?.message || 'unknown_error'}.`);
+    }
   };
 
   return (
     <div className={styles.overlay}>
       <div className={styles.modal}>
         <div className={styles.header}>
-          <div className={styles.title}>Escalation Room · {incidentId}</div>
+          <div className={styles.title}>Escalation Room - {incidentId}</div>
           <div>
             <a
               href={`/merchant/app/index.html?tab=escalations&incident_id=${encodeURIComponent(incidentId)}`}
@@ -166,8 +218,16 @@ export default function EscalationRoom({ incidentId, buyerToken, staffToken, onC
             </div>
           ))}
         </div>
+        {connectionError && <div style={{ padding: '0 12px 10px', color: '#9f2d1b', fontSize: 12 }}>{connectionError}</div>}
+        {sendError && <div style={{ padding: '0 12px 10px', color: '#9f2d1b', fontSize: 12 }}>{sendError}</div>}
         <div className={styles.footer}>
-          <input className={styles.input} placeholder="Type a message…" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendMessage()} />
+          <input
+            className={styles.input}
+            placeholder="Type a message..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+          />
           <button className={styles.sendBtn} onClick={sendMessage}>Send</button>
         </div>
       </div>

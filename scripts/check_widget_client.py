@@ -1,6 +1,6 @@
 from playwright.sync_api import sync_playwright
 
-URL = 'http://127.0.0.1:8081/ui/storefront'
+URL = 'http://127.0.0.1:8080/ui/storefront'
 
 with sync_playwright() as p:
     browser = p.chromium.launch()

@@ -496,7 +496,7 @@ docker run -p 3000:3000 \
 
 ```javascript
 // Browser console
-const ws = new WebSocket('ws://localhost:8000/api/v1/decisions/test-trace-123/events/ws');
+const ws = new WebSocket('ws://localhost:8080/api/v1/decisions/test-trace-123/events/ws');
 ws.onmessage = (e) => console.log('Event:', JSON.parse(e.data));
 ```
 

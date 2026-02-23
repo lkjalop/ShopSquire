@@ -9,8 +9,8 @@ Proof artifacts:
 - Writes runs/demo_proof.json with incident + ticket ids and timestamps
 
 Usage:
-  python scripts/demo_mode.py --api http://127.0.0.1:8081 --open-ui
-  python scripts/demo_mode.py --api http://127.0.0.1:8081 --autostart --open-ui
+  python scripts/demo_mode.py --api http://127.0.0.1:8080 --open-ui
+  python scripts/demo_mode.py --api http://127.0.0.1:8080 --autostart --open-ui
 
 Notes:
 - Requires the API running with DISABLE_UI_ROUTES=0
@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
-DEFAULT_API = os.environ.get("DEMO_API", "http://127.0.0.1:8081")
+DEFAULT_API = os.environ.get("DEMO_API", "http://127.0.0.1:8080")
 HEADERS = {"x-api-key": os.environ.get("DEMO_API_KEY", "local-developer-key")}
 
 
@@ -42,7 +42,7 @@ def wait_ready(api: str, timeout: float = 20.0) -> bool:
     return False
 
 
-def start_server(api_port: int = 8081) -> None:
+def start_server(api_port: int = 8080) -> None:
     # Best-effort: start uvicorn in a detached process
     # Environment mirrors typical local demo settings
     env = os.environ.copy()

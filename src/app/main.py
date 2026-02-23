@@ -24,6 +24,7 @@ from src.app.routers.decisions import router as decisions_router
 from src.app.routers.voice import router as voice_router
 from src.app.routers.vision import router as vision_router
 from src.app.routers.cv import router as cv_router
+from src.app.routers.recruiting import router as recruiting_router
 from src.app.routers.scoring import router as scoring_router
 from src.app.routers.approvals import router as approvals_router
 from src.app.routers.recommend import router as recommend_router
@@ -67,6 +68,7 @@ from src.app.security.admin_mfa import AdminMfaMiddleware
 from src.app.security.pci_boundary import PciBoundaryMiddleware
 from src.app.security.compliance import ComplianceMiddleware
 from src.app.security.headers import SecurityHeadersMiddleware
+from src.app.security.rate_limit import RateLimitMiddleware
 
 
 def create_app() -> FastAPI:
@@ -320,6 +322,14 @@ def create_app() -> FastAPI:
     app.state.chaos_error_prob = float(os.getenv("CHAOS_ERROR_PROB", "0") or 0)
     app.state.chaos_error_prefixes = [p.strip() for p in os.getenv("CHAOS_ERROR_PREFIXES", "").split(",") if p.strip()]
     app.state.busy_until = 0.0
+
+    # Install lightweight rate-limit middleware (per-key + per-IP)
+    try:
+        per_key = int(os.getenv("RATE_LIMIT_PER_MINUTE_KEY", "120") or 120)
+        per_ip = int(os.getenv("RATE_LIMIT_PER_MINUTE_IP", "60") or 60)
+        app.add_middleware(RateLimitMiddleware, per_min_key=per_key, per_min_ip=per_ip)
+    except Exception:
+        pass
 
     @app.middleware("http")
     async def backpressure_middleware(request: Request, call_next):
@@ -848,6 +858,17 @@ def create_app() -> FastAPI:
         # Basic DB connectivity check
         ok = True
         reasons = []
+        config_report = {"ok": True, "missing": [], "warnings": [], "contract": {}}
+        try:
+            from src.app.config import validate_runtime_contract
+
+            config_report = validate_runtime_contract()
+            if not bool(config_report.get("ok")):
+                ok = False
+                reasons.append("config_contract_invalid")
+        except Exception:
+            ok = False
+            reasons.append("config_contract_check_failed")
         try:
             eng = getattr(app.state, "engine", None)
             if eng is None:
@@ -865,7 +886,14 @@ def create_app() -> FastAPI:
             reasons.append("ready_check_failed")
         status = "ok" if ok else "unavailable"
         code = 200 if ok else 503
-        return ORJSONResponse({"status": status, "reasons": reasons}, status_code=code)
+        return ORJSONResponse(
+            {
+                "status": status,
+                "reasons": reasons,
+                "config": config_report,
+            },
+            status_code=code,
+        )
 
     @app.get("/status/summary")
     def status_summary():
@@ -1053,6 +1081,11 @@ def create_app() -> FastAPI:
 
     app.include_router(admin.router)
     try:
+        from src.app.routers.admin_api_keys import router as admin_api_keys_router
+        app.include_router(admin_api_keys_router)
+    except Exception:
+        pass
+    try:
         from src.app.routers.connectors_auth import router as connectors_auth_router
         app.include_router(connectors_auth_router)
     except Exception:
@@ -1075,10 +1108,20 @@ def create_app() -> FastAPI:
         app.include_router(cv_router)
     except Exception:
         pass
+    try:
+        app.include_router(recruiting_router)
+    except Exception:
+        pass
     # CV readiness/admin endpoints
     try:
         from src.app.routers.cv_readiness import router as cv_readiness_router
         app.include_router(cv_readiness_router)
+    except Exception:
+        pass
+    # OOB verification endpoints (bank-change out-of-band confirmation)
+    try:
+        from src.app.routers.oob_verification import router as oob_router
+        app.include_router(oob_router)
     except Exception:
         pass
     # Optionally disable UI routes during tests or minimal deployments
@@ -1165,6 +1208,14 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include admin_supply_chain router: %s", e)
+    # Supply-chain attack simulation API (safe demo + swarm)
+    try:
+        from src.app.routers.admin_supply_chain_sim import router as admin_supply_chain_sim_router
+        app.include_router(admin_supply_chain_sim_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include admin_supply_chain_sim router: %s", e)
     # Admin fairness audit endpoint (demographic parity)
     try:
         from src.app.routers.admin_fairness import router as admin_fairness_router

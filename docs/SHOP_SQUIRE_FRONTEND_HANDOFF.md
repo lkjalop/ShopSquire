@@ -8,7 +8,7 @@ Styles:
 
 API host:
 - `VITE_API_BASE` env var (preferred)
-- Default: `http://localhost:8000/api/v1`
+- Default: `http://localhost:8080/api/v1`
 - If API runs on `http://localhost:8080`, set:
   - `VITE_API_BASE=http://localhost:8080/api/v1`
 

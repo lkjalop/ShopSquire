@@ -8,7 +8,7 @@ Purpose: single document for GitHub Copilot to implement fixes and wiring. This 
 
 - Frontend entry point: `src/frontend/storefront-react/src/App.jsx`
 - Frontend styles: `src/frontend/storefront-react/src/styles.css`
-- API base env: `VITE_API_BASE` (default `http://localhost:8000/api/v1`)
+- API base env: `VITE_API_BASE` (default `http://localhost:8080/api/v1`)
 - Recommend endpoint: `GET /api/v1/recommend/suggest?uid=&query=`
 - Decision trace endpoint: `GET /api/v1/decisions/{trace_id}`
 - CV complaints: `POST /api/v1/support/complaints/submit` and `GET /api/v1/support/complaints/{case_id}/status`

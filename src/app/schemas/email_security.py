@@ -68,5 +68,8 @@ class EmailEvaluateResponse(BaseModel):
     detonation: Optional[Dict[str, Any]] = None
     siem_handoff: Optional[Dict[str, Any]] = None
     fuzzy_signals: Optional[Dict[str, Any]] = None
+    trust_case: Optional[Dict[str, Any]] = None
+    access_policy: Optional[Dict[str, Any]] = None
+    policy_actions: Optional[List[str]] = None
     decision_id: Optional[str] = None
     decision_trace_id: Optional[str] = None

@@ -85,7 +85,8 @@ function getSummary(evt: TraceEvent): string {
   if (evt.payload?.tool) return `Tool: ${evt.payload.tool}`;
   if (evt.payload?.query) return `Query: ${evt.payload.query.slice(0, 50)}...`;
   if (evt.source_id) return evt.source_id;
-  return evt.event_type.replace(/_/g, ' ');
+  const original = evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type;
+  return String(original || 'event').replace(/_/g, ' ');
 }
 
 function humanizeKey(key: string): string {
@@ -119,6 +120,8 @@ function renderValue(value: any) {
 }
 
 export default function DecisionTrace({ traceId, onClose }: { traceId: string | null; onClose: () => void }) {
+  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
+  const authHeaders = API_KEY ? { 'x-api-key': API_KEY } : undefined;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
@@ -134,6 +137,8 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   const [posthocNote, setPosthocNote] = useState<string>('');
   const [posthocStatus, setPosthocStatus] = useState<string | null>(null);
   const apiBase = getApiBase();
+  const displayEventType = (evt: TraceEvent): string =>
+    String(evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type || 'event');
 
   // Draggable state
   const [position, setPosition] = useState({ x: window.innerWidth / 2 - 350, y: 80 });
@@ -209,11 +214,14 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   </div>
   <script>
     const apiBase = ${JSON.stringify(apiBase)};
+    const apiKey = ${JSON.stringify(API_KEY)};
     async function loadTrace() {
       try {
         const url = (apiBase ? apiBase : '') + '/api/v1/decisions/${traceId}';
+        const headers = apiKey ? { 'x-api-key': apiKey } : undefined;
         const r = await fetch(url, {
-          headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' }
+          credentials: 'include',
+          headers,
         });
         const data = await r.json();
         document.getElementById('loading').style.display = 'none';
@@ -255,7 +263,8 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
       try {
         const r = await fetch(apiUrl(`/api/v1/decisions/${traceId}`), {
           signal: ctl.signal,
-          headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' }
+          credentials: 'include',
+          headers: authHeaders,
         });
         const d = await safeJson(r);
         if (mounted) setTrace(d);
@@ -270,10 +279,12 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
       try {
         const [reExplain, reReplay] = await Promise.all([
           fetch(apiUrl(`/api/v1/decisions/${traceId}/explain`), {
-            headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' }
+            credentials: 'include',
+            headers: authHeaders,
           }).then(safeJson),
           fetch(apiUrl(`/api/v1/decisions/${traceId}/replay`), {
-            headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' }
+            credentials: 'include',
+            headers: authHeaders,
           }).then(safeJson),
         ]);
         if (mounted) {
@@ -291,7 +302,8 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     const fetchTimeline = async () => {
       try {
         const r = await fetch(apiUrl(`/api/v1/trace/${traceId}/timeline`), {
-          headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' }
+          credentials: 'include',
+          headers: authHeaders,
         });
         if (r.ok) {
           const j = await safeJson(r);
@@ -417,24 +429,64 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
 
   const ms = trace?.model_selection || {};
 
+  const normalizeSecurityPayload = (value: any) => {
+    if (!value || typeof value !== 'object') return null;
+    const raw: any = value;
+    const candidate = [
+      raw.security,
+      raw.security_analysis,
+      raw.details?.security,
+      raw.details?.security_analysis,
+      raw.details,
+      raw,
+    ].find((v) => v && typeof v === 'object');
+    if (!candidate || typeof candidate !== 'object') return null;
+    const merged: any = { ...(candidate as any) };
+    if (raw.severity != null && merged.severity == null) merged.severity = raw.severity;
+    if (raw.risk_adj != null && merged.risk_adj == null) merged.risk_adj = raw.risk_adj;
+    if (raw.risk_raw != null && merged.risk_raw == null) merged.risk_raw = raw.risk_raw;
+    if (raw.dread_avg != null && merged.dread_avg == null) merged.dread_avg = raw.dread_avg;
+    if (raw.cvss_score != null && merged.cvss_score == null) merged.cvss_score = raw.cvss_score;
+    if (Array.isArray(raw.evidence_tags) && !Array.isArray(merged.evidence_tags)) merged.evidence_tags = raw.evidence_tags;
+    return Object.keys(merged).length > 0 ? merged : null;
+  };
+
   const extractSecurity = () => {
-    if (trace && (trace as any).security) return (trace as any).security;
-    const secEvent = events.find(e => e.event_type === 'security_scan');
-    // Many producers emit { details: <analysis>, severity: <band> }. Merge them so the UI can
-    // reliably render severity/risk fields without requiring all keys to live inside `details`.
-    if (secEvent?.payload?.details && typeof secEvent.payload.details === 'object') {
-      const det: any = secEvent.payload.details;
-      const merged: any = { ...det };
-      if (secEvent.payload.severity != null && merged.severity == null) merged.severity = secEvent.payload.severity;
-      if (secEvent.payload.risk_adj != null && merged.risk_adj == null) merged.risk_adj = secEvent.payload.risk_adj;
-      if (secEvent.payload.risk_raw != null && merged.risk_raw == null) merged.risk_raw = secEvent.payload.risk_raw;
-      if (secEvent.payload.dread_avg != null && merged.dread_avg == null) merged.dread_avg = secEvent.payload.dread_avg;
-      if (secEvent.payload.cvss_score != null && merged.cvss_score == null) merged.cvss_score = secEvent.payload.cvss_score;
-      return merged;
+    const tr: any = trace || {};
+    const traceCandidates = [
+      tr.security,
+      tr.security_analysis,
+      tr.risk_quantification?.security,
+      tr.evidence?.security,
+      tr.evidence?.security_analysis,
+      tr.evidence?.cv_analysis?.security,
+      tr.evidence?.cv_analysis?.security_analysis,
+      tr.evidence?.cv_analysis?.details?.security,
+      tr.evidence?.cv_analysis?.details?.security_analysis,
+      tr.evidence?.analysis?.security,
+    ];
+    for (const c of traceCandidates) {
+      const normalized = normalizeSecurityPayload(c);
+      if (normalized) return normalized;
     }
-    if (secEvent?.payload?.security) return secEvent.payload.security;
-    if (secEvent?.payload) return secEvent.payload;
-    return null;
+
+    const allEvents = events.length > 0 ? events : displayEvents;
+    const secEvent = [...allEvents].reverse().find((e) => String(e.event_type || '').toLowerCase() === 'security_scan');
+    const secNorm = normalizeSecurityPayload(secEvent?.payload);
+    if (secNorm) return secNorm;
+
+    const securityLikeEvent = [...allEvents].reverse().find((e) => {
+      const et = String(e.event_type || '').toLowerCase();
+      if (et.includes('security') || et.includes('risk')) return true;
+      const p: any = e.payload || {};
+      return Boolean(
+        p.security
+        || p.security_analysis
+        || p.details?.security
+        || p.details?.security_analysis
+      );
+    });
+    return normalizeSecurityPayload(securityLikeEvent?.payload);
   };
 
   const security = extractSecurity();
@@ -594,7 +646,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                             <td><ChevronIcon expanded={isExpanded} /></td>
                             <td className={styles.time}>{formatTime(evt.timestamp || evt.created_at)}</td>
                             <td className={styles.summary}>{getSummary(evt)}{evt.latency_ms != null && <span className={styles.latency}>{evt.latency_ms}ms</span>}</td>
-                            <td><VerdictBadge type={evt.event_type} /></td>
+                            <td><VerdictBadge type={displayEventType(evt)} /></td>
                           </tr>
                           {isExpanded && (
                             <tr key={`${rowId}-detail`} className={styles.detailRow}>
@@ -603,7 +655,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                                   <div className={styles.detailHeader}>Event Details</div>
                                   <div className={styles.detailGrid}>
                                     <div className={styles.detailLabel}>Type</div>
-                                    <div className={styles.detailValue}>{humanizeKey(evt.event_type)}</div>
+                                    <div className={styles.detailValue}>{humanizeKey(displayEventType(evt))}</div>
                                     <div className={styles.detailLabel}>Source</div>
                                     <div className={styles.detailValue}>{evt.source_id || '—'}</div>
                                     <div className={styles.detailLabel}>Timestamp</div>

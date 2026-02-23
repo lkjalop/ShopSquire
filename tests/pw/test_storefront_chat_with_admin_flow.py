@@ -1,0 +1,133 @@
+import os
+import shutil
+import socket
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+import requests
+
+
+def _is_port_open(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex((host, port)) == 0
+
+
+def _find_free_port(start: int = 5173) -> int:
+    port = start
+    while _is_port_open("127.0.0.1", port):
+        port += 1
+    return port
+
+
+def _wait_http_ready(url: str, timeout_s: int = 60) -> None:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            r = requests.get(url, timeout=1)
+            if r.status_code == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+    raise RuntimeError(f"Frontend did not become ready: {url}")
+
+
+@pytest.fixture(scope="module")
+def frontend_server(test_server):
+    frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+    if not frontend_dir.exists():
+        raise RuntimeError(f"frontend directory not found: {frontend_dir}")
+
+    requested_port = int(os.getenv("PLAYWRIGHT_FRONTEND_PORT", "5173"))
+    port = _find_free_port(requested_port)
+    base_url = f"http://127.0.0.1:{port}"
+
+    env = os.environ.copy()
+    env["VITE_API_BASE_URL"] = test_server["base_url"]
+    env["VITE_ALLOW_OFFLINE_FALLBACK"] = "0"
+    npm_cmd = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm_cmd:
+        pytest.skip("npm executable not found in PATH for Playwright test")
+
+    proc = subprocess.Popen(
+        [npm_cmd, "run", "dev", "--", "--host", "127.0.0.1", "--port", str(port)],
+        cwd=str(frontend_dir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+    try:
+        _wait_http_ready(base_url, timeout_s=75)
+        yield base_url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def test_chat_with_admin_click_path_opens_escalation_room(page, frontend_server):
+    captured = {"payload": None}
+
+    def handle_orchestrate(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=(
+                '{"decision_trace_id":"trace-cv-1","trace_id":"trace-cv-1",'
+                '"proposal":{"results":[]}}'
+            ),
+        )
+
+    def handle_cv_analyze(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=(
+                '{"case_id":"case-cv-1","trace_id":"trace-cv-1","cv_analysis":{"confidence":0.22},'
+                '"suggested_routing":"security_review","ui_actions":{"chat_with_admin":true},'
+                '"image_consistency":{"status":"mismatch","images":[{"index":0,"status":"mismatch","reasons":["qr_external_url_detected"]}]}}'
+            ),
+        )
+
+    def handle_escalate(route, request):
+        try:
+            captured["payload"] = request.post_data_json
+        except Exception:
+            captured["payload"] = None
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"ok":true,"incident_id":"inc-chat-001","buyer_token":"buyer-token-1","staff_token":"staff-token-1"}',
+        )
+
+    def handle_stream(route):
+        route.fulfill(status=200, headers={"content-type": "text/event-stream"}, body="data: []\n\n")
+
+    page.route("**/api/v1/orchestrate", handle_orchestrate)
+    page.route("**/api/v1/cv/analyze", handle_cv_analyze)
+    page.route("**/api/v1/incidents/escalate", handle_escalate)
+    page.route("**/api/v1/incidents/inc-chat-001/room/stream**", handle_stream)
+    page.route("**/api/v1/incidents/inc-chat-001/room/message**", lambda route: route.fulfill(status=200, content_type="application/json", body='{"sent":true,"role":"buyer"}'))
+
+    page.goto(frontend_server, wait_until="domcontentloaded")
+    page.get_by_role("button", name="Ask Me!").click()
+    page.get_by_placeholder("Type your message...").fill("return request damaged laptop")
+    page.get_by_placeholder("Type your message...").press("Enter")
+
+    page.get_by_text("CV Triage", exact=True).wait_for(timeout=10000)
+    page.get_by_role("button", name="Analyze complaint without upload").click()
+    page.get_by_role("button", name="Escalate and chat with admin").wait_for(timeout=10000)
+    page.get_by_role("button", name="Escalate and chat with admin").click()
+
+    page.get_by_text("Escalation Room - inc-chat-001", exact=False).wait_for(timeout=10000)
+
+    assert captured["payload"] is not None
+    assert captured["payload"].get("trace_id") == "trace-cv-1"
+    assert isinstance(captured["payload"].get("context"), dict)
+    assert isinstance(captured["payload"]["context"].get("evidence_tags"), list)

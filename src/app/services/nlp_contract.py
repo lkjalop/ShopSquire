@@ -9,6 +9,7 @@ import json
 import httpx
 from src.app.services.dependency_resilience import call_with_resilience
 from src.app.feature_flags import get_flags
+from src.app.services.intake_gate import enforce_qr_url_allowlist, sanitize_ocr_text
 
 
 @dataclass
@@ -110,14 +111,23 @@ def is_contract_like_text(text: str) -> bool:
 
 
 def run_contract_assist(text: str, enable_llm: bool = False) -> Dict[str, Any]:
-    base = analyze_contract(text)
+    safe_text, sanitize_meta = sanitize_ocr_text(str(text or ""), max_len=40_000)
+    url_hits = [m.group(0) for m in re.finditer(r"https?://[^\s<>()\"']+", safe_text)]
+    qr_policy = enforce_qr_url_allowlist(url_hits)
+    base = analyze_contract(safe_text)
     out: Dict[str, Any] = {
         "summary": base.summary,
         "score": base.score,
         "risks": base.risks,
         "clauses": base.clauses,
         "mode": "deterministic",
+        "input_sanitization": sanitize_meta,
+        "qr_url_policy": qr_policy,
     }
+    if int(qr_policy.get("blocked_count") or 0) > 0:
+        out["mode"] = "deterministic_blocked"
+        out["llm_blocked_reason"] = "qr_url_not_allowlisted"
+        return out
     if not enable_llm:
         return out
     ollama_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -125,7 +135,7 @@ def run_contract_assist(text: str, enable_llm: bool = False) -> Dict[str, Any]:
     prompt = (
         "Summarize contract risk in 3 short bullets. "
         "Do not add facts not present in the text.\n"
-        f"Text:\n{text}\n"
+        f"Text:\n{safe_text}\n"
     )
     payload = {
         "model": model,

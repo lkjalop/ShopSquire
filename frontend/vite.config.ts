@@ -5,7 +5,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   // Default to docker-compose API port (8080).
   // Use `localhost` (not `127.0.0.1`) to avoid Windows loopback quirks with Docker/WSL port forwarding.
-  // When running uvicorn locally, set `VITE_API_BASE_URL=http://localhost:8081`.
+  // When running uvicorn locally with defaults, use `VITE_API_BASE_URL=http://localhost:8080`.
   const apiTarget = (env.VITE_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
 
   return {

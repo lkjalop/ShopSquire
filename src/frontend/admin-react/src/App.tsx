@@ -19,12 +19,14 @@ import { Playbooks } from './components/Playbooks';
 import { MerchantBIPro } from './components/MerchantBIPro';
 import { EscalationsConsole } from './components/EscalationsConsole';
 import { EmailXdr } from './components/EmailXdr';
-import { fetchMe } from './api';
+import { SupplyChainSim } from './components/SupplyChainSim';
+import { fetchMe, setApiKeyCookie, setClientApiKey } from './api';
 
 type Role = 'merchant' | 'owner' | 'developer';
 
 export default function App() {
   const [active, setActive] = useState('overview');
+  const [incidentIdParam, setIncidentIdParam] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('merchant');
   const [allowedRoles, setAllowedRoles] = useState<Role[]>(['merchant']);
   const [authReady, setAuthReady] = useState(false);
@@ -35,8 +37,14 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const tab = new URLSearchParams(window.location.search).get('tab');
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get('tab');
+      const incidentId = params.get('incident_id');
       if (tab) setActive(tab);
+      if (incidentId) {
+        setIncidentIdParam(incidentId);
+        if (!tab) setActive('escalations');
+      }
     } catch {}
   }, []);
 
@@ -102,6 +110,12 @@ export default function App() {
               onClick={() => setActive('owner')}
             >
               Owner Console <span>{canOwner ? 'Restricted' : 'Locked'}</span>
+            </button>
+            <button
+              className={`${active === 'sc-sim' ? 'active' : ''} ${!(canOwner || canDeveloper) ? 'nav-locked' : ''}`}
+              onClick={() => setActive('sc-sim')}
+            >
+              Supply Chain Sim <span>{(canOwner || canDeveloper) ? 'Admin' : 'Locked'}</span>
             </button>
           </div>
         </>
@@ -173,6 +187,7 @@ export default function App() {
             {active === 'owner' && 'Owner Console'}
             {active === 'developer' && 'Developer Hub'}
             {active === 'grc' && 'GRC Consultant Console'}
+            {active === 'sc-sim' && 'Supply Chain Attack Simulation'}
           </h1>
           <p className="page-sub">
             {active === 'merchant-bi' && 'Custom charts for revenue and security without Grafana.'}
@@ -194,6 +209,7 @@ export default function App() {
             {active === 'owner' && 'Billing, governance, and organization-wide controls.'}
             {active === 'developer' && 'API keys, webhooks, and integration status.'}
             {active === 'grc' && 'Risk register, fingerprint threat monitoring, control mapping, and multi-format reporting.'}
+            {active === 'sc-sim' && 'Safe supply-chain attack simulation with parallel agent swarms, real-time SSE streaming, and bitemporal decision trace.'}
           </p>
           {!canOwner && !canDeveloper && (
             <div className="callout" style={{ marginTop: 8 }}>
@@ -210,7 +226,7 @@ export default function App() {
         {active === 'cv-incidents' && <CVIncidents role={role} />}
         {active === 'inventory-sync' && <InventorySync role={role} />}
         {active === 'email-incidents' && <EmailIncidents />}
-        {active === 'escalations' && <EscalationsConsole role={role} />}
+        {active === 'escalations' && <EscalationsConsole role={role} initialIncidentId={incidentIdParam} />}
         {active === 'playbooks' && <Playbooks />}
         {active === 'rules' && <RulesAdmin role={role} />}
         {active === 'approvals' && <Approvals role={role} />}
@@ -222,6 +238,7 @@ export default function App() {
         {active === 'grc' && <GRC role={role} />}
         {active === 'owner' && <OwnerPanel role={canOwner ? role : 'merchant'} />}
         {active === 'developer' && <DeveloperPanel role={canDeveloper ? role : 'merchant'} />}
+        {active === 'sc-sim' && <SupplyChainSim role={role} />}
 
         {!authReady && (
           <div className="callout" style={{ marginTop: 12 }}>
@@ -251,9 +268,13 @@ export default function App() {
                 <button className="btn secondary" onClick={() => setShowKeyPrompt(false)}>Cancel</button>
                 <button
                   className="btn"
-                  onClick={() => {
+                  onClick={async () => {
                     if (keyInput.trim()) {
-                      localStorage.setItem('shopsquire_api_key', keyInput.trim());
+                      const next = keyInput.trim();
+                      setClientApiKey(next);
+                      try {
+                        await setApiKeyCookie(next);
+                      } catch {}
                       setAuthReady(false);
                       setAuthError('');
                       setShowKeyPrompt(false);

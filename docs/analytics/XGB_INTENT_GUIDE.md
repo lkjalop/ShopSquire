@@ -22,7 +22,7 @@ This guide covers dataset format, training, and inference for the intent classif
 - Endpoint: `POST /api/v1/intent/infer`
 - Body: `{ "text": "Find laptops under 1000" }`
 - Curl (PowerShell quoting):
-  `curl -X POST http://127.0.0.1:8081/api/v1/intent/infer -H "Content-Type: application/json" -d '{"text":"Find laptops under 1000"}'`
+  `curl -X POST http://127.0.0.1:8080/api/v1/intent/infer -H "Content-Type: application/json" -d '{"text":"Find laptops under 1000"}'`
 
 ## Orchestrator Integration
 - `xgb_intent` and `xgb_proba` are attached within `intent_result` by the orchestrator when a trained model is available.

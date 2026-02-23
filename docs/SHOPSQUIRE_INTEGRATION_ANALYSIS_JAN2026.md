@@ -336,15 +336,15 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',  // FastAPI backend
+        target: 'http://localhost:8080',  // FastAPI backend
         changeOrigin: true,
       },
       '/ui': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
       '/static': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },
@@ -428,11 +428,11 @@ sqlite3 data/shopsquire.db ".schema decision_trace_events"
 sqlite3 data/shopsquire.db "SELECT COUNT(*) FROM decision_trace_events"
 
 # 3. Test recommendation API directly
-curl -X GET "http://localhost:8000/api/v1/recommend/suggest?uid=test&query=buy%2015%20laptops%20for%20ai%20engineering%20between%201500%20and%202000" \
+curl -X GET "http://localhost:8080/api/v1/recommend/suggest?uid=test&query=buy%2015%20laptops%20for%20ai%20engineering%20between%201500%20and%202000" \
   -H "x-api-key: local-merchant-key"
 
 # 4. Check feature flags loaded
-curl http://localhost:8000/api/v1/admin/flags -H "x-api-key: local-admin-key"
+curl http://localhost:8080/api/v1/admin/flags -H "x-api-key: local-admin-key"
 
 # 5. Check if Ollama is running (for LLM features)
 curl http://localhost:11434/api/tags

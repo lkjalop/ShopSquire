@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDecisionTrace } from './hooks/useDecisionTrace';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api/v1';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api/v1';
 const API_KEY = import.meta.env.VITE_API_KEY || 'local-developer-key';
 
 const fetchWithTimeout = async (url, options = {}, timeoutMs = 8000) => {
@@ -475,11 +475,29 @@ const CVImageGallery = ({ images, onRemove }) => {
   );
 };
 
-const IncidentChatPanel = ({ incidentId, token, staffToken }) => {
+const buildIncidentPrefillMessage = (prefillContext) => {
+  if (!prefillContext || typeof prefillContext !== 'object') return '';
+  const lines = [];
+  if (prefillContext.case_id) lines.push(`Case: ${prefillContext.case_id}`);
+  if (prefillContext.trace_id) lines.push(`Trace: ${prefillContext.trace_id}`);
+  if (prefillContext.decision_id) lines.push(`Decision: ${prefillContext.decision_id}`);
+  if (prefillContext.severity) lines.push(`Severity: ${prefillContext.severity}`);
+  if (Array.isArray(prefillContext.findings) && prefillContext.findings.length > 0) {
+    lines.push(`Findings: ${prefillContext.findings.slice(0, 6).join(', ')}`);
+  }
+  if (prefillContext.reason) lines.push(`Reason: ${prefillContext.reason}`);
+  if (lines.length === 0) return '';
+  return `Auto-context for support:\n${lines.join('\n')}`;
+};
+
+const IncidentChatPanel = ({ incidentId, token, staffToken, prefillContext }) => {
   const [items, setItems] = useState([]);
   const [connected, setConnected] = useState(false);
   const [err, setErr] = useState(null);
   const [text, setText] = useState('');
+  const [activeToken, setActiveToken] = useState(token || staffToken || null);
+  const tokenAttemptedRef = useRef(false);
+  const prefillSentRef = useRef(false);
   const endRef = useRef(null);
 
   const devMode = (() => {
@@ -503,12 +521,45 @@ const IncidentChatPanel = ({ incidentId, token, staffToken }) => {
   })();
 
   useEffect(() => {
-    if (!incidentId || !token) return;
+    setActiveToken(token || staffToken || null);
+    tokenAttemptedRef.current = false;
+    prefillSentRef.current = false;
+  }, [incidentId, token, staffToken]);
+
+  useEffect(() => {
+    if (!incidentId || activeToken || tokenAttemptedRef.current) return;
+    tokenAttemptedRef.current = true;
+    (async () => {
+      try {
+        const authKey = API_KEY || '';
+        const res = await fetchWithTimeout(
+          `${API_BASE}/admin/incidents/${encodeURIComponent(incidentId)}/room/token`,
+          {
+            method: 'POST',
+            headers: { 'x-api-key': authKey },
+          },
+          6000
+        );
+        const body = await res.json().catch(() => ({}));
+        const next = body?.staff_token || null;
+        if (res.ok && next) {
+          setActiveToken(next);
+          return;
+        }
+        setErr('Unable to issue incident chat token. Please retry escalation.');
+      } catch (e) {
+        setErr('Unable to issue incident chat token. Please retry escalation.');
+      }
+    })();
+  }, [incidentId, activeToken]);
+
+  useEffect(() => {
+    if (!incidentId || !activeToken) return;
     setItems([]);
     setErr(null);
     setConnected(false);
 
-    const url = `${API_BASE}/incidents/${encodeURIComponent(incidentId)}/room/stream?token=${encodeURIComponent(token)}`;
+    const url = `${API_BASE}/incidents/${encodeURIComponent(incidentId)}/room/stream?token=${encodeURIComponent(activeToken)}`;
     const es = new EventSource(url);
     es.onopen = () => setConnected(true);
     es.onerror = () => {
@@ -534,7 +585,40 @@ const IncidentChatPanel = ({ incidentId, token, staffToken }) => {
     return () => {
       try { es.close(); } catch (e) { /* ignore */ }
     };
-  }, [incidentId, token]);
+  }, [incidentId, activeToken]);
+
+  useEffect(() => {
+    if (!incidentId || !activeToken || !prefillContext || prefillSentRef.current) return;
+    const msg = buildIncidentPrefillMessage(prefillContext);
+    if (!msg) return;
+    const key = `shopsquire_incident_prefill:${incidentId}`;
+    try {
+      if (sessionStorage.getItem(key) === '1') {
+        prefillSentRef.current = true;
+        return;
+      }
+    } catch (e) {
+      // ignore
+    }
+    (async () => {
+      try {
+        const res = await fetchWithTimeout(
+          `${API_BASE}/incidents/${encodeURIComponent(incidentId)}/room/message`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-incident-token': activeToken },
+            body: JSON.stringify({ message: msg }),
+          },
+          6000
+        );
+        if (!res.ok) return;
+        prefillSentRef.current = true;
+        try { sessionStorage.setItem(key, '1'); } catch (e) { /* ignore */ }
+      } catch (e) {
+        // best-effort
+      }
+    })();
+  }, [incidentId, activeToken, prefillContext]);
 
   useEffect(() => {
     try {
@@ -554,7 +638,7 @@ const IncidentChatPanel = ({ incidentId, token, staffToken }) => {
         `${API_BASE}/incidents/${encodeURIComponent(incidentId)}/room/message`,
         {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-incident-token': token },
+          headers: { 'content-type': 'application/json', 'x-incident-token': activeToken || '' },
           body: JSON.stringify({ message: msg }),
         },
         6000
@@ -596,6 +680,13 @@ const IncidentChatPanel = ({ incidentId, token, staffToken }) => {
               Copy
             </button>
           </div>
+        </div>
+      )}
+
+      {prefillContext && (
+        <div style={{ padding: '10px 12px', border: '1px solid #dbeafe', borderRadius: '12px', background: '#eff6ff', color: '#1e3a8a' }}>
+          <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>Escalation context</div>
+          <div style={{ fontSize: '12px', whiteSpace: 'pre-wrap' }}>{buildIncidentPrefillMessage(prefillContext) || 'Context attached.'}</div>
         </div>
       )}
 
@@ -820,7 +911,12 @@ const RightPanel = ({
           <ProductGrid products={data} viewMode={viewMode} onAddToCart={onAddToCart} onViewDetail={onViewDetail} isLoading={!!isLoading} />
         )}
         {type === 'incident_chat' && (
-          <IncidentChatPanel incidentId={data?.incident_id} token={data?.token} staffToken={data?.staff_token} />
+          <IncidentChatPanel
+            incidentId={data?.incident_id}
+            token={data?.token}
+            staffToken={data?.staff_token}
+            prefillContext={data?.prefill_context || null}
+          />
         )}
         {type === 'product_detail' && data && (
           <div className="flex flex-col gap-3">
@@ -1173,7 +1269,8 @@ const RightPanel = ({
             <div className="divider" />
             <button
               className="secondary w-full"
-              onClick={() => onEscalate && onEscalate(cvStatus?.caseId)}
+              disabled={cvStatus?.state === 'processing'}
+              onClick={() => onEscalate && onEscalate(cvStatus?.caseId || cvStatus?.traceId || null)}
             >
               <Icons.Phone />
               Escalate to Human Agent
@@ -1890,6 +1987,7 @@ const DevTracePanel = ({ open, onClose, trace }) => {
   const [tab, setTab] = useState('events'); // events | summary | security | raw
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [traceError, setTraceError] = useState('');
   const [showQueueOnly, setShowQueueOnly] = useState(false);
 
   const decisionTrace = useDecisionTrace();
@@ -1905,19 +2003,33 @@ const DevTracePanel = ({ open, onClose, trace }) => {
   useEffect(() => {
     if (!open || !traceId) {
       setDetail(null);
+      setTraceError('');
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/decisions/${encodeURIComponent(traceId)}`, {
+        const res = await fetch(`${API_BASE}/decisions/${encodeURIComponent(traceId)}/query?include_events=true`, {
           headers: { 'x-api-key': API_KEY },
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          let detailMsg = '';
+          try {
+            const errBody = await res.json();
+            detailMsg = errBody?.detail || errBody?.error || '';
+          } catch (e) {
+            detailMsg = '';
+          }
+          if (!cancelled) setTraceError(`Trace fetch failed (${res.status})${detailMsg ? `: ${detailMsg}` : ''}`);
+          return;
+        }
         const data = await res.json();
-        if (!cancelled) setDetail(data);
+        if (!cancelled) {
+          setTraceError('');
+          setDetail(data);
+        }
       } catch (e) {
-        // ignore
+        if (!cancelled) setTraceError(`Trace fetch failed: ${String(e?.message || e)}`);
       }
     })();
     return () => {
@@ -2041,8 +2153,18 @@ const DevTracePanel = ({ open, onClose, trace }) => {
 
     const hookEvents = Array.isArray(decisionTrace.events) ? decisionTrace.events : [];
     hookEvents.forEach((e, idx) => {
-      const badge = String((e.type || e.event_type || 'event')).replace(/_/g, ' ').toUpperCase();
-      out.push({ id: `evt:trace:${e.id || e.time || idx}`, ts: e.time || baseTs, title: e.type || e.event_type || 'trace_event', badge, payload: e.payload || {} });
+      const originalType = e?.payload?._original_event_type || e?.payload?.original_event_type || null;
+      const shownType = String(originalType || e.type || e.event_type || 'event');
+      const badge = shownType.replace(/_/g, ' ').toUpperCase();
+      const titleBits = [shownType];
+      if (e.source) titleBits.push(String(e.source));
+      out.push({
+        id: `evt:trace:${e.id || e.time || idx}`,
+        ts: e.time || baseTs,
+        title: titleBits.join(' · '),
+        badge,
+        payload: e.payload || {},
+      });
     });
 
     const seen = new Set();
@@ -2056,8 +2178,88 @@ const DevTracePanel = ({ open, onClose, trace }) => {
   })();
 
   const selected = eventItems.find((e) => e.id === selectedId) || eventItems[0] || null;
-  const sec = detail?.security || trace?.security || {};
-  const signals = sec?.signals || {};
+
+  const toStrList = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
+    if (typeof value === 'string') return value ? [value] : [];
+    return [];
+  };
+
+  const boolMapFrom = (...objs) => {
+    const out = {};
+    objs.forEach((obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      Object.entries(obj).forEach(([k, v]) => {
+        if (typeof v === 'boolean') out[k] = v;
+      });
+    });
+    return out;
+  };
+
+  const extractSecuritySnapshot = (payload) => {
+    const p = (payload && typeof payload === 'object') ? payload : {};
+    const sec = p.security || p.security_analysis || (typeof p.details === 'object' ? p.details : null) || {};
+    const signals = boolMapFrom(sec?.signals, p?.cv_signals, sec);
+    const severityRaw = String(p.severity || sec.severity || 'info').toLowerCase();
+    const severity = severityRaw === 'warning' ? 'warn' : severityRaw;
+    const route = String(p.route || sec.route || '').toLowerCase() || (severity === 'error' || severity === 'high' ? 'escalate' : (severity === 'warn' ? 'review' : 'allow'));
+    const thresholdVersion = p.threshold_version || sec.threshold_version || 'security-v1';
+    const confidenceVal = (p.confidence ?? sec.confidence ?? null);
+    const confidence = (confidenceVal === null || typeof confidenceVal === 'undefined') ? null : Number(confidenceVal);
+    const mitre = [
+      ...toStrList(sec.mitre_atlas),
+      ...toStrList(sec.mitre),
+      ...toStrList(sec.mitre_attack),
+    ];
+    const owasp = [
+      ...toStrList(sec.owasp_llm_top10),
+      ...toStrList(sec.owasp_llm),
+      ...toStrList(sec.owasp_agentic_top10),
+      ...toStrList(sec.owasp_api_top10),
+    ];
+    const stride = [
+      ...toStrList(sec.stride_categories),
+      ...toStrList(sec.stride),
+    ];
+    const evidence = (sec.evidence && typeof sec.evidence === 'object') ? sec.evidence : {};
+    const containment = toStrList(sec.containment_actions || sec.actions);
+    const bitemporal = (sec.bitemporal && typeof sec.bitemporal === 'object') ? sec.bitemporal : (p.bitemporal && typeof p.bitemporal === 'object' ? p.bitemporal : null);
+    return { severity, route, thresholdVersion, confidence, signals, mitre, owasp, stride, evidence, containment, bitemporal };
+  };
+
+  const securitySnapshots = (() => {
+    const snapshots = [];
+    const add = (evt, idx, source) => {
+      const eventType = String(evt?.event_type || evt?.type || '').toLowerCase();
+      if (eventType !== 'security_scan') return;
+      const snap = extractSecuritySnapshot(evt?.payload || {});
+      snapshots.push({
+        id: evt?.id || `${source}-${idx}`,
+        ts: evt?.created_at || evt?.time || null,
+        source,
+        ...snap,
+      });
+    };
+    const detailEvents = Array.isArray(detail?.events) ? detail.events : [];
+    detailEvents.forEach((evt, idx) => add(evt, idx, 'trace_query'));
+    const liveEvents = Array.isArray(decisionTrace.events) ? decisionTrace.events : [];
+    liveEvents.forEach((evt, idx) => add(evt, idx, 'stream'));
+    const seen = new Set();
+    const deduped = [];
+    for (const snap of snapshots) {
+      const key = `${snap.id}:${snap.ts || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(snap);
+    }
+    deduped.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+    return deduped;
+  })();
+
+  const fallbackSecurity = extractSecuritySnapshot(detail?.security || trace?.security || {});
+  const securityCurrent = securitySnapshots[securitySnapshots.length - 1] || fallbackSecurity;
+  const signals = securityCurrent?.signals || {};
 
   const renderEventsTab = () => (
     <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -2191,34 +2393,79 @@ const DevTracePanel = ({ open, onClose, trace }) => {
     </div>
   );
 
-  const renderSecurityTab = () => (
-    <div style={{ padding: '12px', overflowY: 'auto', width: '100%' }}>
-      <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px' }}>
-        <div style={{ fontWeight: 900, marginBottom: '6px' }}>Signals</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          {Object.entries(signals || {}).filter(([, v]) => Boolean(v)).map(([k]) => (
-            <span key={k} style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' }}>
-              {k}
-            </span>
-          ))}
-          {Object.entries(signals || {}).filter(([, v]) => Boolean(v)).length === 0 && (
-            <small style={{ color: '#6b7280' }}>No security signals flagged.</small>
+  const renderSecurityTab = () => {
+    const signalEntries = Object.entries(signals || {}).filter(([, v]) => Boolean(v));
+    const hasMatrix = signalEntries.length > 0
+      || (securityCurrent?.mitre || []).length > 0
+      || (securityCurrent?.owasp || []).length > 0
+      || (securityCurrent?.stride || []).length > 0
+      || !!securityCurrent?.route;
+
+    if (!hasMatrix) {
+      return (
+        <div style={{ padding: '12px', overflowY: 'auto', width: '100%' }}>
+          {traceError && (
+            <div style={{ border: '1px solid #fecaca', background: '#fff1f2', color: '#9f1239', borderRadius: '12px', padding: '12px', marginBottom: '10px', fontSize: '12px' }}>
+              {traceError}
+            </div>
+          )}
+          <div style={{ border: '1px dashed #d1d5db', borderRadius: '12px', padding: '16px', color: '#6b7280', fontSize: '13px' }}>
+            No security analysis available for this trace yet.
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ padding: '12px', overflowY: 'auto', width: '100%' }}>
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', marginBottom: '10px' }}>
+          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Route</div>
+          <div style={{ fontSize: '12px', color: '#374151', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <span><small style={{ color: '#6b7280' }}>Route:</small> {securityCurrent?.route || '-'}</span>
+            <span><small style={{ color: '#6b7280' }}>Severity:</small> {securityCurrent?.severity || '-'}</span>
+            <span><small style={{ color: '#6b7280' }}>Threshold:</small> {securityCurrent?.thresholdVersion || '-'}</span>
+            <span><small style={{ color: '#6b7280' }}>Confidence:</small> {typeof securityCurrent?.confidence === 'number' ? securityCurrent.confidence.toFixed(3) : '-'}</span>
+          </div>
+          {securityCurrent?.bitemporal && (
+            <div style={{ marginTop: '8px', fontSize: '11px', color: '#6b7280' }}>
+              valid_from: {securityCurrent.bitemporal.valid_from || '-'} | system_from: {securityCurrent.bitemporal.system_from || '-'}
+            </div>
           )}
         </div>
-      </div>
 
-      <div style={{ height: '10px' }} />
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', marginBottom: '10px' }}>
+          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Signals</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {signalEntries.map(([k]) => (
+              <span key={k} style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca' }}>
+                {k}
+              </span>
+            ))}
+            {signalEntries.length === 0 && (
+              <small style={{ color: '#6b7280' }}>No boolean signals flagged.</small>
+            )}
+          </div>
+        </div>
 
-      <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px' }}>
-        <div style={{ fontWeight: 900, marginBottom: '6px' }}>MITRE / OWASP</div>
-        <div style={{ fontSize: '12px', color: '#374151', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div><small style={{ color: '#6b7280' }}>MITRE:</small> <span>{(sec?.mitre || []).join(', ') || '—'}</span></div>
-          <div><small style={{ color: '#6b7280' }}>OWASP LLM:</small> <span>{(sec?.owasp_llm || []).join(', ') || '—'}</span></div>
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', marginBottom: '10px' }}>
+          <div style={{ fontWeight: 900, marginBottom: '6px' }}>MITRE / OWASP / STRIDE</div>
+          <div style={{ fontSize: '12px', color: '#374151', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div><small style={{ color: '#6b7280' }}>MITRE:</small> <span>{(securityCurrent?.mitre || []).join(', ') || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>OWASP:</small> <span>{(securityCurrent?.owasp || []).join(', ') || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>STRIDE:</small> <span>{(securityCurrent?.stride || []).join(', ') || '-'}</span></div>
+          </div>
+        </div>
+
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px' }}>
+          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Evidence / Actions</div>
+          <div style={{ fontSize: '12px', color: '#374151', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div><small style={{ color: '#6b7280' }}>Source:</small> <span>{securityCurrent?.evidence?.source || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>Containment:</small> <span>{(securityCurrent?.containment || []).join(', ') || '-'}</span></div>
+          </div>
         </div>
       </div>
-    </div>
-  );
-
+    );
+  };
   const renderRawTab = () => (
     <div style={{ padding: '12px', overflowY: 'auto', width: '100%' }}>
       <pre style={{ margin: 0, fontSize: '11px', whiteSpace: 'pre-wrap' }}>{JSON.stringify(detail || trace || {}, null, 2)}</pre>
@@ -2269,6 +2516,11 @@ const DevTracePanel = ({ open, onClose, trace }) => {
       </div>
 
       <div style={{ padding: '10px 12px', borderBottom: '1px solid #e5e7eb', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {traceError && (
+          <div style={{ width: '100%', border: '1px solid #fecaca', background: '#fff1f2', color: '#9f1239', borderRadius: '10px', padding: '8px 10px', fontSize: '12px' }}>
+            {traceError}
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '6px' }}>
           {[
             { k: 'events', label: 'Events' },
@@ -2530,10 +2782,8 @@ const ShopSquireApp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const token = localStorage.getItem('shopsquire_session_token') || '';
-        if (!token) return;
         const apiRoot = API_BASE.replace('/api/v1', '');
-        const res = await fetch(`${apiRoot}/api/v1/auth/me?token=${encodeURIComponent(token)}`);
+        const res = await fetch(`${apiRoot}/api/v1/auth/me`, { credentials: 'include' });
         if (!res.ok) return;
         const me = await res.json();
         const roles = (Array.isArray(me.roles) ? me.roles.join(',') : (me.role || '')).toLowerCase();
@@ -2855,6 +3105,7 @@ const ShopSquireApp = () => {
           const needsHuman = ['fraud_review_team', 'supervisor_review', 'manual_review', 'security_review'].includes(String(decisionValue || '').toLowerCase());
           setCvStatus({
             caseId: complaintResult.case_id || 'pending',
+            traceId: cvTraceId,
             decision: decisionValue,
             confidence: complaintResult.cv_analysis?.confidence,
             severity: complaintResult.cv_analysis?.severity,
@@ -3366,18 +3617,45 @@ const ShopSquireApp = () => {
               onEscalate={(caseId) => {
                 (async () => {
                   try {
+                    const traceContext = {
+                      case_id: caseId || cvStatus?.caseId || null,
+                      trace_id: cvStatus?.traceId || lastTrace?.trace_id || lastTrace?.decision_id || null,
+                      decision_id: lastTrace?.decision_id || null,
+                      severity: cvStatus?.severity || lastTrace?.severity || null,
+                      findings: Array.isArray(cvStatus?.fraudSignals) ? cvStatus.fraudSignals : [],
+                      reason: 'cv_human_review',
+                    };
                     const res = await fetchWithTimeout(
                       `${API_BASE}/incidents/escalate`,
                       {
                         method: 'POST',
                         headers: { 'content-type': 'application/json' },
-                        body: JSON.stringify({ case_id: caseId, reason: 'cv_human_review', context: { surface: 'storefront', uid: uid || 'guest_user' } }),
+                        body: JSON.stringify({
+                          case_id: traceContext.case_id,
+                          trace_id: traceContext.trace_id,
+                          reason: 'cv_human_review',
+                          context: {
+                            surface: 'storefront',
+                            uid: uid || 'guest_user',
+                            trace: traceContext,
+                          },
+                        }),
                       },
                       8000
                     );
                     if (!res.ok) throw new Error('escalate_failed');
                     const j = await res.json();
-                    setRightPanel({ type: 'incident_chat', data: { incident_id: j.incident_id, token: j.buyer_token, staff_token: j.staff_token }, meta: {} });
+                    if (!j?.incident_id) throw new Error('missing_incident_id');
+                    setRightPanel({
+                      type: 'incident_chat',
+                      data: {
+                        incident_id: j.incident_id,
+                        token: j.buyer_token || j.staff_token || null,
+                        staff_token: j.staff_token || null,
+                        prefill_context: traceContext,
+                      },
+                      meta: {},
+                    });
                     setMessages((prev) => [
                       ...prev,
                       { role: 'assistant', content: 'I have escalated this to a human support specialist. You can continue the conversation in the Support Chat panel.', timestamp: new Date() },

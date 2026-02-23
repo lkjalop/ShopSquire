@@ -27,13 +27,13 @@ def _url_reachable(url: str, timeout_s: float = 2.0) -> bool:
     reason="playwright disabled or unsupported on this platform",
 )
 def test_storefront_playwright_basic():
-    if not _url_reachable("http://127.0.0.1:8081/ui/storefront", timeout_s=1.5):
+    if not _url_reachable("http://127.0.0.1:8080/ui/storefront", timeout_s=1.5):
         pytest.skip("storefront not reachable; skip playwright e2e")
     # Quick sanity: start playwright and fetch storefront page
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        resp = page.goto("http://127.0.0.1:8081/ui/storefront", timeout=10000)
+        resp = page.goto("http://127.0.0.1:8080/ui/storefront", timeout=10000)
         assert (resp is not None and resp.status == 200) or page.title() is not None
         browser.close()
 
@@ -99,7 +99,7 @@ def test_decision_trace_populates_after_chat():
 
 def test_storefront_http_fallback():
     # If Playwright isn't available, fall back to simple HTTP GET with urllib
-    url = "http://127.0.0.1:8081/ui/storefront"
+    url = "http://127.0.0.1:8080/ui/storefront"
     try:
         with urllib.request.urlopen(url, timeout=5) as r:
             assert r.status == 200

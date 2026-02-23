@@ -16,6 +16,8 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, R
 from src.app.deps import get_redis, DummyRedis
 import logging
 from src.app.models.db import get_engine
+from src.app.services.trace_contracts import validate_incident_matrix_gate
+from src.app.schemas.ui_contracts import IncidentEscalateResponse, IncidentMessageResponse
 
 
 router = APIRouter(prefix="/api/v1/admin/incidents", tags=["admin", "escalation"])
@@ -279,6 +281,14 @@ def update_incident_status(
     try:
         eng = get_engine()
         with eng.begin() as conn:
+            gate_enabled = str(os.getenv("INCIDENT_MATRIX_GATE_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+            if gate_enabled and status in {"resolved", "closed"}:
+                gate = validate_incident_matrix_gate(conn, incident_id)
+                if not gate.get("ok"):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"error": "security_matrix_incomplete", "gate": gate},
+                    )
             conn.execute(
                 sql_text("UPDATE incidents SET status = :status WHERE id = :id"),
                 {"status": status, "id": incident_id},
@@ -393,7 +403,7 @@ class EscalateRequest(BaseModel):
     context: dict | None = None
 
 
-@public_router.post("/escalate")
+@public_router.post("/escalate", response_model=IncidentEscalateResponse)
 def public_escalate(body: EscalateRequest, request: Request) -> Dict:
     """Create an incident + issue buyer/staff chat tokens (local-dev demo only).
 
@@ -432,13 +442,40 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
         # Incident table exists in Postgres; ignore failures in local demo mode.
         pass
     toks = _issue_tokens(incident_id)
-    # Seed a first assistant message so the room isn't empty.
+    # Seed a first assistant message with context so staff can join with immediate triage facts.
     try:
+        trace_ctx = {}
+        if isinstance(body.context, dict):
+            t = body.context.get("trace")
+            if isinstance(t, dict):
+                trace_ctx = t
+        ctx_case = trace_ctx.get("case_id") or body.case_id
+        ctx_trace = trace_ctx.get("trace_id") or body.trace_id
+        ctx_sev = trace_ctx.get("severity")
+        ctx_findings = trace_ctx.get("findings") if isinstance(trace_ctx.get("findings"), list) else []
+        summary_bits = []
+        if ctx_case:
+            summary_bits.append(f"Case: {ctx_case}")
+        if ctx_trace:
+            summary_bits.append(f"Trace: {ctx_trace}")
+        if ctx_sev:
+            summary_bits.append(f"Severity: {ctx_sev}")
+        if ctx_findings:
+            summary_bits.append(f"Findings: {', '.join([str(x) for x in ctx_findings[:6]])}")
+        seed_msg = "Thanks. A support specialist has been notified and will review your case."
+        if summary_bits:
+            seed_msg = seed_msg + "\n\nEscalation context:\n" + "\n".join(summary_bits)
+        seed_msg = seed_msg + "\n\nYou can add any extra details here."
         _append_chat(
             incident_id,
             role="assistant",
-            message="Thanks. A support specialist has been notified and will review your case. You can add any extra details here.",
-            meta={"source": "system", "case_id": body.case_id, "trace_id": body.trace_id},
+            message=seed_msg,
+            meta={
+                "source": "system",
+                "case_id": body.case_id,
+                "trace_id": body.trace_id,
+                "trace_context": trace_ctx,
+            },
         )
     except Exception:
         pass
@@ -491,7 +528,7 @@ async def public_sse_room(
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-@public_router.post("/{incident_id}/room/message")
+@public_router.post("/{incident_id}/room/message", response_model=IncidentMessageResponse)
 def public_send_message(
     incident_id: str,
     body: PublicChatMessage,

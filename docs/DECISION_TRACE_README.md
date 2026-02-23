@@ -26,14 +26,14 @@ Local run (dev)
 ```powershell
 $env:DATABASE_URL = "sqlite+pysqlite:///C:/AI/ShopSquire/tmp/e2e.sqlite"
 $env:TEST_USE_DEMO_DECISION_TRACE = "1"
-$env:API_PORT = "8081"
-& ".venv/Scripts/python.exe" -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory
+$env:API_PORT = "8080"
+& ".venv/Scripts/python.exe" -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8080 --factory
 ```
 
 3. Seed a demo trace (dev only):
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8081/api/v1/decisions/demo/seed' -ContentType 'application/json' -Body '{}'
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8080/api/v1/decisions/demo/seed' -ContentType 'application/json' -Body '{}'
 ```
 
 4. Open the UI and load the `DecisionTrace` modal for the returned `trace_id`. The frontend will attempt WS -> SSE -> polling fallbacks.

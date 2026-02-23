@@ -5,6 +5,8 @@ import EscalationRoom from './components/EscalationRoom';
 import { apiUrl, safeJson } from './lib/api';
 
 export default function AdminShell() {
+  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
+  const OWNER_API_KEY = ((import.meta as any).env?.VITE_OWNER_API_KEY as string | undefined) || API_KEY;
   const [incidentId, setIncidentId] = useState('');
   const [staffToken, setStaffToken] = useState(null);
   const [roomOpen, setRoomOpen] = useState(false);
@@ -27,7 +29,8 @@ export default function AdminShell() {
   const fetchIncidents = async () => {
     try {
       const r = await fetch(apiUrl('/api/v1/admin/incidents/'), {
-        headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-owner-key' },
+        credentials: 'include',
+        headers: OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : undefined,
       });
       const j = await safeJson(r);
       if (Array.isArray(j?.incidents)) setIncidents(j.incidents);
@@ -42,7 +45,8 @@ export default function AdminShell() {
     try {
       const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(id)}/room/token`), {
         method: 'POST',
-        headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-owner-key' },
+        credentials: 'include',
+        headers: OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : undefined,
       });
       const j = await safeJson(r);
       if (j && j.staff_token) {

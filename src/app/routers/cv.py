@@ -26,6 +26,7 @@ from src.app.rules.image_quality import assess_image_quality
 from src.app.services.dependency_resilience import call_with_resilience
 from src.app.models.db import db_session
 from sqlalchemy import text as sql_text
+from src.app.services.intake_gate import strict_binary_ingest_gate
 
 
 router = APIRouter(prefix="/api/v1/cv", tags=["cv"])
@@ -113,6 +114,21 @@ async def analyze(
                         content = base64.b64decode(s, validate=False)
                     except Exception:
                         content = b""
+                    gate = strict_binary_ingest_gate(
+                        filename=f"analyze_{idx + 1}.jpg",
+                        content_type=None,
+                        blob=content,
+                        size_bytes=len(content),
+                    )
+                    if bool(gate.get("blocked")):
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": "ingest_gate_blocked",
+                                "message": "One or more uploaded images failed strict ingest checks.",
+                                "ingest_gate": gate,
+                            },
+                        )
                     meta = sanitize_image(content)
                     try:
                         meta["filename"] = f"analyze_{idx + 1}.jpg"
@@ -379,45 +395,57 @@ async def analyze(
         except Exception:
             pass
 
-        # Emit security_scan trace event for Decision Trace Security Matrix
+        # Emit security_scan trace event for Decision Trace Security Matrix.
+        # Always emit this event so the matrix panel can render even for benign lanes.
         try:
-            if security_details:
-                log_trace_event(
-                    trace_id=case_id,
-                    event_type="security_scan",
-                    source_type="agent",
-                    source_id="Security_Observer_Agent",
-                    target_type="system",
-                    target_id=None,
-                    payload={
-                        "details": security_details,
-                        "severity": security_sev or ("high" if qr_prompt_injection else "medium"),
-                        "diagnostics": {"qr_decoder": qr_decode_reasons if 'qr_decode_reasons' in locals() else []},
-                    },
-                )
+            sec_signals = {}
+            if isinstance(security_details, dict):
+                for k, v in (security_details.get("signals") or {}).items():
+                    if isinstance(v, bool):
+                        sec_signals[str(k)] = v
+                for k, v in security_details.items():
+                    if isinstance(v, bool):
+                        sec_signals[str(k)] = v
+            if qr_prompt_injection:
+                sec_signals["qr_prompt_injection"] = True
+            if qr_decode_hits:
+                sec_signals["qr_code_detected"] = True
+            ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
+            if ic_status in ("mismatch", "suspicious"):
+                sec_signals["image_consistency_mismatch"] = True
+            if isinstance(image_consistency, dict) and bool(image_consistency.get("ocr_prompt_injection")):
+                sec_signals["ocr_prompt_injection"] = True
+
+            sev = str(security_sev or ("high" if qr_prompt_injection else ("warn" if sec_signals else "info"))).lower()
+            if sev in ("critical", "high", "error"):
+                route = "escalate"
+            elif sev in ("warn", "warning", "medium") or sec_signals:
+                route = "review"
             else:
-                sec_signals = {}
-                if qr_prompt_injection:
-                    sec_signals["qr_prompt_injection"] = True
-                if qr_decode_hits:
-                    sec_signals["qr_code_detected"] = True
-                ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
-                if ic_status in ("mismatch", "suspicious"):
-                    sec_signals["image_consistency_mismatch"] = True
-                if sec_signals or ('qr_decode_reasons' in locals() and qr_decode_reasons):
-                    payload = {"details": sec_signals, "severity": "high" if qr_prompt_injection else "medium"}
-                    # Attach diagnostics when available
-                    if 'qr_decode_reasons' in locals():
-                        payload.setdefault("diagnostics", {})["qr_decoder"] = qr_decode_reasons
-                    log_trace_event(
-                        trace_id=case_id,
-                        event_type="security_scan",
-                        source_type="agent",
-                        source_id="cv_forensics",
-                        target_type="complaint",
-                        target_id=case_id,
-                        payload=payload,
-                    )
+                route = "allow"
+
+            details_payload = dict(security_details or {}) if isinstance(security_details, dict) else {}
+            details_payload["signals"] = {**(details_payload.get("signals") or {}), **sec_signals}
+
+            payload = {
+                "details": details_payload,
+                "severity": sev,
+                "route": route,
+                "threshold_version": os.getenv("SECURITY_THRESHOLD_VERSION", "security-v1"),
+                "ocr_text": (extracted_text or "")[:2000],
+                "entities": {"labels": (labels or [])[:20], "qr_code_count": len(qr_decode_hits or [])},
+            }
+            if 'qr_decode_reasons' in locals():
+                payload["diagnostics"] = {"qr_decoder": qr_decode_reasons}
+            log_trace_event(
+                trace_id=case_id,
+                event_type="security_scan",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="complaint",
+                target_id=case_id,
+                payload=payload,
+            )
         except Exception:
             pass
 
@@ -457,8 +485,19 @@ async def analyze(
             pass
 
         # Derive ui_actions based on evidence signals
+        qr_external_url_detected = False
+        try:
+            imgs = (image_consistency or {}).get("images") if isinstance(image_consistency, dict) else []
+            for im in imgs or []:
+                reasons = im.get("reasons") if isinstance(im, dict) else []
+                if isinstance(reasons, list) and "qr_external_url_detected" in reasons:
+                    qr_external_url_detected = True
+                    break
+        except Exception:
+            qr_external_url_detected = False
         _needs_chat = bool(
             qr_prompt_injection
+            or qr_external_url_detected
             or (isinstance(image_consistency, dict) and image_consistency.get("status") in ("mismatch", "suspicious"))
         )
 
@@ -474,6 +513,8 @@ async def analyze(
             "ui_actions": {"chat_with_admin": _needs_chat},
             "suggested_routing": "security_review" if _needs_chat else "standard_queue",
         }
+    except HTTPException:
+        raise
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception:
@@ -531,6 +572,37 @@ async def upload(
         content = await image.read()
         # Always allocate a unique case id for this upload so evidence/decisions don't collide on filename.
         case_id = uuid.uuid4().hex or fallback_case_id
+        gate = strict_binary_ingest_gate(
+            filename=str(image.filename or "upload"),
+            content_type=image.content_type,
+            blob=content,
+            size_bytes=len(content),
+        )
+        if bool(gate.get("blocked")):
+            try:
+                log_trace_event(
+                    trace_id=case_id,
+                    event_type="security_scan",
+                    source_type="agent",
+                    source_id="intake_gate",
+                    target_type="complaint",
+                    target_id=case_id,
+                    payload={
+                        "severity": "high",
+                        "route": "escalate",
+                        "details": {"signals": {"ingest_gate_blocked": True}, "ingest_gate": gate},
+                    },
+                )
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "ingest_gate_blocked",
+                    "message": "Upload blocked by strict ingest gate (type/size/archive/AV policy).",
+                    "ingest_gate": gate,
+                },
+            )
 
         order_ctx = None
         if order_id:
@@ -756,28 +828,54 @@ async def upload(
                 )
             except Exception:
                 pass
-            # Emit security_scan trace event for Decision Trace Security Matrix
+            # Emit security_scan trace event for Decision Trace Security Matrix.
             try:
-                t2_security = (t2 or {}).get("security_analysis")
+                t2_security = (t2 or {}).get("security_analysis") if isinstance(t2, dict) else {}
                 t2_evidence = (t2 or {}).get("evidence_tags") or []
                 sec_signals = {}
-                if t2_security:
-                    sec_signals = t2_security
-                elif t2_evidence:
-                    sec_signals = {"evidence_tags": t2_evidence}
-                if sec_signals or t2_evidence:
+                if isinstance(t2_security, dict):
+                    for k, v in (t2_security.get("signals") or {}).items():
+                        if isinstance(v, bool):
+                            sec_signals[str(k)] = v
+                if t2_evidence:
+                    sec_signals["has_evidence_tags"] = True
+                    for tag in t2_evidence:
+                        t = str(tag or "").strip()
+                        if t:
+                            sec_signals[f"evidence_{t}"] = True
+                sev = str((t2_security or {}).get("severity") or "").lower()
+                if not sev:
                     sev = "high" if any(
                         t in t2_evidence for t in ("qr_url_present", "prompt_injection_text_suspected", "manipulation_detected")
-                    ) else "medium"
-                    log_trace_event(
-                        trace_id=case_id,
-                        event_type="security_scan",
-                        source_type="agent",
-                        source_id="cv_forensics",
-                        target_type="complaint",
-                        target_id=case_id,
-                        payload={"security": sec_signals, "details": sec_signals, "severity": sev},
-                    )
+                    ) else ("warn" if sec_signals else "info")
+                if sev in ("critical", "high", "error"):
+                    route = "escalate"
+                elif sev in ("warn", "warning", "medium") or sec_signals:
+                    route = "review"
+                else:
+                    route = "allow"
+                details_payload = dict(t2_security or {}) if isinstance(t2_security, dict) else {}
+                details_payload["signals"] = {**(details_payload.get("signals") or {}), **sec_signals}
+                if t2_evidence:
+                    details_payload["evidence_tags"] = t2_evidence
+                log_trace_event(
+                    trace_id=case_id,
+                    event_type="security_scan",
+                    source_type="agent",
+                    source_id="cv_forensics",
+                    target_type="complaint",
+                    target_id=case_id,
+                    payload={
+                        "details": details_payload,
+                        "severity": sev,
+                        "route": route,
+                        "threshold_version": os.getenv("SECURITY_THRESHOLD_VERSION", "security-v1"),
+                        "entities": {
+                            "filename": image.filename,
+                            "evidence_tag_count": len(t2_evidence or []),
+                        },
+                    },
+                )
             except Exception:
                 pass
             # Persist a decision log for the upload path so the UI always has a trace id to drill into.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 import re
 
 
@@ -24,24 +24,65 @@ class BasicCVTriage:
         "power": ["charger", "battery", "adapter", "cable", "port"],
     }
 
-    async def analyze(self, labels: list[str], extracted_text: str) -> dict:
-        damage_type = self._classify_damage(labels)
-        component = self._identify_component(labels)
-        serial_number = self._extract_serial(extracted_text)
-        confidence = self._calculate_confidence(labels, damage_type)
+    async def analyze(
+        self,
+        labels: list[str],
+        extracted_text: str,
+        *,
+        cv_pipeline_result: Dict[str, Any] | None = None,
+    ) -> dict:
+        # Attempt to supplement empty labels/text from cv_pipeline output
+        effective_labels = list(labels or [])
+        effective_text = extracted_text or ""
+        insufficient_data = False
 
-        return {
+        if cv_pipeline_result and isinstance(cv_pipeline_result, dict):
+            # Pull OCR text from the pipeline when caller text is empty
+            if not effective_text:
+                for img in cv_pipeline_result.get("images") or []:
+                    ocr = img.get("ocr") or {}
+                    t = ocr.get("best_text") or ""
+                    if t:
+                        effective_text = f"{effective_text} {t}".strip()
+            # Pull ROI class names as pseudo-labels
+            if not effective_labels:
+                for img in cv_pipeline_result.get("images") or []:
+                    for roi in img.get("rois") or []:
+                        cls = roi.get("class") or roi.get("label") or ""
+                        if cls and cls not in effective_labels:
+                            effective_labels.append(str(cls))
+
+        damage_type = self._classify_damage(effective_labels)
+        component = self._identify_component(effective_labels)
+        serial_number = self._extract_serial(effective_text)
+        confidence = self._calculate_confidence(effective_labels, damage_type)
+
+        # Detect "insufficient data" case: no labels, no text, nothing to analyze
+        if not effective_labels and not effective_text.strip():
+            insufficient_data = True
+
+        severity = self._estimate_severity(effective_labels, confidence, insufficient_data=insufficient_data)
+        severity_reason = None
+        if insufficient_data:
+            severity_reason = "no_labels_or_text_extracted"
+
+        result: Dict[str, Any] = {
             "status": "analyzed",
             "damage_type": damage_type,
             "component": component,
-            "severity": self._estimate_severity(labels, confidence),
+            "severity": severity,
             "confidence": confidence,
             "serial_number": serial_number,
-            "extracted_text": (extracted_text or "")[:500],
-            "raw_labels": labels[:10],
-            "needs_human_review": confidence < 0.6,
+            "extracted_text": (effective_text or "")[:500],
+            "raw_labels": effective_labels[:10],
+            "needs_human_review": confidence < 0.6 or insufficient_data,
             "ai_disclaimer": "preliminary",
         }
+        if severity_reason:
+            result["severity_reason"] = severity_reason
+        if insufficient_data:
+            result["insufficient_data"] = True
+        return result
 
     def _classify_damage(self, labels: list[str]) -> str:
         joined = " ".join(labels).lower()
@@ -77,7 +118,15 @@ class BasicCVTriage:
         matches = sum(1 for kw in keywords if kw in " ".join(labels).lower())
         return min(0.5 + (matches * 0.15), 0.85)
 
-    def _estimate_severity(self, labels: list[str], confidence: float) -> str:
+    def _estimate_severity(
+        self,
+        labels: list[str],
+        confidence: float,
+        *,
+        insufficient_data: bool = False,
+    ) -> str:
+        if insufficient_data:
+            return "insufficient_data"
         severe = ["shattered", "destroyed", "broken", "dead"]
         if any(ind in " ".join(labels).lower() for ind in severe):
             return "critical"

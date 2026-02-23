@@ -8,7 +8,7 @@ Runs a real end-to-end proof with server startup, Ollama prewarm, CV readiness, 
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/demo_bundle.ps1
 ```
 Options:
-- `-Api` (default `http://127.0.0.1:8081`)
+- `-Api` (default `http://127.0.0.1:8080`)
 - `-Python` (default `.venv/Scripts/python.exe`)
 
 ## What it does
@@ -33,7 +33,7 @@ Options:
 - Re-run the bundle; watch new entries in `runs/request_log.txt`.
 - Use `curl` to verify incidents JSON:
 ```powershell
-curl "http://127.0.0.1:8081/api/v1/admin/email_security/incidents?limit=10&has_ticket=true"
+curl "http://127.0.0.1:8080/api/v1/admin/email_security/incidents?limit=10&has_ticket=true"
 ```
 - Show `x-request-id` correlation across HTTP responses, `demo_proof.json`, and DevTools Network.
 - Run tests:

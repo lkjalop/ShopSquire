@@ -74,13 +74,9 @@ def merchant_dashboard(request: Request):
           <div style="margin-top: 12px;">
             <a class="btn" href="/merchant/app/index.html?tab=merchant-bi">Open now</a>
           </div>
-          <div class="muted">Local demo convenience: we set <code>localStorage.shopsquire_api_key</code> to <code>local-merchant-key</code> if missing.</div>
+          <div class="muted">Local demo convenience: auth is handled via session cookie flow.</div>
         </div>
         <script>
-          try {
-            const k = (localStorage.getItem('shopsquire_api_key') || '').trim();
-            if(!k) localStorage.setItem('shopsquire_api_key', 'local-merchant-key');
-          } catch (e) {}
           window.location.href = '/merchant/app/index.html?tab=merchant-bi';
         </script>
       </body>
@@ -213,9 +209,14 @@ def merchant_bi(request: Request):
           {frames}
         </div>
         <script>
-          function getApiKey(){{
-            try {{ return (localStorage.getItem('shopsquire_api_key')||'').trim() || 'local-merchant-key'; }} catch(e){{ return 'local-merchant-key'; }}
+          function getCookie(name){{
+            try {{
+              const parts = document.cookie.split(';').map(v => v.trim());
+              const kv = parts.find(v => v.startsWith(name + '='));
+              return kv ? decodeURIComponent(kv.split('=').slice(1).join('=')) : '';
+            }} catch(e) {{ return ''; }}
           }}
+          function getApiKey(){{ return getCookie('shopsquire_api_key') || ''; }}
           const all = {json.dumps([uid for _, uid in dashboards])};
           function show(uid){{
             for(const u of all){{
@@ -230,7 +231,8 @@ def merchant_bi(request: Request):
           // Update Incidents link with count and deep-link to latest room
           (async function(){{
             try{{
-              const r = await fetch('/api/v1/admin/incidents/', {{ headers: {{ 'x-api-key': getApiKey() }} }});
+              const headers = getApiKey() ? {{ 'x-api-key': getApiKey() }} : undefined;
+              const r = await fetch('/api/v1/admin/incidents/', {{ headers }});
               const j = await r.json();
               const incs = (j && j.incidents) ? j.incidents : [];
               const a = document.getElementById('incLink');
@@ -240,13 +242,7 @@ def merchant_bi(request: Request):
                 const latest = incs[0];
                 const id = (latest && latest.id) ? latest.id.toString() : '';
                 if(id){{
-                  try{{
-                    const tr = await fetch('/api/v1/admin/incidents/' + encodeURIComponent(id) + '/room/token', {{ method:'POST', headers:{{ 'x-api-key': getApiKey() }} }});
-                    const tj = await tr.json();
-                    if(tj && tj.staff_token){{
-                      a.onclick = function(ev){{ ev.preventDefault(); window.open('/merchant/incident-room-lite?incident_id=' + encodeURIComponent(id) + '&token=' + encodeURIComponent(tj.staff_token), '_blank'); }};
-                    }}
-                  }}catch(e){{}}
+                  a.onclick = function(ev){{ ev.preventDefault(); window.open('/merchant/incident-room?incident_id=' + encodeURIComponent(id), '_blank'); }};
                 }}
               }}
             }}catch(e){{}}
@@ -259,7 +255,7 @@ def merchant_bi(request: Request):
 
 
 @router.get("/incident-room", response_class=HTMLResponse)
-def merchant_incident_room(request: Request):
+def merchant_incident_room(request: Request, incident_id: str | None = None):
     """Human escalation console entrypoint (local demo).
 
     Deep-links into the React escalation console (queue + chat + context).
@@ -267,6 +263,7 @@ def merchant_incident_room(request: Request):
     if not (_is_loopback(request) or _is_local_demo_host(request)):
         raise HTTPException(status_code=403, detail="incident_room_local_only")
 
+    inc = (incident_id or "").strip()
     html = """
     <!doctype html>
     <html>
@@ -277,15 +274,15 @@ def merchant_incident_room(request: Request):
       </head>
       <body>
         <script>
-          try {
-            const k = (localStorage.getItem('shopsquire_api_key') || '').trim();
-            if(!k) localStorage.setItem('shopsquire_api_key', 'local-merchant-key');
-          } catch (e) {}
-          window.location.href = '/merchant/app/index.html?tab=escalations';
+          const next = new URL('/merchant/app/index.html', window.location.origin);
+          next.searchParams.set('tab', 'escalations');
+          const incident = __INCIDENT_JSON__;
+          if (incident) next.searchParams.set('incident_id', incident);
+          window.location.href = next.toString();
         </script>
       </body>
     </html>
-    """
+    """.replace("__INCIDENT_JSON__", json.dumps(inc))
     return HTMLResponse(content=html)
 
 
@@ -338,7 +335,7 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
           <h4>Open Incidents</h4>
           <div class="body">
             <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-              <span class="pill"><span>API Key</span> <span class="mono" id="apikey_hint">(uses localStorage or local-merchant-key)</span></span>
+              <span class="pill"><span>API Key</span> <span class="mono" id="apikey_hint">(cookie/session or env key)</span></span>
               <button onclick="loadIncidents()">Load Open Incidents</button>
               <span class="small" id="inc_status"></span>
             </div>
@@ -357,13 +354,14 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
         </div>
         <script>
           let es = null;
-          function getApiKey(){{
+          function getCookie(name){{
             try {{
-              return (localStorage.getItem('x-api-key') || localStorage.getItem('api_key') || '').trim() || 'local-merchant-key';
-            }} catch(e) {{
-              return 'local-merchant-key';
-            }}
+              const parts = document.cookie.split(';').map(v => v.trim());
+              const kv = parts.find(v => v.startsWith(name + '='));
+              return kv ? decodeURIComponent(kv.split('=').slice(1).join('=')) : '';
+            }} catch(e) {{ return ''; }}
           }}
+          function getApiKey(){{ return getCookie('shopsquire_api_key') || ''; }}
           function append(rec){{
             const log = document.getElementById('log');
             const d = document.createElement('div');
@@ -379,9 +377,8 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
             status.textContent = 'Loading...';
             list.innerHTML = '';
             try {{
-              const r = await fetch('/api/v1/admin/incidents/', {{
-                headers: {{ 'x-api-key': getApiKey() }}
-              }});
+              const headers = getApiKey() ? {{ 'x-api-key': getApiKey() }} : undefined;
+              const r = await fetch('/api/v1/admin/incidents/', {{ headers }});
               const j = await r.json();
               const incs = (j && j.incidents) ? j.incidents : [];
               if (!Array.isArray(incs) || incs.length === 0) {{
@@ -411,7 +408,7 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
                     // Issue/rotate a staff token so EventSource can connect (no headers).
                     const tr = await fetch(`/api/v1/admin/incidents/${{encodeURIComponent(incId)}}/room/token`, {{
                       method: 'POST',
-                      headers: {{ 'x-api-key': getApiKey() }},
+                      headers: (getApiKey() ? {{ 'x-api-key': getApiKey() }} : undefined),
                     }});
                     const tj = await tr.json();
                     if (tj && tj.staff_token) {{
@@ -555,10 +552,10 @@ def merchant_email_lab(request: Request):
                 <input type="file" id="files" multiple />
                 <div id="att_list" class="small" style="margin-top:6px"></div>
                 <div class="row" style="margin-top:10px">
-                  <button class="btn" onclick="analyze()">Analyze</button>
-                  <button class="btn" onclick="submitEscalate()">Submit & Escalate</button>
-                  <button class="btn" onclick="loadDemoAssets()">Load Demo Assets</button>
-                  <button class="btn" onclick="simulateAgents()">Simulate Agents</button>
+                  <button class="btn" aria-label="Analyze email and populate security matrix" onclick="analyze()">Analyze</button>
+                  <button class="btn" aria-label="Analyze email and escalate to incident room" onclick="submitEscalate()">Submit & Escalate</button>
+                  <button class="btn" aria-label="Load email lab demo assets" onclick="loadDemoAssets()">Load Demo Assets</button>
+                  <button class="btn" aria-label="Simulate agent events in decision trace" onclick="simulateAgents()">Simulate Agents</button>
                   <span class="small" id="status"></span>
                 </div>
                 <div style="margin-top:10px">
@@ -601,14 +598,21 @@ def merchant_email_lab(request: Request):
           ];
           let currentDecisionId = null;
           let es = null;
+          function getCookie(name){
+            try{
+              const parts = document.cookie.split(';').map(v => v.trim());
+              const kv = parts.find(v => v.startsWith(name + '='));
+              return kv ? decodeURIComponent(kv.split('=').slice(1).join('=')) : '';
+            } catch(e) { return ''; }
+          }
           function getApiKey(){
-            try { return (localStorage.getItem('shopsquire_api_key')||'').trim() || 'local-merchant-key'; } catch(e){ return 'local-merchant-key'; }
+            try { return getCookie('shopsquire_api_key') || ''; } catch(e){ return ''; }
           }
           function getOwnerKey(){
             try {
-              const admin = (localStorage.getItem('shopsquire_admin_key')||'').trim();
+              const admin = getCookie('shopsquire_admin_key') || '';
               if(admin) return admin;
-              const general = (localStorage.getItem('shopsquire_api_key')||'').trim();
+              const general = getCookie('shopsquire_api_key') || '';
               if(general && general.startsWith('sk_')) return general;
               return 'local-owner-key';
             } catch(e){ return 'local-owner-key'; }
@@ -654,21 +658,32 @@ def merchant_email_lab(request: Request):
             const fromDemo = Array.isArray(window.__demoAtts) ? window.__demoAtts : [];
             return fromUpload.concat(fromDemo);
           }
+          function pushTraceNotice(eventType, payload){
+            try{
+              const box = document.getElementById('trace');
+              const d = document.createElement('div');
+              d.className = 'ev';
+              const ts = new Date().toISOString();
+              d.innerHTML = `<div class='meta'>${eventType} · ${ts}</div><div class='mono'>${JSON.stringify(payload || {}, null, 0).slice(0, 500)}</div>`;
+              box.appendChild(d);
+              box.scrollTop = box.scrollHeight;
+            }catch(e){}
+          }
           async function analyze(){ document.getElementById('status').textContent='Analyzing…'; const to = document.getElementById('to').value.trim(); const subj = document.getElementById('subject').value.trim(); const body = document.getElementById('body').value.trim(); const atts = await collectAllAttachments(); const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
-              // First try merchant key; on 401, retry with owner/developer key for local demo.
+              // First try merchant key; on authz/authn failure retry with owner/developer key for local demo.
               let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(payload) });
-              if (r.status === 401) {
+              if (r.status === 401 || r.status === 403) {
                 r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }, body: JSON.stringify(payload) });
               }
-              const j = await r.json().catch(()=>null); if(!r.ok || !j){ document.getElementById('status').textContent='Analyze failed ('+r.status+'): '+(j && (j.detail||j.error) ? (j.detail||j.error) : 'no details'); return; }
+              const j = await r.json().catch(()=>null); if(!r.ok || !j){ const err=(j && (j.detail||j.error) ? (j.detail||j.error) : 'no details'); document.getElementById('status').textContent='Analyze failed ('+r.status+'): '+err; pushTraceNotice('analyze_failed', { status: r.status, error: err, endpoint: '/api/v1/email_security/evaluate' }); return; }
               document.getElementById('verdict').textContent = (j.verdict_action || 'unknown') + ' / ' + (j.severity || 'info');
               document.getElementById('reasons').textContent = (j.reasons||[]).slice(0,6).join(', ');
               const ex = []; try { const ev = j.evidence_snapshot||{}; const ioc = ev.ioc_counts||{}; ex.push(`IOC: url=${ioc.url||0} domain=${ioc.domain||0} hash=${ioc.hash||0}`); if(ev.sender_trust && ev.sender_trust.sender_trust_score!=null){ ex.push(`Trust=${ev.sender_trust.sender_trust_score}`); } } catch(e) {}
               document.getElementById('extract').textContent = ex.join(' | ');
               const tid = j.decision_trace_id || j.decision_id || payload.message_id; if (tid) { attachTrace(tid); }
               document.getElementById('status').textContent='Done';
-            } catch(e) { document.getElementById('status').textContent='Analyze error'; }
+            } catch(e) { document.getElementById('status').textContent='Analyze error'; pushTraceNotice('analyze_error', { endpoint: '/api/v1/email_security/evaluate', error: String(e && e.message ? e.message : e) }); }
           }
           async function submitEscalate(){
             document.getElementById('status').textContent='Analyzing & escalating…';
@@ -679,11 +694,11 @@ def merchant_email_lab(request: Request):
             const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
               let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(payload) });
-              if (r.status === 401) {
+              if (r.status === 401 || r.status === 403) {
                 r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }, body: JSON.stringify(payload) });
               }
               const j = await r.json().catch(()=>null);
-              if(!r.ok || !j){ document.getElementById('status').textContent='Analyze failed ('+r.status+')'; return; }
+              if(!r.ok || !j){ const err=(j && (j.detail||j.error) ? (j.detail||j.error) : 'no details'); document.getElementById('status').textContent='Analyze failed ('+r.status+')'; pushTraceNotice('submit_analyze_failed', { status: r.status, error: err, endpoint: '/api/v1/email_security/evaluate' }); return; }
               document.getElementById('verdict').textContent = (j.verdict_action || 'unknown') + ' / ' + (j.severity || 'info');
               document.getElementById('reasons').textContent = (j.reasons||[]).slice(0,6).join(', ');
               const tid = j.decision_trace_id || j.decision_id || payload.message_id; if (tid) { attachTrace(tid); }
@@ -698,9 +713,10 @@ def merchant_email_lab(request: Request):
                   if(j.decision_trace_id){ findRelatedIncident(j.decision_trace_id); }
                 } else {
                   document.getElementById('status').textContent='Analyzed (escalation note: '+(escJ?.detail||'no incident created')+')';
+                  pushTraceNotice('escalation_note', { status: escR.status, detail: (escJ?.detail||'no incident created') });
                 }
-              } catch(esc) { document.getElementById('status').textContent='Analyzed (escalation failed)'; }
-            } catch(e) { document.getElementById('status').textContent='Submit error'; }
+              } catch(esc) { document.getElementById('status').textContent='Analyzed (escalation failed)'; pushTraceNotice('escalation_error', { endpoint: '/api/v1/incidents/escalate', error: String(esc && esc.message ? esc.message : esc) }); }
+            } catch(e) { document.getElementById('status').textContent='Submit error'; pushTraceNotice('submit_error', { endpoint: '/api/v1/email_security/evaluate', error: String(e && e.message ? e.message : e) }); }
           }
           function attachTrace(traceId){ currentDecisionId = traceId; document.getElementById('trace_id').textContent = traceId; const box = document.getElementById('trace'); box.innerHTML=''; if(es) try{ es.close(); }catch(e){}
             es = new EventSource(`/api/v1/trace/${encodeURIComponent(traceId)}/events/stream`);
@@ -739,7 +755,7 @@ def merchant_email_lab(request: Request):
               document.getElementById('inc_status').textContent = 'searching…';
               const r = await fetch('/api/v1/admin/email_security/incidents?limit=20&has_ticket=true');
               let j = null;
-              if(r.status === 401){
+              if(r.status === 401 || r.status === 403){
                 const r2 = await fetch('/api/v1/admin/email_security/incidents?limit=20&has_ticket=true', { headers: { 'x-api-key': getOwnerKey() } });
                 j = await r2.json();
               } else {
@@ -782,8 +798,6 @@ def merchant_email_lab(request: Request):
               document.getElementById('status').textContent='Simulation events sent';
             }catch(e){ document.getElementById('status').textContent='Simulation error'; }
           }
-          // Convenience: seed API key
-          try{ const k=(localStorage.getItem('shopsquire_api_key')||'').trim(); if(!k) localStorage.setItem('shopsquire_api_key','local-merchant-key'); }catch(e){}
           // Preload defaults
           newEmailPreset();
         </script>

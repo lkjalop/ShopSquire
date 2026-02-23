@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   bulkLabelEmailSecurityIncidents,
   executeEmailSecurityRunbook,
+  fetchEmailSecurityInvestigation,
   fetchEmailSecurityConnectorReliability,
   fetchEmailSecurityConnectorDlq,
   fetchEmailSecurityIncidents,
   fetchEmailSecurityRunbook,
   fetchEmailSecuritySuppliers,
   getEmailSecurityIncident,
+  submitEmailSecurityInvestigationAction,
   type EmailSecurityIncident,
+  type EmailSecurityInvestigation,
   type EmailSecuritySupplierBucket,
 } from '../api';
 
@@ -38,11 +41,13 @@ export function EmailXdr({ role }: Props) {
   const [rows, setRows] = useState<EmailSecurityIncident[]>([]);
   const [selected, setSelected] = useState<EmailSecurityIncident | null>(null);
   const [selectedFull, setSelectedFull] = useState<EmailSecurityIncident | null>(null);
+  const [investigation, setInvestigation] = useState<EmailSecurityInvestigation | null>(null);
   const [suppliers, setSuppliers] = useState<EmailSecuritySupplierBucket[]>([]);
   const [connRel, setConnRel] = useState<any | null>(null);
   const [dlq, setDlq] = useState<any | null>(null);
   const [runbook, setRunbook] = useState<any | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionNote, setActionNote] = useState<string>('');
 
   const load = async () => {
     setLoading(true);
@@ -75,8 +80,15 @@ export function EmailXdr({ role }: Props) {
   useEffect(() => {
     if (!selected?.id) return;
     setSelectedFull(null);
-    getEmailSecurityIncident(selected.id)
-      .then((r) => setSelectedFull((r as any).incident || null))
+    setInvestigation(null);
+    Promise.all([
+      getEmailSecurityIncident(selected.id),
+      fetchEmailSecurityInvestigation(selected.id),
+    ])
+      .then(([incidentRes, inv]) => {
+        setSelectedFull((incidentRes as any).incident || null);
+        setInvestigation(inv || null);
+      })
       .catch(() => {});
   }, [selected?.id]);
 
@@ -216,6 +228,7 @@ export function EmailXdr({ role }: Props) {
                 <div className="list-item"><div>Severity</div><strong>{selected.severity}</strong></div>
                 <div className="list-item"><div>Class</div><strong>{classify(selected)}</strong></div>
                 <div className="list-item"><div>Playbook</div><strong>{selected.playbook?.title || selected.playbook?.id || '-'}</strong></div>
+                <div className="list-item"><div>Trace</div><strong style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{String(investigation?.trace_id || selectedFull?.evidence_snapshot?.trace_id || '-')}</strong></div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
                 <button
@@ -256,7 +269,84 @@ export function EmailXdr({ role }: Props) {
                 >
                   Mark False Positive
                 </button>
+                <button
+                  className="btn secondary"
+                  onClick={async () => {
+                    try {
+                      await bulkLabelEmailSecurityIncidents({
+                        incident_ids: [selected.id],
+                        outcome_type: 'human_verdict',
+                        outcome_value: 'true_positive',
+                        actor_role: role,
+                        note: actionNote || 'Mark true positive',
+                      });
+                      setActionMsg('Recorded: true positive.');
+                    } catch {
+                      setActionMsg('Failed to record true positive.');
+                    }
+                  }}
+                >
+                  Mark True Positive
+                </button>
                 <button className="btn ghost" onClick={() => setSelected(null)}>Close</button>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <input
+                  className="modal-input"
+                  style={{ marginTop: 0 }}
+                  placeholder="Optional action note"
+                  value={actionNote}
+                  onChange={(e) => setActionNote(e.target.value)}
+                />
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div className="page-sub" style={{ fontWeight: 600 }}>Trust Case</div>
+                <pre className="panel" style={{ maxHeight: 220, overflow: 'auto' }}>
+                  {JSON.stringify(investigation?.trust_case || selectedFull?.evidence_snapshot?.trust_case || {}, null, 2)}
+                </pre>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div className="page-sub" style={{ fontWeight: 600 }}>Explain</div>
+                <pre className="panel" style={{ maxHeight: 220, overflow: 'auto' }}>
+                  {JSON.stringify(investigation?.explain || {
+                    score_breakdown: investigation?.score_breakdown || {},
+                    access_policy: investigation?.access_policy || selectedFull?.evidence_snapshot?.access_policy || {},
+                    sandbox_ioc_stage: investigation?.sandbox_ioc_stage || selectedFull?.evidence_snapshot?.sandbox_ioc_stage || {},
+                  }, null, 2)}
+                </pre>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div className="page-sub" style={{ fontWeight: 600 }}>Timeline</div>
+                <pre className="panel" style={{ maxHeight: 220, overflow: 'auto' }}>
+                  {JSON.stringify({
+                    summary: investigation?.timeline_summary || {},
+                    events: (investigation?.timeline || []).slice(0, 40),
+                  }, null, 2)}
+                </pre>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                {(investigation?.recommended_actions || []).slice(0, 8).map((act) => (
+                  <button
+                    className="btn secondary"
+                    key={act.id}
+                    onClick={async () => {
+                      try {
+                        await submitEmailSecurityInvestigationAction(selected.id, { action: act.id, note: actionNote || undefined });
+                        setActionMsg(`Action recorded: ${act.label}`);
+                        const inv = await fetchEmailSecurityInvestigation(selected.id);
+                        setInvestigation(inv || null);
+                      } catch {
+                        setActionMsg(`Failed action: ${act.label}`);
+                      }
+                    }}
+                  >
+                    {act.label}
+                  </button>
+                ))}
               </div>
 
               <div style={{ marginTop: 10 }}>
@@ -297,4 +387,3 @@ export function EmailXdr({ role }: Props) {
     </div>
   );
 }
-

@@ -12,6 +12,6 @@ def test_camera_ui_capture_and_upload():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto("http://127.0.0.1:8081/static/camera.html")
+        page.goto("http://127.0.0.1:8080/static/camera.html")
         assert "Camera Upload Demo" in page.content()
         browser.close()

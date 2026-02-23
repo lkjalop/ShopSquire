@@ -78,7 +78,7 @@ if not origins:
 cd frontend && npm run dev  # Note the port (usually 5173)
 
 # 2. Test CORS preflight
-curl -X OPTIONS http://localhost:8000/api/v1/health \
+curl -X OPTIONS http://localhost:8080/api/v1/health \
   -H "Origin: http://localhost:5173" \
   -H "Access-Control-Request-Method: GET" \
   -v 2>&1 | grep -i "access-control"
@@ -113,7 +113,7 @@ import httpx
 import sys
 from typing import Dict, List, Tuple
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8080"
 
 HEALTH_CHECKS: List[Tuple[str, str, str]] = [
     ("Health", "GET", "/api/v1/health"),

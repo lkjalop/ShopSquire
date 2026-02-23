@@ -23,6 +23,7 @@ export default function CartPanel({
   onAdd: (sku: string) => Promise<void>;
   onTraceId?: (traceId: string | null) => void;
 }) {
+  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const [upsells, setUpsells] = useState<Product[]>([]);
   const [upsellTraceId, setUpsellTraceId] = useState<string | null>(null);
   const [loadingUpsell, setLoadingUpsell] = useState(false);
@@ -48,7 +49,8 @@ export default function CartPanel({
         u.searchParams.set('uid', uid || 'demo-user');
         u.searchParams.set('query', upsellQuery);
         const r = await fetch(u.toString(), {
-          headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+          credentials: 'include',
+          headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
         });
         const j = await safeJson(r);
         if (!r.ok || !j) throw new Error('upsell_failed');
@@ -80,7 +82,7 @@ export default function CartPanel({
     return () => {
       mounted = false;
     };
-  }, [uid, upsellQuery]);
+  }, [API_KEY, uid, upsellQuery]);
 
   useEffect(() => {
     onTraceId?.(upsellTraceId);

@@ -10,7 +10,7 @@ import sys
 
 import os
 
-BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8081")
+BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8080")
 
 # Which endpoints should use merchant vs owner API key
 HEALTH_CHECKS = [
@@ -90,7 +90,7 @@ except ImportError:
     sys.exit(1)
 
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://localhost:8080"
 
 HEALTH_CHECKS: List[Tuple[str, str, str, Dict]] = [
     # (name, method, path, body)

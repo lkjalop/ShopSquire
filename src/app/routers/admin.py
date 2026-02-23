@@ -26,7 +26,9 @@ from src.app.services.pii_crypto import rotate_encrypted_pii_columns
 from src.app.services.secrets_manager import get_secret_required
 from src.app.security.threshold_tuning import recompute_thresholds_from_corrections, get_runtime_thresholds
 from src.app.services.checkout_upsell import upsell_performance_snapshot
+from src.app.services.trace_contracts import validate_incident_matrix_gate
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
+from src.app.services.timescale_admin import detect_timescale_state, apply_timescale_phase_b, apply_timescale_phase_c
 import ipaddress
 from urllib.parse import urlparse
 
@@ -66,7 +68,22 @@ def db_readiness(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))
                     ts_ready = False
     except Exception as e:
         err = str(e)
-    return {"engine": url, "dialect": dialect, "connected": db_ok, "migrations_ok": mig_ok, "timescale_ready": ts_ready, "error": err}
+    timescale = {}
+    if db_ok:
+        try:
+            with db_session() as db:
+                timescale = detect_timescale_state(db)
+        except Exception:
+            timescale = {}
+    return {
+        "engine": url,
+        "dialect": dialect,
+        "connected": db_ok,
+        "migrations_ok": mig_ok,
+        "timescale_ready": ts_ready,
+        "timescale": timescale,
+        "error": err,
+    }
 
 
 @router.post("/db/ensure-timescale")
@@ -80,6 +97,7 @@ def ensure_timescale(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPE
     from src.app.models.init_db import ensure_metadata
     eng = get_engine()
     url = str(getattr(eng, "url", ""))
+    phase_b = {"applied": [], "errors": [], "skipped": []}
     try:
         with db_session() as db:
             if url.startswith("postgres"):
@@ -87,6 +105,7 @@ def ensure_timescale(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPE
                     db.execute(_text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
                 except Exception:
                     pass
+                phase_b = apply_timescale_phase_b(db)
             ensure_metadata()
             try:
                 db.commit()
@@ -95,7 +114,41 @@ def ensure_timescale(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPE
     except Exception:
         pass
     # Return readiness state
-    return db_readiness()
+    out = db_readiness()
+    out["phase_b"] = phase_b
+    return out
+
+
+@router.post("/db/timescale/phase-b")
+def ensure_timescale_phase_b(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))):
+    from src.app.models.db import db_session
+    result = {"applied": [], "errors": [], "skipped": []}
+    try:
+        with db_session() as db:
+            result = apply_timescale_phase_b(db)
+            try:
+                db.commit()
+            except Exception:
+                pass
+    except Exception as exc:
+        result["errors"].append({"step": "phase_b", "error": str(exc)})
+    return {"ok": len(result.get("errors") or []) == 0, "phase_b": result, "readiness": db_readiness(role=role)}
+
+
+@router.post("/db/timescale/phase-c")
+def ensure_timescale_phase_c(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))):
+    from src.app.models.db import db_session
+    result = {"applied": [], "errors": [], "skipped": []}
+    try:
+        with db_session() as db:
+            result = apply_timescale_phase_c(db)
+            try:
+                db.commit()
+            except Exception:
+                pass
+    except Exception as exc:
+        result["errors"].append({"step": "phase_c", "error": str(exc)})
+    return {"ok": len(result.get("errors") or []) == 0, "phase_c": result, "readiness": db_readiness(role=role)}
 
 
 @router.get("/powerbi/dataset")
@@ -3112,6 +3165,14 @@ def update_incident_status(incident_id: str, status: str, role: str = Depends(re
         span.set_attribute("incident.status", status)
         try:
             with db_session() as db:
+                gate_enabled = str(os.getenv("INCIDENT_MATRIX_GATE_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+                if gate_enabled and str(status or "").strip().lower() in {"resolved", "closed"}:
+                    gate = validate_incident_matrix_gate(db, incident_id)
+                    if not gate.get("ok"):
+                        raise HTTPException(
+                            status_code=409,
+                            detail={"error": "security_matrix_incomplete", "gate": gate},
+                        )
                 res = db.execute("UPDATE incidents SET status = :status WHERE id = :id", {"status": status, "id": incident_id})
                 db.commit()
                 if res.rowcount == 0:
@@ -3171,25 +3232,36 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
     try:
         # Test toggle: skip heavy aggregation during chaos tests
         try:
-            if str(os.getenv("TEST_SKIP_ADMIN_HEAVY", "0")).lower() in ("1", "true", "yes"):
+            skip_heavy = str(os.getenv("TEST_SKIP_ADMIN_HEAVY", "0")).lower() in ("1", "true", "yes")
+            app_env = str(os.getenv("APP_ENV", "") or "").lower()
+            if skip_heavy and app_env in ("test", "ci"):
                 return {"revenue_today": 0, "orders_today": 0, "autonomy_percent": 0, "security_status": "unknown", "critical_events_24h": 0, "approval_pending": 0, "decision_series": [], "approval_latency_p95_sec": 0.0, "policy_reject_rate": 0.0, "uptime_seconds": int(time.time() - _SERVER_START), "ragas_eval_enabled": False, "ragas_eval_counts": {}, "approval_pending": 0}
         except Exception:
             pass
         with db_session() as db:
             try:
-                rev = db.execute("SELECT COALESCE(SUM(total_cents),0) FROM orders WHERE DATE(created_at) = :day", {"day": today}).scalar()
-                cnt = db.execute("SELECT COUNT(*) FROM orders WHERE DATE(created_at) = :day", {"day": today}).scalar()
+                rev = db.execute(
+                    sql_text("SELECT COALESCE(SUM(total_cents),0) FROM orders WHERE DATE(created_at) = :day"),
+                    {"day": today},
+                ).scalar()
+                cnt = db.execute(
+                    sql_text("SELECT COUNT(*) FROM orders WHERE DATE(created_at) = :day"),
+                    {"day": today},
+                ).scalar()
                 data["revenue_today"] = round(float(rev or 0) / 100, 2)
                 data["orders_today"] = int(cnt or 0)
             except Exception:
                 pass
             try:
                 total = db.execute(
-                    "SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :start_ts",
+                    sql_text("SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :start_ts"),
                     {"start_ts": start},
                 ).scalar()
                 auto = db.execute(
-                    "SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :start_ts AND approval_required = false",
+                    sql_text(
+                        "SELECT COUNT(*) FROM decision_logs "
+                        "WHERE valid_from >= :start_ts AND (approval_required = false OR approval_required = 0)"
+                    ),
                     {"start_ts": start},
                 ).scalar()
                 data["autonomy_percent"] = int(round((auto or 0) / (total or 1) * 100))
@@ -3198,7 +3270,7 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
             try:
                 since = (datetime.utcnow() - timedelta(days=1)).isoformat()
                 critical = db.execute(
-                    "SELECT COUNT(*) FROM security_events WHERE event_time >= :since AND severity = 'critical'",
+                    sql_text("SELECT COUNT(*) FROM security_events WHERE event_time >= :since AND severity = 'critical'"),
                     {"since": since},
                 ).scalar()
                 data["critical_events_24h"] = int(critical or 0)
@@ -3208,7 +3280,10 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
             try:
                 since = datetime.utcnow() - timedelta(days=1)
                 rows = db.execute(
-                    "SELECT valid_from, approved_at FROM decision_logs WHERE approved_at IS NOT NULL AND valid_from >= :since",
+                    sql_text(
+                        "SELECT valid_from, approved_at FROM decision_logs "
+                        "WHERE approved_at IS NOT NULL AND valid_from >= :since"
+                    ),
                     {"since": since},
                 ).fetchall()
                 latencies = []
@@ -3229,11 +3304,11 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
 
             try:
                 total = db.execute(
-                    "SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :since",
+                    sql_text("SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :since"),
                     {"since": since},
                 ).scalar()
                 rejected = db.execute(
-                    "SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :since AND execution_status = 'rejected'",
+                    sql_text("SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :since AND execution_status = 'rejected'"),
                     {"since": since},
                 ).scalar()
                 if total:
@@ -3243,7 +3318,10 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
 
             try:
                 rows = db.execute(
-                    "SELECT DATE(valid_from) as day, COUNT(*) as count FROM decision_logs WHERE DATE(valid_from) >= :start GROUP BY DATE(valid_from)",
+                    sql_text(
+                        "SELECT DATE(valid_from) as day, COUNT(*) as count "
+                        "FROM decision_logs WHERE DATE(valid_from) >= :start GROUP BY DATE(valid_from)"
+                    ),
                     {"start": start},
                 ).fetchall()
                 counts = {str(r[0]): int(r[1]) for r in rows}
@@ -3257,9 +3335,7 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
             # RAGAS evaluation counts (optional table) - only if enabled
             try:
                 if flags.get("RAGAS_EVAL_ENABLED", False):
-                    rows = db.execute(
-                        "SELECT result, COUNT(*) FROM ragas_evaluations GROUP BY result",
-                    ).fetchall()
+                    rows = db.execute(sql_text("SELECT result, COUNT(*) FROM ragas_evaluations GROUP BY result")).fetchall()
                     data["ragas_eval_counts"] = {str(r[0]): int(r[1]) for r in rows}
                 else:
                     data["ragas_eval_counts"] = {}
@@ -3269,10 +3345,9 @@ def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
         pass
 
     try:
-        from src.app.models.db import db_session
         with db_session() as db:
             try:
-                row = db.execute("SELECT COUNT(*) FROM approvals WHERE status = 'pending'").fetchone()
+                row = db.execute(sql_text("SELECT COUNT(*) FROM approvals WHERE status = 'pending'")).fetchone()
                 data["approval_pending"] = int(row[0]) if row else 0
             except Exception:
                 data["approval_pending"] = 0

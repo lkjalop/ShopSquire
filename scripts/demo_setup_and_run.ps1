@@ -45,8 +45,8 @@ try {
         Write-Host "Skipping demo seeding (SEED_ON_STARTUP=$seedOnStartup)"
     }
 
-    Write-Host "Starting uvicorn (detached) on port 8081..."
-    Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory" -WorkingDirectory (Get-Location) -WindowStyle Hidden
+    Write-Host "Starting uvicorn (detached) on port 8080..."
+    Start-Process -FilePath $pythonExe -ArgumentList "-m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8080 --factory" -WorkingDirectory (Get-Location) -WindowStyle Hidden
     Write-Host "Server started (background). Wait a few seconds for startup then run scripts/demo_flows.ps1"
 } finally {
     Pop-Location

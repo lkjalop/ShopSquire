@@ -26,19 +26,19 @@ def _as_float(v: Any, default: float = 0.0) -> float:
 
 def _confusable_skeleton(text: str) -> str:
     conf_map = {
-        "а": "a",
-        "е": "e",
-        "о": "o",
-        "р": "p",
-        "с": "c",
-        "у": "y",
-        "х": "x",
-        "і": "i",
-        "ј": "j",
-        "ӏ": "l",
-        "ԁ": "d",
-        "һ": "h",
-        "ո": "n",
+        "\u0430": "a",
+        "\u0435": "e",
+        "\u043e": "o",
+        "\u0440": "p",
+        "\u0441": "c",
+        "\u0443": "y",
+        "\u0445": "x",
+        "\u0456": "i",
+        "\u0458": "j",
+        "\u04cf": "l",
+        "\u0501": "d",
+        "\u04bb": "h",
+        "\u0578": "n",
     }
     norm = unicodedata.normalize("NFKC", text or "")
     return "".join(conf_map.get(ch, ch) for ch in norm)
@@ -57,6 +57,9 @@ def _extract_structured_fields(text: str) -> Dict[str, Any]:
     m_vendor = re.search(r"(?im)^\s*([A-Za-z0-9 .&,'-]{3,80}(?:Pty Ltd|Ltd|LLC|Inc\.?|GmbH))\s*$", t)
     if m_vendor:
         out["vendor_name"] = m_vendor.group(1).strip()
+    # detect common placeholder/template ABN strings like "[YOUR ABN]" or "YOUR ABN"
+    if re.search(r"\[?YOUR\s*ABN\b", t, re.IGNORECASE):
+        out["abn_placeholder"] = True
     m_abn = re.search(r"\bABN\s*:\s*([0-9 ]{11,20})", t, re.IGNORECASE)
     if m_abn:
         out["abn"] = re.sub(r"\s+", "", m_abn.group(1))
@@ -305,6 +308,9 @@ def _forensics_from_attachments(attachments: List[Dict[str, Any]]) -> Tuple[List
 def _signal_weight(ind_type: str) -> float:
     weights = {
         "vendor_homoglyph_impersonation": 35.0,
+        "account_name_mismatch": 35.0,
+        "abn_placeholder_detected": 10.0,
+        "invoice_amount_anomaly": 25.0,
         "confusable_homoglyph_domain": 20.0,
         "vendor_master_mismatch": 18.0,
         "approved_contact_mismatch": 15.0,
@@ -321,6 +327,10 @@ def _signal_weight(ind_type: str) -> float:
         "pdf_object_stream_heavy": 12.0,
         "bank_fingerprint_extracted_mismatch": 30.0,
         "bank_fields_present_in_attachment": 10.0,
+        "pdf_producer_vulnerable": 22.0,
+        "pdf_producer_anomalous": 8.0,
+        # Informational only: missing baseline should not increase risk by itself.
+        "vendor_baseline_missing": 0.0,
     }
     return float(weights.get(ind_type, 8.0))
 
@@ -350,8 +360,10 @@ def analyze_email_artifacts(email: Dict[str, Any]) -> Dict[str, Any]:
         if et:
             text_parts.append(et)
     raw_text = "\n".join([x for x in text_parts if x])
+    # keep both raw and normalized field extraction to detect confusable/homoglyph differences
     normalized_text = normalize_confusable_text(raw_text)
     fields = _extract_structured_fields(normalized_text)
+    fields_raw = _extract_structured_fields(raw_text)
 
     indicators: List[Dict[str, Any]] = []
     if normalized_text and normalized_text != raw_text:
@@ -362,10 +374,66 @@ def analyze_email_artifacts(email: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": "Unicode confusable normalization changed extracted text",
             }
         )
+    # Detect vendor homoglyph impersonation in PDF/body vendor name.
+    # Some malicious samples use non-Latin confusables that break strict ASCII extraction
+    # in the raw path, so include a fallback when normalization materially changes text.
+    try:
+        raw_vendor = str(fields_raw.get("vendor_name") or "").strip()
+        norm_vendor = str(fields.get("vendor_name") or "").strip()
+        if raw_vendor and norm_vendor and raw_vendor != norm_vendor:
+            indicators.append(
+                {
+                    "type": "vendor_homoglyph_impersonation",
+                    "value": {"raw": raw_vendor, "normalized": norm_vendor},
+                    "reason": "Vendor name contains Unicode confusable characters or mixed scripts",
+                }
+            )
+        elif not raw_vendor and norm_vendor and normalized_text != raw_text:
+            indicators.append(
+                {
+                    "type": "vendor_homoglyph_impersonation",
+                    "value": {"raw": None, "normalized": norm_vendor},
+                    "reason": "Unicode confusable normalization changed vendor-like text",
+                }
+            )
+    except Exception:
+        pass
     baseline_ind, baseline_checks = _cross_check(email, fields)
     forensics_ind, forensics_details = _forensics_from_attachments(attachments)
     indicators.extend(baseline_ind)
     indicators.extend(forensics_ind)
+
+    # Account name vs vendor name cross-check (quick P0 fix)
+    try:
+        vendor_name = str(fields.get("vendor_name") or "").strip()
+        for a in attachments or []:
+            acct = str((a or {}).get("extracted_account_name") or (a or {}).get("account_name") or "").strip()
+            if acct and vendor_name:
+                # normalize both for confusables and compare simple equality; conservative quick check
+                if normalize_confusable_text(acct).lower() != normalize_confusable_text(vendor_name).lower():
+                    indicators.append(
+                        {
+                            "type": "account_name_mismatch",
+                            "value": {"account_name": acct, "vendor_name": vendor_name},
+                            "reason": "Account name in attachment does not match extracted vendor name",
+                        }
+                    )
+                    break
+    except Exception:
+        pass
+
+    # ABN placeholder detection
+    try:
+        if fields.get("abn_placeholder"):
+            indicators.append(
+                {
+                    "type": "abn_placeholder_detected",
+                    "value": True,
+                    "reason": "ABN placeholder or template token detected in document",
+                }
+            )
+    except Exception:
+        pass
 
     # Evidence fusion: if attachment parsing extracted bank details, compare derived fingerprint vs trusted baseline
     # when baseline is a real fingerprint (64-hex).
@@ -394,6 +462,67 @@ def analyze_email_artifacts(email: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # S-006: PDF producer CVE/KEV check
+    try:
+        from src.app.security.pdf_producer_cve import check_attachment_producers
+        producer_hits = check_attachment_producers(attachments)
+        for hit in producer_hits:
+            if hit.get("flagged"):
+                indicators.append(
+                    {
+                        "type": "pdf_producer_vulnerable",
+                        "value": {
+                            "label": hit.get("label"),
+                            "producer": hit.get("producer"),
+                            "creator": hit.get("creator"),
+                            "cves": hit.get("cves", []),
+                            "severity": hit.get("severity"),
+                            "attachment": hit.get("attachment_name"),
+                            "kev_matches": hit.get("kev_matches", []),
+                        },
+                        "reason": f"PDF created by known-vulnerable tool: {hit.get('label')}",
+                    }
+                )
+            elif hit.get("anomalous"):
+                indicators.append(
+                    {
+                        "type": "pdf_producer_anomalous",
+                        "value": {
+                            "label": hit.get("anomalous_label"),
+                            "producer": hit.get("producer"),
+                            "attachment": hit.get("attachment_name"),
+                        },
+                        "reason": f"PDF created by unusual tool: {hit.get('anomalous_label')}",
+                    }
+                )
+    except Exception:
+        pass
+
+    # Per-vendor invoice amount anomaly check (S-005)
+    try:
+        from src.app.security.vendor_baselines import check_anomaly as _check_anomaly
+        total_amount = fields.get("total_amount")
+        vendor_domain = str(email.get("vendor_domain") or "").strip().lower()
+        if total_amount and vendor_domain:
+            anomaly = _check_anomaly(vendor_domain, float(total_amount))
+            if anomaly.get("anomaly"):
+                indicators.append(
+                    {
+                        "type": "invoice_amount_anomaly",
+                        "value": anomaly,
+                        "reason": anomaly.get("reason", "Invoice amount anomaly detected"),
+                    }
+                )
+    except Exception:
+        pass
+
+    # OOB verification flag (S-004)
+    try:
+        from src.app.security.oob_verification import requires_oob as _requires_oob
+        oob_needed = _requires_oob(indicators)
+    except Exception:
+        oob_needed = False
+
     signal_scores = compute_signal_scores(indicators)
     return {
         "parsed_fields": fields,
@@ -402,4 +531,5 @@ def analyze_email_artifacts(email: Dict[str, Any]) -> Dict[str, Any]:
         "baseline_checks": baseline_checks,
         "forensics_details": forensics_details,
         "signal_scores": signal_scores,
+        "requires_oob": oob_needed,
     }

@@ -1,11 +1,11 @@
 <#
-Run a small set of demo flows against a running local server (http://127.0.0.1:8081).
+Run a small set of demo flows against a running local server (http://127.0.0.1:8080).
 Sends requests that produce decision logs, traceable activity, and a ticket creation.
 
 Usage:
   .\scripts\demo_flows.ps1
 #>
-$base = "http://127.0.0.1:8081"
+$base = "http://127.0.0.1:8080"
 # Use `DEMO_API_KEY` env var if present, otherwise default to local developer key
 $apiKey = $env:DEMO_API_KEY
 if (-not $apiKey) { $apiKey = 'local-developer-key' }

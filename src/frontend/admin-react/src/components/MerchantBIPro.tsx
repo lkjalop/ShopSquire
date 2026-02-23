@@ -24,6 +24,155 @@ function addDays(d: Date, days: number) {
   return x;
 }
 
+function hashSeed(input: string) {
+  let h = 0;
+  for (let i = 0; i < input.length; i += 1) {
+    h = (h * 31 + input.charCodeAt(i)) % 2147483647;
+  }
+  return Math.abs(h || 1);
+}
+
+function buildDeterministicTransactionDemo(start: string, end: string, granularity: Granularity): { series: TransactionTimeseriesPoint[]; totals: any } {
+  const out: TransactionTimeseriesPoint[] = [];
+  const seed = hashSeed(`${start}:${end}:${granularity}`);
+  const from = new Date(`${start}T00:00:00Z`);
+  const to = new Date(`${end}T00:00:00Z`);
+  let idx = 0;
+  const totals = { orders: 0, revenue: 0, paid: 0, refunded: 0, chargeback: 0, pending_payment: 0, aov: 0 };
+
+  const cursor = new Date(from.getTime());
+  while (cursor < to) {
+    const bucket = new Date(cursor.getTime());
+    let label = isoDate(bucket);
+    if (granularity === 'month') {
+      label = `${bucket.getUTCFullYear()}-${String(bucket.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    }
+    const orders = 24 + ((seed + idx * 17) % 43);
+    const unitPrice = 720 + ((seed + idx * 29) % 980);
+    const gross = Number(((orders * unitPrice) / 100).toFixed(2));
+    const paid = Math.max(0, Math.round(orders * 0.86));
+    const refunded = Math.max(0, Math.round(orders * 0.08));
+    const chargeback = Math.max(0, Math.round(orders * 0.02));
+    const pending = Math.max(0, orders - paid - refunded - chargeback);
+    out.push({
+      bucket: label,
+      orders,
+      revenue: gross,
+      paid,
+      refunded,
+      chargeback,
+      pending_payment: pending,
+    });
+    totals.orders += orders;
+    totals.revenue += gross;
+    totals.paid += paid;
+    totals.refunded += refunded;
+    totals.chargeback += chargeback;
+    totals.pending_payment += pending;
+    idx += 1;
+    if (granularity === 'month') {
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      cursor.setUTCDate(1);
+    } else {
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  }
+
+  totals.revenue = Number(totals.revenue.toFixed(2));
+  totals.aov = totals.orders > 0 ? Number((totals.revenue / totals.orders).toFixed(2)) : 0;
+  return { series: out, totals };
+}
+
+function buildDeterministicAttackDemo(hours: number): SecurityAttackBucket[] {
+  const days = Math.max(1, Math.min(50, Math.ceil(hours / 24)));
+  const now = new Date();
+  const types = ['email', 'cv', 'nlp', 'supply_chain', 'endpoint', 'network'];
+  const threats: Record<string, string> = {
+    email: 'bec',
+    cv: 'overlay',
+    nlp: 'prompt_injection',
+    supply_chain: 'supplier_takeover',
+    endpoint: 'lolbin',
+    network: 'c2_beacon',
+  };
+  const vectors: Record<string, string> = {
+    email: 'header',
+    cv: 'image_overlay',
+    nlp: 'instruction',
+    supply_chain: 'vendor_account',
+    endpoint: 'macro',
+    network: 'callback',
+  };
+  const seed = hashSeed(String(hours));
+  const out: SecurityAttackBucket[] = [];
+  for (let d = days - 1; d >= 0; d -= 1) {
+    const day = addDays(now, -d);
+    const hour = `${isoDate(day)}T12:00:00Z`;
+    for (let i = 0; i < types.length; i += 1) {
+      const t = types[i];
+      const count = 2 + ((seed + d * 13 + i * 11) % 16);
+      out.push({
+        hour,
+        security_type: t,
+        threat: threats[t] || 'unknown',
+        vector: vectors[t] || 'unknown',
+        count,
+      });
+    }
+  }
+  return out;
+}
+
+function buildDeterministicGeoDemo(hours: number): SecurityGeoAsnTrend[] {
+  const seed = hashSeed(String(hours));
+  const rows = [
+    ['AS15169', 'US'],
+    ['AS13335', 'US'],
+    ['AS4766', 'AU'],
+    ['AS16509', 'US'],
+    ['AS9009', 'DE'],
+    ['AS4837', 'CN'],
+  ];
+  return rows.map((row, idx) => {
+    const count = 8 + ((seed + idx * 7) % 35);
+    const geoTrust = idx < 2 ? 'high' : (idx < 4 ? 'medium' : 'low');
+    return {
+      asn: row[0],
+      country: row[1],
+      count,
+      network_confidence: Number((0.42 + ((seed + idx * 3) % 35) / 100).toFixed(3)),
+      network_confidence_avg: Number((0.42 + ((seed + idx * 3) % 35) / 100).toFixed(3)),
+      asn_risk_avg: Number((0.2 + ((seed + idx * 5) % 60) / 100).toFixed(3)),
+      vpn_or_hosting_hits: Math.max(0, Math.round(count * (idx >= 3 ? 0.45 : 0.2))),
+      velocity_anomaly_hits: Math.max(0, Math.round(count * (idx >= 4 ? 0.3 : 0.12))),
+      sender_tool_behavior_avg: Number((0.3 + ((seed + idx * 4) % 40) / 100).toFixed(3)),
+      ip_churn_velocity: Number((0.08 + ((seed + idx * 6) % 45) / 100).toFixed(3)),
+      geo_trust_level: geoTrust as 'low' | 'medium' | 'high',
+      last_seen: new Date().toISOString(),
+      business_contexts: { storefront: Math.max(1, Math.round(count * 0.6)) },
+      security_contexts: { auth_fail: Math.max(1, Math.round(count * 0.35)) },
+    };
+  });
+}
+
+function buildDeterministicOverview() {
+  return {
+    security_status: 'guarded',
+    critical_events_24h: 2,
+    autonomy_percent: 71,
+    approval_pending: 3,
+  };
+}
+
+function buildDeterministicUpsell() {
+  return {
+    ctr: 0.114,
+    add_to_cart_rate: 0.061,
+    blocked_poisoned_candidates: 2,
+    impressions: 1842,
+  };
+}
+
 function niceBucketLabel(bucket: string | null, granularity: Granularity) {
   if (!bucket) return '-';
   try {
@@ -200,22 +349,28 @@ function StackedByType({
 const bucketData: Record<string, Record<string, number>> = {};
 
 export function MerchantBIPro({ role }: Props) {
+  const allowSyntheticFallback = ((import.meta as any).env?.VITE_BI_ALLOW_SYNTHETIC_FALLBACK === '1');
   const [granularity, setGranularity] = useState<Granularity>('day');
   const [rangeKey, setRangeKey] = useState<'last30' | 'last90' | 'janfeb'>('janfeb');
   const [tx, setTx] = useState<{ series: TransactionTimeseriesPoint[]; totals: any } | null>(null);
+  const [txDemoSeeded, setTxDemoSeeded] = useState(false);
   const [txLoading, setTxLoading] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
 
   const [attackBuckets, setAttackBuckets] = useState<SecurityAttackBucket[]>([]);
+  const [attackDemoSeeded, setAttackDemoSeeded] = useState(false);
   const [attackLoading, setAttackLoading] = useState(false);
   const [attackError, setAttackError] = useState<string | null>(null);
 
   const [geo, setGeo] = useState<SecurityGeoAsnTrend[]>([]);
+  const [geoDemoSeeded, setGeoDemoSeeded] = useState(false);
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
 
   const [overview, setOverview] = useState<any>(null);
   const [upsell, setUpsell] = useState<any>(null);
+  const [overviewDemoSeeded, setOverviewDemoSeeded] = useState(false);
+  const [upsellDemoSeeded, setUpsellDemoSeeded] = useState(false);
 
   const { start, end, hours } = useMemo(() => {
     const now = new Date();
@@ -236,15 +391,33 @@ export function MerchantBIPro({ role }: Props) {
     let cancelled = false;
     setTxLoading(true);
     setTxError(null);
+    setTxDemoSeeded(false);
     fetchTransactionTimeseries({ granularity, start, end })
       .then((r) => {
         if (cancelled) return;
-        setTx({ series: r.series || [], totals: r.totals || {} });
+        const series = Array.isArray(r.series) ? r.series : [];
+        if (series.length > 0) {
+          setTx({ series, totals: r.totals || {} });
+          setTxDemoSeeded(false);
+          return;
+        }
+        if (allowSyntheticFallback) {
+          setTx(buildDeterministicTransactionDemo(start, end, granularity));
+          setTxDemoSeeded(true);
+        } else {
+          setTx({ series: [], totals: {} });
+          setTxError('No transaction data available for selected range.');
+        }
       })
       .catch((e: any) => {
         if (cancelled) return;
         setTxError(e.message || 'Failed to load transactions');
-        setTx(null);
+        if (allowSyntheticFallback) {
+          setTx(buildDeterministicTransactionDemo(start, end, granularity));
+          setTxDemoSeeded(true);
+        } else {
+          setTx({ series: [], totals: {} });
+        }
       })
       .finally(() => {
         if (!cancelled) setTxLoading(false);
@@ -259,12 +432,32 @@ export function MerchantBIPro({ role }: Props) {
     const load = async () => {
       setAttackLoading(true);
       setAttackError(null);
+      setAttackDemoSeeded(false);
       try {
         const data = await fetchSecurityAttackTimeseries(hours, 8000);
         if (cancelled) return;
-        setAttackBuckets(Array.isArray(data.buckets) ? data.buckets : []);
+        const buckets = Array.isArray(data.buckets) ? data.buckets : [];
+        if (buckets.length > 0) {
+          setAttackBuckets(buckets);
+          setAttackDemoSeeded(false);
+          return;
+        }
+        if (allowSyntheticFallback) {
+          setAttackBuckets(buildDeterministicAttackDemo(hours));
+          setAttackDemoSeeded(true);
+        } else {
+          setAttackBuckets([]);
+          setAttackError('No security trend data available.');
+        }
       } catch (e: any) {
-        if (!cancelled) setAttackError(e.message || 'Failed to load security trends');
+        if (cancelled) return;
+        setAttackError(e.message || 'Failed to load security trends');
+        if (allowSyntheticFallback) {
+          setAttackBuckets(buildDeterministicAttackDemo(hours));
+          setAttackDemoSeeded(true);
+        } else {
+          setAttackBuckets([]);
+        }
       } finally {
         if (!cancelled) setAttackLoading(false);
       }
@@ -280,12 +473,32 @@ export function MerchantBIPro({ role }: Props) {
     const load = async () => {
       setGeoLoading(true);
       setGeoError(null);
+      setGeoDemoSeeded(false);
       try {
         const data = await fetchSecurityGeoAsnTrends(hours, 4000);
         if (cancelled) return;
-        setGeo((data.trends || []).slice(0, 10));
+        const trends = Array.isArray(data.trends) ? data.trends.slice(0, 10) : [];
+        if (trends.length > 0) {
+          setGeo(trends);
+          setGeoDemoSeeded(false);
+          return;
+        }
+        if (allowSyntheticFallback) {
+          setGeo(buildDeterministicGeoDemo(hours));
+          setGeoDemoSeeded(true);
+        } else {
+          setGeo([]);
+          setGeoError('No geo/ASN trend data available.');
+        }
       } catch (e: any) {
-        if (!cancelled) setGeoError(e.message || 'Failed to load geo/ASN trends');
+        if (cancelled) return;
+        setGeoError(e.message || 'Failed to load geo/ASN trends');
+        if (allowSyntheticFallback) {
+          setGeo(buildDeterministicGeoDemo(hours));
+          setGeoDemoSeeded(true);
+        } else {
+          setGeo([]);
+        }
       } finally {
         if (!cancelled) setGeoLoading(false);
       }
@@ -298,18 +511,52 @@ export function MerchantBIPro({ role }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchOverview(), fetchUpsellPerformance(24, 6)])
-      .then(([ov, up]) => {
+    setOverviewDemoSeeded(false);
+    setUpsellDemoSeeded(false);
+    Promise.allSettled([fetchOverview(), fetchUpsellPerformance(24, 6)])
+      .then((res) => {
         if (cancelled) return;
-        setOverview(ov);
-        setUpsell(up);
+        const ov = res[0];
+        const up = res[1];
+        if (ov.status === 'fulfilled' && ov.value) {
+          setOverview(ov.value);
+          setOverviewDemoSeeded(false);
+        } else {
+          if (allowSyntheticFallback) {
+            setOverview(buildDeterministicOverview());
+            setOverviewDemoSeeded(true);
+          } else {
+            setOverview({ security_status: 'unknown', critical_events_24h: 0, autonomy_percent: 0, approval_pending: 0 });
+          }
+        }
+        if (up.status === 'fulfilled' && up.value) {
+          setUpsell(up.value);
+          setUpsellDemoSeeded(false);
+        } else {
+          if (allowSyntheticFallback) {
+            setUpsell(buildDeterministicUpsell());
+            setUpsellDemoSeeded(true);
+          } else {
+            setUpsell({ ctr: 0, add_to_cart_rate: 0, blocked_poisoned_candidates: 0, impressions: 0 });
+          }
+        }
       })
-      .catch(() => {})
-      .finally(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        if (allowSyntheticFallback) {
+          setOverview(buildDeterministicOverview());
+          setUpsell(buildDeterministicUpsell());
+          setOverviewDemoSeeded(true);
+          setUpsellDemoSeeded(true);
+        } else {
+          setOverview({ security_status: 'unknown', critical_events_24h: 0, autonomy_percent: 0, approval_pending: 0 });
+          setUpsell({ ctr: 0, add_to_cart_rate: 0, blocked_poisoned_candidates: 0, impressions: 0 });
+        }
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [allowSyntheticFallback]);
 
   const txOrdersPoints = useMemo(() => {
     const series = tx?.series || [];
@@ -330,7 +577,7 @@ export function MerchantBIPro({ role }: Props) {
     return out.length ? out : core;
   }, [attackBuckets]);
 
-  const { secBuckets, secBucketLabel } = useMemo(() => {
+  const { secBuckets } = useMemo(() => {
     const map: Record<string, Record<string, number>> = {};
     const labelFor = (isoHour: string) => {
       try {
@@ -352,7 +599,7 @@ export function MerchantBIPro({ role }: Props) {
     for (const k of Object.keys(bucketData)) delete bucketData[k];
     for (const k of Object.keys(map)) bucketData[k] = map[k];
     const keys = Object.keys(map).sort();
-    return { secBuckets: keys, secBucketLabel: labelFor };
+    return { secBuckets: keys };
   }, [attackBuckets, granularity]);
 
   const colorForType = (t: string) => {
@@ -413,6 +660,20 @@ export function MerchantBIPro({ role }: Props) {
     <div className="stagger">
       {headline}
       {kpis}
+      {allowSyntheticFallback && (txDemoSeeded || attackDemoSeeded || geoDemoSeeded || overviewDemoSeeded || upsellDemoSeeded) && (
+        <div className="callout" style={{ marginTop: 14 }}>
+          Demo-seeded data active for:
+          {' '}
+          {[
+            txDemoSeeded ? 'transactions' : null,
+            attackDemoSeeded ? 'security activity' : null,
+            geoDemoSeeded ? 'geo/ASN' : null,
+            overviewDemoSeeded ? 'overview' : null,
+            upsellDemoSeeded ? 'upsell' : null,
+          ].filter(Boolean).join(', ')}
+          .
+        </div>
+      )}
 
       {(txLoading || txError) && (
         <div className="callout" style={{ marginTop: 14 }}>
@@ -436,9 +697,11 @@ export function MerchantBIPro({ role }: Props) {
             <div className="list-item"><div>Chargeback</div><strong>{Number(tx?.totals?.chargeback || 0).toLocaleString()}</strong></div>
             <div className="list-item"><div>Pending payment</div><strong>{Number(tx?.totals?.pending_payment || 0).toLocaleString()}</strong></div>
           </div>
-          <div className="page-sub" style={{ marginTop: 10 }}>
-            Note: demo data uses synthetic distributions; in prod this becomes your ground truth.
-          </div>
+          {allowSyntheticFallback && (
+            <div className="page-sub" style={{ marginTop: 10 }}>
+              Note: demo data uses synthetic distributions; in prod this becomes your ground truth.
+            </div>
+          )}
         </div>
 
         <div className="card">
@@ -523,4 +786,3 @@ export function MerchantBIPro({ role }: Props) {
     </div>
   );
 }
-

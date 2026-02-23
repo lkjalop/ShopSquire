@@ -8,7 +8,7 @@ import requests
 OUT_DIR = Path("runs")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-PORT = os.getenv("PLAYWRIGHT_TEST_PORT", os.getenv("API_PORT", "8081"))
+PORT = os.getenv("PLAYWRIGHT_TEST_PORT", os.getenv("API_PORT", "8080"))
 HOST = os.getenv("PLAYWRIGHT_TEST_HOST", "127.0.0.1")
 WAIT_FOR_RESULTS = int(os.getenv("WAIT_FOR_RESULTS_TIMEOUT", "12"))
 BASE = os.getenv("E2E_BASE_URL", f"http://{HOST}:{PORT}")

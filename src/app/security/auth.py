@@ -385,8 +385,14 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
         authorization: Optional[str] = Header(default=None, alias="Authorization"),
         request: Request = None,  # FastAPI injects Request
     ) -> str:
+        effective_key = x_api_key
+        try:
+            if not effective_key and request is not None:
+                effective_key = request.cookies.get("shopsquire_api_key")
+        except Exception:
+            effective_key = x_api_key
         # Prefer API key; otherwise try OIDC JWT
-        role = get_role_from_key(x_api_key)
+        role = get_role_from_key(effective_key)
         if role and _admin_oidc_required() and _is_admin_operator_scope(allowed) and role in (ROLE_OWNER, ROLE_DEVELOPER):
             # In hardened mode, owner/developer accesses require bearer/OIDC.
             role = None
@@ -410,7 +416,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                 pass
         # Backwards-compatible tolerant behavior for local/dev merchant key
         try:
-            if not role and x_api_key and x_api_key == _role_keys().get(ROLE_MERCHANT):
+            if not role and effective_key and effective_key == _role_keys().get(ROLE_MERCHANT):
                 role = ROLE_MERCHANT
         except Exception:
             pass
@@ -420,7 +426,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                     _emit_iam(
                         action="authn_check",
                         outcome="missing",
-                        subject={"actor_id": (x_api_key or "bearer"), "role": None},
+                        subject={"actor_id": (effective_key or "bearer"), "role": None},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                         risk="medium",
                         tags=["authn", "oidc" if authorization else "api_key"],
@@ -431,7 +437,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing credentials")
         if role not in allowed:
             try:
-                if x_api_key and x_api_key == _role_keys().get(ROLE_MERCHANT) and ROLE_MERCHANT in allowed:
+                if effective_key and effective_key == _role_keys().get(ROLE_MERCHANT) and ROLE_MERCHANT in allowed:
                     return ROLE_MERCHANT
             except Exception:
                 pass
@@ -440,7 +446,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                     _emit_iam(
                         action="authz_check",
                         outcome="denied",
-                        subject={"actor_id": (x_api_key or "bearer"), "role": role},
+                        subject={"actor_id": (effective_key or "bearer"), "role": role},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                         risk="medium",
                         tags=["authz"],
@@ -461,7 +467,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                         _emit_iam(
                             action="authz_check",
                             outcome="denied",
-                            subject={"actor_id": (x_api_key or "bearer"), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
+                            subject={"actor_id": (effective_key or "bearer"), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
                             resource=(ctx or {}).get("resource") or {"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                             risk="high" if ((ctx or {}).get("resource") or {}).get("sensitivity") == "high" else "medium",
                             tags=["authz", "abac"],
@@ -475,7 +481,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                 _emit_iam(
                     action="access_granted",
                     outcome="granted",
-                    subject={"actor_id": (x_api_key or "bearer"), "role": role},
+                    subject={"actor_id": (effective_key or "bearer"), "role": role},
                     resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                     risk="low",
                     tags=["authz"],
@@ -506,20 +512,38 @@ def _keys_path() -> Path:
 
 
 def _load_file_keys() -> dict[str, list[str]]:
-    path = _keys_path()
-    if not path.exists():
-        return {}
+    # Prefer secrets manager when available; otherwise fallback to local file
+    out: dict[str, list[str]] = {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {}
-        out: dict[str, list[str]] = {}
-        for role, keys in data.items():
-            if isinstance(keys, list):
-                out[role] = [str(k) for k in keys if k]
-        return out
+        from src.app.security.secrets_store import fetch_api_keys
+
+        vault_keys = fetch_api_keys() or {}
+        for role, recs in (vault_keys or {}).items():
+            if isinstance(recs, list):
+                out[role] = [str(r.get("key")) for r in recs if r and isinstance(r, dict) and r.get("key")]
     except Exception:
-        return {}
+        # ignore vault errors and fall through to file
+        pass
+
+    path = _keys_path()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for role, keys in data.items():
+                    if isinstance(keys, list):
+                        file_keys = [str(k.get("key")) if isinstance(k, dict) and k.get("key") else str(k) for k in keys]
+                        if role in out:
+                            # merge unique
+                            existing = set(out.get(role) or [])
+                            for fk in file_keys:
+                                if fk and fk not in existing:
+                                    out[role].append(fk)
+                        else:
+                            out[role] = [k for k in file_keys if k]
+        except Exception:
+            pass
+    return out
 
 
 def get_role_from_key(key: Optional[str]) -> Optional[str]:
@@ -548,7 +572,13 @@ def require_role(allowed_roles: Iterable[str]):
         authorization: Optional[str] = Header(default=None, alias="Authorization"),
         request: Request = None,
     ) -> str:
-        role = get_role_from_key(x_api_key)
+        effective_key = x_api_key
+        try:
+            if not effective_key and request is not None:
+                effective_key = request.cookies.get("shopsquire_api_key")
+        except Exception:
+            effective_key = x_api_key
+        role = get_role_from_key(effective_key)
         if role and _admin_oidc_required() and _is_admin_operator_scope(allowed) and role in (ROLE_OWNER, ROLE_DEVELOPER):
             role = None
         if not role and authorization:
@@ -558,7 +588,7 @@ def require_role(allowed_roles: Iterable[str]):
                 role = None
         # Backwards-compatible tolerant behavior for local/dev keys used in tests
         try:
-            if not role and x_api_key and x_api_key == _role_keys().get(ROLE_MERCHANT):
+            if not role and effective_key and effective_key == _role_keys().get(ROLE_MERCHANT):
                 role = ROLE_MERCHANT
         except Exception:
             pass
@@ -568,7 +598,7 @@ def require_role(allowed_roles: Iterable[str]):
                     _emit_iam(
                         action="authn_check",
                         outcome="invalid",
-                        subject={"actor_id": (x_api_key or "api_key"), "role": None},
+                        subject={"actor_id": (effective_key or "api_key"), "role": None},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                         risk="medium",
                         tags=["authn", "api_key"],
@@ -581,7 +611,7 @@ def require_role(allowed_roles: Iterable[str]):
             # If the provided key equals the configured merchant key and merchant role is allowed,
             # accept it to support test environments using the default local key.
             try:
-                if x_api_key and x_api_key == _role_keys().get(ROLE_MERCHANT) and ROLE_MERCHANT in allowed:
+                if effective_key and effective_key == _role_keys().get(ROLE_MERCHANT) and ROLE_MERCHANT in allowed:
                     return ROLE_MERCHANT
             except Exception:
                 pass
@@ -590,7 +620,7 @@ def require_role(allowed_roles: Iterable[str]):
                     _emit_iam(
                         action="authz_check",
                         outcome="denied",
-                        subject={"actor_id": (x_api_key or "api_key"), "role": role},
+                        subject={"actor_id": (effective_key or "api_key"), "role": role},
                         resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                         risk="medium",
                         tags=["authz"],
@@ -611,7 +641,7 @@ def require_role(allowed_roles: Iterable[str]):
                         _emit_iam(
                             action="authz_check",
                             outcome="denied",
-                            subject={"actor_id": (x_api_key or "api_key"), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
+                            subject={"actor_id": (effective_key or "api_key"), "role": role, "tenant_id": (ctx or {}).get("tenant_id")},
                             resource=(ctx or {}).get("resource") or {"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", "")},
                             risk="high" if ((ctx or {}).get("resource") or {}).get("sensitivity") == "high" else "medium",
                             tags=["authz", "abac"],
@@ -625,7 +655,7 @@ def require_role(allowed_roles: Iterable[str]):
                 _emit_iam(
                     action="access_granted",
                     outcome="granted",
-                    subject={"actor_id": (x_api_key or "api_key"), "role": role},
+                    subject={"actor_id": (effective_key or "api_key"), "role": role},
                     resource={"path": getattr(request, "url", getattr(request, "scope", {})).path if request else "", "method": getattr(request, "method", ""), "target_role": list(allowed)},
                     risk="low",
                     tags=["authz"],

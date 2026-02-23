@@ -29,6 +29,7 @@ from src.app.services.db_read_routing import read_session
 from src.app.services.dependency_resilience import call_with_resilience
 from src.app.services.decision_log import get_cached_trace_events
 from src.app.observability.telemetry import telemetry_emit
+from src.app.schemas.ui_contracts import DecisionTraceQueryResponse
 
 router = APIRouter(prefix="/api/v1/decisions", tags=["decisions"])
 tracer = get_tracer("decisions-router")
@@ -1165,7 +1166,7 @@ def evaluate(decision_id: str, role: str = Depends(require_role([ROLE_MERCHANT, 
     return res
 
 
-@router.get("/{trace_id}/query")
+@router.get("/{trace_id}/query", response_model=DecisionTraceQueryResponse)
 def query_decision_trace(
     trace_id: str,
     include_events: bool = False,

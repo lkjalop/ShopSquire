@@ -13,9 +13,9 @@ Set demo-friendly envs and start FastAPI via Uvicorn:
 ```
 $env:DATABASE_URL = "sqlite+pysqlite:///$PWD/tmp/e2e.sqlite"
 $env:DISABLE_UI_ROUTES = "0"
-$env:API_PORT = "8081"
+$env:API_PORT = "8080"
 $env:BACKPRESSURE_TEST_DELAY_SEC = "0.3"
-& ".venv/Scripts/python.exe" -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8081 --factory
+& ".venv/Scripts/python.exe" -m uvicorn src.app.main:create_app --host 127.0.0.1 --port 8080 --factory
 ```
 
 ## Demo Steps

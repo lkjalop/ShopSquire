@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
 
 export default function SecurityDemo({ onClose }: { onClose: () => void }) {
+  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
+  const DEV_API_KEY = ((import.meta as any).env?.VITE_DEVELOPER_API_KEY as string | undefined) || API_KEY;
   const [events, setEvents] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    const apiKey = (typeof window !== 'undefined' && (window.localStorage.getItem('apiKey') || window.localStorage.getItem('x-api-key'))) || 'local-developer-key';
     const ctl = new AbortController();
     const to = setTimeout(() => ctl.abort(), 10000);
-    fetch('/api/v1/security/demo/events', { headers: { 'x-api-key': apiKey }, signal: ctl.signal })
+    fetch('/api/v1/security/demo/events', {
+      credentials: 'include',
+      headers: DEV_API_KEY ? { 'x-api-key': DEV_API_KEY } : undefined,
+      signal: ctl.signal,
+    })
       .then((r) => {
         clearTimeout(to);
         if (!r.ok) throw new Error('forbidden');
@@ -15,7 +20,7 @@ export default function SecurityDemo({ onClose }: { onClose: () => void }) {
       })
       .then((d) => setEvents(d.events || []))
       .catch((e) => setError(e.message));
-  }, []);
+  }, [DEV_API_KEY]);
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'grid', placeItems: 'center', zIndex: 50 }}>
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, width: 560, maxWidth: '90vw', boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>

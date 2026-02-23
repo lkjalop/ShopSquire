@@ -5,6 +5,7 @@ import pytest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
 
 from src.app.main import create_app
 from src.app.services.playbook_engine import (
@@ -12,7 +13,7 @@ from src.app.services.playbook_engine import (
     start_playbook_run,
     execute_typed_actions,
 )
-from src.app.models.db import db_session
+from src.app.models.db import db_session, set_engine
 
 
 _PLAYBOOKS_PATH = Path("config") / "security" / "cv_playbooks.json"
@@ -163,7 +164,13 @@ def test_playbook_publish_rollback_and_diff(tmp_path):
     assert rb.get("after", {}).get("version") == before_v
 
 
-def test_dlq_list_and_reprocess(monkeypatch):
+def test_dlq_list_and_reprocess(monkeypatch, tmp_path):
+    db_file = tmp_path / "playbook_dlq.sqlite"
+    db_url = f"sqlite+pysqlite:///{db_file.as_posix()}"
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("DATABASE_URL_RO", db_url)
+    monkeypatch.setenv("PLAYBOOK_ACTION_MAX_RETRIES", "0")
+    set_engine(create_engine(db_url, future=True))
     pb_id = "PB-TEST-2"
     _write_playbooks_config(pb_id)
 

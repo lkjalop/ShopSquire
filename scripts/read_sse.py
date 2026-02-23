@@ -3,7 +3,7 @@ import sys
 import time
 
 trace = sys.argv[1] if len(sys.argv) > 1 else 'demo-1770544601-33c62750'
-url = f'http://127.0.0.1:8081/api/v1/decisions/{trace}/events/stream'
+url = f'http://127.0.0.1:8080/api/v1/decisions/{trace}/events/stream'
 try:
     with requests.get(url, stream=True, timeout=10) as r:
         print('STATUS', r.status_code)

@@ -11,7 +11,7 @@ Quick steps:
 & .venv/Scripts/Activate.ps1
 ```
 
-2) Run the setup script to seed DB and start the API on port 8081:
+2) Run the setup script to seed DB and start the API on port 8080:
 
 ```
 .

@@ -10,6 +10,7 @@ from src.app.deps import security_sanitize
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.services.trace_broker import publish as publish_trace
 from src.app.services.decision_log import get_cached_trace_events
+from src.app.services.trace_contracts import apply_trace_contract
 import asyncio
 from src.app.services.db_read_routing import read_session
 from src.app.services.dependency_resilience import call_with_resilience
@@ -52,6 +53,15 @@ def append_trace_events(events: List[Dict[str, Any]], role: str = Depends(requir
                 payload = ev.get("payload") or {}
                 payload = security_sanitize(payload) if isinstance(payload, dict) else payload
                 canonical_type, original_type = normalize_trace_event_type(ev.get("event_type") or ev.get("type"))
+                try:
+                    payload = apply_trace_contract(
+                        event_type=canonical_type,
+                        payload=(payload if isinstance(payload, dict) else {"data": payload}),
+                        source_id=ev.get("source_id"),
+                        now_ts=ev.get("created_at") or now_iso,
+                    )
+                except Exception:
+                    pass
                 if isinstance(payload, dict):
                     payload.setdefault("_event_type", canonical_type)
                     payload.setdefault("_schema_version", "1.0")

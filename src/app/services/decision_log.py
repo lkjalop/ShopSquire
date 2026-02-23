@@ -18,6 +18,7 @@ import threading
 from collections import defaultdict
 from src.app.services.trace_broker import publish as _publish_trace
 from src.app.services.trace_taxonomy import normalize_trace_event_type
+from src.app.services.trace_contracts import apply_trace_contract
 from src.app.observability.telemetry import telemetry_emit
 from src.app.observability.metrics import record_decision_trace_write_failure
 import urllib.request
@@ -587,7 +588,13 @@ def log_trace_event(
             except Exception:
                 pass
 
-        safe_payload = redact_for_trace(security_sanitize(original_payload))
+        contracted_payload = apply_trace_contract(
+            event_type=event_type,
+            payload=(original_payload if isinstance(original_payload, dict) else {"data": original_payload}),
+            source_id=source_id,
+            now_ts=now_ts,
+        )
+        safe_payload = redact_for_trace(security_sanitize(contracted_payload))
         if not isinstance(safe_payload, dict):
             safe_payload = {"data": safe_payload}
         if original_type:

@@ -173,7 +173,7 @@ def run(api: str, tenant: str, scenarios: List[str], api_key: str | None, invoic
 
 def main():
     p = argparse.ArgumentParser(description="Seed email incidents into ShopSquire Email XDR")
-    p.add_argument("--api", default=os.getenv("API_URL", "http://127.0.0.1:8081"))
+    p.add_argument("--api", default=os.getenv("API_URL", "http://127.0.0.1:8080"))
     p.add_argument("--tenant", default=os.getenv("TENANT_ID", "t-demo"))
     p.add_argument("--api-key", default=os.getenv("API_KEY", "local-owner-key"))
     p.add_argument("--invoice-path", default=None)

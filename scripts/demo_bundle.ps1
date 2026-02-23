@@ -16,7 +16,7 @@ Notes:
 #>
 
 param(
-  [string]$Api = "http://127.0.0.1:8081",
+  [string]$Api = "http://127.0.0.1:8080",
   [string]$Python = "$PWD/.venv/Scripts/python.exe",
   [int]$WaitReadySeconds = 20
 )

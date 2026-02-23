@@ -200,6 +200,8 @@ def pytest_sessionstart(session):
     # Test helpers: deterministic storefront product list and demo decision traces
     os.environ.setdefault("TEST_USE_FALLBACK_PRODUCTS", "1")
     os.environ.setdefault("TEST_USE_DEMO_DECISION_TRACE", "1")
+    # Calibrated for local CPU-only/dev laptop runs.
+    os.environ.setdefault("SMOKE_RECOMMEND_MAX_SEC", "150")
 
     # Capture baseline feature flags for restoration between tests
     global _BASE_FLAGS_TEXT, _BASE_PLAYBOOKS_TEXT

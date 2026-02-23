@@ -22,9 +22,18 @@ export type ApprovalItem = {
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
 const API_KEY_ENV = (import.meta.env.VITE_API_KEY as string) || '';
+let VOLATILE_API_KEY = '';
 
 function getApiKey(): string {
-  return API_KEY_ENV || localStorage.getItem('shopsquire_api_key') || '';
+  return API_KEY_ENV || VOLATILE_API_KEY || '';
+}
+
+export function setClientApiKey(key: string) {
+  VOLATILE_API_KEY = String(key || '').trim();
+}
+
+export function clearClientApiKey() {
+  VOLATILE_API_KEY = '';
 }
 
 async function http<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -45,13 +54,32 @@ async function http<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   const key = getApiKey();
   if (key) headers['x-api-key'] = key;
-  const r = await fetch(url, { ...opts, headers });
+  const r = await fetch(url, { ...opts, headers, credentials: 'include' });
   if (!r.ok) {
-    const err: any = new Error(`${r.status} ${r.statusText}`);
+    let detail = '';
+    try {
+      const body = await r.json();
+      detail = body?.detail ? String(body.detail) : (body?.error ? String(body.error) : '');
+    } catch {
+      detail = '';
+    }
+    const err: any = new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ''}`);
     err.status = r.status;
+    err.detail = detail;
     throw err;
   }
   return r.json();
+}
+
+export async function setApiKeyCookie(apiKey: string): Promise<{ ok: boolean }> {
+  return http(`/api/v1/auth/api-key-cookie`, {
+    method: 'POST',
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+}
+
+export async function clearApiKeyCookie(): Promise<{ ok: boolean }> {
+  return http(`/api/v1/auth/api-key-cookie`, { method: 'DELETE' });
 }
 
 export async function fetchMe(): Promise<{ role: 'merchant' | 'owner' | 'developer'; allowed_roles: string[] }> {
@@ -635,6 +663,35 @@ export async function getEmailSecurityIncident(id: string): Promise<{ incident: 
   return http(`/api/v1/admin/email_security/incidents/${encodeURIComponent(id)}`);
 }
 
+export type EmailSecurityInvestigation = {
+  incident: EmailSecurityIncident;
+  trace_id?: string | null;
+  timeline: Array<{ id: string; event_type: string; source_type?: string; source_id?: string; payload?: any; created_at?: string }>;
+  timeline_summary?: { event_count?: number; event_type_counts?: Record<string, number>; first_event_at?: string | null; last_event_at?: string | null };
+  score_breakdown?: any;
+  trust_case?: any;
+  access_policy?: any;
+  sandbox_ioc_stage?: any;
+  explain?: any;
+  recommended_actions?: Array<{ id: string; label: string }>;
+  actions?: Array<{ id: string; action: string; note?: string; actor?: string; created_at?: string }>;
+  feedback?: any;
+};
+
+export async function fetchEmailSecurityInvestigation(incidentId: string): Promise<EmailSecurityInvestigation> {
+  return http(`/api/v1/admin/email_security/investigations/${encodeURIComponent(incidentId)}`);
+}
+
+export async function submitEmailSecurityInvestigationAction(
+  incidentId: string,
+  payload: { action: string; note?: string },
+): Promise<{ ok: boolean; incident_id: string; action_id: string; action: string; status?: string }> {
+  return http(`/api/v1/admin/email_security/investigations/${encodeURIComponent(incidentId)}/action`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export type EmailSecuritySupplierBucket = {
   supplier_key_hash: string;
   counts: { error: number; warning: number; info: number };
@@ -840,4 +897,95 @@ export async function deleteRule(id: string): Promise<{ ok: boolean }> {
 
 export async function previewRule(payload: { text: string; tenant_id?: string; domain?: string }): Promise<any> {
   return http(`/api/v1/rules/preview`, { method: 'POST', body: JSON.stringify(payload) });
+}
+
+// --- Supply-chain attack simulation ---
+
+export type SCScenario = {
+  scenario_id: string;
+  name: string;
+  description: string;
+  mitre_attack: string[];
+  owasp_tags: string[];
+  kill_chain: string[];
+  expected_signals: string[];
+  expected_severity: string;
+  human_escalation_expected: boolean;
+  payload: Record<string, any>;
+};
+
+export type SCThinkingStep = {
+  step_id: number;
+  agent: string;
+  action: string;
+  reasoning: string;
+  inputs: Record<string, any>;
+  outputs: Record<string, any>;
+  duration_ms: number;
+  timestamp: string;
+};
+
+export type SCSimResult = {
+  scenario_id: string;
+  scenario_name: string;
+  trace_id: string;
+  decision_id: string;
+  thinking_steps: SCThinkingStep[];
+  agent_chain: { agent_id: string; role: string; order: number; status: string; findings: Record<string, any> }[];
+  risk_analysis: Record<string, any>;
+  signals_detected: string[];
+  severity: string;
+  human_escalation_triggered: boolean;
+  escalation_reason: string;
+  incident_id?: string | null;
+  bitemporal: Record<string, string>;
+  elapsed_ms: number;
+  pass_fail: string;
+};
+
+export type SCSwarmJob = {
+  job_id: string;
+  status: string;
+  created_at?: number;
+  completed_at?: number;
+  rounds?: { round: number; results: any[] }[];
+  summary?: { total_runs: number; pass_rate: number; rounds_completed: number };
+};
+
+export async function fetchSCScenarios(): Promise<SCScenario[]> {
+  const data = await http<{ scenarios: SCScenario[] }>(`/api/v1/admin/supply-chain-sim/scenarios`);
+  return data.scenarios || [];
+}
+
+export async function fetchSCScenario(id: string): Promise<SCScenario> {
+  return http<SCScenario>(`/api/v1/admin/supply-chain-sim/scenarios/${encodeURIComponent(id)}`);
+}
+
+export async function runSCScenario(id: string): Promise<SCSimResult> {
+  return http<SCSimResult>(`/api/v1/admin/supply-chain-sim/run?scenario_id=${encodeURIComponent(id)}`, { method: 'POST' });
+}
+
+export async function runSCAll(): Promise<{ results: SCSimResult[]; summary: any; report_text: string }> {
+  return http(`/api/v1/admin/supply-chain-sim/run-all`, { method: 'POST' });
+}
+
+export async function startSCSwarm(rounds = 1, scenarioIds?: string[]): Promise<{ job_id: string; status: string }> {
+  const q = new URLSearchParams();
+  q.set('rounds', String(rounds));
+  if (scenarioIds?.length) q.set('scenario_ids', scenarioIds.join(','));
+  return http(`/api/v1/admin/supply-chain-sim/swarm?${q.toString()}`, { method: 'POST' });
+}
+
+export async function fetchSCSwarm(jobId: string): Promise<SCSwarmJob> {
+  return http<SCSwarmJob>(`/api/v1/admin/supply-chain-sim/swarm/${encodeURIComponent(jobId)}`);
+}
+
+export function streamSCScenario(id: string): EventSource {
+  const url = `${API_BASE.replace(/\/$/, '')}/api/v1/admin/supply-chain-sim/run/${encodeURIComponent(id)}/stream`;
+  return new EventSource(url, { withCredentials: true });
+}
+
+export function streamSCAll(): EventSource {
+  const url = `${API_BASE.replace(/\/$/, '')}/api/v1/admin/supply-chain-sim/run-all/stream`;
+  return new EventSource(url, { withCredentials: true });
 }

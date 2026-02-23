@@ -71,6 +71,8 @@ def verdict(email: Dict[str, Any], extracted: Dict[str, Any], dmarc_fail: bool =
                 tags.append("bec")
             elif t == "anomaly":
                 tags.append("anomaly")
+            elif t in ("lolbin_command", "lolbin_delivery_combo"):
+                tags.append("lolbin")
     except Exception:
         pass
     # IoC tags
@@ -111,7 +113,10 @@ def verdict(email: Dict[str, Any], extracted: Dict[str, Any], dmarc_fail: bool =
     route = "auto_resolve"
     escalation = "none"
     # Keep fuzzy clustering signals in telemetry, but exclude them from risk scoring.
-    scoring_indicators = [i for i in indicators if str((i or {}).get("type") or "") != "simhash_fingerprint"]
+    scoring_indicators = [
+        i for i in indicators
+        if str((i or {}).get("type") or "") not in ("simhash_fingerprint", "vendor_baseline_missing", "ocr_overlay_benign_catalog")
+    ]
     total_signals = len(scoring_indicators)
     if total_signals >= warn_n:
         severity = "warning"
@@ -129,14 +134,24 @@ def verdict(email: Dict[str, Any], extracted: Dict[str, Any], dmarc_fail: bool =
     # 1) Hard security routes for policy/auth failures and malicious IoCs.
     if dmarc_fail:
         reasons.append("dmarc_fail")
+    bank_change_detected = bool("bank_change_request" in ind_types or "bank_fingerprint_mismatch" in ind_types)
+    oob_verified = bool(email.get("oob_verified")) or ("oob_verification_completed" in ind_types)
+    thread_hijack_combo = bool(
+        "reply_chain_hijack" in ind_types
+        and ("bank_change_request" in ind_types or "invoice_redirect" in ind_types or "urgency_language" in ind_types)
+        and not oob_verified
+    )
     hard_security = bool(
         dmarc_fail
         or "auth_enforcement" in ind_types
         or "prompt_injection" in ind_types
         or "dangerous_tool_intent" in ind_types
+        or "lolbin_command" in ind_types
         or "lolbin_delivery_combo" in ind_types
         or "confusable_homoglyph_domain" in ind_types
         or "vendor_homoglyph_impersonation" in ind_types
+        or "ocr_overlay_malicious_text" in ind_types
+        or "ocr_overlay_unicode_confusable_payment" in ind_types
         or "ransomware_extortion_pattern" in ind_types
         or "data_exfil_intent" in ind_types
         or "keylogger_pattern" in ind_types
@@ -146,22 +161,25 @@ def verdict(email: Dict[str, Any], extracted: Dict[str, Any], dmarc_fail: bool =
         or "url_detonation_high_risk" in ind_types
         or "attachment_static_triage_high_risk" in ind_types
         or "canary_token_triggered" in ind_types
+        or thread_hijack_combo
         or len(deny_iocs) >= max(ioc_err, 1)
     )
     # 2) Supplier/BEC mandatory OOB verification.
     oob_required = bool(
         "oob_verification_required" in ind_types
         or "bank_fingerprint_mismatch" in ind_types
+        or "reply_chain_hijack" in ind_types
+        or "ocr_overlay_payment_instruction" in ind_types
         or ("bank_change_request" in ind_types and ("urgency_language" in ind_types or "invoice_redirect" in ind_types))
     )
-    bank_change_detected = bool("bank_change_request" in ind_types or "bank_fingerprint_mismatch" in ind_types)
-    oob_verified = bool(email.get("oob_verified")) or ("oob_verification_completed" in ind_types)
     if oob_required:
         reasons.append("oob_verification_required")
     if bank_change_detected and not oob_verified:
         reasons.append("mandatory_oob_verification_pending")
 
     if hard_security:
+        if thread_hijack_combo:
+            reasons.append("thread_hijack_plus_payment_change")
         verdict_action = "security_review"
         route = "security_review"
         escalation = "security_middleware"

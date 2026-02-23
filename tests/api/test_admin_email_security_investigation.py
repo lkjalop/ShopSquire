@@ -98,6 +98,9 @@ def test_admin_investigation_payload_and_actions():
     assert isinstance(body.get("timeline"), list)
     assert body.get("score_breakdown", {}).get("band") == "block"
     assert isinstance(body.get("recommended_actions"), list)
+    assert isinstance(body.get("explain"), dict)
+    assert isinstance(body.get("timeline_summary"), dict)
+    assert "feedback" in body
 
     r2 = client.post(
         f"/api/v1/admin/email_security/investigations/{incident_id}/action",
@@ -108,3 +111,15 @@ def test_admin_investigation_payload_and_actions():
     out = r2.json()
     assert out.get("ok") is True
     assert out.get("action") == "hold_payment"
+
+    r3 = client.post(
+        f"/api/v1/admin/email_security/investigations/{incident_id}/action",
+        headers={"x-api-key": "local-owner-key"},
+        json={"action": "force_reauth", "note": "compromised sender suspected"},
+    )
+    assert r3.status_code == 200
+    out3 = r3.json()
+    assert out3.get("ok") is True
+    assert out3.get("action") == "force_reauth"
+    assert out3.get("status") == "executed"
+    assert isinstance(out3.get("execution"), dict)

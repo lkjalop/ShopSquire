@@ -59,7 +59,7 @@ def simulate_beacon(api: str, tenant: str, api_key: str | None):
 
 def main():
     p = argparse.ArgumentParser(description="Seed outbound email C2/beacon anomalies for Email XDR")
-    p.add_argument("--api", default=os.getenv("API_URL", "http://127.0.0.1:8081"))
+    p.add_argument("--api", default=os.getenv("API_URL", "http://127.0.0.1:8080"))
     p.add_argument("--tenant", default=os.getenv("TENANT_ID", "t-demo"))
     p.add_argument("--api-key", default=os.getenv("API_KEY", "local-owner-key"))
     args = p.parse_args()

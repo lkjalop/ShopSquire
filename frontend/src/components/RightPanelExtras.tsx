@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { apiUrl, safeJson, cvAnalyze, cvIssueNonce, cvUpload } from '../lib/api';
 import CVResultsPanel, { CVResult } from './CVResultsPanel';
 import { fileToBase64, buildSanitizedImages } from '../utils/imageProcessing';
@@ -66,6 +66,8 @@ export default function RightPanelExtras({
   initialImages?: File[];
   onResult?: (result: CVResult | null) => void;
 }) {
+  const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
+  const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
   const [faq, setFaq] = useState<FAQItem[]>([]);
   const [images, setImages] = useState<File[]>([]);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
@@ -97,14 +99,15 @@ export default function RightPanelExtras({
   useEffect(() => {
     if (mode !== 'cv' || !showAdvancedCvControls) return;
     fetch(apiUrl('/api/v1/security/playbooks/cv'), {
-      headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+      credentials: 'include',
+      headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
     })
       .then(r => safeJson(r))
       .then((data) => {
         if (data && Array.isArray(data.playbooks)) setCvPlaybooks(data.playbooks);
       })
       .catch(() => setCvPlaybooks([]));
-  }, [mode, showAdvancedCvControls]);
+  }, [API_KEY, mode, showAdvancedCvControls]);
 
   useEffect(() => {
     const urls = images.map(img => URL.createObjectURL(img));
@@ -187,12 +190,13 @@ export default function RightPanelExtras({
         const imageB64s = images.length > 0 ? await Promise.all(images.map(fileToBase64)) : [];
         const orchResp = await fetch(apiUrl('/api/v1/orchestrate'), {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key',
+            ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
           },
           body: JSON.stringify({
-            uid: localStorage.getItem('uid') || 'demo-user',
+            uid: DEFAULT_UID,
             cart_total_cents: 0,
             query: description || 'Customer complaint/return request',
             complaint_intent: true,
@@ -220,8 +224,9 @@ export default function RightPanelExtras({
       images.forEach((f) => fd.append('images', f));
       const r = await fetch(apiUrl('/api/v1/support/complaints/submit'), {
         method: 'POST',
+        credentials: 'include',
         body: fd,
-        headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
       });
       const j = await safeJson(r);
       if (!r.ok || !j) {
@@ -333,7 +338,8 @@ export default function RightPanelExtras({
     // If auto_process suggested, fetch return label
     if (result?.case_id) {
       fetch(apiUrl(`/api/v1/support/complaints/${encodeURIComponent(result.case_id)}/return-label`), {
-        headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+        credentials: 'include',
+        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
       }).then(() => {}).catch(() => {});
     }
   };
@@ -342,16 +348,23 @@ export default function RightPanelExtras({
     // Open support conversation stub
     fetch(apiUrl('/api/v1/support/answer'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'x-api-key': API_KEY } : {}) },
       body: JSON.stringify({ question: `Disagree with verdict. Case=${result?.case_id}` }),
     }).then(() => {}).catch(() => {});
   };
 
   const escalate = async () => {
+    setError(null);
+    if (!result?.case_id && !result?.trace_id && !result?.decision_id) {
+      setError('Escalation failed: missing case/trace id for this review.');
+      return;
+    }
     try {
       const resp = await fetch(apiUrl('/api/v1/incidents/escalate'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'x-api-key': API_KEY } : {}) },
         body: JSON.stringify({
           case_id: result?.case_id,
           trace_id: result?.trace_id,
@@ -360,7 +373,7 @@ export default function RightPanelExtras({
         }),
       });
       const data = await safeJson(resp);
-      if (data?.ok && data?.incident_id) {
+      if (resp.ok && data?.ok && data?.incident_id) {
         onEscalate?.({
           case_id: result?.case_id,
           decision_id: result?.decision_id,
@@ -369,10 +382,13 @@ export default function RightPanelExtras({
         });
         return;
       }
-    } catch {
-      // Fallback: open escalation room with case_id as incident proxy
+      const detail = (data && (data.detail || data.error)) ? (data.detail || data.error) : `http_${resp.status}`;
+      setError(`Escalation failed: ${String(detail)}.`);
+      return;
+    } catch (e: any) {
+      setError(`Escalation failed: ${e?.message || 'network_error'}.`);
+      return;
     }
-    onEscalate?.({ case_id: result?.case_id, decision_id: result?.decision_id });
   };
 
   const uploadWithNonce = async () => {
@@ -562,14 +578,14 @@ export default function RightPanelExtras({
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <button onClick={submitCV} disabled={submitting}>{submitting ? 'Submitting...' : 'Submit (upload)'}</button>
-        <button onClick={uploadWithNonce} disabled={submitting}>{submitting ? 'Uploading...' : 'Upload (nonce)'}</button>
-        <button onClick={analyzeSafely} disabled={submitting}>{submitting ? 'Analyzing...' : 'Analyze (no upload)'}</button>
+        <button type="button" aria-label="Submit complaint upload for CV triage" onClick={submitCV} disabled={submitting}>{submitting ? 'Submitting...' : 'Submit (upload)'}</button>
+        <button type="button" aria-label="Upload complaint images with nonce" onClick={uploadWithNonce} disabled={submitting}>{submitting ? 'Uploading...' : 'Upload (nonce)'}</button>
+        <button type="button" aria-label="Analyze complaint without upload" onClick={analyzeSafely} disabled={submitting}>{submitting ? 'Analyzing...' : 'Analyze (no upload)'}</button>
         {result && (
           <>
-            <button onClick={agree}>Agree</button>
-            <button onClick={disagree}>Disagree</button>
-            {showChatWithAdmin && <button onClick={escalate}>Chat with Admin</button>}
+            <button type="button" aria-label="Agree with triage decision" onClick={agree}>Agree</button>
+            <button type="button" aria-label="Disagree with triage decision" onClick={disagree}>Disagree</button>
+            {showChatWithAdmin && <button type="button" aria-label="Escalate and chat with admin" onClick={escalate}>Chat with Admin</button>}
           </>
         )}
       </div>

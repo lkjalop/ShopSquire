@@ -12,7 +12,7 @@ def test_storefront_search_triggers_recommend(page):
     # Placeholder: when Playwright is enabled, this will open the storefront
     # and perform a search to exercise the full stack. Kept minimal so it can
     # be expanded later with selectors from the frontend.
-    page.goto("http://127.0.0.1:8081/")
+    page.goto("http://127.0.0.1:8080/")
     # wait for the page to load
     page.wait_for_timeout(500)
     # Type in search box selector (update selector as frontend evolves)

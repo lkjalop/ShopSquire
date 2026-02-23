@@ -3,7 +3,7 @@ import json
 import pytest
 import requests
 
-API_URL = "http://127.0.0.1:8081"
+API_URL = "http://127.0.0.1:8080"
 
 # Small 1x1 PNG base64
 SAMPLE_PNG_B64 = (
@@ -14,7 +14,7 @@ SAMPLE_PNG_B64 = (
 @pytest.mark.skipif(True, reason="Manual run: requires local server")
 def test_cv_upload_flow_api_noninteractive():
     # This is a simple API-level e2e test that fetches a nonce and uploads a capture
-    # Run only when local server (uvicorn) is running on port 8081
+    # Run only when local server (uvicorn) is running on port 8080
     resp = requests.get(API_URL + "/api/v1/cv/nonce", timeout=5)
     assert resp.status_code == 200
     j = resp.json()

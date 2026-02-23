@@ -20,7 +20,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[2]
 API_HOST = "127.0.0.1"
-API_PORT = int(os.getenv("E2E_API_PORT", "8081"))
+API_PORT = int(os.getenv("E2E_API_PORT", "8080"))
 UI_HOST = "127.0.0.1"
 UI_PORT = int(os.getenv("E2E_UI_PORT", "5173"))
 API_BASE = f"http://{API_HOST}:{API_PORT}"

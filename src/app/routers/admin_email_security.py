@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+from src.app.deps import get_redis, DummyRedis
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
 from src.app.services.security_playbooks import get_cv_playbook_by_id
 from src.app.security.email_security import evaluate_email_security
@@ -19,6 +21,7 @@ from src.app.security.threat_intel_store import list_indicators, upsert_indicato
 
 
 router = APIRouter(prefix="/api/v1/admin/email_security", tags=["admin-email-security"])
+_EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 
 
 def _json_load(s: str | None, default):
@@ -28,6 +31,230 @@ def _json_load(s: str | None, default):
         return json.loads(s)
     except Exception:
         return default
+
+
+def _extract_emails(value: Any) -> List[str]:
+    out: List[str] = []
+    if value is None:
+        return out
+    if isinstance(value, list):
+        for x in value:
+            out.extend(_extract_emails(x))
+        return out
+    if isinstance(value, dict):
+        for x in value.values():
+            out.extend(_extract_emails(x))
+        return out
+    text = str(value or "").strip()
+    if not text:
+        return out
+    return [m.group(0).lower() for m in _EMAIL_RE.finditer(text)]
+
+
+def _extract_action_targets(incident: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    evidence = incident.get("evidence_snapshot") if isinstance(incident, dict) else {}
+    explicit = payload if isinstance(payload, dict) else {}
+    user_ids: set[str] = set()
+    emails: set[str] = set()
+    scope = str(explicit.get("scope") or "incident").strip().lower()
+
+    for key in ("user_id", "customer_id", "account_id", "uid"):
+        val = explicit.get(key)
+        if val:
+            user_ids.add(str(val).strip())
+    for key in ("email", "user_email", "customer_email", "guest_email"):
+        for e in _extract_emails(explicit.get(key)):
+            emails.add(e)
+
+    candidate_blobs: List[Any] = []
+    if isinstance(evidence, dict):
+        candidate_blobs.extend(
+            [
+                evidence,
+                evidence.get("identity"),
+                evidence.get("input"),
+                evidence.get("input_data"),
+                evidence.get("sender_trust"),
+                evidence.get("trust_case"),
+                evidence.get("access_policy"),
+            ]
+        )
+    if isinstance(incident, dict):
+        candidate_blobs.extend([incident.get("provider"), incident.get("tenant_id"), incident])
+    for blob in candidate_blobs:
+        if not blob:
+            continue
+        if isinstance(blob, dict):
+            for k in ("user_id", "customer_id", "account_id", "uid"):
+                v = blob.get(k)
+                if v:
+                    user_ids.add(str(v).strip())
+            for k in ("email", "user_email", "customer_email", "guest_email", "from_addr", "reply_to"):
+                for e in _extract_emails(blob.get(k)):
+                    emails.add(e)
+        else:
+            for e in _extract_emails(blob):
+                emails.add(e)
+
+    user_ids = {x for x in user_ids if x}
+    emails = {x for x in emails if x}
+    return {
+        "scope": scope,
+        "user_ids": sorted(user_ids),
+        "emails": sorted(emails),
+        "has_targets": bool(user_ids or emails),
+    }
+
+
+def _resolve_user_ids_from_emails(emails: List[str]) -> List[str]:
+    if not emails:
+        return []
+    user_ids: set[str] = set()
+    try:
+        with db_session() as db:
+            rows = db.execute(
+                text("SELECT id FROM user_accounts WHERE lower(email) IN :emails"),
+                {"emails": tuple([e.lower() for e in emails])},
+            ).fetchall()
+        for r in rows or []:
+            if r and r[0]:
+                user_ids.add(str(r[0]).strip())
+    except Exception:
+        # SQLite fallback when IN tuple binding is strict.
+        try:
+            with db_session() as db:
+                for email in emails:
+                    row = db.execute(
+                        text("SELECT id FROM user_accounts WHERE lower(email) = :email LIMIT 1"),
+                        {"email": str(email).lower()},
+                    ).fetchone()
+                    if row and row[0]:
+                        user_ids.add(str(row[0]).strip())
+        except Exception:
+            pass
+    return sorted([x for x in user_ids if x])
+
+
+def _upsert_forced_reauth_flags(*, user_ids: List[str], emails: List[str], reason: str) -> Dict[str, Any]:
+    inserted = 0
+    try:
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS security_forced_reauth_flags (
+                        id TEXT PRIMARY KEY,
+                        target_type TEXT NOT NULL,
+                        target_value TEXT NOT NULL,
+                        reason TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(target_type, target_value)
+                    )
+                    """
+                )
+            )
+            for uid in user_ids:
+                db.execute(
+                    text(
+                        """
+                        INSERT OR REPLACE INTO security_forced_reauth_flags
+                        (id, target_type, target_value, reason, created_at)
+                        VALUES (:id, 'user_id', :target_value, :reason, CURRENT_TIMESTAMP)
+                        """
+                    ),
+                    {"id": f"fr-{uuid.uuid4().hex}", "target_value": uid, "reason": reason},
+                )
+                inserted += 1
+            for email in emails:
+                db.execute(
+                    text(
+                        """
+                        INSERT OR REPLACE INTO security_forced_reauth_flags
+                        (id, target_type, target_value, reason, created_at)
+                        VALUES (:id, 'email', :target_value, :reason, CURRENT_TIMESTAMP)
+                        """
+                    ),
+                    {"id": f"fr-{uuid.uuid4().hex}", "target_value": email, "reason": reason},
+                )
+                inserted += 1
+            db.commit()
+    except Exception:
+        pass
+    return {"flags_written": int(inserted)}
+
+
+def _revoke_sessions(*, user_ids: List[str]) -> Dict[str, Any]:
+    if not user_ids:
+        return {"revoked_tokens": 0, "target_user_count": 0}
+    deleted = 0
+    try:
+        with db_session() as db:
+            for uid in user_ids:
+                try:
+                    res = db.execute(text("DELETE FROM session_tokens WHERE user_id = :uid"), {"uid": uid})
+                    deleted += int(getattr(res, "rowcount", 0) or 0)
+                except Exception:
+                    continue
+            db.commit()
+    except Exception:
+        pass
+    return {"revoked_tokens": int(max(0, deleted)), "target_user_count": len(user_ids)}
+
+
+def _invalidate_session_memory(*, user_ids: List[str]) -> Dict[str, Any]:
+    if not user_ids:
+        return {"redis_available": False, "keys_deleted": 0, "target_user_count": 0}
+    r = get_redis()
+    if isinstance(r, DummyRedis):
+        return {"redis_available": False, "keys_deleted": 0, "target_user_count": len(user_ids)}
+    deleted = 0
+    for uid in user_ids:
+        keys = [
+            f"session:{uid}:summary",
+            f"session:{uid}:kv_state",
+            f"session:{uid}:recent_retrieval",
+            f"session:{uid}:agent_steps",
+        ]
+        try:
+            deleted += int(r.delete(*keys) or 0)
+        except Exception:
+            continue
+    return {"redis_available": True, "keys_deleted": int(max(0, deleted)), "target_user_count": len(user_ids)}
+
+
+def _execute_investigation_action(action: str, incident: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    targets = _extract_action_targets(incident, payload or {})
+    user_ids = list(targets.get("user_ids") or [])
+    emails = list(targets.get("emails") or [])
+    resolved_user_ids = sorted(set(user_ids + _resolve_user_ids_from_emails(emails)))
+    exec_res: Dict[str, Any] = {
+        "action": action,
+        "targets": {**targets, "resolved_user_ids": resolved_user_ids},
+        "executed": False,
+    }
+    if action == "force_reauth":
+        session_res = _revoke_sessions(user_ids=resolved_user_ids)
+        memory_res = _invalidate_session_memory(user_ids=resolved_user_ids)
+        flags_res = _upsert_forced_reauth_flags(
+            user_ids=resolved_user_ids,
+            emails=emails,
+            reason=str((payload or {}).get("note") or "admin_investigation_force_reauth"),
+        )
+        exec_res.update(
+            {
+                "executed": True,
+                "session_revoke": session_res,
+                "session_memory": memory_res,
+                "forced_reauth_flags": flags_res,
+            }
+        )
+        return exec_res
+    if action == "invalidate_sessions":
+        session_res = _revoke_sessions(user_ids=resolved_user_ids)
+        memory_res = _invalidate_session_memory(user_ids=resolved_user_ids)
+        exec_res.update({"executed": True, "session_revoke": session_res, "session_memory": memory_res})
+        return exec_res
+    return exec_res
 
 
 def _ensure_ioc_feedback_table() -> None:
@@ -948,6 +1175,9 @@ def get_investigation(
     evidence = incident.get("evidence_snapshot") if isinstance(incident, dict) else {}
     trace_id = (evidence or {}).get("trace_id") or (evidence or {}).get("decision_id")
     score_breakdown = ((evidence or {}).get("artifact_intel") or {}).get("signal_scores") or {}
+    trust_case = (evidence or {}).get("trust_case") if isinstance(evidence, dict) else {}
+    access_policy = (evidence or {}).get("access_policy") if isinstance(evidence, dict) else {}
+    sandbox_ioc_stage = (evidence or {}).get("sandbox_ioc_stage") if isinstance(evidence, dict) else {}
     timeline: List[Dict[str, Any]] = []
     if trace_id:
         try:
@@ -1017,15 +1247,58 @@ def get_investigation(
         {"id": "hold_payment", "label": "Hold Payment"},
         {"id": "request_oob_verification", "label": "Request OOB Verification"},
         {"id": "escalate_security", "label": "Escalate Security"},
+        {"id": "force_reauth", "label": "Force Reauth"},
+        {"id": "invalidate_sessions", "label": "Invalidate Sessions"},
+        {"id": "quarantine_sender", "label": "Quarantine Sender"},
         {"id": "close_case", "label": "Close Case"},
     ]
+    if bool((trust_case or {}).get("forced_reauth")):
+        recommended_actions = [x for x in recommended_actions if x.get("id") != "close_case"]
+    explain = {
+        "risk_band": incident.get("risk_band"),
+        "severity": incident.get("severity"),
+        "score_breakdown": score_breakdown,
+        "trust_case": trust_case or {},
+        "access_policy": access_policy or {},
+        "sandbox_ioc_stage": sandbox_ioc_stage or {},
+        "top_signal_contributions": list((score_breakdown or {}).get("contributions") or [])[:10],
+    }
+    type_counts: Dict[str, int] = {}
+    for ev in timeline:
+        et = str((ev or {}).get("event_type") or "")
+        if not et:
+            continue
+        type_counts[et] = int(type_counts.get(et, 0)) + 1
+    timeline_summary = {
+        "event_count": len(timeline),
+        "event_type_counts": dict(sorted(type_counts.items(), key=lambda kv: kv[1], reverse=True)[:20]),
+        "first_event_at": (timeline[0].get("created_at") if timeline else None),
+        "last_event_at": (timeline[-1].get("created_at") if timeline else None),
+    }
+    feedback = {
+        "bulk_label_endpoint": "/api/v1/admin/email_security/feedback/bulk_label",
+        "summary_endpoint": "/api/v1/admin/email_security/feedback/summary",
+        "recommended_payload": {
+            "incident_ids": [incident_id],
+            "outcome_type": "human_verdict",
+            "outcome_value": "false_positive",
+            "actor_role": role,
+            "note": "Analyst feedback",
+        },
+    }
     return {
         "incident": incident,
         "trace_id": trace_id,
         "timeline": timeline,
+        "timeline_summary": timeline_summary,
         "score_breakdown": score_breakdown,
+        "trust_case": trust_case or {},
+        "access_policy": access_policy or {},
+        "sandbox_ioc_stage": sandbox_ioc_stage or {},
+        "explain": explain,
         "recommended_actions": recommended_actions,
         "actions": actions,
+        "feedback": feedback,
     }
 
 
@@ -1037,7 +1310,16 @@ def investigation_action(
 ) -> Dict[str, Any]:
     action = str((payload or {}).get("action") or "").strip().lower()
     note = str((payload or {}).get("note") or "").strip()
-    if action not in {"hold_payment", "request_oob_verification", "escalate_security", "close_case"}:
+    if action not in {
+        "hold_payment",
+        "request_oob_verification",
+        "escalate_security",
+        "force_reauth",
+        "invalidate_sessions",
+        "quarantine_sender",
+        "restore_access",
+        "close_case",
+    }:
         raise HTTPException(status_code=400, detail="unsupported_action")
     inc = get_incident(incident_id=incident_id, role=role).get("incident") or {}
     evidence = inc.get("evidence_snapshot") if isinstance(inc, dict) else {}
@@ -1084,7 +1366,30 @@ def investigation_action(
             )
     except Exception:
         pass
-    return {"ok": True, "incident_id": incident_id, "action_id": action_id, "action": action}
+    execution = {}
+    try:
+        if action in {"force_reauth", "invalidate_sessions"}:
+            execution = _execute_investigation_action(action, inc if isinstance(inc, dict) else {}, payload or {})
+            if trace_id:
+                log_trace_event(
+                    trace_id=str(trace_id),
+                    event_type="investigation_action_executed",
+                    source_type="agent",
+                    source_id="Admin_Action_Executor",
+                    target_type="incident",
+                    target_id=incident_id,
+                    payload=execution,
+                )
+    except Exception as exc:
+        execution = {"action": action, "executed": False, "error": str(exc)[:240]}
+    return {
+        "ok": True,
+        "incident_id": incident_id,
+        "action_id": action_id,
+        "action": action,
+        "status": "executed" if action in {"force_reauth", "invalidate_sessions"} else ("queued" if action in {"quarantine_sender", "restore_access"} else "recorded"),
+        "execution": execution if execution else None,
+    }
 
 
 @router.get("/threat-intel")

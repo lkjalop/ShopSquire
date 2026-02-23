@@ -34,7 +34,8 @@ _BANK_CHANGE_PAT = re.compile(
     r"changing\s+payment\s+procedures|updated\s+payment\s+details|"
     r"bank(?:ing)?\s+details\s+(?:have\s+)?recently\s+changed|"
     r"disregard\s+(?:any\s+)?previous\s+remittance\s+instructions|"
-    r"wire\s+to\s+new\s+account|remit\s+to\s+new\s+beneficiary)"
+    r"wire\s+to\s+new\s+account|remit\s+to\s+new\s+beneficiary|"
+    r"updated\s+beneficiary\s+account)"
 )
 
 _INVOICE_REDIRECT_PAT = re.compile(r"(?i)(invoice\s+redirect|send\s+payment\s+to|new\s+remittance)")
@@ -62,6 +63,14 @@ _FILELESS_PAT = re.compile(
     r"mshta\s+https?://|rundll32\s+javascript:|wmic\s+process\s+call\s+create)"
 )
 _URL_SHORTENER_DOMAINS = {"bit.ly", "tinyurl.com", "t.co", "goo.gl", "rb.gy", "ow.ly", "is.gd"}
+_OCR_OVERLAY_PAYMENT_PAT = re.compile(
+    r"(?i)(payid|scan\s*(the)?\s*qr|qr\s*code|pay\s+to|send\s+payment|"
+    r"bank\s+transfer|remit\s+to|beneficiary|account\s+number|bsb|swift)"
+)
+_OCR_OVERLAY_BENIGN_CATALOG_PAT = re.compile(
+    r"(?i)(sku|model|spec(?:ification)?s?|warranty|catalog(?:ue)?|"
+    r"resolution|inch|ram|ssd|cpu|battery|price|rrp)"
+)
 
 
 def _get_thresholds(*, tenant_id: str | None = None) -> Dict[str, Any]:
@@ -127,10 +136,10 @@ def _confusable_skeleton(text: str | None) -> str:
     if not text:
         return ""
     conf_map = {
-        "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
-        "і": "i", "ј": "j", "ӏ": "l", "ԁ": "d", "һ": "h", "ո": "n",
-        "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K",
-        "Μ": "M", "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+        "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0443": "y", "\u0445": "x",
+        "\u0456": "i", "\u0458": "j", "\u04cf": "l", "\u0501": "d", "\u04bb": "h", "\u0578": "n",
+        "\u0391": "A", "\u0392": "B", "\u0395": "E", "\u0396": "Z", "\u0397": "H", "\u0399": "I", "\u039a": "K",
+        "\u039c": "M", "\u039d": "N", "\u039f": "O", "\u03a1": "P", "\u03a4": "T", "\u03a5": "Y", "\u03a7": "X",
     }
     norm = unicodedata.normalize("NFKC", str(text).lower())
     return "".join(conf_map.get(ch, ch) for ch in norm)
@@ -430,10 +439,18 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
     """
     subject = str(email.get("subject") or "")
     body = str(email.get("body") or "")
+    attachments = email.get("attachments") or []
     text = f"{subject}\n{body}"
+    # Scan attachment extracted text for advanced threats (OCR/QR overlays, embedded instructions)
+    # while keeping core BEC wording checks body-focused to reduce false positives.
+    attachment_text = "\n".join(
+        str((a or {}).get("extracted_text") or "")[:4000]
+        for a in attachments
+        if str((a or {}).get("extracted_text") or "").strip()
+    )[:40000]
+    analysis_text = f"{text}\n{attachment_text}" if attachment_text else text
     from_addr = email.get("from_addr")
     reply_to = email.get("reply_to")
-    attachments = email.get("attachments") or []
     thresholds = _get_thresholds(tenant_id=tenant_id)
 
     indicators: List[Dict[str, Any]] = []
@@ -553,15 +570,82 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
     if chain and prior_chain and chain != prior_chain:
         indicators.append({"type": "reply_chain_hijack", "value": chain, "reason": "Reply-chain continuity mismatch"})
 
+    # OCR overlay tuning: distinguish benign catalog overlays from payment/malicious overlays.
+    if attachment_text:
+        overlay_text = str(attachment_text or "")[:20000]
+        overlay_has_payment = bool(_OCR_OVERLAY_PAYMENT_PAT.search(overlay_text))
+        overlay_has_malicious = bool(
+            _PROMPT_INJECTION_PAT.search(overlay_text)
+            or _DANGEROUS_TOOL_PAT.search(overlay_text)
+            or _EXFIL_PAT.search(overlay_text)
+            or _C2_BEACON_PAT.search(overlay_text)
+            or _FILELESS_PAT.search(overlay_text)
+        )
+        overlay_benign_catalog = bool(_OCR_OVERLAY_BENIGN_CATALOG_PAT.search(overlay_text)) and not overlay_has_payment and not overlay_has_malicious
+        if overlay_has_malicious:
+            indicators.append(
+                {
+                    "type": "ocr_overlay_malicious_text",
+                    "value": True,
+                    "reason": "Attachment OCR text contains malicious instruction patterns",
+                }
+            )
+            # Keep legacy/high-signal tags so downstream policy + regressions
+            # treat OCR-borne prompt payloads the same as body-borne payloads.
+            indicators.append(
+                {
+                    "type": "prompt_injection",
+                    "value": True,
+                    "reason": "Prompt injection pattern detected in attachment OCR text",
+                }
+            )
+            if _DANGEROUS_TOOL_PAT.search(overlay_text):
+                indicators.append(
+                    {
+                        "type": "dangerous_tool_intent",
+                        "value": True,
+                        "reason": "Disallowed tool intent detected in attachment OCR text",
+                    }
+                )
+        elif overlay_has_payment:
+            indicators.append(
+                {
+                    "type": "ocr_overlay_payment_instruction",
+                    "value": True,
+                    "reason": "Attachment OCR text includes payment/QR remittance instructions",
+                }
+            )
+            try:
+                norm_overlay = unicodedata.normalize("NFKC", overlay_text.lower())
+                skel_overlay = _confusable_skeleton(overlay_text)
+                if _has_non_ascii(overlay_text) and skel_overlay and skel_overlay != norm_overlay:
+                    indicators.append(
+                        {
+                            "type": "ocr_overlay_unicode_confusable_payment",
+                            "value": True,
+                            "reason": "Attachment OCR payment text contains confusable Unicode characters",
+                        }
+                    )
+            except Exception:
+                pass
+        elif overlay_benign_catalog:
+            indicators.append(
+                {
+                    "type": "ocr_overlay_benign_catalog",
+                    "value": True,
+                    "reason": "Attachment OCR text appears to be benign catalog/specification content",
+                }
+            )
+
     # Agent/LLM control indicators
-    if _PROMPT_INJECTION_PAT.search(text):
+    if _PROMPT_INJECTION_PAT.search(analysis_text):
         indicators.append({"type": "prompt_injection", "value": True, "reason": "Prompt injection pattern detected"})
-    if _DANGEROUS_TOOL_PAT.search(text):
+    if _DANGEROUS_TOOL_PAT.search(analysis_text):
         indicators.append({"type": "dangerous_tool_intent", "value": True, "reason": "Disallowed tool intent in content"})
-    lolbin_hits = sorted({m.group(1).lower() for m in _LOLBINS_PAT.finditer(text)})
+    lolbin_hits = sorted({m.group(1).lower() for m in _LOLBINS_PAT.finditer(analysis_text)})
     if lolbin_hits:
         indicators.append({"type": "lolbin_command", "value": lolbin_hits, "reason": "Living-off-the-land binary pattern detected"})
-        has_external_link = bool(re.search(r"https?://", text))
+        has_external_link = bool(re.search(r"https?://", analysis_text))
         has_risky_attachment = bool(suspicious_attachments(attachments))
         if has_external_link or has_risky_attachment:
             indicators.append(
@@ -571,23 +655,23 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
                     "reason": "LOLBin command combined with external link/attachment",
                 }
             )
-    if _RANSOMWARE_PAT.search(text):
+    if _RANSOMWARE_PAT.search(analysis_text):
         indicators.append({"type": "ransomware_extortion_pattern", "value": True, "reason": "Ransomware/extortion language detected"})
-    if _EXFIL_PAT.search(text):
+    if _EXFIL_PAT.search(analysis_text):
         indicators.append({"type": "data_exfil_intent", "value": True, "reason": "Data exfiltration pattern detected"})
-    if _KEYLOGGER_PAT.search(text):
+    if _KEYLOGGER_PAT.search(analysis_text):
         indicators.append({"type": "keylogger_pattern", "value": True, "reason": "Keylogger/credential-harvester pattern detected"})
-    if _C2_BEACON_PAT.search(text):
+    if _C2_BEACON_PAT.search(analysis_text):
         indicators.append({"type": "c2_beacon_pattern", "value": True, "reason": "C2 beacon/callback pattern detected"})
-    if _FILELESS_PAT.search(text):
+    if _FILELESS_PAT.search(analysis_text):
         indicators.append({"type": "fileless_execution_pattern", "value": True, "reason": "Fileless execution pattern detected"})
     try:
         risky_names = suspicious_attachments(attachments)
         if risky_names and (
-            _FILELESS_PAT.search(text)
-            or _KEYLOGGER_PAT.search(text)
-            or _EXFIL_PAT.search(text)
-            or _RANSOMWARE_PAT.search(text)
+            _FILELESS_PAT.search(analysis_text)
+            or _KEYLOGGER_PAT.search(analysis_text)
+            or _EXFIL_PAT.search(analysis_text)
+            or _RANSOMWARE_PAT.search(analysis_text)
         ):
             indicators.append(
                 {
@@ -600,11 +684,11 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
         pass
 
     # P2 fuzzy/canary
-    if _CANARY_PAT.search(text):
+    if _CANARY_PAT.search(analysis_text):
         indicators.append({"type": "canary_token_triggered", "value": True, "reason": "Canary marker detected"})
     # URL detonation/redirect-chain and attachment static triage (oletools-style metadata checks).
     try:
-        urls = [str(x.get("value") or "") for x in extract_iocs(text, tenant_id=tenant_id) if str(x.get("type") or "") == "url"]
+        urls = [str(x.get("value") or "") for x in extract_iocs(analysis_text, tenant_id=tenant_id) if str(x.get("type") or "") == "url"]
         url_triage = url_redirect_chain_risk(urls)
         if float(url_triage.get("score") or 0.0) >= 0.45:
             indicators.append(
@@ -648,7 +732,7 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
     indicators.append({"type": "simhash_fingerprint", "value": simhash, "reason": "Near-duplicate clustering fingerprint"})
 
     # IoCs
-    iocs = extract_iocs(text, tenant_id=tenant_id)
+    iocs = extract_iocs(analysis_text, tenant_id=tenant_id)
     iocs.extend(extract_attachment_hash_iocs(attachments, tenant_id=tenant_id))
 
     return {
@@ -667,3 +751,4 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
             },
         },
     }
+

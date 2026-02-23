@@ -2,7 +2,7 @@ import os
 import requests
 import json
 
-BASE = os.getenv('API_BASE', 'http://127.0.0.1:8081')
+BASE = os.getenv('API_BASE', 'http://127.0.0.1:8080')
 HEADERS = {'x-api-key': os.getenv('MERCHANT_API_KEY', 'local-merchant-key'), 'Content-Type': 'application/json'}
 
 print('POST /api/v1/orchestrate')

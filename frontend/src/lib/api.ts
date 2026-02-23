@@ -1,5 +1,6 @@
 const rawBase = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined;
 const API_BASE = rawBase ? rawBase.replace(/\/+$/, '') : '';
+const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 
 export function getApiBase(): string {
   return API_BASE;
@@ -49,9 +50,10 @@ export async function cvAnalyze(payload: {
 }) {
   const r = await fetch(apiUrl('/api/v1/cv/analyze'), {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key',
+      ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
     },
     body: JSON.stringify({
       provider: 'basic',
@@ -68,7 +70,8 @@ export async function cvAnalyze(payload: {
 
 export async function cvIssueNonce(): Promise<{ nonce: string; expires_in: number } | null> {
   const r = await fetch(apiUrl('/api/v1/cv/nonce'), {
-    headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+    credentials: 'include',
+    headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
   });
   const j = await safeJson(r);
   if (!r.ok || !j) return null;
@@ -99,8 +102,9 @@ export async function cvUpload(params: {
   if (params.description) u.searchParams.set('description', params.description);
   const r = await fetch(u.toString(), {
     method: 'POST',
+    credentials: 'include',
     body: fd,
-    headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+    headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
   });
   const j = await safeJson(r);
   if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cv_upload_failed (${r.status})`);
@@ -111,7 +115,8 @@ export async function getCart(uid: string) {
   const u = new URL(apiUrl('/api/v1/cart'), window.location.href);
   u.searchParams.set('uid', uid || 'demo-user');
   const r = await fetch(u.toString(), {
-    headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+    credentials: 'include',
+    headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
   });
   const j = await safeJson(r);
   if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cart_get_failed (${r.status})`);
@@ -121,9 +126,10 @@ export async function getCart(uid: string) {
 export async function addCartItem(uid: string, sku: string, quantity = 1) {
   const r = await fetch(apiUrl('/api/v1/cart/items'), {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key',
+      ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
     },
     body: JSON.stringify({ uid: uid || 'demo-user', sku, quantity }),
   });
@@ -137,7 +143,8 @@ export async function removeCartItem(uid: string, sku: string) {
   u.searchParams.set('uid', uid || 'demo-user');
   const r = await fetch(u.toString(), {
     method: 'DELETE',
-    headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+    credentials: 'include',
+    headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
   });
   const j = await safeJson(r);
   if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cart_remove_failed (${r.status})`);
@@ -149,7 +156,8 @@ export async function clearCart(uid: string) {
   u.searchParams.set('uid', uid || 'demo-user');
   const r = await fetch(u.toString(), {
     method: 'POST',
-    headers: { 'x-api-key': localStorage.getItem('x-api-key') || 'local-merchant-key' },
+    credentials: 'include',
+    headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
   });
   const j = await safeJson(r);
   if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cart_clear_failed (${r.status})`);

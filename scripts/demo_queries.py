@@ -1,7 +1,7 @@
 """Demo queries harness for recommendation API.
 
 Prereqs:
-  - Start API server (e.g., uvicorn on 127.0.0.1:8081)
+  - Start API server (e.g., uvicorn on 127.0.0.1:8080)
   - Set `x-api-key` if required (default: local-merchant-key)
 
 Run:
@@ -20,7 +20,7 @@ from typing import Dict, Any, List
 import requests
 
 
-BASE = os.getenv("API_BASE", "http://127.0.0.1:8081")
+BASE = os.getenv("API_BASE", "http://127.0.0.1:8080")
 KEY = os.getenv("API_KEY", "local-merchant-key")
 
 QUERIES: List[str] = [

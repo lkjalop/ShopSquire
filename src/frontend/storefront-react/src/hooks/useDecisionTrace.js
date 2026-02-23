@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import traceClient from './traceClient';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api/v1';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api/v1';
 const API_KEY = import.meta.env.VITE_API_KEY || 'local-developer-key';
 
 export function useDecisionTrace() {
@@ -21,7 +21,7 @@ export function useDecisionTrace() {
         const mapped = items.map((i) => ({
           id: i.id || `evt-${i.created_at || Date.now()}`,
           time: i.created_at || new Date().toISOString(),
-          type: i.event_type || 'event',
+          type: (i?.payload?._original_event_type || i?.payload?.original_event_type || i.event_type || 'event'),
           source: i.source_id,
           target: i.target_id,
           trace_id: i.trace_id,
@@ -44,7 +44,12 @@ export function useDecisionTrace() {
       const url = `${API_BASE}/decisions/${encodeURIComponent(traceId)}/events/stream`;
       const pollFn = async () => {
         try {
-          const res = await fetch(`${API_BASE}/decisions/${encodeURIComponent(activeTraceRef.current)}`);
+          const res = await fetch(
+            `${API_BASE}/decisions/${encodeURIComponent(activeTraceRef.current)}/query?include_events=true`,
+            {
+              headers: { 'x-api-key': API_KEY },
+            }
+          );
           if (!res.ok) return;
           const data = await res.json();
           const items = Array.isArray(data.events) ? data.events : [];

@@ -1023,23 +1023,12 @@ def db_session():
 
 
 def get_engine():
-    # Always return the module-level engine so patched engines in tests
-    # are used consistently everywhere.
-    try:
-        url_env = os.getenv("DATABASE_URL")
-        if url_env:
-            try:
-                current = str(getattr(engine, "url", ""))
-            except Exception:
-                current = ""
-            if current != url_env:
-                set_engine(_create_engine_with_fallback(url_env))
-    except Exception:
-        pass
+    # Return the module-level engine. Tests commonly monkeypatch this object;
+    # auto-replacing from DATABASE_URL here can break request/session parity.
     return engine
 
 
-def get_db_for_request(request: Any = None):
+def get_db_for_request(request: Request | None = None):
     """Return a sessionmaker-bound session using the request.app.state.engine
     if available, otherwise fall back to the module-level engine. This helper
     is intended for use as a FastAPI dependency `Depends(get_db)`.
@@ -1076,7 +1065,7 @@ def get_db_for_request(request: Any = None):
         session.close()
 
 
-def get_db(request: Any = None):
+def get_db(request: Request):
     """FastAPI-friendly dependency: `Depends(get_db)` or `Depends(lambda req: get_db(req))`.
     When FastAPI injects the Request object it will be passed here automatically.
     """
