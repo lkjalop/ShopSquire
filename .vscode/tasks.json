@@ -34,13 +34,17 @@
 		{
 			"label": "temp-run-import-check",
 			"type": "shell",
-			"command": "\"D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe\" -c \"import sys\nfailed=[]\nfor m in ('pytest','playwright'):\n    try:\n        mod=__import__(m)\n        v=getattr(mod,'__version__',None)\n        print(f'OK {m} {v}')\n    except Exception as e:\n        failed.append(m)\n        print(f'FAIL {m} {e}', file=sys.stderr)\n# always exit 0\nsys.exit(0)\"",
+			"command": "python",
+			"args": [
+				"-c",
+				"import pytest,playwright; print(\"OK pytest\", getattr(pytest,\"__version__\",None)); print(\"OK playwright\", getattr(playwright,\"__version__\",None))"
+			],
 			"isBackground": false
 		},
 		{
 			"label": "Run run_tests_noninteractive.py",
 			"type": "shell",
-			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe scripts/run_tests_noninteractive.py",
+			"command": "python scripts/run_tests_noninteractive.py",
 			"isBackground": false,
 			"group": "none"
 		},
@@ -67,7 +71,7 @@
 				"-ExecutionPolicy",
 				"Bypass",
 				"-Command",
-				"Push-Location \"D:/AI/agentLumen/ShopSquire\"; $env:PYTHONPATH = \"D:/AI/agentLumen/ShopSquire\"; & \".venv/Scripts/python.exe\" \"scripts/check_imports.py\"; Pop-Location"
+				"Push-Location \"${workspaceFolder}\"; $env:PYTHONPATH = (Get-Location).Path; python \"scripts/check_imports.py\"; Pop-Location"
 			],
 			"isBackground": false,
 			"group": "none"
@@ -81,7 +85,7 @@
 				"-ExecutionPolicy",
 				"Bypass",
 				"-Command",
-				"Push-Location \"D:/AI/agentLumen/ShopSquire\"; $env:PYTHONPATH = (Get-Location).Path; & \".venv/Scripts/python.exe\" \"scripts/check_imports.py\"; Pop-Location"
+				"Push-Location \"${workspaceFolder}\"; $env:PYTHONPATH = (Get-Location).Path; python \"scripts/check_imports.py\"; Pop-Location"
 			],
 			"isBackground": false,
 			"group": "none"
@@ -89,7 +93,7 @@
 		{
 			"label": "Direct chaos+load pytest",
 			"type": "shell",
-			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe",
+			"command": "python",
 			"args": [
 				"-m",
 				"pytest",
@@ -103,7 +107,7 @@
 		{
 			"label": "Run recommend price/spec test",
 			"type": "shell",
-			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe",
+			"command": "python",
 			"args": [
 				"-m",
 				"pytest",
@@ -117,7 +121,7 @@
 		{
 			"label": "Re-run recommend price/spec test",
 			"type": "shell",
-			"command": "D:/AI/agentLumen/ShopSquire/.venv/Scripts/python.exe",
+			"command": "python",
 			"args": [
 				"-m",
 				"pytest",
