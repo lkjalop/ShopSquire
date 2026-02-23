@@ -14,8 +14,10 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
 
   db:
@@ -59,8 +61,10 @@ services:
       INVENTORY_SYNC_DRY_RUN: "0"
       INVENTORY_SYNC_UPSERT_PRODUCTS: "0"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: ["python", "scripts/sync_worker.py"]
     restart: unless-stopped
 

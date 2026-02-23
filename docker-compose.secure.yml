@@ -16,7 +16,7 @@ services:
     image: postgres:16
     container_name: shopsquire_db
     environment:
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres-change-me}
       POSTGRES_USER: postgres
       POSTGRES_DB: shopsquire
     ports:
@@ -61,7 +61,7 @@ services:
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_ADMIN_USER: "admin"
-      GF_SECURITY_ADMIN_PASSWORD: "change-me"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-grafana-change-me}"
     ports:
       - "3000:3000"
     volumes:

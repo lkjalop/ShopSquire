@@ -71,6 +71,11 @@ from src.app.security.headers import SecurityHeadersMiddleware
 from src.app.security.rate_limit import RateLimitMiddleware
 
 
+def _is_non_dev_env() -> bool:
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    return env not in ("local", "dev", "development", "test")
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -308,7 +313,9 @@ def create_app() -> FastAPI:
 
     # Simple in-memory rate limiting and concurrency backpressure
     # Token-bucket rate limiting
-    app.state.rate_limit_per_min = int(os.getenv("RATE_LIMIT_PER_IP_PER_MIN", "0") or 0)
+    # In non-dev environments, default to a non-zero IP limit unless explicitly overridden.
+    default_ip_rate = "60" if _is_non_dev_env() else "0"
+    app.state.rate_limit_per_min = int(os.getenv("RATE_LIMIT_PER_IP_PER_MIN", default_ip_rate) or default_ip_rate)
     app.state.rate_limit_window_sec = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60") or 60)
     app.state.rate_buckets = {}  # key -> {tokens, last_refill}
     app.state.scoped_rate_buckets = {}  # key -> {start, count}
@@ -325,8 +332,10 @@ def create_app() -> FastAPI:
 
     # Install lightweight rate-limit middleware (per-key + per-IP)
     try:
-        per_key = int(os.getenv("RATE_LIMIT_PER_MINUTE_KEY", "120") or 120)
-        per_ip = int(os.getenv("RATE_LIMIT_PER_MINUTE_IP", "60") or 60)
+        default_per_key = "120" if _is_non_dev_env() else "0"
+        default_per_ip = "60" if _is_non_dev_env() else "0"
+        per_key = int(os.getenv("RATE_LIMIT_PER_MINUTE_KEY", default_per_key) or default_per_key)
+        per_ip = int(os.getenv("RATE_LIMIT_PER_MINUTE_IP", default_per_ip) or default_per_ip)
         app.add_middleware(RateLimitMiddleware, per_min_key=per_key, per_min_ip=per_ip)
     except Exception:
         pass

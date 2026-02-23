@@ -20,7 +20,7 @@ services:
     command: ["node", "server.js"]
     environment:
       API_BASE: http://host.docker.internal:8080
-      API_KEY: local-merchant-key
+      API_KEY: ${OBS_API_KEY:-merchant-key-replace-me}
       PORT: 3333
     ports:
       - "3333:3333"
@@ -34,7 +34,7 @@ services:
     command: ["node", "livefeed.js"]
     environment:
       API_BASE: http://host.docker.internal:8080
-      API_KEY: local-owner-key
+      API_KEY: ${OBS_OWNER_API_KEY:-owner-key-replace-me}
       PORT: 3334
     ports:
       - "3334:3334"
@@ -54,7 +54,7 @@ services:
       - "3005:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana-change-me}
     volumes:
       - ./config/observability/grafana/datasources:/etc/grafana/provisioning/datasources:ro
       - ./config/observability/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro

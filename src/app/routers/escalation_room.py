@@ -48,6 +48,9 @@ def _allow_public_escalation(req: Request) -> bool:
         return _is_local_demo_host(req)
     if explicit in ("0", "false", "no", "off"):
         return False
+    # If APP_ENV is unset, default to loopback-only allowance for local demos.
+    if not env:
+        return _is_local_demo_host(req)
     return env in ("local", "dev", "development") and _is_local_demo_host(req)
 
 

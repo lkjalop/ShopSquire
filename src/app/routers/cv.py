@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
 import time
 import base64
+import io
 
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.cv_triage_basic import BasicCVTriage
@@ -30,6 +31,41 @@ from src.app.services.intake_gate import strict_binary_ingest_gate
 
 
 router = APIRouter(prefix="/api/v1/cv", tags=["cv"])
+
+
+def _normalize_upload_for_cv(
+    *, filename: str | None, content_type: str | None, blob: bytes
+) -> tuple[bytes, str | None, str, Dict[str, Any]]:
+    """Convert supported document uploads (PDF) into an image for CV processing.
+
+    Returns: (normalized_blob, normalized_content_type, normalized_filename, metadata)
+    """
+    safe_name = str(filename or "upload")
+    ctype = str(content_type or "").lower().strip()
+    is_pdf = ctype == "application/pdf" or safe_name.lower().endswith(".pdf")
+    if not is_pdf:
+        return blob, content_type, safe_name, {}
+
+    meta: Dict[str, Any] = {"source_document": "pdf"}
+    try:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(blob)
+        meta["pdf_pages"] = len(pdf)
+        if len(pdf) < 1:
+            raise ValueError("empty_pdf")
+
+        page = pdf[0]
+        bitmap = page.render(scale=2.0)
+        pil_image = bitmap.to_pil()
+        out = io.BytesIO()
+        pil_image.save(out, format="PNG")
+        png = out.getvalue()
+        normalized_name = f"{safe_name.rsplit('.', 1)[0]}_page1.png"
+        meta["normalized_from_pdf"] = True
+        return png, "image/png", normalized_name, meta
+    except Exception as exc:
+        raise ValueError(f"pdf_conversion_failed:{str(exc)[:160]}")
 
 
 class CVAnalyzeRequest(BaseModel):
@@ -570,6 +606,22 @@ async def upload(
         except Exception:
             pass
         content = await image.read()
+        normalized_meta: Dict[str, Any] = {}
+        try:
+            content, normalized_content_type, normalized_filename, normalized_meta = _normalize_upload_for_cv(
+                filename=image.filename,
+                content_type=image.content_type,
+                blob=content,
+            )
+        except ValueError as ve:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "document_conversion_failed",
+                    "message": "Unable to convert uploaded document into an analyzable image.",
+                    "detail": str(ve),
+                },
+            )
         # Always allocate a unique case id for this upload so evidence/decisions don't collide on filename.
         case_id = uuid.uuid4().hex or fallback_case_id
         gate = strict_binary_ingest_gate(
@@ -663,7 +715,7 @@ async def upload(
                 _safe_name = _re.sub(r"[^\w\-.]", "_", (image.filename or "upload"))[:100]
                 key = f"{uuid.uuid4().hex}_{_safe_name}"
                 storage = get_default_storage()
-                res = storage.upload_bytes(key, data_bytes, content_type=(image.content_type or None))
+                res = storage.upload_bytes(key, data_bytes, content_type=(normalized_content_type or None))
                 if isinstance(res, dict) and res.get("ok"):
                     storage_url = res.get("url")
             except Exception:
@@ -676,8 +728,8 @@ async def upload(
                 job_id = enqueue_cv(
                     {
                         "images": [content],
-                        "filename": image.filename,
-                        "content_type": image.content_type,
+                        "filename": normalized_filename,
+                        "content_type": normalized_content_type,
                         "storage_url": storage_url,
                     }
                 )
@@ -709,14 +761,15 @@ async def upload(
                     content,
                     meta={
                         "case_id": case_id,
-                        "filename": image.filename,
-                        "content_type": image.content_type,
+                        "filename": normalized_filename,
+                        "content_type": normalized_content_type,
                         "order_id": order_id,
                         "order_ctx": order_ctx,
                         "sku": sku,
                         "expected_label": expected_label,
                         "issue_type": issue_type,
                         "description": description,
+                        "upload_normalization": normalized_meta,
                     },
                     pack_id=pack_id,
                 ),

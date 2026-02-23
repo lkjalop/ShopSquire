@@ -22,6 +22,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         try:
+            # Non-positive values mean rate limiting is disabled for that scope.
+            enforce_key = self.per_min_key > 0
+            enforce_ip = self.per_min_ip > 0
+            if not enforce_key and not enforce_ip:
+                return await call_next(request)
+
             now = time.time()
             # determine bucket keys
             hdr_key = request.headers.get("x-api-key") or request.cookies.get("shopsquire_api_key") or "anon"
@@ -37,7 +43,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     ts, cnt = now, 0
                 cnt += 1
                 _STATE[key_bucket] = (ts, cnt)
-                if cnt > self.per_min_key:
+                if enforce_key and cnt > self.per_min_key:
                     over = True
                     reason = f"key_rate_limit_exceeded ({self.per_min_key}/min)"
                 # ip bucket
@@ -46,7 +52,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     ts2, cnt2 = now, 0
                 cnt2 += 1
                 _STATE[ip_bucket] = (ts2, cnt2)
-                if cnt2 > self.per_min_ip:
+                if enforce_ip and cnt2 > self.per_min_ip:
                     over = True
                     reason = f"ip_rate_limit_exceeded ({self.per_min_ip}/min)"
             if over:

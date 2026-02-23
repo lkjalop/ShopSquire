@@ -36,7 +36,61 @@ export default function EscalationRoom({
   const [input, setInput] = useState('');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [incidentSummary, setIncidentSummary] = useState<any>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setSummaryError(null);
+    setIncidentSummary(null);
+
+    const loadSummary = async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (OWNER_API_KEY) headers['x-api-key'] = OWNER_API_KEY;
+        const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}`), {
+          credentials: 'include',
+          headers,
+        });
+        const j = await safeJson(r);
+        if (!r.ok) {
+          throw new Error(parseError(r.status, j, 'incident_summary_failed'));
+        }
+        if (!mounted) return;
+
+        let reason = '';
+        let traceId = '';
+        try {
+          const desc = j && typeof j.description === 'string' ? JSON.parse(j.description) : null;
+          reason = String(desc?.reason || '');
+          traceId = String(desc?.trace_id || desc?.context?.trace_id || '');
+        } catch {
+          reason = '';
+          traceId = '';
+        }
+        setIncidentSummary({
+          id: j?.id || incidentId,
+          severity: j?.severity || 'unknown',
+          status: j?.status || 'unknown',
+          title: j?.title || 'Escalated incident',
+          reason,
+          traceId,
+          createdAt: j?.created_at || '',
+          createdBy: j?.created_by || '',
+        });
+      } catch (e: any) {
+        if (mounted) {
+          setSummaryError(e?.message || 'Unable to load incident summary.');
+        }
+      }
+    };
+
+    loadSummary();
+    return () => {
+      mounted = false;
+    };
+  }, [OWNER_API_KEY, incidentId]);
 
   useEffect(() => {
     let mounted = true;
@@ -209,14 +263,34 @@ export default function EscalationRoom({
             <button className={styles.closeBtn} onClick={onClose}>Close</button>
           </div>
         </div>
-        <div ref={bodyRef} className={styles.body}>
-          {events.length === 0 && <div style={{ color: '#6b7280' }}>No messages yet.</div>}
-          {events.map((e, i) => (
-            <div key={e.id || i} className={styles.msg}>
-              <div><strong>{e.user || e.role || 'system'}</strong>: {e.message || ''}</div>
-              <div className={styles.meta}>{e.time || ''}</div>
-            </div>
-          ))}
+        <div className={styles.contentLayout}>
+          <aside className={styles.summaryPanel}>
+            <div className={styles.summaryTitle}>Escalation Summary</div>
+            {!incidentSummary && !summaryError && (
+              <div className={styles.summaryValue}>Loading incident context...</div>
+            )}
+            {summaryError && (
+              <div className={styles.summaryError}>{summaryError}</div>
+            )}
+            {incidentSummary && (
+              <>
+                <div className={styles.summaryItem}><span className={styles.summaryKey}>Severity</span><span className={styles.summaryValue}>{incidentSummary.severity}</span></div>
+                <div className={styles.summaryItem}><span className={styles.summaryKey}>Status</span><span className={styles.summaryValue}>{incidentSummary.status}</span></div>
+                <div className={styles.summaryItem}><span className={styles.summaryKey}>Reason</span><span className={styles.summaryValue}>{incidentSummary.reason || 'human_review_requested'}</span></div>
+                <div className={styles.summaryItem}><span className={styles.summaryKey}>Trace</span><span className={styles.summaryValue}>{incidentSummary.traceId || 'n/a'}</span></div>
+                <div className={styles.summaryItem}><span className={styles.summaryKey}>Created</span><span className={styles.summaryValue}>{incidentSummary.createdAt || 'n/a'}</span></div>
+              </>
+            )}
+          </aside>
+          <div ref={bodyRef} className={styles.body}>
+            {events.length === 0 && <div style={{ color: '#6b7280' }}>No messages yet.</div>}
+            {events.map((e, i) => (
+              <div key={e.id || i} className={styles.msg}>
+                <div><strong>{e.user || e.role || 'system'}</strong>: {e.message || ''}</div>
+                <div className={styles.meta}>{e.time || ''}</div>
+              </div>
+            ))}
+          </div>
         </div>
         {connectionError && <div style={{ padding: '0 12px 10px', color: '#9f2d1b', fontSize: 12 }}>{connectionError}</div>}
         {sendError && <div style={{ padding: '0 12px 10px', color: '#9f2d1b', fontSize: 12 }}>{sendError}</div>}

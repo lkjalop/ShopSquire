@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: shopsquire
       POSTGRES_USER: shopsquire
-      POSTGRES_PASSWORD: shopsquire
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres-change-me}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -58,7 +58,7 @@ services:
   grafana:
     image: grafana/grafana:9.5.0
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-grafana-change-me}
     volumes:
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
     ports:

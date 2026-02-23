@@ -9,7 +9,7 @@
 .modal {
   background: #fff;
   border-radius: 12px;
-  width: 680px;
+  width: 920px;
   max-width: 94vw;
   box-shadow: 0 10px 40px rgba(0,0,0,.2);
   overflow: hidden;
@@ -23,6 +23,43 @@
   color: #fff;
 }
 .title { font-weight: 600; }
+.contentLayout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  border-top: 1px solid #e5e7eb;
+}
+.summaryPanel {
+  border-right: 1px solid #e5e7eb;
+  background: #f8fbff;
+  padding: 12px;
+  max-height: 56vh;
+  overflow: auto;
+}
+.summaryTitle {
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.summaryItem {
+  display: grid;
+  gap: 3px;
+  padding: 8px 0;
+  border-bottom: 1px solid #e8edf4;
+}
+.summaryKey {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+}
+.summaryValue {
+  font-size: 13px;
+  color: #111827;
+  word-break: break-word;
+}
+.summaryError {
+  font-size: 12px;
+  color: #9f2d1b;
+}
 .body { padding: 12px; max-height: 56vh; overflow: auto; }
 .footer { padding: 12px; display: flex; gap: 8px; border-top: 1px solid #eee; }
 .input { flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
@@ -30,3 +67,14 @@
 .msg { border-bottom: 1px solid #f1f1f1; padding: 8px 0; }
 .meta { font-size: 11px; color: #6b7280; }
 .closeBtn { background: transparent; color: #fff; border: none; cursor: pointer; }
+
+@media (max-width: 860px) {
+  .contentLayout {
+    grid-template-columns: 1fr;
+  }
+  .summaryPanel {
+    border-right: 0;
+    border-bottom: 1px solid #e5e7eb;
+    max-height: 28vh;
+  }
+}
