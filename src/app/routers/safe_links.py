@@ -24,12 +24,15 @@ def rewrite_link(
     ttl_seconds = int((payload or {}).get("ttl_seconds") or 7 * 24 * 3600)
     if not url:
         return {"ok": False, "detail": "url_required"}
-    out = create_safe_link(
-        tenant_id=str(tenant_id) if tenant_id is not None else None,
-        original_url=url,
-        campaign_id=str(campaign_id) if campaign_id is not None else None,
-        ttl_seconds=ttl_seconds,
-    )
+    try:
+        out = create_safe_link(
+            tenant_id=str(tenant_id) if tenant_id is not None else None,
+            original_url=url,
+            campaign_id=str(campaign_id) if campaign_id is not None else None,
+            ttl_seconds=ttl_seconds,
+        )
+    except ValueError as exc:
+        return {"ok": False, "detail": str(exc)}
     return {"ok": True, **out}
 
 
@@ -46,4 +49,3 @@ def click_recheck(token: str, request: Request):
     if not url:
         return ORJSONResponse({"ok": False, **out, "detail": "missing_target_url"}, status_code=404)
     return RedirectResponse(url=url, status_code=307)
-

@@ -34,6 +34,10 @@ COPY README.md /app/
 EXPOSE 8080
 
 RUN chmod +x /app/scripts/docker_entrypoint.sh
+RUN addgroup --system shopsquire && adduser --system --ingroup shopsquire shopsquire \
+    && chown -R shopsquire:shopsquire /app
+
+USER shopsquire
 
 ENTRYPOINT ["/app/scripts/docker_entrypoint.sh"]
 CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -7,7 +7,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
       RUN_MIGRATIONS: "1"
       AUTO_MIGRATE: "1"
       DB_MIGRATION_GUARD: "1"
@@ -19,6 +19,8 @@ services:
       redis:
         condition: service_healthy
     command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    security_opt:
+      - no-new-privileges:true
 
   db:
     image: postgres:16
@@ -39,10 +41,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: shopsquire_redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis-change-me}"]
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis-change-me}", "ping"]
       interval: 5s
       retries: 5
 
@@ -53,7 +56,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
       DB_MIGRATION_GUARD: "1"
       INVENTORY_SYNC_CONNECTORS: "csv,shopify"
       INVENTORY_SYNC_INTERVAL_SEC: "300"
@@ -67,6 +70,8 @@ services:
         condition: service_healthy
     command: ["python", "scripts/sync_worker.py"]
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   prometheus:
     image: prom/prometheus:latest

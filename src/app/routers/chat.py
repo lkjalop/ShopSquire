@@ -7,8 +7,10 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.deps import get_redis
 from src.app.services.llm_provider import select_ollama_model, ollama_generate, is_complex_query
 from src.app.services.search_events import log_search_event
+from src.app.security.model_theft import enforce_model_theft_rate_limit
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
@@ -18,6 +20,7 @@ router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 async def chat_query(
     request: Request,
     payload: Dict,
+    redis=Depends(get_redis),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
     """Chat query wrapper that delegates to recommendation endpoint and
@@ -34,6 +37,14 @@ async def chat_query(
     q = (payload or {}).get("query") or ""
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
+    allowed_model_use, model_use_reason = enforce_model_theft_rate_limit(
+        redis_client=redis,
+        uid=str((payload or {}).get("uid") or ""),
+        source_ip=(request.client.host if request and request.client else None),
+        query=q,
+    )
+    if not allowed_model_use:
+        raise HTTPException(status_code=429, detail={"message": "model_theft_guard", "reason": model_use_reason})
 
     # Call internal recommend endpoint to leverage agentic pipeline
     base = str(request.base_url).rstrip("/")

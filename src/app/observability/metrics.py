@@ -573,6 +573,35 @@ ab_assignments_total = Counter(
 
 _ab_variant_counts: dict[str, int] = {"A": 0, "B": 0}
 
+ab_decision_quality_total = Counter(
+    "shopsquire_ab_decision_quality_total",
+    "AB decision quality outcomes by variant",
+    labelnames=["variant", "outcome"],
+)
+
+ab_decision_quality_score = Histogram(
+    "shopsquire_ab_decision_quality_score",
+    "AB decision quality score distribution (0..1)",
+    labelnames=["variant"],
+)
+
+ab_decision_quality_avg = Gauge(
+    "shopsquire_ab_decision_quality_avg",
+    "Running average AB decision quality score",
+    labelnames=["variant"],
+)
+
+agent_feature_toggle_used_total = Counter(
+    "shopsquire_agent_feature_toggle_used_total",
+    "Feature toggle usage by feature/state",
+    labelnames=["feature", "state"],
+)
+
+_ab_quality_snapshot: dict[str, dict[str, float]] = {
+    "A": {"count": 0.0, "score_sum": 0.0},
+    "B": {"count": 0.0, "score_sum": 0.0},
+}
+
 
 def record_ab_assignment(variant: str):
     try:
@@ -586,12 +615,57 @@ def record_ab_assignment(variant: str):
         pass
 
 
+def record_feature_toggle_used(feature: str, enabled: bool):
+    try:
+        agent_feature_toggle_used_total.labels(feature=feature or "unknown", state=("enabled" if enabled else "disabled")).inc()
+    except Exception:
+        pass
+
+
+def record_ab_decision_quality(variant: str, score: float, outcome: str):
+    try:
+        v = (variant or "A").upper()
+        s = max(0.0, min(1.0, float(score or 0.0)))
+        o = str(outcome or "unknown")
+        ab_decision_quality_total.labels(variant=v, outcome=o).inc()
+        ab_decision_quality_score.labels(variant=v).observe(s)
+        snap = _ab_quality_snapshot.setdefault(v, {"count": 0.0, "score_sum": 0.0})
+        snap["count"] = float(snap.get("count", 0.0)) + 1.0
+        snap["score_sum"] = float(snap.get("score_sum", 0.0)) + s
+        avg = snap["score_sum"] / max(1.0, snap["count"])
+        ab_decision_quality_avg.labels(variant=v).set(avg)
+    except Exception:
+        pass
+
+
 @router.get("/observability/ab_snapshot")
 def ab_snapshot():
     try:
         return {"A": _ab_variant_counts.get("A", 0), "B": _ab_variant_counts.get("B", 0)}
     except Exception:
         return {"A": 0, "B": 0}
+
+
+@router.get("/observability/ab_quality_snapshot")
+def ab_quality_snapshot():
+    try:
+        out: dict[str, dict[str, float]] = {}
+        for variant, vals in (_ab_quality_snapshot or {}).items():
+            c = float(vals.get("count", 0.0))
+            out[variant] = {
+                "count": c,
+                "score_avg": (float(vals.get("score_sum", 0.0)) / max(1.0, c)) if c > 0 else 0.0,
+            }
+        a = out.get("A", {}).get("score_avg", 0.0)
+        b = out.get("B", {}).get("score_avg", 0.0)
+        out["compare"] = {
+            "baseline_variant": "A",
+            "delta_b_minus_a": float(b) - float(a),
+            "ratio_b_over_a": (float(b) / max(1e-9, float(a))) if float(a) > 0 else 0.0,
+        }
+        return out
+    except Exception:
+        return {"A": {"count": 0.0, "score_avg": 0.0}, "B": {"count": 0.0, "score_avg": 0.0}, "compare": {"baseline_variant": "A", "delta_b_minus_a": 0.0, "ratio_b_over_a": 0.0}}
 
 # -------------------- Recommendation LTR Metrics --------------------
 

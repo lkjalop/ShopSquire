@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import base64
 import os
 import time
 from typing import Iterable, Tuple
@@ -101,6 +102,17 @@ def _verify_slack_signature(secret: str, payload: bytes, signature: str, timesta
     return hmac.compare_digest(expected, signature)
 
 
+def _verify_shopify_signature(secret: str, payload: bytes, signature: str) -> bool:
+    if not secret or not signature:
+        return False
+    try:
+        digest = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).digest()
+        expected = base64.b64encode(digest).decode("ascii")
+        return hmac.compare_digest(expected, signature.strip())
+    except Exception:
+        return False
+
+
 class WebhookSecurityMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, paths: Iterable[str] | None = None):
         super().__init__(app)
@@ -113,12 +125,14 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
         self.stripe_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
         self.github_secret = os.getenv("GITHUB_WEBHOOK_SECRET", "")
         self.slack_secret = os.getenv("SLACK_WEBHOOK_SECRET", "")
+        self.shopify_secret = os.getenv("SHOPIFY_WEBHOOK_SECRET", "")
         if paths:
             self.paths = list(paths)
         else:
             self.paths = [
                 "/api/v1/orchestrator/events/",
                 "/api/v1/admin/connectors/test",
+                "/api/v1/webhooks/",
             ]
 
     async def dispatch(self, request: Request, call_next):
@@ -132,6 +146,7 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
             stripe_secret = os.getenv("STRIPE_WEBHOOK_SECRET", self.stripe_secret or "")
             github_secret = os.getenv("GITHUB_WEBHOOK_SECRET", self.github_secret or "")
             slack_secret = os.getenv("SLACK_WEBHOOK_SECRET", self.slack_secret or "")
+            shopify_secret = os.getenv("SHOPIFY_WEBHOOK_SECRET", self.shopify_secret or "")
             tolerance_seconds = int(os.getenv("WEBHOOK_TOLERANCE_SECONDS", str(self.tolerance_seconds)))
             body = await request.body()
             signature = (request.headers.get(self.signature_header) or "").strip()
@@ -139,6 +154,7 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
             stripe_sig = (request.headers.get("stripe-signature") or "").strip()
             github_sig = (request.headers.get("x-hub-signature-256") or "").strip()
             slack_sig = (request.headers.get("x-slack-signature") or "").strip()
+            shopify_sig = (request.headers.get("x-shopify-hmac-sha256") or "").strip()
             slack_ts = (request.headers.get("x-slack-request-timestamp") or "").strip()
             now = int(time.time())
             webhook_id_hdr = (
@@ -246,6 +262,37 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
                         )
                         raise HTTPException(status_code=401, detail="Invalid Slack webhook signature")
                     vendor_verified = True
+            elif shopify_sig:
+                vendor = "shopify"
+                if not shopify_secret:
+                    if enforce_vendor:
+                        record_webhook_verification(vendor, "missing_secret")
+                        log_agent_security_event(
+                            interaction_type=AgentInteractionType.webhook_received,
+                            source=request.client.host if request.client else "unknown",
+                            destination=path,
+                            threat_category=ThreatCategory.webhook_spoofing,
+                            severity="high",
+                            confidence=0.8,
+                            details={"vendor": "shopify", "reason": "missing_secret"},
+                            requires_escalation=True,
+                        )
+                        raise HTTPException(status_code=401, detail="Missing Shopify webhook secret")
+                else:
+                    if not _verify_shopify_signature(shopify_secret, body, shopify_sig):
+                        record_webhook_verification(vendor, "invalid_signature")
+                        log_agent_security_event(
+                            interaction_type=AgentInteractionType.webhook_received,
+                            source=request.client.host if request.client else "unknown",
+                            destination=path,
+                            threat_category=ThreatCategory.webhook_spoofing,
+                            severity="high",
+                            confidence=0.9,
+                            details={"vendor": "shopify", "reason": "signature_mismatch"},
+                            requires_escalation=True,
+                        )
+                        raise HTTPException(status_code=401, detail="Invalid Shopify webhook signature")
+                    vendor_verified = True
 
             enforce_timestamp = path.startswith("/api/v1/admin/connectors/test")
             if secret and not vendor_verified:
@@ -319,7 +366,7 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
             else:
                 record_webhook_verification(vendor or "generic", "ok")
                 try:
-                    replay_sig = stripe_sig or github_sig or slack_sig
+                    replay_sig = stripe_sig or github_sig or slack_sig or shopify_sig
                     # Some providers (e.g., GitHub) may not send timestamps on every
                     # webhook. Use a rolling replay window bucket to avoid false
                     # positives across independent runs while still catching quick

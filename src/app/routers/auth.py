@@ -3,6 +3,10 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import time
+import base64
+import hmac
+import json
 from datetime import datetime, timedelta
 from typing import Dict
 from urllib.parse import urlencode
@@ -85,14 +89,34 @@ def _clear_api_key_cookie(resp: Response) -> None:
 
 def _ensure_auth_tables():
     # Alembic is the source of truth for non-SQLite DBs.
+    non_sqlite = False
     try:
         from src.app.models.db import get_engine
 
         eng = get_engine()
-        if getattr(eng, "dialect", None) is not None and eng.dialect.name != "sqlite":
-            return
+        non_sqlite = bool(getattr(eng, "dialect", None) is not None and eng.dialect.name != "sqlite")
     except Exception:
         pass
+
+    if non_sqlite:
+        # Keep non-SQLite schemas migration-first, but ensure refresh token
+        # table exists for auth token rotation compatibility.
+        with db_session() as db:
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS refresh_tokens (
+                  id TEXT PRIMARY KEY,
+                  user_id TEXT NOT NULL,
+                  token_hash TEXT UNIQUE NOT NULL,
+                  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                  expires_at TEXT,
+                  revoked_at TEXT,
+                  rotated_from TEXT
+                )
+                """
+            )
+            db.commit()
+        return
 
     with db_session() as db:
         db.execute(
@@ -116,6 +140,19 @@ def _ensure_auth_tables():
               token_hash TEXT,
               created_at TEXT DEFAULT CURRENT_TIMESTAMP,
               expires_at TEXT
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+              id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              token_hash TEXT UNIQUE NOT NULL,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+              expires_at TEXT,
+              revoked_at TEXT,
+              rotated_from TEXT
             )
             """
         )
@@ -224,6 +261,195 @@ def _hash_password(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
 
 
+def _jwt_secret() -> str:
+    return str(os.getenv("JWT_SIGNING_KEY", "") or "").strip()
+
+
+def _jwt_issuer() -> str:
+    return str(os.getenv("JWT_ISSUER", "shopsquire") or "shopsquire")
+
+
+def _jwt_audience() -> str:
+    return str(os.getenv("JWT_AUDIENCE", "shopsquire-api") or "shopsquire-api")
+
+
+def _jwt_default_role() -> str:
+    return str(os.getenv("LOCAL_AUTH_DEFAULT_ROLE", "merchant") or "merchant")
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(data: str) -> bytes:
+    pad = "=" * ((4 - len(data) % 4) % 4)
+    return base64.urlsafe_b64decode((data + pad).encode("ascii"))
+
+
+def _jwt_encode_hs256(claims: Dict[str, object], secret: str) -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    h = _b64url_encode(json.dumps(header, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    p = _b64url_encode(json.dumps(claims, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    sig = hmac.new(secret.encode("utf-8"), f"{h}.{p}".encode("utf-8"), hashlib.sha256).digest()
+    s = _b64url_encode(sig)
+    return f"{h}.{p}.{s}"
+
+
+def _jwt_decode_hs256(token: str, secret: str, *, issuer: str, audience: str) -> Dict | None:
+    try:
+        parts = str(token or "").split(".")
+        if len(parts) != 3:
+            return None
+        h, p, s = parts
+        calc = _b64url_encode(hmac.new(secret.encode("utf-8"), f"{h}.{p}".encode("utf-8"), hashlib.sha256).digest())
+        if not hmac.compare_digest(calc, s):
+            return None
+        claims = json.loads(_b64url_decode(p).decode("utf-8"))
+        now = int(time.time())
+        exp = int(claims.get("exp") or 0)
+        iat = int(claims.get("iat") or 0)
+        if exp <= now or iat > now + 5:
+            return None
+        if str(claims.get("iss") or "") != str(issuer or ""):
+            return None
+        aud = claims.get("aud")
+        if isinstance(aud, list):
+            if audience not in [str(x) for x in aud]:
+                return None
+        else:
+            if str(aud or "") != str(audience or ""):
+                return None
+        return claims
+    except Exception:
+        return None
+
+
+def _issue_access_jwt(*, user_id: str, email: str | None, role: str) -> Dict:
+    secret = _jwt_secret()
+    if not secret:
+        return {"token": "", "expires_in": 0}
+    ttl = int(os.getenv("JWT_ACCESS_TTL_SECONDS", "900") or 900)
+    now = int(time.time())
+    exp = now + max(60, ttl)
+    claims = {
+        "sub": str(user_id),
+        "email": str(email or ""),
+        "role": str(role or _jwt_default_role()),
+        "typ": "access",
+        "iss": _jwt_issuer(),
+        "aud": _jwt_audience(),
+        "iat": now,
+        "exp": exp,
+        "jti": secrets.token_hex(8),
+    }
+    token = _jwt_encode_hs256(claims, secret)
+    return {"token": str(token), "expires_in": int(max(1, exp - now))}
+
+
+def _issue_refresh_jwt(*, user_id: str, email: str | None, role: str, rotated_from: str | None = None) -> Dict:
+    secret = _jwt_secret()
+    if not secret:
+        return {"token": "", "expires_in": 0}
+    ttl = int(os.getenv("JWT_REFRESH_TTL_SECONDS", "86400") or 86400)
+    now = int(time.time())
+    exp = now + max(300, ttl)
+    jti = secrets.token_hex(16)
+    claims = {
+        "sub": str(user_id),
+        "email": str(email or ""),
+        "role": str(role or _jwt_default_role()),
+        "typ": "refresh",
+        "iss": _jwt_issuer(),
+        "aud": _jwt_audience(),
+        "iat": now,
+        "exp": exp,
+        "jti": jti,
+    }
+    token = str(_jwt_encode_hs256(claims, secret))
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = datetime.utcfromtimestamp(exp).isoformat()
+    with db_session() as db:
+        db.execute(
+            """
+            INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, rotated_from)
+            VALUES (:id, :user_id, :token_hash, :expires_at, :rotated_from)
+            """,
+            {
+                "id": f"rt-{jti}",
+                "user_id": str(user_id),
+                "token_hash": token_hash,
+                "expires_at": expires_at,
+                "rotated_from": rotated_from,
+            },
+        )
+        db.commit()
+    return {"token": token, "expires_in": int(max(1, exp - now))}
+
+
+def _issue_jwt_pair(*, user_id: str, email: str | None, role: str) -> Dict[str, object]:
+    access = _issue_access_jwt(user_id=user_id, email=email, role=role)
+    refresh = _issue_refresh_jwt(user_id=user_id, email=email, role=role)
+    if not access.get("token") or not refresh.get("token"):
+        return {"access_token": None, "access_expires_in": 0, "refresh_token": None, "refresh_expires_in": 0}
+    return {
+        "access_token": access["token"],
+        "access_expires_in": access["expires_in"],
+        "refresh_token": refresh["token"],
+        "refresh_expires_in": refresh["expires_in"],
+    }
+
+
+def _decode_refresh_jwt(token: str) -> Dict | None:
+    secret = _jwt_secret()
+    if not secret:
+        return None
+    claims = _jwt_decode_hs256(str(token or ""), secret, issuer=_jwt_issuer(), audience=_jwt_audience())
+    if not claims:
+        return None
+    if str(claims.get("typ") or "").lower() != "refresh":
+        return None
+    return claims
+
+
+def _revoke_refresh_token(token: str) -> bool:
+    token_hash = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+    with db_session() as db:
+        row = db.execute(
+            "SELECT id, revoked_at, expires_at FROM refresh_tokens WHERE token_hash = :h LIMIT 1",
+            {"h": token_hash},
+        ).fetchone()
+        if not row:
+            return False
+        if row[1]:
+            return False
+        try:
+            exp = row[2]
+            if exp and datetime.utcnow() > datetime.fromisoformat(str(exp)):
+                return False
+        except Exception:
+            pass
+        db.execute(
+            "UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = :h",
+            {"h": token_hash},
+        )
+        db.commit()
+    return True
+
+
+def _rotate_refresh_token(token: str) -> Dict | None:
+    claims = _decode_refresh_jwt(token)
+    if not claims:
+        return None
+    if not _revoke_refresh_token(token):
+        return None
+    return _issue_refresh_jwt(
+        user_id=str(claims.get("sub") or ""),
+        email=str(claims.get("email") or ""),
+        role=str(claims.get("role") or _jwt_default_role()),
+        rotated_from=str(claims.get("jti") or ""),
+    )
+
+
 def _issue_token(user_id: str) -> Dict:
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -283,6 +509,10 @@ def _user_from_token(token: str):
                     db.execute("DELETE FROM session_tokens WHERE user_id = :uid", {"uid": str(user_id)})
                 except Exception:
                     pass
+                try:
+                    db.execute("UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = :uid AND revoked_at IS NULL", {"uid": str(user_id)})
+                except Exception:
+                    pass
                 db.commit()
                 return None
         except Exception:
@@ -317,6 +547,10 @@ class LoginPayload(BaseModel):
 
 class ApiKeyCookiePayload(BaseModel):
     api_key: str
+
+
+class RefreshPayload(BaseModel):
+    refresh_token: str
 
 
 @router.post("/register")
@@ -354,8 +588,9 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
         token = _issue_token(user_id)
+        jwt_pair = _issue_jwt_pair(user_id=user_id, email=email, role=_jwt_default_role())
         _set_session_cookie(response, str(token.get("token") or ""), request)
-        return {"user_id": user_id, "email": email, "name": payload.name, **token}
+        return {"user_id": user_id, "email": email, "name": payload.name, **token, **jwt_pair}
 
 
 @router.post("/login")
@@ -396,6 +631,7 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                 raise HTTPException(status_code=403, detail="mfa_stepup_required")
             _clear_forced_reauth(user_id=str(user_id or ""), email=email)
         token = _issue_token(user_id)
+        jwt_pair = _issue_jwt_pair(user_id=str(user_id), email=email, role=_jwt_default_role())
         _set_session_cookie(response, str(token.get("token") or ""), request)
         try:
             log_iam_event("login_success", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), True, {"user_id": user_id})
@@ -404,7 +640,7 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                 emit_iam_anomaly(email, request.client.host if request.client else "unknown", reason)
         except Exception:
             pass
-        return {"user_id": user_id, "email": email, "name": name, **token}
+        return {"user_id": user_id, "email": email, "name": name, **token, **jwt_pair}
 
 
 @router.post("/logout")
@@ -418,11 +654,24 @@ def logout(
         token_value = str(token or shopsquire_session or "")
         token_hash = hashlib.sha256(token_value.encode("utf-8")).hexdigest() if token_value else ""
         with db_session() as db:
+            user_row = None
+            try:
+                user_row = _user_from_token(token_value)
+            except Exception:
+                user_row = None
             # Delete by hash if present, else token
             try:
                 db.execute("DELETE FROM session_tokens WHERE token_hash = :th", {"th": token_hash})
             except Exception:
                 db.execute("DELETE FROM session_tokens WHERE token = :t", {"t": token_value})
+            try:
+                if user_row and user_row[0]:
+                    db.execute(
+                        "UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = :uid AND revoked_at IS NULL",
+                        {"uid": str(user_row[0])},
+                    )
+            except Exception:
+                pass
             db.commit()
         _clear_session_cookie(response)
         return {"logged_out": True}
@@ -436,6 +685,31 @@ def me(token: str | None = None, shopsquire_session: str | None = Cookie(default
         if not row:
             raise HTTPException(status_code=401, detail="Invalid token")
         return {"user_id": row[0], "email": row[1], "name": row[2]}
+
+
+@router.post("/token/refresh")
+def refresh_token(payload: RefreshPayload) -> Dict:
+    _ensure_auth_tables()
+    refresh_token_value = str(payload.refresh_token or "").strip()
+    if not refresh_token_value:
+        raise HTTPException(status_code=400, detail="refresh_token_required")
+    claims = _decode_refresh_jwt(refresh_token_value)
+    if not claims:
+        raise HTTPException(status_code=401, detail="invalid_refresh_token")
+    rotated = _rotate_refresh_token(refresh_token_value)
+    if not rotated:
+        raise HTTPException(status_code=401, detail="refresh_token_revoked_or_expired")
+    access = _issue_access_jwt(
+        user_id=str(claims.get("sub") or ""),
+        email=str(claims.get("email") or ""),
+        role=str(claims.get("role") or _jwt_default_role()),
+    )
+    return {
+        "access_token": access.get("token"),
+        "access_expires_in": int(access.get("expires_in") or 0),
+        "refresh_token": rotated.get("token"),
+        "refresh_expires_in": int(rotated.get("expires_in") or 0),
+    }
 
 
 @router.post("/api-key-cookie")

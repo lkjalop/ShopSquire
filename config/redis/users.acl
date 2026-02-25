@@ -1,0 +1,7 @@
+# Redis ACL template for production.
+# Update passwords before use.
+#
+# Default user disabled; app user should be used by services.
+user default off
+user shopsquire on >replace-me-redis-password ~* +@all
+

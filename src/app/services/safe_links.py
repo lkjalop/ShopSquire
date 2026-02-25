@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from src.app.models.db import db_session
 from src.app.security.email_enrichment import detonate_targets, enrich_iocs
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 
 def _secret() -> str:
@@ -64,6 +65,7 @@ def _decode_token(tok: str) -> str:
 
 def create_safe_link(*, tenant_id: str | None, original_url: str, campaign_id: str | None = None, ttl_seconds: int = 7 * 24 * 3600) -> Dict[str, Any]:
     _ensure_table()
+    ensure_safe_outbound_url(original_url)
     now = int(time.time())
     exp = int(now + max(60, int(ttl_seconds or 0)))
     lid = f"sl-{uuid.uuid4().hex[:18]}"
@@ -192,4 +194,3 @@ def recheck_safe_link(*, token: str, ip: str | None = None, user_agent: str | No
         "ip": ip,
         "user_agent_hash": (hashlib.sha256((user_agent or "").encode("utf-8")).hexdigest()[:16] if user_agent else None),
     }
-

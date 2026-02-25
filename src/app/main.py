@@ -43,6 +43,8 @@ from src.app.routers.query import router as query_router
 from src.app.routers.session_events import router as session_events_router
 from src.app.routers.chat import router as chat_router
 from src.app.routers.safe_links import router as safe_links_router
+from src.app.routers.billing import router as billing_router
+from src.app.routers.admin_webhooks import router as admin_webhooks_router
 from src.app.routers.audit import router as audit_router
 from src.app.routers.posthoc import router as posthoc_router
 from src.app.routers.health import router as health_router
@@ -69,6 +71,7 @@ from src.app.security.pci_boundary import PciBoundaryMiddleware
 from src.app.security.compliance import ComplianceMiddleware
 from src.app.security.headers import SecurityHeadersMiddleware
 from src.app.security.rate_limit import RateLimitMiddleware
+from src.app.security.internal_mtls import InternalMTLSMiddleware
 
 
 def _is_non_dev_env() -> bool:
@@ -288,6 +291,11 @@ def create_app() -> FastAPI:
         pass
     # Enforce webhook signature + replay protection on inbound webhooks
     app.add_middleware(WebhookSecurityMiddleware)
+    # Enforce proxy-validated mTLS headers for internal service routes when enabled.
+    try:
+        app.add_middleware(InternalMTLSMiddleware)
+    except Exception:
+        pass
     # Idempotency for write endpoints (POST/PUT/PATCH)
     try:
         app.add_middleware(IdempotencyMiddleware)
@@ -1326,6 +1334,8 @@ def create_app() -> FastAPI:
     app.include_router(support_complaints_router)
     app.include_router(chat_router)
     app.include_router(safe_links_router)
+    app.include_router(billing_router)
+    app.include_router(admin_webhooks_router)
     app.include_router(query_router)
     app.include_router(audit_router)
     app.include_router(posthoc_router)

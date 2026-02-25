@@ -46,6 +46,11 @@ from src.app.flows.catalog import QuestionTemplateCatalog
 from src.app.rag.retrieve import Retriever
 from src.app.services.trace_strategy_tags import build_strategy_trace_correlation
 from src.app.services.i18n import localize_recommend_payload
+from src.app.services.billing import record_meter_event
+from src.app.security.model_theft import (
+    enforce_model_theft_rate_limit,
+    build_model_watermark,
+)
 import httpx
 from types import SimpleNamespace
 import logging
@@ -499,6 +504,18 @@ def suggest(request: Request, uid: str, query: str, budget_max: Optional[int] = 
     span.set_attribute("recommend.uid_hash", uid_hash)
     span.set_attribute("recommend.query_len", len(query or ""))
     span.set_attribute("recommend.has_budget_max", bool(budget_max))
+    source_ip = request.client.host if request and request.client else None
+    allowed_model_use, model_use_reason = enforce_model_theft_rate_limit(
+        redis_client=redis,
+        uid=uid,
+        source_ip=source_ip,
+        query=query,
+    )
+    if not allowed_model_use:
+        raise HTTPException(
+            status_code=429,
+            detail={"message": "Request blocked by model extraction controls", "reason": model_use_reason},
+        )
     flags_path = os.getenv("FEATURE_FLAGS_PATH") or get_settings().feature_flags_path
     flags = load_feature_flags(flags_path)
     skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
@@ -2573,6 +2590,33 @@ def suggest(request: Request, uid: str, query: str, budget_max: Optional[int] = 
     # Final safety: ensure contract keys present after redaction as well
     try:
         redacted = _ensure_trace_response(redacted or {}, decision_id or trace_id, flags)
+    except Exception:
+        pass
+    try:
+        wm = build_model_watermark(
+            trace_id=decision_id or trace_id,
+            model=str(redacted.get("llm_model") or redacted.get("model_tier") or ""),
+            payload_hint=str(redacted.get("assistant_message") or "")[:120],
+        )
+        redacted["model_watermark"] = wm
+        if str(os.getenv("MODEL_THEFT_WATERMARK_APPEND_TEXT", "0")).lower() in ("1", "true", "yes"):
+            if isinstance(redacted.get("assistant_message"), str) and redacted.get("assistant_message"):
+                redacted["assistant_message"] = f"{redacted['assistant_message']} [{wm}]"
+    except Exception:
+        pass
+    try:
+        tenant_for_billing = (
+            request.headers.get("X-Tenant-Id")
+            or request.headers.get("x-tenant-id")
+            or "default"
+        )
+        record_meter_event(
+            tenant_id=str(tenant_for_billing),
+            metric="recommend_requests",
+            quantity=1.0,
+            source="api",
+            metadata={"trace_id": decision_id or trace_id, "uid_hash": uid_hash},
+        )
     except Exception:
         pass
     # Emit additional output analysis including critique deltas

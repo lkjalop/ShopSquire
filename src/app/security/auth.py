@@ -5,6 +5,9 @@ import os
 import time
 import uuid
 import ipaddress
+import base64
+import hmac
+import hashlib
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -214,6 +217,54 @@ def _admin_oidc_required() -> bool:
 
 def _is_admin_operator_scope(allowed: set[str]) -> bool:
     return (ROLE_OWNER in allowed) or (ROLE_DEVELOPER in allowed)
+
+
+def _verify_local_jwt(auth_header: Optional[str]) -> Optional[str]:
+    """Validate locally-issued HS256 access JWTs and return role claim."""
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return None
+    secret = str(os.getenv("JWT_SIGNING_KEY", "") or "").strip()
+    if not secret:
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    issuer = str(os.getenv("JWT_ISSUER", "shopsquire") or "shopsquire")
+    audience = str(os.getenv("JWT_AUDIENCE", "shopsquire-api") or "shopsquire-api")
+    role_claim = str(os.getenv("JWT_ROLE_CLAIM", "role") or "role")
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        h, p, s = parts
+        sig = base64.urlsafe_b64encode(
+            hmac.new(secret.encode("utf-8"), f"{h}.{p}".encode("utf-8"), hashlib.sha256).digest()
+        ).decode("ascii").rstrip("=")
+        if not hmac.compare_digest(sig, s):
+            return None
+        pad = "=" * ((4 - len(p) % 4) % 4)
+        claims = json.loads(base64.urlsafe_b64decode((p + pad).encode("ascii")).decode("utf-8"))
+        now = int(time.time())
+        exp = int(claims.get("exp") or 0)
+        iat = int(claims.get("iat") or 0)
+        if exp <= now or iat > now + 5:
+            return None
+        if str(claims.get("iss") or "") != issuer:
+            return None
+        aud_val = claims.get("aud")
+        if isinstance(aud_val, list):
+            if audience not in [str(x) for x in aud_val]:
+                return None
+        elif str(aud_val or "") != audience:
+            return None
+        token_type = str(claims.get("typ") or claims.get("token_type") or "access").lower()
+        if token_type != "access":
+            return None
+        role = claims.get(role_claim)
+        if isinstance(role, list):
+            role = role[0] if role else None
+        return str(role) if role else None
+    except Exception:
+        return None
+
 
 def _verify_oidc_jwt(auth_header: Optional[str]) -> Optional[str]:
     """Return role from JWT claims if OIDC configured and token valid; otherwise None.
@@ -684,6 +735,12 @@ def get_current_role(
 
 def get_role_from_bearer(auth_header: Optional[str]) -> Optional[str]:
     """Helper to derive role from a bearer Authorization header using JWT claims or token introspection."""
+    try:
+        role = _verify_local_jwt(auth_header)
+        if role:
+            return role
+    except Exception:
+        pass
     try:
         role = _verify_oidc_jwt(auth_header)
         if role:

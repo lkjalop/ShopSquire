@@ -42,6 +42,8 @@ config/security/versions/risk_correlation_policy_*.json
 *.sqlite
 *.db
 *.sqlite-journal
+/*.sqlite
+/*.db
 test.sqlite*
 
 node_modules/

@@ -12,6 +12,7 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, R
 from src.app.safety.policies import get_policy, apply_post_policy
 from src.app.safety.redaction import redact_payload
 from src.app.services.faq_bank import match_faq
+from src.app.security.model_theft import enforce_model_theft_rate_limit
 
 
 router = APIRouter(prefix="/api/v1/support", tags=["support"])
@@ -56,6 +57,14 @@ def _answer_from_faq(question: str) -> Dict:
 def answer(question: str, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("support.answer") as span:
         span.set_attribute("support.question_len", len(question or ""))
+        allow_model, reason = enforce_model_theft_rate_limit(
+            redis_client=redis,
+            uid=None,
+            source_ip=None,
+            query=question,
+        )
+        if not allow_model:
+            raise HTTPException(status_code=429, detail={"message": "model_theft_guard", "reason": reason})
         flags = load_feature_flags(get_settings().feature_flags_path)
         if flags.get("KILL_SWITCH"):
             raise HTTPException(status_code=503, detail="Agent disabled by kill switch")

@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from functools import lru_cache
 from src.app.services.secrets_manager import get_secret
@@ -74,9 +75,17 @@ def _default_database_url() -> str:
     return "postgresql+psycopg2://postgres:postgres@localhost:5432/shopsquire"
 
 
+def _redis_url_has_auth(redis_url: str) -> bool:
+    try:
+        p = urlparse(str(redis_url or ""))
+        return bool((p.password or "").strip())
+    except Exception:
+        return False
+
+
 @lru_cache(maxsize=8)
 def _get_settings_cached(_sig: tuple) -> Settings:
-    return Settings(
+    s = Settings(
         app_env=os.getenv("APP_ENV", "local"),
         api_host=os.getenv("API_HOST", "0.0.0.0"),
         api_port=int(os.getenv("API_PORT", "8080")),
@@ -90,6 +99,10 @@ def _get_settings_cached(_sig: tuple) -> Settings:
         openai_api_key=_resolved_secret("OPENAI_API_KEY", ""),
         feature_flags_path=os.getenv("FEATURE_FLAGS_PATH", "config/feature_flags.json"),
     )
+    # Enforce Redis auth in production.
+    if str(s.app_env or "").lower() in ("prod", "production") and not _redis_url_has_auth(s.redis_url):
+        raise RuntimeError("missing_required_secret:REDIS_URL_password")
+    return s
 
 
 def get_settings() -> Settings:
@@ -134,6 +147,9 @@ def validate_runtime_contract() -> dict[str, Any]:
     for key in ("MERCHANT_API_KEY", "OWNER_API_KEY", "DEVELOPER_API_KEY"):
         if not contract.get(key):
             warnings.append(f"{key}_not_set_using_defaults_or_auth_failures_possible")
+    env = str(os.getenv("APP_ENV", "local") or "local").lower()
+    if env in ("prod", "production") and not _redis_url_has_auth(str(contract.get("REDIS_URL") or "")):
+        warnings.append("REDIS_URL_missing_password_for_production")
     return {
         "ok": len(missing) == 0,
         "missing": missing,
@@ -143,6 +159,30 @@ def validate_runtime_contract() -> dict[str, Any]:
 
 
 def load_feature_flags(path: str) -> dict:
+    def _env_bool(name: str) -> bool | None:
+        raw = os.getenv(name)
+        if raw is None:
+            return None
+        s = str(raw).strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return True
+        if s in ("0", "false", "no", "off"):
+            return False
+        return None
+
+    def _apply_toggle_overrides(flags: dict) -> dict:
+        out = dict(flags or {})
+        override_map = {
+            "DYNAMIC_CONTEXT_PROVIDER_ENABLED": "DYNAMIC_CONTEXT_PROVIDER_ENABLED",
+            "CAG_CONTEXT_ENABLED": "CAG_CONTEXT_ENABLED",
+            "GRAPH_RAG_ENABLED": "GRAPH_RAG_ENABLED",
+        }
+        for key, env_key in override_map.items():
+            v = _env_bool(env_key)
+            if v is not None:
+                out[key] = bool(v)
+        return out
+
     def _defaults() -> dict:
         # Sensible defaults when feature flags file is missing:
         # - Enable decision log writes by default in non-production environments
@@ -192,6 +232,26 @@ def load_feature_flags(path: str) -> dict:
             },
             "RAGAS_EVAL_ENABLED": False,
             "TEST_FORCE_BAD_SKU": False,
+            "DYNAMIC_CONTEXT_PROVIDER_ENABLED": True,
+            "CAG_CONTEXT_ENABLED": True,
+            "GRAPH_RAG_ENABLED": True,
+            "SECURITY_THRESHOLDS": {
+                "ML_DECISION_GATE": {
+                    "enabled": True,
+                    "LEARNED_ML_GATE_ENABLED": True,
+                    "LEARNED_ML_GATE_TENANT_ALLOWLIST": [],
+                    "LEARNED_ML_GATE_CANARY_PERCENT": 100,
+                    "SHADOW_MODE_ENABLED": False,
+                    "allow_threshold": 0.35,
+                    "block_threshold": 0.7,
+                    "POLICY_TARGETS": {
+                        "allow_false_negative_ceiling": 0.03,
+                        "block_false_positive_ceiling": 0.02,
+                        "review_queue_max": 200,
+                        "review_sla_minutes": 30,
+                    },
+                }
+            },
         }
 
     def _deep_merge(base: dict, override: dict) -> dict:
@@ -269,7 +329,7 @@ def load_feature_flags(path: str) -> dict:
                         json.dump(loaded, wf, ensure_ascii=False)
             except Exception:
                 pass
-            return merged
+            return _apply_toggle_overrides(merged)
 
         with open(effective_path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
@@ -282,7 +342,7 @@ def load_feature_flags(path: str) -> dict:
                         merged["DECISION_LOG_WRITES_ENABLED"] = True
             except Exception:
                 pass
-            return merged
+            return _apply_toggle_overrides(merged)
     except Exception:
         # If the configured path is missing (e.g. temp file in tests),
         # fall back to the default project feature flags file.
@@ -302,9 +362,9 @@ def load_feature_flags(path: str) -> dict:
                         import logging
 
                         logging.getLogger("shopsquire.config").exception("Failed checking DECISION_LOG_WRITES_ENABLED env logic")
-                    return merged
+                    return _apply_toggle_overrides(merged)
         except Exception:
             import logging
 
             logging.getLogger("shopsquire.config").exception("Failed loading fallback feature flags file")
-        return defaults
+        return _apply_toggle_overrides(defaults)

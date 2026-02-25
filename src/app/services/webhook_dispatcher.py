@@ -15,6 +15,7 @@ from src.app.observability.metrics import (
 
 from src.app.models.db import get_engine
 from sqlalchemy import text
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 try:
     import requests
@@ -52,6 +53,7 @@ def _ensure_table(engine):
 def enqueue_webhook(id: str, url: str, payload: dict, secret: Optional[str] = None, key_id: Optional[str] = None, max_attempts: int = 5, tenant_id: Optional[str] = None) -> None:
     eng = get_engine()
     try:
+        ensure_safe_outbound_url(url)
         _ensure_table(eng)
         with eng.begin() as conn:
             conn.execute(
@@ -75,6 +77,7 @@ def enqueue_webhook(id: str, url: str, payload: dict, secret: Optional[str] = No
         # Best-effort fallback: immediate send if DB enqueue fails
         try:
             if requests and payload is not None:
+                ensure_safe_outbound_url(url)
                 requests.post(url, json=payload, timeout=2)
         except Exception:
             pass
@@ -97,6 +100,7 @@ def _deliver_row(row):
         payload = {}
     start = time.time()
     try:
+        ensure_safe_outbound_url(url)
         if not requests:
             raise RuntimeError("requests unavailable")
         resp = requests.post(url, json=payload, timeout=10)

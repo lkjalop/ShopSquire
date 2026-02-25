@@ -5,6 +5,7 @@ import os
 import time
 import hashlib
 import hmac
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 try:
     import requests
@@ -28,6 +29,11 @@ def send_webhook(url: str, payload: dict, timeout: float = 0.5, secret: str | No
     """
 
     def _post():
+        try:
+            ensure_safe_outbound_url(url)
+        except Exception as exc:
+            logger.warning("webhook blocked by url guard for %s: %s", url, exc)
+            return
         # If persistent delivery is enabled, enqueue and return immediately
         try:
             if str(os.getenv("PERSISTENT_WEBHOOKS", "0")).lower() in ("1", "true", "yes"):
