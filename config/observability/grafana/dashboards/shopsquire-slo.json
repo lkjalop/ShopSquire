@@ -1,0 +1,42 @@
+{
+  "title": "ShopSquire SLO Overview",
+  "uid": "shopsquire-slo-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "API Availability (5m)",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "100 * (1 - rate(http_requests_total{status=~\"5..\"}[5m]) / rate(http_requests_total[5m]))", "legendFormat": "availability"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "P95 Latency (5m)",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 5},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Error Budget Burn",
+      "gridPos": {"x": 0, "y": 5, "w": 12, "h": 7},
+      "targets": [
+        {"expr": "rate(http_requests_total{status=~\"5..\"}[5m]) / clamp_min(rate(http_requests_total[5m]), 1)", "legendFormat": "5xx rate"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tier Distribution",
+      "gridPos": {"x": 12, "y": 0, "w": 12, "h": 12},
+      "targets": [
+        {"expr": "sum by (tier) (rate(tier_hit_count_total[5m]))", "legendFormat": "tier {{tier}}"}
+      ]
+    }
+  ]
+}
