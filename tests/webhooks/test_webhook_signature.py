@@ -219,6 +219,13 @@ def _make_slack_headers(secret: str, payload: bytes, ts: int) -> dict:
     return {"x-slack-signature": sig, "x-slack-request-timestamp": str(ts)}
 
 
+def _make_shopify_header(secret: str, payload: bytes) -> str:
+    import base64
+
+    digest = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
 def test_slack_signature_valid():
     if _httpx_post_patched():
         pytest.skip("httpx Client.post patched; response assertions unreliable")
@@ -286,3 +293,35 @@ def test_vendor_missing_secret_enforced():
         headers={"stripe-signature": header, "x-api-key": "local-developer-key"},
     )
     assert r.status_code == 401
+
+
+def test_shopify_signature_valid():
+    if _httpx_post_patched():
+        pytest.skip("httpx Client.post patched; response assertions unreliable")
+    os.environ["SHOPIFY_WEBHOOK_SECRET"] = "shop_secret"
+    app = create_app()
+    client = TestClient(app)
+    payload = json.dumps({"topic": "orders/create", "id": 1}).encode("utf-8")
+    header = _make_shopify_header("shop_secret", payload)
+    r = client.post(
+        "/api/v1/webhooks/shopify",
+        data=payload,
+        headers={"x-shopify-hmac-sha256": header, "x-shopify-topic": "orders/create"},
+    )
+    assert r.status_code == 200
+    assert r.json().get("valid") is True
+
+
+def test_shopify_signature_invalid_rejected():
+    if _httpx_post_patched():
+        pytest.skip("httpx Client.post patched; status assertions unreliable")
+    os.environ["SHOPIFY_WEBHOOK_SECRET"] = "shop_secret"
+    app = create_app()
+    client = TestClient(app)
+    payload = json.dumps({"topic": "orders/create", "id": 1}).encode("utf-8")
+    r = client.post(
+        "/api/v1/webhooks/shopify",
+        data=payload,
+        headers={"x-shopify-hmac-sha256": "deadbeef", "x-shopify-topic": "orders/create"},
+    )
+    assert r.status_code in (401, 422)
