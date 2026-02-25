@@ -13,6 +13,9 @@ htmlcov/
 tmp/
 .tmp_test_reports/
 .tmp_pytest_*.log
+.tmp_*.log
+.tmp_*.txt
+.tmp_*.db
 
 # Local runtime artifacts / recordings (keep only the compact summary JSON)
 runs/**
