@@ -41,6 +41,7 @@ async def chat_query(
         redis_client=redis,
         uid=str((payload or {}).get("uid") or ""),
         source_ip=(request.client.host if request and request.client else None),
+        api_key_id=(request.headers.get("x-api-key") if request else None),
         query=q,
     )
     if not allowed_model_use:

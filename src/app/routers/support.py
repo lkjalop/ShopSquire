@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 import time
 from typing import Dict
 
@@ -54,13 +54,14 @@ def _answer_from_faq(question: str) -> Dict:
 
 
 @router.post("/answer")
-def answer(question: str, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def answer(question: str, request: Request, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("support.answer") as span:
         span.set_attribute("support.question_len", len(question or ""))
         allow_model, reason = enforce_model_theft_rate_limit(
             redis_client=redis,
             uid=None,
             source_ip=None,
+            api_key_id=(request.headers.get("x-api-key") if request else None),
             query=question,
         )
         if not allow_model:

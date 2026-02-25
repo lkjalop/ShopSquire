@@ -89,6 +89,16 @@ class PolicyGate:
                 "confidence": 0.85,
             }
 
+        # Mass financial action guard.
+        if re.search(r"(?i)(refund\s+all|refund\s+for\s+all|all\s+orders.*refund|mass\s+refund|bulk\s+refund)", low):
+            return {
+                "verdict": "block",
+                "reason": "bulk_refund_not_allowed",
+                "mitigations": ["require_individual_order_validation", "human_review"],
+                "mitre_tags": ["T1499"],
+                "confidence": 0.95,
+            }
+
         # Supply chain / dependency tampering requests
         if any(k in low for k in ("supply chain", "sbom", "dependency", "package", "vendor", "third party")):
             return {

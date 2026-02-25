@@ -509,6 +509,7 @@ def suggest(request: Request, uid: str, query: str, budget_max: Optional[int] = 
         redis_client=redis,
         uid=uid,
         source_ip=source_ip,
+        api_key_id=(request.headers.get("x-api-key") if request else None),
         query=query,
     )
     if not allowed_model_use:

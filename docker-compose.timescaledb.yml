@@ -2,6 +2,7 @@ version: "3.9"
 services:
   db:
     image: timescale/timescaledb:2.14.2-pg16
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_USER: postgres
@@ -9,4 +10,3 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/timescale:/docker-entrypoint-initdb.d:ro
-

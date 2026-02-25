@@ -163,6 +163,7 @@ class InterleavingController:
             self.state.stop_reason = reason
 
     def get_summary(self) -> Dict[str, Any]:
+        budget_exhausted = bool(self.state.stop_reason == StopReason.BUDGET_EXHAUSTED)
         return {
             "iterations": self.state.iteration,
             "tool_calls": len(self.state.tool_calls),
@@ -170,6 +171,8 @@ class InterleavingController:
             "budget_remaining": self.state.tool_budget_remaining,
             "final_confidence": self.state.confidence,
             "stop_reason": self.state.stop_reason.value if self.state.stop_reason else None,
+            "needs_human_review": budget_exhausted,
+            "escalation_reason": "budget_exhausted" if budget_exhausted else None,
             "total_latency_ms": self.state.total_latency_ms,
             "observations": self.state.observations,
         }

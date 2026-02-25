@@ -16,14 +16,14 @@ migrations = [
     Path("db/timescale/003_continuous_aggregates.sql"),
 ]
 
-with engine.begin() as conn:
-    for mig in migrations:
-        if not mig.exists():
-            print(f"Missing migration: {mig}")
-            continue
-        sql = mig.read_text(encoding="utf-8")
-        print(f"Applying {mig}...")
+for mig in migrations:
+    if not mig.exists():
+        print(f"Missing migration: {mig}")
+        continue
+    sql = mig.read_text(encoding="utf-8")
+    print(f"Applying {mig}...")
+    with engine.begin() as conn:
         conn.exec_driver_sql(sql)
-        print(f"Applied {mig}.")
+    print(f"Applied {mig}.")
 
 print("Timescale migrations applied.")

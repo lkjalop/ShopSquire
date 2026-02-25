@@ -97,12 +97,14 @@ def enforce_model_theft_rate_limit(
     uid: str | None,
     source_ip: str | None,
     query: str | None,
+    api_key_id: str | None = None,
 ) -> tuple[bool, str]:
     if not _enabled():
         return True, "disabled"
 
     norm_q = _normalize_query(query)
     who = str(uid or source_ip or "anon")
+    api_actor = str(api_key_id or "").strip()
     bucket = int(time.time() // 3600)
 
     # Structural probing controls: repeated near-identical probing and low-diversity
@@ -151,7 +153,18 @@ def enforce_model_theft_rate_limit(
 
     max_per_hour = int(os.getenv("MODEL_THEFT_MAX_EXTRACTION_REQ_PER_HOUR", "40") or 40)
     key = f"model_theft:extract:{bucket}:{who}"
+    max_api_per_day = int(os.getenv("MODEL_THEFT_MAX_COMPLEX_QUERY_PER_DAY_PER_KEY", "1000") or 1000)
+    day_bucket = int(time.time() // 86400)
     try:
+        if api_actor:
+            day_key = f"model_theft:api_extract:{day_bucket}:{api_actor}"
+            day_count = int(redis_client.get(day_key) or 0)
+            if day_count >= max_api_per_day:
+                _emit_model_theft_alert(reason="api_key_model_extraction_rate_limited", who=api_actor, query=norm_q, confidence=0.94)
+                return False, "api_key_model_extraction_rate_limited"
+            redis_client.incrby(day_key, 1)
+            redis_client.expire(day_key, 90000)
+
         current = int(redis_client.get(key) or 0)
         if current >= max_per_hour:
             _emit_model_theft_alert(reason="model_extraction_rate_limited", who=who, query=norm_q, confidence=0.95)

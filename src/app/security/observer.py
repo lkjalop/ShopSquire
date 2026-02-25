@@ -30,6 +30,7 @@ from urllib.parse import unquote
 from src.app.observability.worm import append_worm_record
 from src.app.services.geoip import enrich_ip
 from src.app.observability.metrics import record_geo_velocity_anomaly
+from src.app.security.jailbreak_embedding_guard import is_embedding_jailbreak
 
 
 def _load_json(path: str) -> Dict:
@@ -103,6 +104,9 @@ def _detect_signals(payload: Dict[str, Any]) -> Dict[str, bool]:
     normalized = unicode_normalize(combined_text)
     has_unicode_obfuscation = normalized != combined_text or normalized_text != decoded_text
     has_jailbreak = bool(JAILBREAK_PAT.search(combined_text) or JAILBREAK_PAT.search(decoded_text))
+    emb_jb = is_embedding_jailbreak(f"{combined_text} {decoded_text}")
+    if bool(emb_jb.get("detected")):
+        has_jailbreak = True
     has_pii = bool(
         PII_EMAIL.search(combined_text)
         or PII_PHONE.search(combined_text)
@@ -157,6 +161,7 @@ def _detect_signals(payload: Dict[str, Any]) -> Dict[str, bool]:
     has_social = any(s.get("type") == "social_engineering" for s in deception.get("signals", []))
     return {
         "jailbreak": has_jailbreak,
+        "embedding_jailbreak": bool(emb_jb.get("detected")),
         "unicode_obfuscation": has_unicode_obfuscation,
         "pii": has_pii,
         "api_key": has_api_key,
@@ -230,6 +235,8 @@ def _mitre_tags(signals: Dict[str, bool], cv_signals: Dict[str, Any] | None = No
     tags: List[str] = []
     if signals.get("jailbreak"):
         tags.append("AML.T0043")  # Craft Adversarial Data (Prompt Injection)
+    if signals.get("embedding_jailbreak"):
+        tags.append("AML.0005")
     if signals.get("unicode_obfuscation"):
         tags.append("AML.T0015")  # Model Evasion/Obfuscation
     if signals.get("pii") or signals.get("pci"):

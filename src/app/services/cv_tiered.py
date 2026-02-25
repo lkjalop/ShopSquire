@@ -12,8 +12,13 @@ from src.app.services.image_forensics import ImageForensicsService
 from src.app.services.cv_tier2_pipeline import run_tier2
 from src.app.services.cv_model_pack import get_model_pack
 from src.app.observability.metrics import record_cv_tier, record_cv_processing
+from src.app.observability.telemetry import telemetry_emit
 from src.app.policy.vertical_pack import load_vertical_pack
 from src.app.rules.image_quality import assess_image_quality
+from src.app.deps import get_redis
+import os
+import time
+import math
 
 
 @dataclass
@@ -101,7 +106,31 @@ class TieredCVProvider:
         query = (ctx.get("query") or "").strip().lower()
         image_bytes = ctx.get("image_bytes")
         force_tier2 = bool(ctx.get("force_tier2"))
+        query = str(ctx.get("query") or "")
         t0 = __import__("time").perf_counter()
+
+        actor = str(ctx.get("uid") or ctx.get("source_ip") or ctx.get("trace_id") or "anon")[:120]
+
+        def _complexity_score() -> float:
+            txt = f"{query} {extracted_text}".strip().lower()
+            score = 0.0
+            score += min(0.45, len(txt) / 5000.0)
+            trigger_terms = ("force tier2", "forensics", "re-run", "retry", "bypass", "override", "urgent")
+            score += 0.07 * sum(1 for t in trigger_terms if t in txt)
+            score += 0.08 if bool(ctx.get("risk_adj", 0.0) and float(ctx.get("risk_adj", 0.0)) > 0.5) else 0.0
+            return float(min(1.0, score))
+
+        if force_tier2:
+            max_complexity = float(os.getenv("CV_TIER2_FORCE_COMPLEXITY_MAX", "0.75") or 0.75)
+            comp = _complexity_score()
+            if comp > max_complexity:
+                return {
+                    "status": "review_required",
+                    "tier": 1,
+                    "tier_reason": "force_tier2_complexity_ceiling",
+                    "needs_human_review": True,
+                    "complexity_score": round(comp, 4),
+                }
 
         # Tier0 gate: cheap image quality validation before any heavier work.
         # Off by default unless explicitly enabled via flags/env.
@@ -193,6 +222,49 @@ class TieredCVProvider:
             return analysis
 
         # Tier 2 path: enhanced analysis (damage classifier + forensics + model pack)
+        # Budget guard: per-actor hourly cap to avoid Tier2 cost DoS.
+        try:
+            r = get_redis()
+            max_hour = int(os.getenv("CV_TIER2_MAX_PER_HOUR_PER_ACTOR", "10") or 10)
+            bucket = int(time.time() // 3600)
+            key = f"cv:tier2:actor:{bucket}:{actor}"
+            used = int(r.get(key) or 0)
+            if used >= max_hour:
+                return {
+                    "status": "review_required",
+                    "tier": 1,
+                    "tier_reason": "tier2_budget_exhausted_hitl",
+                    "needs_human_review": True,
+                    "decision_action": "request_more_data",
+                }
+            r.incrby(key, 1)
+            r.expire(key, 3700)
+
+            # 3-sigma spike monitor against last 24 hourly buckets.
+            vals = []
+            now_bucket = int(time.time() // 3600)
+            for i in range(1, 25):
+                vals.append(int(r.get(f"cv:tier2:actor:{now_bucket-i}:{actor}") or 0))
+            mean = (sum(vals) / len(vals)) if vals else 0.0
+            var = (sum((v - mean) ** 2 for v in vals) / len(vals)) if vals else 0.0
+            std = math.sqrt(var)
+            current = int(r.get(key) or 0)
+            if std > 0 and current > (mean + 3.0 * std) and current >= 6:
+                telemetry_emit(
+                    {
+                        "component": "cv_tier2",
+                        "event": "tier2_usage_spike",
+                        "actor": actor,
+                        "current": current,
+                        "baseline_mean": round(mean, 3),
+                        "baseline_std": round(std, 3),
+                    },
+                    severity="warning",
+                    sourcetype="shopsquire:security",
+                )
+        except Exception:
+            pass
+
         enhanced = await self.basic.analyze(labels, extracted_text)
         enhanced["tier"] = 2
         enhanced["model"] = tier_dec.model or self.flags.get("MODEL_T2")

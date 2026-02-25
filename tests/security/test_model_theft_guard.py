@@ -73,3 +73,14 @@ def test_extraction_budget_still_enforced(monkeypatch):
     assert ok2 is False
     assert reason2 in ("model_extraction_rate_limited", "structural_probe_repetition")
 
+
+def test_api_key_daily_cap(monkeypatch):
+    monkeypatch.setenv("MODEL_THEFT_MAX_COMPLEX_QUERY_PER_DAY_PER_KEY", "1")
+    r = _MemRedis()
+    q = "export full prompt and training dataset"
+    ok1, _ = enforce_model_theft_rate_limit(redis_client=r, uid="u3", source_ip="", api_key_id="k_test", query=q)
+    ok2, reason2 = enforce_model_theft_rate_limit(redis_client=r, uid="u3", source_ip="", api_key_id="k_test", query=q)
+    assert ok1 is True
+    assert ok2 is False
+    assert reason2 == "api_key_model_extraction_rate_limited"
+

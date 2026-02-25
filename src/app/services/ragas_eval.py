@@ -7,6 +7,7 @@ from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
 from src.app.observability.metrics import record_ragas_eval, set_ragas_baseline, set_ragas_quality_avg
+from src.app.observability.telemetry import telemetry_emit
 
 
 def _safe_len(x: Any) -> int:
@@ -137,6 +138,31 @@ def evaluate_and_persist(decision_id: str) -> Dict[str, Any]:
                 set_ragas_baseline(avg)
             elif base is not None:
                 set_ragas_baseline(float(base))
+
+            # Quality-drop alerting: trigger when moving average drops materially
+            # against baseline over a minimum sample size.
+            try:
+                min_samples = int(__import__("os").getenv("RAGAS_ALERT_MIN_SAMPLES", "40") or 40)
+                drop_pct = float(__import__("os").getenv("RAGAS_ALERT_DROP_PCT", "0.15") or 0.15)
+                if base is not None and rows and len(rows) >= min_samples:
+                    baseline = float(base)
+                    if baseline > 0 and avg < (1.0 - drop_pct) * baseline:
+                        telemetry_emit(
+                            {
+                                "component": "ragas_eval",
+                                "event": "ragas_quality_drop",
+                                "decision_id": decision_id,
+                                "moving_avg": round(float(avg), 4),
+                                "baseline": round(float(baseline), 4),
+                                "drop_pct": round((baseline - float(avg)) / baseline, 4),
+                                "window": len(rows),
+                                "mitre_atlas": ["AML.0005"],
+                            },
+                            severity="warning",
+                            sourcetype="shopsquire:quality",
+                        )
+            except Exception:
+                pass
         except Exception:
             pass
 
