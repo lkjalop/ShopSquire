@@ -5,6 +5,7 @@ from typing import Dict
 from fastapi import APIRouter, Depends
 
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, require_role
+from src.app.security.dlp_export import dlp_sanitize_export_value
 from src.app.services.audit_chain import verify_audit_chain
 from src.app.services.compliance_reporting import generate_evidence_report
 
@@ -14,7 +15,9 @@ router = APIRouter(prefix="/api/v1/admin/compliance/reports", tags=["admin-compl
 
 @router.get("/evidence")
 def evidence_report(days: int = 30, role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    return generate_evidence_report(days=days)
+    payload = generate_evidence_report(days=days)
+    sanitized, _hits = dlp_sanitize_export_value(payload)
+    return sanitized if isinstance(sanitized, dict) else {"report": sanitized}
 
 
 @router.get("/audit-chain/verify")

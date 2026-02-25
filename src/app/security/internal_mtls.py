@@ -10,7 +10,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 
 def _enabled() -> bool:
-    return str(os.getenv("INTERNAL_MTLS_REQUIRED", "0")).lower() in ("1", "true", "yes")
+    raw = os.getenv("INTERNAL_MTLS_REQUIRED")
+    if raw is not None:
+        return str(raw).lower() in ("1", "true", "yes")
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    return env not in ("local", "dev", "development", "test", "testing")
 
 
 def _paths() -> list[str]:

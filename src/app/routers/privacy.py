@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from src.app.deps import get_redis, hash_uid
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+from src.app.security.dlp_export import dlp_sanitize_export_value
 from src.app.services.memory import Memory
 from src.app.services.decision_log import log_trace_event
 
@@ -372,7 +373,8 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                 "summary": _safe_json(summary) if summary else None,
                 "kv_state": _safe_json(kv) if kv else None,
             }
-        return export
+        sanitized, _hits = dlp_sanitize_export_value(export)
+        return sanitized if isinstance(sanitized, dict) else {"export": sanitized}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

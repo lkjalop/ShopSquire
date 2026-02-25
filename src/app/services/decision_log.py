@@ -12,6 +12,7 @@ from src.app.models.db import db_session
 from src.app.models.init_db import ensure_metadata
 from src.app.services.policy_evaluator import PolicyEvaluator
 from src.app.deps import redact_for_trace, security_sanitize
+from src.app.security.pii_ner import redact_free_text_pii_ner
 from src.app.services.confidence_calibration import calibrate_confidence
 import asyncio
 import threading
@@ -212,7 +213,7 @@ def log_decision(
                 "system_to": "infinity",
                 "input_data": json.dumps(safe_input, ensure_ascii=False, separators=(",", ":")),
                 "retrieved_context": json.dumps(safe_context, ensure_ascii=False, separators=(",", ":")),
-                "agent_reasoning": agent_reasoning or "",
+                "agent_reasoning": redact_free_text_pii_ner(agent_reasoning or ""),
                 "proposed_action": json.dumps(safe_action, ensure_ascii=False, separators=(",", ":")),
                 "policy_version": policy_version,
                 "approval_required": approval_required,

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "description": "JPEG-focused steganography regression corpus metadata for DCT/LSB checks.",
+  "cases": [
+    {
+      "id": "jpeg_clean_solid_q88",
+      "kind": "generated",
+      "generator": "tests/security/test_steg_detector_dct.py::_jpeg_bytes",
+      "expected": {
+        "dct_anomaly_score": "0.0..1.0",
+        "jpeg_quant_table_score": "0.0..1.0"
+      }
+    }
+  ]
+}

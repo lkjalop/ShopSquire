@@ -11,6 +11,7 @@ services:
       RUN_MIGRATIONS: "1"
       AUTO_MIGRATE: "1"
       DB_MIGRATION_GUARD: "1"
+      INTERNAL_MTLS_REQUIRED: "1"
     ports:
       - "8080:8080"
     depends_on:

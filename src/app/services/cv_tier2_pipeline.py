@@ -11,9 +11,11 @@ from src.app.services.forensics_policy import evaluate as evaluate_forensics_pol
 from src.app.observability.metrics import record_cv_fraud
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.services.cv_vision_ollama import vision_analyze_with_ollama
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 import difflib
 import math
+import os
 import re
 import unicodedata
 from urllib.parse import urlparse
@@ -97,6 +99,53 @@ def _qr_url_risk(url: str) -> Dict[str, Any]:
         reasons.append("parse_error")
         risk += 0.4
     return {"url": u[:2048], "risk": float(min(1.0, risk)), "reasons": reasons}
+
+
+def _resolve_redirect_chain(url: str, max_hops: int = 5) -> Dict[str, Any]:
+    """Resolve redirect chain in a bounded, safe manner.
+
+    Each hop is validated with SSRF guard before any request. Redirects are
+    resolved manually with `allow_redirects=False` to keep hop control explicit.
+    """
+    out: Dict[str, Any] = {"start_url": str(url or "")[:2048], "hops": [], "final_url": str(url or "")[:2048], "error": None}
+    try:
+        import requests
+    except Exception:
+        out["error"] = "requests_unavailable"
+        return out
+
+    current = str(url or "").strip()
+    timeout_s = float(os.getenv("QR_REDIRECT_TIMEOUT_SEC", "2.0") or 2.0)
+    for idx in range(max(0, int(max_hops))):
+        if not current:
+            break
+        try:
+            ensure_safe_outbound_url(current)
+        except Exception as exc:
+            out["error"] = f"unsafe_redirect_url:{exc}"
+            break
+        try:
+            resp = requests.get(current, allow_redirects=False, timeout=timeout_s)
+        except Exception as exc:
+            out["error"] = f"redirect_request_failed:{str(exc)[:140]}"
+            break
+
+        status = int(getattr(resp, "status_code", 0) or 0)
+        location = str((resp.headers or {}).get("Location") or "").strip()
+        hop = {"index": idx + 1, "url": current[:2048], "status": status, "location": location[:2048] if location else None}
+        out["hops"].append(hop)
+
+        if status in (301, 302, 303, 307, 308) and location:
+            from urllib.parse import urljoin
+
+            nxt = urljoin(current, location)
+            if nxt == current:
+                break
+            current = nxt
+            out["final_url"] = current[:2048]
+            continue
+        break
+    return out
 
 
 def _detect_document_like(ocr_boxes: List[Dict[str, Any]]) -> bool:
@@ -288,8 +337,29 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         record_cv_fraud("robustness_qr_url_present")
 
     qr_risks = []
+    qr_redirect_chains: List[Dict[str, Any]] = []
     try:
-        qr_risks = [_qr_url_risk(u) for u in qr_urls[:5]]
+        follow_redirects = str(os.getenv("QR_REDIRECT_RESOLUTION_ENABLED", "1")).lower() in ("1", "true", "yes")
+        max_hops = int(os.getenv("QR_REDIRECT_MAX_HOPS", "5") or 5)
+        for u in qr_urls[:5]:
+            if follow_redirects:
+                chain = _resolve_redirect_chain(u, max_hops=max_hops)
+                qr_redirect_chains.append(chain)
+                final_url = str(chain.get("final_url") or u)
+                risk = _qr_url_risk(final_url)
+                hop_count = len(chain.get("hops") or [])
+                if hop_count > 1:
+                    risk["risk"] = float(min(1.0, float(risk.get("risk") or 0.0) + min(0.35, 0.08 * (hop_count - 1))))
+                    risk.setdefault("reasons", []).append("redirect_chain_detected")
+                if chain.get("error"):
+                    risk["risk"] = float(min(1.0, float(risk.get("risk") or 0.0) + 0.2))
+                    risk.setdefault("reasons", []).append("redirect_resolution_failed")
+                    risk["redirect_error"] = str(chain.get("error"))[:160]
+                risk["resolved_url"] = final_url[:2048]
+                risk["redirect_hops"] = hop_count
+                qr_risks.append(risk)
+            else:
+                qr_risks.append(_qr_url_risk(u))
     except Exception:
         qr_risks = []
     try:
@@ -450,6 +520,7 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "qr": qr,
             "qr_url_count": len(qr_urls),
             "qr_risks": qr_risks,
+            "qr_redirect_chains": qr_redirect_chains,
             "ocr_text_entropy": round(_shannon_entropy(ocr_text[:800]), 4),
             "prompt_injection_phrases": injection_phrases,
             "filename": {"value": filename[:200], "nfkc_changed": filename_unicode_nfkc, "unicode_suspicious": filename_unicode_any},

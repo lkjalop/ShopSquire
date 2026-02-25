@@ -5,6 +5,8 @@ services:
     container_name: shopsquire_api
     env_file:
       - .env
+    environment:
+      INTERNAL_MTLS_REQUIRED: "1"
     ports:
       - "8080:8080"
     depends_on:

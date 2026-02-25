@@ -4,6 +4,7 @@ from typing import Optional
 import json
 import requests
 from src.app.services.secrets_manager import get_secret
+from src.app.security.safe_requests import safe_post
 
 
 def _sanitize_summary(summary: str) -> str:
@@ -34,7 +35,7 @@ def create_jira_issue(summary: str, description: str, severity: str) -> Optional
                 "priority": {"name": "High" if severity in ("high", "critical") else "Medium"},
             }
         }
-        resp = requests.post(url, headers=headers, auth=auth, data=json.dumps(payload), timeout=8)
+        resp = safe_post(url, headers=headers, auth=auth, data=json.dumps(payload), timeout=8)
         if resp.ok:
             jid = resp.json().get("key")
             return str(jid) if jid else None
@@ -67,7 +68,7 @@ def create_servicenow_incident(summary: str, description: str, severity: str) ->
             "description": (description or "")[:2000],
             "severity": 1 if severity == "critical" else (2 if severity == "high" else 3),
         }
-        resp = requests.post(url, headers=headers, auth=auth, data=json.dumps(payload), timeout=8)
+        resp = safe_post(url, headers=headers, auth=auth, data=json.dumps(payload), timeout=8)
         if resp.ok:
             rid = resp.json().get("result", {}).get("sys_id")
             return str(rid) if rid else None

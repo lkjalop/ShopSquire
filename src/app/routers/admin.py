@@ -28,6 +28,8 @@ from src.app.security.threshold_tuning import recompute_thresholds_from_correcti
 from src.app.services.checkout_upsell import upsell_performance_snapshot
 from src.app.services.trace_contracts import validate_incident_matrix_gate
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
+from src.app.security.dlp_export import dlp_sanitize_export_record
+from src.app.security.safe_requests import safe_post
 from src.app.services.timescale_admin import detect_timescale_state, apply_timescale_phase_b, apply_timescale_phase_c
 import ipaddress
 from urllib.parse import urlparse
@@ -277,6 +279,7 @@ def powerbi_export_csv(
                             "verdict_score": "",
                             "path": "",
                         }
+                        row = dlp_sanitize_export_record(row)
                         w.writerow(row)
                         yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                 # orders
@@ -315,6 +318,7 @@ def powerbi_export_csv(
                                 "verdict_score": "",
                                 "path": "",
                             }
+                            row = dlp_sanitize_export_record(row)
                             w.writerow(row)
                             yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                     except Exception:
@@ -366,6 +370,7 @@ def powerbi_export_csv(
                                 "verdict_score": r.get("verdict_score"),
                                 "path": r.get("path"),
                             }
+                            row = dlp_sanitize_export_record(row)
                             w.writerow(row)
                             yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                     except Exception:
@@ -446,6 +451,7 @@ def powerbi_export_ndjson(
                             "approval_required": r.get("approval_required"),
                             "execution_status": r.get("execution_status"),
                         }
+                        out = dlp_sanitize_export_record(out)
                         yield _json.dumps(out, ensure_ascii=False) + "\n"
                 # orders
                 if dataset in ("all", "orders"):
@@ -476,6 +482,7 @@ def powerbi_export_ndjson(
                                 "session_id": "",
                                 "channel": "",
                             }
+                            out = dlp_sanitize_export_record(out)
                             yield _json.dumps(out, ensure_ascii=False) + "\n"
                     except Exception:
                         pass
@@ -517,6 +524,7 @@ def powerbi_export_ndjson(
                                 "session_id": "",
                                 "channel": chan,
                             }
+                            out = dlp_sanitize_export_record(out)
                             yield _json.dumps(out, ensure_ascii=False) + "\n"
                     except Exception:
                         pass
@@ -572,6 +580,7 @@ def powerbi_export_decisions_csv(
                         pass
                     out = {k: r.get(k) for k in cols if k not in ("tenant_id", "session_id", "channel")}
                     out["tenant_id"], out["session_id"], out["channel"] = tenant, sess, chan
+                    out = dlp_sanitize_export_record(out)
                     w.writerow(out); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
         except Exception:
             status_code = 500
@@ -616,6 +625,7 @@ def powerbi_export_orders_csv(
                     for r in db.execute(_text(sql), params).mappings().all():
                         out = {k: r.get(k) for k in cols if k not in ("tenant_id", "session_id", "channel")}
                         out["tenant_id"], out["session_id"], out["channel"] = "", "", ""
+                        out = dlp_sanitize_export_record(out)
                         w.writerow(out); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                 except Exception:
                     pass
@@ -672,6 +682,7 @@ def powerbi_export_security_csv(
                             pass
                         out = {k: r.get(k) for k in cols if k not in ("tenant_id", "session_id", "channel")}
                         out["tenant_id"], out["session_id"], out["channel"] = "", "", chan
+                        out = dlp_sanitize_export_record(out)
                         w.writerow(out); yield buf.getvalue(); buf.seek(0); buf.truncate(0)
                 except Exception:
                     pass
@@ -738,6 +749,7 @@ def powerbi_export_zip(
                         pass
                     o = {k: r.get(k) for k in d_cols if k not in ("tenant_id", "session_id", "channel")}
                     o["tenant_id"], o["session_id"], o["channel"] = tenant, sess, chan
+                    o = dlp_sanitize_export_record(o)
                     d_out.append(o)
                 zf.writestr("decisions.csv", _build_csv(d_out, d_cols))
 
@@ -759,6 +771,7 @@ def powerbi_export_zip(
                 for r in o_rows:
                     o = {k: r.get(k) for k in o_cols if k not in ("tenant_id", "session_id", "channel")}
                     o["tenant_id"], o["session_id"], o["channel"] = "", "", ""
+                    o = dlp_sanitize_export_record(o)
                     o_out.append(o)
                 zf.writestr("orders.csv", _build_csv(o_out, o_cols))
 
@@ -790,6 +803,7 @@ def powerbi_export_zip(
                         pass
                     o = {k: r.get(k) for k in s_cols if k not in ("tenant_id", "session_id", "channel")}
                     o["tenant_id"], o["session_id"], o["channel"] = "", "", chan
+                    o = dlp_sanitize_export_record(o)
                     s_out.append(o)
                 zf.writestr("security.csv", _build_csv(s_out, s_cols))
 
@@ -1860,7 +1874,7 @@ def send_alertmanager_test(role: str = Depends(require_role([ROLE_OWNER, ROLE_DE
         }
     ]
     try:
-        resp = requests.post(f"{url}/api/v1/alerts", json=payload, timeout=5)
+        resp = safe_post(f"{url}/api/v1/alerts", json_body=payload, timeout=5)
         if resp.status_code >= 300:
             raise HTTPException(status_code=502, detail=f"AlertManager error {resp.status_code}: {resp.text}")
         record_alertmanager_test()

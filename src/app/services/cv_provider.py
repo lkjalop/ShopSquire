@@ -5,6 +5,7 @@ import json
 import base64
 from typing import Tuple, List
 import logging
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 
 class ManagedCVProvider:
@@ -76,6 +77,7 @@ class ManagedCVProvider:
         }).encode("utf-8")
         base = (os.getenv("OLLAMA_URL", "http://127.0.0.1:11434") or "http://127.0.0.1:11434").rstrip("/")
         url = f"{base}/api/generate"
+        ensure_safe_outbound_url(url)
         timeout = float(os.getenv("CV_VISION_TIMEOUT_SEC", "20") or 20)
 
         # Try configured model first, then a small fallback list for resilience.

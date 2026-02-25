@@ -5,6 +5,7 @@ import logging
 import time
 
 import requests
+from src.app.security.safe_requests import safe_post
 
 logger = logging.getLogger("shopsquire.telemetry")
 try:
@@ -78,7 +79,7 @@ def telemetry_emit(
             try:
                 headers = {"Authorization": f"Splunk {hec_token}", "Content-Type": "application/json"}
                 body = _splunk_hec_payload(payload, sourcetype=sourcetype)
-                requests.post(hec_url, headers=headers, data=json.dumps(body), timeout=5)
+                safe_post(hec_url, headers=headers, data=json.dumps(body), timeout=5)
             except Exception as exc:
                 logger.exception("Failed sending telemetry to Splunk HEC: %s", exc)
                 logger.info("Telemetry event fallback: %s", json.dumps(payload))
@@ -96,7 +97,7 @@ def telemetry_emit(
                     "priority": "normal" if severity in ("info", "debug") else "normal",
                     "tags": [f"severity:{severity}", f"sourcetype:{sourcetype}"],
                 }
-                requests.post(dd_url, headers={"Content-Type": "application/json"}, data=json.dumps(dd_body), timeout=5)
+                safe_post(dd_url, headers={"Content-Type": "application/json"}, data=json.dumps(dd_body), timeout=5)
             except Exception as exc:
                 logger.exception("Failed sending telemetry to Datadog: %s", exc)
         # fallback local logging for dev/test

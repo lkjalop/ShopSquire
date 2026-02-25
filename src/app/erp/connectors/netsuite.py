@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from src.app.erp.connectors.base import InventoryConnector, InventoryRecord
 from src.app.models.db import db_session
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,7 @@ class NetSuiteConnector(InventoryConnector):
             return h
         if self.token_url and self.client_id and self.client_secret:
             try:
+                ensure_safe_outbound_url(self.token_url)
                 r = requests.post(
                     self.token_url,
                     data={
@@ -140,6 +142,7 @@ class NetSuiteConnector(InventoryConnector):
 
     def _req(self, method: str, path: str, *, params: Dict[str, Any] | None = None, payload: Dict[str, Any] | None = None) -> requests.Response:
         url = f"{self.base_url}/{path.lstrip('/')}"
+        ensure_safe_outbound_url(url)
         headers = self._auth_headers()
         last = None
         for attempt in range(max(1, self.max_retries)):

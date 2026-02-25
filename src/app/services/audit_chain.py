@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import uuid
+import requests
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -87,6 +88,48 @@ def _append_anchor_record(merkle_root: str) -> None:
     }
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    _append_external_anchor(rec)
+
+
+def _external_anchor_mode() -> str:
+    return str(os.getenv("AUDIT_CHAIN_EXTERNAL_ANCHOR_MODE", "none") or "none").strip().lower()
+
+
+def _external_anchor_archive_path() -> Path:
+    return Path(os.getenv("AUDIT_CHAIN_WORM_ARCHIVE_PATH", "runs/audit_chain_worm_archive.log"))
+
+
+def _append_external_anchor(record: Dict[str, Any]) -> None:
+    """Append signed anchor records to external immutable sinks (best effort).
+
+    Modes:
+    - `worm_local`: append to a dedicated append-only archive file.
+    - `notary_http`: POST signed anchor payload to external notary endpoint.
+    - `both`: apply both mechanisms.
+    """
+    mode = _external_anchor_mode()
+    if mode in ("none", "off", "disabled", ""):
+        return
+    payload = {
+        "anchor_id": record.get("id"),
+        "created_at": record.get("created_at"),
+        "merkle_root": record.get("merkle_root"),
+        "prev_signature": record.get("prev_signature"),
+        "signature": record.get("signature"),
+        "source": "shopsquire.audit_chain",
+    }
+
+    if mode in ("worm_local", "both"):
+        p = _external_anchor_archive_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    if mode in ("notary_http", "both"):
+        endpoint = str(os.getenv("AUDIT_CHAIN_NOTARY_URL", "") or "").strip()
+        if endpoint:
+            timeout = float(os.getenv("AUDIT_CHAIN_NOTARY_TIMEOUT_SEC", "3") or 3.0)
+            requests.post(endpoint, json=payload, timeout=timeout)
 
 
 def _read_latest_anchor() -> Dict[str, Any] | None:
@@ -184,4 +227,9 @@ def verify_audit_chain(limit: int = 1000) -> Dict[str, Any]:
                 return {"ok": False, "checked": checked, "head": prev, "reason": "anchor_mismatch", "anchor": anchor_status}
         except Exception:
             return {"ok": False, "checked": checked, "head": prev, "reason": "anchor_verify_failed", "anchor": {"present": True, "ok": False}}
-    return {"ok": True, "checked": checked, "head": prev, "anchor": anchor_status}
+    ext = {
+        "mode": _external_anchor_mode(),
+        "worm_archive_path": str(_external_anchor_archive_path()),
+        "notary_url": str(os.getenv("AUDIT_CHAIN_NOTARY_URL", "") or "") or None,
+    }
+    return {"ok": True, "checked": checked, "head": prev, "anchor": anchor_status, "external_anchor": ext}

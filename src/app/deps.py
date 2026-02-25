@@ -2,6 +2,7 @@ import json
 import unicodedata
 import re
 import hashlib
+import os
 from typing import Dict, Generator, Any
 
 import redis
@@ -38,11 +39,21 @@ _redis_warned = False
 def _create_redis_client() -> redis.Redis | None:
     try:
         settings = get_settings()
+        redis_url = settings.redis_url
+        acl_user = str(os.getenv("REDIS_ACL_USERNAME", "") or "").strip()
+        acl_pass = str(os.getenv("REDIS_ACL_PASSWORD", "") or "").strip()
+        kwargs = {
+            "decode_responses": True,
+            "socket_connect_timeout": 0.01,
+            "socket_timeout": 0.01,
+        }
+        if acl_user:
+            kwargs["username"] = acl_user
+        if acl_pass:
+            kwargs["password"] = acl_pass
         cli = redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            socket_connect_timeout=0.01,
-            socket_timeout=0.01,
+            redis_url,
+            **kwargs,
         )
         # quick health-check; may raise quickly if unreachable
         try:

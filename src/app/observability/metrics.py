@@ -1,5 +1,6 @@
 from typing import Optional
 import os
+import ipaddress
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, REGISTRY
@@ -487,8 +488,43 @@ def record_inflight(service: str, value: int):
 router = APIRouter(prefix="", tags=["metrics"])
 
 
+def _is_non_local_env() -> bool:
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    return env not in ("local", "dev", "development", "test", "testing")
+
+
+def _client_ip(request: Request) -> str:
+    xff = str(request.headers.get("x-forwarded-for") or "").strip()
+    if xff:
+        return xff.split(",")[0].strip()
+    return str(request.client.host if request and request.client else "")
+
+
+def _ip_allowed(ip_text: str) -> bool:
+    if not ip_text:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(ip_text)
+    except Exception:
+        return False
+    cidrs = str(os.getenv("METRICS_ALLOW_CIDRS", "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16") or "")
+    for c in [x.strip() for x in cidrs.split(",") if x.strip()]:
+        try:
+            if ip_obj in ipaddress.ip_network(c, strict=False):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 @router.get("/metrics")
 def metrics(request: Request) -> Response:
+    require_auth = str(os.getenv("METRICS_REQUIRE_AUTH", "1" if _is_non_local_env() else "0")).lower() in ("1", "true", "yes")
+    restrict_ip = str(os.getenv("METRICS_INTERNAL_ONLY", "1" if _is_non_local_env() else "0")).lower() in ("1", "true", "yes")
+    client_ip = _client_ip(request)
+    if restrict_ip and not _ip_allowed(client_ip):
+        return Response(b"forbidden\n", status_code=403, media_type="text/plain")
+
     raw = generate_latest(REGISTRY).decode("utf-8", errors="ignore")
     # Determine role from API key or Authorization header (best-effort)
     try:
@@ -509,6 +545,9 @@ def metrics(request: Request) -> Response:
             role = get_role_from_bearer(request.headers.get("Authorization"))
         except Exception:
             role = None
+
+    if require_auth and role not in (ROLE_OWNER, ROLE_DEVELOPER, ROLE_MERCHANT):
+        return Response(b"unauthorized\n", status_code=401, media_type="text/plain")
 
     # Owner/developer see full metrics
     if role in (ROLE_OWNER, ROLE_DEVELOPER):

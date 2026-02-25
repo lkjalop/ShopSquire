@@ -10,6 +10,7 @@ import requests
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+from src.app.security.safe_requests import safe_post
 
 
 def dispatch_pending_once(limit: int = 20):
@@ -26,7 +27,7 @@ def dispatch_pending_once(limit: int = 20):
             if url:
                 try:
                     data = json.loads(payload or "{}")
-                    resp = requests.post(url, json={"type": evt_type, "payload": data}, timeout=3)
+                    resp = safe_post(url, json_body={"type": evt_type, "payload": data}, timeout=3)
                     ok = resp.status_code < 300
                 except Exception:
                     ok = False

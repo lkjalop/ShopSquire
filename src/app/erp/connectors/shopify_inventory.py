@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from src.app.erp.connectors.base import InventoryConnector, InventoryRecord
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 
 class ShopifyInventoryConnector:
@@ -45,7 +46,9 @@ class ShopifyInventoryConnector:
 
     def _base_url(self) -> str:
         shop = self.shop.replace("https://", "").replace("http://", "").strip().strip("/")
-        return f"https://{shop}/admin/api/{self.api_version}"
+        base = f"https://{shop}/admin/api/{self.api_version}"
+        ensure_safe_outbound_url(base)
+        return base
 
     def fetch_inventory(self, *, tenant_id: str | None = None) -> List[InventoryRecord]:
         if not self.health().get("ok"):
@@ -68,8 +71,10 @@ class ShopifyInventoryConnector:
         for _page in range(1, 50):  # hard cap for safety
             try:
                 if next_url:
+                    ensure_safe_outbound_url(next_url)
                     resp = requests.get(next_url, headers=headers, timeout=10)
                 else:
+                    ensure_safe_outbound_url(url)
                     resp = requests.get(url, headers=headers, params=params, timeout=10)
                 resp.raise_for_status()
                 data = resp.json() or {}

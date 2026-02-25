@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 import requests
 
 from src.app.erp.connectors.base import InventoryConnector, InventoryRecord
+from src.app.security.url_guard import ensure_safe_outbound_url
 
 
 class HTTPInventoryConnector(InventoryConnector):
@@ -39,6 +40,7 @@ class HTTPInventoryConnector(InventoryConnector):
             h["authorization"] = f"Bearer {cfg['bearer_token']}"
         elif cfg.get("token_url") and cfg.get("client_id") and cfg.get("client_secret"):
             try:
+                ensure_safe_outbound_url(cfg["token_url"])
                 r = requests.post(
                     cfg["token_url"],
                     data={
@@ -60,7 +62,9 @@ class HTTPInventoryConnector(InventoryConnector):
     def _endpoint(self, cfg: Dict[str, str]) -> str:
         base = (cfg.get("base_url") or "").rstrip("/")
         path = "/" + (cfg.get("inventory_path") or "/inventory").lstrip("/")
-        return f"{base}{path}"
+        out = f"{base}{path}"
+        ensure_safe_outbound_url(out)
+        return out
 
     def health(self) -> Dict[str, Any]:
         cfg = self._cfg()
