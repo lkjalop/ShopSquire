@@ -519,8 +519,10 @@ def _ip_allowed(ip_text: str) -> bool:
 
 @router.get("/metrics")
 def metrics(request: Request) -> Response:
-    require_auth = str(os.getenv("METRICS_REQUIRE_AUTH", "1" if _is_non_local_env() else "0")).lower() in ("1", "true", "yes")
-    restrict_ip = str(os.getenv("METRICS_INTERNAL_ONLY", "1" if _is_non_local_env() else "0")).lower() in ("1", "true", "yes")
+    # H07: Enforce auth and IP restriction by default in non-local envs
+    default_secure = "1" if _is_non_local_env() else "0"
+    require_auth = str(os.getenv("METRICS_REQUIRE_AUTH", default_secure)).lower() in ("1", "true", "yes")
+    restrict_ip = str(os.getenv("METRICS_INTERNAL_ONLY", default_secure)).lower() in ("1", "true", "yes")
     client_ip = _client_ip(request)
     if restrict_ip and not _ip_allowed(client_ip):
         return Response(b"forbidden\n", status_code=403, media_type="text/plain")

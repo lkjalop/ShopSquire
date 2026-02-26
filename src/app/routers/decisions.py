@@ -35,6 +35,19 @@ router = APIRouter(prefix="/api/v1/decisions", tags=["decisions"])
 tracer = get_tracer("decisions-router")
 logger = logging.getLogger(__name__)
 
+_QUERY_DECISIONS_SQL = text(
+        """
+        SELECT id, agent_name, valid_from, valid_to, system_from, system_to, input_data,
+                     proposed_action, policy_version, approval_required, execution_status
+        FROM decision_logs
+        WHERE (:vf IS NULL OR valid_from >= :vf)
+            AND (:vt IS NULL OR valid_to <= :vt)
+            AND (:sf IS NULL OR system_from >= :sf)
+            AND (:st IS NULL OR system_to <= :st)
+            AND (:agent_name IS NULL OR agent_name = :agent_name)
+        """
+)
+
 # Runtime connection limiting (simple in-process enforcement)
 _WS_CONN_COUNTS: dict[str, int] = {}
 _WS_GLOBAL_COUNT = 0
@@ -208,6 +221,25 @@ def _synthesize_trace_events(trace_id: str, base: Dict | None = None) -> list[di
         )
     except Exception:
         pass
+    try:
+        out.append(
+            {
+                "id": f"synthetic-feedback-{trace_id}",
+                "trace_id": trace_id,
+                "event_type": "feedback_loop",
+                "source_type": "api",
+                "source_id": "decisions.query_fallback",
+                "target_type": "user",
+                "target_id": None,
+                "payload": {
+                    "intent": (base.get("intent_analysis") or {}).get("intent"),
+                    "reason": "synthetic_trace_degraded_path",
+                },
+                "created_at": now_ts,
+            }
+        )
+    except Exception:
+        pass
     return out
 
 
@@ -291,42 +323,26 @@ def query_decisions(
         if not _decision_reads_enabled(flags):
             # Avoid DB access during local/tests
             raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
-        sql = (
-            "SELECT id, agent_name, valid_from, valid_to, system_from, system_to, input_data, proposed_action, policy_version, approval_required, execution_status FROM decision_logs"
-        )
-        params = {}
-        clauses = []
-        if valid_from:
-            clauses.append("valid_from >= :vf")
-            params["vf"] = valid_from
-        if valid_to:
-            clauses.append("valid_to <= :vt")
-            params["vt"] = valid_to
-        if system_from:
-            clauses.append("system_from >= :sf")
-            params["sf"] = system_from
-        if system_to:
-            clauses.append("system_to <= :st")
-            params["st"] = system_to
-        if agent_name:
-            clauses.append("agent_name = :agent_name")
-            params["agent_name"] = agent_name
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
+        params = {
+            "vf": valid_from,
+            "vt": valid_to,
+            "sf": system_from,
+            "st": system_to,
+            "agent_name": agent_name,
+        }
         # Use the session wrapper so tests that swap the module engine/session
         # see the same data. The session wrapper also normalizes SQL strings
         # for SQLite test runs (INSERT OR REPLACE, now() -> CURRENT_TIMESTAMP).
-        from sqlalchemy import text as _text
         out = []
         replica_enabled = str(os.getenv("READ_REPLICA_ENABLED", "0")).strip().lower() in ("1", "true", "yes")
         try:
             if replica_enabled:
                 with read_session(read_class="bi") as rdb:
-                    rows = rdb.execute(_text(sql), params).mappings().all()
+                    rows = rdb.execute(_QUERY_DECISIONS_SQL, params).mappings().all()
             else:
                 # Prefer the request-injected session so request.app.state.engine
                 # is respected in tests that create an app with a test engine.
-                rows = db.execute(_text(sql), params).mappings().all()
+                rows = db.execute(_QUERY_DECISIONS_SQL, params).mappings().all()
             out = [dict(r) for r in rows]
         except Exception:
             out = []
@@ -336,7 +352,7 @@ def query_decisions(
         if not out:
             try:
                 with db_session() as _db:
-                    rows3 = _db.execute(_text(sql), params).mappings().all()
+                    rows3 = _db.execute(_QUERY_DECISIONS_SQL, params).mappings().all()
                     out = [dict(r) for r in rows3]
             except Exception:
                 pass
@@ -975,20 +991,15 @@ def reopen_decision(decision_id: str, actor: str, comment: str | None = None, ro
                 # Engine-level fallback insert to ensure visibility for tests using engine.begin()
                 try:
                     from src.app.models.db import get_engine
-                    from sqlalchemy import text as _text
+                    from src.app.services.audit_writer import insert_audit_row
                     eng = get_engine()
                     with eng.connect() as conn:
-                        conn.execute(
-                            _text(
-                                "INSERT INTO decision_audits (id, decision_id, action, actor, metadata, created_at) VALUES (:id, :decision_id, :action, :actor, :metadata, CURRENT_TIMESTAMP)"
-                            ),
-                            {
-                                "id": str(uuid.uuid4()),
-                                "decision_id": decision_id,
-                                "action": "reopen",
-                                "actor": actor,
-                                "metadata": json.dumps({"comment": comment}),
-                            },
+                        insert_audit_row(
+                            conn,
+                            decision_id=decision_id,
+                            action="reopen",
+                            actor=actor,
+                            metadata={"comment": comment},
                         )
                         try:
                             conn.commit()
@@ -1065,20 +1076,15 @@ def extend_decision(decision_id: str, actor: str, extend_seconds: int, role: str
             # Engine-level fallback insert to ensure visibility for tests using engine.begin()
             try:
                 from src.app.models.db import get_engine
-                from sqlalchemy import text as _text
+                from src.app.services.audit_writer import insert_audit_row
                 eng = get_engine()
                 with eng.connect() as conn:
-                    conn.execute(
-                        _text(
-                            "INSERT INTO decision_audits (id, decision_id, action, actor, metadata, created_at) VALUES (:id, :decision_id, :action, :actor, :metadata, CURRENT_TIMESTAMP)"
-                        ),
-                        {
-                            "id": str(uuid.uuid4()),
-                            "decision_id": decision_id,
-                            "action": "extend",
-                            "actor": actor,
-                            "metadata": json.dumps({"new_valid_to": str(new_valid_to)}),
-                        },
+                    insert_audit_row(
+                        conn,
+                        decision_id=decision_id,
+                        action="extend",
+                        actor=actor,
+                        metadata={"new_valid_to": str(new_valid_to)},
                     )
                     try:
                         conn.commit()

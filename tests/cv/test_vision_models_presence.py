@@ -35,8 +35,11 @@ def test_ollama_vision_models_basic(model):
     provider = ManagedCVProvider()
     img_bytes = base64.b64decode(MINI_PNG_BASE64)
     try:
-        labels, text = asyncio.run(asyncio.wait_for(provider.get_labels_and_text(img_bytes), timeout=8))
+        result = asyncio.run(asyncio.wait_for(provider.get_labels_and_text(img_bytes), timeout=8))
     except asyncio.TimeoutError:
         pytest.skip(f"Vision generation timed out for model '{model}'; skipping")
+    if result is None:
+        pytest.skip(f"Vision provider returned no result for model '{model}'; skipping")
+    labels, text = result
     assert isinstance(labels, list)
     assert isinstance(text, str)

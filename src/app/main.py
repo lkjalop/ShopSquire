@@ -72,6 +72,7 @@ from src.app.security.compliance import ComplianceMiddleware
 from src.app.security.headers import SecurityHeadersMiddleware
 from src.app.security.rate_limit import RateLimitMiddleware
 from src.app.security.internal_mtls import InternalMTLSMiddleware
+from src.app.security.request_shape import GlobalRequestShapeMiddleware
 
 
 def _is_non_dev_env() -> bool:
@@ -316,6 +317,12 @@ def create_app() -> FastAPI:
     # Compliance middleware (PCI detection + per-request compliance flags)
     try:
         app.add_middleware(ComplianceMiddleware)
+    except Exception:
+        pass
+    # Global request body and JSON shape caps (fail-safe in non-dev).
+    # Added after other middlewares so it executes first in request flow.
+    try:
+        app.add_middleware(GlobalRequestShapeMiddleware)
     except Exception:
         pass
 
@@ -1336,6 +1343,12 @@ def create_app() -> FastAPI:
     app.include_router(safe_links_router)
     app.include_router(billing_router)
     app.include_router(admin_webhooks_router)
+    try:
+        from src.app.routers.shopify_webhooks import router as shopify_webhooks_router
+
+        app.include_router(shopify_webhooks_router)
+    except Exception as e:
+        logging.getLogger("shopsquire.startup").exception("failed to include shopify_webhooks router: %s", e)
     app.include_router(query_router)
     app.include_router(audit_router)
     app.include_router(posthoc_router)
@@ -1610,8 +1623,10 @@ def create_app() -> FastAPI:
     try:
         from src.app.services.webhook_dispatcher import start_worker, stop_worker
 
-        app.add_event_handler("startup", lambda: start_worker(app))
-        app.add_event_handler("shutdown", stop_worker)
+        webhook_worker_enabled = str(os.getenv("WEBHOOK_DISPATCHER_WORKER_ENABLED", "1")).lower() in ("1", "true", "yes")
+        if webhook_worker_enabled:
+            app.add_event_handler("startup", lambda: start_worker(app))
+            app.add_event_handler("shutdown", stop_worker)
     except Exception:
         pass
 
@@ -1650,6 +1665,24 @@ def create_app() -> FastAPI:
 
         app.add_event_handler("startup", lambda: start_dlq_scheduler(app))
         app.add_event_handler("shutdown", lambda: stop_dlq_scheduler(app))
+    except Exception:
+        pass
+
+    # Scheduled playbook autorun engine (interval-based)
+    try:
+        from src.app.services.playbook_scheduler import start_playbook_scheduler, stop_playbook_scheduler
+
+        app.add_event_handler("startup", lambda: start_playbook_scheduler(app))
+        app.add_event_handler("shutdown", lambda: stop_playbook_scheduler(app))
+    except Exception:
+        pass
+
+    # mTLS certificate expiry monitoring (alerts before certificate expiration)
+    try:
+        from src.app.services.mtls_cert_monitor import start_mtls_cert_monitor, stop_mtls_cert_monitor
+
+        app.add_event_handler("startup", lambda: start_mtls_cert_monitor(app))
+        app.add_event_handler("shutdown", lambda: stop_mtls_cert_monitor(app))
     except Exception:
         pass
 

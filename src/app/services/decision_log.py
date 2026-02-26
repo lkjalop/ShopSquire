@@ -40,6 +40,118 @@ _TRACE_EVENT_CACHE: dict[str, list[dict[str, Any]]] = defaultdict(list)
 _TRACE_EVENT_CACHE_LOCK = threading.Lock()
 _TRACE_EVENT_CACHE_MAX_PER_TRACE = 256
 
+_DECISION_LOG_INSERT_EXTENDED = text(
+    """
+    INSERT INTO decision_logs (
+        id, tenant_id, actor_id, actor_role, event_type, agent_name, valid_from, valid_to, system_from, system_to,
+        input_data, retrieved_context, agent_reasoning, proposed_action,
+        policy_version, approval_required, execution_status
+    ) VALUES (
+        :id, :tenant_id, :actor_id, :actor_role, :event_type, :agent_name, :valid_from, :valid_to, :system_from, :system_to,
+        :input_data, :retrieved_context, :agent_reasoning, :proposed_action,
+        :policy_version, :approval_required, :execution_status
+    )
+    """
+)
+
+_DECISION_LOG_INSERT_MINIMAL = text(
+    """
+    INSERT INTO decision_logs (
+        id, agent_name, valid_from, input_data, proposed_action, policy_version, approval_required, execution_status
+    ) VALUES (
+        :id, :agent_name, :valid_from, :input_data, :proposed_action, :policy_version, :approval_required, :execution_status
+    )
+    """
+)
+
+_DECISION_LOG_INSERT_CONTEXT = text(
+    """
+    INSERT INTO decision_logs (
+        id, agent_name, valid_from, valid_to, system_from, system_to,
+        input_data, retrieved_context, agent_reasoning, proposed_action,
+        policy_version, approval_required, execution_status
+    ) VALUES (
+        :id, :agent_name, :valid_from, :valid_to, :system_from, :system_to,
+        :input_data, :retrieved_context, :agent_reasoning, :proposed_action,
+        :policy_version, :approval_required, :execution_status
+    )
+    """
+)
+
+_DECISION_LOG_INSERT_CONTEXT_TENANT = text(
+    """
+    INSERT INTO decision_logs (
+        id, tenant_id, actor_id, actor_role, event_type, agent_name,
+        valid_from, valid_to, system_from, system_to,
+        input_data, retrieved_context, agent_reasoning, proposed_action,
+        policy_version, approval_required, execution_status
+    ) VALUES (
+        :id, :tenant_id, :actor_id, :actor_role, :event_type, :agent_name,
+        :valid_from, :valid_to, :system_from, :system_to,
+        :input_data, :retrieved_context, :agent_reasoning, :proposed_action,
+        :policy_version, :approval_required, :execution_status
+    )
+    """
+)
+
+_DECISION_LOG_INSERT_CONTEXT_WITH_TENANT = text(
+    """
+    INSERT INTO decision_logs (
+        id, tenant_id, agent_name, valid_from, valid_to, system_from, system_to,
+        input_data, retrieved_context, agent_reasoning, proposed_action,
+        policy_version, approval_required, execution_status
+    ) VALUES (
+        :id, :tenant_id, :agent_name, :valid_from, :valid_to, :system_from, :system_to,
+        :input_data, :retrieved_context, :agent_reasoning, :proposed_action,
+        :policy_version, :approval_required, :execution_status
+    )
+    """
+)
+
+
+def _exec_decision_log_insert_mapped(db, cols: list[str], payload: Dict[str, Any]) -> bool:
+    colset = set(str(c) for c in (cols or []))
+    full_cols = {
+        "id", "tenant_id", "actor_id", "actor_role", "event_type", "agent_name", "valid_from", "valid_to",
+        "system_from", "system_to", "input_data", "retrieved_context", "agent_reasoning", "proposed_action",
+        "policy_version", "approval_required", "execution_status",
+    }
+    minimal_cols = {
+        "id", "agent_name", "valid_from", "input_data", "proposed_action", "policy_version", "approval_required", "execution_status",
+    }
+    context_cols = {
+        "id", "agent_name", "valid_from", "valid_to", "system_from", "system_to",
+        "input_data", "retrieved_context", "agent_reasoning", "proposed_action",
+        "policy_version", "approval_required", "execution_status",
+    }
+    context_with_tenant_cols = {
+        "id", "tenant_id", "agent_name", "valid_from", "valid_to", "system_from", "system_to",
+        "input_data", "retrieved_context", "agent_reasoning", "proposed_action",
+        "policy_version", "approval_required", "execution_status",
+    }
+    context_tenant_cols = {
+        "id", "tenant_id", "actor_id", "actor_role", "event_type", "agent_name",
+        "valid_from", "valid_to", "system_from", "system_to",
+        "input_data", "retrieved_context", "agent_reasoning", "proposed_action",
+        "policy_version", "approval_required", "execution_status",
+    }
+    if full_cols.issubset(colset):
+        db.execute(_DECISION_LOG_INSERT_EXTENDED, payload)
+        return True
+    if context_tenant_cols.issubset(colset):
+        db.execute(_DECISION_LOG_INSERT_CONTEXT_TENANT, payload)
+        return True
+    if context_with_tenant_cols.issubset(colset):
+        db.execute(_DECISION_LOG_INSERT_CONTEXT_WITH_TENANT, payload)
+        return True
+    if context_cols.issubset(colset):
+        db.execute(_DECISION_LOG_INSERT_CONTEXT, payload)
+        return True
+    if minimal_cols.issubset(colset):
+        db.execute(_DECISION_LOG_INSERT_MINIMAL, payload)
+        return True
+    return False
+
 
 def _cache_trace_event(trace_id: str, event: Dict[str, Any]) -> None:
     try:
@@ -160,7 +272,10 @@ def _decision_log_columns(db) -> list[str]:
             db.rollback()
         except Exception:
             pass
-    _DECISION_LOG_COL_CACHE[key] = cols
+    # SQLite schemas are frequently recreated in tests under the same URL;
+    # avoid stale schema cache entries that can misroute insert mapping.
+    if dialect != "sqlite":
+        _DECISION_LOG_COL_CACHE[key] = cols
     return cols
 
 
@@ -228,32 +343,11 @@ def log_decision(
                 cols = _decision_log_columns(db)
             try:
                 if cols:
-                    insert_cols = [c for c in payload.keys() if c in cols]
-                    if not insert_cols:
+                    if not _exec_decision_log_insert_mapped(db, cols, payload):
                         raise RuntimeError("decision_logs columns not available")
-                    stmt = text(
-                        "INSERT INTO decision_logs (" + ", ".join(insert_cols) + ") VALUES (" +
-                        ", ".join([":" + c for c in insert_cols]) + ")"
-                    )
-                    db.execute(stmt, {k: payload[k] for k in insert_cols})
                 else:
                     # Fall back to extended insert if we cannot introspect columns
-                    db.execute(
-                        text(
-                            """
-                            INSERT INTO decision_logs (
-                                id, tenant_id, actor_id, actor_role, event_type, agent_name, valid_from, valid_to, system_from, system_to,
-                                input_data, retrieved_context, agent_reasoning, proposed_action,
-                                policy_version, approval_required, execution_status
-                            ) VALUES (
-                                :id, :tenant_id, :actor_id, :actor_role, :event_type, :agent_name, :valid_from, :valid_to, :system_from, :system_to,
-                                :input_data, :retrieved_context, :agent_reasoning, :proposed_action,
-                                :policy_version, :approval_required, :execution_status
-                            )
-                            """
-                        ),
-                        payload,
-                    )
+                    db.execute(_DECISION_LOG_INSERT_EXTENDED, payload)
             except Exception:
                 logging.exception("decision_logs insert failed; falling back to minimal schema")
                 try:
@@ -261,21 +355,7 @@ def log_decision(
                         db.rollback()
                     except Exception:
                         pass
-                    minimal_cols = [
-                        "id",
-                        "agent_name",
-                        "valid_from",
-                        "input_data",
-                        "proposed_action",
-                        "policy_version",
-                        "approval_required",
-                        "execution_status",
-                    ]
-                    stmt = text(
-                        "INSERT INTO decision_logs (" + ", ".join(minimal_cols) + ") VALUES (" +
-                        ", ".join([":" + c for c in minimal_cols]) + ")"
-                    )
-                    db.execute(stmt, {k: payload[k] for k in minimal_cols})
+                    db.execute(_DECISION_LOG_INSERT_MINIMAL, payload)
                 except Exception:
                     logging.exception("decision_logs minimal insert failed")
             try:
