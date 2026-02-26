@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ENV POETRY_VERSION=1.7.1 \
     POETRY_HTTP_TIMEOUT=120 \
