@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from src.app.main import create_app
 from src.app.services.recommendations import RecommendationService
 from src.app.models.db import db_session
+from src.app.routers import recommend as recommend_router
 
 
 app = create_app()
@@ -447,6 +448,9 @@ def test_gpu_workload_prefers_discrete_and_adds_nqe_question():
         assert all(_looks_discrete_gpu(x) for x in rows)
         next_q = body.get("next_questions") or []
         assert any(str((q or {}).get("id") or "") == "ask_gpu_preference" for q in next_q if isinstance(q, dict))
+        gpu_q = next((q for q in next_q if isinstance(q, dict) and str(q.get("id")) == "ask_gpu_preference"), {})
+        assert "What matters more" in str(gpu_q.get("text") or "")
+        assert isinstance(gpu_q.get("options"), list) and len(gpu_q.get("options")) >= 2
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
 
@@ -494,3 +498,50 @@ def test_explicit_without_gpu_filters_discrete_out():
         assert all(not _looks_discrete_gpu(x) for x in rows)
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_selection_explanation_requests_llm_summary_and_trace(monkeypatch):
+    orig_retrieve = RecommendationService.retrieve_candidates
+    orig_summarize = recommend_router._summarize_results
+    calls = {"count": 0}
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {
+                "id": "p1",
+                "sku": "GPU-YES-3",
+                "name": "Lenovo Legion Pro 7",
+                "price_cents": 199900,
+                "currency": "USD",
+                "stock": 3,
+                "specs": {"gpu": "nvidia discrete rtx 4080", "ram_gb": 32},
+            }
+        ]
+
+        def _capture_summary(query, results, constraints, llm_model, trace_id):
+            calls["count"] += 1
+            return ("Explanation generated.", None)
+
+        recommend_router._summarize_results = _capture_summary
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": "u-why-picked-1", "query": "why selected this product for me?"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert calls["count"] >= 1
+        assert body.get("explainability_mode") == "llm_assisted"
+        assert "Explanation generated." in str(body.get("assistant_message") or "")
+        assert body.get("trace_id") or body.get("decision_trace_id")
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+        recommend_router._summarize_results = orig_summarize
+

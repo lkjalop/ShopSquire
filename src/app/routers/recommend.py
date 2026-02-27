@@ -187,6 +187,24 @@ _GPU_WITHOUT_TERMS = (
     "no graphics card",
 )
 
+_TECHY_QUERY_TOKENS = (
+    "gpu",
+    "rtx",
+    "radeon",
+    "cuda",
+    "vram",
+    "ram",
+    "ssd",
+    "tb",
+    "i7",
+    "i9",
+    "ryzen",
+    "threadripper",
+    "cores",
+    "ghz",
+    "fps",
+)
+
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -472,19 +490,58 @@ def _safe_float(value: Any, default: float) -> float:
         return float(default)
 
 
-def _append_gpu_disambiguation_question(existing: list[dict] | None) -> list[dict]:
+def _append_gpu_disambiguation_question(existing: list[dict] | None, query: str | None = None) -> list[dict]:
     out = [q for q in (existing or []) if isinstance(q, dict)]
     qid = "ask_gpu_preference"
     if any(str((q or {}).get("id") or "") == qid for q in out):
         return out
+    techy = _is_techy_query(query)
+    question_text = (
+        "Do you want a dedicated GPU (RTX/Radeon) or integrated graphics only?"
+        if techy
+        else "What matters more for your laptop: faster heavy-task performance, or longer battery life and lower cost?"
+    )
+    options = (
+        [
+            {"id": "with_discrete", "label": "Dedicated GPU (RTX/Radeon)"},
+            {"id": "without_discrete", "label": "Integrated graphics only"},
+            {"id": "no_preference", "label": "No strong preference"},
+        ]
+        if techy
+        else [
+            {"id": "with_discrete", "label": "Better performance for gaming/creative work"},
+            {"id": "without_discrete", "label": "Longer battery life and lower price"},
+            {"id": "no_preference", "label": "Show both"},
+        ]
+    )
     out.append(
         {
             "id": qid,
-            "text": "Do you want a dedicated GPU (RTX/Radeon) or integrated graphics only?",
+            "text": question_text,
             "goal": "narrow_results",
+            "options": options,
         }
     )
     return out[:3]
+
+
+def _is_techy_query(query: str | None) -> bool:
+    q = str(query or "").lower()
+    if not q:
+        return False
+    return any(tok in q for tok in _TECHY_QUERY_TOKENS)
+
+
+def _is_selection_rationale_query(query: str | None) -> bool:
+    q = str(query or "").strip().lower()
+    if not q:
+        return False
+    return bool(
+        re.search(
+            r"\b(why (this|these|those|that)|why selected|why pick(ed)?|how is (this|that) related|why (it|they) (match|matched)|explain (selection|why))\b",
+            q,
+        )
+    )
 
 
 def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[str, Any]) -> Dict[str, Any]:
@@ -1709,6 +1766,7 @@ def suggest(
 
     parsed = service.parse_constraints(query_effective)
     followup_explain = _is_followup_explain_query(query)
+    explanation_request = _is_selection_rationale_query(query_effective)
     explicit_constraint_update = _has_explicit_constraint_update(parsed, query)
     followup_contract = _build_followup_contract(query, nlp.get("intent_chain") if isinstance(nlp, dict) else [])
     intent_execution_plan = _build_multi_intent_execution_plan(nlp.get("intent_chain") if isinstance(nlp, dict) else [])
@@ -2137,7 +2195,7 @@ def suggest(
         # Clarify-or-assume protocol: ask at most 1-2 clarifying questions per turn.
         next_questions = (next_questions or [])[:2]
         if gpu_followup_question_needed:
-            next_questions = _append_gpu_disambiguation_question(next_questions)
+            next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
         # Emit a decision trace event so SSE/WebSocket consumers see the clarifying questions
         try:
             if next_questions:
@@ -3450,7 +3508,7 @@ def suggest(
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
             next_questions = (next_questions or [])[:2]
             if gpu_followup_question_needed:
-                next_questions = _append_gpu_disambiguation_question(next_questions)
+                next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
             if next_questions:
                 payload["next_questions"] = next_questions
                 # Also attach follow-ups into the NLP bundle so frontends reading
@@ -3501,12 +3559,31 @@ def suggest(
     except Exception:
         next_questions = []
     if gpu_followup_question_needed:
-        next_questions = _append_gpu_disambiguation_question(next_questions)
+        next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
         payload["next_questions"] = next_questions
     assistant_message = None
     llm_summary_job_id = None
-    if nlp.get("llm_fallback") and rule_eval.get("recommend_llm", True):
+    llm_summary_requested = bool(nlp.get("llm_fallback") or explanation_request)
+    if llm_summary_requested and rule_eval.get("recommend_llm", True):
         assistant_message, llm_summary_job_id = _summarize_results(query, results, constraints, llm_model, trace_id)
+    if explanation_request:
+        payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="selection_explanation_requested",
+                source_type="user",
+                source_id=uid,
+                target_type="agent",
+                target_id="NLP_Search_Agent",
+                payload={
+                    "query": scrub_pii(query),
+                    "explainability_mode": payload["explainability_mode"],
+                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["results", "constraints"]),
+                },
+            )
+        except Exception:
+            pass
     if not assistant_message:
         assistant_message = _deterministic_assistant_message(query, results, constraints)
     if image_brand_mismatch_note:
