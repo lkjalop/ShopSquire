@@ -1,11 +1,13 @@
-﻿import { useEffect, useMemo, useState, useRef } from 'react';
+﻿import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
 import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, clearCart } from './lib/api';
-import CameraButton from './components/CameraButton';
+import AttachmentButton from './components/AttachmentButton';
+import DisambiguationButtons from './components/DisambiguationButtons';
+import { useDualSTT } from './hooks/useDualSTT';
 import CartPanel from './components/CartPanel';
 
 export type Product = {
@@ -16,9 +18,27 @@ export type Product = {
   image_url?: string;
   why?: string[];
   score_norm?: number;
+  why_codes?: { code: string; label: string; confidence: number; weight?: number; weighted_score?: number }[];
+  why_confidence?: number;
+  model_source?: string;
 };
-type RightPanelMode = 'none' | 'grid' | 'list' | 'compare' | 'cv' | 'cart' | 'faq' | 'security';
-type ChatMessage = { role: 'user' | 'assistant'; content: string; timestamp: Date };
+type RightPanelMode = 'none' | 'grid' | 'list' | 'compare' | 'cv' | 'cart' | 'faq' | 'security' | 'visual_search' | 'image_context';
+type ChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+  images?: string[];           // data-URL thumbnails shown inline
+  disambiguation?: boolean;    // true → render DisambiguationButtons
+  disambiguationOptions?: string[];
+  nextQuestions?: { id: string; text: string; goal?: string }[];
+  complexity?: { score: number; tier: string; model: string };
+  voiceUsed?: boolean;
+};
+type PendingImageContext = {
+  labels: string[];
+  ocrText: string;
+  imageHash?: string | null;
+};
 
 type BackendStatus = {
   ok: boolean;
@@ -166,13 +186,46 @@ export default function App() {
   const [escalationIncidentId, setEscalationIncidentId] = useState<string | null>(null);
   const [escalationBuyerToken, setEscalationBuyerToken] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [isRecording, setIsRecording] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatBodyRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [cvPrefillImages, setCvPrefillImages] = useState<File[]>([]);
+  const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
+  const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
   const [lastCvSecurityNoteKey, setLastCvSecurityNoteKey] = useState<string | null>(null);
   const uid = (localStorage.getItem('uid') || 'demo-user');
   const [cart, setCart] = useState<any | null>(null);
+
+  // Multimodal: attached images queued for Send
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [attachedThumbs, setAttachedThumbs] = useState<string[]>([]);
+
+  // Dual STT (browser + Whisper)
+  const stt = useDualSTT();
+
+  // Sync STT transcript into input
+  useEffect(() => {
+    if (stt.transcript) setInputValue(stt.transcript);
+  }, [stt.transcript]);
+
+  /** Add files from AttachmentButton / drop / paste */
+  const handleAttach = useCallback((files: File[]) => {
+    const imgFiles = files.filter(f => f.type.startsWith('image/'));
+    if (imgFiles.length === 0) return;
+    setAttachedFiles(prev => [...prev, ...imgFiles]);
+    // Generate thumbnails as data URLs
+    imgFiles.forEach(f => {
+      const reader = new FileReader();
+      reader.onload = () => setAttachedThumbs(prev => [...prev, reader.result as string]);
+      reader.readAsDataURL(f);
+    });
+  }, []);
+
+  const removeAttachment = useCallback((idx: number) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== idx));
+    setAttachedThumbs(prev => prev.filter((_, i) => i !== idx));
+  }, []);
 
   const maybeAppendCvSecurityNote = (cvResult: any) => {
     if (!cvResult || typeof cvResult !== 'object') return;
@@ -253,21 +306,16 @@ export default function App() {
     }
   };
 
-  const handleCameraCapture = (files: File[]) => {
+  const handleCameraCapture = async (files: File[]) => {
     if (!files || files.length === 0) return;
+    // Defer triage until Send — just attach thumbnails
+    handleAttach(files);
     setCvPrefillImages(files);
-    setRightPanelMode('cv');
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: 'Photo(s) attached. Fill in the complaint details on the right panel and submit for CV triage.',
-      timestamp: new Date()
-    }]);
   };
 
-  // Microphone handler - speech-to-text
-  const handleMicClick = async () => {
-    const SpeechRecognitionAPI = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-    if (!SpeechRecognitionAPI) {
+  // Microphone handler — delegates to dual STT hook
+  const handleMicClick = () => {
+    if (stt.error) {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Speech recognition is not supported in your browser. Please try Chrome or Edge for voice input.',
@@ -275,31 +323,31 @@ export default function App() {
       }]);
       return;
     }
-
-    if (isRecording) {
-      setIsRecording(false);
-      return;
-    }
-
-    const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInputValue(transcript);
-      setIsRecording(false);
-    };
-
-    recognition.onerror = () => setIsRecording(false);
-    recognition.onend = () => setIsRecording(false);
-
-    setIsRecording(true);
-    recognition.start();
+    stt.toggle();
   };
 
   const hasRightPanel = rightPanelMode !== 'none';
+
+  const normalizeNextQuestions = (items: any[]): { id: string; text: string; goal?: string }[] => {
+    if (!Array.isArray(items)) return [];
+    const out = items
+      .map((item: any, idx: number) => {
+        if (item && typeof item === 'object') {
+          const text = String(item.text || item.question || '').trim();
+          if (!text) return null;
+          return {
+            id: String(item.id || `nq_${idx + 1}`),
+            text,
+            goal: item.goal ? String(item.goal) : undefined,
+          };
+        }
+        const text = String(item || '').trim();
+        if (!text) return null;
+        return { id: `nq_${idx + 1}`, text };
+      })
+      .filter(Boolean) as { id: string; text: string; goal?: string }[];
+    return out.slice(0, 3);
+  };
 
   const formatNextQuestions = (items: any[]): string => {
     if (!Array.isArray(items) || items.length === 0) return '';
@@ -312,6 +360,22 @@ export default function App() {
       .slice(0, 3);
     if (lines.length === 0) return '';
     return `\n\nTo narrow this down quickly:\n- ${lines.join('\n- ')}`;
+  };
+
+  const complaintTextHint = (text: string) => /\b(return|broken|damaged|refund|complaint|defective|wrong item|warranty)\b/i.test(text || '');
+  const visualSearchHint = (text: string) => /\b(find similar|similar products?|visual search|look like this|like this|match this)\b/i.test(text || '');
+
+  const summarizeWhy = (items: Product[]) => {
+    if (!Array.isArray(items) || items.length === 0) return '';
+    const snippets = items
+      .slice(0, 2)
+      .map((p) => {
+        const why = Array.isArray(p.why) ? p.why.filter(Boolean).slice(0, 2) : [];
+        if (!p?.name || why.length === 0) return '';
+        return `${p.name} (${why.join(', ')})`;
+      })
+      .filter(Boolean);
+    return snippets.length > 0 ? `Top picks: ${snippets.join('; ')}.` : '';
   };
 
   useEffect(() => {
@@ -378,17 +442,85 @@ export default function App() {
       return;
     }
 
-    const userMsg: ChatMessage = { role: 'user', content: q, timestamp: new Date() };
+    const userMsg: ChatMessage = { role: 'user', content: q, timestamp: new Date(), images: [...attachedThumbs], voiceUsed: stt.source !== null };
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
+    const currentAttachedFiles = [...attachedFiles];
+    const currentSttConf = stt.whisperConfidence;
+    const currentSttSrc = stt.source;
+    setAttachedFiles([]);
+    setAttachedThumbs([]);
     setIsThinking(true);
 
     const mode = detectPanelMode(q);
     const complaintIntent = isComplaintIntent(q);
+    const hasImages = currentAttachedFiles.length > 0;
+    const hasPendingImage = Boolean(pendingImageContext) || cvPrefillImages.length > 0 || hasImages;
+    const explicitVisualIntent = visualSearchHint(q);
+    const explicitComplaintIntent = complaintTextHint(q);
+    const requestImageContext = (Boolean(pendingImageContext) && !explicitComplaintIntent) ? pendingImageContext : null;
+
+    if (hasPendingImage && explicitComplaintIntent && !hasImages) {
+      setPendingImageContext(null);
+      setRightPanelMode('cv');
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Opening return/complaint flow with your uploaded photo.',
+        timestamp: new Date(),
+      }]);
+      setIsThinking(false);
+      return;
+    }
+
+    if (requestImageContext) {
+      setPendingImageContext(null);
+      if (explicitVisualIntent) {
+        setCvPrefillImages([]);
+      }
+    }
 
     // Call backend
     try {
-      if (mode === 'cv' || complaintIntent) {
+      // If images are attached, triage them first
+      let imageTriageResults: any[] = [];
+      if (hasImages) {
+        setImageRoutingInFlight(true);
+        try {
+          const triagePromises = currentAttachedFiles.map(async (file) => {
+            const fd = new FormData();
+            fd.append('image', file);
+            const r = await fetch(apiUrl('/api/v1/vision/triage'), {
+              method: 'POST',
+              body: fd,
+              headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+            });
+            return r.ok ? await safeJson(r) : null;
+          });
+          imageTriageResults = (await Promise.all(triagePromises)).filter(Boolean);
+        } finally {
+          setImageRoutingInFlight(false);
+        }
+
+        // Auto-route to CV if damage detected
+        const anyDamage = imageTriageResults.some((t: any) => {
+          const ds = t?.damage_score ?? 0;
+          return ds >= 0.7;
+        });
+        if (anyDamage && (explicitComplaintIntent || complaintIntent)) {
+          setCvPrefillImages(currentAttachedFiles);
+          setRightPanelMode('cv');
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'I detected likely damage in your photo and opened the return/complaint panel.',
+            timestamp: new Date(),
+          }]);
+          setIsThinking(false);
+          return;
+        }
+      }
+
+      const routeToComplaint = (mode === 'cv' || complaintIntent || explicitComplaintIntent) && !explicitVisualIntent && !requestImageContext && !hasImages;
+      if (routeToComplaint) {
         const r = await fetch(apiUrl('/api/v1/orchestrate'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
@@ -443,10 +575,35 @@ export default function App() {
           setMessages(prev => [...prev, assistantMsg]);
         }
       } else {
+        // Build multimodal chat payload
+        const chatPayload: any = { uid, query: q };
+        if (currentSttSrc) {
+          chatPayload.voice_transcript = q;
+          chatPayload.voice_confidence = currentSttConf ?? undefined;
+        }
+        // Attach image triage data
+        if (imageTriageResults.length > 0) {
+          chatPayload.images = imageTriageResults.map((t: any) => ({
+            labels: t?.labels || [],
+            ocr_text: t?.extracted_text || '',
+            image_hash: t?.image_hash || null,
+            damage_score: t?.damage_score ?? 0,
+            is_product_photo: t?.is_product_photo ?? false,
+            intent_routing: t?.intent_routing || null,
+            security: t?.security || null,
+          }));
+        } else if (requestImageContext) {
+          chatPayload.image_labels = requestImageContext.labels || [];
+          chatPayload.image_ocr_text = requestImageContext.ocrText || '';
+          chatPayload.image_hash = requestImageContext.imageHash || undefined;
+          chatPayload.image_intent = 'visual_search';
+        }
+        chatPayload.recent_messages = messages.slice(-6).map(m => ({ role: m.role, content: m.content }));
+
         const r = await fetch(apiUrl('/api/v1/chat/query'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
-          body: JSON.stringify({ query: q }),
+          body: JSON.stringify(chatPayload),
         });
         const data = await safeJson(r);
         if (!r.ok || !data) {
@@ -455,15 +612,40 @@ export default function App() {
         const prods = (data.products || []) as Product[];
         const respAssistant = data.assistant_message || '';
         const nextQuestions = Array.isArray(data.next_questions) ? data.next_questions : [];
+        const normalizedNextQuestions = normalizeNextQuestions(nextQuestions);
+        const isDisambiguation = data.disambiguation === true;
+        const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
+        const complexity = data.complexity || null;
         setTraceId(data.decision_trace_id || null);
-        if (prods.length > 0) {
-          setDisplayProducts(prods);
+
+        if (isDisambiguation) {
+          // Show disambiguation buttons instead of products
+          const assistantMsg: ChatMessage = {
+            role: 'assistant',
+            content: respAssistant || 'I see you uploaded an image. What would you like to do?',
+            timestamp: new Date(),
+            disambiguation: true,
+            disambiguationOptions: disambiguationOpts,
+            complexity,
+          };
+          setMessages(prev => [...prev, assistantMsg]);
+        } else if (prods.length > 0) {
+          const visibleProducts = prods.slice(0, 12);
+          setDisplayProducts(visibleProducts);
           setRightPanelMode(mode === 'none' ? 'grid' : mode);
+          const whySummary = summarizeWhy(prods);
+          const hasAssistantBody = typeof respAssistant === 'string' && respAssistant.trim().length > 0;
+          const baseLine = hasAssistantBody
+            ? respAssistant.trim()
+            : `I found ${prods.length} ${mode === 'compare' ? 'products to compare' : 'matching products'} and I’m showing the top ${visibleProducts.length}.`;
+          const includeWhy = whySummary && !/top picks:/i.test(baseLine);
 
           const assistantMsg: ChatMessage = {
             role: 'assistant',
-            content: `Found ${prods.length} ${mode === 'compare' ? 'products to compare' : 'matching products'}. ${respAssistant}`,
+            content: `${baseLine}${includeWhy ? `\n\n${whySummary}` : ''}`,
             timestamp: new Date(),
+            complexity,
+            nextQuestions: normalizedNextQuestions,
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
@@ -473,6 +655,8 @@ export default function App() {
             role: 'assistant',
             content: (respAssistant || 'I could not find products matching that query.') + nqePrompt,
             timestamp: new Date(),
+            complexity,
+            nextQuestions: normalizedNextQuestions,
           };
           setMessages(prev => [...prev, assistantMsg]);
         }
@@ -496,6 +680,43 @@ export default function App() {
     setInputValue(query);
     setTimeout(() => handleSend(), 100);
   };
+
+  /** Disambiguation button click → re-send with the chosen intent */
+  const handleDisambiguationSelect = (option: string) => {
+    setInputValue(option);
+    setTimeout(() => handleSend(), 100);
+  };
+
+  /** Drag-and-drop on chat body */
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files);
+    handleAttach(files);
+  }, [handleAttach]);
+
+  /** Paste images in chat body */
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = Array.from(e.clipboardData.items);
+    const files: File[] = [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      handleAttach(files);
+    }
+  }, [handleAttach]);
+
+  /** Auto-resize textarea */
+  const handleTextareaInput = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+  }, []);
 
   return (
     <div className={styles.page}>
@@ -573,11 +794,18 @@ export default function App() {
                 </div>
               </div>
 
-              <div className={styles.chatBody}>
+              <div
+                className={styles.chatBody}
+                ref={chatBodyRef}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                onPaste={handlePaste}
+              >
                 {messages.length === 0 && (
                   <div className={styles.welcome}>
                     <p>Hi! I'm your ShopSquire assistant.</p>
                     <p>Ask me about laptops, compare models, or get recommendations.</p>
+                    <p className={styles.welcomeHint}>You can also paste or drag images into this chat.</p>
                     <div className={styles.quickActions}>
                       <button onClick={() => handleQuickAction('Show gaming laptops under $2000')}>Gaming</button>
                       <button onClick={() => handleQuickAction('Budget laptops under $1000')}>Budget</button>
@@ -588,10 +816,46 @@ export default function App() {
                 )}
                 {messages.map((msg, i) => (
                   <div key={i} className={`${styles.message} ${styles[msg.role]}`}>
-                    <div className={styles.messageContent}>{msg.content}</div>
+                    <div className={styles.messageContent}>
+                      {/* Inline image thumbnails for user messages */}
+                      {msg.images && msg.images.length > 0 && (
+                        <div className={styles.msgImageStrip}>
+                          {msg.images.map((src, j) => (
+                            <img key={j} src={src} alt={`attachment ${j + 1}`} className={styles.msgThumb} />
+                          ))}
+                        </div>
+                      )}
+                      {msg.content}
+                      {/* Voice badge */}
+                      {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
+                      {/* Complexity badge */}
+                      {msg.complexity && (
+                        <span className={styles.complexityBadge} title={`Tier: ${msg.complexity.tier} | Model: ${msg.complexity.model}`}>
+                          ⚡ {msg.complexity.score}/10
+                        </span>
+                      )}
+                      {msg.nextQuestions && msg.nextQuestions.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                          {msg.nextQuestions.map((nq) => (
+                            <button
+                              key={nq.id}
+                              type="button"
+                              className={styles.filterBtn}
+                              onClick={() => handleQuickAction(nq.text)}
+                            >
+                              {nq.text}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {/* Disambiguation buttons for assistant */}
+                    {msg.disambiguation && msg.disambiguationOptions && msg.disambiguationOptions.length > 0 && (
+                      <DisambiguationButtons options={msg.disambiguationOptions} onSelect={handleDisambiguationSelect} />
+                    )}
                   </div>
                 ))}
-                {isThinking && (
+                {(isThinking || imageRoutingInFlight) && (
                   <div className={`${styles.message} ${styles.assistant}`}>
                     <div className={`${styles.messageContent} ${styles.thinkingBubble}`}>
                       <span className={styles.thinkingDot}>.</span>
@@ -603,24 +867,40 @@ export default function App() {
                 <div ref={chatEndRef} />
               </div>
 
+              {/* Composer Card */}
               <div className={styles.chatFooter}>
-                <CameraButton onFiles={handleCameraCapture} className={styles.inputIconBtn} />
-                <input
-                  type="text"
-                  className={styles.chatInput}
-                  placeholder={isRecording ? "Listening..." : "Type your message..."}
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                />
-                <button
-                  className={`${styles.inputIconBtn} ${isRecording ? styles.recording : ''}`}
-                  onClick={handleMicClick}
-                  title={isRecording ? 'Click to stop recording' : 'Voice input'}
-                >
-                  <MicIcon />
-                </button>
-                <button className={styles.sendBtn} onClick={handleSend}><SendIcon /></button>
+                {/* Thumbnail strip for attached images */}
+                {attachedThumbs.length > 0 && (
+                  <div className={styles.thumbStrip}>
+                    {attachedThumbs.map((src, i) => (
+                      <div key={i} className={styles.thumbWrap}>
+                        <img src={src} alt={`attached ${i + 1}`} className={styles.thumbImg} />
+                        <button className={styles.thumbRemove} onClick={() => removeAttachment(i)} title="Remove">&times;</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className={styles.composerRow}>
+                  <AttachmentButton onFiles={handleAttach} className={styles.inputIconBtn} />
+                  <textarea
+                    ref={textareaRef}
+                    className={styles.chatInput}
+                    placeholder={imageRoutingInFlight ? "Analyzing image..." : (stt.isRecording ? "Listening..." : "Type your message...")}
+                    value={inputValue}
+                    onChange={(e) => { setInputValue(e.target.value); handleTextareaInput(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                    rows={1}
+                  />
+                  <button
+                    className={`${styles.inputIconBtn} ${stt.isRecording ? styles.recording : ''}`}
+                    onClick={handleMicClick}
+                    title={stt.isRecording ? 'Click to stop recording' : 'Voice input'}
+                  >
+                    <MicIcon />
+                    {stt.whisperPending && <span className={styles.whisperDot} />}
+                  </button>
+                  <button className={styles.sendBtn} onClick={handleSend} disabled={isThinking || imageRoutingInFlight}><SendIcon /></button>
+                </div>
               </div>
             </div>
 
@@ -637,7 +917,11 @@ export default function App() {
                           ? 'CV Triage'
                           : rightPanelMode === 'cart'
                             ? 'Cart & Upsell'
-                            : `Found ${displayProducts.length} products`}
+                            : rightPanelMode === 'visual_search'
+                              ? 'Visual Search'
+                              : rightPanelMode === 'image_context'
+                                ? 'Image Context'
+                                : `Found ${displayProducts.length} products`}
                   </span>
                   <div className={styles.viewToggle}>
                     <button className={viewMode === 'grid' ? styles.active : ''} onClick={() => setViewMode('grid')}><GridIcon /></button>
@@ -647,6 +931,10 @@ export default function App() {
                 <div className={styles.rightBody}>
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
+                  ) : rightPanelMode === 'visual_search' ? (
+                    <RightPanelExtras mode="visual_search" />
+                  ) : rightPanelMode === 'image_context' ? (
+                    <RightPanelExtras mode="image_context" />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"

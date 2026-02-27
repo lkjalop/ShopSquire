@@ -379,13 +379,23 @@ class InventoryAgent:
         sales: List[int] = []
         try:
             with db_session() as db:
-                sql = (
-                    "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                    "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
-                    f"WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - INTERVAL '{days} days') "
-                    "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
-                )
-                rows = db.execute(text(sql), {"sku": sku}).fetchall()
+                dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+                if "postgres" in dialect:
+                    sql = (
+                        "SELECT date(o.created_at) as d, count(*) as daily_sales "
+                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - (:days * INTERVAL '1 day')) "
+                        "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
+                    )
+                    rows = db.execute(text(sql), {"sku": sku, "days": max(1, int(days))}).fetchall()
+                else:
+                    sql = (
+                        "SELECT date(o.created_at) as d, count(*) as daily_sales "
+                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "WHERE oi.sku = :sku AND datetime(o.created_at) >= datetime('now', :window) "
+                        "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
+                    )
+                    rows = db.execute(text(sql), {"sku": sku, "window": f"-{max(1, int(days))} days"}).fetchall()
                 sales = [int(r[1] or 0) for r in rows] if rows else []
         except Exception:
             sales = []
@@ -421,19 +431,55 @@ class InventoryAgent:
     def _get_sales_series(self, sku: str, days: int = 45) -> List[int]:
         try:
             with db_session() as db:
-                sql = (
-                    "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                    "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
-                    f"WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - INTERVAL '{days} days') "
-                    "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
-                )
-                rows = db.execute(text(sql), {"sku": sku}).fetchall()
+                dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+                if "postgres" in dialect:
+                    sql = (
+                        "SELECT date(o.created_at) as d, count(*) as daily_sales "
+                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - (:days * INTERVAL '1 day')) "
+                        "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
+                    )
+                    rows = db.execute(text(sql), {"sku": sku, "days": max(1, int(days))}).fetchall()
+                else:
+                    sql = (
+                        "SELECT date(o.created_at) as d, count(*) as daily_sales "
+                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "WHERE oi.sku = :sku AND datetime(o.created_at) >= datetime('now', :window) "
+                        "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
+                    )
+                    rows = db.execute(text(sql), {"sku": sku, "window": f"-{max(1, int(days))} days"}).fetchall()
                 return [int(r[1] or 0) for r in rows] if rows else []
         except Exception:
             return []
 
     def _forecast_daily_demand(self, sku: str) -> Dict[str, Any]:
         import statistics as _st
+
+        use_hardened_pipeline = str(os.environ.get("INV_FORECAST_PIPELINE", "0")).strip().lower() in ("1", "true", "yes", "on")
+        if use_hardened_pipeline:
+            try:
+                from src.app.services.demand_forecast import DemandForecaster
+
+                fc = DemandForecaster().forecast_sku(sku, horizon_days=14)
+                means = [float((d or {}).get("mean") or 0.0) for d in (fc.daily or [])]
+                if means:
+                    avg = float(sum(means) / float(max(1, len(means))))
+                    std = float(_st.pstdev(means)) if len(means) >= 2 else 0.0
+                    cv = float(std / max(0.1, avg))
+                    mape = ((fc.meta or {}).get("mape_proxy") if isinstance(fc.meta, dict) else None)
+                    return {
+                        "method": str((fc.meta or {}).get("method") or "hardened_pipeline"),
+                        "daily_demand": avg,
+                        "std_daily": std,
+                        "variance": float(std * std),
+                        "high_variance": bool(cv > float(os.environ.get("INV_FORECAST_MAX_CV", "1.2") or 1.2)),
+                        "cv": cv,
+                        "mape": mape,
+                        "quarantined_points": int(((fc.meta or {}).get("quarantined_points") or 0)),
+                        "poison_guard": (fc.meta or {}).get("poison_guard"),
+                    }
+            except Exception:
+                pass
 
         days = int(os.environ.get("INV_FORECAST_DAYS", "45") or 45)
         alpha = float(os.environ.get("INV_EWMA_ALPHA", "0.3") or 0.3)

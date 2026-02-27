@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Dict, List, Tuple
 
 import os
+from sqlalchemy import text
 
 from src.app.models.db import db_session
 
 
 Status = str
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass
@@ -41,7 +45,10 @@ def _table_exists(db, table: str) -> bool:
 
 def _columns_for(db, table: str) -> List[str]:
     try:
-        rows = db.execute(f"PRAGMA table_info({table})").fetchall()
+        t = str(table or "").strip()
+        if not _IDENT_RE.match(t):
+            return []
+        rows = db.execute(text(f"PRAGMA table_info({t})")).fetchall()
         if rows:
             return [r[1] for r in rows]
     except Exception:

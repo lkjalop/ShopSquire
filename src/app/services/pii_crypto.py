@@ -143,6 +143,38 @@ def rotate_encrypted_pii_columns(*, dry_run: bool = True, limit: int = 500) -> D
         ("customers", "id", "email_encrypted"),
         ("customers", "id", "phone_encrypted"),
     ]
+    select_sql = {
+        ("orders", "id", "guest_email_encrypted"): text(
+            "SELECT id, guest_email_encrypted FROM orders "
+            "WHERE guest_email_encrypted IS NOT NULL AND guest_email_encrypted != '' LIMIT :lim"
+        ),
+        ("cases", "id", "guest_email_encrypted"): text(
+            "SELECT id, guest_email_encrypted FROM cases "
+            "WHERE guest_email_encrypted IS NOT NULL AND guest_email_encrypted != '' LIMIT :lim"
+        ),
+        ("customers", "id", "email_encrypted"): text(
+            "SELECT id, email_encrypted FROM customers "
+            "WHERE email_encrypted IS NOT NULL AND email_encrypted != '' LIMIT :lim"
+        ),
+        ("customers", "id", "phone_encrypted"): text(
+            "SELECT id, phone_encrypted FROM customers "
+            "WHERE phone_encrypted IS NOT NULL AND phone_encrypted != '' LIMIT :lim"
+        ),
+    }
+    update_sql = {
+        ("orders", "id", "guest_email_encrypted"): text(
+            "UPDATE orders SET guest_email_encrypted = :v WHERE id = :id"
+        ),
+        ("cases", "id", "guest_email_encrypted"): text(
+            "UPDATE cases SET guest_email_encrypted = :v WHERE id = :id"
+        ),
+        ("customers", "id", "email_encrypted"): text(
+            "UPDATE customers SET email_encrypted = :v WHERE id = :id"
+        ),
+        ("customers", "id", "phone_encrypted"): text(
+            "UPDATE customers SET phone_encrypted = :v WHERE id = :id"
+        ),
+    }
     out: Dict[str, Any] = {"dry_run": bool(dry_run), "limit": int(limit), "tables": [], "rotated": 0}
     per_target_limit = max(1, int(limit))
     for table, pk, enc_col in targets:
@@ -150,15 +182,9 @@ def rotate_encrypted_pii_columns(*, dry_run: bool = True, limit: int = 500) -> D
         scanned = 0
         try:
             with db_session() as db:
+                key = (table, pk, enc_col)
                 rows = db.execute(
-                    text(
-                        f"""
-                        SELECT {pk}, {enc_col}
-                        FROM {table}
-                        WHERE {enc_col} IS NOT NULL AND {enc_col} != ''
-                        LIMIT :lim
-                        """
-                    ),
+                    select_sql[key],
                     {"lim": per_target_limit},
                 ).fetchall()
                 for row in rows or []:
@@ -170,7 +196,7 @@ def rotate_encrypted_pii_columns(*, dry_run: bool = True, limit: int = 500) -> D
                         rotated += 1
                         if not dry_run:
                             db.execute(
-                                text(f"UPDATE {table} SET {enc_col} = :v WHERE {pk} = :id"),
+                                update_sql[key],
                                 {"v": rotated_value, "id": rid},
                             )
                 if not dry_run:

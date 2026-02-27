@@ -78,6 +78,15 @@ function formatTime(ts: string | undefined): string {
 
 // Generate summary from event
 function getSummary(evt: TraceEvent): string {
+  if (evt.event_type === 'turn_envelope_diff') {
+    const p = evt.payload || {};
+    const changed = Array.isArray(p.changed_fields) ? p.changed_fields.length : 0;
+    return `Envelope diff (${changed} changed)`;
+  }
+  if (evt.event_type === 'upsell_promotion_selected') {
+    const promoted = Array.isArray(evt.payload?.promoted) ? evt.payload.promoted.length : 0;
+    return `Upsell promotions selected (${promoted})`;
+  }
   if (evt.payload?.summary) return evt.payload.summary;
   if (evt.payload?.action) return evt.payload.action;
   if (evt.payload?.model) return `Model: ${evt.payload.model}`;
@@ -119,6 +128,26 @@ function renderValue(value: any) {
   return <span className={styles.valueText}>{String(value)}</span>;
 }
 
+function eventAliases(evt: TraceEvent): string[] {
+  const out = new Set<string>();
+  const direct = String(evt?.event_type || '').toLowerCase().trim();
+  if (direct) out.add(direct);
+  const payload = evt?.payload || {};
+  const original = String(payload?._original_event_type || payload?.original_event_type || '').toLowerCase().trim();
+  if (original) out.add(original);
+  const schema = String(payload?._event_type || '').toLowerCase().trim();
+  if (schema) out.add(schema);
+  return Array.from(out);
+}
+
+function eventMatches(evt: TraceEvent, expected: string | string[]): boolean {
+  const wants = Array.isArray(expected) ? expected : [expected];
+  const want = new Set(wants.map((x) => String(x || '').toLowerCase().trim()).filter(Boolean));
+  if (want.size === 0) return false;
+  const aliases = eventAliases(evt);
+  return aliases.some((x) => want.has(x));
+}
+
 export default function DecisionTrace({ traceId, onClose }: { traceId: string | null; onClose: () => void }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const authHeaders = API_KEY ? { 'x-api-key': API_KEY } : undefined;
@@ -127,7 +156,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'security' | 'raw'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'raw'>('events');
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll'>('poll');
@@ -136,6 +165,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   const [posthocValue, setPosthocValue] = useState<string>('true');
   const [posthocNote, setPosthocNote] = useState<string>('');
   const [posthocStatus, setPosthocStatus] = useState<string | null>(null);
+  const [eventFilter, setEventFilter] = useState<'all' | 'turn_envelope_diff'>('all');
   const apiBase = getApiBase();
   const displayEventType = (evt: TraceEvent): string =>
     String(evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type || 'event');
@@ -418,7 +448,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   };
 
   // Generate synthetic events from trace if timeline API not available
-  const displayEvents: TraceEvent[] = events.length > 0 ? events : (trace ? [
+  const allDisplayEvents: TraceEvent[] = events.length > 0 ? events : (trace ? [
     { event_type: 'query_received', source_id: 'input', payload: { query: trace.input_query }, timestamp: trace.timestamp },
     ...(trace.intent_analysis ? [{ event_type: 'intent_analysis', source_id: 'nlp', payload: trace.intent_analysis, timestamp: trace.timestamp }] : []),
     ...(trace.agent_chain || []).map((a: any, i: number) => ({ event_type: 'agent_step', source_id: a.agent || `agent-${i}`, payload: a, timestamp: trace.timestamp })),
@@ -426,6 +456,10 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     ...(trace.policy_gates ? [{ event_type: 'policy_gate', source_id: 'policy', payload: trace.policy_gates, timestamp: trace.timestamp }] : []),
     ...(trace.recommendation ? [{ event_type: 'success', source_id: 'output', payload: trace.recommendation, timestamp: trace.timestamp }] : []),
   ] : []);
+  const displayEvents: TraceEvent[] =
+    eventFilter === 'all'
+      ? allDisplayEvents
+      : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
 
   const ms = trace?.model_selection || {};
 
@@ -490,18 +524,26 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   };
 
   const security = extractSecurity();
-  const playbookEvent = events.find((e) => e.event_type === 'cv_playbook');
+  const playbookEvent = events.find((e) => eventMatches(e, ['cv_playbook', 'proposal_build']));
   const playbookPayload = playbookEvent?.payload || null;
   const playbookPreview = playbookPayload?.playbook || null;
   const playbookData = playbookPreview?.playbook || playbookPreview || null;
   const playbookTags = playbookPayload?.evidence_tags || playbookPreview?.triggered_by || [];
   // Contract NLP events
-  const contractEvt = events.find((e) => e.event_type === 'contract_nlp_analysis');
+  const contractEvt = events.find((e) => eventMatches(e, ['contract_nlp_analysis', 'constraint_parse']));
   const contractPayload = contractEvt?.payload || null;
-  const qualityEvt = events.find((e) => e.event_type === 'nlp_quality_gate');
+  const qualityEvt = events.find((e) => eventMatches(e, ['nlp_quality_gate', 'policy_verdict']));
   const qualityPayload = qualityEvt?.payload || null;
-  const tier2Event = events.find((e) => e.event_type === 'cv_pipeline' && e.payload?.tier === 2);
+  const tier2Event = events.find((e) => eventMatches(e, ['cv_pipeline', 'execution_result']) && e.payload?.tier === 2);
   const tier2Summary = tier2Event?.payload?.tier2_summary || null;
+  const envelopeDiffEvent =
+    [...(events || [])].reverse().find((e) => String(e.event_type || '').toLowerCase() === 'turn_envelope_diff')
+    || null;
+  const envelopeDiff = envelopeDiffEvent?.payload || null;
+  const upsellEvent =
+    [...(events || [])].reverse().find((e) => String(e.event_type || '').toLowerCase() === 'upsell_promotion_selected')
+    || null;
+  const upsellPromoted = Array.isArray(upsellEvent?.payload?.promoted) ? upsellEvent?.payload?.promoted : [];
   const mitreDetails = (security?.mitre_details && security.mitre_details.length > 0)
     ? security.mitre_details
     : (security?.mitre || []).map((id: string) => ({
@@ -615,6 +657,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
             <div className={styles.tabs}>
               <button className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => setActiveTab('events')}>Events</button>
               <button className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => setActiveTab('summary')}>Summary</button>
+              <button className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => setActiveTab('multimodal')}>Multimodal</button>
+              <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
+              <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
               <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
               <button className={activeTab === 'raw' ? styles.activeTab : ''} onClick={() => setActiveTab('raw')}>Raw</button>
             </div>
@@ -627,6 +672,21 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                 </div>
               )}
               {activeTab === 'events' && (
+                <>
+                  <div className={styles.eventFilterRow}>
+                    <button
+                      className={eventFilter === 'all' ? styles.eventFilterChipActive : styles.eventFilterChip}
+                      onClick={() => setEventFilter('all')}
+                    >
+                      All Events
+                    </button>
+                    <button
+                      className={eventFilter === 'turn_envelope_diff' ? styles.eventFilterChipActive : styles.eventFilterChip}
+                      onClick={() => setEventFilter('turn_envelope_diff')}
+                    >
+                      Envelope Diff
+                    </button>
+                  </div>
                 <table className={styles.table}>
                   <thead>
                     <tr>
@@ -642,10 +702,16 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                       const isExpanded = expandedRows.has(rowId);
                       return (
                         <>
-                          <tr key={rowId} className={styles.row} onClick={() => toggleRow(rowId)}>
+                          <tr key={rowId} className={`${styles.row} ${String(evt.event_type || '').toLowerCase() === 'turn_envelope_diff' ? styles.rowEnvelopeDiff : ''}`} onClick={() => toggleRow(rowId)}>
                             <td><ChevronIcon expanded={isExpanded} /></td>
                             <td className={styles.time}>{formatTime(evt.timestamp || evt.created_at)}</td>
-                            <td className={styles.summary}>{getSummary(evt)}{evt.latency_ms != null && <span className={styles.latency}>{evt.latency_ms}ms</span>}</td>
+                            <td className={styles.summary}>
+                              {getSummary(evt)}
+                              {evt.latency_ms != null && <span className={styles.latency}>{evt.latency_ms}ms</span>}
+                              {String(evt.event_type || '').toLowerCase() === 'turn_envelope_diff' && (
+                                <span className={styles.envelopeBadge}>Envelope Diff</span>
+                              )}
+                            </td>
                             <td><VerdictBadge type={displayEventType(evt)} /></td>
                           </tr>
                           {isExpanded && (
@@ -692,6 +758,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                     )}
                   </tbody>
                 </table>
+                </>
               )}
 
               {activeTab === 'summary' && trace && (
@@ -801,6 +868,51 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                       <div className={styles.kvRow}><span>Reasoning</span><span>{trace.recommendation.reasoning || '—'}</span></div>
                     </>
                   )}
+                  <div className={styles.sectionTitle}>Turn Envelope Diff</div>
+                  {!envelopeDiff ? (
+                    <div className={styles.muted}>No envelope diff recorded for this turn.</div>
+                  ) : (
+                    <>
+                      <div className={styles.kvRow}><span>Reason</span><span>{envelopeDiff.reason || '—'}</span></div>
+                      <div className={styles.kvRow}><span>Expanded</span><span>{String(Boolean(envelopeDiff.expanded))}</span></div>
+                      <div className={styles.kvRow}><span>Narrowed</span><span>{String(Boolean(envelopeDiff.narrowed))}</span></div>
+                      <div className={styles.kvRow}><span>Changed Fields</span><span>{Array.isArray(envelopeDiff.changed_fields) && envelopeDiff.changed_fields.length ? envelopeDiff.changed_fields.join(', ') : 'none'}</span></div>
+                    </>
+                  )}
+
+                  <div className={styles.sectionTitle}>Upsell Promotion Reasons</div>
+                  {upsellPromoted.length === 0 ? (
+                    <div className={styles.muted}>No upsell promotions recorded in this trace.</div>
+                  ) : (
+                    <table className={styles.smallTable}>
+                      <thead>
+                        <tr>
+                          <th>SKU</th>
+                          <th>Confidence</th>
+                          <th>Model</th>
+                          <th>Reason Codes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {upsellPromoted.map((p: any, idx: number) => (
+                          <tr key={`${p?.sku || 'sku'}-${idx}`}>
+                            <td>{p?.sku || '—'}</td>
+                            <td>
+                              {typeof p?.reason_confidence === 'number'
+                                ? `${Math.round((p.reason_confidence || 0) * 100)}%`
+                                : '—'}
+                            </td>
+                            <td>{p?.model_source || 'rules'}</td>
+                            <td>
+                              {Array.isArray(p?.reason_codes) && p.reason_codes.length
+                                ? p.reason_codes.slice(0, 3).map((r: any) => `${r.code}(${Math.round((r.confidence || 0) * 100)}%)`).join(', ')
+                                : (Array.isArray(p?.reasons) ? p.reasons.join(', ') : '—')}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                   <div className={styles.sectionTitle}>Post‑hoc Outcome</div>
                   <div className={styles.posthocRow}>
                     <select value={posthocType} onChange={(e) => setPosthocType(e.target.value)}>
@@ -826,6 +938,151 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                     <button className={styles.copyBtn} onClick={submitPosthoc}>Record Outcome</button>
                     {posthocStatus && <span className={styles.copyStatus}>{posthocStatus}</span>}
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'multimodal' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const imgEvt = events.find(e => eventMatches(e, ['image_intent_routing', 'cv_analysis', 'intent_classify']));
+                    const fusionEvt = events.find(e => eventMatches(e, ['multimodal_fusion', 'synthesis_reasoning', 'proposal_build']));
+                    const secEvt = events.find(e => eventMatches(e, ['image_security_scan', 'security_scan']));
+                    const hasData = imgEvt || fusionEvt || secEvt;
+                    if (!hasData) return <div className={styles.empty}>No multimodal events recorded for this trace. Attach an image to your chat message to see image routing, fusion, and security scan details.</div>;
+                    return (
+                      <>
+                        <div className={styles.sectionTitle}>Image Intent Routing</div>
+                        {imgEvt ? (
+                          <>
+                            <div className={styles.kvRow}><span>Intent</span><span>{imgEvt.payload?.intent || '--'}</span></div>
+                            <div className={styles.kvRow}><span>Confidence</span><span>{imgEvt.payload?.confidence != null ? `${Math.round(imgEvt.payload.confidence * 100)}%` : '--'}</span></div>
+                            <div className={styles.kvRow}><span>Reason</span><span>{imgEvt.payload?.reason || '--'}</span></div>
+                            <div className={styles.kvRow}><span>Signals</span><span>{JSON.stringify(imgEvt.payload?.signals || {})}</span></div>
+                          </>
+                        ) : <div className={styles.muted}>No image intent routing event.</div>}
+                        <div className={styles.sectionTitle}>Multimodal Fusion</div>
+                        {fusionEvt ? (
+                          <>
+                            <div className={styles.kvRow}><span>Images Count</span><span>{fusionEvt.payload?.image_count ?? '--'}</span></div>
+                            <div className={styles.kvRow}><span>Voice Used</span><span>{fusionEvt.payload?.voice_used ? 'Yes' : 'No'}</span></div>
+                            <div className={styles.kvRow}><span>Labels</span><span>{Array.isArray(fusionEvt.payload?.labels) ? fusionEvt.payload.labels.join(', ') : '--'}</span></div>
+                            <div className={styles.kvRow}><span>OCR Text</span><span>{fusionEvt.payload?.ocr_text || '--'}</span></div>
+                          </>
+                        ) : <div className={styles.muted}>No multimodal fusion event.</div>}
+                        <div className={styles.sectionTitle}>Image Security Scan</div>
+                        {secEvt ? (
+                          <>
+                            <div className={styles.kvRow}><span>QR Detected</span><span>{secEvt.payload?.qr_detected ? 'Yes' : 'No'}</span></div>
+                            <div className={styles.kvRow}><span>Adversarial Score</span><span>{secEvt.payload?.adversarial_score ?? '--'}</span></div>
+                            <div className={styles.kvRow}><span>Reupload Needed</span><span>{secEvt.payload?.reupload_needed ? 'Yes' : 'No'}</span></div>
+                          </>
+                        ) : <div className={styles.muted}>No image security scan event.</div>}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {activeTab === 'complexity' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const cxEvt = events.find(e => eventMatches(e, ['tier_complexity_score', 'tier_decision', 'model_selection']));
+                    const escEvt = events.find(e => eventMatches(e, ['tier_escalation', 'tier_decision']));
+                    const msTr = trace?.model_selection || {};
+                    const score = cxEvt?.payload?.score ?? cxEvt?.payload?.complexity_score ?? (msTr as any).tier;
+                    if (score == null && !cxEvt && !escEvt) return <div className={styles.empty}>No complexity scoring data in this trace.</div>;
+                    const tierName = cxEvt?.payload?.tier || cxEvt?.payload?.model_tier || msTr?.selected || '--';
+                    const signals = cxEvt?.payload?.signals || cxEvt?.payload?.complexity_signals || {};
+                    const explanations = cxEvt?.payload?.explanations || [];
+                    return (
+                      <>
+                        <div className={styles.sectionTitle}>Complexity Score</div>
+                        <div className={styles.kvRow}><span>Score</span><span className={styles.mono}>{score ?? '--'} / 10</span></div>
+                        <div className={styles.kvRow}><span>Tier</span><span>{tierName}</span></div>
+                        <div className={styles.kvRow}><span>Model Selected</span><span>{cxEvt?.payload?.model || cxEvt?.payload?.llm_model || msTr?.selected || '--'}</span></div>
+                        {/* Score bar */}
+                        <div className={styles.scoreBar}>
+                          <div className={styles.scoreBarFill} style={{ width: `${Math.min(100, (Number(score) || 0) * 10)}%` }} />
+                        </div>
+                        <div className={styles.sectionTitle}>Signals</div>
+                        {Object.keys(signals).length > 0 ? (
+                          <table className={styles.smallTable}>
+                            <thead><tr><th>Signal</th><th>Value</th></tr></thead>
+                            <tbody>
+                              {Object.entries(signals).map(([k, v]) => (
+                                <tr key={k}><td>{humanizeKey(k)}</td><td>{renderValue(v)}</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : <div className={styles.muted}>No signal breakdown available.</div>}
+                        {explanations.length > 0 && (
+                          <>
+                            <div className={styles.sectionTitle}>Explanations</div>
+                            <ul className={styles.explainList}>{explanations.map((e: string, i: number) => <li key={i}>{e}</li>)}</ul>
+                          </>
+                        )}
+                        {escEvt && (
+                          <>
+                            <div className={styles.sectionTitle}>Tier Escalation</div>
+                            <div className={styles.kvRow}><span>From</span><span>{escEvt.payload?.from_tier || '--'}</span></div>
+                            <div className={styles.kvRow}><span>To</span><span>{escEvt.payload?.to_tier || '--'}</span></div>
+                            <div className={styles.kvRow}><span>Reason</span><span>{escEvt.payload?.reason || '--'}</span></div>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {activeTab === 'memory' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const cacheEvt = events.find(e => eventMatches(e, ['cache_hit', 'shortlist_memory_lock']));
+                    const nqeEvt = events.find(e => eventMatches(e, ['nqe_refinement', 'nqe_plan_built', 'nqe_question_shown', 'nqe_assumption_applied']));
+                    const memEvents = events.filter(e => {
+                      const aliases = eventAliases(e).join(' ');
+                      return /memory|context|cache|session|shortlist|nqe/.test(aliases);
+                    });
+                    if (!cacheEvt && !nqeEvt && memEvents.length === 0) return <div className={styles.empty}>No memory/cache events in this trace.</div>;
+                    return (
+                      <>
+                        <div className={styles.sectionTitle}>CacheRAG</div>
+                        {cacheEvt ? (
+                          <>
+                            <div className={styles.kvRow}><span>Cache Hit</span><span>{cacheEvt.payload?.hit ? 'Yes' : 'Miss'}</span></div>
+                            <div className={styles.kvRow}><span>Key</span><span>{cacheEvt.payload?.key || '--'}</span></div>
+                            <div className={styles.kvRow}><span>TTL</span><span>{cacheEvt.payload?.ttl ?? '--'}</span></div>
+                          </>
+                        ) : <div className={styles.muted}>No cache hit/miss event.</div>}
+                        <div className={styles.sectionTitle}>NQE Refinement</div>
+                        {nqeEvt ? (
+                          <>
+                            <div className={styles.kvRow}><span>Original Query</span><span>{nqeEvt.payload?.original || '--'}</span></div>
+                            <div className={styles.kvRow}><span>Refined Query</span><span>{nqeEvt.payload?.refined || '--'}</span></div>
+                            <div className={styles.kvRow}><span>Questions Generated</span><span>{nqeEvt.payload?.question_count ?? '--'}</span></div>
+                          </>
+                        ) : <div className={styles.muted}>No NQE refinement event.</div>}
+                        {memEvents.length > 0 && (
+                          <>
+                            <div className={styles.sectionTitle}>Session Memory Events</div>
+                            <table className={styles.smallTable}>
+                              <thead><tr><th>Type</th><th>Summary</th><th>Time</th></tr></thead>
+                              <tbody>
+                                {memEvents.map((e, i) => (
+                                  <tr key={e.id || `mem-${i}`}>
+                                    <td>{humanizeKey(e.event_type)}</td>
+                                    <td>{getSummary(e)}</td>
+                                    <td className={styles.time}>{formatTime(e.timestamp || e.created_at)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 

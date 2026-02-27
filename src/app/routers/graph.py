@@ -2,9 +2,41 @@ from typing import Dict, List
 from fastapi import APIRouter, Query, HTTPException, Depends
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+from sqlalchemy import text
 import json
 
 router = APIRouter(prefix="/api/v1/graph", tags=["graph"])
+
+_GRAPH_DECISIONS_SQL = text(
+        """
+        SELECT id, agent_name, valid_from, input_data
+        FROM decision_logs
+        WHERE (:since IS NULL OR valid_from >= :since)
+            AND (:until IS NULL OR valid_from <= :until)
+        ORDER BY valid_from DESC
+        LIMIT :limit
+        """
+)
+
+_GRAPH_SECURITY_SQL = text(
+        """
+        SELECT id, severity, path, event_time, details
+        FROM security_events
+        WHERE (:since IS NULL OR event_time >= :since)
+            AND (:until IS NULL OR event_time <= :until)
+        ORDER BY event_time DESC
+        LIMIT :limit
+        """
+)
+
+_GRAPH_INCIDENTS_SQL = text(
+        """
+        SELECT id, event_id, title, severity
+        FROM incidents
+        ORDER BY created_at DESC
+        LIMIT :limit
+        """
+)
 
 
 @router.get("/context")
@@ -26,19 +58,8 @@ def context_graph(
         with db_session() as db:
             # Decisions
             try:
-                where = []
-                params = {"limit": limit}
-                if since:
-                    where.append("valid_from >= :since")
-                    params["since"] = since
-                if until:
-                    where.append("valid_from <= :until")
-                    params["until"] = until
-                base = "SELECT id, agent_name, valid_from, input_data FROM decision_logs"
-                if where:
-                    base += " WHERE " + " AND ".join(where)
-                base += " ORDER BY valid_from DESC LIMIT :limit"
-                rows = db.execute(base, params).mappings().all()
+                params = {"limit": limit, "since": since, "until": until}
+                rows = db.execute(_GRAPH_DECISIONS_SQL, params).mappings().all()
                 for r in rows:
                     label = f"decision:{r.get('agent_name')}"
                     nodes.append({"id": r.get("id"), "type": "decision", "label": label})
@@ -63,19 +84,8 @@ def context_graph(
                 pass
             # Security events
             try:
-                where = []
-                params = {"limit": limit}
-                if since:
-                    where.append("event_time >= :since")
-                    params["since"] = since
-                if until:
-                    where.append("event_time <= :until")
-                    params["until"] = until
-                base = "SELECT id, severity, path, event_time, details FROM security_events"
-                if where:
-                    base += " WHERE " + " AND ".join(where)
-                base += " ORDER BY event_time DESC LIMIT :limit"
-                rows = db.execute(base, params).mappings().all()
+                params = {"limit": limit, "since": since, "until": until}
+                rows = db.execute(_GRAPH_SECURITY_SQL, params).mappings().all()
                 for r in rows:
                     label = f"security:{r.get('severity')}:{r.get('path')}"
                     # If uid filter present, attempt to match against event details payload
@@ -96,10 +106,7 @@ def context_graph(
                 pass
             # Incidents
             try:
-                rows = db.execute(
-                    "SELECT id, event_id, title, severity FROM incidents ORDER BY created_at DESC LIMIT :limit",
-                    {"limit": limit},
-                ).mappings().all()
+                rows = db.execute(_GRAPH_INCIDENTS_SQL, {"limit": limit}).mappings().all()
                 for r in rows:
                     nodes.append({"id": r.get("id"), "type": "incident", "label": f"incident:{r.get('severity')}:{r.get('title')}"})
                     if r.get("event_id"):

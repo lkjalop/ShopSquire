@@ -261,15 +261,16 @@ def order_history(
             sql = (
                 "SELECT o.id, o.total_cents, o.status, o.created_at "
                 "FROM order_sessions s JOIN orders o ON o.id = s.order_id "
-                f"WHERE s.uid = :uid ORDER BY s.created_at DESC LIMIT {lim} OFFSET {off}"
+                "WHERE s.uid = :uid ORDER BY s.created_at DESC LIMIT :lim OFFSET :off"
             )
+            q_params = {"uid": uid, "lim": lim, "off": off}
             # Prefer db_session so tests that swap the module engine/session
             # see the same data. Use the injected `db` only for writes; some
             # tests insert directly via the engine and require a session bound
             # to the test engine for visibility.
             # Prefer the injected request-bound session for reads to align with test engines
             try:
-                rows = db.execute(_text(sql), {"uid": uid}).fetchall()
+                rows = db.execute(_text(sql), q_params).fetchall()
                 try:
                     import sys
                     sys.stderr.write(f"[orders] injected.bind.url={getattr(getattr(db, 'bind', None), 'url', None)}\n")
@@ -282,7 +283,7 @@ def order_history(
                 # Fallback to module-level session if injected one fails
                 try:
                     with db_session() as _db:
-                        rows = _db.execute(_text(sql), {"uid": uid}).fetchall()
+                        rows = _db.execute(_text(sql), q_params).fetchall()
                         try:
                             import sys
                             sys.stderr.write(f"[orders] db_session.bind.url={getattr(_db.bind, 'url', None)}\n")
@@ -306,7 +307,7 @@ def order_history(
                     except Exception:
                         pass
                     with eng.connect() as conn:
-                        rows2 = conn.execute(_text(sql), {"uid": uid}).fetchall()
+                        rows2 = conn.execute(_text(sql), q_params).fetchall()
                         has_more = len(rows2) > limit
                         trimmed = rows2[:limit]
                 except Exception:

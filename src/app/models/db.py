@@ -337,14 +337,14 @@ def _ensure_minimal_sqlite_tables(bind):
                     conn.execute(sql_text("ALTER TABLE email_security_incidents ADD COLUMN ticket_id TEXT"))
                 except Exception:
                     pass
-                for col_def in [
-                    "ground_truth TEXT",
-                    "analyst_verdict TEXT",
-                    "correction_ts TEXT",
-                    "correction_notes TEXT",
+                for stmt in [
+                    "ALTER TABLE email_security_incidents ADD COLUMN ground_truth TEXT",
+                    "ALTER TABLE email_security_incidents ADD COLUMN analyst_verdict TEXT",
+                    "ALTER TABLE email_security_incidents ADD COLUMN correction_ts TEXT",
+                    "ALTER TABLE email_security_incidents ADD COLUMN correction_notes TEXT",
                 ]:
                     try:
-                        conn.execute(sql_text(f"ALTER TABLE email_security_incidents ADD COLUMN {col_def}"))
+                        conn.execute(sql_text(stmt))
                     except Exception:
                         pass
                 try:
@@ -434,41 +434,41 @@ def _ensure_minimal_sqlite_tables(bind):
                 except Exception:
                     pass
                 # Ensure common columns exist on human_review_tasks for older test DBs
-                for col in [
-                    ("decision_id", "TEXT"),
-                    ("ticket_id", "TEXT"),
-                    ("status", "TEXT"),
-                    ("reviewer_id", "TEXT"),
-                    ("rationale", "TEXT"),
-                    ("updated_at", "TEXT"),
+                for stmt in [
+                    "ALTER TABLE human_review_tasks ADD COLUMN decision_id TEXT",
+                    "ALTER TABLE human_review_tasks ADD COLUMN ticket_id TEXT",
+                    "ALTER TABLE human_review_tasks ADD COLUMN status TEXT",
+                    "ALTER TABLE human_review_tasks ADD COLUMN reviewer_id TEXT",
+                    "ALTER TABLE human_review_tasks ADD COLUMN rationale TEXT",
+                    "ALTER TABLE human_review_tasks ADD COLUMN updated_at TEXT",
                 ]:
                     try:
-                        conn.execute(sql_text(f"ALTER TABLE human_review_tasks ADD COLUMN {col[0]} {col[1]}"))
+                        conn.execute(sql_text(stmt))
                     except Exception:
                         pass
                 # Backfill missing columns for existing minimal tables
-                for col_def in [
-                    "tenant_id TEXT",
-                    "agent_name TEXT",
-                    "valid_from TEXT",
-                    "valid_to TEXT",
-                    "system_from TEXT",
-                    "system_to TEXT",
-                    "input_data TEXT",
-                    "retrieved_context TEXT",
-                    "agent_reasoning TEXT",
-                    "proposed_action TEXT",
-                    "policy_version TEXT",
-                    "approval_required INTEGER",
-                    "approved_by TEXT",
-                    "approved_at TEXT",
-                    "execution_status TEXT",
-                    "error_message TEXT",
-                    "evaluator_model TEXT",
-                    "created_at INTEGER",
+                for stmt in [
+                    "ALTER TABLE decision_logs ADD COLUMN tenant_id TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN agent_name TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN valid_from TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN valid_to TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN system_from TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN system_to TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN input_data TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN retrieved_context TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN agent_reasoning TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN proposed_action TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN policy_version TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN approval_required INTEGER",
+                    "ALTER TABLE decision_logs ADD COLUMN approved_by TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN approved_at TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN execution_status TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN error_message TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN evaluator_model TEXT",
+                    "ALTER TABLE decision_logs ADD COLUMN created_at INTEGER",
                 ]:
                     try:
-                        conn.execute(sql_text(f"ALTER TABLE decision_logs ADD COLUMN {col_def}"))
+                        conn.execute(sql_text(stmt))
                     except Exception:
                         pass
 
@@ -510,11 +510,22 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  action TEXT NOT NULL,\n"
                         "  actor TEXT,\n"
                         "  metadata TEXT,\n"
-                        "  created_at TEXT\n"
+                        "  created_at TEXT,\n"
+                        "  record_hash TEXT,\n"
+                        "  prev_hash TEXT\n"
                         ")"
                     ))
                 except Exception:
                     pass
+                # C01: add hash chain columns if missing (migration for existing DBs)
+                for stmt in (
+                    "ALTER TABLE decision_audits ADD COLUMN record_hash TEXT",
+                    "ALTER TABLE decision_audits ADD COLUMN prev_hash TEXT",
+                ):
+                    try:
+                        conn.execute(sql_text(stmt))
+                    except Exception:
+                        pass
                 # Playbook execution state (SQLite fallback for tests/dev)
                 try:
                     conn.execute(sql_text(

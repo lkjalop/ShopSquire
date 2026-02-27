@@ -21,6 +21,7 @@ from src.app.services.security_playbooks import select_cv_playbook
 from src.app.security.email_enrichment import enrich_iocs, detonate_targets
 from src.app.security.email_attachment_intel import analyze_email_artifacts
 from src.app.security.email_attachment_parser import hydrate_attachments_from_bytes
+from src.app.security.bimi_verifier import verify_bimi_provider_backed
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
 import time
@@ -312,6 +313,26 @@ def _persist_incident(
     from src.app.models.db import db_session
 
     inc_id = f"esi-{uuid.uuid4().hex}"
+    insert_full_stmt = text(
+        """
+        INSERT INTO email_security_incidents
+        (id, tenant_id, provider, supplier_key_hash, conversation_id_hash, message_id_hash, ticket_id,
+         severity, risk_band, tags_json, reasons_json, evidence_json,
+         playbook_id, playbook_title, ticket_created, ticket_rate_limited, ticket_deduped)
+        VALUES
+        (:id, :tenant_id, :provider, :supplier_key_hash, :conversation_id_hash, :message_id_hash, :ticket_id,
+         :severity, :risk_band, :tags_json, :reasons_json, :evidence_json,
+         :playbook_id, :playbook_title, :ticket_created, :ticket_rate_limited, :ticket_deduped)
+        """
+    )
+    insert_min_stmt = text(
+        """
+        INSERT INTO email_security_incidents
+        (id, severity, tags_json, reasons_json, evidence_json)
+        VALUES
+        (:id, :severity, :tags_json, :reasons_json, :evidence_json)
+        """
+    )
     payload = {
         "id": inc_id,
         "tenant_id": tenant_id,
@@ -388,14 +409,19 @@ def _persist_incident(
                     cols = []
                 if not cols:
                     return
-                insert_cols = [c for c in payload.keys() if c in cols]
-                if not insert_cols:
+                colset = set(str(c) for c in cols)
+                full_cols = {
+                    "id", "tenant_id", "provider", "supplier_key_hash", "conversation_id_hash", "message_id_hash", "ticket_id",
+                    "severity", "risk_band", "tags_json", "reasons_json", "evidence_json",
+                    "playbook_id", "playbook_title", "ticket_created", "ticket_rate_limited", "ticket_deduped",
+                }
+                minimal_cols = {"id", "severity", "tags_json", "reasons_json", "evidence_json"}
+                if full_cols.issubset(colset):
+                    db.execute(insert_full_stmt, payload)
+                elif minimal_cols.issubset(colset):
+                    db.execute(insert_min_stmt, payload)
+                else:
                     return
-                stmt = text(
-                    "INSERT INTO email_security_incidents (" + ", ".join(insert_cols) + ") VALUES (" +
-                    ", ".join([":" + c for c in insert_cols]) + ")"
-                )
-                db.execute(stmt, {k: payload[k] for k in insert_cols})
                 db.commit()
         except Exception:
             # Best-effort persistence (schema may be absent in SQLite-only envs).
@@ -710,6 +736,20 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         extracted.setdefault("meta", {})["sender_trust"] = trust
     except Exception:
         trust = {}
+    # Provider-backed BIMI verification (header + DNS + logo URL checks).
+    try:
+        bimi = verify_bimi_provider_backed(email)
+        extracted.setdefault("meta", {})["bimi_verification"] = bimi
+        if bool(bimi.get("verified")):
+            extracted["indicators"] = list(extracted.get("indicators") or []) + [
+                {"type": "bimi_provider_verified", "value": True, "reason": "BIMI provider, DNS and logo checks passed"}
+            ]
+        elif bool(bimi.get("failed")):
+            extracted["indicators"] = list(extracted.get("indicators") or []) + [
+                {"type": "bimi_provider_verification_failed", "value": True, "reason": "BIMI verification failed across provider/DNS/logo checks"}
+            ]
+    except Exception:
+        pass
 
     # DMARC fail is considered if caller passed a boolean in email["dmarc_fail"]. Default False.
     dmarc_fail = bool(email.get("dmarc_fail", False))

@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Optional
 
 from sqlalchemy import text
 
 from src.app.models.db import db_session
+
+
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _safe_ident(name: str) -> str:
+    n = str(name or "").strip()
+    if not _IDENT_RE.match(n):
+        raise ValueError(f"invalid_identifier:{n}")
+    return n
 
 
 def _get_days(env_key: str, default_days: int) -> int:
@@ -17,10 +28,13 @@ def _get_days(env_key: str, default_days: int) -> int:
 
 
 def _cleanup_sql(dialect: str, table: str, column: str, days: int) -> str:
+    t = _safe_ident(table)
+    c = _safe_ident(column)
+    d = max(1, min(int(days), 3650))
     if "postgres" in dialect:
-        return f"DELETE FROM {table} WHERE {column} < NOW() - INTERVAL '{days} days'"
+        return f"DELETE FROM {t} WHERE {c} < NOW() - INTERVAL '{d} days'"
     # sqlite / others
-    return f"DELETE FROM {table} WHERE {column} < datetime('now', '-{days} days')"
+    return f"DELETE FROM {t} WHERE {c} < datetime('now', '-{d} days')"
 
 
 def cleanup_once() -> None:

@@ -6,6 +6,7 @@ from sqlalchemy import text
 from src.app.models.db import db_session
 from src.app.models.event_log import ensure_event_log_table
 from src.app.services.decision_log import log_decision
+from src.app.services.audit_writer import insert_audit_row
 from src.app.services.audit_chain import append_audit_chain_event
 
 
@@ -51,15 +52,12 @@ def persist_decision_and_audits(
             )
             chain_events = []
             for ae in (audit_entries or []):
-                db.execute(
-                    text("INSERT INTO decision_audits (id, decision_id, action, actor, metadata, created_at) VALUES (:id, :decision_id, :action, :actor, :metadata, CURRENT_TIMESTAMP)"),
-                    {
-                        "id": str(uuid.uuid4()),
-                        "decision_id": dec_id,
-                        "action": ae.get("action"),
-                        "actor": ae.get("actor"),
-                        "metadata": json.dumps(ae.get("metadata") or {}, ensure_ascii=False),
-                    },
+                insert_audit_row(
+                    db,
+                    decision_id=dec_id,
+                    action=str(ae.get("action") or ""),
+                    actor=ae.get("actor"),
+                    metadata=ae.get("metadata") or {},
                 )
                 db.execute(
                     text("INSERT INTO event_log (id, type, payload, status) VALUES (:id, :type, :payload, 'pending')"),
@@ -96,17 +94,12 @@ def write_audit_and_event(decision_id: str, action: str, actor: str, metadata: D
     try:
         chain_payload = {"decision_id": decision_id, "action": action, "actor": actor, "metadata": metadata or {}}
         with db_session() as db:
-            db.execute(
-                text(
-                    "INSERT INTO decision_audits (id, decision_id, action, actor, metadata, created_at) VALUES (:id, :decision_id, :action, :actor, :metadata, CURRENT_TIMESTAMP)"
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "decision_id": decision_id,
-                    "action": action,
-                    "actor": actor,
-                    "metadata": json.dumps(metadata or {}, ensure_ascii=False),
-                },
+            insert_audit_row(
+                db,
+                decision_id=decision_id,
+                action=action,
+                actor=actor,
+                metadata=metadata or {},
             )
             db.execute(
                 text(

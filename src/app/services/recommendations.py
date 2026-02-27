@@ -7,9 +7,10 @@ import time
 import uuid
 import math
 import hashlib
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 
 from src.app.services.semantic_search import SemanticService
 from src.app.services.embeddings import VectorStoreEmbeddings
@@ -22,6 +23,9 @@ from src.app.observability.tracing import get_tracer
 from src.app.deps import scrub_pii, security_sanitize, hash_uid
 from src.app.services.policy_evaluator import PolicyEvaluator
 from src.app.services.decision_log import log_decision as central_log_decision
+from src.app.services.recommendation_identity_graph import linked_uid_hashes
+from src.app.services.recommendation_als import load_precomputed_cf_scores
+from src.app.services.recommendation_bandit import choose_recommendation_arm
 
 
 PROMPT_CONTROL = {
@@ -645,10 +649,92 @@ class RecommendationService:
             else:
                 if buf:
                     tokens.append("".join(buf))
-                    buf = []
+                buf = []
         if buf:
             tokens.append("".join(buf))
         return [t for t in tokens if len(t) > 2]
+
+    def _levenshtein(self, a: str, b: str) -> int:
+        if a == b:
+            return 0
+        if not a:
+            return len(b)
+        if not b:
+            return len(a)
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, start=1):
+            cur = [i]
+            for j, cb in enumerate(b, start=1):
+                ins = cur[j - 1] + 1
+                delete = prev[j] + 1
+                sub = prev[j - 1] + (0 if ca == cb else 1)
+                cur.append(min(ins, delete, sub))
+            prev = cur
+        return prev[-1]
+
+    def _spelling_correct(self, query: str) -> str:
+        q = str(query or "").strip().lower()
+        if not q:
+            return q
+        tokens = self._tokenize(q)
+        if not tokens:
+            return q
+        # Small domain vocabulary for ecommerce recommendations.
+        vocab = {
+            "laptop", "notebook", "ultrabook", "keyboard", "monitor", "charger", "adapter",
+            "gaming", "business", "student", "battery", "screen", "ssd", "ram", "windows",
+            "macbook", "lenovo", "dell", "apple", "asus", "acer", "hp", "samsung", "budget",
+        }
+        out: List[str] = []
+        for t in tokens:
+            if t in vocab or len(t) <= 3:
+                out.append(t)
+                continue
+            best = t
+            best_d = 99
+            for cand in vocab:
+                d = self._levenshtein(t, cand)
+                if d < best_d:
+                    best_d = d
+                    best = cand
+                    if d == 1:
+                        break
+            out.append(best if best_d <= 2 else t)
+        return " ".join(out)
+
+    def _expand_synonyms(self, query: str) -> str:
+        q = str(query or "").strip().lower()
+        if not q:
+            return q
+        syn = {
+            "notebook": "laptop",
+            "ultrabook": "laptop",
+            "portable": "laptop",
+            "gpu": "graphics",
+            "graphics card": "gpu",
+            "charger": "power adapter",
+            "dock": "docking station",
+            "cheap": "budget",
+            "affordable": "budget",
+        }
+        expanded = q
+        for src, dst in syn.items():
+            if src in expanded and dst not in expanded:
+                expanded = f"{expanded} {dst}"
+        return expanded
+
+    def _reformulate_query(self, query: str) -> List[str]:
+        base = self._normalize_text(query or "")
+        if not base:
+            return []
+        corrected = self._spelling_correct(base)
+        expanded = self._expand_synonyms(corrected)
+        out = [base]
+        for q in (corrected, expanded):
+            q = self._normalize_text(q)
+            if q and q not in out:
+                out.append(q)
+        return out[:3]
 
     def _tfidf_rank(self, query: str, products: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
         docs = []
@@ -899,7 +985,17 @@ class RecommendationService:
         with self.tracer.start_as_current_span("recommend.retrieve_candidates") as span:
             span.set_attribute("query.length", len(query or ""))
             span.set_attribute("limit", limit)
-            products = self.catalog.search_products(query, limit=limit)
+            products = []
+            for q in self._reformulate_query(query):
+                hits = self.catalog.search_products(q, limit=limit)
+                for p in hits or []:
+                    if any(getattr(p, "id", None) == getattr(x, "id", None) for x in products):
+                        continue
+                    products.append(p)
+                    if len(products) >= max(8, limit * 2):
+                        break
+                if len(products) >= max(8, limit * 2):
+                    break
         candidates: List[Dict[str, Any]] = []
         # Batch-fetch stock for products to avoid N DB round-trips
         prod_ids = [p.id for p in products]
@@ -1010,6 +1106,267 @@ class RecommendationService:
         scored = self.rerank_candidates_with_factors(candidates, constraints)
         return [s["candidate"] for s in scored]
 
+    def _linked_uid_hashes(self, uid_hash: str | None) -> List[str]:
+        uid = str(uid_hash or "").strip()
+        if not uid:
+            return []
+        try:
+            sess = self.catalog._get_session()
+            if sess is not None:
+                linked = linked_uid_hashes(sess, uid, max_depth=2, max_nodes=24)
+            else:
+                with db_session() as db:
+                    linked = linked_uid_hashes(db, uid, max_depth=2, max_nodes=24)
+            return linked or [uid]
+        except Exception:
+            return [uid]
+
+    def _clickstream_affinity(self, uid_hash: str | None, sku: str, lookback_days: int = 45) -> float:
+        if not uid_hash or not sku:
+            return 0.0
+        uid = str(uid_hash).strip()
+        if not uid:
+            return 0.0
+        uid_keys = self._linked_uid_hashes(uid)
+        if not uid_keys:
+            return 0.0
+        weight = {"hover": 0.15, "view": 0.25, "click": 0.85, "add_to_cart": 1.2, "atc": 1.2, "cart_add": 1.2}
+        try:
+            uid_placeholders = ", ".join([f":u{i}" for i in range(len(uid_keys))])
+            params = {f"u{i}": uid_keys[i] for i in range(len(uid_keys))}
+            params.update({"sku": str(sku), "window": f"-{max(1, int(lookback_days))} days"})
+            sess = self.catalog._get_session()
+            if sess is not None:
+                rows = sess.execute(
+                    text(
+                        f"""
+                        SELECT action, COUNT(*) AS n
+                        FROM recommend_interactions
+                        WHERE uid_hash IN ({uid_placeholders})
+                          AND sku = :sku
+                          AND datetime(event_time) >= datetime('now', :window)
+                        GROUP BY action
+                        """
+                    ),
+                    params,
+                ).fetchall()
+            else:
+                with db_session() as db:
+                    rows = db.execute(
+                        text(
+                            f"""
+                            SELECT action, COUNT(*) AS n
+                            FROM recommend_interactions
+                            WHERE uid_hash IN ({uid_placeholders})
+                              AND sku = :sku
+                              AND datetime(event_time) >= datetime('now', :window)
+                            GROUP BY action
+                            """
+                        ),
+                        params,
+                    ).fetchall()
+        except Exception:
+            return 0.0
+        score = 0.0
+        for r in rows or []:
+            act = str(r[0] or "").strip().lower()
+            cnt = int(r[1] or 0)
+            if not act or cnt <= 0:
+                continue
+            score += float(weight.get(act, 0.0)) * float(cnt)
+        return min(1.5, score)
+
+    def _clickstream_affinity_map(
+        self,
+        uid_hash: str | None,
+        skus: List[str],
+        lookback_days: int = 45,
+    ) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        uid = str(uid_hash or "").strip()
+        clean = [str(s).strip() for s in (skus or []) if str(s).strip()]
+        if not uid or not clean:
+            return out
+        for sku in clean:
+            out[sku] = self._clickstream_affinity(uid, sku, lookback_days=lookback_days)
+        return out
+
+    def _collaborative_filter_scores(self, uid_hash: str | None, candidate_skus: List[str]) -> Dict[str, float]:
+        uid = str(uid_hash or "").strip()
+        if not uid or not candidate_skus:
+            return {}
+        linked_uids = self._linked_uid_hashes(uid)
+        try:
+            sess = self.catalog._get_session()
+            if sess is not None:
+                pre = load_precomputed_cf_scores(sess, linked_uids, candidate_skus)
+            else:
+                with db_session() as db:
+                    pre = load_precomputed_cf_scores(db, linked_uids, candidate_skus)
+            if pre:
+                return pre
+        except Exception:
+            pass
+
+        interactions: List[Tuple[str, str, int]] = []
+        try:
+            sess = self.catalog._get_session()
+            if sess is not None:
+                rows = sess.execute(
+                    text(
+                        f"""
+                        SELECT uid_hash, sku, COUNT(*) AS n
+                        FROM recommend_interactions
+                        WHERE datetime(event_time) >= datetime('now', :window)
+                          AND action IN ('click','add_to_cart','atc','cart_add')
+                          AND uid_hash IS NOT NULL
+                          AND sku IS NOT NULL
+                        GROUP BY uid_hash, sku
+                        LIMIT 6000
+                        """
+                    ),
+                    {"window": "-90 days"},
+                ).fetchall()
+            else:
+                with db_session() as db:
+                    rows = db.execute(
+                        text(
+                            f"""
+                            SELECT uid_hash, sku, COUNT(*) AS n
+                            FROM recommend_interactions
+                            WHERE datetime(event_time) >= datetime('now', :window)
+                              AND action IN ('click','add_to_cart','atc','cart_add')
+                              AND uid_hash IS NOT NULL
+                              AND sku IS NOT NULL
+                            GROUP BY uid_hash, sku
+                            LIMIT 6000
+                            """
+                        ),
+                        {"window": "-90 days"},
+                    ).fetchall()
+        except Exception:
+            return {}
+        for r in rows or []:
+            interactions.append((str(r[0] or "").strip(), str(r[1] or "").strip(), int(r[2] or 0)))
+        if not interactions:
+            return {}
+
+        user_item: Dict[str, Dict[str, float]] = defaultdict(dict)
+        item_users: Dict[str, Dict[str, float]] = defaultdict(dict)
+        for u, i, n in interactions:
+            if not u or not i or n <= 0:
+                continue
+            val = min(4.0, 1.0 + math.log1p(float(n)))
+            user_item[u][i] = val
+            item_users[i][u] = val
+        merged: Dict[str, float] = {}
+        for lu in linked_uids:
+            prof = user_item.get(str(lu), {})
+            for sku, val in prof.items():
+                merged[sku] = max(float(val), float(merged.get(sku, 0.0)))
+        user_profile = merged
+        if not user_profile:
+            return {}
+
+        out: Dict[str, float] = {}
+        for sku in candidate_skus:
+            if sku in user_profile:
+                out[sku] = min(1.4, float(user_profile[sku]))
+                continue
+            users_for_sku = item_users.get(str(sku), {})
+            if not users_for_sku:
+                continue
+            num = 0.0
+            den = 0.0
+            for seen_sku, pref in user_profile.items():
+                users_for_seen = item_users.get(str(seen_sku), {})
+                if not users_for_seen:
+                    continue
+                overlap = set(users_for_sku.keys()) & set(users_for_seen.keys())
+                if not overlap:
+                    continue
+                top = 0.0
+                left = 0.0
+                right = 0.0
+                for u in overlap:
+                    a = float(users_for_sku.get(u, 0.0))
+                    b = float(users_for_seen.get(u, 0.0))
+                    top += a * b
+                    left += a * a
+                    right += b * b
+                sim = (top / math.sqrt(max(1e-9, left * right))) if left > 0 and right > 0 else 0.0
+                if sim <= 0:
+                    continue
+                num += sim * float(pref)
+                den += abs(sim)
+            if den > 0:
+                out[str(sku)] = min(1.4, max(0.0, num / den))
+        return out
+
+    def _supplier_performance_map(self, candidate_skus: List[str], lookback_days: int = 30) -> Dict[str, float]:
+        clean = [str(s).strip() for s in (candidate_skus or []) if str(s).strip()]
+        if not clean:
+            return {}
+        params = {
+            "skus": clean,
+            "window": f"-{max(7, int(lookback_days))} days",
+        }
+        query = text(
+            """
+            SELECT sa.sku,
+                   AVG(COALESCE(sa.score, 0)) AS supplier_score
+            FROM supplier_score_audits sa
+            WHERE sa.sku IN :skus
+              AND datetime(sa.created_at) >= datetime('now', :window)
+            GROUP BY sa.sku
+            """
+        ).bindparams(bindparam("skus", expanding=True))
+        try:
+            sess = self.catalog._get_session()
+            if sess is not None:
+                rows = sess.execute(query, params).fetchall()
+            else:
+                with db_session() as db:
+                    rows = db.execute(query, params).fetchall()
+        except Exception:
+            return {}
+        out: Dict[str, float] = {}
+        for r in rows or []:
+            sku = str(r[0] or "").strip()
+            if not sku:
+                continue
+            score = float(r[1] or 0.0)
+            # Normalize from ~0..2 range used by supplier audit scoring.
+            out[sku] = max(0.0, min(1.0, score / 2.0))
+        return out
+
+    def _cross_encoder_score(self, query: str, candidate: Dict[str, Any]) -> float:
+        q = str(query or "").strip()
+        if not q:
+            return 0.0
+        text_blob = f"{candidate.get('name') or ''} {candidate.get('sku') or ''} {json.dumps(candidate.get('specs') or {}, ensure_ascii=False)}"
+        model_name = str(os.getenv("RECO_CROSS_ENCODER_MODEL", "") or "").strip()
+        if model_name:
+            try:
+                from sentence_transformers import CrossEncoder  # type: ignore
+
+                model = getattr(self, "_cross_encoder_model", None)
+                if model is None:
+                    model = CrossEncoder(model_name)
+                    setattr(self, "_cross_encoder_model", model)
+                pred = float(model.predict([(q, text_blob)])[0])
+                return pred
+            except Exception:
+                pass
+        # Lightweight fallback: token overlap + contiguous phrase bonus.
+        q_tokens = set(self._tokenize(q))
+        d_tokens = set(self._tokenize(text_blob))
+        if not q_tokens or not d_tokens:
+            return 0.0
+        overlap = len(q_tokens & d_tokens) / float(max(1, len(q_tokens)))
+        phrase_bonus = 0.18 if " ".join(list(q_tokens)[:2]) in text_blob.lower() else 0.0
+        return float(overlap + phrase_bonus)
+
     def rerank_candidates_with_factors(self, candidates: List[Dict[str, Any]], constraints: Dict[str, Any]) -> List[Dict[str, Any]]:
         t0 = time.perf_counter()
         budget = constraints.get("budget_max")
@@ -1018,6 +1375,35 @@ class RecommendationService:
         intent = constraints.get("intent") or "recommend"
         use_case = constraints.get("use_case") or ""
         use_case_tags = constraints.get("use_case_tags") or []
+        uid_hash = str(constraints.get("uid_hash") or "").strip() or None
+        candidate_skus = [str((c or {}).get("sku") or "").strip() for c in candidates if str((c or {}).get("sku") or "").strip()]
+        cf_scores = self._collaborative_filter_scores(uid_hash, candidate_skus)
+        clickstream_scores = self._clickstream_affinity_map(uid_hash, candidate_skus)
+        supplier_scores = self._supplier_performance_map(candidate_skus)
+        bandit_arm = "balanced"
+        try:
+            bandit_ctx = {
+                "budget_tight": 1.0 if budget and int(budget) <= 100000 else 0.0,
+                "is_repeat_user": 1.0 if uid_hash else 0.0,
+                "query_specificity": min(1.0, len((specs or [])) / 3.0),
+                "inventory_pressure": 1.0 if any((c.get("stock") or 0) <= 2 for c in candidates) else 0.0,
+            }
+            sess = self.catalog._get_session()
+            if sess is not None:
+                bandit = choose_recommendation_arm(sess, bandit_ctx)
+            else:
+                with db_session() as db:
+                    bandit = choose_recommendation_arm(db, bandit_ctx)
+            bandit_arm = str((bandit or {}).get("arm") or "balanced")
+        except Exception:
+            bandit_arm = "balanced"
+        arm_weights = {
+            "balanced": {"cf": 1.30, "click": 0.80, "supplier": 0.65, "cross": 0.60},
+            "explore_novelty": {"cf": 0.95, "click": 1.15, "supplier": 0.50, "cross": 0.80},
+            "price_value": {"cf": 1.05, "click": 0.60, "supplier": 0.90, "cross": 0.45},
+            "personalized_heavy": {"cf": 1.55, "click": 1.00, "supplier": 0.50, "cross": 0.70},
+        }
+        arm_w = arm_weights.get(bandit_arm, arm_weights["balanced"])
 
         # Precompute query embedding once for similarity boost
         q_text = str(constraints.get("query") or "")
@@ -1119,6 +1505,26 @@ class RecommendationService:
                 else:
                     factors["negative"].append("-embedding_similarity")
                     factors["weights"]["embedding_similarity"] = 0.0
+
+            sku_key = str(c.get("sku") or "").strip()
+            cf = float(cf_scores.get(sku_key, 0.0) or 0.0)
+            if cf > 0.0:
+                cf_w = float(arm_w.get("cf", 1.35))
+                s += cf * cf_w
+                factors["positive"].append("+collaborative_filtering")
+                factors["weights"]["collaborative_filtering"] = round(cf * cf_w, 3)
+            clickstream = float(clickstream_scores.get(sku_key, 0.0) or 0.0)
+            if clickstream > 0.0:
+                cs_w = float(arm_w.get("click", 0.8))
+                s += clickstream * cs_w
+                factors["positive"].append("+clickstream_affinity")
+                factors["weights"]["clickstream_affinity"] = round(clickstream * cs_w, 3)
+            supplier = float(supplier_scores.get(sku_key, 0.0) or 0.0)
+            if supplier > 0.0:
+                sp_w = float(arm_w.get("supplier", 0.65))
+                s += supplier * sp_w
+                factors["positive"].append("+supplier_performance")
+                factors["weights"]["supplier_performance"] = round(supplier * sp_w, 3)
             return s, factors
 
         # Optional LTR scorer when model is available; otherwise use rule-based score.
@@ -1181,6 +1587,23 @@ class RecommendationService:
                     s_val = base_score
             scored.append({"candidate": c, "score": s_val, "factors": factors})
         scored.sort(key=lambda x: x["score"], reverse=True)
+        ce_enabled = str(os.environ.get("RECO_CROSS_ENCODER_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+        if ce_enabled and scored:
+            ce_w = float(arm_w.get("cross", 0.60))
+            for item in scored:
+                ce = self._cross_encoder_score(q_text, item.get("candidate") or {})
+                if ce <= 0:
+                    continue
+                item["score"] = float(item.get("score") or 0.0) + ce_w * float(ce)
+                f = item.get("factors") or {}
+                w = f.get("weights") or {}
+                w["cross_encoder"] = round(ce_w * float(ce), 3)
+                f["weights"] = w
+                pos = f.get("positive") or []
+                pos.append("+cross_encoder")
+                f["positive"] = pos
+                item["factors"] = f
+            scored.sort(key=lambda x: x["score"], reverse=True)
 
         # Apply MMR diversification to reduce near-duplicates
         try:
@@ -1246,7 +1669,7 @@ class RecommendationService:
                     in_stock += 1
             recall_proxy = float(in_stock / max(1, len(topk)))
             record_recommendation_rerank(
-                mode=rerank_mode,
+                mode=f"{rerank_mode}:{bandit_arm}",
                 latency_s=max(0.0, time.perf_counter() - t0),
                 ndcg_proxy_val=ndcg_proxy,
                 recall_proxy_val=recall_proxy,

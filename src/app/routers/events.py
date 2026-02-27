@@ -28,7 +28,15 @@ def _idempotent(path: str, key: str | None) -> bool:
         try:
             # Use atomic INSERT OR IGNORE to avoid race conditions and extra SELECTs
             from sqlalchemy import text
-            res = db.execute(text("INSERT OR IGNORE INTO idempotency_keys (key) VALUES (:k)"), {"k": f"{path}:{key}"})
+            idem_key = f"{path}:{key}"
+            is_sqlite = bool(getattr(db.bind, "dialect", None) is not None and db.bind.dialect.name == "sqlite")
+            if is_sqlite:
+                res = db.execute(text("INSERT OR IGNORE INTO idempotency_keys (key) VALUES (:k)"), {"k": idem_key})
+            else:
+                res = db.execute(
+                    text("INSERT INTO idempotency_keys (key) VALUES (:k) ON CONFLICT (key) DO NOTHING"),
+                    {"k": idem_key},
+                )
             db.commit()
             try:
                 return bool(getattr(res, "rowcount", 0))

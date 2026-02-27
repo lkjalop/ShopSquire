@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import os
 from typing import Iterable
 
@@ -34,6 +35,41 @@ def _allowed_fingerprints() -> set[str]:
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
+def _fail_closed() -> bool:
+    raw = os.getenv("INTERNAL_MTLS_FAIL_CLOSED")
+    if raw is not None:
+        return str(raw).lower() in ("1", "true", "yes")
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    return env in ("prod", "production", "staging")
+
+
+def _trusted_proxy_cidrs() -> list[str]:
+    raw = str(
+        os.getenv(
+            "INTERNAL_MTLS_TRUSTED_PROXY_CIDRS",
+            "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+        )
+        or ""
+    )
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def _ip_in_cidrs(ip_text: str | None, cidrs: list[str]) -> bool:
+    if not ip_text:
+        return False
+    try:
+        ip = ipaddress.ip_address(str(ip_text).strip())
+    except Exception:
+        return False
+    for c in cidrs:
+        try:
+            if ip in ipaddress.ip_network(c, strict=False):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _normalize_fp(value: str) -> str:
     v = str(value or "").strip().lower()
     v = v.replace("sha256:", "").replace(":", "")
@@ -58,6 +94,11 @@ class InternalMTLSMiddleware(BaseHTTPMiddleware):
         verify_hdr = str(request.headers.get("x-ssl-client-verify") or "").strip().upper()
         cert_hdr = str(request.headers.get("x-forwarded-client-cert") or request.headers.get("x-client-cert") or "").strip()
         fp_hdr = str(request.headers.get("x-ssl-client-fingerprint") or "").strip()
+
+        # Fail-closed guard: only trust mTLS headers when request comes from a trusted ingress proxy.
+        source_ip = request.client.host if request.client else None
+        if _fail_closed() and not _ip_in_cidrs(source_ip, _trusted_proxy_cidrs()):
+            return JSONResponse(status_code=403, content={"detail": "mtls_untrusted_proxy_source"})
 
         if verify_hdr != "SUCCESS":
             return JSONResponse(status_code=401, content={"detail": "mtls_required"})

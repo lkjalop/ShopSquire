@@ -100,25 +100,34 @@ class RuleStore:
     def update_rule(self, rule_id: str, updates: Dict[str, Any]) -> bool:
         try:
             with db_session() as db:
-                # Build set clause
-                fields = []
-                params = {"id": rule_id}
-                for k, v in updates.items():
-                    if k in ("domain", "title", "pattern", "expression", "priority", "active", "created_by", "version", "effective_from", "effective_to"):
-                        fields.append(f"{k} = :{k}")
-                        if k == "priority":
-                            try:
-                                params[k] = int(v)
-                            except Exception:
-                                params[k] = v
-                        elif k == "active":
-                            params[k] = 1 if bool(v) else 0
-                        else:
-                            params[k] = v
-                if not fields:
+                field_sql = {
+                    "domain": "UPDATE rule_definitions SET domain = :v WHERE id = :id",
+                    "title": "UPDATE rule_definitions SET title = :v WHERE id = :id",
+                    "pattern": "UPDATE rule_definitions SET pattern = :v WHERE id = :id",
+                    "expression": "UPDATE rule_definitions SET expression = :v WHERE id = :id",
+                    "priority": "UPDATE rule_definitions SET priority = :v WHERE id = :id",
+                    "active": "UPDATE rule_definitions SET active = :v WHERE id = :id",
+                    "created_by": "UPDATE rule_definitions SET created_by = :v WHERE id = :id",
+                    "version": "UPDATE rule_definitions SET version = :v WHERE id = :id",
+                    "effective_from": "UPDATE rule_definitions SET effective_from = :v WHERE id = :id",
+                    "effective_to": "UPDATE rule_definitions SET effective_to = :v WHERE id = :id",
+                }
+                touched = 0
+                for k, v in (updates or {}).items():
+                    stmt = field_sql.get(k)
+                    if not stmt:
+                        continue
+                    if k == "priority":
+                        try:
+                            v = int(v)
+                        except Exception:
+                            pass
+                    elif k == "active":
+                        v = 1 if bool(v) else 0
+                    db.execute(stmt, {"id": rule_id, "v": v})
+                    touched += 1
+                if touched == 0:
                     return False
-                sql = f"UPDATE rule_definitions SET {', '.join(fields)} WHERE id = :id"
-                db.execute(sql, params)
                 db.commit()
             # best-effort cache refresh for all tenants (simpler)
             self._cache.clear()

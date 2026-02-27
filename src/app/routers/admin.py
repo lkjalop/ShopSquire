@@ -911,16 +911,212 @@ def get_flags(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_
     return load_feature_flags(settings.feature_flags_path)
 
 
+def _flag_approvals_path() -> str:
+    return os.getenv("FLAG_APPROVALS_PATH", os.path.join("config", "security", "flag_change_approvals.json"))
+
+
+def _load_flag_approvals() -> Dict[str, Any]:
+    p = _flag_approvals_path()
+    if not os.path.exists(p):
+        return {"items": []}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return data
+    except Exception:
+        pass
+    return {"items": []}
+
+
+def _save_flag_approvals(doc: Dict[str, Any]) -> None:
+    p = _flag_approvals_path()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=2)
+
+
+def _canonical_flags_hash(flags: Dict[str, Any]) -> str:
+    import hashlib
+
+    raw = json.dumps(flags or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _create_flag_proposal(*, actor: str, flags: Dict[str, Any], changed_critical: List[Dict[str, Any]]) -> Dict[str, Any]:
+    proposal = {
+        "id": f"flagchg-{uuid.uuid4().hex[:16]}",
+        "status": "pending",
+        "proposer": actor,
+        "approver": None,
+        "created_at": datetime.utcnow().isoformat() + "Z",
+        "approved_at": None,
+        "flags_hash": _canonical_flags_hash(flags),
+        "flags": flags,
+        "changed_critical": changed_critical,
+    }
+    doc = _load_flag_approvals()
+    items = doc.get("items") if isinstance(doc.get("items"), list) else []
+    items.append(proposal)
+    doc["items"] = items[-500:]
+    _save_flag_approvals(doc)
+    return proposal
+
+
 @router.post("/flags")
-def set_flags(flags: Dict, role: str = Depends(require_role([ROLE_OWNER]))) -> Dict:
+def set_flags(
+    request: Request,
+    flags: Dict,
+    role: str = Depends(require_role([ROLE_OWNER])),
+) -> Dict:
+    from src.app.security.flag_integrity import sign_flags, SECURITY_CRITICAL_FLAGS
     settings = get_settings()
     path = settings.feature_flags_path
+
+    # Load current flags for diff / 4-eyes check
+    try:
+        current = load_feature_flags(path)
+    except Exception:
+        current = {}
+
+    # Identify security-critical changes that require a second approver
+    changed_critical = []
+    for key in SECURITY_CRITICAL_FLAGS:
+        old_val = current.get(key)
+        new_val = flags.get(key)
+        if old_val != new_val:
+            changed_critical.append({"flag": key, "old": old_val, "new": new_val})
+
+    if changed_critical:
+        dual_enabled = str(os.getenv("FLAG_DUAL_APPROVAL_ENABLED", "1")).lower() in ("1", "true", "yes")
+        actor = request.headers.get("X-Forwarded-User", request.client.host if request.client else "unknown")
+        approval_id = str(request.headers.get("X-Flag-Approval-Id", "") or "").strip()
+        if dual_enabled:
+            # Two-step flow: propose first, then separate approver applies with approval id.
+            if not approval_id:
+                proposal = _create_flag_proposal(actor=actor, flags=flags, changed_critical=changed_critical)
+                return {
+                    "updated": False,
+                    "pending_approval": True,
+                    "proposal_id": proposal.get("id"),
+                    "security_critical_changes": len(changed_critical),
+                    "action": "A different owner must approve via POST /api/v1/admin/flags/approvals/{proposal_id}/approve",
+                }
+
+            # Approval id provided: verify proposal status, content hash, and separation of duties.
+            doc = _load_flag_approvals()
+            items = doc.get("items") if isinstance(doc.get("items"), list) else []
+            prop = next((x for x in items if isinstance(x, dict) and str(x.get("id") or "") == approval_id), None)
+            if not prop:
+                raise HTTPException(status_code=404, detail={"error": "flag_proposal_not_found", "proposal_id": approval_id})
+            if str(prop.get("status") or "") != "approved":
+                raise HTTPException(status_code=409, detail={"error": "flag_proposal_not_approved", "proposal_id": approval_id})
+            if str(prop.get("proposer") or "") == actor:
+                raise HTTPException(status_code=409, detail={"error": "dual_approval_requires_distinct_actor"})
+            if str(prop.get("flags_hash") or "") != _canonical_flags_hash(flags):
+                raise HTTPException(status_code=409, detail={"error": "flag_payload_hash_mismatch", "proposal_id": approval_id})
+        else:
+            # Backward compatibility for environments not yet using dual-approval workflow.
+            confirm = request.headers.get("X-Flag-Change-Confirm", "").lower()
+            if confirm != "acknowledged":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "security_critical_change_requires_confirmation",
+                        "changed_flags": changed_critical,
+                        "action": "Resend with header X-Flag-Change-Confirm: acknowledged",
+                    },
+                )
+
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(flags, f, ensure_ascii=False, indent=2)
-        return {"updated": True}
+        # Write HMAC signature alongside the flags file
+        sign_flags(path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Audit log the change
+    actor = request.headers.get("X-Forwarded-User", request.client.host if request.client else "unknown")
+    _log_flag_change(actor, current, flags, changed_critical)
+
+    # Mark proposal applied to prevent replay of same approval ticket.
+    try:
+        if changed_critical:
+            approval_id = str(request.headers.get("X-Flag-Approval-Id", "") or "").strip()
+            if approval_id:
+                doc = _load_flag_approvals()
+                items = doc.get("items") if isinstance(doc.get("items"), list) else []
+                for it in items:
+                    if isinstance(it, dict) and str(it.get("id") or "") == approval_id:
+                        it["status"] = "applied"
+                        it["applied_at"] = datetime.utcnow().isoformat() + "Z"
+                        break
+                doc["items"] = items
+                _save_flag_approvals(doc)
+    except Exception:
+        pass
+
+    return {"updated": True, "security_critical_changes": len(changed_critical)}
+
+
+@router.get("/flags/approvals")
+def list_flag_approvals(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict[str, Any]:
+    _ = role
+    doc = _load_flag_approvals()
+    items = doc.get("items") if isinstance(doc.get("items"), list) else []
+    pending = [x for x in items if isinstance(x, dict) and str(x.get("status") or "") == "pending"]
+    return {"count": len(pending), "items": pending}
+
+
+@router.post("/flags/approvals/{proposal_id}/approve")
+def approve_flag_change(
+    proposal_id: str,
+    request: Request,
+    role: str = Depends(require_role([ROLE_OWNER])),
+) -> Dict[str, Any]:
+    _ = role
+    approver = request.headers.get("X-Forwarded-User", request.client.host if request.client else "unknown")
+    doc = _load_flag_approvals()
+    items = doc.get("items") if isinstance(doc.get("items"), list) else []
+    idx = next((i for i, x in enumerate(items) if isinstance(x, dict) and str(x.get("id") or "") == proposal_id), None)
+    if idx is None:
+        raise HTTPException(status_code=404, detail={"error": "flag_proposal_not_found", "proposal_id": proposal_id})
+    prop = items[idx]
+    if str(prop.get("status") or "") != "pending":
+        return {"approved": False, "status": prop.get("status"), "proposal_id": proposal_id}
+    if str(prop.get("proposer") or "") == approver:
+        raise HTTPException(status_code=409, detail={"error": "dual_approval_requires_distinct_actor"})
+
+    prop["status"] = "approved"
+    prop["approver"] = approver
+    prop["approved_at"] = datetime.utcnow().isoformat() + "Z"
+    items[idx] = prop
+    doc["items"] = items
+    _save_flag_approvals(doc)
+    return {"approved": True, "proposal_id": proposal_id, "approver": approver}
+
+
+def _log_flag_change(actor: str, old_flags: Dict, new_flags: Dict, critical: list) -> None:
+    """Append flag change to immutable audit log."""
+    import hashlib
+    diff = {}
+    all_keys = set(list(old_flags.keys()) + list(new_flags.keys()))
+    for k in all_keys:
+        o, n = old_flags.get(k), new_flags.get(k)
+        if o != n:
+            diff[k] = {"old": o, "new": n}
+    entry = {
+        "ts": datetime.utcnow().isoformat() + "Z",
+        "actor": actor,
+        "diff": diff,
+        "security_critical": critical,
+    }
+    log_path = os.path.join("logs", "flag_changes.jsonl")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    line = json.dumps(entry, default=str)
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 
 def _policy_path() -> str:

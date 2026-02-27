@@ -105,10 +105,12 @@ def connectors_summary(
                 runs = db.execute(
                     text(
                         "SELECT id, tenant_id, source, status, started_at, finished_at, records_seen, records_applied, error "
-                        f"FROM inventory_sync_runs {where} "
+                        "FROM inventory_sync_runs "
+                        "WHERE source = :source "
+                        "AND (:tenant_id IS NULL OR tenant_id = :tenant_id) "
                         "ORDER BY started_at DESC LIMIT 2"
                     ),
-                    params,
+                    {"source": cid, "tenant_id": (str(tenant_id) if tenant_id else None)},
                 ).fetchall()
                 if runs:
                     r = runs[0]
@@ -393,18 +395,12 @@ def external_stock_recent(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     lim = max(1, min(int(limit or 200), 1000))
-    where = []
-    params: Dict[str, Any] = {"lim": lim}
-    if tenant_id:
-        where.append("tenant_id = :tenant_id")
-        params["tenant_id"] = str(tenant_id)
-    if source:
-        where.append("source = :source")
-        params["source"] = str(source)
-    if sku:
-        where.append("sku = :sku")
-        params["sku"] = str(sku)
-    clause = ("WHERE " + " AND ".join(where) + " ") if where else ""
+    params: Dict[str, Any] = {
+        "lim": lim,
+        "tenant_id": (str(tenant_id) if tenant_id else None),
+        "source": (str(source) if source else None),
+        "sku": (str(sku) if sku else None),
+    }
 
     rows = []
     try:
@@ -412,7 +408,10 @@ def external_stock_recent(
             rows = db.execute(
                 text(
                     "SELECT id, tenant_id, source, sku, warehouse, stock, observed_at, raw_json "
-                    f"FROM inventory_external_stock {clause}"
+                    "FROM inventory_external_stock "
+                    "WHERE (:tenant_id IS NULL OR tenant_id = :tenant_id) "
+                    "AND (:source IS NULL OR source = :source) "
+                    "AND (:sku IS NULL OR sku = :sku) "
                     "ORDER BY observed_at DESC LIMIT :lim"
                 ),
                 params,

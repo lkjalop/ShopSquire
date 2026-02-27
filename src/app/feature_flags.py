@@ -67,6 +67,20 @@ def load_flags() -> Dict[str, Any]:
     # Next fallback to disk-based feature flags via existing helper
     try:
         path = settings.feature_flags_path
+        # Verify HMAC integrity when a signing key is configured
+        try:
+            from src.app.security.flag_integrity import verify_flags
+            result = verify_flags(path)
+            if result is False:
+                import logging
+                logging.getLogger("feature_flags").critical(
+                    "Feature flags file HMAC verification FAILED — possible tampering: %s", path
+                )
+                # In production, refuse to load tampered flags
+                if os.getenv("ENVIRONMENT", "").lower() in ("production", "prod", "staging"):
+                    return {}
+        except ImportError:
+            pass
         return load_feature_flags(path)
     except Exception:
         return {}

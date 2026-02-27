@@ -277,21 +277,19 @@ def query_daily_metrics(*, domain: Optional[str] = None, days: int = 30, tenant_
     days = max(1, min(int(days or 30), 365))
     cutoff = (date.today() - timedelta(days=days)).isoformat()
     with db_session() as db:
-        params: Dict[str, Any] = {"cutoff": cutoff}
-        where = ["day >= :cutoff"]
-        if domain:
-            where.append("domain = :domain")
-            params["domain"] = domain
-        if tenant_id is not None:
-            where.append("tenant_id = :tenant_id")
-            params["tenant_id"] = tenant_id
-        else:
-            where.append("tenant_id IS NULL")
+        params: Dict[str, Any] = {
+            "cutoff": cutoff,
+            "domain": domain,
+            "tenant_id": tenant_id,
+            "tenant_is_null": 1 if tenant_id is None else 0,
+        }
 
         sql = (
             "SELECT day, domain, metric_key, metric_value, labels_json "
             "FROM drift_daily_metrics "
-            f"WHERE {' AND '.join(where)} "
+            "WHERE day >= :cutoff "
+            "AND (:domain IS NULL OR domain = :domain) "
+            "AND ((:tenant_is_null = 1 AND tenant_id IS NULL) OR (:tenant_is_null = 0 AND tenant_id = :tenant_id)) "
             "ORDER BY day ASC"
         )
         try:

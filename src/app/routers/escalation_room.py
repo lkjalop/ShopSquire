@@ -208,23 +208,23 @@ def list_incidents(
     _ = role
     try:
         eng = get_engine()
-        clauses = []
         params: dict = {"lim": limit, "off": offset}
         if status:
-            clauses.append("status = :status")
             params["status"] = status
         else:
-            clauses.append("status IN ('open', 'review')")
+            params["status"] = None
         if severity:
-            clauses.append("severity = :severity")
             params["severity"] = severity
-        where = " AND ".join(clauses) if clauses else "1=1"
+        else:
+            params["severity"] = None
         with eng.begin() as conn:
             rows = conn.execute(
                 sql_text(
-                    f"SELECT id, event_id, severity, title, status, created_at "
-                    f"FROM incidents WHERE {where} "
-                    f"ORDER BY created_at DESC LIMIT :lim OFFSET :off"
+                    "SELECT id, event_id, severity, title, status, created_at "
+                    "FROM incidents "
+                    "WHERE ((:status IS NULL AND status IN ('open', 'review')) OR status = :status) "
+                    "AND (:severity IS NULL OR severity = :severity) "
+                    "ORDER BY created_at DESC LIMIT :lim OFFSET :off"
                 ),
                 params,
             ).fetchall()

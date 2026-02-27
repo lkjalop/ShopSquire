@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text, bindparam
 from pydantic import BaseModel
 
 from src.app.deps import get_redis, hash_uid
@@ -81,6 +82,9 @@ def _uid_patterns(uid: str, uid_hash: str) -> tuple[str, Dict[str, str]]:
     where = " OR ".join([f"input_data LIKE :p{i}" for i in range(len(patterns))])
     params = {f"p{i}": pat for i, pat in enumerate(patterns)}
     return where, params
+
+
+_UID_WHERE_SQL = "(input_data LIKE :p0 OR input_data LIKE :p1 OR input_data LIKE :p2 OR input_data LIKE :p3)"
 
 
 def _in_clause(prefix: str, values: List[str]) -> tuple[str, Dict[str, str]]:
@@ -246,17 +250,23 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
     }
     try:
         with db_session() as db:
-            where, params = _uid_patterns(uid, uid_hash)
-            ids = db.execute(f"SELECT id FROM decision_logs WHERE {where}", params).fetchall()
+            _where, params = _uid_patterns(uid, uid_hash)
+            ids = db.execute(text(f"SELECT id FROM decision_logs WHERE {_UID_WHERE_SQL}"), params).fetchall()
             decision_ids = [r[0] for r in ids if r and r[0]]
             if decision_ids:
-                in_clause, in_params = _in_clause("d", decision_ids)
+                in_params = {"decision_ids": decision_ids}
                 res = db.execute(
-                    f"DELETE FROM decision_audits WHERE decision_id IN ({in_clause})", in_params
+                    text("DELETE FROM decision_audits WHERE decision_id IN :decision_ids").bindparams(
+                        bindparam("decision_ids", expanding=True)
+                    ),
+                    in_params,
                 )
                 deleted["decision_audits"] = getattr(res, "rowcount", 0) or 0
                 res = db.execute(
-                    f"DELETE FROM decision_logs WHERE id IN ({in_clause})", in_params
+                    text("DELETE FROM decision_logs WHERE id IN :decision_ids").bindparams(
+                        bindparam("decision_ids", expanding=True)
+                    ),
+                    in_params,
                 )
                 deleted["decision_logs"] = getattr(res, "rowcount", 0) or 0
 
@@ -316,10 +326,11 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
             order_ids = [r.get("order_id") for r in export["order_sessions"] if r.get("order_id")]
 
             if order_ids:
-                in_clause, in_params = _in_clause("o", order_ids)
                 rows = db.execute(
-                    f"SELECT * FROM orders WHERE id IN ({in_clause})",
-                    in_params,
+                    text("SELECT * FROM orders WHERE id IN :order_ids").bindparams(
+                        bindparam("order_ids", expanding=True)
+                    ),
+                    {"order_ids": order_ids},
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
             else:
@@ -332,9 +343,13 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
             rows = db.execute("SELECT * FROM draft_orders WHERE customer_id = :uid", {"uid": uid}).mappings().all()
             export["draft_orders"] = [dict(r) for r in rows]
 
-            where, params = _uid_patterns(uid, uid_hash)
+            _where, params = _uid_patterns(uid, uid_hash)
             rows = db.execute(
-                f"SELECT id, agent_name, valid_from, input_data, retrieved_context, agent_reasoning, proposed_action, policy_version, approval_required, execution_status FROM decision_logs WHERE {where} ORDER BY valid_from DESC",
+                text(
+                    "SELECT id, agent_name, valid_from, input_data, retrieved_context, agent_reasoning, "
+                    "proposed_action, policy_version, approval_required, execution_status "
+                    f"FROM decision_logs WHERE {_UID_WHERE_SQL} ORDER BY valid_from DESC"
+                ),
                 params,
             ).mappings().all()
             decisions = []
@@ -353,10 +368,13 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
             export["decision_logs"] = decisions
 
             if decision_ids:
-                in_clause, in_params = _in_clause("d", [d for d in decision_ids if d])
+                filtered_ids = [d for d in decision_ids if d]
                 rows = db.execute(
-                    f"SELECT id, decision_id, action, actor, metadata, created_at FROM decision_audits WHERE decision_id IN ({in_clause}) ORDER BY created_at DESC",
-                    in_params,
+                    text(
+                        "SELECT id, decision_id, action, actor, metadata, created_at "
+                        "FROM decision_audits WHERE decision_id IN :decision_ids ORDER BY created_at DESC"
+                    ).bindparams(bindparam("decision_ids", expanding=True)),
+                    {"decision_ids": filtered_ids},
                 ).mappings().all()
                 audits = []
                 for r in rows:
@@ -475,8 +493,14 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
     redacted = {"decision_logs": 0, "decision_audits": 0, "customers": 0}
     try:
         with db_session() as db:
-            where, params = _uid_patterns(uid, uid_hash)
-            rows = db.execute(f"SELECT id, input_data, retrieved_context, proposed_action FROM decision_logs WHERE {where}", params).fetchall()
+            _where, params = _uid_patterns(uid, uid_hash)
+            rows = db.execute(
+                text(
+                    "SELECT id, input_data, retrieved_context, proposed_action "
+                    f"FROM decision_logs WHERE {_UID_WHERE_SQL}"
+                ),
+                params,
+            ).fetchall()
             ids = []
             for r in rows:
                 try:
@@ -494,8 +518,12 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
             redacted["decision_logs"] = len(ids)
             # redact decision_audits metadata
             if ids:
-                in_clause, in_params = _in_clause("d", ids)
-                rows2 = db.execute(f"SELECT id, metadata FROM decision_audits WHERE decision_id IN ({in_clause})", in_params).fetchall()
+                rows2 = db.execute(
+                    text("SELECT id, metadata FROM decision_audits WHERE decision_id IN :decision_ids").bindparams(
+                        bindparam("decision_ids", expanding=True)
+                    ),
+                    {"decision_ids": ids},
+                ).fetchall()
                 cnt = 0
                 for r2 in rows2:
                     try:
