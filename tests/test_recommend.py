@@ -397,3 +397,100 @@ def test_llm_rerank_auto_disabled_for_simple_cheap_queries(monkeypatch):
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
         RecommendationService.maybe_llm_rerank = orig_maybe
+
+
+def _looks_discrete_gpu(row: dict) -> bool:
+    blob = f"{row.get('name') or ''} {json.dumps(row.get('specs') or {})}".lower()
+    return any(tok in blob for tok in ("discrete", "rtx", "geforce", "radeon", "dgpu"))
+
+
+def test_gpu_workload_prefers_discrete_and_adds_nqe_question():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {
+                "id": "p1",
+                "sku": "GPU-YES-1",
+                "name": "Creator Laptop Pro",
+                "price_cents": 159900,
+                "currency": "USD",
+                "stock": 4,
+                "specs": {"gpu": "nvidia discrete rtx 4060", "ram_gb": 16},
+            },
+            {
+                "id": "p2",
+                "sku": "GPU-NO-1",
+                "name": "Creator Laptop Light",
+                "price_cents": 129900,
+                "currency": "USD",
+                "stock": 8,
+                "specs": {"gpu": "integrated", "ram_gb": 16},
+            },
+        ]
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": "u-gpu-intent-1", "query": "video editing laptop under $1800"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        rows = body.get("results") or []
+        assert rows
+        assert all(_looks_discrete_gpu(x) for x in rows)
+        next_q = body.get("next_questions") or []
+        assert any(str((q or {}).get("id") or "") == "ask_gpu_preference" for q in next_q if isinstance(q, dict))
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_explicit_without_gpu_filters_discrete_out():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {
+                "id": "p1",
+                "sku": "GPU-YES-2",
+                "name": "Gaming Laptop RTX",
+                "price_cents": 149900,
+                "currency": "USD",
+                "stock": 4,
+                "specs": {"gpu": "nvidia discrete rtx 4060", "ram_gb": 16},
+            },
+            {
+                "id": "p2",
+                "sku": "GPU-NO-2",
+                "name": "Office Laptop",
+                "price_cents": 99900,
+                "currency": "USD",
+                "stock": 12,
+                "specs": {"gpu": "integrated", "ram_gb": 16},
+            },
+        ]
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": "u-gpu-intent-2", "query": "video editing laptop under $1800 without gpu"},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        rows = body.get("results") or []
+        assert rows
+        assert all(not _looks_discrete_gpu(x) for x in rows)
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve

@@ -149,6 +149,44 @@ _OFF_DOMAIN_PATTERNS = [
     re.compile(r"(?i)\b(date me|go out with me|sexy|hot)\b"),
 ]
 
+_GPU_TASK_TERMS = (
+    "ai training",
+    "model training",
+    "machine learning",
+    "deep learning",
+    "cuda",
+    "pytorch",
+    "tensorflow",
+    "vram",
+    "video rendering",
+    "rendering",
+    "3d",
+    "blender",
+    "premiere",
+    "davinci",
+    "gaming",
+    "esports",
+    "rtx",
+)
+
+_GPU_WITH_TERMS = (
+    "with gpu",
+    "dedicated gpu",
+    "discrete gpu",
+    "rtx",
+    "geforce",
+    "radeon",
+    "graphics card",
+)
+
+_GPU_WITHOUT_TERMS = (
+    "without gpu",
+    "no gpu",
+    "integrated graphics only",
+    "integrated gpu only",
+    "no graphics card",
+)
+
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -384,6 +422,42 @@ def _candidate_looks_like_laptop(candidate: Dict[str, Any] | None) -> bool:
     return any(t in text_blob for t in positive_terms)
 
 
+def _candidate_has_discrete_gpu(candidate: Dict[str, Any] | None) -> bool:
+    c = candidate or {}
+    try:
+        text_blob = f"{c.get('name') or ''} {json.dumps(c.get('specs') or {}, ensure_ascii=False)}".lower()
+    except Exception:
+        text_blob = str(c).lower()
+    dedicated_markers = ("rtx", "geforce", "radeon", "discrete", "graphics card", "dgpu")
+    integrated_markers = ("integrated", "intel iris", "uhd graphics", "igpu")
+    has_integrated = any(x in text_blob for x in integrated_markers)
+    has_dedicated = any(x in text_blob for x in dedicated_markers)
+    if has_dedicated:
+        return True
+    if has_integrated:
+        return False
+    return False
+
+
+def _gpu_intent_profile(query: str | None, constraints: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    q = str(query or "").lower()
+    c = constraints or {}
+    explicit_with = any(t in q for t in _GPU_WITH_TERMS) or ("gpu:discrete" in [str(s).lower() for s in (c.get("specs") or [])])
+    explicit_without = any(t in q for t in _GPU_WITHOUT_TERMS)
+    use_case = str(c.get("use_case") or "").lower()
+    use_case_tags = [str(x).lower() for x in (c.get("use_case_tags") or [])]
+    likely_gpu_tasks = (
+        any(t in q for t in _GPU_TASK_TERMS)
+        or use_case in ("ai_ml_workstation", "gaming", "content_creation")
+        or any(t in ("ai_ml_workstation", "gaming", "content_creation") for t in use_case_tags)
+    )
+    return {
+        "likely_gpu_tasks": bool(likely_gpu_tasks),
+        "explicit_with_gpu": bool(explicit_with),
+        "explicit_without_gpu": bool(explicit_without),
+    }
+
+
 def _safe_int(value: Any, default: int) -> int:
     try:
         return int(value)
@@ -396,6 +470,21 @@ def _safe_float(value: Any, default: float) -> float:
         return float(value)
     except Exception:
         return float(default)
+
+
+def _append_gpu_disambiguation_question(existing: list[dict] | None) -> list[dict]:
+    out = [q for q in (existing or []) if isinstance(q, dict)]
+    qid = "ask_gpu_preference"
+    if any(str((q or {}).get("id") or "") == qid for q in out):
+        return out
+    out.append(
+        {
+            "id": qid,
+            "text": "Do you want a dedicated GPU (RTX/Radeon) or integrated graphics only?",
+            "goal": "narrow_results",
+        }
+    )
+    return out[:3]
 
 
 def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[str, Any]) -> Dict[str, Any]:
@@ -1625,6 +1714,9 @@ def suggest(
     intent_execution_plan = _build_multi_intent_execution_plan(nlp.get("intent_chain") if isinstance(nlp, dict) else [])
     prior_shortlist = list((kv.get("last_shortlist_skus") or [])) if isinstance(kv.get("last_shortlist_skus"), list) else []
     shortlist_lock_active = bool(followup_explain and prior_shortlist and not explicit_constraint_update)
+    gpu_followup_question_needed = False
+    gpu_inference_note: str | None = None
+    gpu_pref_inferred = False
     constraints = {
         "uid_hash": uid_hash,
         "budget_max": budget_max or parsed.get("budget_max") or nlp.get("preferences", {}).get("budget_max") or _decayed_pref("budget_max"),
@@ -1728,6 +1820,39 @@ def suggest(
                         **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["memory_prefs"]),
                     },
                 )
+    except Exception:
+        pass
+    # GPU-aware intent handling for AI training / rendering / gaming workflows.
+    try:
+        gpu_prof = _gpu_intent_profile(query_effective, constraints)
+        if gpu_prof.get("explicit_without_gpu"):
+            constraints["gpu_preference"] = "without_discrete"
+            constraints["specs"] = [s for s in (constraints.get("specs") or []) if "gpu:discrete" not in str(s).lower()]
+            gpu_followup_question_needed = False
+        elif gpu_prof.get("explicit_with_gpu"):
+            constraints["gpu_preference"] = "with_discrete"
+            gpu_followup_question_needed = False
+        elif gpu_prof.get("likely_gpu_tasks"):
+            constraints["gpu_preference"] = "with_discrete"
+            gpu_pref_inferred = True
+            gpu_followup_question_needed = True
+            try:
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="nqe_assumption_applied",
+                    source_type="agent",
+                    source_id="NQE_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "assumption": "prefer_discrete_gpu_for_workload",
+                        "gpu_preference": "with_discrete",
+                        "reason": "ai_rendering_or_gaming_signal_detected",
+                        **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["query", "constraints"]),
+                    },
+                )
+            except Exception:
+                pass
     except Exception:
         pass
     # Resolve common brand aliases to inventory-recognized names
@@ -2011,6 +2136,8 @@ def suggest(
             ]
         # Clarify-or-assume protocol: ask at most 1-2 clarifying questions per turn.
         next_questions = (next_questions or [])[:2]
+        if gpu_followup_question_needed:
+            next_questions = _append_gpu_disambiguation_question(next_questions)
         # Emit a decision trace event so SSE/WebSocket consumers see the clarifying questions
         try:
             if next_questions:
@@ -2469,6 +2596,43 @@ def suggest(
         # Availability constraint
         if constraints.get("availability") == "in_stock":
             candidates = [c for c in candidates if (c.get("stock") or 0) > 0]
+
+        # GPU preference refinement (explicit or inferred from workload intent).
+        gpu_pref = str(constraints.get("gpu_preference") or "").strip().lower()
+        if gpu_pref in ("with_discrete", "without_discrete"):
+            before_gpu = len(candidates or [])
+            if gpu_pref == "with_discrete":
+                gpu_filtered = [c for c in (candidates or []) if _candidate_has_discrete_gpu(c)]
+                if gpu_filtered:
+                    candidates = gpu_filtered
+                elif gpu_pref_inferred:
+                    # Soft fallback for inferred preference: keep candidates and ask user.
+                    gpu_inference_note = (
+                        "I prioritized dedicated-GPU systems for this workload, but availability is limited. "
+                        "I can also show integrated-graphics options if you prefer."
+                    )
+                    gpu_followup_question_needed = True
+                else:
+                    candidates = []
+            else:
+                candidates = [c for c in (candidates or []) if not _candidate_has_discrete_gpu(c)]
+            try:
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="agent_process",
+                    source_type="agent",
+                    source_id="GPU_Filter_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "gpu_preference": gpu_pref,
+                        "inferred": gpu_pref_inferred,
+                        "candidates_before": before_gpu,
+                        "candidates_after": len(candidates or []),
+                    },
+                )
+            except Exception:
+                pass
 
         # Inventory agent evaluation WITH quantity check for bulk orders
         requested_qty = constraints.get("quantity") or 1
@@ -3285,6 +3449,8 @@ def suggest(
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
             next_questions = (next_questions or [])[:2]
+            if gpu_followup_question_needed:
+                next_questions = _append_gpu_disambiguation_question(next_questions)
             if next_questions:
                 payload["next_questions"] = next_questions
                 # Also attach follow-ups into the NLP bundle so frontends reading
@@ -3334,6 +3500,9 @@ def suggest(
                     pass
     except Exception:
         next_questions = []
+    if gpu_followup_question_needed:
+        next_questions = _append_gpu_disambiguation_question(next_questions)
+        payload["next_questions"] = next_questions
     assistant_message = None
     llm_summary_job_id = None
     if nlp.get("llm_fallback") and rule_eval.get("recommend_llm", True):
@@ -3342,6 +3511,8 @@ def suggest(
         assistant_message = _deterministic_assistant_message(query, results, constraints)
     if image_brand_mismatch_note:
         assistant_message = f"{assistant_message} {image_brand_mismatch_note}" if assistant_message else image_brand_mismatch_note
+    if gpu_inference_note:
+        assistant_message = f"{assistant_message} {gpu_inference_note}" if assistant_message else gpu_inference_note
     # Inventory presence note when requested brands are missing (via helper for testability)
     note, unmatched = _emit_inventory_brand_notice(results=results, constraints=constraints, decision_id=decision_id, trace_id=trace_id)
     if note:
