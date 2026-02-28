@@ -990,7 +990,14 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                     const escEvt = events.find(e => eventMatches(e, ['tier_escalation', 'tier_decision']));
                     const msTr = trace?.model_selection || {};
                     const score = cxEvt?.payload?.score ?? cxEvt?.payload?.complexity_score ?? (msTr as any).tier;
-                    if (score == null && !cxEvt && !escEvt) return <div className={styles.empty}>No complexity scoring data in this trace.</div>;
+                    const hasModelFallback = Boolean(
+                      (msTr as any)?.selected ||
+                      (msTr as any)?.model ||
+                      (msTr as any)?.intent_summary ||
+                      (Array.isArray((msTr as any)?.path) && (msTr as any).path.length > 0) ||
+                      (msTr as any)?.decision
+                    );
+                    if (score == null && !cxEvt && !escEvt && !hasModelFallback) return <div className={styles.empty}>No complexity scoring data in this trace.</div>;
                     const tierName = cxEvt?.payload?.tier || cxEvt?.payload?.model_tier || msTr?.selected || '--';
                     const signals = cxEvt?.payload?.signals || cxEvt?.payload?.complexity_signals || {};
                     const explanations = cxEvt?.payload?.explanations || [];

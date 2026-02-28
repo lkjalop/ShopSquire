@@ -262,6 +262,62 @@ def _build_question_plan(*, constraints: Dict[str, Any], nlp: Dict[str, Any], re
     }
 
 
+def _compute_needs_disambiguation(
+    *, question_plan: Dict[str, Any] | None, next_questions: list[dict] | None = None
+) -> bool:
+    qp = question_plan or {}
+    mode = str(qp.get("mode") or "").strip().lower()
+    band = str(qp.get("confidence_band") or "").strip().lower()
+    if next_questions and isinstance(next_questions, list) and len(next_questions) > 0:
+        return True
+    if mode in {"alternative", "clarify"} and band in {"low", "medium"}:
+        return True
+    return False
+
+
+def _is_requirements_query(query: str | None) -> bool:
+    q = str(query or "").strip().lower()
+    if not q:
+        return False
+    return bool(
+        re.search(
+            r"\b(requirements?|system requirements?|minimum specs?|recommended specs?|compatib(le|ility))\b",
+            q,
+        )
+    )
+
+
+def _apply_nqe_confidence_gating(
+    questions: list[dict] | None,
+    *,
+    query: str | None,
+    confidence_band: str | None,
+) -> list[dict]:
+    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
+    if not out:
+        return out
+    band = str(confidence_band or "").strip().lower()
+    techy = _is_techy_query(query) or _is_requirements_query(query)
+    for q in out:
+        qid = str(q.get("id") or "").strip().lower()
+        if not qid:
+            continue
+        if not techy and band in {"low", "medium"}:
+            if qid in {"ask_specs", "ask_system_requirements", "ask_requirements"}:
+                q["text"] = (
+                    "Any must-have features matter most to you: long battery, lighter weight, "
+                    "bigger screen, or gaming/creative speed?"
+                )
+            elif qid == "ask_use_case":
+                q["text"] = "What will you mainly use it for day to day (school/work, gaming, editing, or a mix)?"
+        elif techy and (band in {"medium", "high"} or _is_requirements_query(query)):
+            if qid in {"ask_specs", "ask_system_requirements", "ask_requirements"}:
+                q["text"] = "If you know them, share target specs (GPU class, RAM, storage, and CPU tier)."
+            elif qid == "ask_gpu_preference":
+                q["text"] = "Do you need a dedicated GPU class for your workloads (RTX/Radeon), or integrated is fine?"
+    return out[:3]
+
+
 def _is_followup_explain_query(query: str | None) -> bool:
     q = str(query or "").strip().lower()
     if not q:
@@ -274,9 +330,27 @@ def _is_followup_explain_query(query: str | None) -> bool:
     )
 
 
-def _infer_missing_fields(*, constraints: Dict[str, Any], nlp: Dict[str, Any]) -> list[str]:
+def _infer_missing_fields(
+    *, constraints: Dict[str, Any], nlp: Dict[str, Any], kv: Dict[str, Any] | None = None
+) -> list[str]:
     missing = []
-    if constraints.get("budget_min") is None and constraints.get("budget_max") is None:
+    # Budget is truly missing only when neither the current constraints NOR the
+    # durable prefs_meta from prior turns carries a value.  Without this guard
+    # the NQE asks "What budget?" on every follow-up even after the user already
+    # stated a range in a previous turn.
+    budget_in_prefs = bool(
+        kv
+        and isinstance(kv.get("prefs_meta"), dict)
+        and (
+            kv["prefs_meta"].get("budget_max", {}).get("value") is not None
+            or kv["prefs_meta"].get("budget_min", {}).get("value") is not None
+        )
+    )
+    if (
+        constraints.get("budget_min") is None
+        and constraints.get("budget_max") is None
+        and not budget_in_prefs
+    ):
         missing.append("budget")
     if not (constraints.get("specs") or []):
         missing.append("specs")
@@ -362,6 +436,116 @@ def _build_envelope_snapshot(
         "shortlist_locked": bool(shortlist_locked),
         "shortlist_size": int(shortlist_size),
     }
+
+
+def _classify_turn_type(
+    *,
+    results_count: int,
+    followup_explain: bool,
+    explicit_constraint_update: bool,
+) -> str:
+    if int(results_count or 0) <= 0:
+        return "zero_result_turn"
+    if followup_explain:
+        return "explain_turn"
+    if explicit_constraint_update:
+        return "constraint_update_turn"
+    return "result_turn"
+
+
+def _extract_referents(
+    *,
+    query: str | None,
+    prior_shortlist: list[str] | None,
+    current_results: list[dict] | None,
+) -> Dict[str, Any]:
+    q = str(query or "").strip().lower()
+    if not q:
+        return {"has_reference": False, "source": "none", "skus": []}
+    has_ref = bool(re.search(r"\b(those|these|them|that one|this one|selected|picked|from those)\b", q))
+    if not has_ref:
+        return {"has_reference": False, "source": "none", "skus": []}
+    prior = [str(x) for x in (prior_shortlist or []) if str(x)]
+    if prior:
+        return {"has_reference": True, "source": "prior_shortlist", "skus": prior[:12]}
+    curr = [str((r or {}).get("sku") or "") for r in (current_results or []) if isinstance(r, dict)]
+    curr = [x for x in curr if x]
+    return {"has_reference": bool(curr), "source": "current_results" if curr else "none", "skus": curr[:12]}
+
+
+def _update_pinned_context(
+    *,
+    kv: Dict[str, Any],
+    constraints: Dict[str, Any],
+    shortlist_skus: list[str] | None,
+    turn_type: str,
+    ts: int | None = None,
+) -> Dict[str, Any]:
+    now_ts = int(ts or time.time())
+    pinned = kv.get("pinned_context") if isinstance(kv.get("pinned_context"), dict) else {}
+
+    def _pin(key: str, value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, list) and not value:
+            return
+        pinned[key] = {"value": value, "ts": now_ts, "source_turn_type": turn_type}
+
+    _pin("budget", {"min": constraints.get("budget_min"), "max": constraints.get("budget_max")})
+    _pin("use_case", constraints.get("use_case"))
+    _pin("gpu_preference", constraints.get("gpu_preference"))
+    _pin("brand_preference", list(constraints.get("brands") or []))
+    if shortlist_skus:
+        _pin("selected_skus", shortlist_skus[:12])
+    excludes = list(constraints.get("brand_excludes") or [])
+    if excludes:
+        _pin("excluded_skus", excludes[:12])
+    kv["pinned_context"] = pinned
+    return kv
+
+
+def _build_rolling_summary(
+    *,
+    kv: Dict[str, Any],
+    constraints: Dict[str, Any],
+    results: list[dict] | None,
+    next_questions: list[dict] | None,
+    turn_type: str,
+    referents: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    pinned = kv.get("pinned_context") if isinstance(kv.get("pinned_context"), dict) else {}
+    current_shortlist = [str((r or {}).get("sku") or "") for r in (results or []) if isinstance(r, dict)]
+    current_shortlist = [x for x in current_shortlist if x][:12]
+    unresolved = []
+    for q in (next_questions or []):
+        if isinstance(q, dict) and q.get("text"):
+            unresolved.append(str(q.get("text")))
+    unresolved = unresolved[:4]
+    goals = []
+    if constraints.get("use_case"):
+        goals.append(str(constraints.get("use_case")))
+    if constraints.get("budget_max") is not None or constraints.get("budget_min") is not None:
+        goals.append("budget_focused")
+    summary = {
+        "ts": int(time.time()),
+        "turn_type": turn_type,
+        "goals": goals[:3],
+        "hard_constraints": {
+            "budget_min": constraints.get("budget_min"),
+            "budget_max": constraints.get("budget_max"),
+            "brands": list(constraints.get("brands") or [])[:8],
+            "gpu_preference": constraints.get("gpu_preference"),
+        },
+        "soft_preferences": {
+            "specs": list(constraints.get("specs") or [])[:10],
+            "use_case_tags": list(constraints.get("use_case_tags") or [])[:8],
+        },
+        "current_shortlist": current_shortlist,
+        "pinned_context": pinned,
+        "referents": referents or {"has_reference": False, "source": "none", "skus": []},
+        "unresolved_questions": unresolved,
+    }
+    return summary
 
 
 def _compute_envelope_diff(previous: Dict[str, Any] | None, current: Dict[str, Any]) -> Dict[str, Any]:
@@ -698,6 +882,11 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
         response["confidence_band"] = str((response.get("question_plan") or {}).get("confidence_band") or "low")
     if not isinstance(response.get("ambiguity_reason"), str):
         response["ambiguity_reason"] = str((response.get("question_plan") or {}).get("ambiguity_reason") or "insufficient_context")
+    if "needs_disambiguation" not in response:
+        response["needs_disambiguation"] = _compute_needs_disambiguation(
+            question_plan=response.get("question_plan") if isinstance(response.get("question_plan"), dict) else None,
+            next_questions=response.get("next_questions") if isinstance(response.get("next_questions"), list) else None,
+        )
     if "counterfactual" not in response:
         response["counterfactual"] = "Different budget/spec constraints or stock availability could change top recommendations."
     if "followup_contract" not in response:
@@ -710,6 +899,12 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
         }
     if "intent_execution_plan" not in response:
         response["intent_execution_plan"] = {"plan_version": "intent_split_v1", "is_multi_intent": False, "steps": []}
+    if "turn_type" not in response:
+        response["turn_type"] = "unknown_turn"
+    if "referents" not in response:
+        response["referents"] = {"has_reference": False, "source": "none", "skus": []}
+    if "memory_confidence" not in response:
+        response["memory_confidence"] = 0.5
     return response
 
 
@@ -763,6 +958,29 @@ def _extract_quantity_from_query(query: str | None) -> int | None:
     if qty <= 0 or qty > 1000:
         return None
     return qty
+
+
+def _extract_result_limit_from_query(query: str | None) -> int | None:
+    """Extract a user-specified display limit like 'top 3', 'best 5', 'show me 3'.
+
+    Distinct from _extract_quantity_from_query which handles bulk-order units.
+    Returns None when no limit phrase is found.
+    """
+    if not query:
+        return None
+    q = str(query).strip().lower()
+    # "top 3", "best 3", "show me 3", "just 3", "only 3", "pick 3"
+    m = re.search(r"\b(?:top|best|show\s+me|just|only|pick)\s+(\d{1,2})\b", q)
+    if not m:
+        # "give me 3", "list 3", "select 3", "choose 3", "find me 3"
+        m = re.search(r"\b(?:give\s+me|list\s+(?:the\s+)?|select|choose|find\s+me)\s*(\d{1,2})\b", q)
+    if not m:
+        return None
+    try:
+        n = int(m.group(1))
+    except Exception:
+        return None
+    return n if 1 <= n <= 20 else None
 
 
 def _current_trace_id() -> str | None:
@@ -1883,6 +2101,22 @@ def suggest(
     intent_execution_plan = _build_multi_intent_execution_plan(nlp.get("intent_chain") if isinstance(nlp, dict) else [])
     prior_shortlist = list((kv.get("last_shortlist_skus") or [])) if isinstance(kv.get("last_shortlist_skus"), list) else []
     shortlist_lock_active = bool(followup_explain and prior_shortlist and not explicit_constraint_update)
+    turn_type = _classify_turn_type(
+        results_count=0,
+        followup_explain=followup_explain,
+        explicit_constraint_update=explicit_constraint_update,
+    )
+    memory_confidence = 1.0
+    try:
+        if followup_contract.get("memory_carry_forward_required") and not prior_shortlist:
+            memory_confidence = 0.2
+        elif followup_contract.get("memory_carry_forward_required") and prior_shortlist:
+            memory_confidence = 0.9
+        else:
+            memory_confidence = 0.75
+    except Exception:
+        memory_confidence = 0.5
+    referents = _extract_referents(query=query, prior_shortlist=prior_shortlist, current_results=[])
     gpu_followup_question_needed = False
     gpu_inference_note: str | None = None
     gpu_pref_inferred = False
@@ -2289,7 +2523,7 @@ def suggest(
     )
     if is_open_ended:
         question_plan = _build_question_plan(constraints=constraints, nlp=nlp, results_count=0)
-        missing_fields_open = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {})
+        missing_fields_open = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
         try:
             log_trace_event(
                 trace_id=trace_id,
@@ -2334,6 +2568,9 @@ def suggest(
         if gpu_followup_question_needed:
             next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
         next_questions = _append_standard_nqe_options(next_questions, query_effective)
+        next_questions = _apply_nqe_confidence_gating(
+            next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
+        )
         # Emit a decision trace event so SSE/WebSocket consumers see the clarifying questions
         try:
             if next_questions:
@@ -2385,6 +2622,10 @@ def suggest(
             "question_plan": question_plan,
             "confidence_band": question_plan.get("confidence_band"),
             "ambiguity_reason": question_plan.get("ambiguity_reason"),
+            "needs_disambiguation": _compute_needs_disambiguation(
+                question_plan=question_plan,
+                next_questions=next_questions,
+            ),
             "view_mode": view_hint.get("view_mode"),
             "view_reason": view_hint.get("view_reason"),
             "agent_chain": [
@@ -2396,6 +2637,9 @@ def suggest(
             "model_tier": model_tier,
             "complexity_signals": complexity_signals,
             "nqe_selection_applied": nqe_selection_applied,
+            "turn_type": turn_type,
+            "referents": referents,
+            "memory_confidence": round(float(memory_confidence), 4),
         }
         _log_early_decision(
             status="clarifying_questions",
@@ -3194,6 +3438,12 @@ def suggest(
         "customer_tier": tier,
         "retention_policy": retention_policy,
         "policy_notes": policy_notes,
+        "session_memory": {
+            "summary": (ctx.get("summary") if isinstance(ctx, dict) else None),
+            "pinned_context": (kv.get("pinned_context") if isinstance(kv.get("pinned_context"), dict) else {}),
+            "last_valid_shortlist_skus": (kv.get("last_valid_shortlist_skus") if isinstance(kv.get("last_valid_shortlist_skus"), list) else []),
+            "conversation_turn": int(kv.get("conversation_turn") or 0),
+        },
     }
     # analysis/PII severity already normalized earlier
     risk_quantification = None
@@ -3433,6 +3683,15 @@ def suggest(
             "baseline_rank": baseline_rank,
             "rerank_delta": rerank_delta,
         })
+    # Apply user-requested result display limit ("top 3", "best 5", etc.)
+    # This is distinct from bulk-order quantity — it controls how many cards
+    # are shown, preserving the full ranked list for context tracking.
+    try:
+        _display_limit = _extract_result_limit_from_query(query)
+        if _display_limit and len(results) > _display_limit:
+            results = results[:_display_limit]
+    except Exception:
+        pass
     # Persist search event for BI/funnel tracking
     try:
         log_search_event(
@@ -3529,6 +3788,9 @@ def suggest(
         "llm_model": llm_model,
         "model_tier": model_tier,
         "complexity_signals": complexity_signals,
+        "turn_type": turn_type,
+        "referents": referents,
+        "memory_confidence": round(float(memory_confidence), 4),
         "view_mode": view_hint.get("view_mode"),
         "view_reason": view_hint.get("view_reason"),
         "security": _build_security_payload(
@@ -3628,8 +3890,13 @@ def suggest(
         pass
     next_questions = []
     try:
-        missing_fields = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {})
-        if missing_fields:
+        # When the user is asking for an explanation or ranking of results they
+        # already have (e.g. "explain top 3", "list those", "why these?"), skip
+        # the clarifying-question loop entirely — they don't need "What budget?"
+        # while they're reviewing a shortlist.  NQE still fires on fresh queries.
+        _skip_nqe_clarify = bool(followup_explain or shortlist_lock_active)
+        missing_fields = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
+        if missing_fields and not _skip_nqe_clarify:
             category = "laptop" if "laptop" in (query or "").lower() else "general"
             nqe_input = NQEInput(
                 intent="product_search",
@@ -3649,6 +3916,9 @@ def suggest(
             if gpu_followup_question_needed:
                 next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
             next_questions = _append_standard_nqe_options(next_questions, query_effective)
+            next_questions = _apply_nqe_confidence_gating(
+                next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
+            )
             if next_questions:
                 payload["next_questions"] = next_questions
                 # Also attach follow-ups into the NLP bundle so frontends reading
@@ -3703,6 +3973,46 @@ def suggest(
         payload["next_questions"] = next_questions
     if isinstance(payload.get("next_questions"), list):
         payload["next_questions"] = _append_standard_nqe_options(payload.get("next_questions"), query_effective)
+        payload["next_questions"] = _apply_nqe_confidence_gating(
+            payload.get("next_questions"),
+            query=query_effective,
+            confidence_band=question_plan.get("confidence_band"),
+        )
+    if memory_confidence < 0.4 and followup_contract.get("memory_carry_forward_required"):
+        payload["next_questions"] = [
+            {
+                "id": "resolve_reference",
+                "text": "Do you mean the products from your previous shortlist, or should I start a fresh search?",
+                "goal": "disambiguate_reference",
+                "options": [
+                    {"id": "use_previous_shortlist", "label": "Use previous shortlist"},
+                    {"id": "start_fresh", "label": "Start fresh search"},
+                ],
+            }
+        ]
+        payload["assistant_message"] = (
+            "I want to avoid guessing. I can continue from your earlier shortlist or run a fresh search."
+        )
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="memory_disambiguation_prompted",
+                source_type="agent",
+                source_id="Conversation_Memory_Agent",
+                target_type="user",
+                target_id=uid,
+                payload={
+                    "memory_confidence": round(float(memory_confidence), 4),
+                    "reason": "followup_reference_without_shortlist",
+                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["memory_shortlist", "followup_contract"]),
+                },
+            )
+        except Exception:
+            pass
+    payload["needs_disambiguation"] = _compute_needs_disambiguation(
+        question_plan=question_plan,
+        next_questions=payload.get("next_questions") if isinstance(payload.get("next_questions"), list) else None,
+    )
     if nqe_selection_applied:
         payload["nqe_selection_applied"] = nqe_selection_applied
     assistant_message = None
@@ -3800,6 +4110,12 @@ def suggest(
             except Exception:
                 pass
         payload["assistant_message"] = assistant_message
+    turn_type = _classify_turn_type(
+        results_count=len(results or []),
+        followup_explain=followup_explain,
+        explicit_constraint_update=explicit_constraint_update,
+    )
+    referents = _extract_referents(query=query, prior_shortlist=prior_shortlist, current_results=results or [])
     if llm_summary_job_id:
         payload["llm_summary_job_id"] = llm_summary_job_id
     try:
@@ -3828,16 +4144,65 @@ def suggest(
     except Exception:
         pass
     try:
+        prior_summary = ctx.get("summary") if isinstance(ctx, dict) and isinstance(ctx.get("summary"), dict) else {}
+        summary_ts = int(prior_summary.get("ts") or 0) if prior_summary else 0
+        summary_age_sec = int(time.time()) - summary_ts if summary_ts else None
+        stale_slots = []
+        pinned_prev = (kv.get("pinned_context") if isinstance(kv.get("pinned_context"), dict) else {})
+        slot_ttl = int(os.getenv("PINNED_SLOT_TTL_SECONDS", "86400"))
+        now_ts = int(time.time())
+        for k, v in pinned_prev.items():
+            if not isinstance(v, dict):
+                continue
+            ts = int(v.get("ts") or 0)
+            if ts and (now_ts - ts) > slot_ttl:
+                stale_slots.append(str(k))
+        payload["memory_health"] = {
+            "memory_confidence": round(float(memory_confidence), 4),
+            "summary_age_sec": summary_age_sec,
+            "stale_slots": stale_slots[:10],
+            "shortlist_lock_active": bool(shortlist_lock_active),
+            "turn_type": turn_type,
+        }
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="memory_health",
+            source_type="agent",
+            source_id="Conversation_Memory_Agent",
+            target_type="system",
+            target_id=None,
+            payload={
+                "memory_confidence": round(float(memory_confidence), 4),
+                "memory_miss": bool(followup_contract.get("memory_carry_forward_required") and not prior_shortlist),
+                "shortlist_lock_failed": bool(followup_contract.get("memory_carry_forward_required") and not shortlist_lock_active),
+                "summary_age_sec": summary_age_sec,
+                "stale_slots": stale_slots[:10],
+                "turn_type": turn_type,
+                **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["memory_shortlist", "session_summary"]),
+            },
+        )
+    except Exception:
+        pass
+    try:
         shortlist_skus = [str((r or {}).get("sku") or "") for r in (results or []) if isinstance(r, dict)]
         shortlist_skus = [s for s in shortlist_skus if s][:12]
         kv_out = mem.get_kv(uid) or {}
-        kv_out["last_shortlist_skus"] = shortlist_skus
+        # Only overwrite the shortlist when this turn produced results.
+        # Zero-result turns (e.g. brand filter with no matches) must NOT erase
+        # the prior shortlist — the user's follow-up "top 3 from those" still
+        # needs the original candidates.
+        if shortlist_skus:
+            kv_out["last_shortlist_skus"] = shortlist_skus
+            kv_out["last_valid_shortlist_skus"] = shortlist_skus
+        # else: leave kv_out["last_shortlist_skus"] intact from the prior turn
         kv_out["last_constraints_snapshot"] = {
             "budget_min": constraints.get("budget_min"),
             "budget_max": constraints.get("budget_max"),
             "brands": list(constraints.get("brands") or []),
             "specs": list(constraints.get("specs") or []),
         }
+        if turn_type in {"result_turn", "constraint_update_turn"}:
+            kv_out["last_valid_constraints_snapshot"] = dict(kv_out["last_constraints_snapshot"])
         kv_out["last_result_envelope"] = _build_envelope_snapshot(
             constraints=constraints,
             candidates_count=len(candidates or []),
@@ -3845,8 +4210,16 @@ def suggest(
             shortlist_locked=shortlist_lock_active,
             shortlist_size=len(shortlist_skus),
         )
+        kv_out["last_turn_type"] = turn_type
+        kv_out["last_referents"] = referents
         kv_out["last_followup_contract"] = followup_contract
         kv_out["last_intent_execution_plan"] = intent_execution_plan
+        kv_out = _update_pinned_context(
+            kv=kv_out,
+            constraints=constraints,
+            shortlist_skus=shortlist_skus,
+            turn_type=turn_type,
+        )
         if image_context.get("labels") or image_context.get("ocr") or image_context.get("hash") or image_context.get("intent"):
             kv_out["image_context"] = {
                 "hash": image_context.get("hash"),
@@ -3864,7 +4237,40 @@ def suggest(
                     if qid not in asked:
                         asked.append(qid)
             kv_out["nqe_asked"] = asked[-25:]
-        mem.set_kv(uid, kv_out)
+        active_ttl = int(os.getenv("CHAT_ACTIVE_TTL_SECONDS", "86400"))
+        mem.set_kv(uid, kv_out, ttl_seconds=active_ttl)
+        mem.touch_session(uid, ttl_seconds=active_ttl)
+        summary_interval = int(os.getenv("MEMORY_SUMMARY_INTERVAL", "10"))
+        should_checkpoint = bool(
+            (int(kv_out.get("conversation_turn") or 0) % max(1, summary_interval) == 0)
+            or turn_type in {"zero_result_turn", "explain_turn"}
+            or not isinstance((ctx or {}).get("summary"), dict)
+        )
+        if should_checkpoint:
+            rolling_summary = _build_rolling_summary(
+                kv=kv_out,
+                constraints=constraints,
+                results=results or [],
+                next_questions=payload.get("next_questions") if isinstance(payload.get("next_questions"), list) else [],
+                turn_type=turn_type,
+                referents=referents,
+            )
+            mem.set_summary(uid, rolling_summary, ttl_seconds=active_ttl)
+            payload["session_summary"] = rolling_summary
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="session_summary_checkpoint",
+                source_type="agent",
+                source_id="Conversation_Memory_Agent",
+                target_type="system",
+                target_id=None,
+                payload={
+                    "turn": int(kv_out.get("conversation_turn") or 0),
+                    "turn_type": turn_type,
+                    "summary": rolling_summary,
+                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["session_summary", "pinned_context"]),
+                },
+            )
     except Exception:
         pass
     # Test-only debug: emit a simple log of SKUs when query mentions budget
@@ -4063,6 +4469,130 @@ def checkout_upsell(
         "trace_id": trace_id,
         "decision_trace_id": trace_id,
         "policy_version": policy_version,
+    }
+
+
+def _build_sku_explanation_payload(
+    *,
+    row: Dict[str, Any],
+    constraints: Dict[str, Any],
+    query: str,
+) -> Dict[str, Any]:
+    factors = row.get("factors") if isinstance(row.get("factors"), dict) else {}
+    positive = [str(x) for x in (factors.get("positive") or []) if x is not None][:8]
+    negative = [str(x) for x in (factors.get("negative") or []) if x is not None][:8]
+    checks = [str(x) for x in (factors.get("checks") or []) if x is not None][:8]
+    matched_constraints: list[str] = []
+    if constraints.get("budget_max") is not None or constraints.get("budget_min") is not None:
+        if any("within_budget" in p for p in positive):
+            matched_constraints.append("budget")
+    if constraints.get("brands"):
+        if any("brand_match" in p for p in positive):
+            matched_constraints.append("brand")
+    if constraints.get("specs"):
+        if any(str(spec).lower().strip("+") in " ".join(positive).lower() for spec in (constraints.get("specs") or [])):
+            matched_constraints.append("specs")
+    if constraints.get("use_case") and any("use_case_match" in p for p in positive):
+        matched_constraints.append("use_case")
+    reasons = []
+    if positive:
+        reasons.append(f"Selected because it matched: {', '.join(positive[:4])}.")
+    if checks:
+        reasons.append(f"Additional checks considered: {', '.join(checks[:3])}.")
+    if negative:
+        reasons.append(f"Tradeoffs noted: {', '.join(negative[:3])}.")
+    if not reasons:
+        reasons.append("Selected based on overall rank score and inventory availability.")
+    return {
+        "sku": str(row.get("sku") or ""),
+        "name": row.get("name"),
+        "score": row.get("score"),
+        "confidence": row.get("confidence"),
+        "matched_constraints": matched_constraints,
+        "disqualifiers": negative,
+        "positive_factors": positive,
+        "checks": checks,
+        "reason_summary": " ".join(reasons),
+        "query": str(query or ""),
+    }
+
+
+@router.get("/why_product")
+def explain_why_product(
+    request: Request,
+    uid: str,
+    sku: str,
+    query: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    redis=Depends(get_redis),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    db=Depends(get_db),
+) -> Dict[str, Any]:
+    target_sku = str(sku or "").strip()
+    if not target_sku:
+        raise HTTPException(status_code=400, detail="sku required")
+    mem = Memory(redis)
+    kv = mem.get_kv(uid) or {}
+    snapshot = kv.get("last_constraints_snapshot") if isinstance(kv.get("last_constraints_snapshot"), dict) else {}
+    prefs_meta = kv.get("prefs_meta") if isinstance(kv.get("prefs_meta"), dict) else {}
+    constraints: Dict[str, Any] = {
+        "budget_min": snapshot.get("budget_min"),
+        "budget_max": snapshot.get("budget_max"),
+        "brands": list(snapshot.get("brands") or []),
+        "specs": list(snapshot.get("specs") or []),
+        "use_case": None,
+    }
+    try:
+        for k in ("budget_min", "budget_max", "brands", "specs", "use_case"):
+            pm = prefs_meta.get(k) if isinstance(prefs_meta.get(k), dict) else None
+            if pm and pm.get("value") is not None:
+                constraints[k] = pm.get("value")
+        if not isinstance(constraints.get("brands"), list):
+            constraints["brands"] = []
+        if not isinstance(constraints.get("specs"), list):
+            constraints["specs"] = []
+    except Exception:
+        pass
+    query_effective = str(query or kv.get("last_query") or "explain this selected product").strip()
+    service = RecommendationService(redis)
+    candidates = service.retrieve_candidates(query_effective, limit=60)
+    constraints["query"] = query_effective
+    ranked = service.rerank_candidates_with_factors(candidates, constraints)
+    row = next((r for r in (ranked or []) if str((r or {}).get("sku") or "") == target_sku), None)
+    if not row:
+        # Fallback: explain from candidate snapshot if SKU is outside current top ranking window.
+        row = next((r for r in (candidates or []) if str((r or {}).get("sku") or "") == target_sku), None)
+        if row:
+            row = {**row, "factors": {"positive": [], "negative": [], "checks": []}, "score": row.get("score"), "confidence": row.get("confidence")}
+    if not row:
+        raise HTTPException(status_code=404, detail="sku not found in candidate set")
+    explanation = _build_sku_explanation_payload(row=row, constraints=constraints, query=query_effective)
+    decision_trace_id = str(trace_id or _current_trace_id() or uuid.uuid4())
+    try:
+        log_trace_event(
+            trace_id=decision_trace_id,
+            event_type="selection_explanation_generated",
+            source_type="agent",
+            source_id="Selection_Explain_Agent",
+            target_type="user",
+            target_id=uid,
+            payload={
+                "sku": target_sku,
+                "matched_constraints": explanation.get("matched_constraints") or [],
+                "disqualifiers": explanation.get("disqualifiers") or [],
+                "reason_summary": explanation.get("reason_summary"),
+                **_trace_meta_payload(
+                    policy_version=load_feature_flags(os.getenv("FEATURE_FLAGS_PATH") or get_settings().feature_flags_path).get("POLICY_VERSION", "v1"),
+                    context_ids=["constraints", "factors", "ranking"],
+                ),
+            },
+        )
+    except Exception:
+        pass
+    return {
+        "decision_trace_id": decision_trace_id,
+        "trace_id": decision_trace_id,
+        "explanation": explanation,
     }
 
 

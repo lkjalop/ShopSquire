@@ -26,6 +26,25 @@ from src.app.services.bi_query_agent import run_query_agent
 router = APIRouter(prefix="/api/v1/admin/bi", tags=["admin", "bi"])
 
 
+def _dialect_name(db) -> str:
+    try:
+        name = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+        if name:
+            return name
+    except Exception:
+        pass
+    try:
+        from src.app.models.db import get_engine
+
+        return str(getattr(getattr(get_engine(), "dialect", None), "name", "") or "").lower()
+    except Exception:
+        return ""
+
+
+def _is_sqlite(dialect: str) -> bool:
+    return str(dialect or "").startswith("sqlite")
+
+
 def _timescale_flags() -> Dict[str, Any]:
     try:
         ff = load_feature_flags(get_settings().feature_flags_path) or {}
@@ -90,6 +109,12 @@ def _parse_ts(value: Any) -> datetime | None:
     s = str(value or "").strip()
     if not s:
         return None
+    # Handle RFC3339/ISO strings with timezone offsets first.
+    try:
+        iso = s.replace("Z", "+00:00")
+        return datetime.fromisoformat(iso)
+    except Exception:
+        pass
     s = s.replace("T", " ").replace("Z", "")
     for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
@@ -99,8 +124,20 @@ def _parse_ts(value: Any) -> datetime | None:
     return None
 
 
+def _json_loads_safe(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        obj = json.loads(str(value or "{}"))
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    return {}
+
+
 def _normalized_ts_expr(col: str, dialect: str) -> str:
-    if str(dialect or "").lower() == "sqlite":
+    if _is_sqlite(dialect):
         return _sql_ts_from_text_sqlite(col)
     return _sql_ts_from_text(col)
 
@@ -164,8 +201,8 @@ def transactions_timeseries(
     }
     try:
         with db_session() as db:
-            dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
-            if dialect == "sqlite":
+            dialect = _dialect_name(db)
+            if _is_sqlite(dialect):
                 ts_expr = _sql_ts_from_text_sqlite("created_at")
                 bucket_expr = (
                     f"substr({ts_expr}, 1, 10)"
@@ -390,7 +427,7 @@ def executive_pulse_api(
     }
     try:
         with db_session() as db:
-            dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+            dialect = _dialect_name(db)
             vfrom_expr = _normalized_ts_expr("valid_from", dialect)
             ctime_expr = _normalized_ts_expr("created_at", dialect)
             etime_expr = _normalized_ts_expr("event_time", dialect)
@@ -421,8 +458,8 @@ def executive_pulse_api(
                     """
                 ),
                 {
-                    "start_ts": dt_start if dialect != "sqlite" else dt_start.strftime("%Y-%m-%d %H:%M:%S"),
-                    "end_ts": dt_end if dialect != "sqlite" else dt_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    "start_ts": dt_start if not _is_sqlite(dialect) else dt_start.strftime("%Y-%m-%d %H:%M:%S"),
+                    "end_ts": dt_end if not _is_sqlite(dialect) else dt_end.strftime("%Y-%m-%d %H:%M:%S"),
                 },
             ).fetchall()
             total_dec = len(dec_rows or [])
@@ -464,8 +501,8 @@ def executive_pulse_api(
                         """
                     ),
                     {
-                        "start_ts": dt_start if dialect != "sqlite" else dt_start.strftime("%Y-%m-%d %H:%M:%S"),
-                        "end_ts": dt_end if dialect != "sqlite" else dt_end.strftime("%Y-%m-%d %H:%M:%S"),
+                        "start_ts": dt_start if not _is_sqlite(dialect) else dt_start.strftime("%Y-%m-%d %H:%M:%S"),
+                        "end_ts": dt_end if not _is_sqlite(dialect) else dt_end.strftime("%Y-%m-%d %H:%M:%S"),
                     },
                 ).fetchall()
                 for tr in trace_rows or []:
@@ -526,21 +563,40 @@ def executive_pulse_api(
                 for p, v in sorted(policy_rollup.items(), key=lambda x: x[1]["decisions"], reverse=True)
             ]
 
-            sec_rows = db.execute(
-                sql_text(
-                    f"""
-                    SELECT event_time, severity, details, correction_ts
-                    FROM security_events
-                    WHERE {etime_expr} >= :start_ts
-                      AND {etime_expr} < :end_ts
-                    ORDER BY event_time
-                    """
-                ),
-                {
-                    "start_ts": dt_start if dialect != "sqlite" else dt_start.strftime("%Y-%m-%d %H:%M:%S"),
-                    "end_ts": dt_end if dialect != "sqlite" else dt_end.strftime("%Y-%m-%d %H:%M:%S"),
-                },
-            ).fetchall()
+            try:
+                sec_rows = db.execute(
+                    sql_text(
+                        """
+                        SELECT event_time, severity, event_type, NULL as correction_ts
+                        FROM security_event_ingest
+                        WHERE event_time >= :start_ts
+                          AND event_time < :end_ts
+                        ORDER BY event_time
+                        """
+                    ),
+                    {
+                        "start_ts": dt_start.strftime("%Y-%m-%d %H:%M:%S"),
+                        "end_ts": dt_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    },
+                ).fetchall()
+            except Exception:
+                sec_rows = []
+            if not sec_rows:
+                sec_rows = db.execute(
+                    sql_text(
+                        f"""
+                        SELECT event_time, severity, details, correction_ts
+                        FROM security_events
+                        WHERE {etime_expr} >= :start_ts
+                          AND {etime_expr} < :end_ts
+                        ORDER BY event_time
+                        """
+                    ),
+                    {
+                        "start_ts": dt_start if not _is_sqlite(dialect) else dt_start.strftime("%Y-%m-%d %H:%M:%S"),
+                        "end_ts": dt_end if not _is_sqlite(dialect) else dt_end.strftime("%Y-%m-%d %H:%M:%S"),
+                    },
+                ).fetchall()
             mttd: List[float] = []
             mttr: List[float] = []
             matrix: Dict[tuple, int] = defaultdict(int)
@@ -647,9 +703,9 @@ def agentic_rag_summary_api(
     _ = role
     try:
         with db_session() as db:
-            dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+            dialect = _dialect_name(db)
             ctime_expr = _normalized_ts_expr("created_at", dialect)
-            if dialect == "sqlite":
+            if _is_sqlite(dialect):
                 where_clause = f"{ctime_expr} >= datetime('now', :window)"
                 where_params = {"window": f"-{int(days)} days"}
             else:
@@ -702,6 +758,184 @@ def agentic_rag_summary_api(
         raise HTTPException(status_code=500, detail=f"agentic_rag_summary_failed: {exc}")
 
 
+@router.get("/ml-governance/summary")
+def ml_governance_summary_api(
+    days: int = Query(default=30, ge=1, le=365),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    out: Dict[str, Any] = {
+        "days": int(days),
+        "cf_training": {"runs": [], "last_success_model_version": None, "last_success_at": None},
+        "forecast_governance": {"runs": [], "avg_mape_proxy": None, "avg_quarantined_points": None},
+    }
+    try:
+        with db_session() as db:
+            dialect = _dialect_name(db)
+            if _is_sqlite(dialect):
+                where = "datetime(created_at) >= datetime('now', :window)"
+                params = {"window": f"-{int(days)} days"}
+            else:
+                where = "created_at >= (NOW() - (:days * INTERVAL '1 day'))"
+                params = {"days": int(days)}
+
+            try:
+                rows = db.execute(
+                    sql_text(
+                        f"""
+                        SELECT run_type, status, created_at, metadata_json
+                        FROM ml_retrain_governance_runs
+                        WHERE {where}
+                        ORDER BY created_at DESC
+                        LIMIT 500
+                        """
+                    ),
+                    params,
+                ).fetchall()
+            except Exception:
+                rows = []
+
+            cf_runs: List[Dict[str, Any]] = []
+            fg_runs: List[Dict[str, Any]] = []
+            mape_vals: List[float] = []
+            q_vals: List[float] = []
+            for r in rows or []:
+                run_type = str(r[0] or "")
+                status = str(r[1] or "")
+                created_at = str(r[2] or "")
+                meta = _json_loads_safe(r[3])
+                item = {"status": status, "created_at": created_at, "meta": meta}
+                if run_type == "recommend_cf_train":
+                    cf_runs.append(item)
+                elif run_type == "forecast_governance_snapshot":
+                    fg_runs.append(item)
+                    try:
+                        m = meta.get("avg_mape_proxy")
+                        if m is not None:
+                            mape_vals.append(float(m))
+                        q_vals.append(float(meta.get("quarantined_points") or 0.0))
+                    except Exception:
+                        pass
+
+            out["cf_training"]["runs"] = cf_runs[:20]
+            out["forecast_governance"]["runs"] = fg_runs[:20]
+            out["forecast_governance"]["avg_mape_proxy"] = (
+                round(sum(mape_vals) / max(1, len(mape_vals)), 4) if mape_vals else None
+            )
+            out["forecast_governance"]["avg_quarantined_points"] = (
+                round(sum(q_vals) / max(1, len(q_vals)), 2) if q_vals else None
+            )
+
+            try:
+                cf_model = db.execute(
+                    sql_text(
+                        """
+                        SELECT model_version, trained_at
+                        FROM recommend_cf_model
+                        ORDER BY trained_at DESC
+                        LIMIT 1
+                        """
+                    )
+                ).fetchone()
+            except Exception:
+                cf_model = None
+            if cf_model:
+                out["cf_training"]["last_success_model_version"] = str(cf_model[0] or "")
+                out["cf_training"]["last_success_at"] = str(cf_model[1] or "")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"ml_governance_summary_failed: {exc}")
+    return out
+
+
+@router.get("/hitl/reviewer-consistency")
+def hitl_reviewer_consistency_api(
+    days: int = Query(default=30, ge=1, le=180),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    out: Dict[str, Any] = {"days": int(days), "reviewers": [], "summary": {"total_reviews": 0, "median_turnaround_minutes": 0.0}}
+    try:
+        with db_session() as db:
+            try:
+                rows = db.execute(
+                    sql_text(
+                        """
+                        SELECT reviewer_id, status, created_at, updated_at
+                        FROM human_review_tasks
+                        ORDER BY created_at DESC
+                        LIMIT 5000
+                        """
+                    )
+                ).fetchall()
+            except Exception:
+                rows = []
+            since = datetime.utcnow() - timedelta(days=int(days))
+            rollup: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"total": 0, "approved": 0, "rejected": 0, "escalated": 0, "turnaround": []})
+            all_turnaround: List[float] = []
+            for r in rows or []:
+                reviewer = str(r[0] or "unassigned").strip() or "unassigned"
+                status = str(r[1] or "").lower()
+                created = _parse_ts(r[2])
+                updated = _parse_ts(r[3])
+                if created is not None and created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                if updated is not None and updated.tzinfo is not None:
+                    updated = updated.replace(tzinfo=None)
+                if created is None or created < since:
+                    continue
+                bucket = rollup[reviewer]
+                bucket["total"] += 1
+                if status in ("approved", "completed"):
+                    bucket["approved"] += 1
+                elif status in ("rejected", "denied"):
+                    bucket["rejected"] += 1
+                elif status in ("escalated", "needs_escalation"):
+                    bucket["escalated"] += 1
+                if updated is not None and updated >= created:
+                    mins = max(0.0, (updated - created).total_seconds() / 60.0)
+                    bucket["turnaround"].append(mins)
+                    all_turnaround.append(mins)
+
+            def _median(vals: List[float]) -> float:
+                if not vals:
+                    return 0.0
+                x = sorted(vals)
+                m = len(x) // 2
+                if len(x) % 2 == 1:
+                    return float(x[m])
+                return float((x[m - 1] + x[m]) / 2.0)
+
+            items: List[Dict[str, Any]] = []
+            for reviewer, v in sorted(rollup.items(), key=lambda kv: kv[1]["total"], reverse=True):
+                total = int(v["total"])
+                approval_rate = round(100.0 * float(v["approved"]) / max(1, total), 2)
+                rejection_rate = round(100.0 * float(v["rejected"]) / max(1, total), 2)
+                escalation_rate = round(100.0 * float(v["escalated"]) / max(1, total), 2)
+                med = _median(v["turnaround"])
+                consistency_band = "high"
+                if rejection_rate > 35.0 or escalation_rate > 45.0:
+                    consistency_band = "watch"
+                if rejection_rate > 50.0 or escalation_rate > 60.0:
+                    consistency_band = "low"
+                items.append(
+                    {
+                        "reviewer_id": reviewer,
+                        "total_reviews": total,
+                        "approval_rate": approval_rate,
+                        "rejection_rate": rejection_rate,
+                        "escalation_rate": escalation_rate,
+                        "median_turnaround_minutes": round(float(med), 2),
+                        "consistency_band": consistency_band,
+                    }
+                )
+            out["reviewers"] = items[:50]
+            out["summary"]["total_reviews"] = int(sum(int(x["total_reviews"]) for x in out["reviewers"]))
+            out["summary"]["median_turnaround_minutes"] = round(_median(all_turnaround), 2)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"hitl_reviewer_consistency_failed: {exc}")
+    return out
+
+
 @router.get("/db-stack/status")
 def db_stack_status_api(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
@@ -713,6 +947,8 @@ def db_stack_status_api(
         "timescale_cagg_orders_hourly": False,
         "redis_configured": False,
         "neo4j_pilot_enabled": False,
+        "security_event_storage_targets": [],
+        "security_event_storage_paths": {},
     }
     try:
         settings = get_settings()
@@ -723,15 +959,209 @@ def db_stack_status_api(
         import os
 
         out["neo4j_pilot_enabled"] = str(os.getenv("FRAUD_GRAPH_NEO4J_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+        raw_targets = str(os.getenv("SECURITY_EVENT_STORAGE_TARGETS", "database") or "")
+        out["security_event_storage_targets"] = [x.strip() for x in raw_targets.split(",") if x.strip()]
+        out["security_event_storage_paths"] = {
+            "object": str(os.getenv("SECURITY_EVENT_OBJECT_PATH", "data/security-events/object") or "data/security-events/object"),
+            "warehouse": str(os.getenv("SECURITY_EVENT_WAREHOUSE_PATH", "data/security-events/warehouse") or "data/security-events/warehouse"),
+            "lakehouse": str(os.getenv("SECURITY_EVENT_LAKEHOUSE_PATH", "data/security-events/lakehouse") or "data/security-events/lakehouse"),
+            "block": str(os.getenv("SECURITY_EVENT_BLOCK_PATH", "data/security-events/block") or "data/security-events/block"),
+        }
     except Exception:
         pass
     try:
         with db_session() as db:
-            dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+            dialect = _dialect_name(db)
             out["postgres_source_of_truth"] = dialect == "postgresql"
             if dialect == "postgresql":
                 out["timescaledb_extension"] = _has_timescaledb(db)
                 out["timescale_cagg_orders_hourly"] = _relation_exists(db, "orders_hourly")
     except Exception:
         pass
+    return out
+
+
+@router.get("/security-events/trend-pack")
+def security_events_trend_pack_api(
+    start: str = Query(..., description="YYYY-MM-DD"),
+    end: str = Query(..., description="YYYY-MM-DD"),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    dt_start = _parse_date(start)
+    dt_end = _parse_date(end)
+    if dt_end <= dt_start:
+        raise HTTPException(status_code=400, detail="end_must_be_after_start")
+
+    matrix: Dict[tuple, int] = defaultdict(int)
+    vendor_counts: Dict[str, int] = defaultdict(int)
+    action_counts: Dict[str, int] = defaultdict(int)
+    hourly_volume: Dict[str, int] = defaultdict(int)
+    asn_counts: Dict[str, int] = defaultdict(int)
+    country_counts: Dict[str, int] = defaultdict(int)
+    impossible_travel_count = 0
+    vpn_count = 0
+    tor_count = 0
+    hosting_count = 0
+    high_geo_risk_count = 0
+    started = datetime.utcnow()
+    query_ms = 0.0
+    with db_session() as db:
+        try:
+            rows = db.execute(
+                sql_text(
+                    """
+                    SELECT event_time, event_type, severity, vendor, policy_action,
+                           asn, geo_country, is_vpn, is_tor, is_hosting, geo_risk, impossible_travel
+                    FROM security_event_ingest
+                    WHERE event_time >= :start_ts
+                      AND event_time < :end_ts
+                    ORDER BY event_time
+                    """
+                ),
+                {
+                    "start_ts": dt_start.strftime("%Y-%m-%d 00:00:00"),
+                    "end_ts": dt_end.strftime("%Y-%m-%d 00:00:00"),
+                },
+            ).fetchall()
+        except Exception:
+            rows = []
+    query_ms = (datetime.utcnow() - started).total_seconds() * 1000.0
+
+    for r in rows or []:
+        ts = _parse_ts(r[0])
+        if ts is None:
+            continue
+        week = ts.strftime("%Y-W%W")
+        et = str(r[1] or "other").lower()
+        if bool(r[11]):
+            et = "impossible-travel"
+        sev = str(r[2] or "unknown").lower()
+        ven = str(r[3] or "unknown").lower()
+        act = str(r[4] or "allow").lower()
+        matrix[(week, et, sev)] += 1
+        vendor_counts[ven] += 1
+        action_counts[act] += 1
+        hourly_volume[ts.strftime("%Y-%m-%d %H:00")] += 1
+        asn = str(r[5] or "").strip()
+        country = str(r[6] or "").strip()
+        if asn:
+            asn_counts[asn] += 1
+        if country:
+            country_counts[country] += 1
+        vpn_count += 1 if bool(r[7]) else 0
+        tor_count += 1 if bool(r[8]) else 0
+        hosting_count += 1 if bool(r[9]) else 0
+        try:
+            high_geo_risk_count += 1 if float(r[10] or 0.0) >= 0.7 else 0
+        except Exception:
+            pass
+        impossible_travel_count += 1 if bool(r[11]) else 0
+
+    return {
+        "window": {"start": dt_start.date().isoformat(), "end": dt_end.date().isoformat()},
+        "security_incursions_matrix": [
+            {"week": k[0], "type": k[1], "severity": k[2], "count": v}
+            for k, v in sorted(matrix.items())
+        ],
+        "trend_overlays": {
+            "vendor_counts": [{"vendor": k, "count": v} for k, v in sorted(vendor_counts.items(), key=lambda x: x[1], reverse=True)],
+            "policy_actions": [{"action": k, "count": v} for k, v in sorted(action_counts.items(), key=lambda x: x[1], reverse=True)],
+            "hourly_volume": [{"bucket": k, "count": v} for k, v in sorted(hourly_volume.items())],
+            "asn_counts": [{"asn": k, "count": v} for k, v in sorted(asn_counts.items(), key=lambda x: x[1], reverse=True)[:20]],
+            "country_counts": [{"country": k, "count": v} for k, v in sorted(country_counts.items(), key=lambda x: x[1], reverse=True)[:20]],
+        },
+        "geo_risk_summary": {
+            "impossible_travel": int(impossible_travel_count),
+            "vpn": int(vpn_count),
+            "tor": int(tor_count),
+            "hosting": int(hosting_count),
+            "high_geo_risk": int(high_geo_risk_count),
+        },
+        "dashboard_query_latency_ms": round(float(query_ms), 2),
+        "rows": len(rows or []),
+    }
+
+
+@router.get("/memory-health")
+def memory_health_api(
+    days: int = Query(7, ge=1, le=90),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    now = datetime.utcnow()
+    start = now - timedelta(days=int(days))
+    out: Dict[str, Any] = {
+        "window": {"start": start.date().isoformat(), "end": now.date().isoformat()},
+        "days": int(days),
+        "totals": {
+            "events": 0,
+            "memory_miss": 0,
+            "shortlist_lock_failed": 0,
+            "disambiguation_prompts": 0,
+            "summary_checkpoints": 0,
+        },
+        "averages": {
+            "memory_confidence": 0.0,
+            "summary_age_sec": 0.0,
+        },
+        "stale_slots_top": [],
+    }
+    conf_sum = 0.0
+    conf_n = 0
+    age_sum = 0.0
+    age_n = 0
+    stale_rollup: Dict[str, int] = defaultdict(int)
+    try:
+        with db_session() as db:
+            rows = db.execute(
+                sql_text(
+                    """
+                    SELECT event_type, payload, created_at
+                    FROM decision_trace_events
+                    WHERE created_at >= :start_ts
+                      AND (
+                        source_id = 'Conversation_Memory_Agent'
+                        OR event_type IN ('memory_health', 'session_summary_checkpoint', 'memory_disambiguation_prompted')
+                      )
+                    ORDER BY created_at DESC
+                    """
+                ),
+                {"start_ts": start.strftime("%Y-%m-%d %H:%M:%S")},
+            ).fetchall()
+    except Exception:
+        rows = []
+    for r in rows or []:
+        et = str((r[0] if len(r) > 0 else "") or "")
+        payload = _json_loads_safe(r[1] if len(r) > 1 else {})
+        out["totals"]["events"] += 1
+        if et == "memory_disambiguation_prompted":
+            out["totals"]["disambiguation_prompts"] += 1
+        if et == "session_summary_checkpoint":
+            out["totals"]["summary_checkpoints"] += 1
+        if et == "memory_health":
+            if bool(payload.get("memory_miss")):
+                out["totals"]["memory_miss"] += 1
+            if bool(payload.get("shortlist_lock_failed")):
+                out["totals"]["shortlist_lock_failed"] += 1
+            try:
+                if payload.get("memory_confidence") is not None:
+                    conf_sum += float(payload.get("memory_confidence") or 0.0)
+                    conf_n += 1
+            except Exception:
+                pass
+            try:
+                if payload.get("summary_age_sec") is not None:
+                    age_sum += float(payload.get("summary_age_sec") or 0.0)
+                    age_n += 1
+            except Exception:
+                pass
+            for s in (payload.get("stale_slots") or []):
+                stale_rollup[str(s)] += 1
+    out["averages"]["memory_confidence"] = round(conf_sum / conf_n, 4) if conf_n else 0.0
+    out["averages"]["summary_age_sec"] = round(age_sum / age_n, 2) if age_n else 0.0
+    out["stale_slots_top"] = [
+        {"slot": slot, "count": count}
+        for slot, count in sorted(stale_rollup.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    ]
     return out

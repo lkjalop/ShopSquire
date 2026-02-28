@@ -192,6 +192,17 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  status TEXT DEFAULT 'open'\n"
                     ")"
                 ))
+                conn.execute(sql_text(
+                    "CREATE TABLE IF NOT EXISTS chat_messages (\n"
+                    "  id TEXT PRIMARY KEY,\n"
+                    "  uid TEXT NOT NULL,\n"
+                    "  session_id TEXT,\n"
+                    "  role TEXT NOT NULL,\n"
+                    "  content TEXT NOT NULL,\n"
+                    "  trace_id TEXT,\n"
+                    "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
+                    ")"
+                ))
                 # Outbox table for async event delivery in tests/dev (SQLite)
                 conn.execute(sql_text(
                     "CREATE TABLE IF NOT EXISTS event_log (\n"

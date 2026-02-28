@@ -133,6 +133,105 @@ export async function fetchTransactionTimeseries(params: { granularity: 'day' | 
   return http(`/api/v1/admin/bi/transactions/timeseries?${q.toString()}`);
 }
 
+export type ExecutivePulse = {
+  window: { start: string; end: string };
+  kpis: {
+    revenue: number;
+    gross_margin_pct: number;
+    refund_pct: number;
+    chargeback_pct: number;
+    approval_rate: number;
+    autonomy_pct: number;
+    mttd_minutes: number;
+    mttr_minutes: number;
+  };
+  trend_overlays: {
+    revenue: Array<{
+      bucket: string;
+      actual: number;
+      baseline: number;
+      anomaly_low: number;
+      anomaly_high: number;
+      is_anomaly: boolean;
+    }>;
+    causal_factors: Array<{ id: string; count: number }>;
+  };
+  agentic_ops: {
+    auto_vs_human: Array<{ bucket: string; auto: number; human: number }>;
+    false_positive_drift: Array<{ week: string; fp_rate: number; total: number }>;
+    per_agent: Array<{ agent: string; error_rate: number; avg_latency_ms: number; count: number }>;
+  };
+  security_incursions_matrix: Array<{ week: string; type: string; severity: string; count: number }>;
+  decision_replay: Array<{ policy_version: string; decisions: number; approval_rate: number }>;
+};
+
+export async function fetchExecutivePulse(start: string, end: string): Promise<ExecutivePulse> {
+  const q = new URLSearchParams();
+  q.set('start', start);
+  q.set('end', end);
+  return http(`/api/v1/admin/bi/executive-pulse?${q.toString()}`);
+}
+
+export async function fetchTrendPackAlarms(weeks = 8): Promise<{ status: string; weeks: number; alarm_count: number; alarms: Array<{ type: string; severity: string; message: string }> }> {
+  return http(`/api/v1/admin/bi/trend-pack/alarms?weeks=${weeks}`);
+}
+
+export async function runBiQueryAgent(payload: { query: string; start?: string; end?: string; limit?: number }): Promise<any> {
+  return http(`/api/v1/admin/bi/query-agent`, { method: 'POST', body: JSON.stringify(payload || {}) });
+}
+
+export async function fetchAgenticRagSummary(days = 7): Promise<{
+  status: string;
+  days: number;
+  event_counts: Record<string, number>;
+  contexts_injected: number;
+  verify_failures: number;
+  avg_budget_utilization: number;
+}> {
+  return http(`/api/v1/admin/bi/agentic-rag/summary?days=${days}`);
+}
+
+export async function fetchDbStackStatus(): Promise<{
+  postgres_source_of_truth: boolean;
+  timescaledb_extension: boolean;
+  timescale_cagg_orders_hourly: boolean;
+  redis_configured: boolean;
+  neo4j_pilot_enabled: boolean;
+  security_event_storage_targets?: string[];
+  security_event_storage_paths?: Record<string, string>;
+}> {
+  return http(`/api/v1/admin/bi/db-stack/status`);
+}
+
+export async function fetchMlGovernanceSummary(days = 30): Promise<any> {
+  return http(`/api/v1/admin/bi/ml-governance/summary?days=${days}`);
+}
+
+export async function fetchHitlReviewerConsistency(days = 30): Promise<any> {
+  return http(`/api/v1/admin/bi/hitl/reviewer-consistency?days=${days}`);
+}
+
+export type MemoryHealthSummary = {
+  window: { start: string; end: string };
+  days: number;
+  totals: {
+    events: number;
+    memory_miss: number;
+    shortlist_lock_failed: number;
+    disambiguation_prompts: number;
+    summary_checkpoints: number;
+  };
+  averages: {
+    memory_confidence: number;
+    summary_age_sec: number;
+  };
+  stale_slots_top: Array<{ slot: string; count: number }>;
+};
+
+export async function fetchMemoryHealth(days = 7): Promise<MemoryHealthSummary> {
+  return http(`/api/v1/admin/bi/memory-health?days=${days}`);
+}
+
 export async function fetchComplianceOverview(days = 7): Promise<any> {
   return http(`/api/v1/admin/compliance/overview?days=${days}`);
 }
@@ -825,6 +924,10 @@ export async function fetchAdminPlaybookKpis(days = 30): Promise<any> {
 
 export async function fetchAdminPlaybookReliability(days = 30): Promise<any> {
   return http(`/api/v1/admin/playbooks/ops/reliability?days=${days}`);
+}
+
+export async function fetchAdminPlaybookDriftAlerts(days = 30): Promise<any> {
+  return http(`/api/v1/admin/playbooks/ops/drift-alerts?days=${days}`);
 }
 
 export async function fetchAdminPlaybookTrail(playbookId: string, limit = 50): Promise<any> {

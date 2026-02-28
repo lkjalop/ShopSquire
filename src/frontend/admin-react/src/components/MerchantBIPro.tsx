@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchOverview, fetchSecurityAttackTimeseries, fetchSecurityGeoAsnTrends, fetchTransactionTimeseries, fetchUpsellPerformance, type SecurityAttackBucket, type SecurityGeoAsnTrend, type TransactionTimeseriesPoint } from '../api';
+import { fetchAgenticRagSummary, fetchDbStackStatus, fetchExecutivePulse, fetchHitlReviewerConsistency, fetchMemoryHealth, fetchMlGovernanceSummary, fetchOverview, fetchSecurityAttackTimeseries, fetchSecurityGeoAsnTrends, fetchTransactionTimeseries, fetchTrendPackAlarms, fetchUpsellPerformance, runBiQueryAgent, type ExecutivePulse, type MemoryHealthSummary, type SecurityAttackBucket, type SecurityGeoAsnTrend, type TransactionTimeseriesPoint } from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
 
@@ -188,6 +188,55 @@ function seriesMax(points: Array<{ y: number }>) {
   return points.reduce((m, p) => Math.max(m, Number(p.y || 0)), 0);
 }
 
+function OverlayLineChart({
+  title,
+  points,
+}: {
+  title: string;
+  points: Array<{ x: string; actual: number; baseline: number; low: number; high: number; anomaly: boolean }>;
+}) {
+  const w = 660;
+  const h = 200;
+  const pad = 24;
+  const maxY = Math.max(1, ...points.map((p) => Math.max(p.actual, p.high)));
+  const innerW = w - pad * 2;
+  const innerH = h - pad * 2;
+  const xy = (i: number, y: number) => ({
+    x: pad + (innerW * (points.length <= 1 ? 0 : i / (points.length - 1))),
+    y: pad + innerH * (1 - (y / maxY)),
+  });
+  const path = (key: 'actual' | 'baseline') =>
+    points
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xy(i, Number(p[key] || 0)).x.toFixed(2)} ${xy(i, Number(p[key] || 0)).y.toFixed(2)}`)
+      .join(' ');
+  const areaTop = points
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xy(i, Number(p.high || 0)).x.toFixed(2)} ${xy(i, Number(p.high || 0)).y.toFixed(2)}`)
+    .join(' ');
+  const areaBottom = points
+    .map((_p, i) => {
+      const rev = points.length - 1 - i;
+      return `${i === 0 ? 'L' : 'L'} ${xy(rev, Number(points[rev]?.low || 0)).x.toFixed(2)} ${xy(rev, Number(points[rev]?.low || 0)).y.toFixed(2)}`;
+    })
+    .join(' ');
+  const area = `${areaTop} ${areaBottom} Z`;
+  return (
+    <div className="card">
+      <h3>{title}</h3>
+      <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 14, background: '#fff', overflow: 'hidden' }}>
+        <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none">
+          <rect x="0" y="0" width={w} height={h} fill="#fff" />
+          <path d={area} fill="rgba(42,109,107,0.10)" />
+          <path d={path('baseline')} fill="none" stroke="#2a6d6b" strokeWidth="2" strokeDasharray="4 4" />
+          <path d={path('actual')} fill="none" stroke="#cc5b2c" strokeWidth="3" />
+          {points.map((p, i) =>
+            p.anomaly ? <circle key={`${p.x}-${i}`} cx={xy(i, p.actual).x} cy={xy(i, p.actual).y} r="4" fill="#9f2d1b" /> : null
+          )}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function LineChart({
   title,
   subtitle,
@@ -369,6 +418,16 @@ export function MerchantBIPro({ role }: Props) {
 
   const [overview, setOverview] = useState<any>(null);
   const [upsell, setUpsell] = useState<any>(null);
+  const [pulse, setPulse] = useState<ExecutivePulse | null>(null);
+  const [alarms, setAlarms] = useState<Array<{ type: string; severity: string; message: string }>>([]);
+  const [queryText, setQueryText] = useState('show me refund rate and approval rate');
+  const [queryResult, setQueryResult] = useState<any>(null);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [ragSummary, setRagSummary] = useState<any>(null);
+  const [dbStack, setDbStack] = useState<any>(null);
+  const [mlGovernance, setMlGovernance] = useState<any>(null);
+  const [reviewerConsistency, setReviewerConsistency] = useState<any>(null);
+  const [memoryHealth, setMemoryHealth] = useState<MemoryHealthSummary | null>(null);
   const [overviewDemoSeeded, setOverviewDemoSeeded] = useState(false);
   const [upsellDemoSeeded, setUpsellDemoSeeded] = useState(false);
 
@@ -558,6 +617,90 @@ export function MerchantBIPro({ role }: Props) {
     };
   }, [allowSyntheticFallback]);
 
+  useEffect(() => {
+    let cancelled = false;
+    Promise.allSettled([fetchExecutivePulse(start, end), fetchTrendPackAlarms(8)])
+      .then((res) => {
+        if (cancelled) return;
+        const p = res[0];
+        const a = res[1];
+        if (p.status === 'fulfilled') setPulse(p.value);
+        else setPulse(null);
+        if (a.status === 'fulfilled') setAlarms(Array.isArray(a.value.alarms) ? a.value.alarms : []);
+        else setAlarms([]);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPulse(null);
+        setAlarms([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [start, end]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDbStackStatus()
+      .then((r) => {
+        if (!cancelled) setDbStack(r);
+      })
+      .catch(() => {
+        if (!cancelled) setDbStack(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [start, end]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAgenticRagSummary(7)
+      .then((r) => {
+        if (!cancelled) setRagSummary(r);
+      })
+      .catch(() => {
+        if (!cancelled) setRagSummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [start, end]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.allSettled([fetchMlGovernanceSummary(30), fetchHitlReviewerConsistency(30)])
+      .then((res) => {
+        if (cancelled) return;
+        const mg = res[0];
+        const rc = res[1];
+        setMlGovernance(mg.status === 'fulfilled' ? mg.value : null);
+        setReviewerConsistency(rc.status === 'fulfilled' ? rc.value : null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setMlGovernance(null);
+        setReviewerConsistency(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [start, end]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchMemoryHealth(14)
+      .then((r) => {
+        if (!cancelled) setMemoryHealth(r);
+      })
+      .catch(() => {
+        if (!cancelled) setMemoryHealth(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [start, end]);
+
   const txOrdersPoints = useMemo(() => {
     const series = tx?.series || [];
     return series.map((p) => ({ x: niceBucketLabel(p.bucket, granularity), y: Number(p.orders || 0) }));
@@ -719,6 +862,22 @@ export function MerchantBIPro({ role }: Props) {
         </div>
       </div>
 
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>Memory Health (14d)</h3>
+        <div className="page-sub">Conversation-memory reliability from trace telemetry.</div>
+        {!memoryHealth && <div className="page-sub" style={{ marginTop: 10 }}>Loading…</div>}
+        {!!memoryHealth && (
+          <div className="list" style={{ marginTop: 10 }}>
+            <div className="list-item"><div>Memory confidence (avg)</div><strong>{Number(memoryHealth.averages?.memory_confidence || 0).toFixed(3)}</strong></div>
+            <div className="list-item"><div>Memory misses</div><strong>{Number(memoryHealth.totals?.memory_miss || 0).toLocaleString()}</strong></div>
+            <div className="list-item"><div>Shortlist lock failures</div><strong>{Number(memoryHealth.totals?.shortlist_lock_failed || 0).toLocaleString()}</strong></div>
+            <div className="list-item"><div>Disambiguation prompts</div><strong>{Number(memoryHealth.totals?.disambiguation_prompts || 0).toLocaleString()}</strong></div>
+            <div className="list-item"><div>Summary checkpoints</div><strong>{Number(memoryHealth.totals?.summary_checkpoints || 0).toLocaleString()}</strong></div>
+            <div className="list-item"><div>Summary age (avg sec)</div><strong>{Number(memoryHealth.averages?.summary_age_sec || 0).toFixed(1)}</strong></div>
+          </div>
+        )}
+      </div>
+
       <div style={{ marginTop: 14 }}>
         {(attackLoading || attackError) && (
           <div className="callout">
@@ -781,6 +940,212 @@ export function MerchantBIPro({ role }: Props) {
           <a className="btn secondary" href="/api/v1/admin/grc/report?days=30" target="_blank" rel="noreferrer">GRC report (30d)</a>
           <a className="btn ghost" href="/api/v1/decisions/query" target="_blank" rel="noreferrer">Decision logs</a>
           <a className="btn ghost" href="/api/v1/admin/security/events?limit=50&offset=0" target="_blank" rel="noreferrer">Security events</a>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>Executive Pulse</h3>
+        {!pulse && <div className="page-sub">Loading pulse...</div>}
+        {!!pulse && (
+          <>
+            <div className="grid-4" style={{ marginTop: 10 }}>
+              <div className="list-item"><div>Revenue</div><strong>{formatMoney(Number(pulse.kpis.revenue || 0))}</strong></div>
+              <div className="list-item"><div>Gross margin %</div><strong>{Number(pulse.kpis.gross_margin_pct || 0).toFixed(2)}%</strong></div>
+              <div className="list-item"><div>Refund %</div><strong>{Number(pulse.kpis.refund_pct || 0).toFixed(2)}%</strong></div>
+              <div className="list-item"><div>Chargeback %</div><strong>{Number(pulse.kpis.chargeback_pct || 0).toFixed(2)}%</strong></div>
+              <div className="list-item"><div>Approval rate</div><strong>{Number(pulse.kpis.approval_rate || 0).toFixed(2)}%</strong></div>
+              <div className="list-item"><div>Autonomy %</div><strong>{Number(pulse.kpis.autonomy_pct || 0).toFixed(2)}%</strong></div>
+              <div className="list-item"><div>MTTD</div><strong>{Number(pulse.kpis.mttd_minutes || 0).toFixed(2)} min</strong></div>
+              <div className="list-item"><div>MTTR</div><strong>{Number(pulse.kpis.mttr_minutes || 0).toFixed(2)} min</strong></div>
+            </div>
+            {!!alarms.length && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                {alarms.map((a, idx) => (
+                  <span key={`${a.type}-${idx}`} className="badge" style={{ background: 'rgba(159,45,27,0.08)', borderColor: 'rgba(159,45,27,0.2)' }}>
+                    [{a.severity}] {a.message}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {!!pulse && (
+        <>
+          <div className="grid-2" style={{ marginTop: 14 }}>
+            <OverlayLineChart
+              title="Trend Overlay: Revenue vs Baseline"
+              points={(pulse.trend_overlays.revenue || []).map((r) => ({
+                x: String(r.bucket || ''),
+                actual: Number(r.actual || 0),
+                baseline: Number(r.baseline || 0),
+                low: Number(r.anomaly_low || 0),
+                high: Number(r.anomaly_high || 0),
+                anomaly: Boolean(r.is_anomaly),
+              }))}
+            />
+            <div className="card">
+              <h3>Causal Factor Chips</h3>
+              <div className="page-sub">Promo, supplier outage, traffic-drop style tags from incident correlations.</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                {(pulse.trend_overlays.causal_factors || []).length === 0 && <span className="page-sub">No causal factors in range.</span>}
+                {(pulse.trend_overlays.causal_factors || []).map((c) => (
+                  <span key={c.id} className="badge">{c.id} ({c.count})</span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid-2" style={{ marginTop: 14 }}>
+            <div className="card">
+              <h3>Agentic Ops</h3>
+              <div className="page-sub">Auto vs human-reviewed, false-positive drift, per-agent latency/error.</div>
+              <table className="table" style={{ marginTop: 10 }}>
+                <thead><tr><th>Bucket</th><th>Auto</th><th>Human</th></tr></thead>
+                <tbody>
+                  {(pulse.agentic_ops.auto_vs_human || []).slice(-8).map((r) => <tr key={r.bucket}><td>{r.bucket}</td><td>{r.auto}</td><td>{r.human}</td></tr>)}
+                </tbody>
+              </table>
+              <div style={{ marginTop: 10 }}>
+                {(pulse.agentic_ops.false_positive_drift || []).slice(-8).map((f) => (
+                  <span key={f.week} className="badge" style={{ marginRight: 6 }}>{f.week}: {Number(f.fp_rate || 0).toFixed(1)}%</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="card">
+              <h3>Security Incursions Matrix</h3>
+              <div className="page-sub">Type x severity x week.</div>
+              <table className="table" style={{ marginTop: 10 }}>
+                <thead><tr><th>Week</th><th>Type</th><th>Severity</th><th>Count</th></tr></thead>
+                <tbody>
+                  {(pulse.security_incursions_matrix || []).slice(-20).map((m, idx) => (
+                    <tr key={`${m.week}-${m.type}-${m.severity}-${idx}`}>
+                      <td>{m.week}</td><td>{m.type}</td><td>{m.severity}</td><td>{m.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 14 }}>
+            <h3>Decision Replay</h3>
+            <div className="page-sub">Policy version changes vs outcome shifts.</div>
+            <table className="table" style={{ marginTop: 10 }}>
+              <thead><tr><th>Policy</th><th>Decisions</th><th>Approval rate</th></tr></thead>
+              <tbody>
+                {(pulse.decision_replay || []).map((r) => (
+                  <tr key={r.policy_version}><td>{r.policy_version}</td><td>{r.decisions}</td><td>{Number(r.approval_rate || 0).toFixed(2)}%</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>NL-to-BI Query Agent</h3>
+        <div className="page-sub">Template SQL only, strict schema guardrails.</div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+          <input className="modal-input" value={queryText} onChange={(e) => setQueryText(e.target.value)} style={{ flex: 1 }} />
+          <button
+            className="btn"
+            disabled={queryLoading}
+            onClick={async () => {
+              setQueryLoading(true);
+              try {
+                const res = await runBiQueryAgent({ query: queryText, start, end, limit: 200 });
+                setQueryResult(res);
+              } catch (e: any) {
+                setQueryResult({ status: 'error', error: e?.message || 'query_failed' });
+              } finally {
+                setQueryLoading(false);
+              }
+            }}
+          >
+            {queryLoading ? 'Running...' : 'Run'}
+          </button>
+        </div>
+        {queryResult && (
+          <pre style={{ marginTop: 10, maxHeight: 220, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10, padding: 10, background: '#fff' }}>
+            {JSON.stringify(queryResult, null, 2)}
+          </pre>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>Agentic RAG Pipeline Signals</h3>
+        <div className="page-sub">Plan to Retrieve to Rank to Inject to Decide to Verify to Trace, surfaced from decision trace events.</div>
+        {!ragSummary && <div className="page-sub" style={{ marginTop: 10 }}>No recent agentic RAG events.</div>}
+        {!!ragSummary && (
+          <div className="list" style={{ marginTop: 10 }}>
+            <div className="list-item"><div>Injected contexts (7d)</div><strong>{Number(ragSummary.contexts_injected || 0)}</strong></div>
+            <div className="list-item"><div>Verify failures (7d)</div><strong>{Number(ragSummary.verify_failures || 0)}</strong></div>
+            <div className="list-item"><div>Avg budget utilization</div><strong>{(100 * Number(ragSummary.avg_budget_utilization || 0)).toFixed(1)}%</strong></div>
+            <div className="list-item"><div>Event counts</div><strong>{Object.entries((ragSummary.event_counts || {})).map(([k, v]) => `${k}:${v}`).join(' | ') || '-'}</strong></div>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>DB Stack Status</h3>
+        <div className="page-sub">Postgres source-of-truth, Timescale, CacheRAG/Redis, and Neo4j pilot readiness.</div>
+        {!dbStack && <div className="page-sub" style={{ marginTop: 10 }}>Unavailable.</div>}
+        {!!dbStack && (
+          <div className="list" style={{ marginTop: 10 }}>
+            <div className="list-item"><div>Postgres source of truth</div><strong>{dbStack.postgres_source_of_truth ? 'yes' : 'no'}</strong></div>
+            <div className="list-item"><div>Timescale extension</div><strong>{dbStack.timescaledb_extension ? 'yes' : 'no'}</strong></div>
+            <div className="list-item"><div>Timescale CAGG orders_hourly</div><strong>{dbStack.timescale_cagg_orders_hourly ? 'yes' : 'no'}</strong></div>
+            <div className="list-item"><div>Redis configured</div><strong>{dbStack.redis_configured ? 'yes' : 'no'}</strong></div>
+            <div className="list-item"><div>Neo4j fraud pilot enabled</div><strong>{dbStack.neo4j_pilot_enabled ? 'yes' : 'no'}</strong></div>
+            <div className="list-item"><div>Security event sinks</div><strong>{Array.isArray(dbStack.security_event_storage_targets) && dbStack.security_event_storage_targets.length ? dbStack.security_event_storage_targets.join(', ') : 'database'}</strong></div>
+          </div>
+        )}
+      </div>
+
+      <div className="grid-2" style={{ marginTop: 14 }}>
+        <div className="card">
+          <h3>ML Governance</h3>
+          <div className="page-sub">Forecast retrain governance and collaborative-filtering train health.</div>
+          {!mlGovernance && <div className="page-sub" style={{ marginTop: 10 }}>Unavailable.</div>}
+          {!!mlGovernance && (
+            <div className="list" style={{ marginTop: 10 }}>
+              <div className="list-item"><div>CF model version</div><strong>{mlGovernance?.cf_training?.last_success_model_version || '-'}</strong></div>
+              <div className="list-item"><div>CF last success</div><strong>{mlGovernance?.cf_training?.last_success_at || '-'}</strong></div>
+              <div className="list-item"><div>Forecast avg MAPE proxy</div><strong>{mlGovernance?.forecast_governance?.avg_mape_proxy ?? '-'}</strong></div>
+              <div className="list-item"><div>Forecast quarantine avg</div><strong>{mlGovernance?.forecast_governance?.avg_quarantined_points ?? '-'}</strong></div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <h3>HITL Reviewer Consistency</h3>
+          <div className="page-sub">Reviewer approval/rejection/escalation patterns and turnaround consistency.</div>
+          {!reviewerConsistency && <div className="page-sub" style={{ marginTop: 10 }}>Unavailable.</div>}
+          {!!reviewerConsistency && (
+            <>
+              <div className="list" style={{ marginTop: 10 }}>
+                <div className="list-item"><div>Total reviews (30d)</div><strong>{reviewerConsistency?.summary?.total_reviews ?? 0}</strong></div>
+                <div className="list-item"><div>Median turnaround (min)</div><strong>{reviewerConsistency?.summary?.median_turnaround_minutes ?? 0}</strong></div>
+              </div>
+              <table className="table" style={{ marginTop: 10 }}>
+                <thead><tr><th>Reviewer</th><th>Reviews</th><th>Approval %</th><th>Escalation %</th><th>Band</th></tr></thead>
+                <tbody>
+                  {(reviewerConsistency?.reviewers || []).slice(0, 8).map((r: any) => (
+                    <tr key={r.reviewer_id}>
+                      <td>{r.reviewer_id}</td>
+                      <td>{r.total_reviews}</td>
+                      <td>{Number(r.approval_rate || 0).toFixed(1)}</td>
+                      <td>{Number(r.escalation_rate || 0).toFixed(1)}</td>
+                      <td>{r.consistency_band || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       </div>
     </div>

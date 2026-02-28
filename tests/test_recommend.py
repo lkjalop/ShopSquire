@@ -599,3 +599,190 @@ def test_nqe_option_contract_helper_adds_budget_and_use_case_options():
     assert any(str((o or {}).get("id") or "").startswith("budget_") for o in budget_opts if isinstance(o, dict))
     assert any(str((o or {}).get("id") or "").startswith("use_case_") for o in use_case_opts if isinstance(o, dict))
 
+
+def test_zero_result_followup_does_not_overwrite_prior_shortlist():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p1", "sku": "A-1", "name": "ASUS Gaming 15", "price_cents": 159900, "currency": "USD", "stock": 5, "specs": {"gpu": "rtx 4060"}},
+            {"id": "p2", "sku": "L-1", "name": "Lenovo Legion 5", "price_cents": 169900, "currency": "USD", "stock": 5, "specs": {"gpu": "rtx 4060"}},
+            {"id": "p3", "sku": "M-1", "name": "MSI Katana", "price_cents": 179900, "currency": "USD", "stock": 5, "specs": {"gpu": "rtx 4070"}},
+            {"id": "p4", "sku": "C-1", "name": "Canon Printer", "price_cents": 12900, "currency": "USD", "stock": 5, "specs": {}},
+        ]
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        uid = "u-shortlist-preserve-1"
+        r1 = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": uid, "query": "show me gaming laptops between 1500 and 1900"},
+        )
+        assert r1.status_code == 200
+        b1 = r1.json()
+        turn1_skus = [str((x or {}).get("sku") or "") for x in (b1.get("results") or []) if isinstance(x, dict)]
+        turn1_skus = [x for x in turn1_skus if x]
+        assert len(turn1_skus) >= 1
+
+        # This turn intentionally produces zero matches by applying a brand filter not in candidates.
+        r2 = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": uid, "query": "show options under $50"},
+        )
+        assert r2.status_code == 200
+        b2 = r2.json()
+        assert (b2.get("results") or []) == []
+
+        # Follow-up explain should still anchor to the prior shortlist from turn 1.
+        r3 = client.get(
+            "/api/v1/recommend/suggest",
+            params={"uid": uid, "query": "give me detailed list from those and why"},
+        )
+        assert r3.status_code == 200
+        b3 = r3.json()
+        turn3 = b3.get("results") or []
+        turn3_skus = [str((x or {}).get("sku") or "") for x in turn3 if isinstance(x, dict)]
+        turn3_skus = [x for x in turn3_skus if x]
+        assert len(turn3_skus) >= 1
+        assert len(turn3_skus) <= len(turn1_skus)
+        assert all(s in set(turn1_skus) for s in turn3_skus)
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_nqe_confidence_gating_prefers_non_techy_prompts_for_ambiguous_queries():
+    qs = [{"id": "ask_specs", "text": "What specs do you need?"}]
+    out = recommend_router._apply_nqe_confidence_gating(qs, query="help me pick a laptop", confidence_band="low")
+    assert isinstance(out, list) and out
+    txt = str((out[0] or {}).get("text") or "").lower()
+    assert "must-have features" in txt
+    assert "gpu class" not in txt
+
+
+def test_nqe_confidence_gating_uses_techy_prompts_for_requirements_queries():
+    qs = [{"id": "ask_specs", "text": "What specs do you need?"}]
+    out = recommend_router._apply_nqe_confidence_gating(
+        qs, query="what are the system requirements for ai training and cuda", confidence_band="high"
+    )
+    assert isinstance(out, list) and out
+    txt = str((out[0] or {}).get("text") or "").lower()
+    assert "gpu class" in txt
+
+
+def test_open_ended_response_sets_needs_disambiguation():
+    _write_flags({
+        "USE_AGENT_CAPABILITIES": True,
+        "AGENT_ROLLOUT_PERCENT": 100,
+        "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+        "KILL_SWITCH": False,
+        "DECISION_LOG_WRITES_ENABLED": False,
+        "DEGRADATION": {"enabled": True},
+        "TEST_FORCE_BAD_SKU": False,
+    })
+    r = client.get("/api/v1/recommend/suggest", params={"uid": "u-open-ended-nd-1", "query": "help me choose a laptop"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("needs_disambiguation") is True
+
+
+def test_why_product_endpoint_returns_explanation_and_logs_event():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p1", "sku": "WHY-1", "name": "Creator Pro 16", "price_cents": 179900, "currency": "USD", "stock": 4, "specs": {"gpu": "rtx 4070", "ram_gb": 32}},
+            {"id": "p2", "sku": "WHY-2", "name": "Office Light 14", "price_cents": 109900, "currency": "USD", "stock": 8, "specs": {"gpu": "integrated", "ram_gb": 16}},
+        ]
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        uid = "u-why-product-1"
+        r1 = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": "video editing laptop under 2000"})
+        assert r1.status_code == 200
+        trace_id = "trace-why-product-1"
+        r2 = client.get(
+            "/api/v1/recommend/why_product",
+            params={"uid": uid, "sku": "WHY-1", "query": "video editing laptop under 2000", "trace_id": trace_id},
+        )
+        assert r2.status_code == 200
+        body = r2.json()
+        exp = body.get("explanation") or {}
+        assert body.get("decision_trace_id") == trace_id
+        assert str(exp.get("sku") or "") == "WHY-1"
+        assert isinstance(exp.get("reason_summary"), str) and exp.get("reason_summary")
+        assert isinstance(exp.get("disqualifiers"), list)
+
+        ev = client.get(f"/api/v1/trace/{trace_id}/events")
+        assert ev.status_code == 200
+        events = ev.json().get("events") or []
+        assert any(str(e.get("source_id") or "") == "Selection_Explain_Agent" for e in events)
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_turn_type_classifier_covers_core_paths():
+    assert recommend_router._classify_turn_type(results_count=0, followup_explain=False, explicit_constraint_update=False) == "zero_result_turn"
+    assert recommend_router._classify_turn_type(results_count=3, followup_explain=True, explicit_constraint_update=False) == "explain_turn"
+    assert recommend_router._classify_turn_type(results_count=2, followup_explain=False, explicit_constraint_update=True) == "constraint_update_turn"
+    assert recommend_router._classify_turn_type(results_count=2, followup_explain=False, explicit_constraint_update=False) == "result_turn"
+
+
+def test_update_pinned_context_persists_priority_slots():
+    kv = {}
+    out = recommend_router._update_pinned_context(
+        kv=kv,
+        constraints={
+            "budget_min": 1000,
+            "budget_max": 1800,
+            "use_case": "gaming",
+            "gpu_preference": "with_discrete",
+            "brands": ["Lenovo"],
+            "brand_excludes": ["Apple"],
+        },
+        shortlist_skus=["SKU-1", "SKU-2"],
+        turn_type="result_turn",
+        ts=12345,
+    )
+    pc = out.get("pinned_context") or {}
+    assert isinstance(pc.get("budget"), dict)
+    assert isinstance(pc.get("selected_skus"), dict)
+    assert pc.get("gpu_preference", {}).get("value") == "with_discrete"
+    assert pc.get("budget", {}).get("value", {}).get("max") == 1800
+    assert pc.get("selected_skus", {}).get("value") == ["SKU-1", "SKU-2"]
+
+
+def test_followup_reference_without_shortlist_prompts_disambiguation():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p1", "sku": "R-1", "name": "Laptop A", "price_cents": 99900, "currency": "USD", "stock": 4, "specs": {"ram_gb": 16}},
+        ]
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        r = client.get("/api/v1/recommend/suggest", params={"uid": "u-ref-miss-1", "query": "show me those and why"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("needs_disambiguation") is True
+        assert float(body.get("memory_confidence") or 0.0) < 0.5
+        nqs = body.get("next_questions") or []
+        assert any(str((q or {}).get("id") or "") == "resolve_reference" for q in nqs if isinstance(q, dict))
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+

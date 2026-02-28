@@ -242,6 +242,7 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
     deleted = {
         "decision_logs": 0,
         "decision_audits": 0,
+        "chat_messages": 0,
         "order_sessions": 0,
         "orders": 0,
         "draft_orders": 0,
@@ -270,8 +271,14 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                 )
                 deleted["decision_logs"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute("DELETE FROM order_sessions WHERE uid = :uid", {"uid": uid})
+            res = db.execute(text("DELETE FROM order_sessions WHERE uid = :uid"), {"uid": uid})
             deleted["order_sessions"] = getattr(res, "rowcount", 0) or 0
+
+            try:
+                res = db.execute(text("DELETE FROM chat_messages WHERE uid = :uid"), {"uid": uid})
+                deleted["chat_messages"] = getattr(res, "rowcount", 0) or 0
+            except Exception:
+                deleted["chat_messages"] = 0
 
             res = db.execute(
                 "UPDATE orders SET customer_id = 'DELETED' WHERE customer_id = :uid",
@@ -279,10 +286,10 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
             )
             deleted["orders"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute("DELETE FROM draft_orders WHERE customer_id = :uid", {"uid": uid})
+            res = db.execute(text("DELETE FROM draft_orders WHERE customer_id = :uid"), {"uid": uid})
             deleted["draft_orders"] = getattr(res, "rowcount", 0) or 0
 
-            res = db.execute("DELETE FROM customers WHERE id = :uid", {"uid": uid})
+            res = db.execute(text("DELETE FROM customers WHERE id = :uid"), {"uid": uid})
             deleted["customers"] = getattr(res, "rowcount", 0) or 0
 
             db.commit()
@@ -308,6 +315,7 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
         "uid": uid,
         "uid_hash": uid_hash,
         "exported_at": datetime.utcnow().isoformat(),
+        "chat_messages": [],
         "customers": [],
         "orders": [],
         "order_sessions": [],
@@ -318,12 +326,24 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
     }
     try:
         with db_session() as db:
-            rows = db.execute("SELECT * FROM customers WHERE id = :uid", {"uid": uid}).mappings().all()
+            rows = db.execute(text("SELECT * FROM customers WHERE id = :uid"), {"uid": uid}).mappings().all()
             export["customers"] = [dict(r) for r in rows]
 
-            rows = db.execute("SELECT * FROM order_sessions WHERE uid = :uid", {"uid": uid}).mappings().all()
+            rows = db.execute(text("SELECT * FROM order_sessions WHERE uid = :uid"), {"uid": uid}).mappings().all()
             export["order_sessions"] = [dict(r) for r in rows]
             order_ids = [r.get("order_id") for r in export["order_sessions"] if r.get("order_id")]
+
+            try:
+                rows = db.execute(
+                    text(
+                        "SELECT id, uid, session_id, role, content, trace_id, created_at "
+                        "FROM chat_messages WHERE uid = :uid ORDER BY created_at DESC LIMIT 1000"
+                    ),
+                    {"uid": uid},
+                ).mappings().all()
+                export["chat_messages"] = [dict(r) for r in rows]
+            except Exception:
+                export["chat_messages"] = []
 
             if order_ids:
                 rows = db.execute(
@@ -340,7 +360,7 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                 ).mappings().all()
                 export["orders"] = [dict(r) for r in rows]
 
-            rows = db.execute("SELECT * FROM draft_orders WHERE customer_id = :uid", {"uid": uid}).mappings().all()
+            rows = db.execute(text("SELECT * FROM draft_orders WHERE customer_id = :uid"), {"uid": uid}).mappings().all()
             export["draft_orders"] = [dict(r) for r in rows]
 
             _where, params = _uid_patterns(uid, uid_hash)
@@ -512,7 +532,7 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                     new_inp = _redact_json(inp) if isinstance(inp, (dict, list)) else inp
                     new_rc = _redact_json(rc) if isinstance(rc, (dict, list)) else rc
                     new_pa = _redact_json(pa) if isinstance(pa, (dict, list)) else pa
-                    db.execute("UPDATE decision_logs SET input_data = :inp, retrieved_context = :rc, proposed_action = :pa WHERE id = :id", {"inp": json.dumps(new_inp, ensure_ascii=False), "rc": json.dumps(new_rc, ensure_ascii=False), "pa": json.dumps(new_pa, ensure_ascii=False), "id": _id})
+                    db.execute(text("UPDATE decision_logs SET input_data = :inp, retrieved_context = :rc, proposed_action = :pa WHERE id = :id"), {"inp": json.dumps(new_inp, ensure_ascii=False), "rc": json.dumps(new_rc, ensure_ascii=False), "pa": json.dumps(new_pa, ensure_ascii=False), "id": _id})
                 except Exception:
                     pass
             redacted["decision_logs"] = len(ids)
@@ -530,14 +550,14 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                         aid = r2[0]
                         meta = _safe_json(r2[1])
                         new_meta = _redact_json(meta) if isinstance(meta, (dict, list)) else meta
-                        db.execute("UPDATE decision_audits SET metadata = :m WHERE id = :id", {"m": json.dumps(new_meta, ensure_ascii=False), "id": aid})
+                        db.execute(text("UPDATE decision_audits SET metadata = :m WHERE id = :id"), {"m": json.dumps(new_meta, ensure_ascii=False), "id": aid})
                         cnt += 1
                     except Exception:
                         pass
                 redacted["decision_audits"] = cnt
             # pseudonymize customers row for strict minimization
             try:
-                res = db.execute("UPDATE customers SET email = 'REDACTED', phone = NULL, first_name = 'REDACTED', last_name = NULL WHERE id = :uid", {"uid": uid})
+                res = db.execute(text("UPDATE customers SET email = 'REDACTED', phone = NULL, first_name = 'REDACTED', last_name = NULL WHERE id = :uid"), {"uid": uid})
                 redacted["customers"] = getattr(res, "rowcount", 0) or 0
             except Exception:
                 redacted["customers"] = 0

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from sqlalchemy import text as sql_text
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.deps import get_redis
+from src.app.models.db import get_db
 from src.app.services.llm_provider import select_ollama_model, ollama_generate, is_complex_query, score_query_complexity
 from src.app.services.search_events import log_search_event
 from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
@@ -18,11 +21,72 @@ from src.app.services.decision_log import log_trace_event
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
+def _ensure_chat_messages_table(db) -> None:
+    dialect = str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+    if "sqlite" in dialect:
+        db.execute(
+            sql_text(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                  id TEXT PRIMARY KEY,
+                  uid TEXT NOT NULL,
+                  session_id TEXT,
+                  role TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  trace_id TEXT,
+                  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+    else:
+        db.execute(
+            sql_text(
+                """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                  id TEXT PRIMARY KEY,
+                  uid TEXT NOT NULL,
+                  session_id TEXT NULL,
+                  role TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  trace_id TEXT NULL,
+                  created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+                """
+            )
+        )
+    db.commit()
+
+
+def _store_chat_message(db, *, uid: str, role: str, content: str, trace_id: str | None, session_id: str | None = None) -> None:
+    if not str(content or "").strip():
+        return
+    _ensure_chat_messages_table(db)
+    db.execute(
+        sql_text(
+            """
+            INSERT INTO chat_messages (id, uid, session_id, role, content, trace_id)
+            VALUES (:id, :uid, :session_id, :role, :content, :trace_id)
+            """
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "uid": str(uid or "demo-user"),
+            "session_id": str(session_id or "")[:128] or None,
+            "role": str(role or "assistant")[:32],
+            "content": str(content or "")[:8000],
+            "trace_id": str(trace_id or "")[:128] or None,
+        },
+    )
+    db.commit()
+
+
 @router.post("/query")
 async def chat_query(
     request: Request,
     payload: Dict,
     redis=Depends(get_redis),
+    db=Depends(get_db),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
     """Chat query wrapper that delegates to recommendation endpoint and
@@ -138,7 +202,7 @@ async def chat_query(
 
     # If intent is disambiguate, return disambiguation response without calling recommend
     if image_intent_in == "disambiguate" and has_image:
-        return {
+        out = {
             "products": [],
             "view_mode": "cards",
             "confidence": None,
@@ -150,6 +214,7 @@ async def chat_query(
                 "\u2022 Or describe what you need and I'll figure it out"
             ),
             "disambiguation": True,
+            "needs_disambiguation": True,
             "intent_routing": intent_routing_result,
             "next_questions": [
                 {"id": "visual_search", "text": "Find similar products", "goal": "visual_search"},
@@ -160,6 +225,13 @@ async def chat_query(
             "model_tier": None,
             "complexity": score_query_complexity(q, context={"has_image": True}),
         }
+        try:
+            uid = str((payload or {}).get("uid") or "demo-user")
+            _store_chat_message(db, uid=uid, role="user", content=q, trace_id=None)
+            _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=None)
+        except Exception:
+            pass
+        return out
 
     # -----------------------------------------------------------------------
     # Complexity scoring for trace enrichment
@@ -246,7 +318,7 @@ async def chat_query(
                     {"id": "remove_sensitive", "text": "Can you rephrase without any personal info, order numbers, or long digit strings?", "goal": "safety_rephrase"},
                     {"id": "use_budget_words", "text": "If you meant a price range, try: 'budget between $900 and $1300'.", "goal": "clarify_details"},
                 ]
-                return {
+                out = {
                     "products": [],
                     "view_mode": "cards",
                     "confidence": None,
@@ -259,6 +331,19 @@ async def chat_query(
                     "blocked": True,
                     "blocked_detail": blocked,
                 }
+                try:
+                    uid = str((payload or {}).get("uid") or "demo-user")
+                    _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id)
+                    _store_chat_message(
+                        db,
+                        uid=uid,
+                        role="assistant",
+                        content=str(out.get("assistant_message") or ""),
+                        trace_id=decision_trace_id,
+                    )
+                except Exception:
+                    pass
+                return out
             r.raise_for_status()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"recommend_unavailable: {e}")
@@ -363,7 +448,7 @@ async def chat_query(
                 source_type="agent", source_id="Chat_Multimodal",
                 target_type="chat", target_id=None,
                 payload={
-                    "image_count": len(images_list) if images_list else (1 if has_image else 0),
+                    "image_count": len(images_array) if images_array else (1 if has_image else 0),
                     "voice_used": bool(voice_transcript),
                     "labels": (image_labels_in[:12] if isinstance(image_labels_in, list) else []),
                     "ocr_text": str(image_ocr_text_in or "")[:200],
@@ -404,7 +489,7 @@ async def chat_query(
     except Exception:
         pass
 
-    return {
+    out = {
         "products": products,
         "view_mode": view_mode,
         "confidence": confidence,
@@ -412,6 +497,7 @@ async def chat_query(
         "trace_id": decision_trace_id,
         "assistant_message": assistant_message,
         "next_questions": next_questions,
+        "needs_disambiguation": bool(data.get("needs_disambiguation") or (not products and next_questions)),
         "nqe_selection_applied": data.get("nqe_selection_applied") or {},
         "llm_model": data.get("llm_model"),
         "model_tier": data.get("model_tier"),
@@ -419,6 +505,54 @@ async def chat_query(
         "intent_routing": intent_routing_result,
         "voice_used": bool(voice_transcript),
     }
+    try:
+        uid = str((payload or {}).get("uid") or "demo-user")
+        session_id = str((payload or {}).get("session_id") or "")[:128] or None
+        _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
+        _store_chat_message(
+            db,
+            uid=uid,
+            role="assistant",
+            content=str(out.get("assistant_message") or ""),
+            trace_id=decision_trace_id,
+            session_id=session_id,
+        )
+    except Exception:
+        pass
+    return out
+
+
+@router.get("/history")
+def chat_history(
+    request: Request,
+    uid: str,
+    limit: int = Query(50, ge=1, le=500),
+    before: Optional[str] = None,
+    db=Depends(get_db),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    _ensure_chat_messages_table(db)
+    params: Dict[str, Any] = {"uid": uid, "lim": int(limit)}
+    where = "WHERE uid = :uid"
+    if before:
+        where += " AND created_at < :before"
+        params["before"] = str(before)
+    rows = db.execute(
+        sql_text(
+            f"""
+            SELECT id, uid, session_id, role, content, trace_id, created_at
+            FROM chat_messages
+            {where}
+            ORDER BY created_at DESC
+            LIMIT :lim
+            """
+        ),
+        params,
+    ).mappings().all()
+    items = [dict(r) for r in rows]
+    items.reverse()
+    return {"uid": uid, "count": len(items), "items": items}
 
 
 @router.post("/ollama_test")
