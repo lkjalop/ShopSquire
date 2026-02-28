@@ -30,7 +30,7 @@ type ChatMessage = {
   images?: string[];           // data-URL thumbnails shown inline
   disambiguation?: boolean;    // true → render DisambiguationButtons
   disambiguationOptions?: string[];
-  nextQuestions?: { id: string; text: string; goal?: string }[];
+  nextQuestions?: { id: string; text: string; goal?: string; options?: { id: string; label: string; value?: string }[] }[];
   complexity?: { score: number; tier: string; model: string };
   voiceUsed?: boolean;
 };
@@ -328,24 +328,35 @@ export default function App() {
 
   const hasRightPanel = rightPanelMode !== 'none';
 
-  const normalizeNextQuestions = (items: any[]): { id: string; text: string; goal?: string }[] => {
+  const normalizeNextQuestions = (items: any[]): { id: string; text: string; goal?: string; options?: { id: string; label: string; value?: string }[] }[] => {
     if (!Array.isArray(items)) return [];
     const out = items
       .map((item: any, idx: number) => {
         if (item && typeof item === 'object') {
           const text = String(item.text || item.question || '').trim();
           if (!text) return null;
+          const options = Array.isArray(item.options)
+            ? item.options
+                .map((o: any, j: number) => ({
+                  id: String(o?.id || `opt_${j + 1}`),
+                  label: String(o?.label || o?.text || '').trim(),
+                  value: o?.value != null ? String(o.value) : undefined,
+                }))
+                .filter((o: any) => o.label)
+                .slice(0, 5)
+            : undefined;
           return {
             id: String(item.id || `nq_${idx + 1}`),
             text,
             goal: item.goal ? String(item.goal) : undefined,
+            options,
           };
         }
         const text = String(item || '').trim();
         if (!text) return null;
         return { id: `nq_${idx + 1}`, text };
       })
-      .filter(Boolean) as { id: string; text: string; goal?: string }[];
+      .filter(Boolean) as { id: string; text: string; goal?: string; options?: { id: string; label: string; value?: string }[] }[];
     return out.slice(0, 3);
   };
 
@@ -424,8 +435,8 @@ export default function App() {
     };
   }, [chatOpen]);
 
-  const handleSend = async () => {
-    const q = inputValue.trim();
+  const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string } }) => {
+    const q = String(opts?.queryOverride ?? inputValue).trim();
     if (!q) return;
 
     // PII Detection - warn user and don't send sensitive data
@@ -577,6 +588,9 @@ export default function App() {
       } else {
         // Build multimodal chat payload
         const chatPayload: any = { uid, query: q };
+        if (opts?.nqeSelection) {
+          chatPayload.nqe_selection = opts.nqeSelection;
+        }
         if (currentSttSrc) {
           chatPayload.voice_transcript = q;
           chatPayload.voice_confidence = currentSttConf ?? undefined;
@@ -678,13 +692,31 @@ export default function App() {
 
   const handleQuickAction = (query: string) => {
     setInputValue(query);
-    setTimeout(() => handleSend(), 100);
+    setTimeout(() => handleSend({ queryOverride: query }), 100);
   };
 
   /** Disambiguation button click → re-send with the chosen intent */
   const handleDisambiguationSelect = (option: string) => {
     setInputValue(option);
-    setTimeout(() => handleSend(), 100);
+    setTimeout(() => handleSend({ queryOverride: option }), 100);
+  };
+
+  const handleNqeOptionSelect = (
+    question: { id: string; text: string; goal?: string; options?: { id: string; label: string; value?: string }[] },
+    option: { id: string; label: string; value?: string },
+  ) => {
+    const label = String(option?.label || '').trim();
+    if (!label) return;
+    setInputValue(label);
+    setTimeout(() => handleSend({
+      queryOverride: label,
+      nqeSelection: {
+        question_id: question.id,
+        option_id: option.id,
+        option_label: label,
+        option_value: option.value,
+      },
+    }), 100);
   };
 
   /** Drag-and-drop on chat body */
@@ -837,14 +869,29 @@ export default function App() {
                       {msg.nextQuestions && msg.nextQuestions.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
                           {msg.nextQuestions.map((nq) => (
-                            <button
-                              key={nq.id}
-                              type="button"
-                              className={styles.filterBtn}
-                              onClick={() => handleQuickAction(nq.text)}
-                            >
-                              {nq.text}
-                            </button>
+                            <div key={nq.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
+                              <button
+                                type="button"
+                                className={styles.filterBtn}
+                                onClick={() => handleQuickAction(nq.text)}
+                              >
+                                {nq.text}
+                              </button>
+                              {Array.isArray(nq.options) && nq.options.length > 0 && (
+                                <>
+                                  {nq.options.map((opt) => (
+                                    <button
+                                      key={`${nq.id}:${opt.id}`}
+                                      type="button"
+                                      className={styles.filterBtn}
+                                      onClick={() => handleNqeOptionSelect(nq, opt)}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                            </div>
                           ))}
                         </div>
                       )}

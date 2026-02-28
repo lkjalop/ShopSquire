@@ -525,6 +525,35 @@ def _append_gpu_disambiguation_question(existing: list[dict] | None, query: str 
     return out[:3]
 
 
+def _append_standard_nqe_options(existing: list[dict] | None, query: str | None = None) -> list[dict]:
+    out: list[dict] = []
+    for item in (existing or []):
+        if not isinstance(item, dict):
+            continue
+        q = dict(item)
+        qid = str(q.get("id") or "").strip().lower()
+        if qid == "ask_budget" and not isinstance(q.get("options"), list):
+            q["options"] = [
+                {"id": "budget_under_1000", "label": "Under $1,000", "value": "0-1000"},
+                {"id": "budget_1000_1500", "label": "$1,000-$1,500", "value": "1000-1500"},
+                {"id": "budget_1500_2200", "label": "$1,500-$2,200", "value": "1500-2200"},
+                {"id": "budget_2200_plus", "label": "$2,200+", "value": "2200+"},
+            ]
+        elif qid == "ask_use_case" and not isinstance(q.get("options"), list):
+            q["options"] = [
+                {"id": "use_case_student", "label": "School and everyday"},
+                {"id": "use_case_business", "label": "Work and productivity"},
+                {"id": "use_case_gaming", "label": "Gaming"},
+                {"id": "use_case_video_editing", "label": "Video editing / creative"},
+                {"id": "use_case_ai_training", "label": "AI training / ML"},
+            ]
+        out.append(q)
+    # Ensure GPU disambiguation card is preserved if requested.
+    if any(str((q or {}).get("id") or "") == "ask_gpu_preference" for q in out):
+        out = _append_gpu_disambiguation_question(out, query)
+    return out[:3]
+
+
 def _is_techy_query(query: str | None) -> bool:
     q = str(query or "").lower()
     if not q:
@@ -542,6 +571,85 @@ def _is_selection_rationale_query(query: str | None) -> bool:
             q,
         )
     )
+
+
+def _apply_nqe_selection_to_constraints(
+    *,
+    constraints: Dict[str, Any],
+    nqe_question_id: str | None,
+    nqe_option_id: str | None,
+    nqe_option_label: str | None,
+) -> Dict[str, Any]:
+    qid = str(nqe_question_id or "").strip().lower()
+    oid = str(nqe_option_id or "").strip().lower()
+    lbl = str(nqe_option_label or "").strip().lower()
+    applied: Dict[str, Any] = {}
+    if not qid or not oid:
+        return applied
+
+    if qid == "ask_gpu_preference":
+        if "without" in oid or "integrated" in oid or "without" in lbl:
+            constraints["gpu_preference"] = "without_discrete"
+            constraints["specs"] = [s for s in (constraints.get("specs") or []) if "gpu:discrete" not in str(s).lower()]
+            applied["gpu_preference"] = "without_discrete"
+        elif "with" in oid or "dedicated" in oid or "discrete" in oid or "rtx" in lbl or "radeon" in lbl:
+            constraints["gpu_preference"] = "with_discrete"
+            applied["gpu_preference"] = "with_discrete"
+        elif "no_preference" in oid:
+            constraints.pop("gpu_preference", None)
+            applied["gpu_preference"] = "none"
+        return applied
+
+    if qid == "ask_budget":
+        range_value = ""
+        if oid == "budget_under_1000":
+            range_value = "0-1000"
+        elif oid == "budget_1000_1500":
+            range_value = "1000-1500"
+        elif oid == "budget_1500_2200":
+            range_value = "1500-2200"
+        elif oid == "budget_2200_plus":
+            range_value = "2200+"
+        elif re.search(r"\d", lbl):
+            range_value = lbl.replace("$", "").replace(",", "").replace(" ", "")
+        if range_value.endswith("+"):
+            try:
+                constraints["budget_min"] = int(re.sub(r"[^\d]", "", range_value))
+                constraints["budget_max"] = None
+                applied["budget_min"] = constraints["budget_min"]
+            except Exception:
+                pass
+        elif "-" in range_value:
+            bits = [re.sub(r"[^\d]", "", x) for x in range_value.split("-", 1)]
+            try:
+                bmin = int(bits[0]) if bits and bits[0] else None
+                bmax = int(bits[1]) if len(bits) > 1 and bits[1] else None
+                if bmin is not None:
+                    constraints["budget_min"] = bmin
+                    applied["budget_min"] = bmin
+                if bmax is not None:
+                    constraints["budget_max"] = bmax
+                    applied["budget_max"] = bmax
+            except Exception:
+                pass
+        return applied
+
+    if qid == "ask_use_case":
+        mapping = {
+            "use_case_student": ("general_productivity", ["student", "general_productivity"]),
+            "use_case_business": ("general_productivity", ["business", "general_productivity"]),
+            "use_case_gaming": ("gaming", ["gaming"]),
+            "use_case_video_editing": ("content_creation", ["content_creation"]),
+            "use_case_ai_training": ("ai_ml_workstation", ["ai_ml_workstation"]),
+        }
+        use_case, tags = mapping.get(oid, (None, None))
+        if use_case:
+            constraints["use_case"] = use_case
+            constraints["use_case_tags"] = tags
+            applied["use_case"] = use_case
+            applied["use_case_tags"] = tags
+        return applied
+    return applied
 
 
 def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[str, Any]) -> Dict[str, Any]:
@@ -961,6 +1069,9 @@ def suggest(
     uid: str,
     query: str,
     budget_max: Optional[int] = None,
+    nqe_question_id: Optional[str] = None,
+    nqe_option_id: Optional[str] = None,
+    nqe_option_label: Optional[str] = None,
     image_labels: Optional[str] = None,
     image_ocr_text: Optional[str] = None,
     image_hash: Optional[str] = None,
@@ -1775,6 +1886,7 @@ def suggest(
     gpu_followup_question_needed = False
     gpu_inference_note: str | None = None
     gpu_pref_inferred = False
+    nqe_selection_applied: Dict[str, Any] = {}
     constraints = {
         "uid_hash": uid_hash,
         "budget_max": budget_max or parsed.get("budget_max") or nlp.get("preferences", {}).get("budget_max") or _decayed_pref("budget_max"),
@@ -1792,6 +1904,31 @@ def suggest(
         "slots": nlp.get("slots") or {},
         "shortlist_lock_active": shortlist_lock_active,
     }
+    try:
+        nqe_selection_applied = _apply_nqe_selection_to_constraints(
+            constraints=constraints,
+            nqe_question_id=nqe_question_id,
+            nqe_option_id=nqe_option_id,
+            nqe_option_label=nqe_option_label,
+        )
+        if nqe_selection_applied:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="nqe_option_applied",
+                source_type="user",
+                source_id=uid,
+                target_type="agent",
+                target_id="NQE_Agent",
+                payload={
+                    "question_id": nqe_question_id,
+                    "option_id": nqe_option_id,
+                    "option_label": nqe_option_label,
+                    "applied_constraints": nqe_selection_applied,
+                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["constraints"]),
+                },
+            )
+    except Exception:
+        nqe_selection_applied = {}
     strategy_corr = build_strategy_trace_correlation(
         query=query or "",
         nlp=nlp if isinstance(nlp, dict) else {},
@@ -2196,6 +2333,7 @@ def suggest(
         next_questions = (next_questions or [])[:2]
         if gpu_followup_question_needed:
             next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
+        next_questions = _append_standard_nqe_options(next_questions, query_effective)
         # Emit a decision trace event so SSE/WebSocket consumers see the clarifying questions
         try:
             if next_questions:
@@ -2257,6 +2395,7 @@ def suggest(
             "llm_model": llm_model,
             "model_tier": model_tier,
             "complexity_signals": complexity_signals,
+            "nqe_selection_applied": nqe_selection_applied,
         }
         _log_early_decision(
             status="clarifying_questions",
@@ -3509,6 +3648,7 @@ def suggest(
             next_questions = (next_questions or [])[:2]
             if gpu_followup_question_needed:
                 next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
+            next_questions = _append_standard_nqe_options(next_questions, query_effective)
             if next_questions:
                 payload["next_questions"] = next_questions
                 # Also attach follow-ups into the NLP bundle so frontends reading
@@ -3561,6 +3701,10 @@ def suggest(
     if gpu_followup_question_needed:
         next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
         payload["next_questions"] = next_questions
+    if isinstance(payload.get("next_questions"), list):
+        payload["next_questions"] = _append_standard_nqe_options(payload.get("next_questions"), query_effective)
+    if nqe_selection_applied:
+        payload["nqe_selection_applied"] = nqe_selection_applied
     assistant_message = None
     llm_summary_job_id = None
     llm_summary_requested = bool(nlp.get("llm_fallback") or explanation_request)

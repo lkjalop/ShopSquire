@@ -545,3 +545,57 @@ def test_selection_explanation_requests_llm_summary_and_trace(monkeypatch):
         RecommendationService.retrieve_candidates = orig_retrieve
         recommend_router._summarize_results = orig_summarize
 
+
+def test_nqe_budget_option_applies_budget_constraints():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p1", "sku": "B-LOW", "name": "Budget Laptop", "price_cents": 89900, "currency": "USD", "stock": 8, "specs": {"ram_gb": 16}},
+            {"id": "p2", "sku": "B-MID", "name": "Mid Laptop", "price_cents": 129900, "currency": "USD", "stock": 6, "specs": {"ram_gb": 16}},
+        ]
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": "u-nqe-budget-1",
+                "query": "show laptops",
+                "nqe_question_id": "ask_budget",
+                "nqe_option_id": "budget_under_1000",
+                "nqe_option_label": "Under $1,000",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        constraints = body.get("constraints_used") or {}
+        assert int(constraints.get("budget_max") or 0) == 1000
+        rows = body.get("results") or []
+        assert rows
+        assert all(int((x.get("price_cents") or 0)) <= 100000 for x in rows)
+        applied = body.get("nqe_selection_applied") or {}
+        assert int(applied.get("budget_max") or 0) == 1000
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_nqe_option_contract_helper_adds_budget_and_use_case_options():
+    nqs = [
+        {"id": "ask_budget", "text": "What's your budget?"},
+        {"id": "ask_use_case", "text": "What will you use it for?"},
+    ]
+    out = recommend_router._append_standard_nqe_options(nqs, "help me choose a laptop")
+    assert isinstance(out, list) and len(out) == 2
+    budget_q = next((q for q in out if str((q or {}).get("id") or "") == "ask_budget"), {})
+    use_case_q = next((q for q in out if str((q or {}).get("id") or "") == "ask_use_case"), {})
+    budget_opts = budget_q.get("options") or []
+    use_case_opts = use_case_q.get("options") or []
+    assert any(str((o or {}).get("id") or "").startswith("budget_") for o in budget_opts if isinstance(o, dict))
+    assert any(str((o or {}).get("id") or "").startswith("use_case_") for o in use_case_opts if isinstance(o, dict))
+

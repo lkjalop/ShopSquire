@@ -5,15 +5,18 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 
-class BitemporalStamp(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class BitemporalStamp(StrictModel):
     valid_from: Optional[str] = None
     valid_to: Optional[str] = None
     system_from: Optional[str] = None
     system_to: Optional[str] = None
 
 
-class DecisionTraceEvent(BaseModel):
-    model_config = ConfigDict(extra="allow")
+class DecisionTraceEvent(StrictModel):
     id: Optional[str] = None
     seq: Optional[int] = None
     trace_id: Optional[str] = None
@@ -26,8 +29,7 @@ class DecisionTraceEvent(BaseModel):
     created_at: Optional[str] = None
 
 
-class DecisionTraceQueryResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
+class DecisionTraceQueryResponse(StrictModel):
     decision_id: Optional[str] = None
     timestamp: Optional[str] = None
     input_query: Optional[str] = None
@@ -36,7 +38,7 @@ class DecisionTraceQueryResponse(BaseModel):
     evidence: Any = Field(default_factory=dict)
 
 
-class IncidentEscalateResponse(BaseModel):
+class IncidentEscalateResponse(StrictModel):
     ok: bool
     incident_id: str
     buyer_token: str
@@ -44,12 +46,32 @@ class IncidentEscalateResponse(BaseModel):
     ttl_seconds: int
 
 
-class IncidentMessageResponse(BaseModel):
+class IncidentMessageResponse(StrictModel):
     sent: bool
     role: Optional[str] = None
 
 
-class TransactionTimeseriesPoint(BaseModel):
+class NQEOption(StrictModel):
+    id: str
+    label: str
+    value: Optional[str] = None
+
+
+class NQEQuestion(StrictModel):
+    id: str
+    text: str
+    goal: Optional[str] = None
+    options: List[NQEOption] = Field(default_factory=list)
+
+
+class NQESelectionInput(StrictModel):
+    question_id: str
+    option_id: str
+    option_label: str
+    option_value: Optional[str] = None
+
+
+class TransactionTimeseriesPoint(StrictModel):
     bucket: Optional[str] = None
     orders: int = 0
     revenue: float = 0.0
@@ -59,7 +81,7 @@ class TransactionTimeseriesPoint(BaseModel):
     pending_payment: int = 0
 
 
-class TransactionTimeseriesTotals(BaseModel):
+class TransactionTimeseriesTotals(StrictModel):
     orders: int = 0
     revenue: float = 0.0
     aov: float = 0.0
@@ -69,7 +91,7 @@ class TransactionTimeseriesTotals(BaseModel):
     pending_payment: int = 0
 
 
-class TransactionTimeseriesResponse(BaseModel):
+class TransactionTimeseriesResponse(StrictModel):
     granularity: str
     start: str
     end: str
