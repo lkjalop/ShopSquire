@@ -109,6 +109,17 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
     return payload
 
 
+def _decision_log_writes_enabled(flags: Dict[str, Any] | None) -> bool:
+    """Mirror decisions-router precedence: env override, then feature flags."""
+    try:
+        env_val = os.getenv("DECISION_LOG_WRITES_ENABLED")
+        if env_val is not None:
+            return str(env_val).strip().lower() in ("1", "true", "yes", "on")
+    except Exception:
+        pass
+    return bool((flags or {}).get("DECISION_LOG_WRITES_ENABLED"))
+
+
 _SUPPORTED_PRODUCT_TERMS = {
     "laptop",
     "notebook",
@@ -1486,7 +1497,7 @@ def suggest(
         pass
 
     def _log_early_decision(status: str, proposed_action: Dict[str, Any], agent_chain: list[Dict[str, Any]] | None = None, retrieved_context: Dict[str, Any] | None = None, execution_status: str = "executed") -> None:
-        if not flags.get("DECISION_LOG_WRITES_ENABLED", False):
+        if not _decision_log_writes_enabled(flags):
             return
         try:
             safe_query = scrub_pii(query or "")
@@ -1730,7 +1741,7 @@ def suggest(
         view_hint = _derive_view_mode_reason(query_effective)
         # Persist minimal decision log for trace visibility even on review/deny.
         try:
-            if flags.get("DECISION_LOG_WRITES_ENABLED", False):
+            if _decision_log_writes_enabled(flags):
                 input_payload = {
                     "uid_hash": hash_uid(uid),
                     "user_query": scrub_pii(query or ""),
@@ -3502,7 +3513,7 @@ def suggest(
     except Exception:
         pass
 
-    if flags.get("DECISION_LOG_WRITES_ENABLED", False):
+    if _decision_log_writes_enabled(flags):
         try:
             with tracer.start_as_current_span("recommend.log_decision"):
                 tenant_id = None

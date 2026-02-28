@@ -1181,7 +1181,31 @@ def query_decision_trace(
     db=Depends(get_db),
 ) -> Dict:
     """Query detailed decision information, with optional events/evidence."""
-    base = get_decision_trace(trace_id=trace_id, role=role, db=db)
+    try:
+        base = get_decision_trace(trace_id=trace_id, role=role, db=db)
+    except HTTPException as exc:
+        # Degraded persistence path: allow event-only trace query when the
+        # decision row was not persisted but trace events may exist.
+        if include_events and getattr(exc, "status_code", None) == 404:
+            events = []
+            try:
+                events = _fetch_trace_events(trace_id)
+            except Exception:
+                events = []
+            if not events:
+                try:
+                    events = _synthesize_trace_events(trace_id, {"decision_id": trace_id})
+                except Exception:
+                    events = []
+            return {
+                "decision_id": trace_id,
+                "timestamp": None,
+                "input_query": None,
+                "bitemporal": {},
+                "events": events or [],
+                "evidence": [] if include_evidence else {},
+            }
+        raise
     if isinstance(base, dict) and base.get("available") is False:
         # Even when decision log reads are disabled, expose trace events via
         # DB/cache fallback so security/trace tests can still observe emissions.
@@ -1192,7 +1216,14 @@ def query_decision_trace(
                 base["events"] = []
         if include_evidence:
             base["evidence"] = []
-        return base
+        return {
+            "decision_id": base.get("decision_id") or trace_id,
+            "timestamp": base.get("timestamp"),
+            "input_query": base.get("input_query"),
+            "bitemporal": base.get("bitemporal"),
+            "events": base.get("events") or [],
+            "evidence": base.get("evidence") or {},
+        }
     if include_events:
         try:
             rows = db.execute(
@@ -1244,7 +1275,14 @@ def query_decision_trace(
             base["evidence"] = [dict(r) for r in rows]
         except Exception:
             base["evidence"] = []
-    return base
+    return {
+        "decision_id": base.get("decision_id") or trace_id,
+        "timestamp": base.get("timestamp"),
+        "input_query": base.get("input_query"),
+        "bitemporal": base.get("bitemporal"),
+        "events": base.get("events") or [],
+        "evidence": base.get("evidence") or {},
+    }
 
 
 @router.get("/{trace_id}")
@@ -1419,6 +1457,16 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                 ms["decision"] = {
                     "action": "escalate_to_big" if complex_bool else "prefer_small",
                 }
+            if ms.get("selected") is None:
+                action = ((ms.get("decision") or {}).get("action") if isinstance(ms.get("decision"), dict) else None) or "prefer_small"
+                ms["selected"] = f"rule-based ({action})"
+            if not isinstance(ms.get("path"), list):
+                frm = ((ms.get("decision") or {}).get("from") if isinstance(ms.get("decision"), dict) else None)
+                to = ((ms.get("decision") or {}).get("to") if isinstance(ms.get("decision"), dict) else None)
+                ms["path"] = [x for x in (frm, to) if x]
+            if not ms.get("intent_summary"):
+                q_hint = str(input_data.get("query") or "").strip()
+                ms["intent_summary"] = q_hint[:180] if q_hint else None
             out["model_selection"] = ms
         # Provide flattened model tier fields for frontend compatibility
         if isinstance(out.get("model_selection"), dict):
