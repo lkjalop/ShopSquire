@@ -27,7 +27,7 @@ from src.app.rules.image_quality import assess_image_quality
 from src.app.services.dependency_resilience import call_with_resilience
 from src.app.models.db import db_session
 from sqlalchemy import text as sql_text
-from src.app.services.intake_gate import strict_binary_ingest_gate
+from src.app.services.intake_gate import strict_image_ingest_gate
 
 
 router = APIRouter(prefix="/api/v1/cv", tags=["cv"])
@@ -132,6 +132,9 @@ async def analyze(
         image_consistency: Optional[Dict[str, Any]] = None
         qr_decode_hits: List[Dict[str, Any]] = []
         qr_prompt_injection = False
+        tier2_result: Dict[str, Any] = {}
+        tier2_evidence_tags: List[str] = []
+        tier2_security: Dict[str, Any] = {}
         labels = list(req.labels or [])
         extracted_text = (req.extracted_text or "") if req.extracted_text is not None else ""
 
@@ -150,7 +153,7 @@ async def analyze(
                         content = base64.b64decode(s, validate=False)
                     except Exception:
                         content = b""
-                    gate = strict_binary_ingest_gate(
+                    gate = strict_image_ingest_gate(
                         filename=f"analyze_{idx + 1}.jpg",
                         content_type=None,
                         blob=content,
@@ -184,6 +187,27 @@ async def analyze(
                     )
             except Exception:
                 pass
+
+            # Tier2 scan on first image so /cv/analyze exposes security evidence
+            # (QR URLs, overlay/prompt-injection tags, manipulation signals).
+            try:
+                if sanitized_images and str(sanitized_images[0].get("status") or "") == "sanitized":
+                    _img0 = sanitized_images[0].get("bytes") or b""
+                    if isinstance(_img0, (bytes, bytearray)) and _img0:
+                        _meta = {
+                            "filename": str(sanitized_images[0].get("filename") or "analyze_1.jpg"),
+                            "case_id": str(req.case_id or ""),
+                            "description": req.description,
+                            "issue_type": req.issue_type,
+                            "order_id": req.order_id,
+                        }
+                        tier2_result = run_tier2(bytes(_img0), meta=_meta, pack_id=resolve_pack_id(req.description or req.issue_type or "electronics"))
+                        tier2_evidence_tags = list(tier2_result.get("evidence_tags") or [])
+                        tier2_security = (tier2_result.get("security_analysis") or {}) if isinstance(tier2_result.get("security_analysis"), dict) else {}
+            except Exception:
+                tier2_result = {}
+                tier2_evidence_tags = []
+                tier2_security = {}
 
             # Image consistency (mismatch, suspicious overlays, low evidence).
             try:
@@ -333,6 +357,10 @@ async def analyze(
                 "qr_prompt_injection": bool(qr_prompt_injection),
                 "image_consistency_mismatch": bool(ic_status in ("mismatch", "suspicious")),
                 "ocr_prompt_injection": bool((image_consistency or {}).get("ocr_prompt_injection")) if isinstance(image_consistency, dict) else False,
+                "qr_url_present": bool("qr_url_present" in tier2_evidence_tags),
+                "qr_url_suspicious": bool("qr_url_suspicious" in tier2_evidence_tags),
+                "manipulation_detected": bool("manipulation_detected" in tier2_evidence_tags),
+                "prompt_injection_text_suspected": bool("prompt_injection_text_suspected" in tier2_evidence_tags),
             }
             security_payload = {
                 "description": req.description,
@@ -446,6 +474,14 @@ async def analyze(
                 sec_signals["qr_prompt_injection"] = True
             if qr_decode_hits:
                 sec_signals["qr_code_detected"] = True
+            if "qr_url_present" in tier2_evidence_tags:
+                sec_signals["qr_url_present"] = True
+            if "qr_url_suspicious" in tier2_evidence_tags:
+                sec_signals["qr_url_suspicious"] = True
+            if "manipulation_detected" in tier2_evidence_tags:
+                sec_signals["manipulation_detected"] = True
+            if "prompt_injection_text_suspected" in tier2_evidence_tags:
+                sec_signals["prompt_injection_text_suspected"] = True
             ic_status = (image_consistency or {}).get("status") if isinstance(image_consistency, dict) else None
             if ic_status in ("mismatch", "suspicious"):
                 sec_signals["image_consistency_mismatch"] = True
@@ -471,6 +507,8 @@ async def analyze(
                 "ocr_text": (extracted_text or "")[:2000],
                 "entities": {"labels": (labels or [])[:20], "qr_code_count": len(qr_decode_hits or [])},
             }
+            if tier2_evidence_tags:
+                payload["evidence_tags"] = tier2_evidence_tags[:24]
             if 'qr_decode_reasons' in locals():
                 payload["diagnostics"] = {"qr_decoder": qr_decode_reasons}
             log_trace_event(
@@ -534,6 +572,10 @@ async def analyze(
         _needs_chat = bool(
             qr_prompt_injection
             or qr_external_url_detected
+            or bool("qr_url_present" in tier2_evidence_tags)
+            or bool("qr_url_suspicious" in tier2_evidence_tags)
+            or bool("manipulation_detected" in tier2_evidence_tags)
+            or bool("prompt_injection_text_suspected" in tier2_evidence_tags)
             or (isinstance(image_consistency, dict) and image_consistency.get("status") in ("mismatch", "suspicious"))
         )
 
@@ -541,6 +583,8 @@ async def analyze(
             "status": "ok",
             "case_id": case_id,
             "cv_analysis": analysis,
+            "cv_tiered_analysis": {"tier2": tier2_result} if tier2_result else None,
+            "evidence_tags": tier2_evidence_tags[:24],
             "evidence_id": evidence_id,
             "trace_id": case_id,
             "image_consistency": image_consistency,
@@ -624,9 +668,9 @@ async def upload(
             )
         # Always allocate a unique case id for this upload so evidence/decisions don't collide on filename.
         case_id = uuid.uuid4().hex or fallback_case_id
-        gate = strict_binary_ingest_gate(
-            filename=str(image.filename or "upload"),
-            content_type=image.content_type,
+        gate = strict_image_ingest_gate(
+            filename=str(normalized_filename or image.filename or "upload"),
+            content_type=normalized_content_type or image.content_type,
             blob=content,
             size_bytes=len(content),
         )

@@ -60,7 +60,7 @@ export default function RightPanelExtras({
   initialImages,
   onResult,
 }: {
-  mode: 'faq' | 'cv';
+  mode: 'faq' | 'cv' | 'visual_search' | 'image_context';
   onEscalate?: (payload: any) => void;
   onTraceId?: (traceId: string | null) => void;
   initialImages?: File[];
@@ -287,15 +287,20 @@ export default function RightPanelExtras({
       });
       const resolvedTraceId = (resp as any)?.trace_id || resp.case_id || null;
       const ic = (resp as any)?.image_consistency || null;
+      const backendEvidenceTags = Array.isArray((resp as any)?.evidence_tags)
+        ? ((resp as any).evidence_tags as string[])
+        : Array.isArray((resp as any)?.cv_tiered_analysis?.tier2?.evidence_tags)
+          ? (((resp as any).cv_tiered_analysis.tier2.evidence_tags) as string[])
+          : [];
       const cvRes: CVSubmitResult = {
         decision_id: undefined,
         trace_id: resolvedTraceId || undefined,
         case_id: resp.case_id,
         analysis: resp.cv_analysis,
-        cv_tiered_analysis: undefined,
+        cv_tiered_analysis: (resp as any)?.cv_tiered_analysis,
         suggested_routing: (resp as any)?.suggested_routing || undefined,
         human_review: false,
-        evidence_tags: [],
+        evidence_tags: backendEvidenceTags,
         playbook_preview: undefined,
         image_consistency: ic || {
           status: 'not_analyzed',
@@ -465,6 +470,26 @@ export default function RightPanelExtras({
             </div>
           </div>
         ))}
+      </div>
+    );
+  }
+
+  if (mode === 'visual_search') {
+    return (
+      <div style={{ padding: 12 }}>
+        <h3 style={{ margin: '8px 0' }}>Visual Search Results</h3>
+        <p style={{ color: '#666', fontSize: 13, margin: '8px 0' }}>Products matching your uploaded image appear here.</p>
+        <div style={{ color: '#999', fontSize: 12 }}>Upload an image and type "find similar" to populate results.</div>
+      </div>
+    );
+  }
+
+  if (mode === 'image_context') {
+    return (
+      <div style={{ padding: 12 }}>
+        <h3 style={{ margin: '8px 0' }}>Image Context</h3>
+        <p style={{ color: '#666', fontSize: 13, margin: '8px 0' }}>Extracted labels, OCR text, and image analysis details from your uploaded photo.</p>
+        <div style={{ color: '#999', fontSize: 12 }}>Attach an image and send a message to see context here.</div>
       </div>
     );
   }

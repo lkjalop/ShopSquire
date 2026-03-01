@@ -119,6 +119,145 @@ class Orchestrator:
             self._incident_idem_ttl = int(flags.get("INCIDENT_IDEMPOTENCY_TTL", 3600) or 3600)
         except Exception:
             self._incident_idem_ttl = 3600
+        # Per-trace runtime flags (best-effort), used for SLO-triggered degrade paths.
+        self._trace_runtime_flags: Dict[str, Dict[str, Any]] = {}
+
+    def _init_trace_runtime(self, trace_id: str | None) -> None:
+        if not trace_id:
+            return
+        try:
+            self._trace_runtime_flags[str(trace_id)] = {
+                "degraded": False,
+                "degrade_reasons": [],
+                "adaptive_budget": {},
+            }
+        except Exception:
+            pass
+
+    def _mark_trace_degraded(self, trace_id: str | None, reason: str) -> None:
+        if not trace_id:
+            return
+        try:
+            key = str(trace_id)
+            st = self._trace_runtime_flags.get(key) or {"degraded": False, "degrade_reasons": [], "adaptive_budget": {}}
+            st["degraded"] = True
+            reasons = st.get("degrade_reasons")
+            if not isinstance(reasons, list):
+                reasons = []
+            if reason and reason not in reasons:
+                reasons.append(reason)
+            st["degrade_reasons"] = reasons
+            self._trace_runtime_flags[key] = st
+        except Exception:
+            pass
+
+    def _trace_is_degraded(self, trace_id: str | None) -> bool:
+        if not trace_id:
+            return False
+        try:
+            return bool((self._trace_runtime_flags.get(str(trace_id)) or {}).get("degraded"))
+        except Exception:
+            return False
+
+    def _trace_degrade_reasons(self, trace_id: str | None) -> List[str]:
+        if not trace_id:
+            return []
+        try:
+            rs = (self._trace_runtime_flags.get(str(trace_id)) or {}).get("degrade_reasons")
+            return list(rs or []) if isinstance(rs, list) else []
+        except Exception:
+            return []
+
+    def _clear_trace_runtime(self, trace_id: str | None) -> None:
+        if not trace_id:
+            return
+        try:
+            self._trace_runtime_flags.pop(str(trace_id), None)
+        except Exception:
+            pass
+
+    def _agent_step_slo_ms(self, agent_name: str) -> int:
+        default_ms = int(self.flags.get("AGENT_STEP_SLO_MS_DEFAULT", 1800) or 1800)
+        env_map = str(self.flags.get("AGENT_STEP_SLO_MS_MAP", "") or "").strip()
+        if env_map:
+            try:
+                if env_map.startswith("{"):
+                    import json as _json
+
+                    raw = _json.loads(env_map)
+                    if isinstance(raw, dict):
+                        v = raw.get(agent_name)
+                        if v is not None:
+                            return int(v)
+                else:
+                    for part in env_map.split(","):
+                        if ":" not in part:
+                            continue
+                        k, v = part.split(":", 1)
+                        if str(k).strip() == agent_name:
+                            return int(v)
+            except Exception:
+                pass
+        return default_ms
+
+    def _compute_adaptive_agent_budgets(
+        self,
+        *,
+        query: str,
+        tier: int,
+        base_tool_budget: int,
+        risk_adj: float,
+        intent_confidence: float,
+        multi_turn: bool,
+    ) -> Dict[str, Any]:
+        q = str(query or "").lower()
+        complexity_hits = 0
+        for tok in ("compare", "tradeoff", "versus", "detailed", "why", "explain", "multi"):
+            if tok in q:
+                complexity_hits += 1
+        factor = 1.0
+        if int(tier or 1) >= 2:
+            factor += 0.25
+        if float(risk_adj or 0.0) >= 40.0:
+            factor += 0.25
+        if float(intent_confidence or 1.0) < 0.70:
+            factor += 0.20
+        if bool(multi_turn):
+            factor += 0.10
+        if complexity_hits >= 2:
+            factor += 0.15
+        global_budget = max(1, min(12, int(round(float(base_tool_budget or 1) * factor))))
+        agent_weights = {
+            "Security_Observer_Agent": 0.20,
+            "NLP_Search_Agent": 0.20,
+            "Candidate_Retrieval_Agent": 0.16,
+            "Product_Ranking_Agent": 0.20,
+            "CV_Label_Agent": 0.12,
+            "Inventory_Agent": 0.06,
+            "Fraud_Scoring_Agent": 0.06,
+        }
+        per_agent: Dict[str, int] = {}
+        remaining = global_budget
+        keys = list(agent_weights.keys())
+        for idx, agent in enumerate(keys):
+            w = float(agent_weights.get(agent) or 0.0)
+            if idx == len(keys) - 1:
+                alloc = max(0, remaining)
+            else:
+                alloc = max(0, int(round(global_budget * w)))
+                remaining -= alloc
+            per_agent[agent] = alloc
+        token_base = int(self.flags.get("AGENT_TOKEN_BUDGET_DEFAULT", 2200) or 2200)
+        per_agent_tokens: Dict[str, int] = {}
+        for agent, tb in per_agent.items():
+            per_agent_tokens[agent] = int(max(256, token_base * (0.6 + (float(tb) / max(1.0, float(global_budget))))))
+        return {
+            "global_tool_budget": global_budget,
+            "factor": round(float(factor), 4),
+            "complexity_hits": complexity_hits,
+            "agent_tool_budgets": per_agent,
+            "agent_token_budgets": per_agent_tokens,
+        }
 
     def _ensure_trace_id(self, payload: Dict[str, Any]) -> str:
         trace_id = payload.get("trace_id") if isinstance(payload, dict) else None
@@ -187,6 +326,28 @@ class Orchestrator:
                 target_id=agent_name,
                 payload=payload,
             )
+            try:
+                slo_ms = int(self._agent_step_slo_ms(agent_name))
+            except Exception:
+                slo_ms = 0
+            if slo_ms > 0 and latency_ms > slo_ms:
+                self._mark_trace_degraded(trace_id, "step_slo_breach")
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="step_slo_breach",
+                    source_type="orchestrator",
+                    source_id="slo_guard",
+                    target_type="agent",
+                    target_id=agent_name,
+                    payload={
+                        "agent": agent_name,
+                        "phase": phase,
+                        "latency_ms": latency_ms,
+                        "slo_ms": slo_ms,
+                        "breach_ratio": round(float(latency_ms) / float(max(1, slo_ms)), 4),
+                        "auto_degrade": True,
+                    },
+                )
         except Exception:
             pass
 
@@ -2023,13 +2184,13 @@ class Orchestrator:
                         pass
                     exists = None
                     try:
-                        exists = db.execute("SELECT 1 FROM idempotency_keys WHERE key = :k", {"k": idempotency_key}).scalar()
+                        exists = db.execute(text("SELECT 1 FROM idempotency_keys WHERE key = :k"), {"k": idempotency_key}).scalar()
                     except Exception:
                         exists = None
                     ok, _msg = self.firewall.idempotency_ok(bool(exists))
                     if not ok:
                         return False
-                    db.execute("INSERT INTO idempotency_keys (key) VALUES (:k)", {"k": idempotency_key})
+                    db.execute(text("INSERT INTO idempotency_keys (key) VALUES (:k)"), {"k": idempotency_key})
                     try:
                         db.commit()
                     except Exception:
@@ -2076,6 +2237,7 @@ class Orchestrator:
         timings: dict[str, float] = {}
         t0 = time.time()
         trace_id = self._ensure_trace_id(payload)
+        self._init_trace_runtime(trace_id)
         try:
             print(f"[orch.run] start trace_id={trace_id} uid={uid} simulate_only={simulate_only}")
         except Exception:
@@ -2300,6 +2462,25 @@ class Orchestrator:
                     "tenant_id": payload.get("tenant_id") or payload.get("tenant") or None,
                 }
                 tier_decision = self.tier_router.route(query=query, context=router_ctx, intent_result=intent_result, security_analysis=sec)
+                try:
+                    adaptive_budget = self._compute_adaptive_agent_budgets(
+                        query=query,
+                        tier=int(getattr(tier_decision, "tier", 1) or 1),
+                        base_tool_budget=int(getattr(tier_decision, "tool_budget", 1) or 1),
+                        risk_adj=float((sec or {}).get("risk_adj") or 0.0) if isinstance(sec, dict) else 0.0,
+                        intent_confidence=float((intent_result or {}).get("confidence") or 1.0),
+                        multi_turn=bool(router_ctx.get("multi_turn")),
+                    )
+                    try:
+                        tier_decision.tool_budget = int(adaptive_budget.get("global_tool_budget") or tier_decision.tool_budget)
+                    except Exception:
+                        pass
+                    rt = self._trace_runtime_flags.get(str(trace_id)) if trace_id else None
+                    if isinstance(rt, dict):
+                        rt["adaptive_budget"] = adaptive_budget
+                        self._trace_runtime_flags[str(trace_id)] = rt
+                except Exception:
+                    adaptive_budget = {}
                 # Log a trace event summarizing tier decision when trace_id provided
                 try:
                     if trace_id:
@@ -2315,7 +2496,21 @@ class Orchestrator:
                                 "reason": tier_decision.reason,
                                 "tool_budget": tier_decision.tool_budget,
                                 "model": tier_decision.model,
+                                "adaptive_budget": adaptive_budget if isinstance(adaptive_budget, dict) else {},
                             },
+                        )
+                except Exception:
+                    pass
+                try:
+                    if trace_id and isinstance(adaptive_budget, dict) and adaptive_budget:
+                        log_trace_event(
+                            trace_id=trace_id,
+                            event_type="adaptive_budget_applied",
+                            source_type="orchestrator",
+                            source_id="budget_controller",
+                            target_type=None,
+                            target_id=None,
+                            payload=adaptive_budget,
                         )
                 except Exception:
                     pass
@@ -2482,6 +2677,26 @@ class Orchestrator:
             proposal["text_tier"] = model_choice.get("text_tier") if isinstance(model_choice, dict) else None
             proposal["vision_tier"] = model_choice.get("vision_tier") if isinstance(model_choice, dict) else None
             proposal["trace_id"] = trace_id
+            if trace_id:
+                rt = self._trace_runtime_flags.get(str(trace_id)) or {}
+                if isinstance(rt.get("adaptive_budget"), dict) and rt.get("adaptive_budget"):
+                    proposal["adaptive_budget"] = rt.get("adaptive_budget")
+                if self._trace_is_degraded(trace_id):
+                    proposal["decision_mode"] = "degraded"
+                    proposal["degraded"] = True
+                    proposal["degrade_reasons"] = self._trace_degrade_reasons(trace_id)
+                    try:
+                        log_trace_event(
+                            trace_id=trace_id,
+                            event_type="auto_degrade_policy",
+                            source_type="orchestrator",
+                            source_id="slo_guard",
+                            target_type=None,
+                            target_id=None,
+                            payload={"reasons": proposal.get("degrade_reasons") or ["step_slo_breach"]},
+                        )
+                    except Exception:
+                        pass
             if behavior:
                 proposal["agent_behavior_anomaly"] = behavior
         except Exception:
@@ -2503,6 +2718,14 @@ class Orchestrator:
             meta={"discipline": "always_on"},
         )
         policy = self.policy(proposal)
+        try:
+            if trace_id and self._trace_is_degraded(trace_id):
+                policy["status"] = "degraded"
+                policy.setdefault("reason_codes", [])
+                if "step_slo_breach" not in policy.get("reason_codes", []):
+                    policy["reason_codes"] = list(policy.get("reason_codes") or []) + ["step_slo_breach"]
+        except Exception:
+            pass
         try:
             record_agent_invocation("orchestrator", "proposed", None)
         except Exception:
@@ -2827,6 +3050,130 @@ class Orchestrator:
         except Exception:
             pass
 
+        # ── Debate coordinator for complex queries (complexity ≥ 7 / tier ≥ 2) ──
+        try:
+            _complexity = 0
+            try:
+                _ab = (self._trace_runtime_flags.get(str(trace_id)) or {}).get("adaptive_budget") or {}
+                _complexity = int(_ab.get("complexity_hits") or 0)
+                _tier_val = 1
+                try:
+                    _tier_val = int(getattr(tier_decision, "tier", 1) or 1)
+                except Exception:
+                    pass
+                if _tier_val >= 2:
+                    _complexity += 4
+                _risk = float((sec or {}).get("risk_adj") or 0.0) if isinstance(sec, dict) else 0.0
+                if _risk >= 40.0:
+                    _complexity += 2
+            except Exception:
+                pass
+            if _complexity >= 7:
+                from src.app.services.debate_coordinator import run_structured_debate
+                _debate_scenario = "cv_ambiguity"
+                try:
+                    q = str((payload or {}).get("query") or "").lower()
+                    if any(w in q for w in ("compare", "versus", "vs", "which is better", "tradeoff")):
+                        _debate_scenario = "cv_ambiguity"
+                    elif any(w in q for w in ("supplier", "vendor")):
+                        _debate_scenario = "supplier_change"
+                    elif any(w in q for w in ("policy", "rule")):
+                        _debate_scenario = "policy_update"
+                except Exception:
+                    pass
+                debate_result = run_structured_debate(
+                    scenario=_debate_scenario,
+                    proposal=proposal,
+                    evidence=sec if isinstance(sec, dict) else {},
+                )
+                proposal["debate"] = debate_result
+                if debate_result.get("judge", {}).get("decision") == "escalate":
+                    proposal["needs_human_review"] = True
+                try:
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="debate_completed",
+                        source_type="orchestrator",
+                        source_id="debate_coordinator",
+                        target_type=None,
+                        target_id=None,
+                        payload={
+                            "scenario": _debate_scenario,
+                            "judge_decision": debate_result.get("judge", {}).get("decision"),
+                            "risks": debate_result.get("challenger", {}).get("risks", []),
+                            "complexity": _complexity,
+                        },
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ── Self-reflection step: "Did we actually answer the user's question?" ──
+        try:
+            _query_text = str((payload or {}).get("query") or (payload or {}).get("input") or "").strip()
+            if _query_text and isinstance(proposal, dict):
+                _reflection_issues: List[str] = []
+                _p_keys = set(proposal.keys())
+                # Check: if user asked for recommendations, do we have products?
+                _rec_keywords = {"recommend", "suggest", "find", "show", "laptop", "buy", "search"}
+                if any(w in _query_text.lower() for w in _rec_keywords):
+                    if not proposal.get("products") and not proposal.get("recommendations") and not proposal.get("ranked_products"):
+                        _reflection_issues.append("no_products_in_response")
+                # Check: if user asked a comparison, do we have multiple products?
+                if any(w in _query_text.lower() for w in ("compare", "versus", "vs", "which")):
+                    prods = proposal.get("products") or proposal.get("ranked_products") or []
+                    if isinstance(prods, list) and len(prods) < 2:
+                        _reflection_issues.append("comparison_needs_multiple_products")
+                # Check: if user asked a price question, do we have price info?
+                if any(w in _query_text.lower() for w in ("price", "cost", "how much", "budget", "cheap")):
+                    if not proposal.get("price_range") and not proposal.get("budget_fit"):
+                        _reflection_issues.append("price_info_missing")
+                if _reflection_issues:
+                    proposal["self_reflection"] = {
+                        "issues": _reflection_issues,
+                        "query_responded": False,
+                    }
+                    # Convert reflection findings into a user-facing fallback action.
+                    _fallback_actions: List[str] = []
+                    if "no_products_in_response" in _reflection_issues:
+                        _fallback_actions.append("expand_budget_or_brand_constraints")
+                    if "comparison_needs_multiple_products" in _reflection_issues:
+                        _fallback_actions.append("request_second_candidate")
+                    if "price_info_missing" in _reflection_issues:
+                        _fallback_actions.append("request_budget_range")
+                    proposal.setdefault("assistant_message", "")
+                    if not str(proposal.get("assistant_message") or "").strip():
+                        proposal["assistant_message"] = (
+                            "I could not fully answer that yet. I can refine this quickly if you confirm your budget, "
+                            "preferred brands, or whether you want me to broaden the criteria."
+                        )
+                    proposal["follow_up_suggestions"] = [
+                        {"id": "broaden_constraints", "text": "Show alternatives just outside my budget"},
+                        {"id": "compare_top2", "text": "Compare the top two options"},
+                        {"id": "price_focus", "text": "Focus on best value options"},
+                    ]
+                    proposal["remediation"] = {
+                        "required": True,
+                        "actions": _fallback_actions or ["clarify_requirements"],
+                    }
+                else:
+                    proposal["self_reflection"] = {"issues": [], "query_responded": True}
+                try:
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="self_reflection",
+                        source_type="orchestrator",
+                        source_id="self_reflection",
+                        target_type=None,
+                        target_id=None,
+                        payload=proposal["self_reflection"],
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         self._trace_phase(
             trace_id,
             phase="phase4",
@@ -2956,6 +3303,12 @@ class Orchestrator:
         return OrchestratorResult(proposal=proposal, firewall=policy, executed=executed, timings=timings)
 
     def run(self, uid: str, payload: Dict[str, Any], simulate_only: bool = False, use_rules: bool = False) -> OrchestratorResult:
+        trace_id = None
+        try:
+            if isinstance(payload, dict):
+                trace_id = payload.get("trace_id") or payload.get("decision_id")
+        except Exception:
+            trace_id = None
         try:
             try:
                 print("[orch.run] wrapper invoked")
@@ -3014,3 +3367,10 @@ class Orchestrator:
             }
             fallback_policy = {"allowed": False, "approval_required": True, "deterministic_outcome": "error"}
             return OrchestratorResult(proposal=fallback_proposal, firewall=fallback_policy, executed=False, timings=None)
+        finally:
+            try:
+                if isinstance(payload, dict):
+                    trace_id = trace_id or payload.get("trace_id") or payload.get("decision_id")
+            except Exception:
+                pass
+            self._clear_trace_runtime(trace_id)

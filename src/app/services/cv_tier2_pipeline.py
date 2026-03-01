@@ -8,8 +8,12 @@ from src.app.services.cv_ocr import extract_text
 from src.app.services.cv_quality import score_quality
 from src.app.services.image_forensics import ImageForensicsService, ForensicsResult
 from src.app.services.forensics_policy import evaluate as evaluate_forensics_policy
+from src.app.cv.document_schema_extractor import extract_document_schema
 from src.app.observability.metrics import record_cv_fraud
 from src.app.security.framework_correlation import correlate_security_analysis
+from src.app.security.gan_image_detector import detect_fake_image
+from src.app.security.adversarial_image_detector import detect_adversarial
+from src.app.security.steg_detector import detect_steganography
 from src.app.services.cv_vision_ollama import vision_analyze_with_ollama
 from src.app.security.url_guard import ensure_safe_outbound_url
 
@@ -178,23 +182,36 @@ def _shannon_entropy(s: str) -> float:
 
 
 def _extract_qr_payloads(image_bytes: bytes) -> Dict[str, Any]:
-    # Best-effort QR/barcode extraction. If dependencies are missing, return empty.
+    # Best-effort QR/barcode extraction.
+    # Use shared decoder pipeline so we get both pyzbar and OpenCV fallbacks.
     try:
-        from PIL import Image  # type: ignore
-        from pyzbar.pyzbar import decode  # type: ignore
-        import io
+        from src.app.rules.barcode_decode import decode_barcodes
 
-        img = Image.open(io.BytesIO(image_bytes))
-        decoded = decode(img)
+        result = decode_barcodes([("tier2_input", image_bytes)])
         payloads: List[Dict[str, Any]] = []
-        for d in decoded or []:
-            try:
-                val = (d.data.decode("utf-8", errors="ignore") if getattr(d, "data", None) else "") or ""
-                if val.strip():
-                    payloads.append({"type": str(getattr(d, "type", "unknown")), "value": val.strip()[:4096]})
-            except Exception:
+        for item in (result.codes or []):
+            val = str((item or {}).get("data") or "").strip()
+            if not val:
                 continue
-        return {"provider": "pyzbar", "items": payloads}
+            payloads.append(
+                {
+                    "type": str((item or {}).get("type") or "unknown"),
+                    "value": val[:4096],
+                }
+            )
+
+        provider = "none"
+        reasons = list(result.reasons or [])
+        if "pyzbar_decoded" in reasons:
+            provider = "pyzbar"
+        elif "opencv_decoded" in reasons:
+            provider = "opencv"
+
+        return {
+            "provider": provider,
+            "items": payloads,
+            "decoder_reasons": reasons,
+        }
     except Exception as exc:
         return {"provider": "none", "items": [], "error": str(exc)}
 
@@ -221,9 +238,85 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         ocr = extract_text(image_bytes, provider=ocr_cfg.get("provider"), fallback=ocr_cfg.get("fallback"))
     except Exception as exc:
         ocr = {"text": "", "boxes": [], "provider": None, "error": str(exc)}
+    ocr_conf = float(ocr.get("confidence") or 0.0)
+    ocr_ladder: Dict[str, Any] = {
+        "attempts": [
+            {
+                "provider": ocr.get("provider"),
+                "confidence": ocr_conf,
+                "chars": len(str(ocr.get("text") or "")),
+                "selected": True,
+            }
+        ],
+        "selected_provider": ocr.get("provider"),
+        "selected_confidence": ocr_conf,
+        "fallback_used": False,
+    }
     ocr_text = ocr.get("text") or ""
     ocr_boxes = ocr.get("boxes") or []
     document_like = _detect_document_like(ocr_boxes)
+    evidence_tags: List[str] = []
+    doc_schema: Dict[str, Any] = {}
+    try:
+        doc_schema = extract_document_schema(ocr_text)
+        if bool(doc_schema.get("has_structured_fields")):
+            evidence_tags.append("structured_document_fields_extracted")
+            if str(doc_schema.get("doc_type") or "") in ("invoice", "bol", "shipping_label"):
+                evidence_tags.append(f"document_type:{str(doc_schema.get('doc_type'))}")
+    except Exception:
+        doc_schema = {}
+    clarifiers: List[Dict[str, Any]] = []
+    try:
+        doc_type = str(doc_schema.get("doc_type") or "")
+        has_structured = bool(doc_schema.get("has_structured_fields"))
+        ocr_low_conf_min = float(os.getenv("CV_OCR_LOW_CONFIDENCE_MIN", "0.58") or 0.58)
+        fallback_provider = str(ocr_cfg.get("fallback") or os.getenv("CV_OCR_FALLBACK_PROVIDER", "")).strip() or None
+        selected_provider = str(ocr.get("provider") or "").strip()
+        if has_structured and doc_type in ("invoice", "bol", "shipping_label") and ocr_conf < ocr_low_conf_min:
+            if fallback_provider and fallback_provider != selected_provider:
+                try:
+                    ocr_fb = extract_text(image_bytes, provider=fallback_provider, fallback=None)
+                    fb_conf = float(ocr_fb.get("confidence") or 0.0)
+                    ocr_ladder["attempts"].append(
+                        {
+                            "provider": ocr_fb.get("provider") or fallback_provider,
+                            "confidence": fb_conf,
+                            "chars": len(str(ocr_fb.get("text") or "")),
+                            "selected": False,
+                        }
+                    )
+                    if fb_conf > ocr_conf and str(ocr_fb.get("text") or "").strip():
+                        ocr = ocr_fb
+                        ocr_conf = fb_conf
+                        ocr_text = str(ocr_fb.get("text") or "")
+                        ocr_boxes = ocr_fb.get("boxes") or []
+                        ocr_ladder["fallback_used"] = True
+                        ocr_ladder["selected_provider"] = ocr_fb.get("provider") or fallback_provider
+                        ocr_ladder["selected_confidence"] = fb_conf
+                        evidence_tags.append("ocr_fallback_applied")
+                        try:
+                            doc_schema = extract_document_schema(ocr_text)
+                        except Exception:
+                            pass
+                    for attempt in (ocr_ladder.get("attempts") or []):
+                        if str(attempt.get("provider") or "") == str(ocr_ladder.get("selected_provider") or ""):
+                            attempt["selected"] = True
+                        else:
+                            attempt["selected"] = False
+                except Exception:
+                    pass
+            if float(ocr_conf) < ocr_low_conf_min:
+                evidence_tags.append("ocr_low_confidence")
+                clarifiers.append(
+                    {
+                        "type": "ocr_low_confidence",
+                        "question": "Please upload a clearer invoice/BOL/label image or PDF (flat, bright, and uncropped).",
+                        "confidence": round(float(ocr_conf), 4),
+                        "doc_type": doc_type,
+                    }
+                )
+    except Exception:
+        pass
 
     filename = str(meta.get("filename") or "")
     filename_unicode_nfkc = _nfkc_changed(filename)
@@ -293,8 +386,66 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     else:
         quality = {"scores": {}, "provider": "clip"}
 
+    gan = None
+    adversarial = None
+    steganography = None
+    diffusion_generated = False
+    try:
+        gan_enabled = str(os.getenv("CV_GAN_DETECT_ENABLED", "1")).lower() in ("1", "true", "yes")
+        if gan_enabled:
+            gan_res = detect_fake_image(image_bytes)
+            gan = {
+                "fake_score": float(gan_res.fake_score),
+                "is_likely_fake": bool(gan_res.is_likely_fake),
+                "explanations": list(gan_res.explanations or [])[:8],
+            }
+            if gan.get("is_likely_fake"):
+                evidence_tags.append("gan_fake_image_suspected")
+                record_cv_fraud("robustness_gan_fake_image")
+    except Exception:
+        gan = {"error": "gan_detector_failed"}
+    try:
+        adv_enabled = str(os.getenv("CV_ADVERSARIAL_DETECT_ENABLED", "1")).lower() in ("1", "true", "yes")
+        if adv_enabled:
+            adv_res = detect_adversarial(image_bytes)
+            adversarial = {
+                "adversarial_score": float(adv_res.adversarial_score),
+                "high_freq_ratio": float(adv_res.high_freq_ratio),
+                "recompress_instability": float(adv_res.recompress_instability),
+                "local_gradient_anomaly": float(adv_res.local_gradient_anomaly),
+                "diffusion_score": float(adv_res.diffusion_score),
+                "is_adversarial": bool(adv_res.is_adversarial),
+                "explanations": list(adv_res.explanations or [])[:8],
+            }
+            if adversarial.get("is_adversarial"):
+                evidence_tags.append("adversarial_perturbation_suspected")
+                record_cv_fraud("robustness_adversarial_perturbation")
+            diff_min = float(os.getenv("CV_DIFFUSION_SIGNAL_MIN", "0.55") or 0.55)
+            if float(adversarial.get("diffusion_score") or 0.0) >= diff_min:
+                diffusion_generated = True
+                evidence_tags.append("diffusion_generated_suspected")
+    except Exception:
+        adversarial = {"error": "adversarial_detector_failed"}
+    try:
+        steg_enabled = str(os.getenv("CV_STEG_DETECT_ENABLED", "1")).lower() in ("1", "true", "yes")
+        if steg_enabled:
+            steg_res = detect_steganography(image_bytes)
+            steganography = {
+                "steg_score": float(steg_res.steg_score),
+                "chi_square_p": float(steg_res.chi_square_p),
+                "lsb_entropy_r": float(steg_res.lsb_entropy_r),
+                "lsb_entropy_g": float(steg_res.lsb_entropy_g),
+                "lsb_entropy_b": float(steg_res.lsb_entropy_b),
+                "is_suspicious": bool(steg_res.is_suspicious),
+                "explanations": list(steg_res.explanations or [])[:8],
+            }
+            if steganography.get("is_suspicious"):
+                evidence_tags.append("steganography_suspected")
+                record_cv_fraud("robustness_steganography_suspected")
+    except Exception:
+        steganography = {"error": "steg_detector_failed"}
+
     # Evidence tags derived from tier2 signals
-    evidence_tags: List[str] = []
     try:
         oc = meta.get("order_ctx")
         if isinstance(oc, dict) and oc.get("found") is False:
@@ -307,8 +458,16 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         evidence_tags.append("filename_unicode_suspicious")
     if injection_phrases:
         evidence_tags.append("prompt_injection_text_suspected")
-    if float(forensics.get("manipulation_score") or 0.0) >= 0.6:
+    manip_signal_min = float(os.getenv("CV_MANIP_SIGNAL_MIN", "0.52") or 0.52)
+    if float(forensics.get("manipulation_score") or 0.0) >= manip_signal_min:
         evidence_tags.append("manipulation_detected")
+    try:
+        dct_score = float((forensics.get("details") or {}).get("dct_anomaly_score") or 0.0)
+        dct_min = float(os.getenv("CV_DCT_SIGNAL_MIN", "0.32") or 0.32)
+        if dct_score >= dct_min:
+            evidence_tags.append("jpeg_dct_anomaly")
+    except Exception:
+        pass
     if document_like:
         if "invoice" in ocr_text.lower() or "receipt" in ocr_text.lower():
             evidence_tags.append("invoice_mismatch")
@@ -346,11 +505,27 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
                 chain = _resolve_redirect_chain(u, max_hops=max_hops)
                 qr_redirect_chains.append(chain)
                 final_url = str(chain.get("final_url") or u)
-                risk = _qr_url_risk(final_url)
+                # H06: Score both start URL and final URL, take max risk
+                start_risk = _qr_url_risk(u)
+                final_risk = _qr_url_risk(final_url)
+                risk = final_risk if float(final_risk.get("risk") or 0) >= float(start_risk.get("risk") or 0) else start_risk
+                # Merge reasons from both endpoints
+                all_reasons = list(set((start_risk.get("reasons") or []) + (final_risk.get("reasons") or [])))
+                risk["reasons"] = all_reasons
                 hop_count = len(chain.get("hops") or [])
                 if hop_count > 1:
                     risk["risk"] = float(min(1.0, float(risk.get("risk") or 0.0) + min(0.35, 0.08 * (hop_count - 1))))
                     risk.setdefault("reasons", []).append("redirect_chain_detected")
+                # H06: Flag when start and final domains differ (redirect to different domain)
+                try:
+                    from urllib.parse import urlparse
+                    start_host = urlparse(u).hostname or ""
+                    final_host = urlparse(final_url).hostname or ""
+                    if start_host and final_host and start_host.lower() != final_host.lower():
+                        risk["risk"] = float(min(1.0, float(risk.get("risk") or 0.0) + 0.15))
+                        risk.setdefault("reasons", []).append("cross_domain_redirect")
+                except Exception:
+                    pass
                 if chain.get("error"):
                     risk["risk"] = float(min(1.0, float(risk.get("risk") or 0.0) + 0.2))
                     risk.setdefault("reasons", []).append("redirect_resolution_failed")
@@ -454,6 +629,10 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "filename_unicode_suspicious": ("filename_nfkc_changed" in evidence_tags) or ("filename_unicode_suspicious" in evidence_tags),
             "qr_url_suspicious": "qr_url_suspicious" in evidence_tags,
             "image_category_mismatch": ("image_category_mismatch_filename" in evidence_tags) or ("image_category_mismatch_expected" in evidence_tags),
+            "gan_fake_image_suspected": "gan_fake_image_suspected" in evidence_tags,
+            "adversarial_perturbation_suspected": "adversarial_perturbation_suspected" in evidence_tags,
+            "steganography_suspected": "steganography_suspected" in evidence_tags,
+            "ai_generated_image_suspected": bool(diffusion_generated) or ("diffusion_generated_suspected" in evidence_tags),
         }
     except Exception:
         sig = {}
@@ -507,12 +686,19 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         "evidence": {
             "masks": (forensics_obj.masks if forensics_obj else {}),
             "details": (forensics_obj.details if forensics_obj else {}),
+            "document_schema": doc_schema,
+            "ocr_ladder": ocr_ladder,
         },
         "signals": {
             "document_like": document_like,
             "manipulation_detected": "manipulation_detected" in evidence_tags,
+            "gan_fake_image_suspected": "gan_fake_image_suspected" in evidence_tags,
+            "adversarial_perturbation_suspected": "adversarial_perturbation_suspected" in evidence_tags,
+            "steganography_suspected": "steganography_suspected" in evidence_tags,
+            "ai_generated_image_suspected": bool(diffusion_generated) or ("diffusion_generated_suspected" in evidence_tags),
         },
         "evidence_tags": evidence_tags,
+        "clarifiers": clarifiers,
         "verdict": verdict,
         "security_analysis": sec,
         "robustness": {
@@ -525,5 +711,10 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "prompt_injection_phrases": injection_phrases,
             "filename": {"value": filename[:200], "nfkc_changed": filename_unicode_nfkc, "unicode_suspicious": filename_unicode_any},
             "vision": vision,
+            "gan": gan,
+            "adversarial": adversarial,
+            "steganography": steganography,
+            "document_schema": doc_schema,
+            "ocr_ladder": ocr_ladder,
         },
     }

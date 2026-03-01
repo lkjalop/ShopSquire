@@ -45,7 +45,7 @@ from src.app.services.checkout_upsell import recommend_checkout_upsell, ensure_r
 from src.app.services.recommendation_identity_graph import register_identity_observations, ensure_identity_graph_tables
 from src.app.services.recommendation_bandit import record_bandit_reward, ensure_recommend_bandit_tables
 from src.app.services.recommendation_als import train_recommend_als
-from src.app.flows.nqe import NextQuestionEngine, NQEInput
+from src.app.flows.nqe import NextQuestionEngine, NQEInput, detect_games_in_text, detect_software_in_text
 from src.app.flows.catalog import QuestionTemplateCatalog
 from src.app.rag.retrieve import Retriever
 from src.app.services.trace_strategy_tags import build_strategy_trace_correlation
@@ -74,6 +74,15 @@ class RecommendInteractionPayload(BaseModel):
     action: str
     surface: str = "checkout_upsell"
     trace_id: str | None = None
+    context: Dict[str, Any] | None = None
+
+
+class RecommendFeedbackPayload(BaseModel):
+    uid: str
+    trace_id: str | None = None
+    sku: str | None = None
+    outcome: str
+    correction_text: str | None = None
     context: Dict[str, Any] | None = None
 
 
@@ -329,13 +338,46 @@ def _apply_nqe_confidence_gating(
     return out[:3]
 
 
+def _adapt_nqe_questions_for_sentiment(
+    questions: list[dict] | None,
+    *,
+    sentiment: str | None,
+) -> list[dict]:
+    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
+    if not out:
+        return out
+    s = str(sentiment or "neutral").strip().lower()
+    if s not in {"negative", "frustrated", "angry", "upset"}:
+        return out
+    softened: list[dict] = []
+    for q in out[:2]:
+        qq = dict(q)
+        txt = str(qq.get("text") or "").strip()
+        if txt:
+            qq["text"] = f"I know this can be frustrating. To get this right quickly: {txt}"
+        softened.append(qq)
+    return softened[:1]
+
+
+def _extract_profile_brand_prefs(profile: Dict[str, Any] | None) -> tuple[list[str], list[str]]:
+    p = profile or {}
+    pos = [str(x).strip() for x in (p.get("preferred_brands") or []) if str(x).strip()]
+    neg = [str(x).strip() for x in (p.get("avoided_brands") or []) if str(x).strip()]
+    return pos[:12], neg[:12]
+
+
 def _is_followup_explain_query(query: str | None) -> bool:
     q = str(query or "").strip().lower()
     if not q:
         return False
     return bool(
         re.search(
-            r"\b(why|detailed|detail|explain|those|these|them|that one|this one|list them|list all|all \d+|those \d+|compare them|why this|why those|why are they)\b",
+            r"\b(why|detailed|detail|explain|those|these|them|that one|this one|"
+            r"list them|list all|all \d+|those \d+|compare them|why this|why those|"
+            r"why are they|why did you|how did you|what made you|tell me more|"
+            r"why pick|why picked|why chose|why chosen|why recommend|"
+            r"how is it|how are they|how are these|what.s the difference|"
+            r"break it down|rank them|score them|rate them|pros and cons)\b",
             q,
         )
     )
@@ -714,6 +756,7 @@ def _append_gpu_disambiguation_question(existing: list[dict] | None, query: str 
             "id": qid,
             "text": question_text,
             "goal": "narrow_results",
+            "why_hint": "GPU choice changes performance, battery life, heat, and price more than most other specs.",
             "options": options,
         }
     )
@@ -728,6 +771,7 @@ def _append_standard_nqe_options(existing: list[dict] | None, query: str | None 
         q = dict(item)
         qid = str(q.get("id") or "").strip().lower()
         if qid == "ask_budget" and not isinstance(q.get("options"), list):
+            q["why_hint"] = "Budget keeps recommendations realistic and prevents irrelevant high-end results."
             q["options"] = [
                 {"id": "budget_under_1000", "label": "Under $1,000", "value": "0-1000"},
                 {"id": "budget_1000_1500", "label": "$1,000-$1,500", "value": "1000-1500"},
@@ -735,6 +779,7 @@ def _append_standard_nqe_options(existing: list[dict] | None, query: str | None 
                 {"id": "budget_2200_plus", "label": "$2,200+", "value": "2200+"},
             ]
         elif qid == "ask_use_case" and not isinstance(q.get("options"), list):
+            q["why_hint"] = "Use-case helps rank for what you care about most (battery, performance, portability, value)."
             q["options"] = [
                 {"id": "use_case_student", "label": "School and everyday"},
                 {"id": "use_case_business", "label": "Work and productivity"},
@@ -774,10 +819,12 @@ def _apply_nqe_selection_to_constraints(
     nqe_question_id: str | None,
     nqe_option_id: str | None,
     nqe_option_label: str | None,
+    nqe_option_value: str | None = None,
 ) -> Dict[str, Any]:
     qid = str(nqe_question_id or "").strip().lower()
     oid = str(nqe_option_id or "").strip().lower()
     lbl = str(nqe_option_label or "").strip().lower()
+    val = str(nqe_option_value or "").strip().lower()
     applied: Dict[str, Any] = {}
     if not qid or not oid:
         return applied
@@ -807,6 +854,8 @@ def _apply_nqe_selection_to_constraints(
             range_value = "2200+"
         elif re.search(r"\d", lbl):
             range_value = lbl.replace("$", "").replace(",", "").replace(" ", "")
+        elif re.search(r"\d", val):
+            range_value = val.replace("$", "").replace(",", "").replace(" ", "")
         if range_value.endswith("+"):
             try:
                 constraints["budget_min"] = int(re.sub(r"[^\d]", "", range_value))
@@ -838,6 +887,17 @@ def _apply_nqe_selection_to_constraints(
             "use_case_ai_training": ("ai_ml_workstation", ["ai_ml_workstation"]),
         }
         use_case, tags = mapping.get(oid, (None, None))
+        if not use_case and val:
+            if "gaming" in val:
+                use_case, tags = ("gaming", ["gaming"])
+            elif any(tok in val for tok in ("ai", "ml", "training", "cuda", "llm")):
+                use_case, tags = ("ai_ml_workstation", ["ai_ml_workstation"])
+            elif any(tok in val for tok in ("video", "editing", "creative", "render")):
+                use_case, tags = ("content_creation", ["content_creation"])
+            elif any(tok in val for tok in ("school", "student")):
+                use_case, tags = ("general_productivity", ["student", "general_productivity"])
+            elif any(tok in val for tok in ("work", "business", "office")):
+                use_case, tags = ("general_productivity", ["business", "general_productivity"])
         if use_case:
             constraints["use_case"] = use_case
             constraints["use_case_tags"] = tags
@@ -1301,6 +1361,7 @@ def suggest(
     nqe_question_id: Optional[str] = None,
     nqe_option_id: Optional[str] = None,
     nqe_option_label: Optional[str] = None,
+    nqe_option_value: Optional[str] = None,
     image_labels: Optional[str] = None,
     image_ocr_text: Optional[str] = None,
     image_hash: Optional[str] = None,
@@ -2149,14 +2210,78 @@ def suggest(
         "slots": nlp.get("slots") or {},
         "shortlist_lock_active": shortlist_lock_active,
     }
+
+    # Episodic memory wiring: provide session summary + profile for NQE/ranking.
+    _session_context_summary = ""
+    _user_profile_dict: Dict[str, Any] = {}
+    try:
+        from src.app.services.episodic_memory import EpisodicMemory
+
+        _ep_mem_bootstrap = EpisodicMemory(mem)
+        _session_context_summary = _ep_mem_bootstrap.get_session_context_summary(uid)
+        _profile = _ep_mem_bootstrap.get_user_profile(uid)
+        if _profile is not None:
+            _user_profile_dict = {
+                "preferred_brands": list(getattr(_profile, "preferred_brands", []) or []),
+                "avoided_brands": list(getattr(_profile, "avoided_brands", []) or []),
+                "budget_tier": getattr(_profile, "budget_tier", None),
+                "typical_use_cases": list(getattr(_profile, "typical_use_cases", []) or []),
+            }
+    except Exception:
+        _session_context_summary = ""
+        _user_profile_dict = {}
+
+    # Apply profile preferences if this turn did not explicitly set brand filters.
+    try:
+        _p_brands_boot, _n_brands_boot = _extract_profile_brand_prefs(_user_profile_dict)
+        if not (constraints.get("brands") or []) and _p_brands_boot:
+            constraints["brands"] = _p_brands_boot[:3]
+        if _n_brands_boot:
+            _merged_ex = list(dict.fromkeys(list(constraints.get("brand_excludes") or []) + _n_brands_boot))
+            constraints["brand_excludes"] = _merged_ex[:8]
+    except Exception:
+        pass
+
+    # ── Session slot accumulation: merge NQE-answered fields from prior turns ──
+    try:
+        _accumulated = kv.get("nqe_answered_fields") or {}
+        if _accumulated and isinstance(_accumulated, dict):
+            if not constraints.get("budget_min") and _accumulated.get("budget_min"):
+                constraints["budget_min"] = _accumulated["budget_min"]
+            if not constraints.get("budget_max") and _accumulated.get("budget_max"):
+                constraints["budget_max"] = _accumulated["budget_max"]
+            if not constraints.get("use_case") and _accumulated.get("use_case"):
+                constraints["use_case"] = _accumulated["use_case"]
+            if not constraints.get("use_case_tags") and _accumulated.get("use_case_tags"):
+                constraints["use_case_tags"] = _accumulated["use_case_tags"]
+            if _accumulated.get("gpu_preference") and not constraints.get("gpu_preference"):
+                constraints["gpu_preference"] = _accumulated["gpu_preference"]
+    except Exception:
+        pass
     try:
         nqe_selection_applied = _apply_nqe_selection_to_constraints(
             constraints=constraints,
             nqe_question_id=nqe_question_id,
             nqe_option_id=nqe_option_id,
             nqe_option_label=nqe_option_label,
+            nqe_option_value=nqe_option_value,
         )
         if nqe_selection_applied:
+            # ── BUG-1 fix: persist answered NQE question + field to Redis ──
+            try:
+                _nqe_kv = mem.get_kv(uid) or {}
+                _nqe_asked = list(_nqe_kv.get("nqe_asked_ids") or [])
+                _nqe_answered = dict(_nqe_kv.get("nqe_answered_fields") or {})
+                if nqe_question_id and nqe_question_id not in _nqe_asked:
+                    _nqe_asked.append(nqe_question_id)
+                for ak, av in nqe_selection_applied.items():
+                    _nqe_answered[ak] = av
+                _nqe_kv["nqe_asked_ids"] = _nqe_asked
+                _nqe_kv["nqe_answered_fields"] = _nqe_answered
+                mem.set_kv(uid, _nqe_kv)
+                kv = _nqe_kv  # refresh local kv reference
+            except Exception:
+                pass
             log_trace_event(
                 trace_id=trace_id,
                 event_type="nqe_option_applied",
@@ -2168,6 +2293,7 @@ def suggest(
                     "question_id": nqe_question_id,
                     "option_id": nqe_option_id,
                     "option_label": nqe_option_label,
+                    "option_value": nqe_option_value,
                     "applied_constraints": nqe_selection_applied,
                     **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["constraints"]),
                 },
@@ -2267,13 +2393,16 @@ def suggest(
         gpu_prof = _gpu_intent_profile(query_effective, constraints)
         if gpu_prof.get("explicit_without_gpu"):
             constraints["gpu_preference"] = "without_discrete"
+            constraints["must_have_gpu"] = False
             constraints["specs"] = [s for s in (constraints.get("specs") or []) if "gpu:discrete" not in str(s).lower()]
             gpu_followup_question_needed = False
         elif gpu_prof.get("explicit_with_gpu"):
             constraints["gpu_preference"] = "with_discrete"
+            constraints["must_have_gpu"] = True
             gpu_followup_question_needed = False
         elif gpu_prof.get("likely_gpu_tasks"):
             constraints["gpu_preference"] = "with_discrete"
+            constraints["must_have_gpu"] = True
             gpu_pref_inferred = True
             gpu_followup_question_needed = True
             try:
@@ -2348,6 +2477,137 @@ def suggest(
             qty = _extract_quantity_from_query(query_effective)
             if qty:
                 constraints["quantity"] = qty
+    except Exception:
+        pass
+    # ── Use-Case Advisor: enrich constraints with domain-specific min specs ──
+    _use_case_match = None
+    _use_case_specs = None
+    try:
+        from src.app.services.use_case_advisor import match_use_case_from_query as _match_uc, get_use_case_specs as _get_uc_specs
+        _uc_key = constraints.get("use_case") or None
+        if not _uc_key:
+            _uc_key = _match_uc(query_effective)
+        if _uc_key:
+            _use_case_match = _uc_key
+            _uc_spec = _get_uc_specs(_uc_key)
+            if _uc_spec:
+                _use_case_specs = _uc_spec
+                # Fill in minimum constraints when not already specified
+                if not constraints.get("budget_min") and _uc_spec.get("min_ram_gb"):
+                    # Derive a floor budget from price tier signals
+                    pass
+                if _uc_spec.get("min_ram_gb") and not any("ram" in str(s).lower() for s in (constraints.get("specs") or [])):
+                    constraints.setdefault("specs", [])
+                    constraints["specs"].append(f"ram_gb_min:{_uc_spec['min_ram_gb']}")
+                if _uc_spec.get("gpu_needed") and not constraints.get("must_have_gpu"):
+                    constraints["must_have_gpu"] = True
+                    constraints["gpu_preference"] = "with_discrete"
+                if _uc_spec.get("min_storage_gb") and not any("storage" in str(s).lower() for s in (constraints.get("specs") or [])):
+                    constraints.setdefault("specs", [])
+                    constraints["specs"].append(f"storage_gb_min:{_uc_spec['min_storage_gb']}")
+                if not constraints.get("use_case"):
+                    constraints["use_case"] = _uc_key
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="use_case_advisor_enrichment",
+                    source_type="agent",
+                    source_id="Use_Case_Advisor_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "use_case_key": _uc_key,
+                        "min_ram_gb": _uc_spec.get("min_ram_gb"),
+                        "recommended_ram_gb": _uc_spec.get("recommended_ram_gb"),
+                        "gpu_needed": _uc_spec.get("gpu_needed"),
+                        "min_storage_gb": _uc_spec.get("min_storage_gb"),
+                        "apps": (_uc_spec.get("apps") or [])[:5],
+                    },
+                )
+    except Exception:
+        pass
+    # ── Game/Software Requirements Enrichment ──
+    _detected_games_for_nqe: list = []
+    _detected_software_for_nqe: list = []
+    try:
+        _detected_games_for_nqe = detect_games_in_text(query_effective)
+        _detected_software_for_nqe = detect_software_in_text(query_effective)
+        if _detected_games_for_nqe:
+            from src.app.services.use_case_advisor import match_game_requirements
+            _game_reqs = match_game_requirements(_detected_games_for_nqe)
+            if _game_reqs.get("recommended_ram_gb"):
+                constraints.setdefault("specs", [])
+                constraints["specs"].append(f"ram_gb_min:{_game_reqs['recommended_ram_gb']}")
+            if _game_reqs.get("gpu_needed"):
+                constraints["must_have_gpu"] = True
+                constraints["gpu_preference"] = "with_discrete"
+            if _game_reqs.get("recommended_gpu_vram_gb"):
+                constraints.setdefault("specs", [])
+                constraints["specs"].append(f"gpu_vram_gb_min:{_game_reqs['recommended_gpu_vram_gb']}")
+            if _game_reqs.get("min_refresh_hz", 60) > 60:
+                constraints.setdefault("specs", [])
+                constraints["specs"].append(f"refresh_hz_min:{_game_reqs['min_refresh_hz']}")
+        if _detected_software_for_nqe:
+            from src.app.services.use_case_advisor import match_software_requirements
+            _sw_reqs = match_software_requirements(_detected_software_for_nqe)
+            if _sw_reqs.get("recommended_ram_gb"):
+                constraints.setdefault("specs", [])
+                constraints["specs"].append(f"ram_gb_min:{_sw_reqs['recommended_ram_gb']}")
+            if _sw_reqs.get("gpu_needed"):
+                constraints["must_have_gpu"] = True
+                constraints["gpu_preference"] = "with_discrete"
+    except Exception:
+        pass
+    # ── Product Identity Agent: extract identity from image labels/OCR text ──
+    _identity_constraints: Dict[str, Any] = {}
+    try:
+        if image_context.get("labels") or image_context.get("ocr"):
+            from src.app.services.product_identity_agent import identify_product_from_text, specs_to_constraints as _id_to_constraints
+            _id_result = identify_product_from_text(
+                labels=image_context.get("labels") or [],
+                ocr_text=image_context.get("ocr") or "",
+                user_query=query or "",
+                trace_id=trace_id,
+            )
+            if _id_result.get("identified"):
+                _identity_constraints = _id_to_constraints(_id_result)
+                # Merge identity constraints into the main constraints dict
+                if _identity_constraints.get("identity_brand") and not constraints.get("brand"):
+                    constraints["brand"] = _identity_constraints["identity_brand"]
+                if _identity_constraints.get("identity_budget_min") and not constraints.get("budget_min"):
+                    constraints["budget_min"] = _identity_constraints["identity_budget_min"]
+                if _identity_constraints.get("identity_budget_max") and not constraints.get("budget_max"):
+                    constraints["budget_max"] = _identity_constraints["identity_budget_max"]
+                if _identity_constraints.get("identity_cpu_tier"):
+                    constraints.setdefault("cpu_tier", _identity_constraints["identity_cpu_tier"])
+                if _identity_constraints.get("identity_ram_gb_min"):
+                    constraints.setdefault("specs", [])
+                    if not any("ram" in str(s).lower() for s in constraints["specs"]):
+                        constraints["specs"].append(f"ram_gb_min:{_identity_constraints['identity_ram_gb_min']}")
+                if _identity_constraints.get("identity_gpu_class"):
+                    constraints["must_have_gpu"] = True
+                    constraints.setdefault("gpu_preference", "with_discrete")
+                if _identity_constraints.get("identity_display_inches"):
+                    constraints.setdefault("display_inches", _identity_constraints["identity_display_inches"])
+                if _identity_constraints.get("identity_form_factor"):
+                    constraints.setdefault("form_factor", _identity_constraints["identity_form_factor"])
+                if _identity_constraints.get("identity_product_type"):
+                    constraints.setdefault("product_type", _identity_constraints["identity_product_type"])
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="product_identity_text_enrichment",
+                    source_type="agent",
+                    source_id="Product_Identity_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "brand": _identity_constraints.get("identity_brand"),
+                        "cpu_tier": _identity_constraints.get("identity_cpu_tier"),
+                        "form_factor": _identity_constraints.get("identity_form_factor"),
+                        "product_type": _identity_constraints.get("identity_product_type"),
+                        "confidence": _id_result.get("confidence"),
+                        "constraints_added": list(_identity_constraints.keys()),
+                    },
+                )
     except Exception:
         pass
     # Emit model selection early so tiering is visible even on early returns.
@@ -2554,6 +2814,8 @@ def suggest(
         # Propose next questions and return early without random products
         try:
             category = "laptop" if "laptop" in (query or "").lower() else "general"
+            _nqe_asked = list((kv.get("nqe_asked_ids") or []))
+            _nqe_answered = dict((kv.get("nqe_answered_fields") or {}))
             nqe_input = NQEInput(
                 intent="product_search",
                 product_category=category,
@@ -2565,9 +2827,29 @@ def suggest(
                 template_variant=request.headers.get("X-NQE-Template-Variant") if request is not None else None,
                 template_version=request.headers.get("X-NQE-Template-Version") if request is not None else None,
                 trace_id=trace_id,
+                previously_asked_ids=_nqe_asked,
+                answered_fields=_nqe_answered,
+                has_image=bool(image_context.get("labels") or image_context.get("ocr")),
+                image_identity_confidence=float(_identity_constraints.get("confidence", 1.0) if _identity_constraints else (0.3 if image_context.get("labels") else 1.0)),
+                image_labels=image_context.get("labels") or [],
+                detected_use_case=_use_case_match,
+                query=query or "",
+                detected_games=detect_games_in_text(query or ""),
+                detected_software=detect_software_in_text(query or ""),
+                chat_history_summary=_session_context_summary,
+                user_profile=_user_profile_dict,
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
+            # BUG-1 fix: persist newly-asked question IDs to Redis
+            try:
+                _new_ids = [str(q.get("id") or "") for q in next_questions if q.get("id")]
+                if _new_ids:
+                    _nqe_asked_updated = list(dict.fromkeys(_nqe_asked + _new_ids))
+                    kv["nqe_asked_ids"] = _nqe_asked_updated
+                    mem.set_kv(uid, kv)
+            except Exception:
+                pass
         except Exception:
             next_questions = [
                 {"id": "ask_budget", "text": "What's your budget range?", "goal": "narrow_results"},
@@ -2581,6 +2863,10 @@ def suggest(
         next_questions = _append_standard_nqe_options(next_questions, query_effective)
         next_questions = _apply_nqe_confidence_gating(
             next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
+        )
+        next_questions = _adapt_nqe_questions_for_sentiment(
+            next_questions,
+            sentiment=str(nlp.get("sentiment") or "neutral"),
         )
         # Emit a decision trace event so SSE/WebSocket consumers see the clarifying questions
         try:
@@ -2682,25 +2968,25 @@ def suggest(
         if _is_laptop_focused_query(query_effective, constraints):
             before_family = len(candidates or [])
             narrowed = [c for c in (candidates or []) if _candidate_looks_like_laptop(c)]
-            if narrowed:
-                candidates = narrowed
-                try:
-                    log_trace_event(
-                        trace_id=trace_id,
-                        event_type="agent_process",
-                        source_type="agent",
-                        source_id="Category_Filter_Agent",
-                        target_type="system",
-                        target_id=None,
-                        payload={
-                            "category": "laptop",
-                            "candidates_before": before_family,
-                            "candidates_after": len(candidates),
-                            "reason": "query_focus_laptop_family",
-                        },
-                    )
-                except Exception:
-                    pass
+            candidates = narrowed
+            try:
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="agent_process",
+                    source_type="agent",
+                    source_id="Category_Filter_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "category": "laptop",
+                        "strict": True,
+                        "candidates_before": before_family,
+                        "candidates_after": len(candidates),
+                        "reason": "query_focus_laptop_family",
+                    },
+                )
+            except Exception:
+                pass
         if shortlist_lock_active and prior_shortlist:
             locked = [c for c in (candidates or []) if str(c.get("sku") or "") in set(prior_shortlist)]
             candidates = locked
@@ -3051,13 +3337,14 @@ def suggest(
 
         # GPU preference refinement (explicit or inferred from workload intent).
         gpu_pref = str(constraints.get("gpu_preference") or "").strip().lower()
+        must_have_gpu = bool(constraints.get("must_have_gpu"))
         if gpu_pref in ("with_discrete", "without_discrete"):
             before_gpu = len(candidates or [])
             if gpu_pref == "with_discrete":
                 gpu_filtered = [c for c in (candidates or []) if _candidate_has_discrete_gpu(c)]
                 if gpu_filtered:
                     candidates = gpu_filtered
-                elif gpu_pref_inferred:
+                elif gpu_pref_inferred and not must_have_gpu:
                     # Soft fallback for inferred preference: keep candidates and ask user.
                     gpu_inference_note = (
                         "I prioritized dedicated-GPU systems for this workload, but availability is limited. "
@@ -3078,6 +3365,7 @@ def suggest(
                     target_id=None,
                     payload={
                         "gpu_preference": gpu_pref,
+                        "must_have_gpu": must_have_gpu,
                         "inferred": gpu_pref_inferred,
                         "candidates_before": before_gpu,
                         "candidates_after": len(candidates or []),
@@ -3353,6 +3641,50 @@ def suggest(
                 ranked = service.maybe_llm_rerank(uid, candidates, constraints, use_llm=use_llm)
             with tracer.start_as_current_span("recommend.rerank_post"):
                 scored = service.rerank_candidates_with_factors(ranked, constraints)
+
+        # Add human-facing contrastive WHY + delta explanations.
+        _why_by_sku: Dict[str, str] = {}
+        _delta_by_sku: Dict[str, Dict[str, str]] = {}
+        try:
+            from src.app.services.product_ranking_agent import listwise_rerank
+
+            _p_brands_rank, _n_brands_rank = _extract_profile_brand_prefs(_user_profile_dict)
+            _brand_pos_rank = list(constraints.get("brands") or _p_brands_rank)
+            _brand_neg_rank = list(constraints.get("brand_excludes") or _n_brands_rank)
+            _required_specs_rank: Dict[str, Any] = {}
+            for _spec in list(constraints.get("specs") or []):
+                if isinstance(_spec, dict):
+                    _required_specs_rank.update(_spec)
+
+            _rank_inputs: list[Dict[str, Any]] = []
+            for _it in (scored or []):
+                _cand = dict((_it or {}).get("candidate") or {})
+                _cand["product_id"] = _cand.get("sku") or _cand.get("product_id") or _cand.get("id")
+                if _cand.get("price") is None and _cand.get("price_cents") is not None:
+                    try:
+                        _cand["price"] = float(_cand.get("price_cents")) / 100.0
+                    except Exception:
+                        pass
+                _rank_inputs.append(_cand)
+
+            _ranked_explain = listwise_rerank(
+                _rank_inputs,
+                required_specs=_required_specs_rank,
+                budget_min=constraints.get("budget_min"),
+                budget_max=constraints.get("budget_max"),
+                brands_positive=_brand_pos_rank,
+                brands_negative=_brand_neg_rank,
+                top_n=min(12, len(_rank_inputs) or 12),
+            )
+            for _rp in (_ranked_explain or []):
+                _sku = str((_rp.raw or {}).get("sku") or _rp.product_id or "")
+                if not _sku:
+                    continue
+                _why_by_sku[_sku] = str(_rp.contrastive_why or "")
+                _delta_by_sku[_sku] = dict(_rp.delta_vs_anchor or {})
+        except Exception:
+            _why_by_sku = {}
+            _delta_by_sku = {}
         rerank_ms = int((time.perf_counter() - _rerank_t0) * 1000)
         cb_record(redis, "recommend", True, degradation_cfg)
         try:
@@ -3510,6 +3842,33 @@ def suggest(
             pass
         # attach to retrieved_context for traceability
         # (retrieved_context is built later and will include mem.get_context)
+    except Exception:
+        pass
+
+    # ── Episodic Memory: record this Q&A turn for session context ──
+    try:
+        from src.app.services.episodic_memory import EpisodicMemory, Episode
+        _ep_mem = EpisodicMemory(mem)
+        _turn_idx = len(_ep_mem.get_episodes(uid))
+        _ep = Episode(
+            turn_index=_turn_idx,
+            query=scrub_pii(query or "")[:200],
+            response_summary=f"intent={nlp.get('intent', 'unknown')}, results={len(scored) if 'scored' in dir() else 0}",
+            slots_captured={k: v for k, v in (constraints or {}).items() if k in (
+                "budget_min", "budget_max", "use_case", "brand_preference", "gpu_preference"
+            )},
+        )
+        _ep_mem.append_episode(uid, _ep)
+        _ep_mem.update_profile_from_session(
+            uid,
+            {
+                "brands_positive": list(constraints.get("brands") or []),
+                "brands_negative": list(constraints.get("brand_excludes") or []),
+                "budget_max": constraints.get("budget_max"),
+                "use_case_hints": list(constraints.get("use_case_tags") or ([] if not constraints.get("use_case") else [constraints.get("use_case")])),
+            },
+            session_summary=_session_context_summary,
+        )
     except Exception:
         pass
 
@@ -3691,6 +4050,8 @@ def suggest(
             "score_norm": _normalize_score(score_val),
             "rank_delta": rank_delta,
             "why_not": why_not_inline,
+            "contrastive_why": _why_by_sku.get(str(sku or ""), ""),
+            "delta_vs_anchor": _delta_by_sku.get(str(sku or ""), {}),
             "baseline_rank": baseline_rank,
             "rerank_delta": rerank_delta,
         })
@@ -3839,6 +4200,27 @@ def suggest(
             payload["confidence_calibrated"] = round(sum(confs) / len(confs), 4) if confs else 0.0
         except Exception:
             payload["confidence_calibrated"] = 0.0
+    # ── Price range summary ──
+    # When results exist, provide an explicit price range bracket so the assistant
+    # can answer "what price range should I expect?" directly.
+    try:
+        _prices = []
+        for _pr in (results or []):
+            if isinstance(_pr, dict):
+                p = _pr.get("price") or _pr.get("price_usd")
+                if p and isinstance(p, (int, float)) and p > 0:
+                    _prices.append(float(p))
+        if _prices:
+            _prices_sorted = sorted(_prices)
+            _median_idx = len(_prices_sorted) // 2
+            payload["price_range"] = {
+                "min": _prices_sorted[0],
+                "max": _prices_sorted[-1],
+                "median": _prices_sorted[_median_idx],
+                "count": len(_prices_sorted),
+            }
+    except Exception:
+        pass
     try:
         if inv_shortage_approval_id and not payload.get("approval_id"):
             payload["approval_id"] = inv_shortage_approval_id
@@ -3909,6 +4291,8 @@ def suggest(
         missing_fields = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
         if missing_fields and not _skip_nqe_clarify:
             category = "laptop" if "laptop" in (query or "").lower() else "general"
+            _nqe_asked2 = list((kv.get("nqe_asked_ids") or []))
+            _nqe_answered2 = dict((kv.get("nqe_answered_fields") or {}))
             nqe_input = NQEInput(
                 intent="product_search",
                 product_category=category,
@@ -3920,15 +4304,39 @@ def suggest(
                 template_variant=request.headers.get("X-NQE-Template-Variant") if request is not None else None,
                 template_version=request.headers.get("X-NQE-Template-Version") if request is not None else None,
                 trace_id=trace_id,
+                previously_asked_ids=_nqe_asked2,
+                answered_fields=_nqe_answered2,
+                has_image=bool(image_context.get("labels") or image_context.get("ocr")),
+                image_identity_confidence=float(_identity_constraints.get("confidence", 1.0) if _identity_constraints else (0.3 if image_context.get("labels") else 1.0)),
+                image_labels=image_context.get("labels") or [],
+                detected_use_case=_use_case_match,
+                query=query or "",
+                detected_games=detect_games_in_text(query or ""),
+                detected_software=detect_software_in_text(query or ""),
+                chat_history_summary=_session_context_summary,
+                user_profile=_user_profile_dict,
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
+            # BUG-1 fix: persist newly-asked question IDs to Redis
+            try:
+                _new_ids2 = [str(q.get("id") or "") for q in next_questions if q.get("id")]
+                if _new_ids2:
+                    _asked_updated2 = list(dict.fromkeys(_nqe_asked2 + _new_ids2))
+                    kv["nqe_asked_ids"] = _asked_updated2
+                    mem.set_kv(uid, kv)
+            except Exception:
+                pass
             next_questions = (next_questions or [])[:2]
             if gpu_followup_question_needed:
                 next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
             next_questions = _append_standard_nqe_options(next_questions, query_effective)
             next_questions = _apply_nqe_confidence_gating(
                 next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
+            )
+            next_questions = _adapt_nqe_questions_for_sentiment(
+                next_questions,
+                sentiment=str(nlp.get("sentiment") or "neutral"),
             )
             if next_questions:
                 payload["next_questions"] = next_questions
@@ -4084,6 +4492,99 @@ def suggest(
             )
     except Exception:
         pass
+    # ── Use-Case Advisor: assess suitability of top results and annotate ──
+    try:
+        if _use_case_match and _use_case_specs and results:
+            from src.app.services.use_case_advisor import assess_suitability as _assess_suit
+            _uc_verdicts = []
+            for _r in (results or [])[:3]:
+                _prod_specs = {
+                    "ram_gb": _r.get("specs", {}).get("ram_gb") if isinstance(_r.get("specs"), dict) else None,
+                    "storage_gb": _r.get("specs", {}).get("storage_gb") if isinstance(_r.get("specs"), dict) else None,
+                    "has_dedicated_gpu": bool(_r.get("specs", {}).get("gpu")) if isinstance(_r.get("specs"), dict) else False,
+                    "gpu_vram_gb": _r.get("specs", {}).get("gpu_vram_gb") if isinstance(_r.get("specs"), dict) else None,
+                    "display_inches": _r.get("specs", {}).get("display_inches") if isinstance(_r.get("specs"), dict) else None,
+                }
+                verdict = _assess_suit(_use_case_match, _prod_specs)
+                _uc_verdicts.append(verdict)
+                # Annotate the result dict so frontend can show suitability
+                _r["use_case_suitability"] = {
+                    "use_case": _use_case_match,
+                    "suitable": verdict.get("suitable"),
+                    "verdict": verdict.get("verdict"),
+                    "gaps": verdict.get("gaps", [])[:3],
+                    "strengths": verdict.get("strengths", [])[:3],
+                    "excess": verdict.get("excess", [])[:3],
+                    "overkill_score": verdict.get("overkill_score", 0.0),
+                }
+            # Add suitability summary to assistant message
+            _uc_label = str(_use_case_specs.get("label") or _use_case_match).replace("_", " ")
+            _suitable_count = sum(1 for v in _uc_verdicts if v.get("suitable"))
+            _overkill_count = sum(1 for v in _uc_verdicts if v.get("verdict") == "overkill")
+            _total_assessed = len(_uc_verdicts)
+            if _total_assessed > 0:
+                _uc_note = f"\n\n📋 Use-case analysis ({_uc_label}): {_suitable_count}/{_total_assessed} top results meet minimum requirements."
+                if _overkill_count > 0:
+                    _uc_note += f" ⚡ {_overkill_count}/{_total_assessed} may be overkill for this use-case — consider a more cost-effective option."
+                    _top_excess = []
+                    for v in _uc_verdicts:
+                        _top_excess.extend(v.get("excess", [])[:1])
+                    if _top_excess:
+                        _uc_note += f" ({'; '.join(_top_excess[:2])})"
+                if any(v.get("gaps") for v in _uc_verdicts):
+                    _top_gaps = []
+                    for v in _uc_verdicts:
+                        _top_gaps.extend(v.get("gaps", [])[:1])
+                    if _top_gaps:
+                        _uc_note += f" Key gaps: {'; '.join(_top_gaps[:2])}."
+                _uc_apps = (_use_case_specs.get("apps") or [])[:3]
+                if _uc_apps:
+                    _uc_note += f" Key apps: {', '.join(_uc_apps)}."
+                assistant_message = (assistant_message or "") + _uc_note
+            payload["use_case_analysis"] = {
+                "use_case_key": _use_case_match,
+                "label": _uc_label,
+                "suitable_count": _suitable_count,
+                "total_assessed": _total_assessed,
+                "apps": (_use_case_specs.get("apps") or [])[:5],
+                "priority_factors": (_use_case_specs.get("priority_factors") or [])[:5],
+            }
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="use_case_suitability_assessed",
+                source_type="agent",
+                source_id="Use_Case_Advisor_Agent",
+                target_type="user",
+                target_id=None,
+                payload={
+                    "use_case_key": _use_case_match,
+                    "suitable_count": _suitable_count,
+                    "total_assessed": _total_assessed,
+                    "verdicts_summary": [
+                        {"sku": (results[i] or {}).get("sku"), "suitable": v.get("suitable"), "gaps": v.get("gaps", [])[:2]}
+                        for i, v in enumerate(_uc_verdicts)
+                    ],
+                },
+            )
+    except Exception:
+        pass
+    # ── Price range advisory note in assistant message ──
+    try:
+        _pr_range = payload.get("price_range")
+        if _pr_range and _pr_range.get("count", 0) >= 2:
+            _pr_min = _pr_range["min"]
+            _pr_max = _pr_range["max"]
+            _pr_median = _pr_range["median"]
+            _pr_note = f"\n\n💰 Price range: ${_pr_min:,.0f} – ${_pr_max:,.0f} (median ${_pr_median:,.0f}) across {_pr_range['count']} results."
+            assistant_message = (assistant_message or "") + _pr_note
+    except Exception:
+        pass
+    # Attach product identity constraints to response (when image-based)
+    if _identity_constraints:
+        payload["product_identity"] = {
+            "constraints": _identity_constraints,
+            "source": "text_heuristic",
+        }
     if not results:
         try:
             fallback_alternatives = []
@@ -4614,8 +5115,8 @@ def log_recommend_interaction(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     action = str(payload.action or "").strip().lower()
-    if action not in {"hover", "click", "view", "add_to_cart", "atc", "cart_add"}:
-        raise HTTPException(status_code=400, detail="action must be one of: hover, click, view, add_to_cart")
+    if action not in {"hover", "click", "view", "add_to_cart", "atc", "cart_add", "reject", "dismiss", "dislike", "purchase"}:
+        raise HTTPException(status_code=400, detail="action must be one of: hover, click, view, add_to_cart, reject, dismiss, dislike, purchase")
     sku = str(payload.sku or "").strip()
     if not sku:
         raise HTTPException(status_code=400, detail="sku required")
@@ -4653,7 +5154,18 @@ def log_recommend_interaction(
         except Exception:
             pass
         try:
-            reward_map = {"hover": 0.1, "view": 0.2, "click": 0.7, "add_to_cart": 1.0, "atc": 1.0, "cart_add": 1.0}
+            reward_map = {
+                "hover": 0.1,
+                "view": 0.2,
+                "click": 0.7,
+                "add_to_cart": 1.0,
+                "atc": 1.0,
+                "cart_add": 1.0,
+                "purchase": 1.5,
+                "reject": -0.6,
+                "dismiss": -0.4,
+                "dislike": -0.5,
+            }
             arm = str(safe_ctx.get("bandit_arm") or "balanced")
             reward = float(reward_map.get(action, 0.0))
             bandit_ctx = safe_ctx.get("bandit_context") if isinstance(safe_ctx.get("bandit_context"), dict) else safe_ctx
@@ -4674,6 +5186,110 @@ def log_recommend_interaction(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"interaction_log_failed: {exc}")
     return {"status": "ok", "event_id": eid}
+
+
+@router.post("/feedback")
+def recommend_feedback(
+    payload: RecommendFeedbackPayload,
+    db=Depends(get_db),
+    redis=Depends(get_redis),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    outcome = str(payload.outcome or "").strip().lower()
+    if outcome not in {"accepted", "rejected", "corrected", "purchased", "dismissed"}:
+        raise HTTPException(status_code=400, detail="outcome must be one of: accepted, rejected, corrected, purchased, dismissed")
+
+    ensure_recommend_interactions_table(db)
+    ensure_recommend_bandit_tables(db)
+    ensure_identity_graph_tables(db)
+
+    uid_h = hash_uid(payload.uid)
+    safe_ctx = security_sanitize(payload.context or {})
+    sku = str(payload.sku or "").strip()
+    trace_id = str(payload.trace_id or "").strip()
+
+    action_map = {
+        "accepted": "click",
+        "purchased": "purchase",
+        "rejected": "reject",
+        "dismissed": "dismiss",
+        "corrected": "dislike",
+    }
+    action = action_map.get(outcome, "view")
+    eid = str(uuid.uuid4())
+
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO recommend_interactions (id, uid_hash, sku, action, surface, trace_id, context_json)
+                VALUES (:id, :uid_hash, :sku, :action, :surface, :trace_id, :context_json)
+                """
+            ),
+            {
+                "id": eid,
+                "uid_hash": uid_h,
+                "sku": sku,
+                "action": action,
+                "surface": "user_feedback",
+                "trace_id": trace_id,
+                "context_json": json.dumps({**safe_ctx, "outcome": outcome}, ensure_ascii=False),
+            },
+        )
+        reward_map = {
+            "accepted": 1.0,
+            "purchased": 1.5,
+            "rejected": -0.6,
+            "dismissed": -0.4,
+            "corrected": -0.7,
+        }
+        if sku:
+            record_bandit_reward(
+                db,
+                uid_hash=uid_h,
+                sku=sku,
+                arm=str(safe_ctx.get("bandit_arm") or "balanced"),
+                reward=float(reward_map.get(outcome, 0.0)),
+                context=safe_ctx,
+            )
+        try:
+            db.commit()
+        except Exception:
+            pass
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"feedback_record_failed: {exc}")
+
+    try:
+        corr = str(payload.correction_text or "").strip()
+        if corr:
+            mem = Memory(redis)
+            kv = mem.get_kv(payload.uid) or {}
+            corr_list = kv.get("user_corrections") if isinstance(kv.get("user_corrections"), list) else []
+            corr_list.append({"ts": int(time.time()), "trace_id": trace_id, "text": corr[:500]})
+            kv["user_corrections"] = corr_list[-20:]
+            mem.set_kv(payload.uid, kv)
+    except Exception:
+        pass
+
+    try:
+        if trace_id:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="user_feedback",
+                source_type="user",
+                source_id=payload.uid,
+                target_type="agent",
+                target_id="Recommendation_Agent",
+                payload={
+                    "outcome": outcome,
+                    "sku": sku or None,
+                    "has_correction_text": bool(str(payload.correction_text or "").strip()),
+                },
+            )
+    except Exception:
+        pass
+
+    return {"status": "ok", "event_id": eid, "outcome": outcome}
 
 
 @router.post("/cf/train")
