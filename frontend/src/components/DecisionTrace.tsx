@@ -150,7 +150,20 @@ function eventMatches(evt: TraceEvent, expected: string | string[]): boolean {
 
 export default function DecisionTrace({ traceId, onClose }: { traceId: string | null; onClose: () => void }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
-  const authHeaders = API_KEY ? { 'x-api-key': API_KEY } : undefined;
+  const LOCAL_KEY = (() => {
+    try {
+      const k =
+        localStorage.getItem('x-api-key') ||
+        localStorage.getItem('shopsquire_api_key') ||
+        localStorage.getItem('api_key') ||
+        '';
+      return String(k || '').trim();
+    } catch {
+      return '';
+    }
+  })();
+  const effectiveApiKey = API_KEY || LOCAL_KEY || 'local-merchant-key';
+  const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [explain, setExplain] = useState<any | null>(null);
@@ -447,7 +460,20 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     });
   };
 
-  // Generate synthetic events from trace if timeline API not available
+  // Generate synthetic events from trace if timeline API not available.
+  // If we only have a trace id (fetch still pending), render a lookup event so
+  // the table is never empty immediately after chat submit.
+  const pendingLookupEvents: TraceEvent[] = (!trace && traceId) ? [{
+    event_type: 'trace_lookup',
+    source_id: 'ui',
+    payload: {
+      trace_id: traceId,
+      status: updating ? 'loading' : 'pending',
+      summary: updating ? 'Loading trace data...' : 'Trace id captured; waiting for timeline events.',
+    },
+    timestamp: new Date().toISOString(),
+  }] : [];
+
   const allDisplayEvents: TraceEvent[] = events.length > 0 ? events : (trace ? [
     { event_type: 'query_received', source_id: 'input', payload: { query: trace.input_query }, timestamp: trace.timestamp },
     ...(trace.intent_analysis ? [{ event_type: 'intent_analysis', source_id: 'nlp', payload: trace.intent_analysis, timestamp: trace.timestamp }] : []),
@@ -455,7 +481,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     ...(trace.model_selection ? [{ event_type: 'model_invoke', source_id: trace.model_selection.selected || 'llm', payload: trace.model_selection, latency_ms: trace.model_selection.latency_ms ?? undefined, timestamp: trace.timestamp }] : []),
     ...(trace.policy_gates ? [{ event_type: 'policy_gate', source_id: 'policy', payload: trace.policy_gates, timestamp: trace.timestamp }] : []),
     ...(trace.recommendation ? [{ event_type: 'success', source_id: 'output', payload: trace.recommendation, timestamp: trace.timestamp }] : []),
-  ] : []);
+  ] : pendingLookupEvents);
   const displayEvents: TraceEvent[] =
     eventFilter === 'all'
       ? allDisplayEvents
@@ -754,7 +780,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                       );
                     })}
                     {displayEvents.length === 0 && (
-                      <tr><td colSpan={4} className={styles.empty}>No events recorded yet. Check backend connectivity or trace ID.</td></tr>
+                      <tr><td colSpan={4} className={styles.empty}>Trace events are not available yet. Verify backend connectivity and trace identifier.</td></tr>
                     )}
                   </tbody>
                 </table>

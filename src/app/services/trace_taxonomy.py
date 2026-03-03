@@ -35,6 +35,14 @@ CANONICAL_TRACE_EVENTS = {
     # Added for test alignment and agent handoff semantics
     "handoff_requested",
     "test_event",
+    "nqe_plan_built",
+    "nqe_question_shown",
+    "nqe_assumption_applied",
+    "nqe_fallback_alternatives",
+    "nqe_user_answer_bound",
+    "upsell_promotion_selected",
+    "shortlist_memory_lock",
+    "turn_envelope_diff",
 }
 
 

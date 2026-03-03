@@ -15,6 +15,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _dialect(db) -> str:
+    try:
+        return str(getattr(getattr(db, "bind", None), "dialect", None).name or "").lower()
+    except Exception:
+        return ""
+
+
 def _ensure_billing_tables() -> None:
     try:
         with db_session() as db:
@@ -64,6 +71,21 @@ def _ensure_billing_tables() -> None:
                     """
                 )
             )
+            db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS tenant_provisioning (
+                        tenant_id TEXT PRIMARY KEY,
+                        plan_id TEXT NOT NULL,
+                        home_region TEXT NOT NULL,
+                        status TEXT DEFAULT 'provisioned',
+                        limits_json TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
             db.commit()
     except Exception:
         pass
@@ -78,22 +100,46 @@ def link_tenant_stripe(
 ) -> Dict[str, Any]:
     _ensure_billing_tables()
     with db_session() as db:
-        db.execute(
-            text(
-                """
-                INSERT OR REPLACE INTO tenant_billing_accounts
-                (tenant_id, stripe_customer_id, stripe_subscription_item_id, meter_key, updated_at)
-                VALUES (:tenant_id, :customer_id, :subscription_item_id, :meter_key, :updated_at)
-                """
-            ),
-            {
-                "tenant_id": tenant_id,
-                "customer_id": customer_id,
-                "subscription_item_id": subscription_item_id,
-                "meter_key": meter_key,
-                "updated_at": _now(),
-            },
-        )
+        d = _dialect(db)
+        if d == "sqlite":
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO tenant_billing_accounts
+                    (tenant_id, stripe_customer_id, stripe_subscription_item_id, meter_key, updated_at)
+                    VALUES (:tenant_id, :customer_id, :subscription_item_id, :meter_key, :updated_at)
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "customer_id": customer_id,
+                    "subscription_item_id": subscription_item_id,
+                    "meter_key": meter_key,
+                    "updated_at": _now(),
+                },
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO tenant_billing_accounts
+                    (tenant_id, stripe_customer_id, stripe_subscription_item_id, meter_key, updated_at)
+                    VALUES (:tenant_id, :customer_id, :subscription_item_id, :meter_key, :updated_at)
+                    ON CONFLICT (tenant_id) DO UPDATE SET
+                      stripe_customer_id=EXCLUDED.stripe_customer_id,
+                      stripe_subscription_item_id=EXCLUDED.stripe_subscription_item_id,
+                      meter_key=EXCLUDED.meter_key,
+                      updated_at=EXCLUDED.updated_at
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "customer_id": customer_id,
+                    "subscription_item_id": subscription_item_id,
+                    "meter_key": meter_key,
+                    "updated_at": _now(),
+                },
+            )
         db.commit()
     return {"ok": True, "tenant_id": tenant_id}
 
@@ -101,20 +147,42 @@ def link_tenant_stripe(
 def onboard_pilot_tenant(*, tenant_id: str, company_name: str, contact_email: str, vertical: str | None = None) -> Dict[str, Any]:
     _ensure_billing_tables()
     with db_session() as db:
-        db.execute(
-            text(
-                """
-                INSERT OR REPLACE INTO pilot_tenants (tenant_id, company_name, contact_email, vertical, status)
-                VALUES (:tenant_id, :company_name, :contact_email, :vertical, 'pilot')
-                """
-            ),
-            {
-                "tenant_id": tenant_id,
-                "company_name": company_name,
-                "contact_email": contact_email,
-                "vertical": vertical,
-            },
-        )
+        d = _dialect(db)
+        if d == "sqlite":
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO pilot_tenants (tenant_id, company_name, contact_email, vertical, status)
+                    VALUES (:tenant_id, :company_name, :contact_email, :vertical, 'pilot')
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "company_name": company_name,
+                    "contact_email": contact_email,
+                    "vertical": vertical,
+                },
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO pilot_tenants (tenant_id, company_name, contact_email, vertical, status)
+                    VALUES (:tenant_id, :company_name, :contact_email, :vertical, 'pilot')
+                    ON CONFLICT (tenant_id) DO UPDATE SET
+                      company_name=EXCLUDED.company_name,
+                      contact_email=EXCLUDED.contact_email,
+                      vertical=EXCLUDED.vertical,
+                      status='pilot'
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "company_name": company_name,
+                    "contact_email": contact_email,
+                    "vertical": vertical,
+                },
+            )
         db.commit()
     return {"ok": True, "tenant_id": tenant_id, "status": "pilot"}
 
@@ -197,13 +265,18 @@ def record_meter_event(
 def usage_summary(*, tenant_id: str | None = None, days: int = 30) -> Dict[str, Any]:
     _ensure_billing_tables()
     days = max(1, min(int(days or 30), 365))
-    params: Dict[str, Any] = {"window_expr": f"-{days} days"}
-    where = "WHERE datetime(created_at) >= datetime('now', :window_expr)"
-    if tenant_id:
-        where += " AND tenant_id = :tenant_id"
-        params["tenant_id"] = tenant_id
-
     with db_session() as db:
+        d = _dialect(db)
+        params: Dict[str, Any] = {}
+        if d == "sqlite":
+            params["window_expr"] = f"-{days} days"
+            where = "WHERE datetime(created_at) >= datetime('now', :window_expr)"
+        else:
+            params["days"] = int(days)
+            where = "WHERE created_at >= (NOW() - (:days * INTERVAL '1 day'))"
+        if tenant_id:
+            where += " AND tenant_id = :tenant_id"
+            params["tenant_id"] = tenant_id
         rows = db.execute(
             text(
                 f"""
@@ -221,4 +294,70 @@ def usage_summary(*, tenant_id: str | None = None, days: int = 30) -> Dict[str, 
         for r in (rows or [])
     ]
     return {"ok": True, "days": days, "items": items}
+
+
+def list_billing_plans() -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "plans": [
+            {"id": "starter", "name": "Starter", "monthly_usd": 199, "included_recommend_requests": 10000},
+            {"id": "growth", "name": "Growth", "monthly_usd": 699, "included_recommend_requests": 100000},
+            {"id": "enterprise", "name": "Enterprise", "monthly_usd": 2499, "included_recommend_requests": 1000000},
+        ],
+    }
+
+
+def provision_tenant_core(
+    *,
+    tenant_id: str,
+    plan_id: str,
+    home_region: str,
+    limits: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    _ensure_billing_tables()
+    limits_json = json.dumps(limits or {}, ensure_ascii=False)
+    with db_session() as db:
+        d = _dialect(db)
+        if d == "sqlite":
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO tenant_provisioning
+                    (tenant_id, plan_id, home_region, status, limits_json, updated_at)
+                    VALUES (:tenant_id, :plan_id, :home_region, 'provisioned', :limits_json, :updated_at)
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "plan_id": plan_id,
+                    "home_region": home_region,
+                    "limits_json": limits_json,
+                    "updated_at": _now(),
+                },
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO tenant_provisioning
+                    (tenant_id, plan_id, home_region, status, limits_json, updated_at)
+                    VALUES (:tenant_id, :plan_id, :home_region, 'provisioned', :limits_json, :updated_at)
+                    ON CONFLICT (tenant_id) DO UPDATE SET
+                      plan_id=EXCLUDED.plan_id,
+                      home_region=EXCLUDED.home_region,
+                      status='provisioned',
+                      limits_json=EXCLUDED.limits_json,
+                      updated_at=EXCLUDED.updated_at
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "plan_id": plan_id,
+                    "home_region": home_region,
+                    "limits_json": limits_json,
+                    "updated_at": _now(),
+                },
+            )
+        db.commit()
+    return {"ok": True, "tenant_id": tenant_id, "plan_id": plan_id, "home_region": home_region, "status": "provisioned"}
 

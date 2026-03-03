@@ -7,7 +7,7 @@ from src.app.observability.tracing import get_tracer
 from src.app.services.payments import StripeClient
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
-from src.app.security.payment_threats import evaluate_payment_threat
+from src.app.security.transaction_firewall import evaluate_transaction_firewall
 
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
@@ -152,7 +152,7 @@ def create_intent(
             client = StripeClient(settings.stripe_api_key)
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Stripe provider unavailable: {exc}")
-        risk = evaluate_payment_threat(
+        risk = evaluate_transaction_firewall(
             provider="stripe",
             uid="merchant_portal",
             amount_cents=amount_cents,
@@ -161,12 +161,19 @@ def create_intent(
             request_ip=(request.client.host if request and request.client else None),
             idempotency_key=idempotency_key,
             tenant_id=None,
+            trace_id=None,
         )
-        if risk.get("decision") == "block":
+        if risk.get("action") == "hard_block":
             raise HTTPException(status_code=403, detail={"message": "Payment request blocked by security policy", "security": risk})
+        if risk.get("action") in ("step_up_mfa", "manual_review"):
+            code = 401 if risk.get("action") == "step_up_mfa" else 202
+            detail = "mfa_stepup_required" if code == 401 else "manual_review_required"
+            raise HTTPException(status_code=code, detail={"message": detail, "security": risk})
         if not _idempotent("payment_intent", idempotency_key):
             raise HTTPException(status_code=409, detail="Duplicate payment intent")
         out = client.create_payment_intent(amount_cents, currency)
         if isinstance(out, dict):
             out["security"] = risk
+            out["pci_scope"] = "tokenized_provider_managed"
+            out["card_data_stored"] = ["token", "last4", "provider_ref"]
         return out

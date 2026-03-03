@@ -23,3 +23,16 @@ def test_pre_llm_cv_checks():
     assert signals.get("cv_timestamp_impossible") is True
     assert signals.get("cv_duplicate_hash") is True
     assert signals.get("rapid_photo_submission") is True
+
+
+def test_behavioral_fraud_signals_include_ip_velocity_and_address_cluster():
+    from src.app.services.fraud_scorer import BehavioralFraudDetector
+
+    out = BehavioralFraudDetector().analyze_session(
+        {
+            "ip_velocity_per_hour": 42,
+            "shipping_address_cluster_size": 6,
+        }
+    )
+    assert out.get("ip_velocity_spike") is True
+    assert out.get("shipping_address_clustered") is True

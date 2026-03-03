@@ -45,9 +45,10 @@ export default function CartPanel({
       }
       setLoadingUpsell(true);
       try {
-        const u = new URL(apiUrl('/api/v1/recommend/suggest'), window.location.href);
+        const u = new URL(apiUrl('/api/v1/recommend/checkout_upsell'), window.location.href);
         u.searchParams.set('uid', uid || 'demo-user');
-        u.searchParams.set('query', upsellQuery);
+        u.searchParams.set('cart_skus', cartSkus.join(','));
+        u.searchParams.set('limit', '4');
         const r = await fetch(u.toString(), {
           credentials: 'include',
           headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
@@ -61,7 +62,10 @@ export default function CartPanel({
           price: it.price_cents ? it.price_cents / 100 : (it.price ?? 0),
           features: it.features || [],
           image_url: it.image_url,
-          why: (it.factors?.positive || []).slice(0, 3),
+          why: (it.reasons || it.factors?.positive || []).slice(0, 3),
+          why_codes: (it.reason_codes || []).slice(0, 3),
+          why_confidence: it.reason_confidence,
+          model_source: it.model_source,
           score_norm: it.score_norm,
         })) as Product[];
         const tid = j.decision_trace_id || j.trace_id || j.decision_id || null;
@@ -82,7 +86,7 @@ export default function CartPanel({
     return () => {
       mounted = false;
     };
-  }, [API_KEY, uid, upsellQuery]);
+  }, [API_KEY, uid, upsellQuery, cartSkus]);
 
   useEffect(() => {
     onTraceId?.(upsellTraceId);
@@ -157,9 +161,21 @@ export default function CartPanel({
                         {p.why.slice(0, 3).map((w, idx) => <span key={idx} className={styles.pill}>{w}</span>)}
                       </div>
                     )}
+                    {(p.why_codes && p.why_codes.length > 0) && (
+                      <div className={styles.pillRow}>
+                        {p.why_codes.slice(0, 2).map((w, idx) => (
+                          <span key={`code-${idx}`} className={styles.pill}>
+                            {w.label} ({Math.round((w.confidence || 0) * 100)}%)
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className={styles.rowRight}>
                     <div className={styles.price}>${(p.price || 0).toLocaleString()}</div>
+                    {typeof p.why_confidence === 'number' && (
+                      <div className={styles.sku}>Confidence: {Math.round((p.why_confidence || 0) * 100)}%</div>
+                    )}
                     <div className={styles.btnRow}>
                       <button className={styles.btn} onClick={() => onAdd(p.sku)}>Add</button>
                     </div>
@@ -175,6 +191,20 @@ export default function CartPanel({
                   <article key={`carousel-${p.sku}`} className={styles.carouselCard}>
                     <div className={styles.carouselName}>{p.name}</div>
                     <div className={styles.sku}>{p.sku}</div>
+                    {(p.why && p.why.length > 0) && (
+                      <div className={styles.pillRow}>
+                        {p.why.slice(0, 2).map((w, idx) => <span key={`carousel-why-${idx}`} className={styles.pill}>Why: {w}</span>)}
+                      </div>
+                    )}
+                    {(p.why_codes && p.why_codes.length > 0) && (
+                      <div className={styles.pillRow}>
+                        {p.why_codes.slice(0, 1).map((w, idx) => (
+                          <span key={`carousel-code-${idx}`} className={styles.pill}>
+                            {w.code} {Math.round((w.confidence || 0) * 100)}%
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className={styles.carouselMeta}>
                       <span className={styles.price}>${(p.price || 0).toLocaleString()}</span>
                       <button className={`${styles.btn} ${styles.carouselAddBtn}`} onClick={() => onAdd(p.sku)}>

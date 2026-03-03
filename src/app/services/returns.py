@@ -6,6 +6,7 @@ import hashlib
 import os
 from typing import List, Dict, Any, Tuple
 import re
+from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
 from src.app.services.ocr_embedded import extract_embedded_text
@@ -175,7 +176,7 @@ def check_image_reuse(hash_hex: str) -> bool:
     # Check existing fraud_image_hashes table for the phash
     try:
         with db_session() as db:
-            res = db.execute("SELECT 1 FROM fraud_image_hashes WHERE phash = :p", {"p": hash_hex}).scalar()
+            res = db.execute(sql_text("SELECT 1 FROM fraud_image_hashes WHERE phash = :p"), {"p": hash_hex}).scalar()
             return bool(res)
     except Exception:
         return False
@@ -327,8 +328,24 @@ def capture_evidence(
         sha256 = image_sha256_bytes(b)
         phash = image_phash_hex(b)
         reused = check_image_reuse(phash)
+        reverse_lookup = {}
+        try:
+            from src.app.services.reverse_image_search import ReverseImageSearch
+
+            reverse_lookup = ReverseImageSearch().external_lookup(phash=phash, sha256=sha256, sku=sku)
+        except Exception:
+            reverse_lookup = {}
         ocr_text = cv_best_text.get(safe_name) or ocr_image_bytes(b)
-        pkg["images"].append({"filename": safe_name, "path": path, "phash": phash, "sha256": sha256, "reused": reused})
+        pkg["images"].append(
+            {
+                "filename": safe_name,
+                "path": path,
+                "phash": phash,
+                "sha256": sha256,
+                "reused": reused,
+                "reverse_image": reverse_lookup,
+            }
+        )
         if ocr_text:
             pkg["ocr"][safe_name] = ocr_text
             # OCR-based mismatch heuristics (best-effort)
@@ -352,6 +369,28 @@ def capture_evidence(
                 )
         if reused:
             pkg["fraud_signals"].append({"type": "image_reuse", "phash": phash, "filename": safe_name})
+        try:
+            manu_hits = reverse_lookup.get("manufacturer_matches") if isinstance(reverse_lookup, dict) else []
+            fraud_hits = reverse_lookup.get("fraud_db_matches") if isinstance(reverse_lookup, dict) else []
+            if isinstance(manu_hits, list) and manu_hits:
+                pkg["fraud_signals"].append(
+                    {
+                        "type": "reverse_image_manufacturer_match",
+                        "count": len(manu_hits),
+                        "filename": safe_name,
+                    }
+                )
+            risky_hits = [h for h in (fraud_hits or []) if isinstance(h, dict) and bool(h.get("fraud"))]
+            if risky_hits:
+                pkg["fraud_signals"].append(
+                    {
+                        "type": "reverse_image_fraud_db_hit",
+                        "count": len(risky_hits),
+                        "filename": safe_name,
+                    }
+                )
+        except Exception:
+            pass
 
     # Persist package JSON for export
     try:
@@ -463,14 +502,14 @@ def mark_evidence_as_fraud(evidence_id: str) -> int:
                     continue
                 try:
                     db.execute(
-                        "INSERT OR IGNORE INTO fraud_image_hashes (phash, first_seen_case_id, times_seen, confirmed_fraud, created_at) VALUES (:phash, :case, 1, 1, CURRENT_TIMESTAMP)",
+                        sql_text("INSERT OR IGNORE INTO fraud_image_hashes (phash, first_seen_case_id, times_seen, confirmed_fraud, created_at) VALUES (:phash, :case, 1, 1, CURRENT_TIMESTAMP)"),
                         {"phash": phash, "case": evidence_id},
                     )
                     inserted += 1
                 except Exception:
                     try:
                         # Try update times_seen if exists
-                        db.execute("UPDATE fraud_image_hashes SET times_seen = times_seen + 1, confirmed_fraud = 1 WHERE phash = :phash", {"phash": phash})
+                        db.execute(sql_text("UPDATE fraud_image_hashes SET times_seen = times_seen + 1, confirmed_fraud = 1 WHERE phash = :phash"), {"phash": phash})
                     except Exception:
                         pass
             try:

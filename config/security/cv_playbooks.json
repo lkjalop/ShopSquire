@@ -1,7 +1,12 @@
 {
   "schema_version": "2.0",
-  "published_at": "2026-02-13T00:00:00Z",
-  "risk_band_order": ["low", "medium", "high", "critical"],
+  "published_at": "2026-03-02T20:53:01.402765+00:00",
+  "risk_band_order": [
+    "low",
+    "medium",
+    "high",
+    "critical"
+  ],
   "playbooks": [
     {
       "id": "PB-PAYMENT-FRAUD",
@@ -9,7 +14,7 @@
       "domain": "security",
       "priority": 10,
       "enabled": true,
-      "version": "1.0.0",
+      "version": "1.0.39",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
@@ -37,7 +42,10 @@
       ],
       "sla_minutes": 60,
       "risk_band_min": "high",
-      "owners": ["FraudOps", "SecurityOps"],
+      "owners": [
+        "FraudOps",
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
@@ -45,7 +53,9 @@
         "strategy": "manual"
       },
       "requires_approval_roles": [],
-      "severity": "critical"
+      "severity": "critical",
+      "updated_by": "owner",
+      "updated_at": "2026-03-02T20:53:01.402765+00:00"
     },
     {
       "id": "PB-SEC-001",
@@ -60,15 +70,22 @@
         {
           "type": "create_ticket",
           "mode": "automatic",
-          "params": { "queue": "soc" }
+          "params": {
+            "queue": "soc"
+          }
         }
       ],
       "sla_minutes": 30,
       "risk_band_min": "high",
-      "owners": ["SecurityOps"],
+      "owners": [
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
-      "rollback": { "enabled": false, "strategy": "manual" },
+      "rollback": {
+        "enabled": false,
+        "strategy": "manual"
+      },
       "requires_approval_roles": [],
       "severity": "high"
     },
@@ -85,15 +102,22 @@
         {
           "type": "create_ticket",
           "mode": "automatic",
-          "params": { "queue": "soc" }
+          "params": {
+            "queue": "soc"
+          }
         }
       ],
       "sla_minutes": 60,
       "risk_band_min": "critical",
-      "owners": ["SecurityOps"],
+      "owners": [
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
-      "rollback": { "enabled": false, "strategy": "manual" },
+      "rollback": {
+        "enabled": false,
+        "strategy": "manual"
+      },
       "requires_approval_roles": [],
       "severity": "critical"
     },
@@ -110,15 +134,22 @@
         {
           "type": "create_ticket",
           "mode": "automatic",
-          "params": { "queue": "fraud" }
+          "params": {
+            "queue": "fraud"
+          }
         }
       ],
       "sla_minutes": 120,
       "risk_band_min": "medium",
-      "owners": ["FraudOps"],
+      "owners": [
+        "FraudOps"
+      ],
       "checks": [],
       "closure_criteria": [],
-      "rollback": { "enabled": false, "strategy": "manual" },
+      "rollback": {
+        "enabled": false,
+        "strategy": "manual"
+      },
       "requires_approval_roles": [],
       "severity": "high"
     },
@@ -135,15 +166,22 @@
         {
           "type": "create_ticket",
           "mode": "automatic",
-          "params": { "queue": "ops" }
+          "params": {
+            "queue": "ops"
+          }
         }
       ],
       "sla_minutes": 240,
       "risk_band_min": "low",
-      "owners": ["Ops"],
+      "owners": [
+        "Ops"
+      ],
       "checks": [],
       "closure_criteria": [],
-      "rollback": { "enabled": false, "strategy": "manual" },
+      "rollback": {
+        "enabled": false,
+        "strategy": "manual"
+      },
       "requires_approval_roles": [],
       "severity": "low"
     },
@@ -167,7 +205,9 @@
       ],
       "sla_minutes": 60,
       "risk_band_min": "low",
-      "owners": ["SecurityOps"],
+      "owners": [
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
@@ -204,7 +244,9 @@
       ],
       "sla_minutes": 30,
       "risk_band_min": "medium",
-      "owners": ["SecurityOps"],
+      "owners": [
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
@@ -234,7 +276,10 @@
       ],
       "sla_minutes": 90,
       "risk_band_min": "medium",
-      "owners": ["FinanceOps", "SecurityOps"],
+      "owners": [
+        "FinanceOps",
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
@@ -271,7 +316,10 @@
       ],
       "sla_minutes": 120,
       "risk_band_min": "high",
-      "owners": ["FinanceOps", "SecurityOps"],
+      "owners": [
+        "FinanceOps",
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
@@ -301,7 +349,9 @@
       ],
       "sla_minutes": 60,
       "risk_band_min": "high",
-      "owners": ["SecurityOps"],
+      "owners": [
+        "SecurityOps"
+      ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
@@ -313,19 +363,40 @@
     }
   ],
   "signal_map": {
-    "prompt_injection": ["PB-SEC-001"],
-    "data_exfiltration": ["PB-SEC-002"]
+    "prompt_injection": [
+      "PB-SEC-001"
+    ],
+    "data_exfiltration": [
+      "PB-SEC-002"
+    ]
   },
   "tag_map": {
-    "payment_fraud": ["PB-PAYMENT-FRAUD"],
-    "email_security": ["PB-EMAIL-001"],
-    "reply_to_mismatch": ["PB-EMAIL-002"],
-    "brand_impersonation": ["PB-EMAIL-002"],
-    "invoice_attachment": ["PB-EMAIL-003"],
-    "bank_details_change": ["PB-EMAIL-004"],
-    "dmarc": ["PB-EMAIL-005"],
-    "serial_mismatch": ["PB-CV-SERIAL-001"],
-    "data_not_ready": ["PB-DATA-001"]
+    "payment_fraud": [
+      "PB-PAYMENT-FRAUD"
+    ],
+    "email_security": [
+      "PB-EMAIL-001"
+    ],
+    "reply_to_mismatch": [
+      "PB-EMAIL-002"
+    ],
+    "brand_impersonation": [
+      "PB-EMAIL-002"
+    ],
+    "invoice_attachment": [
+      "PB-EMAIL-003"
+    ],
+    "bank_details_change": [
+      "PB-EMAIL-004"
+    ],
+    "dmarc": [
+      "PB-EMAIL-005"
+    ],
+    "serial_mismatch": [
+      "PB-CV-SERIAL-001"
+    ],
+    "data_not_ready": [
+      "PB-DATA-001"
+    ]
   }
 }
-

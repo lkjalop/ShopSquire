@@ -105,7 +105,8 @@ def _append_external_anchor(record: Dict[str, Any]) -> None:
     Modes:
     - `worm_local`: append to a dedicated append-only archive file.
     - `notary_http`: POST signed anchor payload to external notary endpoint.
-    - `both`: apply both mechanisms.
+    - `s3_worm`: upload signed anchor payload to S3 Object Lock COMPLIANCE.
+    - `both`: apply all configured mechanisms.
     """
     mode = _external_anchor_mode()
     if mode in ("none", "off", "disabled", ""):
@@ -125,11 +126,40 @@ def _append_external_anchor(record: Dict[str, Any]) -> None:
         with p.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
+    if mode in ("s3_worm", "both"):
+        _append_external_anchor_s3(payload)
+
     if mode in ("notary_http", "both"):
         endpoint = str(os.getenv("AUDIT_CHAIN_NOTARY_URL", "") or "").strip()
         if endpoint:
             timeout = float(os.getenv("AUDIT_CHAIN_NOTARY_TIMEOUT_SEC", "3") or 3.0)
             requests.post(endpoint, json=payload, timeout=timeout)
+
+
+def _append_external_anchor_s3(payload: Dict[str, Any]) -> None:
+    bucket = str(os.getenv("AUDIT_CHAIN_S3_BUCKET", "") or "").strip()
+    if not bucket:
+        return
+    try:
+        import boto3  # type: ignore
+    except Exception:
+        return
+    region = str(os.getenv("AUDIT_CHAIN_S3_REGION", "us-east-1") or "us-east-1")
+    prefix = str(os.getenv("AUDIT_CHAIN_S3_PREFIX", "audit_chain_anchors/") or "audit_chain_anchors/").strip()
+    retain_days = int(float(os.getenv("AUDIT_CHAIN_S3_RETENTION_DAYS", "2557") or 2557))
+    retain_until = datetime.now(timezone.utc).timestamp() + (retain_days * 86400)
+    retain_iso = datetime.fromtimestamp(retain_until, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    date_part = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    key = f"{prefix.rstrip('/')}/{date_part}/{str(payload.get('anchor_id') or uuid.uuid4().hex)}.json"
+    client = boto3.client("s3", region_name=region)
+    client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8"),
+        ContentType="application/json",
+        ObjectLockMode="COMPLIANCE",
+        ObjectLockRetainUntilDate=retain_iso,
+    )
 
 
 def _read_latest_anchor() -> Dict[str, Any] | None:
@@ -233,3 +263,22 @@ def verify_audit_chain(limit: int = 1000) -> Dict[str, Any]:
         "notary_url": str(os.getenv("AUDIT_CHAIN_NOTARY_URL", "") or "") or None,
     }
     return {"ok": True, "checked": checked, "head": prev, "anchor": anchor_status, "external_anchor": ext}
+
+
+def publish_daily_audit_chain_anchor() -> Dict[str, Any]:
+    """Publish one daily anchor record over current chain head to external immutable sinks."""
+    ensure_audit_chain_table()
+    with db_session() as db:
+        row = db.execute(
+            text("SELECT merkle_root FROM audit_log_chain ORDER BY created_at DESC LIMIT 1")
+        ).fetchone()
+    head = str(row[0]) if row and row[0] else ""
+    if not head:
+        return {"ok": False, "reason": "empty_chain"}
+    _append_anchor_record(head)
+    return {
+        "ok": True,
+        "head": head,
+        "mode": _external_anchor_mode(),
+        "anchor_path": str(_anchor_path()),
+    }

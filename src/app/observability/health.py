@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Dict
+from sqlalchemy import text
 
 from src.app.deps import get_redis
 from src.app.models.db import db_session
@@ -15,7 +16,7 @@ def _check_db() -> Dict[str, Any]:
     start = time.time()
     try:
         with db_session() as db:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
         latency_ms = int((time.time() - start) * 1000)
         return {"status": "healthy", "latency_ms": latency_ms, "last_ok": int(time.time())}
     except Exception as exc:

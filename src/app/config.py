@@ -83,6 +83,23 @@ def _redis_url_has_auth(redis_url: str) -> bool:
         return False
 
 
+def _redis_url_is_tls(redis_url: str) -> bool:
+    try:
+        p = urlparse(str(redis_url or ""))
+        return str(p.scheme or "").lower() in ("rediss",)
+    except Exception:
+        return False
+
+
+def _is_non_dev_env(env: str | None) -> bool:
+    e = str(env or "local").strip().lower()
+    return e not in ("local", "dev", "development", "test", "testing")
+
+
+def _is_truthy_env(name: str, default: str = "0") -> bool:
+    return str(os.getenv(name, default) or default).strip().lower() in ("1", "true", "yes", "on")
+
+
 @lru_cache(maxsize=8)
 def _get_settings_cached(_sig: tuple) -> Settings:
     s = Settings(
@@ -99,9 +116,24 @@ def _get_settings_cached(_sig: tuple) -> Settings:
         openai_api_key=_resolved_secret("OPENAI_API_KEY", ""),
         feature_flags_path=os.getenv("FEATURE_FLAGS_PATH", "config/feature_flags.json"),
     )
-    # Enforce Redis auth in production.
-    if str(s.app_env or "").lower() in ("prod", "production") and not _redis_url_has_auth(s.redis_url):
-        raise RuntimeError("missing_required_secret:REDIS_URL_password")
+    # Enforce Redis auth/TLS in non-dev environments.
+    if _is_non_dev_env(s.app_env):
+        if not _redis_url_has_auth(s.redis_url):
+            raise RuntimeError("missing_required_secret:REDIS_URL_password")
+        require_tls = str(os.getenv("REDIS_REQUIRE_TLS", "1")).strip().lower() in ("1", "true", "yes", "on")
+        if require_tls and not _redis_url_is_tls(s.redis_url):
+            raise RuntimeError("insecure_runtime:REDIS_URL_requires_rediss")
+        # Infra/Data profile: enforce at-rest encryption + retention + immutable audit export.
+        if not _is_truthy_env("PG_ENCRYPTION_AT_REST", "1"):
+            raise RuntimeError("insecure_runtime:PG_ENCRYPTION_AT_REST_required")
+        if not _is_truthy_env("RETENTION_CLEANUP_ENABLED", "1"):
+            raise RuntimeError("insecure_runtime:RETENTION_CLEANUP_ENABLED_required")
+        anchor_mode = str(os.getenv("AUDIT_CHAIN_EXTERNAL_ANCHOR_MODE", "none") or "none").strip().lower()
+        if anchor_mode in ("", "none", "off", "disabled"):
+            raise RuntimeError("insecure_runtime:AUDIT_CHAIN_EXTERNAL_ANCHOR_MODE_required")
+        has_backup_key = bool(str(os.getenv("BACKUP_ENCRYPTION_KEY", "") or "").strip() or str(os.getenv("BACKUP_ENCRYPTION_PASSPHRASE", "") or "").strip())
+        if not has_backup_key:
+            raise RuntimeError("missing_required_secret:BACKUP_ENCRYPTION_KEY_or_PASSPHRASE")
     return s
 
 
@@ -148,8 +180,16 @@ def validate_runtime_contract() -> dict[str, Any]:
         if not contract.get(key):
             warnings.append(f"{key}_not_set_using_defaults_or_auth_failures_possible")
     env = str(os.getenv("APP_ENV", "local") or "local").lower()
-    if env in ("prod", "production") and not _redis_url_has_auth(str(contract.get("REDIS_URL") or "")):
+    if _is_non_dev_env(env) and not _redis_url_has_auth(str(contract.get("REDIS_URL") or "")):
         warnings.append("REDIS_URL_missing_password_for_production")
+    if _is_non_dev_env(env):
+        require_tls = str(os.getenv("REDIS_REQUIRE_TLS", "1")).strip().lower() in ("1", "true", "yes", "on")
+        if require_tls and not _redis_url_is_tls(str(contract.get("REDIS_URL") or "")):
+            warnings.append("REDIS_URL_missing_tls_rediss_scheme")
+        if not str(os.getenv("REDIS_ACL_USERNAME", "") or "").strip():
+            warnings.append("REDIS_ACL_USERNAME_not_set")
+        if not str(os.getenv("REDIS_ACL_PASSWORD", "") or "").strip():
+            warnings.append("REDIS_ACL_PASSWORD_not_set")
     return {
         "ok": len(missing) == 0,
         "missing": missing,

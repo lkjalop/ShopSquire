@@ -1,0 +1,35 @@
+# Egress Allowlist — Zero-Trust Outbound Domain Control
+# One domain per line. Lines starting with # are comments.
+# Wildcard subdomains supported: *.example.com matches sub.example.com
+#
+# When EGRESS_ALLOWLIST_ONLY=1 (default in production), ALL outbound HTTP(S)
+# connections must match a domain in this list or in SSRF_ALLOWLIST_HOSTS env var.
+#
+# Shopify APIs
+*.myshopify.com
+*.shopify.com
+
+# Payment providers
+api.stripe.com
+api.paypal.com
+
+# Shipping carriers
+api.shipstation.com
+api.easypost.com
+
+# AI/ML services (if used)
+api.openai.com
+
+# Monitoring / observability
+*.datadoghq.com
+*.sentry.io
+hooks.slack.com
+events.pagerduty.com
+
+# Threat intel feeds
+www.cisa.gov
+urlhaus.abuse.ch
+urlhaus-api.abuse.ch
+mb-api.abuse.ch
+
+# Webhook delivery targets should be added per-tenant

@@ -1,0 +1,278 @@
+{
+  "seed_catalog": {
+    "status": "ok",
+    "seeded": 72,
+    "categories": {
+      "laptops": 24,
+      "fashion": 24,
+      "homewares": 24
+    }
+  },
+  "seed_interactions": {
+    "status": "ok",
+    "inserted": 360,
+    "users": 20
+  },
+  "als_training": {
+    "status": "ok",
+    "users": 20,
+    "items": 70,
+    "scores": 1400,
+    "model_version": "als_20260225205802"
+  },
+  "evaluation": {
+    "status": "ok",
+    "scenarios": [
+      {
+        "uid": "syn-user-001",
+        "query": "Need a laptop for university coding under $900 with 16GB RAM",
+        "expected_category": "laptops",
+        "precision_at_n": 1.0,
+        "top_items": [
+          {
+            "sku": "SYN-LAP-0018",
+            "name": "MSI Modern 15 H AI 15.6\" FHD 60Hz Laptop (Intel Core Ultra 7) [1TB]",
+            "category": "laptops",
+            "score": 11.9101
+          },
+          {
+            "sku": "SYN-LAP-0006",
+            "name": "HP OmniBook 5 NG AI PC 14-he0013QU 14\" WUXGA OLED Copilot+ PC Laptop (Snapdragon X1)[512GB/16GB]",
+            "category": "laptops",
+            "score": 11.743
+          },
+          {
+            "sku": "SYN-LAP-0012",
+            "name": "ASUS Vivobook S16 16\" WQXGA Laptop (Copilot+ PC)[512GB]",
+            "category": "laptops",
+            "score": 10.7828
+          },
+          {
+            "sku": "SYN-LAP-0005",
+            "name": "Asus VivoBook 15.6\" Full HD Thin & Light Laptop (1TB)[Intel Core i5",
+            "category": "laptops",
+            "score": 10.2692
+          },
+          {
+            "sku": "SYN-LAP-0001",
+            "name": "Dell 15 DC15255 15.6\" FHD 120Hz Laptop (Ryzen 3)[512GB]",
+            "category": "laptops",
+            "score": 10.1807
+          }
+        ],
+        "decision_id": "3af05d66-907b-4922-8caa-02e5681f1f7f",
+        "bitemporal_ok": true
+      },
+      {
+        "uid": "syn-user-008",
+        "query": "Show me a black street style hoodie and sneakers bundle",
+        "expected_category": "fashion",
+        "precision_at_n": 0.6,
+        "top_items": [
+          {
+            "sku": "SYN-FSH-0020",
+            "name": "Street Shirt",
+            "category": "fashion",
+            "score": 18.4946
+          },
+          {
+            "sku": "SYN-HMW-0014",
+            "name": "Daily Essentials Bedroom Bed Sheet Set",
+            "category": "homewares",
+            "score": 17.6314
+          },
+          {
+            "sku": "SYN-FSH-0006",
+            "name": "Classic Sneakers",
+            "category": "fashion",
+            "score": 17.4762
+          },
+          {
+            "sku": "SYN-FSH-0013",
+            "name": "Street Jeans",
+            "category": "fashion",
+            "score": 17.4166
+          },
+          {
+            "sku": "SYN-HMW-0017",
+            "name": "Home Collective Bedroom Scented Candle",
+            "category": "homewares",
+            "score": 17.1438
+          }
+        ],
+        "decision_id": "1a1d0d74-bd3e-4b9d-bf94-4cb4e096fcd3",
+        "bitemporal_ok": true
+      },
+      {
+        "uid": "syn-user-013",
+        "query": "Looking for kitchen storage basket and non-stick pan set",
+        "expected_category": "homewares",
+        "precision_at_n": 1.0,
+        "top_items": [
+          {
+            "sku": "SYN-HMW-0004",
+            "name": "Daily Essentials Kitchen Bed Sheet Set",
+            "category": "homewares",
+            "score": 17.6577
+          },
+          {
+            "sku": "SYN-HMW-0005",
+            "name": "Target Basics Kitchen Non-stick Pan",
+            "category": "homewares",
+            "score": 17.1407
+          },
+          {
+            "sku": "SYN-HMW-0008",
+            "name": "Urban Nest Kitchen Bath Towel",
+            "category": "homewares",
+            "score": 16.9973
+          },
+          {
+            "sku": "SYN-HMW-0007",
+            "name": "Home Collective Kitchen Scented Candle",
+            "category": "homewares",
+            "score": 16.7058
+          },
+          {
+            "sku": "SYN-HMW-0014",
+            "name": "Daily Essentials Bedroom Bed Sheet Set",
+            "category": "homewares",
+            "score": 16.6715
+          }
+        ],
+        "decision_id": "197e0a79-ac37-4bb9-9abd-c505db020f29",
+        "bitemporal_ok": true
+      },
+      {
+        "uid": "syn-user-020",
+        "query": "Best value office laptop with long battery and windows",
+        "expected_category": "laptops",
+        "precision_at_n": 1.0,
+        "top_items": [
+          {
+            "sku": "SYN-LAP-0005",
+            "name": "Asus VivoBook 15.6\" Full HD Thin & Light Laptop (1TB)[Intel Core i5",
+            "category": "laptops",
+            "score": 20.0936
+          },
+          {
+            "sku": "SYN-LAP-0007",
+            "name": "Dell Inspiron 14 7440 14\" WQXGA 2-in-1 Laptop (Intel Core i5)[512GB/16GB]",
+            "category": "laptops",
+            "score": 19.2208
+          },
+          {
+            "sku": "SYN-LAP-0013",
+            "name": "HP Envy x360 14-fc0189TU 14\" WUXGA 2-in-1 Laptop (Intel Core Ultra 5)[512GB]",
+            "category": "laptops",
+            "score": 18.9665
+          },
+          {
+            "sku": "SYN-LAP-0006",
+            "name": "HP OmniBook 5 NG AI PC 14-he0013QU 14\" WUXGA OLED Copilot+ PC Laptop (Snapdragon X1)[512GB/16GB]",
+            "category": "laptops",
+            "score": 18.9487
+          },
+          {
+            "sku": "SYN-LAP-0011",
+            "name": "Lenovo Ideapad 5 14\" WUXGA OLED 2-in-1 Laptop (Snapdragon X Plus)[1TB]",
+            "category": "laptops",
+            "score": 18.5167
+          }
+        ],
+        "decision_id": "4a5a1973-1827-4408-9b52-8788305d855e",
+        "bitemporal_ok": true
+      },
+      {
+        "uid": "syn-user-026",
+        "query": "Minimal white bed sheet set and bath towels",
+        "expected_category": "homewares",
+        "precision_at_n": 1.0,
+        "top_items": [
+          {
+            "sku": "SYN-HMW-0004",
+            "name": "Daily Essentials Kitchen Bed Sheet Set",
+            "category": "homewares",
+            "score": 15.7867
+          },
+          {
+            "sku": "SYN-HMW-0014",
+            "name": "Daily Essentials Bedroom Bed Sheet Set",
+            "category": "homewares",
+            "score": 15.7117
+          },
+          {
+            "sku": "SYN-HMW-0008",
+            "name": "Urban Nest Kitchen Bath Towel",
+            "category": "homewares",
+            "score": 15.3167
+          },
+          {
+            "sku": "SYN-HMW-0016",
+            "name": "Kmart Living Bedroom Cutlery Set",
+            "category": "homewares",
+            "score": 15.3167
+          },
+          {
+            "sku": "SYN-HMW-0006",
+            "name": "Kmart Living Kitchen Cutlery Set",
+            "category": "homewares",
+            "score": 15.2417
+          }
+        ],
+        "decision_id": "2e536fc8-aa0d-4f64-aeab-129b4a1f3e3c",
+        "bitemporal_ok": true
+      },
+      {
+        "uid": "syn-user-034",
+        "query": "Affordable denim jacket and casual shirt for weekend",
+        "expected_category": "fashion",
+        "precision_at_n": 1.0,
+        "top_items": [
+          {
+            "sku": "SYN-FSH-0004",
+            "name": "Classic Jacket",
+            "category": "fashion",
+            "score": 15.2576
+          },
+          {
+            "sku": "SYN-FSH-0010",
+            "name": "Classic Shirt",
+            "category": "fashion",
+            "score": 15.2576
+          },
+          {
+            "sku": "SYN-FSH-0014",
+            "name": "Street Jacket",
+            "category": "fashion",
+            "score": 15.2576
+          },
+          {
+            "sku": "SYN-FSH-0020",
+            "name": "Street Shirt",
+            "category": "fashion",
+            "score": 15.2576
+          },
+          {
+            "sku": "SYN-FSH-0024",
+            "name": "Athleisure Jacket",
+            "category": "fashion",
+            "score": 15.2576
+          }
+        ],
+        "decision_id": "0c858930-3a15-4b9e-891e-d5941c2b4279",
+        "bitemporal_ok": true
+      }
+    ],
+    "category_precision": {
+      "laptops": 1.0,
+      "fashion": 0.8,
+      "homewares": 1.0
+    },
+    "overall_precision": 0.9333,
+    "bitemporal_trace_ok_ratio": 1.0,
+    "recommended_training_actions": [
+      "Promote synthetic lab to scheduled weekly regression and add category-specific canary checks."
+    ]
+  }
+}

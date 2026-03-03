@@ -3,7 +3,8 @@ from __future__ import annotations
 import hmac
 import hashlib
 import base64
-from typing import Dict
+import os
+from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["webhooks"])
@@ -20,10 +21,13 @@ def _verify_shopify_hmac(secret: str, body: bytes, signature: str) -> bool:
 
 
 @router.post("/shopify")
-async def shopify_webhook(request: Request) -> Dict[str, any]:
+async def shopify_webhook(request: Request) -> Dict[str, Any]:
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    tenant_id = str(request.headers.get("X-Tenant-Id") or "").strip()
+    if env not in ("local", "dev", "development", "test", "testing") and not tenant_id:
+        raise HTTPException(status_code=400, detail="missing_tenant_scope")
     secret = (request.app and request.app.state and getattr(request.app.state, "shopify_secret", None)) or None
     if not secret:
-        import os
         secret = os.getenv("SHOPIFY_WEBHOOK_SECRET")
     body = await request.body()
     sig = request.headers.get("X-Shopify-Hmac-SHA256") or ""

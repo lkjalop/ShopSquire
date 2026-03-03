@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Depends
 import json
 from pydantic import BaseModel
+from sqlalchemy import text as sql_text
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.models.db import db_session
 
@@ -30,7 +31,7 @@ def enqueue_approval(capability: str, payload: Dict, reason: str | None = None, 
     try:
         with db_session() as db:
             db.execute(
-                "INSERT OR REPLACE INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id, :capability, :payload, :reason, :status, :created_by)",
+                sql_text("INSERT OR REPLACE INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id, :capability, :payload, :reason, :status, :created_by)"),
                 {
                     "id": approval_id,
                     "capability": capability,
@@ -70,7 +71,7 @@ def create_proposal(req: ApprovalRequest, role: str = Depends(require_role([ROLE
 def list_pending(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict[str, List[Dict]]:
     try:
         with db_session() as db:
-            rows = db.execute("SELECT id, capability, payload, reason, status, created_by, created_at FROM approvals WHERE status = 'pending' ORDER BY created_at DESC").mappings().all()
+            rows = db.execute(sql_text("SELECT id, capability, payload, reason, status, created_by, created_at FROM approvals WHERE status = 'pending' ORDER BY created_at DESC")).mappings().all()
             out = []
             for r in rows:
                 try:
@@ -107,7 +108,7 @@ def list_pending(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, RO
 def approve(approval_id: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
     try:
         with db_session() as db:
-            res = db.execute("UPDATE approvals SET status = 'approved', approved_by = :approved_by, approved_at = CURRENT_TIMESTAMP WHERE id = :id", {"id": approval_id, "approved_by": role})
+            res = db.execute(sql_text("UPDATE approvals SET status = 'approved', approved_by = :approved_by, approved_at = CURRENT_TIMESTAMP WHERE id = :id"), {"id": approval_id, "approved_by": role})
             db.commit()
             if getattr(res, "rowcount", 0) == 0:
                 raise HTTPException(status_code=404, detail="Approval not found")
@@ -130,7 +131,7 @@ def approve(approval_id: str, role: str = Depends(require_role([ROLE_MERCHANT, R
 def reject(approval_id: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
     try:
         with db_session() as db:
-            res = db.execute("UPDATE approvals SET status = 'rejected' WHERE id = :id", {"id": approval_id})
+            res = db.execute(sql_text("UPDATE approvals SET status = 'rejected' WHERE id = :id"), {"id": approval_id})
             db.commit()
             if getattr(res, "rowcount", 0) == 0:
                 raise HTTPException(status_code=404, detail="Approval not found")

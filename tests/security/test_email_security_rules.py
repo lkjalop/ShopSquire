@@ -29,3 +29,31 @@ def test_lookalike_domain_detection():
     out = extract_indicators(email)
     hits = [i for i in out["indicators"] if i["type"] == "lookalike_domain"]
     assert hits, f"Expected lookalike hit for domain {d}"
+
+
+def test_arc_chain_invalid_indicator():
+    email = {
+        "from_addr": "Vendor <billing@supplier.com>",
+        "reply_to": "billing@supplier.com",
+        "subject": "Invoice",
+        "body": "Please process",
+        "arc_cv": "fail",
+        "arc_chain_valid": False,
+    }
+    out = extract_indicators(email)
+    types = [i["type"] for i in out["indicators"]]
+    assert "arc_chain_invalid" in types
+
+
+def test_bimi_failed_indicator():
+    email = {
+        "from_addr": "Vendor <billing@supplier.com>",
+        "reply_to": "billing@supplier.com",
+        "subject": "Invoice",
+        "body": "Please process",
+        "bimi_present": True,
+        "bimi_result": "fail",
+    }
+    out = extract_indicators(email)
+    types = [i["type"] for i in out["indicators"]]
+    assert "bimi_validation_failed" in types

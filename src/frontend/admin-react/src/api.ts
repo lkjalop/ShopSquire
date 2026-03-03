@@ -232,6 +232,23 @@ export async function fetchMemoryHealth(days = 7): Promise<MemoryHealthSummary> 
   return http(`/api/v1/admin/bi/memory-health?days=${days}`);
 }
 
+export type PersonaSuccessSummary = {
+  window: { start: string; end: string };
+  days: number;
+  totals: { traces: number; reformulated: number; reupload_required: number };
+  personas: Array<{
+    persona: string;
+    traces: number;
+    resolution_turns_avg: number;
+    reformulation_rate: number;
+    reupload_rate: number;
+  }>;
+};
+
+export async function fetchPersonaSuccess(days = 7): Promise<PersonaSuccessSummary> {
+  return http(`/api/v1/admin/bi/persona-success?days=${days}`);
+}
+
 export async function fetchComplianceOverview(days = 7): Promise<any> {
   return http(`/api/v1/admin/compliance/overview?days=${days}`);
 }
@@ -665,6 +682,31 @@ export async function fetchSecurityGeoAsnTrends(hours = 24, limit = 5000): Promi
   return http(`/api/v1/admin/security/geoip-asn/trends?hours=${hours}&limit=${limit}`);
 }
 
+export type IncidentAlertSummary = {
+  hours: number;
+  totals: {
+    sla_breach_alerts: number;
+    runbook_failure_alerts: number;
+    incidents_with_alerts: number;
+  };
+  recent: Array<{
+    type: 'sla_breach' | 'runbook_failure';
+    incident_id: string;
+    severity: string;
+    title: string;
+    status: string;
+    alerted_at?: string | null;
+    created_at?: string | null;
+    sla_due_at?: string | null;
+    runbook_id?: string | null;
+    runbook_run_id?: string | null;
+  }>;
+};
+
+export async function fetchIncidentAlertSummary(hours = 24, limit = 30): Promise<IncidentAlertSummary> {
+  return http(`/api/v1/admin/incidents/ops/alerts/summary?hours=${hours}&limit=${limit}`);
+}
+
 export async function sendAlertmanagerTest(): Promise<{ sent: boolean; alertmanager_url?: string }> {
   return http(`/api/v1/admin/alertmanager/test`, { method: 'POST' });
 }
@@ -697,7 +739,21 @@ export async function fetchEmailIocFeedbackQuality(): Promise<{ items: any[] }> 
   return http(`/api/v1/admin/email_security/feedback/ioc_quality`);
 }
 
-export type IncidentRow = { id: string; event_id?: string; created_at?: string; created_by?: string; severity?: string; title?: string; description?: string; status?: string };
+export type IncidentRow = {
+  id: string;
+  event_id?: string;
+  created_at?: string;
+  created_by?: string;
+  severity?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  sla_status?: string;
+  sla_due_at?: string;
+  runbook_id?: string;
+  runbook_run_id?: string;
+  sla?: { sla_status?: string; sla_due_at?: string; remaining_seconds?: number | null };
+};
 export async function fetchIncidents(params?: { limit?: number; offset?: number; status?: string; severity?: string }) : Promise<IncidentRow[]> {
   const q = new URLSearchParams();
   q.set('limit', String(params?.limit || 50));
@@ -771,6 +827,9 @@ export type EmailSecurityInvestigation = {
   trust_case?: any;
   access_policy?: any;
   sandbox_ioc_stage?: any;
+  mailbox_compromise?: any;
+  phishing_page_stage?: any;
+  bec_kill_chain?: any;
   explain?: any;
   recommended_actions?: Array<{ id: string; label: string }>;
   actions?: Array<{ id: string; action: string; note?: string; actor?: string; created_at?: string }>;
@@ -786,6 +845,23 @@ export async function submitEmailSecurityInvestigationAction(
   payload: { action: string; note?: string },
 ): Promise<{ ok: boolean; incident_id: string; action_id: string; action: string; status?: string }> {
   return http(`/api/v1/admin/email_security/investigations/${encodeURIComponent(incidentId)}/action`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function runEmailSecurityReplayLab(payload: {
+  tenant_id?: string;
+  incident_ids?: string[];
+  decision_ids?: string[];
+}): Promise<{
+  evaluated: number;
+  changed_count: number;
+  changed_rate: number;
+  policy_verdict_counts: Record<string, number>;
+  results: Array<{ decision_id: string; agent_name?: string; valid_from?: string; drift?: any }>;
+}> {
+  return http(`/api/v1/admin/email_security/replay_lab/run`, {
     method: 'POST',
     body: JSON.stringify(payload || {}),
   });

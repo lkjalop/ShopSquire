@@ -97,10 +97,20 @@ def normalize_message(
     if len(body) > max_body:
         body = body[:max_body]
 
-    # DMARC/SPF/DKIM if caller provides Authentication-Results (Graph doesn't always).
+    # DMARC/SPF/DKIM + ARC/BIMI if caller provides auth headers (Graph varies by tenant/config).
     dmarc_fail = False
+    auth: Dict[str, Any] = {}
     try:
-        auth = validate_email_auth({"Authentication-Results": str(msg.get("authenticationResults") or "")})
+        auth = validate_email_auth(
+            {
+                "Authentication-Results": str(msg.get("authenticationResults") or ""),
+                "ARC-Authentication-Results": str(msg.get("arcAuthenticationResults") or ""),
+                "ARC-Seal": str(msg.get("arcSeal") or ""),
+                "ARC-Message-Signature": str(msg.get("arcMessageSignature") or ""),
+                "BIMI-Location": str(msg.get("bimiLocation") or ""),
+                "BIMI-Indicator": str(msg.get("bimiIndicator") or ""),
+            }
+        )
         dmarc_fail = auth.get("dmarc_pass") is False
     except Exception:
         dmarc_fail = False
@@ -116,4 +126,13 @@ def normalize_message(
         "body": body,
         "attachments": attachments or [],
         "dmarc_fail": bool(dmarc_fail),
+        "spf_result": auth.get("spf_result"),
+        "dkim_result": auth.get("dkim_result"),
+        "dmarc_result": auth.get("dmarc_result"),
+        "arc_present": bool(auth.get("arc_present")),
+        "arc_cv": auth.get("arc_cv"),
+        "arc_chain_valid": auth.get("arc_chain_valid"),
+        "bimi_present": bool(auth.get("bimi_present")),
+        "bimi_result": auth.get("bimi_result"),
+        "bimi_location": auth.get("bimi_location"),
     }

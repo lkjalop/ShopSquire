@@ -37,7 +37,7 @@ def _table_exists(db, table: str) -> bool:
     except Exception:
         pass
     try:
-        row = db.execute("SELECT to_regclass(:name)", {"name": table}).fetchone()
+        row = db.execute(text("SELECT to_regclass(:name)"), {"name": table}).fetchone()
         return bool(row and row[0])
     except Exception:
         return False

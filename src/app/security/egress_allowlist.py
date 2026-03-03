@@ -67,6 +67,9 @@ _BUILTIN_ALLOWED_DOMAINS: FrozenSet[str] = frozenset(
         # Supply-chain monitoring (explicitly approved outbound)
         "services.nvd.nist.gov",
         "www.cisa.gov",
+        "urlhaus.abuse.ch",
+        "urlhaus-api.abuse.ch",
+        "mb-api.abuse.ch",
         "pypi.org",
         "pypi.python.org",
         "files.pythonhosted.org",
@@ -220,11 +223,13 @@ class EgressDomainGuard:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# httpx monkey-patch
+# httpx / requests monkey-patch
 # ──────────────────────────────────────────────────────────────────────────────
 
 _guard: EgressDomainGuard | None = None
-_patched = False
+_patched_httpx = False
+_patched_requests = False
+_orig_requests_send = None
 
 
 def get_guard() -> EgressDomainGuard:
@@ -243,13 +248,13 @@ def patch_httpx_egress_guard(guard: EgressDomainGuard | None = None) -> None:
 
     Call this once during application startup (e.g., in create_app()).
     """
-    global _patched
-    if _patched:
+    global _patched_httpx
+    if _patched_httpx:
         return
     g = guard or get_guard()
     if not g._enabled:
         _log.info("Egress allowlist disabled (EGRESS_ALLOWLIST_ENABLED=0)")
-        _patched = True
+        _patched_httpx = True
         return
 
     try:
@@ -269,7 +274,7 @@ def patch_httpx_egress_guard(guard: EgressDomainGuard | None = None) -> None:
         httpx.Client.send = _patched_send  # type: ignore[method-assign]
         httpx.AsyncClient.send = _patched_async_send  # type: ignore[method-assign]
 
-        _patched = True
+        _patched_httpx = True
         _log.info(
             "Egress allowlist active — %d approved domains (strict=%s, log_only=%s)",
             len(g._allowed),
@@ -278,12 +283,51 @@ def patch_httpx_egress_guard(guard: EgressDomainGuard | None = None) -> None:
         )
     except ImportError:
         _log.debug("httpx not installed; egress allowlist patch skipped")
-        _patched = True
+        _patched_httpx = True
+
+
+def patch_requests_egress_guard(guard: EgressDomainGuard | None = None) -> None:
+    """Monkey-patch requests Session.send to enforce egress allowlist."""
+    global _patched_requests, _orig_requests_send
+    if _patched_requests:
+        return
+    g = guard or get_guard()
+    if not g._enabled:
+        _patched_requests = True
+        return
+    try:
+        import requests
+
+        _orig_requests_send = requests.sessions.Session.send
+
+        def _patched_send(self_session, request, *args, **kwargs):
+            try:
+                g.check(str(getattr(request, "url", "") or ""))
+            except Exception:
+                raise
+            return _orig_requests_send(self_session, request, *args, **kwargs)
+
+        requests.sessions.Session.send = _patched_send  # type: ignore[method-assign]
+        _patched_requests = True
+        _log.info(
+            "Egress allowlist active for requests â€” %d approved domains (strict=%s, log_only=%s)",
+            len(g._allowed),
+            g._strict,
+            g._log_only,
+        )
+    except ImportError:
+        _patched_requests = True
+
+
+def patch_outbound_egress_guard(guard: EgressDomainGuard | None = None) -> None:
+    """Patch both httpx and requests outbound clients."""
+    patch_httpx_egress_guard(guard=guard)
+    patch_requests_egress_guard(guard=guard)
 
 
 def unpatch_httpx_egress_guard() -> None:
     """Remove monkey-patch (for testing only). Not thread-safe."""
-    global _patched, _guard
+    global _patched_httpx, _guard
     try:
         import httpx
 
@@ -294,5 +338,31 @@ def unpatch_httpx_egress_guard() -> None:
         importlib.reload(fresh)
     except Exception:
         pass
-    _patched = False
+    _patched_httpx = False
+    _guard = None
+
+
+def unpatch_requests_egress_guard() -> None:
+    """Remove requests monkey-patch (for testing only)."""
+    global _patched_requests, _orig_requests_send, _guard
+    try:
+        import requests
+
+        if _orig_requests_send is not None:
+            requests.sessions.Session.send = _orig_requests_send  # type: ignore[method-assign]
+    except Exception:
+        pass
+    _orig_requests_send = None
+    _patched_requests = False
+    _guard = None
+
+
+def unpatch_outbound_egress_guard() -> None:
+    """Remove all outbound egress monkey-patches (for testing only)."""
+    unpatch_httpx_egress_guard()
+    unpatch_requests_egress_guard()
+
+
+def egress_patch_state() -> dict:
+    return {"httpx": bool(_patched_httpx), "requests": bool(_patched_requests)}
     _guard = None

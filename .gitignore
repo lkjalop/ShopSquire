@@ -60,6 +60,18 @@ venv/
 # Editor / tool local state
 .claude/settings.local.json
 
+# Local test log captures (run artifacts, never source)
+.testlogs/
+.tmp_pw_repro*.py
+.codex_fullsuite.ps1
+
 # Local Docker/backup artifacts
 compose.effective.yml
 *.bundle
+
+# C05: Backup files + encrypted backups — never commit database artifacts
+*.backup
+*.sql.gz
+*.sql.enc
+*.dump
+config/tls/certs/

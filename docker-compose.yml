@@ -20,8 +20,12 @@ services:
       redis:
         condition: service_healthy
     command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    user: "shopsquire"
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256M
 
   db:
     image: postgres:16
@@ -42,9 +46,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: shopsquire_redis
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis-change-me}"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis-change-me}", "--aclfile", "/etc/redis/users.acl"]
     ports:
       - "6379:6379"
+    volumes:
+      - ./config/redis/users.acl:/etc/redis/users.acl:ro
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis-change-me}", "ping"]
       interval: 5s
@@ -71,6 +77,104 @@ services:
         condition: service_healthy
     command: ["python", "scripts/sync_worker.py"]
     restart: unless-stopped
+    user: "shopsquire"
+    security_opt:
+      - no-new-privileges:true
+
+  security-crowdstrike-poll:
+    build: .
+    container_name: shopsquire_security_crowdstrike_poll
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
+      SECURITY_CROWDSTRIKE_POLL_ENABLED: "1"
+      SECURITY_CROWDSTRIKE_POLL_INTERVAL_SEC: "300"
+      SECURITY_CROWDSTRIKE_POLL_LOOKBACK_MINUTES: "30"
+      SECURITY_CROWDSTRIKE_POLL_LIMIT: "100"
+      SECURITY_CROWDSTRIKE_POLL_TENANT_ID: "default"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "scripts/run_crowdstrike_poll_worker.py"]
+    restart: unless-stopped
+    user: "shopsquire"
+    security_opt:
+      - no-new-privileges:true
+
+  security-syslog-listener:
+    build: .
+    container_name: shopsquire_security_syslog_listener
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      SYSLOG_LISTENER_HOST: "0.0.0.0"
+      SYSLOG_LISTENER_ENABLE_TCP: "1"
+      SYSLOG_LISTENER_ENABLE_UDP: "1"
+      SYSLOG_LISTENER_TCP_PORT: "5514"
+      SYSLOG_LISTENER_UDP_PORT: "5514"
+      SYSLOG_LISTENER_TENANT_ID: "default"
+    ports:
+      - "5514:5514/tcp"
+      - "5514:5514/udp"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "scripts/run_syslog_listener.py"]
+    restart: unless-stopped
+    user: "shopsquire"
+    security_opt:
+      - no-new-privileges:true
+
+  security-celery-worker:
+    build: .
+    container_name: shopsquire_security_celery_worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
+      CELERY_BROKER_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/1
+      SECURITY_CROWDSTRIKE_POLL_ENABLED: "1"
+      SECURITY_CROWDSTRIKE_POLL_MINUTES: "5"
+      SECURITY_CROWDSTRIKE_POLL_TENANT_ID: "default"
+      SECURITY_CROWDSTRIKE_POLL_LIMIT: "100"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "src.app.workers.celery_app.celery_app", "worker", "--loglevel=INFO"]
+    restart: unless-stopped
+    user: "shopsquire"
+    security_opt:
+      - no-new-privileges:true
+
+  security-celery-beat:
+    build: .
+    container_name: shopsquire_security_celery_beat
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
+      CELERY_BROKER_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
+      CELERY_RESULT_BACKEND: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/1
+      SECURITY_CROWDSTRIKE_POLL_ENABLED: "1"
+      SECURITY_CROWDSTRIKE_POLL_MINUTES: "5"
+      SECURITY_CROWDSTRIKE_POLL_TENANT_ID: "default"
+      SECURITY_CROWDSTRIKE_POLL_LIMIT: "100"
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "src.app.workers.celery_app.celery_app", "beat", "--loglevel=INFO"]
+    restart: unless-stopped
+    user: "shopsquire"
     security_opt:
       - no-new-privileges:true
 
@@ -83,7 +187,7 @@ services:
       - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./config/observability/prometheus_rules.yml:/etc/prometheus/rules/prometheus_rules.yml:ro
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     depends_on:
       - api
 
@@ -99,7 +203,7 @@ services:
     volumes:
       - ./config/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     depends_on:
       - prometheus
 
@@ -108,10 +212,11 @@ services:
     container_name: shopsquire_grafana
     environment:
       GF_INSTALL_PLUGINS: simpod-json-datasource
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-grafana-change-me}"
     ports:
-      - "3005:3000"
+      - "127.0.0.1:3005:3000"
     volumes:
       - ./config/observability/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./config/observability/grafana/datasources:/etc/grafana/provisioning/datasources:ro

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,6 +21,42 @@ def _sha256_file(path: str) -> Optional[str]:
         return h.hexdigest()
     except Exception:
         return None
+
+
+def _load_json(path: str) -> Dict[str, Any]:
+    try:
+        p = Path(path)
+        if not p.exists() or not p.is_file():
+            return {}
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _collect_cves_from_sbom(sbom: Dict[str, Any]) -> List[str]:
+    cves: set[str] = set()
+    vulns = sbom.get("vulnerabilities")
+    if isinstance(vulns, list):
+        for v in vulns:
+            if not isinstance(v, dict):
+                continue
+            vid = str(v.get("id") or "").upper().strip()
+            if vid.startswith("CVE-"):
+                cves.add(vid)
+    comps = sbom.get("components")
+    if isinstance(comps, list):
+        for c in comps:
+            if not isinstance(c, dict):
+                continue
+            vv = c.get("vulnerabilities")
+            if isinstance(vv, list):
+                for item in vv:
+                    if not isinstance(item, dict):
+                        continue
+                    vid = str(item.get("id") or "").upper().strip()
+                    if vid.startswith("CVE-"):
+                        cves.add(vid)
+    return sorted(cves)
 
 
 def _split_mitre(techniques: List[str] | None) -> Tuple[List[str], List[str]]:
@@ -150,9 +187,23 @@ def _lev(dread: Dict[str, Any] | None, cvss: Dict[str, Any] | None) -> Dict[str,
 
 def _sbom_snapshot() -> Dict[str, Any]:
     sbom_path = os.getenv("SBOM_PATH") or ("sbom.json" if Path("sbom.json").exists() else None)
+    kev_path = os.getenv("KEV_CATALOG_PATH", os.path.join("config", "security", "taxonomy", "kev_catalog.json"))
+    sbom_obj = _load_json(sbom_path) if sbom_path else {}
+    cves = _collect_cves_from_sbom(sbom_obj if isinstance(sbom_obj, dict) else {})
+    kev = _load_json(kev_path)
+    kev_hits = [c for c in cves if c in kev] if isinstance(kev, dict) else []
+    risk_band = "low"
+    if kev_hits:
+        risk_band = "high"
+    elif cves:
+        risk_band = "medium"
     return {
         "slsa_level": (os.getenv("SLSA_LEVEL") or "").strip() or None,
         "sbom_path": sbom_path,
+        "cve_count": len(cves),
+        "cves": cves[:128],
+        "kev_hits": kev_hits[:128],
+        "risk_band": risk_band,
         "python_manifest": {"path": "pyproject.toml", "sha256": _sha256_file("pyproject.toml")},
         "node_manifest": {"path": "frontend/package-lock.json", "sha256": _sha256_file(os.path.join("frontend", "package-lock.json"))},
     }
@@ -209,6 +260,55 @@ def _compliance(signals: Dict[str, Any], tags: List[str]) -> Dict[str, Any]:
             {"framework": "SOC2", "controls": _uniq(soc2)},
         ]
     }
+
+
+def _d3fend_suggestions(signals: Dict[str, Any], tags: List[str]) -> List[Dict[str, Any]]:
+    """Suggest defensive controls aligned with observed signals.
+
+    This is an auto-suggestion helper for triage, not a hard policy decision.
+    """
+    s = signals or {}
+    tset = {str(t or "").lower() for t in (tags or [])}
+    out: List[Dict[str, Any]] = []
+
+    def _add(control: str, rationale: str, priority: str = "medium") -> None:
+        out.append(
+            {
+                "framework": "D3FEND",
+                "control": control,
+                "priority": priority,
+                "rationale": rationale,
+            }
+        )
+
+    if bool(s.get("prompt_injection")) or bool(s.get("jailbreak")) or bool(s.get("agentic_tool_abuse")):
+        _add("Input Validation / Canonicalization", "Prompt or tool-abuse signal detected", priority="high")
+        _add("Execution Policy Enforcement", "Reduce unauthorized tool invocation paths", priority="high")
+
+    if bool(s.get("dmarc_fail")) or "dmarc" in tset or bool(s.get("auth_alignment_failed")):
+        _add("Email Authentication Enforcement (DMARC/DKIM/SPF)", "Sender auth alignment risk present", priority="high")
+
+    if bool(s.get("data_exfiltration")) or bool(s.get("pii")) or bool(s.get("api_key")):
+        _add("Data Loss Prevention", "Sensitive data exposure indicators detected", priority="high")
+        _add("Credential Exposure Monitoring", "Potential secret/API-key leakage signal", priority="high")
+
+    if bool(s.get("supply_chain")) or bool(s.get("training_poisoning")):
+        _add("Dependency Provenance & Integrity Verification", "Supply-chain/training-poisoning signals observed", priority="high")
+        _add("SBOM-Based Vulnerability Monitoring", "Continuously correlate dependencies to known CVEs", priority="medium")
+
+    if bool(s.get("manipulation_detected")) or bool(s.get("layout_text_divergence")):
+        _add("Content Integrity Analysis", "Document/image tampering indicators detected", priority="medium")
+
+    # Stable dedupe by (control, priority).
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for row in out:
+        key = (str(row.get("control")), str(row.get("priority")))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
 
 def _scenario_catalog() -> Dict[str, Dict[str, Any]]:
@@ -343,6 +443,7 @@ def correlate_security_analysis(
     kev = threat.get("kev") if isinstance(threat.get("kev"), list) else []
 
     comp = _compliance(signals_l, tags_l)
+    d3fend = _d3fend_suggestions(signals_l, tags_l)
     scenario_ids = _pick_scenarios(channel=channel, signals=signals_l, tags=tags_l)
     scenarios = _scenario_breakdown(ids=scenario_ids, mitre_atlas=atlas, mitre_attack=attack, owasp_llm=owasp_llm, compliance=comp)
 
@@ -365,5 +466,6 @@ def correlate_security_analysis(
         "lev": _lev(dread, cvss),
         "sbom": _sbom_snapshot(),
         "compliance": comp,
+        "d3fend_suggestions": d3fend,
         "evidence": evidence or {},
     }

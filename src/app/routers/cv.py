@@ -154,7 +154,7 @@ async def analyze(
                     except Exception:
                         content = b""
                     gate = strict_image_ingest_gate(
-                        filename=f"analyze_{idx + 1}.jpg",
+                        filename=f"analyze_{idx + 1}",
                         content_type=None,
                         blob=content,
                         size_bytes=len(content),
@@ -174,6 +174,8 @@ async def analyze(
                     except Exception:
                         pass
                     sanitized_images.append(meta)
+            except HTTPException:
+                raise
             except Exception:
                 sanitized_images = []
 
@@ -1004,10 +1006,23 @@ async def upload(
         except Exception:
             pass
 
+        review_actions = {"human_review", "manual_approval", "policy_escalation"}
+        human_review_required = any(str(a or "") in review_actions for a in (actions or []))
+        security_analysis = (t2.get("security_analysis") or {}) if isinstance(t2, dict) else {}
+        evidence_tags = list((t2.get("evidence_tags") or [])) if isinstance(t2, dict) else []
+        severity = str((security_analysis.get("severity") or "")).lower()
+        suggested_routing = "security_review" if human_review_required or severity in ("high", "critical", "error") else "standard_queue"
+
         return {
             "status": "ok",
             "case_id": case_id,
+            "trace_id": trace_id,
+            "decision_trace_id": trace_id,
             "cv_tier2": t2,
+            "security_analysis": security_analysis,
+            "evidence_tags": evidence_tags,
+            "suggested_routing": suggested_routing,
+            "human_review": {"status": "pending", "ticket_id": None} if human_review_required else False,
             "nonce_ok": nonce_ok,
             "next_actions": actions[:6],
         }

@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
-class AttachmentInput(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class AttachmentInput(StrictModel):
     name: Optional[str] = None
     content_type: Optional[str] = None
     content_b64: Optional[str] = None
 
 
-class ResumeRole(BaseModel):
+class ResumeRole(StrictModel):
     title: str
     canonical_title: Optional[str] = None
     company: Optional[str] = None
@@ -22,7 +26,7 @@ class ResumeRole(BaseModel):
     snippet: Optional[str] = None
 
 
-class ResumeEducation(BaseModel):
+class ResumeEducation(StrictModel):
     institution: Optional[str] = None
     degree: Optional[str] = None
     field_of_study: Optional[str] = None
@@ -31,14 +35,14 @@ class ResumeEducation(BaseModel):
     snippet: Optional[str] = None
 
 
-class ResumeSkill(BaseModel):
+class ResumeSkill(StrictModel):
     raw: str
     canonical: str
     confidence: float = 1.0
     snippet: Optional[str] = None
 
 
-class ResumeSchema(BaseModel):
+class ResumeSchema(StrictModel):
     candidate_id: Optional[str] = None
     full_name: Optional[str] = None
     email: Optional[str] = None
@@ -53,21 +57,21 @@ class ResumeSchema(BaseModel):
     extraction_meta: Dict[str, Any] = Field(default_factory=dict)
 
 
-class ParseResumeRequest(BaseModel):
+class ParseResumeRequest(StrictModel):
     candidate_id: Optional[str] = None
     text: Optional[str] = None
     attachments: List[AttachmentInput] = Field(default_factory=list)
     source: Optional[str] = None
 
 
-class ParseResumeResponse(BaseModel):
+class ParseResumeResponse(StrictModel):
     resume: ResumeSchema
     citations: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     pipeline: Dict[str, Any] = Field(default_factory=dict)
 
 
-class JobRequirement(BaseModel):
+class JobRequirement(StrictModel):
     job_id: Optional[str] = None
     title: str
     location: Optional[str] = None
@@ -78,7 +82,7 @@ class JobRequirement(BaseModel):
     keywords: List[str] = Field(default_factory=list)
 
 
-class FeatureContribution(BaseModel):
+class FeatureContribution(StrictModel):
     feature: str
     value: float
     weight: float
@@ -87,13 +91,13 @@ class FeatureContribution(BaseModel):
     citation: Optional[str] = None
 
 
-class TriageThresholds(BaseModel):
+class TriageThresholds(StrictModel):
     shortlist: float
     review: float
     reject: float = 0.0
 
 
-class TriageOutcome(BaseModel):
+class TriageOutcome(StrictModel):
     candidate_id: Optional[str] = None
     job_id: Optional[str] = None
     score: float
@@ -113,7 +117,7 @@ class TriageOutcome(BaseModel):
     trace_id: Optional[str] = None
 
 
-class TriageRequest(BaseModel):
+class TriageRequest(StrictModel):
     job: JobRequirement
     resume: Optional[ResumeSchema] = None
     parse: Optional[ParseResumeRequest] = None
@@ -124,7 +128,7 @@ class TriageRequest(BaseModel):
     proxy_attributes: Dict[str, str] = Field(default_factory=dict)
 
 
-class RankedCandidate(BaseModel):
+class RankedCandidate(StrictModel):
     candidate_id: Optional[str] = None
     score: float
     decision: str
@@ -136,7 +140,7 @@ class RankedCandidate(BaseModel):
     proxy_attributes: Dict[str, str] = Field(default_factory=dict)
 
 
-class RankingRequest(BaseModel):
+class RankingRequest(StrictModel):
     job: JobRequirement
     candidates: List[TriageRequest]
     top_k: int = 10
@@ -144,28 +148,28 @@ class RankingRequest(BaseModel):
     latency_path: Literal["auto", "fast", "slow", "batch"] = "auto"
 
 
-class FairnessGroupMetric(BaseModel):
+class FairnessGroupMetric(StrictModel):
     proxy: str
     group: str
     positive_rate: float
     count: int
 
 
-class FairnessAudit(BaseModel):
+class FairnessAudit(StrictModel):
     proxy: str
     demographic_parity_diff: Optional[float] = None
     groups: List[FairnessGroupMetric] = Field(default_factory=list)
     n: int = 0
 
 
-class RankingResponse(BaseModel):
+class RankingResponse(StrictModel):
     job_id: Optional[str] = None
     ranked: List[RankedCandidate] = Field(default_factory=list)
     fairness: List[FairnessAudit] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-class BatchScoreRequest(BaseModel):
+class BatchScoreRequest(StrictModel):
     job: JobRequirement
     candidates: List[TriageRequest]
     batch_id: Optional[str] = None
@@ -173,7 +177,7 @@ class BatchScoreRequest(BaseModel):
     mode: Literal["standard", "blind", "hard_fairness"] = "standard"
 
 
-class BatchScoreResponse(BaseModel):
+class BatchScoreResponse(StrictModel):
     batch_id: str
     processed: int
     shortlisted: int
@@ -183,7 +187,7 @@ class BatchScoreResponse(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-class FeedbackRecord(BaseModel):
+class FeedbackRecord(StrictModel):
     candidate_id: str
     job_id: str
     recruiter_decision: Literal["shortlist", "review", "reject"]
@@ -194,7 +198,7 @@ class FeedbackRecord(BaseModel):
     proxy_attributes: Dict[str, str] = Field(default_factory=dict)
 
 
-class FeedbackSummary(BaseModel):
+class FeedbackSummary(StrictModel):
     total: int
     acceptance_rate: float
     avg_model_score_shortlisted: float

@@ -8,6 +8,7 @@ from typing import Dict, Generator, Any
 import redis
 import logging
 from fastapi import Depends
+from urllib.parse import urlparse
 
 from src.app.config import get_settings, load_feature_flags
 
@@ -36,12 +37,31 @@ _lazy_redis: redis.Redis | None = None
 _redis_warned = False
 
 
+def _is_non_dev_env() -> bool:
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    return env not in ("local", "dev", "development", "test", "testing")
+
+
+def _redis_url_is_tls(redis_url: str) -> bool:
+    try:
+        parsed = urlparse(str(redis_url or ""))
+        return str(parsed.scheme or "").lower() == "rediss"
+    except Exception:
+        return False
+
+
 def _create_redis_client() -> redis.Redis | None:
     try:
         settings = get_settings()
         redis_url = settings.redis_url
         acl_user = str(os.getenv("REDIS_ACL_USERNAME", "") or "").strip()
         acl_pass = str(os.getenv("REDIS_ACL_PASSWORD", "") or "").strip()
+        if _is_non_dev_env():
+            if not acl_user or not acl_pass:
+                raise RuntimeError("redis_acl_credentials_required")
+            require_tls = str(os.getenv("REDIS_REQUIRE_TLS", "1") or "1").strip().lower() in ("1", "true", "yes", "on")
+            if require_tls and not _redis_url_is_tls(redis_url):
+                raise RuntimeError("redis_tls_required")
         kwargs = {
             "decode_responses": True,
             "socket_connect_timeout": 0.01,
@@ -71,6 +91,8 @@ def get_redis() -> redis.Redis:
         return _lazy_redis
     cli = _create_redis_client()
     if cli is None:
+        if _is_non_dev_env():
+            raise RuntimeError("redis_unavailable_in_non_dev")
         _lazy_redis = DummyRedis()
         global _redis_warned
         if not _redis_warned:

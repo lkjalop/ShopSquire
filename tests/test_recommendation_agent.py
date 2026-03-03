@@ -49,3 +49,33 @@ def test_rerank_returns_list_and_orders_by_stock_and_specs():
     assert len(ranked) == len(cands)
     # Expect the gaming laptop with stock and discrete GPU to be ranked first
     assert ranked[0]["sku"] == "ELEC-LAP-RTX-001"
+
+
+def test_rerank_uses_collaborative_and_clickstream_signals(monkeypatch):
+    svc = RecommendationService()
+    cands = _sample_candidates()
+    constraints = {
+        "uid_hash": "u-1",
+        "budget_max": 200000,
+        "query": "laptop",
+    }
+
+    monkeypatch.setattr(
+        svc,
+        "_collaborative_filter_scores",
+        lambda uid_hash, candidate_skus: {"ELEC-LAP-CREATOR-001": 1.2},
+    )
+    monkeypatch.setattr(
+        svc,
+        "_clickstream_affinity_map",
+        lambda uid_hash, skus, lookback_days=45: {"ELEC-LAP-CREATOR-001": 1.0},
+    )
+
+    ranked = svc.rerank_candidates_with_factors(cands, constraints)
+    assert isinstance(ranked, list) and ranked
+    top = ranked[0]
+    assert top["candidate"]["sku"] == "ELEC-LAP-CREATOR-001"
+    f = top.get("factors") or {}
+    w = f.get("weights") or {}
+    assert "collaborative_filtering" in w
+    assert "clickstream_affinity" in w

@@ -156,6 +156,15 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
             slack_sig = (request.headers.get("x-slack-signature") or "").strip()
             shopify_sig = (request.headers.get("x-shopify-hmac-sha256") or "").strip()
             slack_ts = (request.headers.get("x-slack-request-timestamp") or "").strip()
+            expected_vendor = None
+            if path.startswith("/api/v1/webhooks/shopify"):
+                expected_vendor = "shopify"
+            elif path.startswith("/api/v1/webhooks/stripe"):
+                expected_vendor = "stripe"
+            elif path.startswith("/api/v1/webhooks/github"):
+                expected_vendor = "github"
+            elif path.startswith("/api/v1/webhooks/slack"):
+                expected_vendor = "slack"
             now = int(time.time())
             webhook_id_hdr = (
                 (request.headers.get("x-webhook-id") or "").strip()
@@ -169,6 +178,14 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
 
             vendor_verified = False
             vendor = None
+            if expected_vendor == "shopify" and not shopify_sig:
+                raise HTTPException(status_code=401, detail="Missing Shopify webhook signature header")
+            if expected_vendor == "stripe" and not stripe_sig:
+                raise HTTPException(status_code=401, detail="Missing Stripe webhook signature header")
+            if expected_vendor == "github" and not github_sig:
+                raise HTTPException(status_code=401, detail="Missing GitHub webhook signature header")
+            if expected_vendor == "slack" and not slack_sig:
+                raise HTTPException(status_code=401, detail="Missing Slack webhook signature header")
             if stripe_sig:
                 vendor = "stripe"
                 if not stripe_secret:
@@ -352,6 +369,21 @@ class WebhookSecurityMiddleware(BaseHTTPMiddleware):
                 except Exception:
                     pass
             elif not vendor_verified:
+                # C04: In production, reject unsigned webhooks entirely
+                reject_unsigned = str(os.getenv("WEBHOOK_REJECT_UNSIGNED", "1" if os.getenv("APP_ENV", "").lower() in ("prod", "production") else "0")).lower() in ("1", "true", "yes")
+                if reject_unsigned and not secret:
+                    record_webhook_verification(vendor or "generic", "rejected_unsigned")
+                    log_agent_security_event(
+                        interaction_type=AgentInteractionType.webhook_received,
+                        source=request.client.host if request.client else "unknown",
+                        destination=path,
+                        threat_category=ThreatCategory.webhook_spoofing,
+                        severity="high",
+                        confidence=0.7,
+                        details={"reason": "unsigned_webhook_rejected"},
+                        requires_escalation=True,
+                    )
+                    raise HTTPException(status_code=401, detail="Unsigned webhooks rejected in production")
                 record_webhook_verification(vendor or "generic", "skipped")
                 log_agent_security_event(
                     interaction_type=AgentInteractionType.webhook_received,

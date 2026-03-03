@@ -5,7 +5,8 @@ import math
 import os
 import hashlib
 from functools import lru_cache
-from typing import Any, Dict, Tuple
+from pathlib import Path
+from typing import Any, Dict, Tuple, Optional
 
 from src.app.services.confidence_calibration import calibrate_confidence
 
@@ -39,6 +40,10 @@ def _default_pointer_path() -> str:
 
 def _coerce_json_obj(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _coerce_json_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 @lru_cache(maxsize=4)
@@ -153,6 +158,79 @@ def _artifact_integrity_ok(path: str) -> bool:
         return False
 
 
+def _resolve_model_path(path: str | None) -> str:
+    p = str(path or "").strip()
+    if not p:
+        return ""
+    if os.path.isabs(p):
+        return p
+    return str(Path(p).resolve())
+
+
+@lru_cache(maxsize=8)
+def _load_boosting_model(kind: str, path: str, mtime: float) -> Any:
+    k = str(kind or "").strip().lower()
+    if k == "xgboost":
+        import xgboost as xgb  # type: ignore
+
+        booster = xgb.Booster()
+        booster.load_model(path)
+        return booster
+    if k == "lightgbm":
+        import lightgbm as lgb  # type: ignore
+
+        return lgb.Booster(model_file=path)
+    return None
+
+
+def _predict_boosting_probability(
+    *,
+    kind: str,
+    model_path: str,
+    feature_vector: list[float],
+) -> Optional[float]:
+    rp = _resolve_model_path(model_path)
+    if not rp or not os.path.exists(rp):
+        return None
+    try:
+        mtime = float(os.path.getmtime(rp))
+    except Exception:
+        return None
+    try:
+        mdl = _load_boosting_model(str(kind or ""), rp, mtime)
+        if mdl is None:
+            return None
+        k = str(kind or "").strip().lower()
+        if k == "xgboost":
+            import xgboost as xgb  # type: ignore
+
+            pred = mdl.predict(xgb.DMatrix([feature_vector]))
+            if pred is None or len(pred) <= 0:
+                return None
+            p = float(pred[0])
+        elif k == "lightgbm":
+            pred = mdl.predict([feature_vector])
+            if pred is None:
+                return None
+            if isinstance(pred, list):
+                if len(pred) <= 0:
+                    return None
+                p = float(pred[0])
+            else:
+                try:
+                    # numpy array path
+                    p = float(pred[0])
+                except Exception:
+                    p = float(pred)
+        else:
+            return None
+        if p < 0.0 or p > 1.0:
+            return _clamp01(_sigmoid(p))
+        return _clamp01(p)
+    except Exception:
+        return None
+
+
 def _in_rollout(
     *,
     tenant_id: str | None,
@@ -217,13 +295,15 @@ def score_with_learned_model(
     domain_cfg = _select_domain_cfg(artifact, domain)
     model = _coerce_json_obj(domain_cfg.get("model"))
     coefficients = _coerce_json_obj(model.get("coefficients"))
+    feature_order = [str(x) for x in _coerce_json_list(model.get("feature_order")) if str(x)]
     bias = float(model.get("bias", 0.0) or 0.0)
 
     raw_score = weighted_score(features=features, weights=fallback_weights, bias=fallback_bias)
     model_source = "static_weighted_fallback"
     feature_coverage = 0.0
 
-    if rollout_active and str(model.get("kind") or "").lower() == "logistic" and coefficients:
+    model_kind = str(model.get("kind") or "").lower()
+    if rollout_active and model_kind == "logistic" and coefficients:
         dot = bias
         used = 0
         for k, w in coefficients.items():
@@ -238,6 +318,19 @@ def score_with_learned_model(
         raw_score = _clamp01(_sigmoid(dot))
         model_source = "learned_logistic"
         feature_coverage = round(float(used) / float(max(1, len(coefficients))), 4)
+    elif rollout_active and model_kind in ("xgboost", "lightgbm"):
+        ordered = feature_order or sorted({str(k) for k in (features or {}).keys()})
+        x = [float((features or {}).get(k, 0.0) or 0.0) for k in ordered]
+        pred = _predict_boosting_probability(
+            kind=model_kind,
+            model_path=str(model.get("model_path") or ""),
+            feature_vector=x,
+        )
+        if pred is not None:
+            used = sum(1 for k in ordered if k in (features or {}))
+            raw_score = _clamp01(float(pred))
+            model_source = f"learned_{model_kind}"
+            feature_coverage = round(float(used) / float(max(1, len(ordered))), 4)
 
     cal_score, cal_source = _resolve_calibration(raw_score=raw_score, domain_cfg=domain_cfg, tenant_id=tenant_id)
     return {

@@ -6,7 +6,7 @@ import os
 import uuid
 import re
 import json
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Tuple
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Body
@@ -257,14 +257,25 @@ def _confidence_band(conf: float) -> str:
     return "high"
 
 
-def _build_question_plan(*, constraints: Dict[str, Any], nlp: Dict[str, Any], results_count: int = 0) -> Dict[str, Any]:
+def _build_question_plan(
+    *,
+    constraints: Dict[str, Any],
+    nlp: Dict[str, Any],
+    results_count: int = 0,
+    persona_confidence: float | None = None,
+) -> Dict[str, Any]:
     missing = _infer_missing_fields(constraints=constraints, nlp=nlp)
 
     conf = float(nlp.get("intent_confidence") or 0.0)
     band = _confidence_band(conf)
+    p_conf = float(persona_confidence if persona_confidence is not None else constraints.get("buyer_persona_confidence") or 0.0)
+    p_min = float(os.getenv("PERSONA_CONFIDENCE_MIN", "0.34") or 0.34)
     if results_count <= 0:
         mode = "alternative"
         reason = "no_relevant_results"
+    elif p_conf > 0.0 and p_conf < p_min:
+        mode = "clarify"
+        reason = "persona_low_confidence"
     elif band == "low":
         mode = "clarify"
         reason = "underspecified_query"
@@ -359,6 +370,60 @@ def _adapt_nqe_questions_for_sentiment(
     return softened[:1]
 
 
+def _filter_nqe_questions_by_missing_fields(
+    questions: list[dict] | None,
+    *,
+    missing_fields: list[str] | None,
+) -> list[dict]:
+    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
+    mf = {str(x or "").strip().lower() for x in (missing_fields or []) if str(x or "").strip()}
+    if not out or not mf:
+        return out
+    allow: set[str] = set()
+    if "budget" in mf:
+        allow.update({"ask_budget", "ask_budget_tier"})
+    if "specs" in mf:
+        allow.update(
+            {
+                "ask_specs",
+                "ask_requirements",
+                "ask_system_requirements",
+                "ask_gpu_preference",
+                "ask_touch_screen_type",
+                "ask_software_confirm",
+                "ask_image_model",
+            }
+        )
+    if "use_case" in mf:
+        allow.update(
+            {
+                "ask_use_case",
+                "ask_university_subject",
+                "ask_corporate_work_type",
+                "ask_touch_screen_type",
+                "ask_gaming_depth",
+                "ask_software_confirm",
+            }
+        )
+    if "brand_preference" in mf:
+        allow.update({"ask_brand_pref", "ask_brand"})
+    # Always allow persona-refinement questions (university subject, gaming depth,
+    # corporate work type, touch screen) — they refine a *detected* use-case,
+    # not a missing one.
+    _REFINEMENT_IDS = {
+        "ask_university_subject", "ask_gaming_depth",
+        "ask_corporate_work_type", "ask_touch_screen_type",
+        "ask_software_confirm", "ask_image_model",
+    }
+    allow.update(_REFINEMENT_IDS)
+    filtered: list[dict] = []
+    for q in out:
+        qid = str(q.get("id") or "").strip().lower()
+        if not qid or qid in allow:
+            filtered.append(q)
+    return filtered
+
+
 def _extract_profile_brand_prefs(profile: Dict[str, Any] | None) -> tuple[list[str], list[str]]:
     p = profile or {}
     pos = [str(x).strip() for x in (p.get("preferred_brands") or []) if str(x).strip()]
@@ -428,7 +493,7 @@ def _has_explicit_constraint_update(parsed: Dict[str, Any] | None, query: str | 
 
 def _build_followup_contract(query: str | None, intent_chain: list[dict] | None) -> Dict[str, Any]:
     q = str(query or "").strip().lower()
-    pronouns = ("it", "this", "that", "these", "those", "them", "one", "ones")
+    pronouns = ("it", "these", "those", "them", "this one", "that one", "same", "previous", "earlier")
     deictic = any(re.search(rf"\b{p}\b", q) for p in pronouns)
     compare_refs = bool(re.search(r"\b(compare|which|why this|why those|list them|detail(ed)? list)\b", q))
     chain = intent_chain if isinstance(intent_chain, list) else []
@@ -655,7 +720,580 @@ def _is_laptop_focused_query(query: str | None, constraints: Dict[str, Any] | No
         return True
     c = constraints or {}
     use_case = str(c.get("use_case") or "").lower()
-    return use_case in ("gaming", "software_development", "ai_ml_workstation", "business", "student", "content_creation", "mobile")
+    return use_case in (
+        "gaming",
+        "software_development",
+        "ai_ml_workstation",
+        "business",
+        "student",
+        "content_creation",
+        "mobile",
+        "office_general",
+        "office_finance",
+        "office_executive",
+        "university_general",
+        "engineering_student",
+        "design_student",
+        "computer_science_student",
+        "data_science_student",
+    )
+
+
+def _infer_use_case_from_query_text(query: str | None) -> tuple[str | None, list[str]]:
+    q = str(query or "").lower()
+    if not q:
+        return None, []
+    # Prefer KB-backed mapping first.
+    try:
+        from src.app.services.use_case_advisor import match_use_case_from_query as _match_uc
+
+        _uc = _match_uc(q)
+        if _uc:
+            if _uc == "business_professional":
+                return "office_general", ["office", "office_general"]
+            if _uc.startswith("office_"):
+                return _uc, ["office", _uc]
+            if _uc.endswith("_student") or _uc.startswith("university_"):
+                return _uc, ["student", _uc]
+            return _uc, [_uc]
+    except Exception:
+        pass
+
+    student_markers = (
+        "university",
+        "college",
+        "school",
+        "student",
+        "class",
+        "lecture",
+        "notes",
+        "note taking",
+        "assignment",
+        "study",
+        "psych",
+        "psychology",
+        "arts",
+        "humanities",
+    )
+    office_markers = (
+        "office",
+        "work",
+        "business",
+        "corporate",
+        "email",
+        "teams",
+        "excel",
+        "presentation",
+    )
+    heavy_markers = (
+        "video rendering",
+        "rendering",
+        "autocad",
+        "cad",
+        "blender",
+        "3d",
+        "gaming",
+        "cuda",
+        "machine learning",
+        "ai training",
+        "deep learning",
+        "pytorch",
+        "tensorflow",
+    )
+    if any(m in q for m in office_markers):
+        if any(m in q for m in ("finance", "accounting", "power bi", "tableau", "sap", "bloomberg", "excel")):
+            return "office_finance", ["office", "office_finance"]
+        if any(m in q for m in ("executive", "director", "travel", "boardroom", "presentation")):
+            return "office_executive", ["office", "office_executive"]
+        return "office_general", ["office", "office_general"]
+    if any(m in q for m in student_markers) and not any(m in q for m in heavy_markers):
+        if any(m in q for m in ("note taking", "handwriting", "stylus", "pen", "2-in-1", "touch")):
+            return "note_taking_student", ["student", "note_taking_student"]
+        if any(m in q for m in ("arts", "visual arts", "design")):
+            return "design_student", ["student", "design_student"]
+        return "university_general", ["student", "university_general"]
+    return None, []
+
+
+# ── Buyer persona detection (Layer 1: keyword/regex, deterministic) ──────────
+_PERSONA_PATTERNS: dict[str, list[str]] = {
+    "student": [
+        r"\buniversity\b", r"\bcollege\b", r"\bstudent\b", r"\bstudying\b",
+        r"\bassignment\b", r"\blecture\b", r"\bsemester\b", r"\bcoursework\b",
+        r"\bschool\b", r"\bclass\b", r"\bhomework\b", r"\bcampus\b",
+    ],
+    "high_schooler": [
+        r"\bhigh\s?school\b", r"\byr\s?(?:7|8|9|10|11|12)\b", r"\byear\s?(?:7|8|9|10|11|12)\b",
+        r"\bteen\b", r"\bHSC\b", r"\bVCE\b", r"\bATAR\b", r"\bgcse\b", r"\ba[\s-]?level\b",
+    ],
+    "corporate": [
+        r"\bcorporate\b", r"\boffice\b", r"\bwork\s?from\s?home\b", r"\bwfh\b",
+        r"\bteams\b", r"\bzoom\b", r"\boutlook\b", r"\bexcel\b", r"\bpresentation\b",
+    ],
+    "job_hunter": [
+        r"\bjob\s?hunt\b", r"\binterview\b", r"\bnew\s?job\b", r"\bcareer\s?change\b",
+        r"\bjob\s?search\b", r"\bfreelance\b",
+    ],
+    "gamer": [
+        r"\bgaming\b", r"\bfps\b", r"\bgame\b", r"\bvalorant\b", r"\bfortnite\b",
+        r"\bcyberpunk\b", r"\bsteam\b", r"\belden\s?ring\b",
+    ],
+    "creative": [
+        r"\bvideo\s?edit\b", r"\bcontent\s?creat\b", r"\byoutube\b", r"\bstreaming\b",
+        r"\bpremiere\b", r"\bdavinci\b", r"\bphotoshop\b", r"\bblender\b",
+    ],
+    "traveler": [
+        r"\btravel\b", r"\bholiday\b", r"\bon\s?the\s?go\b", r"\bportable\b",
+        r"\blightweight\b", r"\bbackpack\b", r"\bcommut\b",
+    ],
+}
+
+
+def _detect_buyer_persona(query: str | None) -> str | None:
+    """Classify the buyer persona from query text. Returns the best-match persona or None."""
+    import re
+    q = str(query or "").lower()
+    if not q:
+        return None
+    best, best_score = None, 0
+    for persona, patterns in _PERSONA_PATTERNS.items():
+        score = sum(1 for p in patterns if re.search(p, q, re.IGNORECASE))
+        if score > best_score:
+            best_score = score
+            best = persona
+    return best if best_score > 0 else None
+
+
+def _detect_buyer_persona_with_confidence(query: str | None) -> Tuple[str | None, float, Dict[str, int]]:
+    import re
+    q = str(query or "").lower()
+    if not q:
+        return None, 0.0, {}
+    scores: Dict[str, int] = {}
+    best: str | None = None
+    best_score = 0
+    for persona, patterns in _PERSONA_PATTERNS.items():
+        score = sum(1 for p in patterns if re.search(p, q, re.IGNORECASE))
+        if score > 0:
+            scores[persona] = score
+        if score > best_score:
+            best_score = score
+            best = persona
+    if not best:
+        return None, 0.0, scores
+    # Confidence is normalized: single match = 0.5, two matches = 1.0.
+    conf = max(0.0, min(1.0, float(best_score) / 2.0))
+    return best, conf, scores
+
+
+def _stable_rollout_bucket(seed: str | None) -> int:
+    s = str(seed or "").strip()
+    if not s:
+        s = "default"
+    return int(hashlib.sha256(s.encode("utf-8")).hexdigest(), 16) % 100
+
+
+def _resolve_ollama_intent_rollout(flags: Dict[str, Any], *, uid: str, trace_id: str | None) -> Dict[str, Any]:
+    cfg = flags.get("OLLAMA_INTENT_ROUTING") if isinstance(flags.get("OLLAMA_INTENT_ROUTING"), dict) else {}
+    stage = str(cfg.get("stage") or "").strip().lower()
+    if not stage:
+        stage = "full" if bool(flags.get("USE_OLLAMA_INTENT", False)) else "off"
+    if stage not in {"off", "shadow", "percent", "full"}:
+        stage = "off"
+    rollout_percent = max(0, min(100, int(cfg.get("rollout_percent", 0) or 0)))
+    shadow_percent = max(0, min(100, int(cfg.get("shadow_percent", 100) or 100)))
+    seed = str(trace_id or uid or "default")
+    bucket = _stable_rollout_bucket(seed)
+    invoke = False
+    shadow_capture = False
+    if stage == "full":
+        invoke = True
+        shadow_capture = True
+    elif stage == "percent":
+        invoke = bucket < rollout_percent
+        shadow_capture = True
+    elif stage == "shadow":
+        invoke = False
+        shadow_capture = bucket < shadow_percent
+    return {
+        "stage": stage,
+        "rollout_percent": rollout_percent,
+        "shadow_percent": shadow_percent,
+        "bucket": bucket,
+        "invoke_ollama": invoke,
+        "shadow_capture": shadow_capture,
+    }
+
+
+def _rule_intent_summary(query: str | None, nlp: Dict[str, Any] | None) -> str:
+    q = str(query or "").strip()
+    n = nlp if isinstance(nlp, dict) else {}
+    intent = str(n.get("intent") or "browse").strip().lower()
+    prefs = n.get("preferences") if isinstance(n.get("preferences"), dict) else {}
+    use_case = str(prefs.get("use_case") or "").strip()
+    attrs: List[str] = []
+    if prefs.get("budget_max") is not None or prefs.get("budget_min") is not None:
+        attrs.append("budget")
+    if use_case:
+        attrs.append(f"use_case={use_case}")
+    if prefs.get("brands"):
+        attrs.append("brand")
+    if prefs.get("specs"):
+        attrs.append("specs")
+    short_q = q[:180]
+    if attrs:
+        return f"Intent={intent}; focus={', '.join(attrs[:3])}; query={short_q}"
+    return f"Intent={intent}; query={short_q}"
+
+
+def _summaries_differ(a: str | None, b: str | None) -> bool:
+    aa = str(a or "").strip().lower()
+    bb = str(b or "").strip().lower()
+    if not aa and not bb:
+        return False
+    return aa != bb
+
+
+# ── Budget fitness pre-check ─────────────────────────────────────────────────
+_USE_CASE_BUDGET_FLOORS: dict[str, int] = {
+    # Minimum viable new-laptop price (AUD/USD rough floor) per workload tier
+    "gaming_casual": 600, "gaming_competitive": 900, "gaming_light": 500,
+    "gaming_aaa_heavy": 1200,
+    "engineering_student": 1000, "architecture_student": 1000,
+    "ai_ml_workstation": 1500, "data_science_student": 900,
+    "content_creator": 900, "music_production": 800,
+    "computer_science_student": 600, "design_student": 700,
+    "university_general": 400, "note_taking_student": 350,
+    "office_general": 350, "office_finance": 500, "office_executive": 600,
+    "medical_student": 500, "law_student": 400,
+}
+
+
+def _assess_budget_fitness(
+    use_case: str | None, budget_min: float | None, budget_max: float | None,
+) -> dict[str, Any]:
+    """Compare stated budget against use-case minimum viable price.
+
+    Returns: {status: 'ok'|'low'|'high', floor, advice}
+    """
+    if not use_case or not budget_max:
+        return {"status": "unknown"}
+    floor = _USE_CASE_BUDGET_FLOORS.get(use_case)
+    if not floor:
+        return {"status": "unknown"}
+    bmax = float(budget_max)
+    if bmax < floor * 0.85:
+        return {
+            "status": "low",
+            "floor": floor,
+            "gap": round(floor - bmax),
+            "advice": (
+                f"For {use_case.replace('_', ' ')}, most new laptops start around ${floor}. "
+                f"At ${int(bmax)} you'll be looking at older or refurbished models. "
+                f"Would you like the best option at your budget, or would you consider raising it a bit?"
+            ),
+        }
+    if bmax > floor * 3.0:
+        return {
+            "status": "high",
+            "floor": floor,
+            "excess": round(bmax - floor * 2),
+            "advice": (
+                f"Your budget is generous for {use_case.replace('_', ' ')}. "
+                f"You won't feel much real-world difference beyond ~${floor * 2}. "
+                f"I can show a great-value pick and a premium option so you're not overpaying."
+            ),
+        }
+    return {"status": "ok", "floor": floor}
+
+
+def _question_slot_from_id(question_id: str | None) -> str:
+    qid = str(question_id or "").strip().lower()
+    if qid in {"ask_budget", "ask_budget_tier"}:
+        return "budget"
+    if qid in {
+        "ask_use_case",
+        "ask_platform",
+        "ask_university_subject",
+        "ask_corporate_work_type",
+        "ask_gaming_depth",
+        "ask_software_confirm",
+    }:
+        return "use_case"
+    if qid in {"ask_brand_pref", "ask_brand"}:
+        return "brand_preference"
+    if qid in {"ask_gpu_preference", "ask_specs", "ask_requirements", "ask_system_requirements"}:
+        return "specs"
+    if qid in {"ask_touch_screen_type"}:
+        return "touch_form_factor"
+    if qid in {"ask_image_model", "reupload_clean_image"}:
+        return "image_quality"
+    return "unknown"
+
+
+def _normalize_recent_nqe_asked(raw: Any) -> list[dict]:
+    out: list[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if isinstance(item, dict):
+            qid = str(item.get("id") or item.get("question_id") or "").strip().lower()
+            if not qid:
+                continue
+            try:
+                turn = int(item.get("turn") or 0)
+            except Exception:
+                turn = 0
+            slot = str(item.get("slot") or _question_slot_from_id(qid)).strip().lower()
+            out.append({"id": qid, "slot": slot or "unknown", "turn": turn})
+        else:
+            qid = str(item or "").strip().lower()
+            if qid:
+                out.append({"id": qid, "slot": _question_slot_from_id(qid), "turn": 0})
+    return out[-60:]
+
+
+def _contradicted_slots(
+    *,
+    query: str | None,
+    constraints: Dict[str, Any],
+    prior_constraints: Dict[str, Any] | None,
+    nqe_selection_applied: Dict[str, Any] | None,
+) -> set[str]:
+    q = str(query or "").lower()
+    prior = prior_constraints if isinstance(prior_constraints, dict) else {}
+    applied = nqe_selection_applied if isinstance(nqe_selection_applied, dict) else {}
+    contradicted: set[str] = set()
+
+    if "budget_min" in applied or "budget_max" in applied:
+        contradicted.add("budget")
+    if "use_case" in applied or "use_case_tags" in applied:
+        contradicted.add("use_case")
+    if "gpu_preference" in applied:
+        contradicted.add("specs")
+
+    try:
+        old_min = prior.get("budget_min")
+        old_max = prior.get("budget_max")
+        new_min = constraints.get("budget_min")
+        new_max = constraints.get("budget_max")
+        if (new_min is not None or new_max is not None) and (old_min != new_min or old_max != new_max):
+            contradicted.add("budget")
+    except Exception:
+        pass
+    try:
+        if prior.get("brands") is not None and list(prior.get("brands") or []) != list(constraints.get("brands") or []):
+            contradicted.add("brand_preference")
+    except Exception:
+        pass
+    try:
+        if prior.get("specs") is not None and list(prior.get("specs") or []) != list(constraints.get("specs") or []):
+            contradicted.add("specs")
+    except Exception:
+        pass
+    try:
+        if prior.get("use_case") and prior.get("use_case") != constraints.get("use_case"):
+            contradicted.add("use_case")
+    except Exception:
+        pass
+
+    contradiction_cues = ("actually", "instead", "changed", "change", "not anymore", "rather", "switch")
+    if any(c in q for c in contradiction_cues):
+        if any(x in q for x in ("budget", "$", "under", "between")):
+            contradicted.add("budget")
+        if any(x in q for x in ("use case", "for work", "for school", "for uni", "for office", "gaming", "rendering")):
+            contradicted.add("use_case")
+        if any(x in q for x in ("brand", "apple", "dell", "lenovo", "asus", "hp", "msi")):
+            contradicted.add("brand_preference")
+        if any(x in q for x in ("gpu", "ram", "ssd", "storage", "cpu", "cores")):
+            contradicted.add("specs")
+    return contradicted
+
+
+def _question_fatigue_filter(
+    questions: list[dict] | None,
+    *,
+    recent_asked: list[dict] | None,
+    current_turn: int,
+    window_turns: int,
+    contradicted_slots: set[str] | None = None,
+) -> tuple[list[dict], list[str]]:
+    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
+    if not out:
+        return [], []
+    contradicted = {str(s or "").strip().lower() for s in (contradicted_slots or set()) if str(s or "").strip()}
+    recent = _normalize_recent_nqe_asked(recent_asked or [])
+    blocked: list[str] = []
+    filtered: list[dict] = []
+    seen_slots: set[str] = set()
+    for q in out:
+        qid = str(q.get("id") or "").strip().lower()
+        slot = _question_slot_from_id(qid)
+        q["question_slot"] = slot
+        asked_recently = False
+        for e in recent:
+            turn = int(e.get("turn") or 0)
+            same_slot = str(e.get("slot") or "").strip().lower() == slot
+            same_qid = str(e.get("id") or "").strip().lower() == qid
+            if not (same_slot or same_qid):
+                continue
+            if turn > 0 and (current_turn - turn) <= max(1, int(window_turns)):
+                asked_recently = True
+                break
+        if asked_recently and slot not in contradicted:
+            blocked.append(qid or slot)
+            continue
+        if slot in seen_slots and slot not in contradicted:
+            continue
+        seen_slots.add(slot)
+        filtered.append(q)
+    return filtered, blocked
+
+
+def _apply_persona_confidence_fallback(
+    questions: list[dict] | None,
+    *,
+    persona: str | None,
+    persona_confidence: float | None,
+) -> list[dict]:
+    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
+    if not out:
+        return out
+    conf = float(persona_confidence or 0.0)
+    min_conf = float(os.getenv("PERSONA_CONFIDENCE_MIN", "0.34") or 0.34)
+    if conf >= min_conf:
+        return out
+    # Low-confidence persona inference: ask broad use-case first to avoid overfitting.
+    fallback = {
+        "id": "ask_use_case",
+        "text": "To avoid guessing, what will you mostly do: general office/school work, creator/engineering tools, or gaming?",
+        "goal": "resolve_use_case",
+        "question_slot": "use_case",
+        "options": [
+            {"id": "use_case_general", "label": "General office/school"},
+            {"id": "use_case_creator", "label": "Creator/engineering tools"},
+            {"id": "use_case_gaming", "label": "Gaming"},
+        ],
+    }
+    existing_ids = {str((q or {}).get("id") or "").strip().lower() for q in out}
+    if "ask_use_case" not in existing_ids:
+        out.insert(0, fallback)
+    else:
+        out = [fallback if str((q or {}).get("id") or "").strip().lower() == "ask_use_case" else q for q in out]
+    return out[:3]
+
+
+def _dedupe_next_questions_for_render(questions: list[dict] | None) -> list[dict]:
+    out: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_slots: set[str] = set()
+    seen_text: set[str] = set()
+    for q in (questions or []):
+        if not isinstance(q, dict):
+            continue
+        qq = dict(q)
+        qid = str(qq.get("id") or "").strip().lower()
+        qtext = " ".join(str(qq.get("text") or "").strip().lower().split())
+        slot = str(qq.get("question_slot") or _question_slot_from_id(qid)).strip().lower()
+        if qid and qid in seen_ids:
+            continue
+        if qtext and qtext in seen_text:
+            continue
+        # Final render guard: only one question per slot unless slot unknown.
+        if slot and slot != "unknown" and slot in seen_slots:
+            continue
+        if qid:
+            seen_ids.add(qid)
+        if qtext:
+            seen_text.add(qtext)
+        if slot and slot != "unknown":
+            seen_slots.add(slot)
+        qq["question_slot"] = slot or "unknown"
+        out.append(qq)
+    return out[:3]
+
+
+def _question_flow(
+    *,
+    query: str | None,
+    constraints: Dict[str, Any] | None,
+) -> str:
+    q = str(query or "").lower()
+    c = constraints or {}
+    use_case = str(c.get("use_case") or "").lower()
+    use_case_tags = [str(x).lower() for x in (c.get("use_case_tags") or [])]
+
+    if use_case in {"content_creator", "content_creation", "ai_ml_workstation", "engineering_student", "architecture_student", "data_science_student"}:
+        return "creator"
+    if use_case.startswith("office_") or any("office_" in t for t in use_case_tags):
+        return "office"
+    if "student" in use_case or "university" in use_case or any(("student" in t or "university" in t) for t in use_case_tags):
+        return "student"
+    if any(t in q for t in ("video editing", "rendering", "creator", "blender", "autocad", "solidworks", "davinci", "premiere", "ai training", "ml training")):
+        return "creator"
+    if any(t in q for t in ("university", "college", "student", "school", "lecture", "assignment")):
+        return "student"
+    if any(t in q for t in ("office", "work", "corporate", "business", "excel", "teams", "outlook")):
+        return "office"
+    return "general"
+
+
+def _apply_intent_specific_question_bank(
+    questions: list[dict] | None,
+    *,
+    query: str | None,
+    constraints: Dict[str, Any] | None,
+) -> list[dict]:
+    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
+    if not out:
+        return out
+    flow = _question_flow(query=query, constraints=constraints)
+    if flow == "creator":
+        out = _append_gpu_disambiguation_question(out, query)
+    for q in out:
+        qid = str(q.get("id") or "").strip().lower()
+        if qid in {"ask_specs", "ask_requirements", "ask_system_requirements"} and flow in {"student", "office"}:
+            q["text"] = "What matters most: lighter weight, longer battery life, larger screen/keyboard, or extra performance?"
+            if not isinstance(q.get("options"), list):
+                q["options"] = [
+                    {"id": "priority_portability", "label": "Lightweight portability"},
+                    {"id": "priority_battery", "label": "Long battery life"},
+                    {"id": "priority_screen", "label": "Larger screen/keyboard"},
+                    {"id": "priority_performance", "label": "More performance headroom"},
+                ]
+        if qid in {"ask_specs", "ask_requirements", "ask_system_requirements"} and flow == "creator":
+            q["text"] = "For creator/engineering workloads, what minimums do you want for GPU/VRAM, RAM, and storage?"
+        if qid == "ask_gpu_preference" and flow == "creator":
+            q["text"] = "What matters more for creator workloads: dedicated GPU + VRAM headroom, or battery and lighter weight?"
+    if flow in {"student", "office"}:
+        rank = {
+            "ask_specs": 0,
+            "ask_requirements": 0,
+            "ask_system_requirements": 0,
+            "ask_budget": 1,
+            "ask_budget_tier": 1,
+            "ask_use_case": 2,
+            "ask_university_subject": 2,
+            "ask_corporate_work_type": 2,
+            "ask_brand_pref": 3,
+            "ask_brand": 3,
+        }
+    elif flow == "creator":
+        rank = {
+            "ask_gpu_preference": 0,
+            "ask_specs": 1,
+            "ask_requirements": 1,
+            "ask_system_requirements": 1,
+            "ask_use_case": 2,
+            "ask_budget": 3,
+            "ask_budget_tier": 3,
+            "ask_brand_pref": 4,
+            "ask_brand": 4,
+        }
+    else:
+        rank = {}
+    out = sorted(out, key=lambda q: rank.get(str(q.get("id") or "").strip().lower(), 9))
+    return out[:3]
 
 
 def _candidate_looks_like_laptop(candidate: Dict[str, Any] | None) -> bool:
@@ -666,7 +1304,7 @@ def _candidate_looks_like_laptop(candidate: Dict[str, Any] | None) -> bool:
         text_blob = str(c).lower()
     negative_terms = (
         "monitor", "display", "headphone", "headset", "earbud", "speaker",
-        "keyboard", "mouse", "dock", "docking station", "webcam", "microphone",
+        "keyboard", "mouse", "dock", "docking station", "webcam", "microphone", "sleeve",
     )
     if any(t in text_blob for t in negative_terms):
         return False
@@ -675,6 +1313,25 @@ def _candidate_looks_like_laptop(candidate: Dict[str, Any] | None) -> bool:
         "ideapad", "legion", "yoga", "vivobook", "zenbook", "gram", "xps",
     )
     return any(t in text_blob for t in positive_terms)
+
+
+def _candidate_matches_brand(candidate: Dict[str, Any] | None, brands: List[str] | None) -> bool:
+    c = candidate or {}
+    req = [str(b or "").strip().lower() for b in (brands or []) if str(b or "").strip()]
+    if not req:
+        return False
+    name = str(c.get("name") or "").lower()
+    sku = str(c.get("sku") or "").lower()
+    text_blob = f"{name} {sku}"
+    alias = {
+        "apple": ["apple", "macbook"],
+        "microsoft": ["microsoft", "surface"],
+    }
+    for b in req:
+        probes = alias.get(b, [b])
+        if any(p in text_blob for p in probes):
+            return True
+    return False
 
 
 def _candidate_has_discrete_gpu(candidate: Dict[str, Any] | None) -> bool:
@@ -703,8 +1360,8 @@ def _gpu_intent_profile(query: str | None, constraints: Dict[str, Any] | None = 
     use_case_tags = [str(x).lower() for x in (c.get("use_case_tags") or [])]
     likely_gpu_tasks = (
         any(t in q for t in _GPU_TASK_TERMS)
-        or use_case in ("ai_ml_workstation", "gaming", "content_creation")
-        or any(t in ("ai_ml_workstation", "gaming", "content_creation") for t in use_case_tags)
+        or use_case in ("ai_ml_workstation", "gaming", "content_creation", "content_creator", "engineering_student", "architecture_student")
+        or any(t in ("ai_ml_workstation", "gaming", "content_creation", "content_creator", "engineering_student", "architecture_student") for t in use_case_tags)
     )
     return {
         "likely_gpu_tasks": bool(likely_gpu_tasks),
@@ -770,7 +1427,7 @@ def _append_standard_nqe_options(existing: list[dict] | None, query: str | None 
             continue
         q = dict(item)
         qid = str(q.get("id") or "").strip().lower()
-        if qid == "ask_budget" and not isinstance(q.get("options"), list):
+        if qid == "ask_budget" and not q.get("options"):
             q["why_hint"] = "Budget keeps recommendations realistic and prevents irrelevant high-end results."
             q["options"] = [
                 {"id": "budget_under_1000", "label": "Under $1,000", "value": "0-1000"},
@@ -778,7 +1435,7 @@ def _append_standard_nqe_options(existing: list[dict] | None, query: str | None 
                 {"id": "budget_1500_2200", "label": "$1,500-$2,200", "value": "1500-2200"},
                 {"id": "budget_2200_plus", "label": "$2,200+", "value": "2200+"},
             ]
-        elif qid == "ask_use_case" and not isinstance(q.get("options"), list):
+        elif qid == "ask_use_case" and not q.get("options"):
             q["why_hint"] = "Use-case helps rank for what you care about most (battery, performance, portability, value)."
             q["options"] = [
                 {"id": "use_case_student", "label": "School and everyday"},
@@ -880,10 +1537,10 @@ def _apply_nqe_selection_to_constraints(
 
     if qid == "ask_use_case":
         mapping = {
-            "use_case_student": ("general_productivity", ["student", "general_productivity"]),
-            "use_case_business": ("general_productivity", ["business", "general_productivity"]),
+            "use_case_student": ("university_general", ["student", "university_general"]),
+            "use_case_business": ("office_general", ["office", "office_general"]),
             "use_case_gaming": ("gaming", ["gaming"]),
-            "use_case_video_editing": ("content_creation", ["content_creation"]),
+            "use_case_video_editing": ("content_creator", ["content_creator"]),
             "use_case_ai_training": ("ai_ml_workstation", ["ai_ml_workstation"]),
         }
         use_case, tags = mapping.get(oid, (None, None))
@@ -893,11 +1550,11 @@ def _apply_nqe_selection_to_constraints(
             elif any(tok in val for tok in ("ai", "ml", "training", "cuda", "llm")):
                 use_case, tags = ("ai_ml_workstation", ["ai_ml_workstation"])
             elif any(tok in val for tok in ("video", "editing", "creative", "render")):
-                use_case, tags = ("content_creation", ["content_creation"])
+                use_case, tags = ("content_creator", ["content_creator"])
             elif any(tok in val for tok in ("school", "student")):
-                use_case, tags = ("general_productivity", ["student", "general_productivity"])
+                use_case, tags = ("university_general", ["student", "university_general"])
             elif any(tok in val for tok in ("work", "business", "office")):
-                use_case, tags = ("general_productivity", ["business", "general_productivity"])
+                use_case, tags = ("office_general", ["office", "office_general"])
         if use_case:
             constraints["use_case"] = use_case
             constraints["use_case_tags"] = tags
@@ -976,6 +1633,16 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
         response["referents"] = {"has_reference": False, "source": "none", "skus": []}
     if "memory_confidence" not in response:
         response["memory_confidence"] = 0.5
+    # Propagate buyer persona from constraints_used into top-level response
+    # so early-return paths (no results, off-domain, etc.) always surface persona.
+    _cu = response.get("constraints_used") or {}
+    if isinstance(_cu, dict):
+        if "buyer_persona" not in response or response.get("buyer_persona") is None:
+            response["buyer_persona"] = _cu.get("buyer_persona")
+        if "buyer_persona_candidate" not in response or response.get("buyer_persona_candidate") is None:
+            response["buyer_persona_candidate"] = _cu.get("buyer_persona_candidate")
+        if "buyer_persona_confidence" not in response or response.get("buyer_persona_confidence") is None:
+            response["buyer_persona_confidence"] = _cu.get("buyer_persona_confidence")
     return response
 
 
@@ -1352,6 +2019,99 @@ def _emit_inventory_brand_notice(
         return None, []
 
 
+def _result_price_dollars(row: Dict[str, Any] | None) -> float | None:
+    r = row or {}
+    try:
+        if isinstance(r.get("price"), (int, float)):
+            p = float(r.get("price"))
+            if p > 0:
+                return p
+    except Exception:
+        pass
+    try:
+        if isinstance(r.get("price_cents"), (int, float)):
+            pc = float(r.get("price_cents"))
+            if pc > 0:
+                return round(pc / 100.0, 2)
+    except Exception:
+        pass
+    return None
+
+
+def _build_price_buckets(
+    *,
+    results: List[Dict[str, Any]] | None,
+    constraints: Dict[str, Any] | None,
+    cap: int = 4,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Build explicit UI-friendly price buckets for recommendation alternatives."""
+    out = {
+        "within_budget": [],
+        "closest_above_budget": [],
+        "closest_below_budget": [],
+    }
+    rows = [r for r in (results or []) if isinstance(r, dict)]
+    if not rows:
+        return out
+
+    c = constraints or {}
+    bmin = c.get("budget_min")
+    bmax = c.get("budget_max")
+    try:
+        bmin = int(bmin) if bmin is not None else None
+    except Exception:
+        bmin = None
+    try:
+        bmax = int(bmax) if bmax is not None else None
+    except Exception:
+        bmax = None
+
+    priced: List[tuple[Dict[str, Any], float]] = []
+    for r in rows:
+        p = _result_price_dollars(r)
+        if p is None:
+            continue
+        priced.append((r, p))
+
+    if not priced:
+        return out
+
+    within: List[Dict[str, Any]] = []
+    above: List[tuple[Dict[str, Any], float]] = []
+    below: List[tuple[Dict[str, Any], float]] = []
+
+    for r, p in priced:
+        if bmin is not None and bmax is not None:
+            if bmin <= p <= bmax:
+                within.append(r)
+            elif p > bmax:
+                above.append((r, p - float(bmax)))
+            elif p < bmin:
+                below.append((r, float(bmin) - p))
+            continue
+        if bmax is not None:
+            if p <= bmax:
+                within.append(r)
+            else:
+                above.append((r, p - float(bmax)))
+            continue
+        if bmin is not None:
+            if p >= bmin:
+                within.append(r)
+            else:
+                below.append((r, float(bmin) - p))
+            continue
+        within.append(r)
+
+    above_sorted = [r for r, _ in sorted(above, key=lambda x: x[1])]
+    below_sorted = [r for r, _ in sorted(below, key=lambda x: x[1])]
+
+    out["within_budget"] = within[:cap]
+    out["closest_above_budget"] = above_sorted[:cap]
+    out["closest_below_budget"] = below_sorted[:cap]
+    return out
+
+
 @router.get("/suggest")
 def suggest(
     request: Request,
@@ -1366,6 +2126,7 @@ def suggest(
     image_ocr_text: Optional[str] = None,
     image_hash: Optional[str] = None,
     image_intent: Optional[str] = None,
+    image_cv_signals: Optional[str] = None,
     response: Response = None,
     redis=Depends(get_redis),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
@@ -1386,7 +2147,8 @@ def suggest(
         source_ip=source_ip,
         api_key_id=(request.headers.get("x-api-key") if request else None),
     )
-    if not policy_gate_ok:
+    benign_shopping_query = (not _query_signals_unsupported_intent(query)) and not _query_signals_off_domain(query)
+    if not policy_gate_ok and not benign_shopping_query:
         raise HTTPException(
             status_code=429,
             detail={"message": "Request blocked by model theft policy gate", "reason": policy_gate_reason},
@@ -1398,7 +2160,7 @@ def suggest(
         api_key_id=(request.headers.get("x-api-key") if request else None),
         query=query,
     )
-    if not allowed_model_use:
+    if not allowed_model_use and not benign_shopping_query:
         raise HTTPException(
             status_code=429,
             detail={"message": "Request blocked by model extraction controls", "reason": model_use_reason},
@@ -1411,7 +2173,7 @@ def suggest(
     )
     if bool(probe_result.get("detected")):
         block_probe = str(os.getenv("MODEL_THEFT_BLOCK_SYSTEMATIC_PROBING", "1")).lower() in ("1", "true", "yes")
-        if block_probe:
+        if block_probe and not benign_shopping_query:
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -1447,6 +2209,9 @@ def suggest(
     except Exception:
         pass
     image_context = {"labels": [], "ocr": "", "hash": None, "intent": None}
+    image_cv_signals_parsed: Dict[str, Any] = {}
+    incoming_image_payload = bool(image_labels or image_ocr_text or image_hash or image_intent or image_cv_signals)
+    image_reupload_reasons: list[str] = []
     try:
         if image_labels:
             labels = [s.strip() for s in str(image_labels).split(",") if str(s).strip()]
@@ -1457,8 +2222,56 @@ def suggest(
             image_context["hash"] = str(image_hash)[:128]
         if image_intent:
             image_context["intent"] = str(image_intent)[:32]
+        if image_cv_signals:
+            parsed_cv = json.loads(str(image_cv_signals))
+            if isinstance(parsed_cv, dict):
+                qr_detected = bool(
+                    parsed_cv.get("qr_code_detected")
+                    or parsed_cv.get("qr_detected")
+                    or parsed_cv.get("qr_url_present")
+                    or parsed_cv.get("qr_url_suspicious")
+                )
+                qr_external = bool(
+                    parsed_cv.get("qr_external_url_detected")
+                    or parsed_cv.get("qr_external_url")
+                    or parsed_cv.get("qr_url_present")
+                    or parsed_cv.get("qr_url_suspicious")
+                )
+                qr_injection = bool(
+                    parsed_cv.get("qr_prompt_injection")
+                    or parsed_cv.get("prompt_injection_text_suspected")
+                )
+                manipulation = bool(
+                    parsed_cv.get("manipulation_detected")
+                    or parsed_cv.get("adversarial_detected")
+                    or parsed_cv.get("steg_suspicious")
+                    or parsed_cv.get("duplicate_image_detected")
+                )
+                adversarial = float(parsed_cv.get("adversarial_score") or 0.0)
+                image_cv_signals_parsed = {
+                    "qr_code_detected": qr_detected,
+                    "qr_prompt_injection": qr_injection,
+                    "qr_external_url_detected": qr_external,
+                    "ocr_prompt_injection": bool(parsed_cv.get("ocr_prompt_injection")),
+                    "manipulation_detected": manipulation,
+                    "adversarial_score": adversarial,
+                }
+                if qr_detected:
+                    image_reupload_reasons.append("qr_code_detected")
+                if qr_external:
+                    image_reupload_reasons.append("qr_external_url_detected")
+                if qr_injection:
+                    image_reupload_reasons.append("qr_prompt_injection")
+                if manipulation:
+                    image_reupload_reasons.append("manipulation_detected")
+                if adversarial >= 0.35:
+                    image_reupload_reasons.append("adversarial_score_high")
     except Exception:
         image_context = {"labels": [], "ocr": "", "hash": None, "intent": None}
+        image_cv_signals_parsed = {}
+        image_reupload_reasons = []
+    if incoming_image_payload and not image_cv_signals_parsed and not (image_context.get("labels") or image_context.get("ocr")):
+        image_reupload_reasons.append("insufficient_image_signals")
     query_effective = query
     if image_context.get("labels") or image_context.get("ocr"):
         query_effective = (
@@ -1532,6 +2345,7 @@ def suggest(
                     "query": query,
                     "image_labels": image_context.get("labels") or [],
                     "image_ocr_text": image_context.get("ocr") or "",
+                    "cv_signals": image_cv_signals_parsed,
                     "merged_text": merged_text,
                 }
             )
@@ -1552,6 +2366,7 @@ def suggest(
                 "cvss": sec_details.get("cvss_score"),
                 "dread": sec_details.get("dread_avg"),
                 "kev": sec_details.get("kev_ids", []),
+                "cv_signals": sec_details.get("cv_signals", {}),
             },
         )
     except Exception:
@@ -1850,6 +2665,10 @@ def suggest(
             "approval_id": approval_id,
             "trace_id": trace_id,
             "policy_version": flags.get("POLICY_VERSION", "v1"),
+            "constraints_used": {
+                "uid_hash": uid_hash,
+                "query": scrub_pii(query or ""),
+            },
             "view_mode": view_hint.get("view_mode"),
             "view_reason": view_hint.get("view_reason"),
             "results": [],
@@ -1879,6 +2698,12 @@ def suggest(
         return _with_trace(payload, trace_id)
     # Review without approval: log the gate event and continue processing.
     try:
+        sec_details = analysis.get("details") or {}
+        cv_signals = sec_details.get("cv_signals") if isinstance(sec_details.get("cv_signals"), dict) else {}
+        qr_detected = bool(cv_signals.get("qr_code_detected"))
+        qr_external = bool(cv_signals.get("qr_external_url_detected") or cv_signals.get("qr_external_url"))
+        qr_injection = bool(cv_signals.get("qr_prompt_injection"))
+        manipulation = bool(cv_signals.get("manipulation_detected"))
         log_trace_event(
             trace_id=trace_id,
             event_type="security_scan",
@@ -1886,7 +2711,15 @@ def suggest(
             source_id="Security_Observer_Agent",
             target_type="system",
             target_id=None,
-            payload={"query": scrub_pii(query or ""), "security": analysis.get("details")},
+            payload={
+                "query": scrub_pii(query or ""),
+                "security": sec_details,
+                "qr_detected": qr_detected,
+                "qr_external_url_detected": qr_external,
+                "qr_prompt_injection": qr_injection,
+                "adversarial_score": float(cv_signals.get("adversarial_score") or 0.0),
+                "reupload_needed": bool(qr_detected or qr_external or qr_injection or manipulation),
+            },
         )
     except Exception:
         pass
@@ -1980,6 +2813,30 @@ def suggest(
     mem = Memory(redis)
     ctx = mem.get_context(uid)
     kv = ctx.get("kv") or {}
+    structured_state = mem.get_structured_state(uid) or {}
+    product_memory_bank = mem.get_product_memory_bank(uid) or {}
+    if not isinstance(structured_state, dict):
+        structured_state = {}
+    if not isinstance(product_memory_bank, dict):
+        product_memory_bank = {}
+    # Prefer explicit structured-state fields when available, but keep KV
+    # mirrored for backward compatibility with existing agents.
+    try:
+        for _k in (
+            "nqe_asked_ids",
+            "nqe_answered_fields",
+            "nqe_recent_asked",
+            "last_shortlist_skus",
+            "last_valid_shortlist_skus",
+            "last_constraints_snapshot",
+            "last_valid_constraints_snapshot",
+            "last_result_envelope",
+            "conversation_turn",
+        ):
+            if _k in structured_state and _k not in kv:
+                kv[_k] = structured_state.get(_k)
+    except Exception:
+        pass
     try:
         cached_image_ctx = kv.get("image_context") if isinstance(kv.get("image_context"), dict) else {}
         cached_labels = cached_image_ctx.get("labels") if isinstance(cached_image_ctx.get("labels"), list) else []
@@ -2063,15 +2920,21 @@ def suggest(
         )
     except Exception:
         pass
-    # Optional Ollama-assisted intent summary/rationale (small vs big model by complexity)
+    # Ollama intent routing with staged rollout: off -> shadow -> percent -> full.
     ollama_meta: Dict[str, Any] = {}
+    ollama_rollout = _resolve_ollama_intent_rollout(flags, uid=uid, trace_id=trace_id)
     try:
-        if flags.get("USE_OLLAMA_INTENT", False):
-            model = select_ollama_model(query_effective)
-            complex_bool = is_complex_query(query_effective)
-            reason = complexity_explain(query_effective)
-            path = [os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b")] + ([os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")] if complex_bool else [])
-            payload = {
+        model = select_ollama_model(query_effective)
+        complex_bool = is_complex_query(query_effective)
+        reason = complexity_explain(query_effective)
+        path = [os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b")] + ([os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")] if complex_bool else [])
+        action = "escalate_to_big" if complex_bool else "prefer_small"
+        rule_summary = _rule_intent_summary(query_effective, nlp if isinstance(nlp, dict) else {})
+        ollama_summary = None
+        dt_ms = None
+
+        if ollama_rollout.get("invoke_ollama") or ollama_rollout.get("shadow_capture"):
+            req_payload = {
                 "model": model,
                 "prompt": (
                     "Summarize the user's shopping intent in one sentence and list the top 2 attributes to consider.\n"
@@ -2083,47 +2946,78 @@ def suggest(
             try:
                 t0 = time.perf_counter()
                 with httpx.Client(timeout=5.0) as client:
-                    r = client.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=payload)
+                    r = client.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=req_payload)
                     r.raise_for_status()
                     resp = r.json()
-                    summary = resp.get("response")
+                    ollama_summary = resp.get("response")
                     dt_ms = (time.perf_counter() - t0) * 1000.0
             except Exception:
-                summary = None
+                ollama_summary = None
                 dt_ms = None
-            # Include explicit selection rationale for trace/gear popup
-            action = "escalate_to_big" if complex_bool else "prefer_small"
-            ollama_meta = {
-                "model": model,
-                "selected": model,
-                "complex": complex_bool,
-                "intent_summary": summary,
-                "reason": reason,
-                "path": path,
-                "latency_ms": dt_ms,
-                "decision": {
-                    "action": action,
-                    "from": os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
-                    "to": os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b") if complex_bool else os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
-                    "triggers": {
-                        "length_trigger": bool(reason.get("length_trigger")),
-                        "matched_keywords": reason.get("matched_keywords", []),
-                        "conjunction_count": reason.get("conjunction_count", 0),
-                        "score": reason.get("score", 0),
+
+        selected_summary = ollama_summary if ollama_rollout.get("invoke_ollama") else rule_summary
+        selected_model = model if ollama_rollout.get("invoke_ollama") else f"rule-based ({action})"
+        selected_provider = "ollama" if ollama_rollout.get("invoke_ollama") else "rules"
+
+        if ollama_rollout.get("shadow_capture"):
+            try:
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="ollama_intent_shadow_diff",
+                    source_type="agent",
+                    source_id="Model_Selector",
+                    target_type="system",
+                    target_id=None,
+                    payload={
+                        "stage": ollama_rollout.get("stage"),
+                        "bucket": ollama_rollout.get("bucket"),
+                        "invoke_ollama": bool(ollama_rollout.get("invoke_ollama")),
+                        "rule_summary": rule_summary,
+                        "ollama_summary": ollama_summary,
+                        "summaries_differ": _summaries_differ(rule_summary, ollama_summary),
+                        "latency_ms": dt_ms,
                     },
+                )
+            except Exception:
+                pass
+
+        ollama_meta = {
+            "provider": selected_provider,
+            "model": model if ollama_summary else None,
+            "selected": selected_model,
+            "complex": complex_bool,
+            "intent_summary": selected_summary,
+            "rule_summary": rule_summary,
+            "ollama_summary": ollama_summary,
+            "reason": reason,
+            "path": path,
+            "latency_ms": dt_ms,
+            "rollout": ollama_rollout,
+            "decision": {
+                "action": action,
+                "from": os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
+                "to": os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b") if complex_bool else os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
+                "triggers": {
+                    "length_trigger": bool(reason.get("length_trigger")),
+                    "matched_keywords": reason.get("matched_keywords", []),
+                    "conjunction_count": reason.get("conjunction_count", 0),
+                    "score": reason.get("score", 0),
                 },
-            }
+            },
+        }
     except Exception:
         r = complexity_explain(query_effective)
         cb = is_complex_query(query_effective)
         ollama_meta = {
+            "provider": "rules",
             "model": None,
-            "selected": None,
+            "selected": f"rule-based ({'escalate_to_big' if cb else 'prefer_small'})",
             "complex": cb,
-            "intent_summary": None,
+            "intent_summary": _rule_intent_summary(query_effective, nlp if isinstance(nlp, dict) else {}),
             "reason": r,
             "path": [os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b")] + ([os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")] if cb else []),
             "latency_ms": None,
+            "rollout": ollama_rollout,
             "decision": {
                 "action": "escalate_to_big" if cb else "prefer_small",
                 "from": os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
@@ -2148,6 +3042,7 @@ def suggest(
             "reason": r,
             "path": [os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b")] + ([os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")] if cb else []),
             "latency_ms": None,
+            "rollout": ollama_rollout,
             "decision": {
                 "action": action,
                 "from": os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
@@ -2171,7 +3066,8 @@ def suggest(
     explicit_constraint_update = _has_explicit_constraint_update(parsed, query)
     followup_contract = _build_followup_contract(query, nlp.get("intent_chain") if isinstance(nlp, dict) else [])
     intent_execution_plan = _build_multi_intent_execution_plan(nlp.get("intent_chain") if isinstance(nlp, dict) else [])
-    prior_shortlist = list((kv.get("last_shortlist_skus") or [])) if isinstance(kv.get("last_shortlist_skus"), list) else []
+    prior_shortlist_src = structured_state.get("last_shortlist_skus") if isinstance(structured_state.get("last_shortlist_skus"), list) else kv.get("last_shortlist_skus")
+    prior_shortlist = list(prior_shortlist_src or []) if isinstance(prior_shortlist_src, list) else []
     shortlist_lock_active = bool(followup_explain and prior_shortlist and not explicit_constraint_update)
     turn_type = _classify_turn_type(
         results_count=0,
@@ -2210,6 +3106,47 @@ def suggest(
         "slots": nlp.get("slots") or {},
         "shortlist_lock_active": shortlist_lock_active,
     }
+    if not constraints.get("use_case"):
+        inferred_use_case, inferred_tags = _infer_use_case_from_query_text(query_effective)
+        if inferred_use_case:
+            constraints["use_case"] = inferred_use_case
+            constraints["use_case_tags"] = inferred_tags
+    # ── Buyer persona detection ──
+    _buyer_persona, _buyer_persona_conf, _persona_scores = _detect_buyer_persona_with_confidence(query_effective)
+    _persona_min = float(os.getenv("PERSONA_CONFIDENCE_MIN", "0.34") or 0.34)
+    if _buyer_persona and _buyer_persona_conf >= _persona_min:
+        constraints["buyer_persona"] = _buyer_persona
+        constraints["buyer_persona_confidence"] = round(float(_buyer_persona_conf), 4)
+    elif _buyer_persona:
+        constraints["buyer_persona_candidate"] = _buyer_persona
+        constraints["buyer_persona_confidence"] = round(float(_buyer_persona_conf), 4)
+        constraints["buyer_persona_low_confidence"] = True
+    if _persona_scores:
+        constraints["buyer_persona_scores"] = _persona_scores
+    # ── Budget fitness pre-check ──
+    _budget_fitness = _assess_budget_fitness(
+        constraints.get("use_case"),
+        constraints.get("budget_min"),
+        constraints.get("budget_max"),
+    )
+    constraints["budget_fitness"] = _budget_fitness
+    # Persist core constraint memory early so follow-up turns can reuse budget/use-case
+    # even when later non-critical blocks fail.
+    try:
+        kv_boot = dict(kv or {})
+        meta_boot = kv_boot.get("prefs_meta") if isinstance(kv_boot.get("prefs_meta"), dict) else {}
+        now_ts_boot = int(time.time())
+        for k in ("budget_min", "budget_max", "use_case", "use_case_tags", "brands", "specs", "brand_excludes", "availability", "condition"):
+            v = constraints.get(k)
+            if v is None:
+                continue
+            meta_boot[k] = {"value": v, "ts": now_ts_boot}
+        kv_boot["prefs_meta"] = meta_boot
+        kv_boot["last_query"] = query
+        mem.set_kv(uid, kv_boot)
+        kv = kv_boot
+    except Exception:
+        pass
 
     # Episodic memory wiring: provide session summary + profile for NQE/ranking.
     _session_context_summary = ""
@@ -2244,7 +3181,7 @@ def suggest(
 
     # ── Session slot accumulation: merge NQE-answered fields from prior turns ──
     try:
-        _accumulated = kv.get("nqe_answered_fields") or {}
+        _accumulated = structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {}
         if _accumulated and isinstance(_accumulated, dict):
             if not constraints.get("budget_min") and _accumulated.get("budget_min"):
                 constraints["budget_min"] = _accumulated["budget_min"]
@@ -2258,6 +3195,34 @@ def suggest(
                 constraints["gpu_preference"] = _accumulated["gpu_preference"]
     except Exception:
         pass
+    # ── Fix 7: persist text-extracted constraints into nqe_answered_fields in Redis ──
+    try:
+        _existing_nqe = dict(
+            (structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {})
+        )
+        _text_facts: Dict[str, Any] = {}
+        for _tk, _tv in (
+            ("budget_min", constraints.get("budget_min")),
+            ("budget_max", constraints.get("budget_max")),
+            ("use_case", constraints.get("use_case")),
+            ("gpu_preference", constraints.get("gpu_preference")),
+            ("buyer_persona", constraints.get("buyer_persona")),
+        ):
+            if _tv and not _existing_nqe.get(_tk):
+                _text_facts[_tk] = _tv
+        if _text_facts:
+            _pst = mem.get_structured_state(uid) or {}
+            _pkv = mem.get_kv(uid) or {}
+            _pa = dict(_pst.get("nqe_answered_fields") or _pkv.get("nqe_answered_fields") or {})
+            _pa.update(_text_facts)
+            _pst["nqe_answered_fields"] = _pa
+            _pkv["nqe_answered_fields"] = _pa
+            mem.set_structured_state(uid, _pst)
+            mem.set_kv(uid, _pkv)
+            kv = _pkv
+            structured_state = _pst
+    except Exception:
+        pass
     try:
         nqe_selection_applied = _apply_nqe_selection_to_constraints(
             constraints=constraints,
@@ -2269,17 +3234,22 @@ def suggest(
         if nqe_selection_applied:
             # ── BUG-1 fix: persist answered NQE question + field to Redis ──
             try:
+                _nqe_state = mem.get_structured_state(uid) or {}
                 _nqe_kv = mem.get_kv(uid) or {}
-                _nqe_asked = list(_nqe_kv.get("nqe_asked_ids") or [])
-                _nqe_answered = dict(_nqe_kv.get("nqe_answered_fields") or {})
+                _nqe_asked = list(_nqe_state.get("nqe_asked_ids") or _nqe_kv.get("nqe_asked_ids") or [])
+                _nqe_answered = dict(_nqe_state.get("nqe_answered_fields") or _nqe_kv.get("nqe_answered_fields") or {})
                 if nqe_question_id and nqe_question_id not in _nqe_asked:
                     _nqe_asked.append(nqe_question_id)
                 for ak, av in nqe_selection_applied.items():
                     _nqe_answered[ak] = av
+                _nqe_state["nqe_asked_ids"] = _nqe_asked
+                _nqe_state["nqe_answered_fields"] = _nqe_answered
                 _nqe_kv["nqe_asked_ids"] = _nqe_asked
                 _nqe_kv["nqe_answered_fields"] = _nqe_answered
+                mem.set_structured_state(uid, _nqe_state)
                 mem.set_kv(uid, _nqe_kv)
                 kv = _nqe_kv  # refresh local kv reference
+                structured_state = _nqe_state
             except Exception:
                 pass
             log_trace_event(
@@ -2300,6 +3270,33 @@ def suggest(
             )
     except Exception:
         nqe_selection_applied = {}
+    current_turn = int(kv.get("conversation_turn") or structured_state.get("conversation_turn") or 0) + 1
+    fatigue_turns = max(1, _safe_int(os.getenv("NQE_QUESTION_FATIGUE_TURNS", "4"), 4))
+    prior_constraints_snapshot = (
+        kv.get("last_constraints_snapshot")
+        if isinstance(kv.get("last_constraints_snapshot"), dict)
+        else structured_state.get("last_constraints_snapshot")
+        if isinstance(structured_state.get("last_constraints_snapshot"), dict)
+        else {}
+    )
+    contradicted_slots = _contradicted_slots(
+        query=query_effective,
+        constraints=constraints,
+        prior_constraints=prior_constraints_snapshot if isinstance(prior_constraints_snapshot, dict) else {},
+        nqe_selection_applied=nqe_selection_applied,
+    )
+    recent_asked_raw = (
+        structured_state.get("nqe_recent_asked")
+        if isinstance(structured_state.get("nqe_recent_asked"), list)
+        else kv.get("nqe_recent_asked")
+        if isinstance(kv.get("nqe_recent_asked"), list)
+        else structured_state.get("nqe_asked")
+        if isinstance(structured_state.get("nqe_asked"), list)
+        else kv.get("nqe_asked")
+        if isinstance(kv.get("nqe_asked"), list)
+        else []
+    )
+    recent_asked_entries = _normalize_recent_nqe_asked(recent_asked_raw)
     strategy_corr = build_strategy_trace_correlation(
         query=query or "",
         nlp=nlp if isinstance(nlp, dict) else {},
@@ -2356,6 +3353,26 @@ def suggest(
         if not asks_specs and not (parsed.get("specs") or []):
             constraints["specs"] = []
         asks_budget = any(tok in q_low for tok in ("$", "budget", "under", "below", "above", "between", "price", "cost", "max", "minimum"))
+        if asks_budget:
+            # Reset stale opposite bound when user gives one-sided budget updates
+            # like "under $900" or "above $2000".
+            if parsed.get("budget_max") is not None and parsed.get("budget_min") is None and any(
+                tok in q_low for tok in ("under", "below", "up to", "max")
+            ):
+                constraints["budget_min"] = None
+            if parsed.get("budget_min") is not None and parsed.get("budget_max") is None and any(
+                tok in q_low for tok in ("above", "over", "minimum", "at least")
+            ):
+                constraints["budget_max"] = None
+            bmin_now = constraints.get("budget_min")
+            bmax_now = constraints.get("budget_max")
+            if bmin_now is not None and bmax_now is not None and float(bmin_now) > float(bmax_now):
+                if any(tok in q_low for tok in ("under", "below", "up to", "max")):
+                    constraints["budget_min"] = None
+                elif any(tok in q_low for tok in ("above", "over", "minimum", "at least")):
+                    constraints["budget_max"] = None
+                else:
+                    constraints["budget_min"], constraints["budget_max"] = bmax_now, bmin_now
         references_prior = bool(re.search(r"\b(same|that|it|similar|previous|this|these|those|earlier|above|them)\b", q_low))
         if explicit_constraint_update and not asks_budget and not references_prior and parsed.get("budget_max") is None and parsed.get("budget_min") is None:
             # New explicit constraint turn (e.g., spec-only refinement) should not inherit
@@ -2402,7 +3419,9 @@ def suggest(
             gpu_followup_question_needed = False
         elif gpu_prof.get("likely_gpu_tasks"):
             constraints["gpu_preference"] = "with_discrete"
-            constraints["must_have_gpu"] = True
+            # Inferred from language only: treat as soft preference, not a hard
+            # must-have, so we avoid zero-result dead-ends.
+            constraints["must_have_gpu"] = False
             gpu_pref_inferred = True
             gpu_followup_question_needed = True
             try:
@@ -2480,13 +3499,24 @@ def suggest(
     except Exception:
         pass
     # ── Use-Case Advisor: enrich constraints with domain-specific min specs ──
+    _user_supplied_specs_count = len(constraints.get("specs") or [])  # snapshot before advisor enrichment
     _use_case_match = None
     _use_case_specs = None
     try:
         from src.app.services.use_case_advisor import match_use_case_from_query as _match_uc, get_use_case_specs as _get_uc_specs
         _uc_key = constraints.get("use_case") or None
-        if not _uc_key:
-            _uc_key = _match_uc(query_effective)
+        # Generic categories (e.g. "student") should be refined to specific
+        # sub-types (e.g. "university_general", "engineering_student") by the
+        # knowledge-backed advisor so NQE can ask the right follow-ups.
+        _GENERIC_USE_CASES = {"student", "business", "gaming", "content_creation", "mobile"}
+        if not _uc_key or _uc_key in _GENERIC_USE_CASES:
+            _refined = _match_uc(query_effective)
+            if _refined:
+                _uc_key = _refined
+                constraints["use_case"] = _refined
+        # Fallback: bridge buyer_persona → detected_use_case for NQE
+        if not _uc_key and constraints.get("buyer_persona") == "student":
+            _uc_key = "university_general"
         if _uc_key:
             _use_case_match = _uc_key
             _uc_spec = _get_uc_specs(_uc_key)
@@ -2559,6 +3589,7 @@ def suggest(
         pass
     # ── Product Identity Agent: extract identity from image labels/OCR text ──
     _identity_constraints: Dict[str, Any] = {}
+    _id_result: Dict[str, Any] = {}
     try:
         if image_context.get("labels") or image_context.get("ocr"):
             from src.app.services.product_identity_agent import identify_product_from_text, specs_to_constraints as _id_to_constraints
@@ -2610,6 +3641,84 @@ def suggest(
                 )
     except Exception:
         pass
+    # Multimodal confidence gate: if image signals are weak/risky, ask for a
+    # clean reupload before continuing normal product questioning.
+    # Use _id_result confidence (product identity agent) when available.
+    _id_conf_raw = _id_result.get("confidence") if _id_result else None
+    if _id_conf_raw is None:
+        # If labels/OCR were successfully parsed from triage, assume decent confidence.
+        _id_conf_raw = 0.7 if (image_context.get("labels") or image_context.get("ocr")) else (0.35 if incoming_image_payload else 1.0)
+    image_identity_confidence = float(_id_conf_raw)
+    if incoming_image_payload and image_identity_confidence < 0.45:
+        image_reupload_reasons.append("identity_confidence_low")
+    if incoming_image_payload and image_reupload_reasons:
+        image_reupload_reasons = list(dict.fromkeys([str(r) for r in image_reupload_reasons if str(r)]))
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="image_reupload_requested",
+                source_type="agent",
+                source_id="Image_Security_Gate_Agent",
+                target_type="user",
+                target_id=uid,
+                payload={
+                    "reasons": image_reupload_reasons,
+                    "image_identity_confidence": round(float(image_identity_confidence), 4),
+                    "cv_signals": image_cv_signals_parsed,
+                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["image_context", "cv_signals"]),
+                },
+            )
+        except Exception:
+            pass
+        payload = {
+            "status": "reupload_required",
+            "results": [],
+            "proposal": {"decision_mode": "policy_gate", "ranked_skus": []},
+            "constraints_used": constraints,
+            "followup_contract": followup_contract,
+            "intent_execution_plan": intent_execution_plan,
+            "policy_version": flags.get("POLICY_VERSION", "v1"),
+            "assistant_message": (
+                "I need a clearer, unedited image before I continue. "
+                "Please reupload a clean product photo with no QR codes, links, or text overlays."
+            ),
+            "next_questions": [
+                {
+                    "id": "reupload_clean_image",
+                    "text": "Please reupload a clear photo of the product only (no QR code, sticker, or text overlay).",
+                    "goal": "reupload",
+                    "options": [
+                        {"id": "reupload_now", "label": "Reupload now"},
+                        {"id": "continue_without_image", "label": "Continue without image"},
+                    ],
+                }
+            ],
+            "question_plan": {
+                "mode": "clarify",
+                "missing_fields": ["image_quality"],
+                "confidence_band": "low",
+                "ambiguity_reason": "weak_image_signals",
+            },
+            "confidence_band": "low",
+            "ambiguity_reason": "weak_image_signals",
+            "needs_disambiguation": True,
+            "llm_model": llm_model,
+            "model_tier": model_tier,
+            "complexity_signals": complexity_signals,
+            "security": _build_security_payload(analysis.get("details") or {}, analysis.get("severity", "warn")),
+            "image_reupload_reasons": image_reupload_reasons,
+            "trace_tags": strategy_corr.get("tags") or [],
+            "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+            "agent_chain": [
+                {"agent": "Image_Security_Gate_Agent", "confidence": 0.93, "duration_ms": None},
+                {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
+            ],
+            "turn_type": turn_type,
+            "referents": referents,
+            "memory_confidence": round(float(memory_confidence), 4),
+        }
+        payload = _ensure_trace_response(payload, trace_id, flags)
+        return _with_trace(payload, trace_id)
     # Emit model selection early so tiering is visible even on early returns.
     try:
         log_trace_event(
@@ -2623,6 +3732,8 @@ def suggest(
                 "model_tier": model_tier,
                 "llm_model": ollama_meta.get("selected") or ollama_meta.get("model"),
                 "complexity_signals": complexity_signals,
+                "ollama_rollout": ollama_meta.get("rollout") or {},
+                "llm_provider": ollama_meta.get("provider") or "rules",
             },
         )
     except Exception:
@@ -2789,11 +3900,16 @@ def suggest(
         not constraints.get("budget_min")
         and not constraints.get("budget_max")
         and not (constraints.get("brands") or [])
-        and len(constraints.get("specs") or []) == 0
-        and intent_conf < 0.75
+        and _user_supplied_specs_count == 0
+        and intent_conf < 0.95
     )
     if is_open_ended:
-        question_plan = _build_question_plan(constraints=constraints, nlp=nlp, results_count=0)
+        question_plan = _build_question_plan(
+            constraints=constraints,
+            nlp=nlp,
+            results_count=0,
+            persona_confidence=constraints.get("buyer_persona_confidence"),
+        )
         missing_fields_open = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
         try:
             log_trace_event(
@@ -2814,8 +3930,30 @@ def suggest(
         # Propose next questions and return early without random products
         try:
             category = "laptop" if "laptop" in (query or "").lower() else "general"
-            _nqe_asked = list((kv.get("nqe_asked_ids") or []))
-            _nqe_answered = dict((kv.get("nqe_answered_fields") or {}))
+            _nqe_asked = list((structured_state.get("nqe_asked_ids") or kv.get("nqe_asked_ids") or []))
+            for _e in (recent_asked_entries or []):
+                _turn = int((_e or {}).get("turn") or 0)
+                _slot = str((_e or {}).get("slot") or "").strip().lower()
+                _qid = str((_e or {}).get("id") or "").strip().lower()
+                if (
+                    _qid
+                    and _turn > 0
+                    and (current_turn - _turn) <= fatigue_turns
+                    and _slot not in contradicted_slots
+                    and _qid not in _nqe_asked
+                ):
+                    _nqe_asked.append(_qid)
+            _nqe_answered = dict((structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {}))
+            # ── Fix 1: bridge text-extracted constraints into NQE answered_fields ──
+            for _ck, _cv in (
+                ("budget_min", constraints.get("budget_min")),
+                ("budget_max", constraints.get("budget_max")),
+                ("use_case", constraints.get("use_case")),
+                ("brand_preference", (constraints.get("brands") or [None])[0]),
+                ("gpu_preference", constraints.get("gpu_preference")),
+            ):
+                if _cv and not _nqe_answered.get(_ck):
+                    _nqe_answered[_ck] = _cv
             nqe_input = NQEInput(
                 intent="product_search",
                 product_category=category,
@@ -2830,7 +3968,7 @@ def suggest(
                 previously_asked_ids=_nqe_asked,
                 answered_fields=_nqe_answered,
                 has_image=bool(image_context.get("labels") or image_context.get("ocr")),
-                image_identity_confidence=float(_identity_constraints.get("confidence", 1.0) if _identity_constraints else (0.3 if image_context.get("labels") else 1.0)),
+                image_identity_confidence=float(image_identity_confidence),
                 image_labels=image_context.get("labels") or [],
                 detected_use_case=_use_case_match,
                 query=query or "",
@@ -2841,12 +3979,67 @@ def suggest(
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
+            next_questions = _filter_nqe_questions_by_missing_fields(
+                next_questions,
+                missing_fields=missing_fields_open,
+            )
+            next_questions = _apply_intent_specific_question_bank(
+                next_questions,
+                query=query_effective,
+                constraints=constraints,
+            )
+            next_questions, fatigue_blocked_ids = _question_fatigue_filter(
+                next_questions,
+                recent_asked=recent_asked_entries,
+                current_turn=current_turn,
+                window_turns=fatigue_turns,
+                contradicted_slots=contradicted_slots,
+            )
+            if fatigue_blocked_ids:
+                try:
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="nqe_question_fatigue_guard",
+                        source_type="agent",
+                        source_id="NQE_Agent",
+                        target_type="system",
+                        target_id=None,
+                        payload={
+                            "blocked_question_ids": fatigue_blocked_ids[:10],
+                            "window_turns": fatigue_turns,
+                            "current_turn": current_turn,
+                            "contradicted_slots": sorted(list(contradicted_slots)),
+                        },
+                    )
+                except Exception:
+                    pass
             # BUG-1 fix: persist newly-asked question IDs to Redis
             try:
                 _new_ids = [str(q.get("id") or "") for q in next_questions if q.get("id")]
                 if _new_ids:
                     _nqe_asked_updated = list(dict.fromkeys(_nqe_asked + _new_ids))
+                    structured_state["nqe_asked_ids"] = _nqe_asked_updated
                     kv["nqe_asked_ids"] = _nqe_asked_updated
+                    _recent = _normalize_recent_nqe_asked(
+                        structured_state.get("nqe_recent_asked")
+                        if isinstance(structured_state.get("nqe_recent_asked"), list)
+                        else kv.get("nqe_recent_asked")
+                    )
+                    for _q in (next_questions or []):
+                        if not isinstance(_q, dict) or not _q.get("id"):
+                            continue
+                        _qid = str(_q.get("id") or "").strip().lower()
+                        _recent.append(
+                            {
+                                "id": _qid,
+                                "slot": _question_slot_from_id(_qid),
+                                "turn": int(current_turn),
+                            }
+                        )
+                    _recent = _recent[-60:]
+                    structured_state["nqe_recent_asked"] = _recent
+                    kv["nqe_recent_asked"] = _recent
+                    mem.set_structured_state(uid, structured_state)
                     mem.set_kv(uid, kv)
             except Exception:
                 pass
@@ -2864,10 +4057,16 @@ def suggest(
         next_questions = _apply_nqe_confidence_gating(
             next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
         )
+        next_questions = _apply_persona_confidence_fallback(
+            next_questions,
+            persona=constraints.get("buyer_persona") or constraints.get("buyer_persona_candidate"),
+            persona_confidence=constraints.get("buyer_persona_confidence"),
+        )
         next_questions = _adapt_nqe_questions_for_sentiment(
             next_questions,
             sentiment=str(nlp.get("sentiment") or "neutral"),
         )
+        next_questions = _dedupe_next_questions_for_render(next_questions)
         # Emit a decision trace event so SSE/WebSocket consumers see the clarifying questions
         try:
             if next_questions:
@@ -2987,6 +4186,28 @@ def suggest(
                 )
             except Exception:
                 pass
+        # If the user explicitly asks for a brand (for example MacBook/Apple),
+        # prioritize those candidates and attempt a focused fallback retrieval
+        # before giving generic alternatives.
+        try:
+            _brands_req = [str(b).lower() for b in (constraints.get("brands") or []) if str(b).strip()]
+            _strict_brand = bool(constraints.get("brand_intent_strict")) or (
+                "apple" in _brands_req and any(tok in str(query_effective or "").lower() for tok in ("macbook", "mac book"))
+            )
+            if _brands_req:
+                _brand_hits = [c for c in (candidates or []) if _candidate_matches_brand(c, _brands_req)]
+                if not _brand_hits and _strict_brand:
+                    _focused_q = f"{_brands_req[0]} laptop"
+                    _fallback = service.retrieve_candidates(_focused_q, limit=max(20, int(limit or 10)))
+                    _fallback_laptops = [c for c in (_fallback or []) if _candidate_looks_like_laptop(c)]
+                    _brand_hits = [c for c in _fallback_laptops if _candidate_matches_brand(c, _brands_req)]
+                    if _brand_hits:
+                        candidates = _brand_hits
+                elif _brand_hits:
+                    _others = [c for c in (candidates or []) if c not in _brand_hits]
+                    candidates = _brand_hits + _others
+        except Exception:
+            pass
         if shortlist_lock_active and prior_shortlist:
             locked = [c for c in (candidates or []) if str(c.get("sku") or "") in set(prior_shortlist)]
             candidates = locked
@@ -3030,7 +4251,7 @@ def suggest(
             pass
         budget_min_val = constraints.get("budget_min")
         budget_max_val = constraints.get("budget_max")
-        if budget_min_val is not None or budget_max_val is not None:
+        if (budget_min_val is not None or budget_max_val is not None) and not shortlist_lock_active:
             filtered = []
             for c in candidates:
                 price_cents = c.get("price_cents")
@@ -3177,7 +4398,7 @@ def suggest(
                     return _with_trace(payload, trace_id)
         # Enforce spec filtering if requested
         specs = constraints.get("specs") or []
-        if specs:
+        if specs and not shortlist_lock_active:
             try:
                 import json as _json
 
@@ -3224,8 +4445,104 @@ def suggest(
                 except Exception:
                     pass
             else:
+                # No candidate matched requested specs in the current set.
+                candidates = []
+                # Recovery pass: broaden retrieval around explicit spec terms
+                # before returning no-results for spec-filtered queries.
+                recovered_spec = []
+                try:
+                    spec_tokens = []
+                    for s in specs:
+                        s_low = str(s).lower().strip()
+                        if not s_low:
+                            continue
+                        if ":" in s_low:
+                            k, v = s_low.split(":", 1)
+                            k = k.strip()
+                            v = v.strip()
+                            if k in ("ssd", "storage", "storage_gb_min"):
+                                spec_tokens.append(v)
+                            elif k in ("ram", "ram_gb_min"):
+                                spec_tokens.append(f"{v} ram")
+                            elif k == "gpu":
+                                spec_tokens.append(v)
+                        else:
+                            spec_tokens.append(s_low)
+                    focused_q = ("laptop " + " ".join(spec_tokens)).strip()
+                    if spec_tokens and service is not None:
+                        recalled = service.retrieve_candidates(focused_q, limit=max(10, int(limit or 10) * 2)) or []
+                        recovered_spec = [c for c in recalled if _match_spec(c)]
+                except Exception:
+                    recovered_spec = []
+                if recovered_spec:
+                    candidates = recovered_spec
+                    filter_spec_applied = True
+                    filter_meta_spec = {
+                        "specs": specs,
+                        "candidates_before": retrieved_count,
+                        "candidates_after": len(candidates),
+                        "fallback": "spec_recall_recovery",
+                    }
+                    try:
+                        log_trace_event(
+                            trace_id=trace_id,
+                            event_type="agent_process",
+                            source_type="agent",
+                            source_id="Spec_Filter_Agent",
+                            target_type="system",
+                            target_id=None,
+                            payload=filter_meta_spec,
+                        )
+                    except Exception:
+                        pass
+                elif os.getenv("TEST_USE_FALLBACK_PRODUCTS", "0").lower() in ("1", "true", "yes"):
+                    try:
+                        _fallback = [
+                            {
+                                "id": "fb-xps13plus",
+                                "sku": "XPS13PLUS",
+                                "name": "Dell XPS 13 Plus",
+                                "price_cents": 129900,
+                                "currency": "USD",
+                                "stock": 5,
+                                "specs": {"ram_gb": 16, "storage": "512GB", "cpu": "Intel Core i7"},
+                            },
+                            {
+                                "id": "fb-mbp14",
+                                "sku": "MBP14",
+                                "name": "MacBook Pro 14",
+                                "price_cents": 209900,
+                                "currency": "USD",
+                                "stock": 3,
+                                "specs": {"ram_gb": 16, "storage": "1TB", "cpu": "Apple M4"},
+                            },
+                        ]
+                        _fallback_spec = [c for c in _fallback if _match_spec(c)]
+                    except Exception:
+                        _fallback_spec = []
+                    if _fallback_spec:
+                        candidates = _fallback_spec
+                        filter_spec_applied = True
+                        filter_meta_spec = {
+                            "specs": specs,
+                            "candidates_before": retrieved_count,
+                            "candidates_after": len(candidates),
+                            "fallback": "test_products_spec_recovery",
+                        }
+                        try:
+                            log_trace_event(
+                                trace_id=trace_id,
+                                event_type="agent_process",
+                                source_type="agent",
+                                source_id="Spec_Filter_Agent",
+                                target_type="system",
+                                target_id=None,
+                                payload=filter_meta_spec,
+                            )
+                        except Exception:
+                            pass
                 # Relax AI/ML spec requirements once if nothing matched.
-                if constraints.get("use_case") == "ai_ml_workstation":
+                elif constraints.get("use_case") == "ai_ml_workstation":
                     relaxed = []
                     for s in specs:
                         s_low = str(s).lower()
@@ -3273,6 +4590,9 @@ def suggest(
                             "eligible": not simulate,
                             "view_mode": view_hint.get("view_mode"),
                             "view_reason": view_hint.get("view_reason"),
+                            "buyer_persona": constraints.get("buyer_persona"),
+                            "buyer_persona_candidate": constraints.get("buyer_persona_candidate"),
+                            "buyer_persona_confidence": constraints.get("buyer_persona_confidence"),
                             "agent_chain": [
                                 {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
                                 {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
@@ -3302,6 +4622,9 @@ def suggest(
                     "eligible": not simulate,
                     "view_mode": view_hint.get("view_mode"),
                     "view_reason": view_hint.get("view_reason"),
+                    "buyer_persona": constraints.get("buyer_persona"),
+                    "buyer_persona_candidate": constraints.get("buyer_persona_candidate"),
+                    "buyer_persona_confidence": constraints.get("buyer_persona_confidence"),
                     "agent_chain": [
                         {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
                         {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
@@ -3937,6 +5260,10 @@ def suggest(
             "approval_id": approval_id,
             "trace_id": trace_id,
             "policy_version": flags.get("POLICY_VERSION", "v1"),
+            "constraints_used": {
+                "uid_hash": uid_hash,
+                "query": scrub_pii(query or ""),
+            },
             "view_mode": view_hint.get("view_mode"),
             "view_reason": view_hint.get("view_reason"),
             "agent_chain": agent_chain,
@@ -3993,6 +5320,10 @@ def suggest(
             "approval_id": approval_id,
             "trace_id": trace_id,
             "policy_version": flags.get("POLICY_VERSION", "v1"),
+            "constraints_used": {
+                "uid_hash": uid_hash,
+                "query": scrub_pii(query or ""),
+            },
             "view_mode": view_hint.get("view_mode"),
             "view_reason": view_hint.get("view_reason"),
             "agent_chain": agent_chain,
@@ -4139,6 +5470,7 @@ def suggest(
     }.get(tier, "neutral")
     payload = _with_trace({
         "results": results,
+        "price_buckets": _build_price_buckets(results=results, constraints=constraints, cap=4),
         "proposal": proposal,
         "constraints_used": constraints,
         "followup_contract": followup_contract,
@@ -4153,6 +5485,10 @@ def suggest(
         "approval_id": approval_id,
         "trace_id": trace_id,
         "persona_tone": persona_tone,
+        "buyer_persona": constraints.get("buyer_persona"),
+        "buyer_persona_confidence": constraints.get("buyer_persona_confidence"),
+        "buyer_persona_candidate": constraints.get("buyer_persona_candidate"),
+        "budget_fitness": constraints.get("budget_fitness"),
         "learn_more_url": "/ui/status",
         "agent_chain": agent_chain,
         "trace_tags": strategy_corr.get("tags") or [],
@@ -4236,7 +5572,12 @@ def suggest(
     if pii_notice:
         payload["notice"] = pii_notice
     # Next-Question Engine for shopping guidance (budget/specs/use-case)
-    question_plan = _build_question_plan(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, results_count=len(results or []))
+    question_plan = _build_question_plan(
+        constraints=constraints,
+        nlp=nlp if isinstance(nlp, dict) else {},
+        results_count=len(results or []),
+        persona_confidence=constraints.get("buyer_persona_confidence"),
+    )
     payload["question_plan"] = question_plan
     payload["confidence_band"] = question_plan.get("confidence_band")
     payload["ambiguity_reason"] = question_plan.get("ambiguity_reason")
@@ -4291,8 +5632,30 @@ def suggest(
         missing_fields = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
         if missing_fields and not _skip_nqe_clarify:
             category = "laptop" if "laptop" in (query or "").lower() else "general"
-            _nqe_asked2 = list((kv.get("nqe_asked_ids") or []))
-            _nqe_answered2 = dict((kv.get("nqe_answered_fields") or {}))
+            _nqe_asked2 = list((structured_state.get("nqe_asked_ids") or kv.get("nqe_asked_ids") or []))
+            for _e in (recent_asked_entries or []):
+                _turn = int((_e or {}).get("turn") or 0)
+                _slot = str((_e or {}).get("slot") or "").strip().lower()
+                _qid = str((_e or {}).get("id") or "").strip().lower()
+                if (
+                    _qid
+                    and _turn > 0
+                    and (current_turn - _turn) <= fatigue_turns
+                    and _slot not in contradicted_slots
+                    and _qid not in _nqe_asked2
+                ):
+                    _nqe_asked2.append(_qid)
+            _nqe_answered2 = dict((structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {}))
+            # ── Fix 1: bridge text-extracted constraints into NQE answered_fields ──
+            for _ck, _cv in (
+                ("budget_min", constraints.get("budget_min")),
+                ("budget_max", constraints.get("budget_max")),
+                ("use_case", constraints.get("use_case")),
+                ("brand_preference", (constraints.get("brands") or [None])[0]),
+                ("gpu_preference", constraints.get("gpu_preference")),
+            ):
+                if _cv and not _nqe_answered2.get(_ck):
+                    _nqe_answered2[_ck] = _cv
             nqe_input = NQEInput(
                 intent="product_search",
                 product_category=category,
@@ -4307,7 +5670,7 @@ def suggest(
                 previously_asked_ids=_nqe_asked2,
                 answered_fields=_nqe_answered2,
                 has_image=bool(image_context.get("labels") or image_context.get("ocr")),
-                image_identity_confidence=float(_identity_constraints.get("confidence", 1.0) if _identity_constraints else (0.3 if image_context.get("labels") else 1.0)),
+                image_identity_confidence=float(image_identity_confidence),
                 image_labels=image_context.get("labels") or [],
                 detected_use_case=_use_case_match,
                 query=query or "",
@@ -4318,12 +5681,67 @@ def suggest(
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
+            next_questions = _filter_nqe_questions_by_missing_fields(
+                next_questions,
+                missing_fields=missing_fields,
+            )
+            next_questions = _apply_intent_specific_question_bank(
+                next_questions,
+                query=query_effective,
+                constraints=constraints,
+            )
+            next_questions, fatigue_blocked_ids2 = _question_fatigue_filter(
+                next_questions,
+                recent_asked=recent_asked_entries,
+                current_turn=current_turn,
+                window_turns=fatigue_turns,
+                contradicted_slots=contradicted_slots,
+            )
+            if fatigue_blocked_ids2:
+                try:
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="nqe_question_fatigue_guard",
+                        source_type="agent",
+                        source_id="NQE_Agent",
+                        target_type="system",
+                        target_id=None,
+                        payload={
+                            "blocked_question_ids": fatigue_blocked_ids2[:10],
+                            "window_turns": fatigue_turns,
+                            "current_turn": current_turn,
+                            "contradicted_slots": sorted(list(contradicted_slots)),
+                        },
+                    )
+                except Exception:
+                    pass
             # BUG-1 fix: persist newly-asked question IDs to Redis
             try:
                 _new_ids2 = [str(q.get("id") or "") for q in next_questions if q.get("id")]
                 if _new_ids2:
                     _asked_updated2 = list(dict.fromkeys(_nqe_asked2 + _new_ids2))
+                    structured_state["nqe_asked_ids"] = _asked_updated2
                     kv["nqe_asked_ids"] = _asked_updated2
+                    _recent2 = _normalize_recent_nqe_asked(
+                        structured_state.get("nqe_recent_asked")
+                        if isinstance(structured_state.get("nqe_recent_asked"), list)
+                        else kv.get("nqe_recent_asked")
+                    )
+                    for _q in (next_questions or []):
+                        if not isinstance(_q, dict) or not _q.get("id"):
+                            continue
+                        _qid = str(_q.get("id") or "").strip().lower()
+                        _recent2.append(
+                            {
+                                "id": _qid,
+                                "slot": _question_slot_from_id(_qid),
+                                "turn": int(current_turn),
+                            }
+                        )
+                    _recent2 = _recent2[-60:]
+                    structured_state["nqe_recent_asked"] = _recent2
+                    kv["nqe_recent_asked"] = _recent2
+                    mem.set_structured_state(uid, structured_state)
                     mem.set_kv(uid, kv)
             except Exception:
                 pass
@@ -4334,10 +5752,16 @@ def suggest(
             next_questions = _apply_nqe_confidence_gating(
                 next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
             )
+            next_questions = _apply_persona_confidence_fallback(
+                next_questions,
+                persona=constraints.get("buyer_persona") or constraints.get("buyer_persona_candidate"),
+                persona_confidence=constraints.get("buyer_persona_confidence"),
+            )
             next_questions = _adapt_nqe_questions_for_sentiment(
                 next_questions,
                 sentiment=str(nlp.get("sentiment") or "neutral"),
             )
+            next_questions = _dedupe_next_questions_for_render(next_questions)
             if next_questions:
                 payload["next_questions"] = next_questions
                 # Also attach follow-ups into the NLP bundle so frontends reading
@@ -4397,6 +5821,12 @@ def suggest(
             query=query_effective,
             confidence_band=question_plan.get("confidence_band"),
         )
+        payload["next_questions"] = _apply_persona_confidence_fallback(
+            payload.get("next_questions"),
+            persona=constraints.get("buyer_persona") or constraints.get("buyer_persona_candidate"),
+            persona_confidence=constraints.get("buyer_persona_confidence"),
+        )
+        payload["next_questions"] = _dedupe_next_questions_for_render(payload.get("next_questions"))
     if memory_confidence < 0.4 and followup_contract.get("memory_carry_forward_required"):
         payload["next_questions"] = [
             {
@@ -4699,6 +6129,10 @@ def suggest(
         shortlist_skus = [str((r or {}).get("sku") or "") for r in (results or []) if isinstance(r, dict)]
         shortlist_skus = [s for s in shortlist_skus if s][:12]
         kv_out = mem.get_kv(uid) or {}
+        if not kv_out and isinstance(kv, dict):
+            kv_out = dict(kv)
+        structured_state_out = mem.get_structured_state(uid) or {}
+        product_memory_bank_out = dict(product_memory_bank or {})
         # Only overwrite the shortlist when this turn produced results.
         # Zero-result turns (e.g. brand filter with no matches) must NOT erase
         # the prior shortlist — the user's follow-up "top 3 from those" still
@@ -4706,6 +6140,8 @@ def suggest(
         if shortlist_skus:
             kv_out["last_shortlist_skus"] = shortlist_skus
             kv_out["last_valid_shortlist_skus"] = shortlist_skus
+            structured_state_out["last_shortlist_skus"] = shortlist_skus
+            structured_state_out["last_valid_shortlist_skus"] = shortlist_skus
         # else: leave kv_out["last_shortlist_skus"] intact from the prior turn
         kv_out["last_constraints_snapshot"] = {
             "budget_min": constraints.get("budget_min"),
@@ -4713,8 +6149,10 @@ def suggest(
             "brands": list(constraints.get("brands") or []),
             "specs": list(constraints.get("specs") or []),
         }
+        structured_state_out["last_constraints_snapshot"] = dict(kv_out["last_constraints_snapshot"])
         if turn_type in {"result_turn", "constraint_update_turn"}:
             kv_out["last_valid_constraints_snapshot"] = dict(kv_out["last_constraints_snapshot"])
+            structured_state_out["last_valid_constraints_snapshot"] = dict(kv_out["last_constraints_snapshot"])
         kv_out["last_result_envelope"] = _build_envelope_snapshot(
             constraints=constraints,
             candidates_count=len(candidates or []),
@@ -4722,10 +6160,22 @@ def suggest(
             shortlist_locked=shortlist_lock_active,
             shortlist_size=len(shortlist_skus),
         )
+        structured_state_out["last_result_envelope"] = dict(kv_out["last_result_envelope"])
         kv_out["last_turn_type"] = turn_type
         kv_out["last_referents"] = referents
         kv_out["last_followup_contract"] = followup_contract
         kv_out["last_intent_execution_plan"] = intent_execution_plan
+        structured_state_out["last_turn_type"] = turn_type
+        structured_state_out["last_referents"] = referents
+        structured_state_out["last_followup_contract"] = followup_contract
+        structured_state_out["last_intent_execution_plan"] = intent_execution_plan
+        structured_state_out["nqe_asked_ids"] = list(kv_out.get("nqe_asked_ids") or structured_state_out.get("nqe_asked_ids") or [])
+        structured_state_out["nqe_answered_fields"] = dict(kv_out.get("nqe_answered_fields") or structured_state_out.get("nqe_answered_fields") or {})
+        structured_state_out["nqe_recent_asked"] = _normalize_recent_nqe_asked(
+            kv_out.get("nqe_recent_asked")
+            if isinstance(kv_out.get("nqe_recent_asked"), list)
+            else structured_state_out.get("nqe_recent_asked")
+        )
         kv_out = _update_pinned_context(
             kv=kv_out,
             constraints=constraints,
@@ -4740,17 +6190,55 @@ def suggest(
                 "ocr": str(image_context.get("ocr") or "")[:500],
                 "ts": int(time.time()),
             }
+            structured_state_out["image_context"] = dict(kv_out["image_context"])
         kv_out["conversation_turn"] = int(kv_out.get("conversation_turn") or 0) + 1
+        structured_state_out["conversation_turn"] = int(kv_out["conversation_turn"])
         if isinstance(payload.get("next_questions"), list) and payload.get("next_questions"):
             asked = kv_out.get("nqe_asked") if isinstance(kv_out.get("nqe_asked"), list) else []
+            asked_recent = _normalize_recent_nqe_asked(
+                kv_out.get("nqe_recent_asked")
+                if isinstance(kv_out.get("nqe_recent_asked"), list)
+                else structured_state_out.get("nqe_recent_asked")
+            )
             for q in payload.get("next_questions") or []:
                 if isinstance(q, dict) and q.get("id"):
                     qid = str(q.get("id"))
                     if qid not in asked:
                         asked.append(qid)
+                    asked_recent.append(
+                        {
+                            "id": str(qid).strip().lower(),
+                            "slot": _question_slot_from_id(qid),
+                            "turn": int(kv_out.get("conversation_turn") or 0) + 1,
+                        }
+                    )
             kv_out["nqe_asked"] = asked[-25:]
+            structured_state_out["nqe_asked"] = list(kv_out["nqe_asked"])
+            kv_out["nqe_recent_asked"] = asked_recent[-60:]
+            structured_state_out["nqe_recent_asked"] = list(kv_out["nqe_recent_asked"])
+
+        # Product memory bank keeps a compact recommendation history for
+        # cross-turn recall without parsing full chat logs.
+        hist = list(product_memory_bank_out.get("recent_recommendations") or [])
+        hist.append({
+            "ts": int(time.time()),
+            "query": scrub_pii(query or "")[:300],
+            "shortlist_skus": shortlist_skus,
+            "budget_min": constraints.get("budget_min"),
+            "budget_max": constraints.get("budget_max"),
+            "turn_type": turn_type,
+            "trace_id": trace_id,
+        })
+        product_memory_bank_out["recent_recommendations"] = hist[-20:]
+        product_memory_bank_out["last_trace_id"] = trace_id
+        product_memory_bank_out["last_query"] = scrub_pii(query or "")[:300]
+        if shortlist_skus:
+            product_memory_bank_out["last_shortlist_skus"] = shortlist_skus
+
         active_ttl = int(os.getenv("CHAT_ACTIVE_TTL_SECONDS", "86400"))
         mem.set_kv(uid, kv_out, ttl_seconds=active_ttl)
+        mem.set_structured_state(uid, structured_state_out, ttl_seconds=active_ttl)
+        mem.set_product_memory_bank(uid, product_memory_bank_out, ttl_seconds=active_ttl)
         mem.touch_session(uid, ttl_seconds=active_ttl)
         summary_interval = int(os.getenv("MEMORY_SUMMARY_INTERVAL", "10"))
         should_checkpoint = bool(
@@ -4808,6 +6296,11 @@ def suggest(
     except Exception:
         pass
     try:
+        if isinstance(payload_policy.get("next_questions"), list):
+            payload_policy["next_questions"] = _dedupe_next_questions_for_render(payload_policy.get("next_questions"))
+    except Exception:
+        pass
+    try:
         agent_chain.append({
             "agent": "Policy_Agent",
             "policy_version": payload_policy.get("policy_version"),
@@ -4833,6 +6326,11 @@ def suggest(
     # Final safety: ensure contract keys present after redaction as well
     try:
         redacted = _ensure_trace_response(redacted or {}, decision_id or trace_id, flags)
+    except Exception:
+        pass
+    try:
+        if isinstance(redacted.get("next_questions"), list):
+            redacted["next_questions"] = _dedupe_next_questions_for_render(redacted.get("next_questions"))
     except Exception:
         pass
     try:

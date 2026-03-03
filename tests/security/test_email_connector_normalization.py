@@ -12,7 +12,9 @@ def test_normalize_gmail_minimal_shape():
                 {"name": "Reply-To", "value": "accounts@supplier.com"},
                 {"name": "Subject", "value": "Invoice overdue"},
                 {"name": "Message-Id", "value": "<abc@xyz>"},
-                {"name": "Authentication-Results", "value": "dmarc=pass"},
+                {"name": "Authentication-Results", "value": "spf=pass dkim=pass dmarc=pass bimi=pass"},
+                {"name": "ARC-Seal", "value": "i=1; a=rsa-sha256; cv=pass; d=example.org; s=arc;"},
+                {"name": "BIMI-Location", "value": "https://mail.example.org/logo.svg"},
             ],
             "mimeType": "text/plain",
             "body": {"data": "SGVsbG8gd29ybGQ="},  # "Hello world" (base64url compatible)
@@ -25,6 +27,10 @@ def test_normalize_gmail_minimal_shape():
     assert out["reply_to"]
     assert out["message_id"]
     assert isinstance(out.get("attachments"), list)
+    assert out.get("arc_cv") == "pass"
+    assert out.get("arc_chain_valid") is True
+    assert out.get("bimi_result") == "pass"
+    assert out.get("bimi_present") is True
 
 
 def test_normalize_m365_minimal_shape():
@@ -36,10 +42,15 @@ def test_normalize_m365_minimal_shape():
         "from": {"emailAddress": {"name": "Vendor", "address": "billing@supplier.com"}},
         "replyTo": [{"emailAddress": {"address": "accounts@supplier.com"}}],
         "bodyPreview": "Pay invoice",
+        "authenticationResults": "spf=pass dkim=pass dmarc=pass bimi=pass",
+        "arcSeal": "i=1; a=rsa-sha256; cv=pass; d=example.org; s=arc;",
+        "bimiLocation": "https://mail.example.org/logo.svg",
     }
     out = normalize_m365(msg=msg, attachments=[{"name": "invoice.zip", "content_type": "application/zip", "size_bytes": 1}], tenant_id="t1")
     assert out["provider"] == "m365"
     assert "supplier.com" in out["from_addr"]
     assert out["reply_to"]
     assert out["message_id"]
-
+    assert out.get("arc_cv") == "pass"
+    assert out.get("arc_chain_valid") is True
+    assert out.get("bimi_result") == "pass"

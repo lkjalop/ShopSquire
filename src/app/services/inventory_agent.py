@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 import uuid
 import math
+import json
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -13,6 +14,12 @@ from src.app.models.db import db_session
 from src.app.services.decision_log import log_decision, log_trace_event
 from src.app.security.observer import emit_security_event
 from src.app.services.ticketing import TicketingAgent
+from src.app.services.inventory_supplier_guard import (
+    compute_supplier_trust_score,
+    evaluate_dual_source_confirmation,
+    evaluate_auto_po_policy,
+)
+from src.app.services.decision_bundle import write_immutable_decision_bundle
 import os
 
 
@@ -69,6 +76,10 @@ class ReorderRecommendation:
     safety_stock: int = 0
     eoq_basis: str = "heuristic"
     requires_human_review_reason: Optional[str] = None
+    supplier_trust_score: float = 0.7
+    supplier_trust_band: str = "medium"
+    anomaly_score: float = 0.0
+    source_confirmations: Optional[Dict[str, Any]] = None
 
 
 class InventoryAgent:
@@ -646,6 +657,12 @@ class InventoryAgent:
                         },
                     )
                     if score > best_score:
+                        trust = compute_supplier_trust_score(
+                            signature_validity=1.0 if rel >= 0.5 else 0.5,
+                            historical_defect_rate=max(0.0, min(1.0, 1.0 - max(0.0, min(1.0, rel)))),
+                            lead_time_variance=max(0.0, min(1.0, float(late_deliveries) / 20.0)),
+                            invoice_mismatch_rate=max(0.0, min(1.0, float(sla_breaches) / 15.0)),
+                        )
                         best_score = score
                         best = {
                             "id": sid,
@@ -658,6 +675,9 @@ class InventoryAgent:
                             "recent_sla_breaches": sla_breaches,
                             "late_deliveries_30d": late_deliveries,
                             "penalty": penalty,
+                            "supplier_trust_score": trust.get("supplier_trust_score"),
+                            "supplier_trust_band": trust.get("band"),
+                            "supplier_trust_components": trust.get("components"),
                         }
                 if best:
                     return best
@@ -764,6 +784,9 @@ class InventoryAgent:
             variance_reason = None
             if bool(forecast.get("high_variance")) or float(forecast.get("cv") or 0.0) > variance_gate:
                 variance_reason = "forecast_variance_high"
+            anomaly_score = min(1.0, max(0.0, float(forecast.get("cv") or 0.0) / max(0.1, variance_gate)))
+            supplier_trust_score = float(supplier.get("supplier_trust_score") or 0.7)
+            supplier_trust_band = str(supplier.get("supplier_trust_band") or "medium")
             rec = ReorderRecommendation(
                 sku=a.sku,
                 supplier_id=supplier.get("id"),
@@ -776,12 +799,22 @@ class InventoryAgent:
                 safety_stock=int(eoq.get("safety_stock") or 0),
                 eoq_basis=str(eoq.get("method") or "eoq"),
                 requires_human_review_reason=variance_reason,
+                supplier_trust_score=supplier_trust_score,
+                supplier_trust_band=supplier_trust_band,
+                anomaly_score=anomaly_score,
             )
             recs.append(rec)
 
             # Log decision in the central decision log for auditability
             try:
                 approval_needed = rec.estimated_cost > approval_min or bool(variance_reason)
+                auto_po_policy = evaluate_auto_po_policy(
+                    amount=rec.estimated_cost,
+                    supplier_risk=(1.0 - supplier_trust_score),
+                    anomaly_score=anomaly_score,
+                )
+                if auto_po_policy.get("decision") in ("challenge", "escalate"):
+                    approval_needed = True
                 dec_id = log_decision(
                     agent_name="inventory_agent",
                     input_data={"sku": a.sku, "current_stock": a.current_stock, "reorder_point": a.reorder_point},
@@ -790,6 +823,10 @@ class InventoryAgent:
                         "forecast": forecast,
                         "supplier_score": supplier.get("score"),
                         "supplier_penalty": supplier.get("penalty"),
+                        "supplier_trust_score": supplier_trust_score,
+                        "supplier_trust_band": supplier_trust_band,
+                        "supplier_trust_components": supplier.get("supplier_trust_components"),
+                        "auto_po_policy": auto_po_policy,
                     },
                     proposed_action={"reorder": rec.__dict__},
                     agent_reasoning=f"EOQ policy: lead={rec.lead_time_days}, annual_demand={eoq.get('annual_demand')}",
@@ -936,6 +973,61 @@ class InventoryAgent:
     def execute_reorder(self, recommendation: ReorderRecommendation, approval: Optional[str] = None) -> Dict[str, Any]:
         thr = _get_inventory_thresholds()
         approval_min = float(thr["reorder_cost_approval_usd"])
+        trust_score = float(getattr(recommendation, "supplier_trust_score", 0.7) or 0.7)
+        trust_band = str(getattr(recommendation, "supplier_trust_band", "medium") or "medium")
+        anomaly_score = float(getattr(recommendation, "anomaly_score", 0.0) or 0.0)
+        confirmations = getattr(recommendation, "source_confirmations", None) or {}
+        dual_confirm = evaluate_dual_source_confirmation(confirmations)
+        policy_gate = evaluate_auto_po_policy(
+            amount=float(getattr(recommendation, "estimated_cost", 0.0) or 0.0),
+            supplier_risk=(1.0 - trust_score),
+            anomaly_score=anomaly_score,
+        )
+        # Enforce supplier trust and policy gates before downstream execution/data thresholds.
+        if trust_band == "low" or trust_score < 0.5:
+            try:
+                log_trace_event(
+                    trace_id=str(uuid.uuid4()),
+                    event_type="policy_gate",
+                    source_type="agent",
+                    source_id="Inventory_Supplier_Guard_Agent",
+                    target_type="supplier",
+                    target_id=str(getattr(recommendation, "supplier_id", "") or ""),
+                    payload={
+                        "decision": "quarantine",
+                        "reason_codes": ["supplier_trust_low"],
+                        "supplier_trust_score": trust_score,
+                        "supplier_trust_band": trust_band,
+                    },
+                )
+            except Exception:
+                pass
+            return {
+                "status": "quarantined_supplier_update",
+                "reason": "supplier_trust_low",
+                "supplier_trust_score": trust_score,
+                "supplier_trust_band": trust_band,
+            }
+        critical_restock = bool(
+            getattr(recommendation, "urgency", "") == "critical"
+            or float(getattr(recommendation, "estimated_cost", 0.0) or 0.0) > (approval_min * 1.5)
+        )
+        if critical_restock and not dual_confirm.get("ok"):
+            return {
+                "status": "challenge_required",
+                "reason": "dual_source_confirmation_missing",
+                "missing": dual_confirm.get("missing"),
+                "confirmations_seen": dual_confirm.get("count"),
+            }
+        if policy_gate.get("decision") == "escalate":
+            return {
+                "status": "approval_required",
+                "reason": "auto_po_policy_escalate",
+                "risk_score": policy_gate.get("risk_score"),
+                "reason_codes": policy_gate.get("reason_codes"),
+                "supplier_trust_score": trust_score,
+            }
+
         # Data readiness gate: block autonomous reorder when data is missing/stale/conflicting.
         required = bool(thr.get("data_readiness_required", True))
         min_score = float(thr.get("data_readiness_min_score", 0.8))
@@ -1084,6 +1176,54 @@ class InventoryAgent:
                     policy_version="v1",
                     approval_required=False,
                     execution_status="executed",
+                )
+            except Exception:
+                pass
+            try:
+                bundle = write_immutable_decision_bundle(
+                    trace_id=po_number,
+                    actor_type="agent",
+                    actor_id="inventory_agent",
+                    tenant_id="default",
+                    resource_id=str(recommendation.sku),
+                    action="auto_po_create",
+                    policy_version="v1",
+                    decision="allow",
+                    reason_codes=(policy_gate.get("reason_codes") or []) + (["dual_source_confirmed"] if dual_confirm.get("ok") else []),
+                    confidence=max(0.0, min(1.0, 1.0 - float(policy_gate.get("risk_score") or 0.0))),
+                    evidence_ids=[str(recommendation.supplier_id or ""), str(po_number)],
+                    approval_chain=[str(approval)] if approval else [],
+                    ticket_id=str(approval) if approval else None,
+                    provider_ref=str(po_number),
+                    model_inputs={
+                        "estimated_cost": recommendation.estimated_cost,
+                        "quantity": recommendation.quantity,
+                        "supplier_trust_score": trust_score,
+                        "anomaly_score": anomaly_score,
+                    },
+                    supplier_docs={"confirmations": confirmations},
+                )
+                log_trace_event(
+                    trace_id=po_number,
+                    event_type="execution_result",
+                    source_type="agent",
+                    source_id="Inventory_Decision_Bundle_Agent",
+                    target_type="bundle",
+                    target_id=str(bundle.get("bundle_id")),
+                    payload={
+                        "action": "immutable_decision_bundle_written",
+                        "bundle_id": bundle.get("bundle_id"),
+                        "bundle_hash": bundle.get("bundle_hash"),
+                        "actor_type": "agent",
+                        "actor_id": "inventory_agent",
+                        "tenant_id": "default",
+                        "resource_id": str(recommendation.sku),
+                        "decision": "allow",
+                        "policy_version": "v1",
+                        "valid_from": (bundle.get("payload") or {}).get("valid_from"),
+                        "valid_to": (bundle.get("payload") or {}).get("valid_to"),
+                        "recorded_at": (bundle.get("payload") or {}).get("recorded_at"),
+                    },
                 )
             except Exception:
                 pass

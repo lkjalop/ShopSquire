@@ -164,6 +164,52 @@ def _check_jpeg_qtable(image_bytes: bytes) -> bool:
         return False
 
 
+def _diffusion_mid_freq_energy(img: "Image.Image") -> float:
+    """Detect diffusion-model spectral footprint (FLUX, SD3, DALL-E 3).
+
+    Diffusion models produce characteristic mid-frequency energy distributions
+    that differ from both natural images and older GAN architectures.
+    The denoising process creates a distinct "band" in the frequency spectrum
+    where energy is unnaturally concentrated or depleted relative to the
+    natural 1/f power-law decay.
+    """
+    arr = np.asarray(img.convert("L"), dtype=np.float64)
+    fft = np.fft.fft2(arr)
+    mag = np.abs(np.fft.fftshift(fft))
+    h, w = mag.shape
+    cy, cx = h // 2, w // 2
+
+    max_r = min(cy, cx) - 1
+    if max_r < 32:
+        return 0.0
+
+    # Radial power spectrum in log bins
+    Y, X = np.mgrid[:h, :w]
+    R = np.sqrt((Y - cy) ** 2 + (X - cx) ** 2)
+
+    # Define frequency bands: low (0-15%), mid (15-50%), high (50-100%)
+    low_mask = (R >= 1) & (R < max_r * 0.15)
+    mid_mask = (R >= max_r * 0.15) & (R < max_r * 0.50)
+    high_mask = (R >= max_r * 0.50) & (R < max_r)
+
+    low_energy = float(np.mean(mag[low_mask])) if low_mask.any() else 1.0
+    mid_energy = float(np.mean(mag[mid_mask])) if mid_mask.any() else 0.0
+    high_energy = float(np.mean(mag[high_mask])) if high_mask.any() else 0.0
+
+    # Natural images follow approx 1/f decay — mid/low ratio should be small.
+    # Diffusion models show elevated mid-frequency energy relative to this expectation.
+    mid_low_ratio = mid_energy / (low_energy + 1e-12)
+    mid_high_ratio = mid_energy / (high_energy + 1e-12)
+
+    # In natural images: mid_low_ratio ~ 0.1-0.3, diffusion: 0.35-0.6+
+    # Score based on deviation from natural expectation
+    deviation = max(0.0, mid_low_ratio - 0.25) / 0.35  # normalized 0-1
+    # Also check if mid-high ratio is unusually flat (diffusion trait)
+    flatness = min(1.0, mid_high_ratio / 5.0) if mid_high_ratio > 2.0 else 0.0
+
+    return float(min(1.0, 0.6 * deviation + 0.4 * flatness))
+
+
 def detect_fake_image(image_bytes: bytes, *, threshold: float | None = None) -> GANDetectionResult:
     """Detect whether an image is likely AI-generated (GAN/diffusion).
 
@@ -183,23 +229,14 @@ def detect_fake_image(image_bytes: bytes, *, threshold: float | None = None) -> 
     texture = _texture_regularity(img)
     exif_absent = _check_exif(img)
     default_qt = _check_jpeg_qtable(image_bytes)
+    diffusion_mid = _diffusion_mid_freq_energy(img)
 
-    exif_score = 0.3 if exif_absent else 0.0
-    qt_score = 0.15 if default_qt else 0.0
-
+    # Weighted composite score — 6 signals
     score = float(min(1.0, (
-        0.25 * spectral
-        + 0.25 * hist_smooth
-        + 0.20 * texture
-        + 0.15 * exif_score / 0.3 if exif_absent else 0.0
-        + 0.15 * qt_score / 0.15 if default_qt else 0.0
-    )))
-
-    # Simpler weighted sum
-    score = float(min(1.0, (
-        0.25 * spectral
-        + 0.25 * hist_smooth
-        + 0.20 * texture
+        0.20 * spectral
+        + 0.20 * hist_smooth
+        + 0.15 * texture
+        + 0.15 * diffusion_mid
         + (0.15 if exif_absent else 0.0)
         + (0.15 if default_qt else 0.0)
     )))
@@ -211,6 +248,8 @@ def detect_fake_image(image_bytes: bytes, *, threshold: float | None = None) -> 
         explanations.append("Colour histogram unusually smooth — typical of AI-generated images")
     if texture >= 0.6:
         explanations.append("Micro-texture over-regularity detected — may indicate diffusion model output")
+    if diffusion_mid >= 0.4:
+        explanations.append("Mid-frequency spectral energy anomaly — consistent with diffusion model (FLUX/SD3) artifacts")
     if exif_absent:
         explanations.append("No camera EXIF metadata — consistent with AI generation")
     if default_qt:
@@ -225,5 +264,9 @@ def detect_fake_image(image_bytes: bytes, *, threshold: float | None = None) -> 
         jpeg_default_qtable=default_qt,
         is_likely_fake=score >= thr,
         explanations=explanations,
-        details={"threshold": thr, "image_size": list(img.size)},
+        details={
+            "threshold": thr,
+            "image_size": list(img.size),
+            "diffusion_mid_freq_score": round(diffusion_mid, 4),
+        },
     )

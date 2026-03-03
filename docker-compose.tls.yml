@@ -28,6 +28,9 @@ services:
       MTLS_CERT_DIR: "/app/certs"
     volumes:
       - ./config/tls/certs:/app/certs:ro
+    user: "shopsquire"
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 
@@ -36,6 +39,9 @@ services:
       INTERNAL_MTLS_REQUIRED: "1"
     volumes:
       - ./config/tls/certs:/app/certs:ro
+    user: "shopsquire"
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
 

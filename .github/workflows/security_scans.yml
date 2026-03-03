@@ -137,3 +137,72 @@ jobs:
         with:
           name: pip-audit.json
           path: pip-audit.json
+
+  # ── 8.4 SLSA provenance ──────────────────────────────────────────────────
+  # Generates SLSA Level 3 build provenance attestation so downstream consumers
+  # can verify the artifact was produced by this exact GitHub Actions workflow
+  # from this exact commit — addressing the supply-chain gap in finding 8.4.
+  slsa-provenance:
+    needs: [trivy-filesystem, sbom-generate, pip-audit]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write    # Required: OIDC token for keyless signing
+      contents: read     # Required: checkout
+      actions: read      # Required: workflow manifest access for SLSA generator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build source distribution
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist --outdir dist/
+
+      - name: List built artifacts
+        id: list-artifacts
+        run: |
+          # Emit a newline-delimited list of .tar.gz paths for the provenance generator
+          ARTIFACTS=$(find dist/ -name "*.tar.gz" | tr '\n' ' ')
+          echo "artifacts=${ARTIFACTS}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate artifact hashes for SLSA
+        id: hash
+        run: |
+          cd dist
+          SHA256=$(sha256sum *.tar.gz | base64 -w0)
+          echo "hashes=${SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SLSA provenance
+        # slsa-github-generator produces a signed SLSA Level 3 provenance bundle
+        # using the OIDC identity of this workflow run.
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+        with:
+          base64-subjects: ${{ steps.hash.outputs.hashes }}
+          upload-assets: false   # We upload manually so we control artifact names
+
+      - name: Upload provenance bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: slsa-provenance.intoto.jsonl
+          path: "*.intoto.jsonl"
+          if-no-files-found: warn
+
+      - name: Post to compliance registry (optional)
+        if: ${{ env.API_BASE_URL != '' && env.ADMIN_API_KEY != '' }}
+        env:
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        run: |
+          python -m pip install orjson requests
+          # Upload the first provenance file found
+          PROV=$(find . -name "*.intoto.jsonl" | head -1)
+          if [ -n "${PROV}" ]; then
+            python scripts/upload_compliance_artifact.py \
+              --type slsa_provenance --vendor slsa-github-generator --file "${PROV}"
+          fi

@@ -57,6 +57,16 @@ type StructuredSections = {
   traceMeta: Record<string, any>;
 };
 
+type Neo4jRingSignal = {
+  eventId: string;
+  eventType: string;
+  source: string;
+  createdAt: string;
+  clusterSize: number | null;
+  ringRisk: number | null;
+  ringHit: boolean;
+};
+
 function parseMaybeJson(value: unknown): any {
   if (typeof value !== 'string') return value;
   try {
@@ -133,13 +143,69 @@ function extractStructuredSections(payload: any): StructuredSections {
       if (p[k] !== undefined) target[k] = p[k];
     }
   };
-  assignSubset(signals, ['risk_score', 'risk_band', 'tags', 'mitre', 'severity', 'latency_ms', 'signals']);
+  assignSubset(signals, [
+    'risk_score',
+    'risk_band',
+    'tags',
+    'mitre',
+    'severity',
+    'latency_ms',
+    'signals',
+    'shipping_address_clustered',
+    'shipping_address_cluster_size',
+    'neo4j_cluster_size',
+    'ring_risk',
+    'neo4j_ring_risk',
+    'ring_hit',
+  ]);
   assignSubset(policyChecks, ['policy', 'policy_gate', 'tier', 'constraints', 'compliance', 'approval_required']);
   assignSubset(actions, ['action', 'actions', 'tool', 'tool_name', 'ticket_id', 'proposal', 'playbook_id']);
   assignSubset(outcome, ['verdict', 'decision', 'status', 'result', 'executed', 'error', 'reason']);
   assignSubset(evidence, ['evidence', 'evidence_items', 'evidence_tags', 'reasons', 'trace_refs']);
   assignSubset(traceMeta, ['trace_tags', 'strategy_tags', 'decision_tags', 'drilldown_hidden_tags', 'hidden_drilldown', 'trace_hidden']);
   return { signals, policyChecks, actions, outcome, evidence, traceMeta };
+}
+
+function readNum(v: any): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function extractNeo4jSignal(ev: DecisionTraceEvent & { normalizedType?: string }): Neo4jRingSignal | null {
+  const p = (ev.payload && typeof ev.payload === 'object') ? ev.payload : {};
+  const nestedSignals = (p.signals && typeof p.signals === 'object') ? p.signals : {};
+  const clusterSize = readNum(
+    p.neo4j_cluster_size ??
+    p.shipping_address_cluster_size ??
+    p.cluster_size ??
+    nestedSignals.neo4j_cluster_size ??
+    nestedSignals.shipping_address_cluster_size ??
+    nestedSignals.cluster_size
+  );
+  const ringRisk = readNum(
+    p.neo4j_ring_risk ??
+    p.ring_risk ??
+    nestedSignals.neo4j_ring_risk ??
+    nestedSignals.ring_risk
+  );
+  const explicitRingHit = (p.ring_hit ?? p.shipping_address_clustered ?? nestedSignals.ring_hit ?? nestedSignals.shipping_address_clustered);
+  const ringHit = typeof explicitRingHit === 'boolean'
+    ? explicitRingHit
+    : Boolean((clusterSize ?? 0) >= 4 || (ringRisk ?? 0) >= 0.65);
+  if (clusterSize === null && ringRisk === null && !ringHit) return null;
+  return {
+    eventId: String(ev.id || ''),
+    eventType: String(ev.normalizedType || ev.event_type || 'event'),
+    source: String(ev.source_id || ev.source_type || 'unknown'),
+    createdAt: String(ev.created_at || ''),
+    clusterSize,
+    ringRisk,
+    ringHit,
+  };
 }
 
 export function Decisions({ role }: Props) {
@@ -361,6 +427,19 @@ export function Decisions({ role }: Props) {
     return counts;
   }, [categorizedEvents]);
 
+  const neo4jSignals = useMemo(() => {
+    return categorizedEvents
+      .map((ev) => extractNeo4jSignal(ev))
+      .filter((s): s is Neo4jRingSignal => !!s);
+  }, [categorizedEvents]);
+
+  const neo4jSummary = useMemo(() => {
+    const maxRisk = neo4jSignals.reduce((m, s) => Math.max(m, s.ringRisk ?? 0), 0);
+    const maxCluster = neo4jSignals.reduce((m, s) => Math.max(m, s.clusterSize ?? 0), 0);
+    const ringHits = neo4jSignals.filter((s) => s.ringHit).length;
+    return { maxRisk, maxCluster, ringHits };
+  }, [neo4jSignals]);
+
   const causalLayout = useMemo(() => {
     const nodes = causal?.nodes || [];
     const edges = causal?.edges || [];
@@ -549,6 +628,27 @@ export function Decisions({ role }: Props) {
                   </div>
                 </div>
               )}
+              {neo4jSignals.length > 0 && (
+                <div className="panel" style={{ marginTop: 10 }}>
+                  <strong>Neo4j Ring Drilldown</strong>
+                  <div className="page-sub">
+                    Ring-hit events: {neo4jSummary.ringHits} | Max cluster: {neo4jSummary.maxCluster || '-'} | Max ring risk: {neo4jSummary.maxRisk ? neo4jSummary.maxRisk.toFixed(3) : '-'}
+                  </div>
+                  <div className="list">
+                    {neo4jSignals.slice(0, 8).map((s) => (
+                      <div key={`neo4j-${s.eventId}`} className="list-item">
+                        <div>
+                          <strong>{s.eventType}</strong>
+                          <div className="page-sub">{formatEventTime(s.createdAt)} | {s.source}</div>
+                        </div>
+                        <span className="badge">
+                          cluster={s.clusterSize ?? '-'} | risk={s.ringRisk !== null ? s.ringRisk.toFixed(3) : '-'} | hit={s.ringHit ? 'yes' : 'no'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="panel" style={{ marginTop: 10 }}>
                 <strong>Compliance & Governance</strong>
                 <div className="page-sub">
@@ -646,6 +746,11 @@ export function Decisions({ role }: Props) {
                         Source: <code>{ev.source_id || ev.source_type || 'unknown'}</code>
                         {extractLatencyMs(ev.payload) !== null ? ` | Latency: ${extractLatencyMs(ev.payload)} ms` : ''}
                         {extractVerdict(ev.payload) ? ` | Verdict: ${extractVerdict(ev.payload)}` : ''}
+                        {(() => {
+                          const n = extractNeo4jSignal(ev);
+                          if (!n) return '';
+                          return ` | Neo4j cluster: ${n.clusterSize ?? '-'} | ring risk: ${n.ringRisk !== null ? n.ringRisk.toFixed(3) : '-'} | ring hit: ${n.ringHit ? 'yes' : 'no'}`;
+                        })()}
                       </div>
                       {traceTags.length > 0 && (
                         <div className="trace-chip-row" style={{ marginTop: 6 }}>

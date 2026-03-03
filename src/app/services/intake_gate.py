@@ -68,6 +68,24 @@ _DEFAULT_ALLOWED_MIME = {
 }
 _DEFAULT_ARCHIVE_EXT = {".zip", ".tar", ".gz", ".tgz", ".bz2", ".7z", ".rar"}
 _DEFAULT_QR_ALLOWLIST = {"localhost", "127.0.0.1"}
+_DEFAULT_ALLOWED_IMAGE_MIME = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+    "image/gif",
+}
+_EXT_MIME_EXPECTED = {
+    ".jpg": {"image/jpeg"},
+    ".jpeg": {"image/jpeg"},
+    ".png": {"image/png"},
+    ".gif": {"image/gif"},
+    ".bmp": {"image/bmp"},
+    ".tif": {"image/tiff"},
+    ".tiff": {"image/tiff"},
+    ".webp": {"image/webp"},
+}
 
 
 def _env_list(name: str, default: set[str]) -> set[str]:
@@ -110,7 +128,30 @@ def _sniff_mime(blob: bytes) -> str | None:
     for magic, mime in _MAGIC_MIME_PREFIXES:
         if blob.startswith(magic):
             return mime
+    # WebP: starts with RIFF + 4-byte size + WEBP signature at offset 8
+    if len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        return "image/webp"
     return None
+
+
+def _detect_polyglot_signatures(blob: bytes, *, primary_mime: str | None) -> list[str]:
+    if not blob:
+        return []
+    hits: list[str] = []
+    window = blob[:4096]
+    for magic, mime in _MAGIC_MIME_PREFIXES:
+        if primary_mime and mime == primary_mime and window.startswith(magic):
+            continue
+        try:
+            if window.find(magic, 1) >= 0:
+                hits.append(mime)
+        except Exception:
+            continue
+    uniq = []
+    for h in hits:
+        if h not in uniq:
+            uniq.append(h)
+    return uniq[:5]
 
 
 def _mime_allowed(mime: str | None, allowed: set[str]) -> bool:
@@ -119,9 +160,9 @@ def _mime_allowed(mime: str | None, allowed: set[str]) -> bool:
         return True
     if m in allowed:
         return True
-    if m.startswith("image/") and any(x.startswith("image/") for x in allowed):
+    if m.startswith("image/") and "image/*" in allowed:
         return True
-    if m.startswith("text/") and any(x.startswith("text/") for x in allowed):
+    if m.startswith("text/") and "text/*" in allowed:
         return True
     return False
 
@@ -439,7 +480,8 @@ def _evaluate_binary_ingest(
     data = bytes(blob or b"")
     sz = int(size_bytes or len(data))
     file_ext = _ext(name)
-    sniff = _sniff_mime(data) or declared_mime
+    sniff_magic = _sniff_mime(data)
+    sniff = sniff_magic or declared_mime
     reasons: list[str] = []
     if file_ext in deny_ext:
         reasons.append("denied_extension")
@@ -447,6 +489,18 @@ def _evaluate_binary_ingest(
         reasons.append("attachment_too_large")
     if not _mime_allowed(sniff, allowed_mime):
         reasons.append("mime_not_allowed")
+    # Block content-type spoofing for image uploads when no valid image magic header exists.
+    if declared_mime and str(declared_mime).startswith("image/") and not sniff_magic:
+        reasons.append("image_magic_header_missing")
+    try:
+        expected = _EXT_MIME_EXPECTED.get(file_ext) or set()
+        if expected and sniff and str(sniff).lower() not in expected:
+            reasons.append("filename_mime_mismatch")
+    except Exception:
+        pass
+    polyglot_hits = _detect_polyglot_signatures(data, primary_mime=sniff)
+    if polyglot_hits and str(os.getenv("ATTACHMENT_POLYGLOT_BLOCK", "1")).strip().lower() in ("1", "true", "yes"):
+        reasons.append("polyglot_signature_detected")
 
     archive_meta: Dict[str, Any] | None = None
     if data and (file_ext in archive_ext or str(sniff or "").endswith("/zip") or str(sniff or "") == "application/zip"):
@@ -472,6 +526,7 @@ def _evaluate_binary_ingest(
         "content_type_declared": declared_mime,
         "content_type_sniffed": sniff,
         "ext": file_ext,
+        "polyglot_hits": polyglot_hits,
         "status": "blocked" if reasons else "accepted",
         "reasons": sorted(set(reasons)),
     }
@@ -484,10 +539,11 @@ def strict_binary_ingest_gate(
     content_type: str | None,
     blob: bytes,
     size_bytes: int | None = None,
+    allowed_mime_override: set[str] | None = None,
 ) -> Dict[str, Any]:
     """Strict ingest controls for a single uploaded binary (CV/storefront uploads)."""
     deny_ext = _env_list("ATTACHMENT_DENY_EXT", _DEFAULT_DENY_EXT)
-    allowed_mime = _env_list("ATTACHMENT_ALLOWED_MIME", _DEFAULT_ALLOWED_MIME)
+    allowed_mime = set(allowed_mime_override or _env_list("ATTACHMENT_ALLOWED_MIME", _DEFAULT_ALLOWED_MIME))
     archive_ext = _env_list("ATTACHMENT_ARCHIVE_EXT", _DEFAULT_ARCHIVE_EXT)
     max_bytes = _env_int("ATTACHMENT_MAX_BYTES", 12 * 1024 * 1024)
     max_entries = _env_int("ATTACHMENT_ARCHIVE_MAX_ENTRIES", 200)
@@ -522,6 +578,28 @@ def strict_binary_ingest_gate(
             "archive_max_ratio": max_ratio,
         },
     }
+
+
+def strict_image_ingest_gate(
+    *,
+    filename: str,
+    content_type: str | None,
+    blob: bytes,
+    size_bytes: int | None = None,
+) -> Dict[str, Any]:
+    allowed_image = _env_list("IMAGE_ALLOWED_MIME", _DEFAULT_ALLOWED_IMAGE_MIME)
+    out = strict_binary_ingest_gate(
+        filename=filename,
+        content_type=content_type,
+        blob=blob,
+        size_bytes=size_bytes,
+        allowed_mime_override=allowed_image,
+    )
+    try:
+        out["gate"] = "strict_image_ingest"
+    except Exception:
+        pass
+    return out
 
 
 def strict_attachment_ingest_gate(email: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:

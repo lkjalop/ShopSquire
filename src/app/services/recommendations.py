@@ -42,6 +42,72 @@ PROMPT_CONTROL = {
 }
 
 
+# ── Budget tier classification ────────────────────────────────────────────────
+def classify_budget_tier(budget_max: Optional[int]) -> Tuple[str, List[str]]:
+    """Classify a budget ceiling into a tier label and advisory warning tags.
+
+    Returns ``(tier_label, warning_tags)`` — a pure function with no I/O.
+
+    Tiers
+    -----
+    accessories_only  < $100   — can't buy a laptop; redirect to accessories
+    very_low          $100–349 — used/refurb only; warn about new laptop risk
+    entry             $350–699 — entry-level new or solid refurb midrange
+    mid               $700–999 — sweet-spot for most users
+    premium           $1000–1999 — premium performance / longevity
+    high_performance  $2000–3499 — creator / workstation / 4-year machine
+    workstation_pro   $3500+    — niche; flag potential overspend
+    """
+    if budget_max is None:
+        return "unknown", []
+    b = int(budget_max)
+    if b <= 99:
+        return "accessories_only", ["budget_too_low_for_laptop"]
+    if b <= 349:
+        return "very_low", ["refurb_recommended", "budget_too_low_for_new_laptop"]
+    if b <= 699:
+        return "entry", []
+    if b <= 999:
+        return "mid", []
+    if b <= 1999:
+        return "premium", []
+    if b <= 3499:
+        return "high_performance", []
+    return "workstation_pro", ["overspend_risk_check"]
+
+
+_WARRANTY_HIGH_RISK_USE_CASES: frozenset[str] = frozenset({
+    "gaming_aaa_heavy", "gaming_competitive", "content_creator",
+    "engineering_student", "data_science_student", "ai_ml_workstation",
+})
+
+
+def classify_warranty_candidate(
+    budget_max: Optional[int],
+    use_case_key: Optional[str] = None,
+) -> str:
+    """Return warranty upsell priority tag: 'warranty_candidate_high', 'warranty_candidate_low',
+    or 'warranty_candidate_neutral'.
+
+    Push warranty when device is expensive (>=$1500) or when use-case involves
+    heavy sustained load and budget is mid-range+.  Avoid pushing for low-budget
+    purchases where it crowds out core value.
+    """
+    if budget_max is not None and budget_max >= 1500:
+        return "warranty_candidate_high"
+    if (
+        use_case_key
+        and use_case_key in _WARRANTY_HIGH_RISK_USE_CASES
+        and budget_max is not None
+        and budget_max >= 900
+    ):
+        return "warranty_candidate_high"
+    if budget_max is not None and budget_max < 700:
+        return "warranty_candidate_low"
+    return "warranty_candidate_neutral"
+
+
+
 class RecommendationService:
     def __init__(self, session=None):
         # Optional injected SQLAlchemy Session for request-bound engine usage.
@@ -422,7 +488,7 @@ class RecommendationService:
             if "rtx" in text:
                 score += 1.5
                 reasons.append("use_case_rtx")
-        elif use_case == "content_creation":
+        elif use_case in ("content_creation", "content_creator"):
             if gpu:
                 score += 1.5
                 reasons.append("use_case_gpu")
@@ -439,11 +505,14 @@ class RecommendationService:
             if storage is not None and storage >= 512:
                 score += 0.8
                 reasons.append("use_case_storage_512")
-        elif use_case == "business":
+        elif use_case in ("business", "office_general", "office_executive", "business_professional"):
             if any(k in text for k in ("thinkpad", "latitude", "elitebook", "probook", "xps")):
                 score += 1.2
                 reasons.append("use_case_business_line")
-        elif use_case == "student":
+            if any(k in text for k in ("light", "ultrabook", "air")):
+                score += 0.6
+                reasons.append("use_case_portable")
+        elif use_case in ("student", "university_general", "note_taking_student", "law_student", "medical_student"):
             if price_cents is not None:
                 if price_cents <= 90000:
                     score += 1.5
@@ -451,6 +520,16 @@ class RecommendationService:
                 elif price_cents <= 120000:
                     score += 0.8
                     reasons.append("use_case_budget_1200")
+            if any(k in text for k in ("light", "ultrabook", "2-in-1", "convertible")):
+                score += 0.6
+                reasons.append("use_case_student_portable")
+        elif use_case in ("office_finance",):
+            if ram is not None and ram >= 16:
+                score += 1.2
+                reasons.append("use_case_ram_16")
+            if cpu_high:
+                score += 0.8
+                reasons.append("use_case_cpu_high")
         elif use_case == "mobile":
             if any(k in text for k in ("thin", "light", "ultrabook", "air")):
                 score += 1.0
@@ -511,12 +590,19 @@ class RecommendationService:
         known_brands = ["dell", "lenovo", "hp", "apple", "asus", "acer", "msi", "samsung"]
         includes: List[str] = []
         excludes: List[str] = []
+        # Map common Apple product wording to brand intent so
+        # "macbook" queries don't drift toward unrelated Windows laptops.
+        if any(k in text for k in ("macbook", "mac book", "macbook air", "macbook pro")):
+            includes.append("apple")
         for b in known_brands:
             if b in text:
                 includes.append(b)
         for b in known_brands:
             if re.search(rf"(no|not|avoid|without)\s+{b}", text):
                 excludes.append(b)
+        # Preserve order while removing duplicates.
+        includes = list(dict.fromkeys(includes))
+        excludes = list(dict.fromkeys(excludes))
         return includes, excludes
 
     def _infer_intents(self, text: str, slots: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
@@ -875,7 +961,9 @@ class RecommendationService:
         if lifecycle_signal:
             entities["lifecycle_signal"] = lifecycle_signal
 
-        if any(w in text for w in ("it", "that", "same", "similar")):
+        # Use word-boundary matching so terms like "with" do not accidentally
+        # trigger follow-up carryover via the substring "it".
+        if re.search(r"\b(it|that|same|similar|these|those|previous|earlier)\b", text):
             if not entities.get("brands") and prior.get("brands"):
                 entities["brands"] = prior.get("brands")
             if not entities.get("specs") and prior.get("specs"):
@@ -960,6 +1048,8 @@ class RecommendationService:
         if budget_max is not None:
             constraints["budget_max"] = budget_max
         constraints["brands"] = brand_includes
+        if "apple" in [str(b).lower() for b in brand_includes]:
+            constraints["brand_intent_strict"] = True
         if brand_excludes:
             constraints["brand_excludes"] = brand_excludes
         if condition_slots.get("availability"):
@@ -1444,8 +1534,11 @@ class RecommendationService:
                     factors["positive"].append("+brand_match")
                     factors["weights"]["brand_match"] = 3.0
                 else:
+                    strict_brand_intent = bool(constraints.get("brand_intent_strict"))
+                    mismatch_penalty = -8.0 if strict_brand_intent else -1.0
+                    s += mismatch_penalty
                     factors["negative"].append("-brand_mismatch")
-                    factors["weights"]["brand_mismatch"] = -1.0
+                    factors["weights"]["brand_mismatch"] = mismatch_penalty
             if specs:
                 spec_text = json.dumps(c.get("specs") or {}, ensure_ascii=False).lower()
                 for spec in specs:

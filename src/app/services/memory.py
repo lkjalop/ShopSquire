@@ -11,6 +11,10 @@ SUMMARY_KEY = "session:{uid}:summary"
 KV_KEY = "session:{uid}:kv_state"
 RETRIEVAL_KEY = "session:{uid}:recent_retrieval"
 AGENT_STEPS_KEY = "session:{uid}:agent_steps"
+STRUCTURED_STATE_KEY = "session:{uid}:structured_state"
+PRODUCT_MEMORY_BANK_KEY = "session:{uid}:product_memory_bank"
+OBSERVATION_LOG_KEY = "session:{uid}:observation_log"
+OBSERVATION_SUMMARY_KEY = "session:{uid}:observation_summary"
 
 
 class Memory:
@@ -55,11 +59,13 @@ class Memory:
             pass
 
     def get_context(self, uid: str) -> Dict[str, Any]:
-        summary = kv = retrieval = None
+        summary = kv = retrieval = structured = product_bank = None
         try:
             summary = self.redis.get(SUMMARY_KEY.format(uid=uid))
             kv = self.redis.get(KV_KEY.format(uid=uid))
             retrieval = self.redis.get(RETRIEVAL_KEY.format(uid=uid))
+            structured = self.redis.get(STRUCTURED_STATE_KEY.format(uid=uid))
+            product_bank = self.redis.get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
         except Exception:
             pass
         if not summary:
@@ -68,10 +74,16 @@ class Memory:
             kv = self._local_get(KV_KEY.format(uid=uid))
         if not retrieval:
             retrieval = self._local_get(RETRIEVAL_KEY.format(uid=uid))
+        if not structured:
+            structured = self._local_get(STRUCTURED_STATE_KEY.format(uid=uid))
+        if not product_bank:
+            product_bank = self._local_get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
         return {
             "summary": json.loads(summary) if summary else None,
             "kv": json.loads(kv) if kv else None,
             "recent_retrieval": json.loads(retrieval) if retrieval else None,
+            "structured_state": json.loads(structured) if structured else None,
+            "product_memory_bank": json.loads(product_bank) if product_bank else None,
         }
 
     def touch_session(self, uid: str, ttl_seconds: int | None = None) -> None:
@@ -81,6 +93,8 @@ class Memory:
             KV_KEY.format(uid=uid),
             RETRIEVAL_KEY.format(uid=uid),
             AGENT_STEPS_KEY.format(uid=uid),
+            STRUCTURED_STATE_KEY.format(uid=uid),
+            PRODUCT_MEMORY_BANK_KEY.format(uid=uid),
         ]
         try:
             for key in keys:
@@ -144,6 +158,68 @@ class Memory:
         else:
             self._local_setex(RETRIEVAL_KEY.format(uid=uid), ttl, payload)
 
+    def set_structured_state(self, uid: str, state: Dict[str, Any], ttl_seconds: int | None = None) -> None:
+        try:
+            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
+            payload = json.dumps(state)
+            self.redis.setex(STRUCTURED_STATE_KEY.format(uid=uid), ttl, payload)
+        except Exception:
+            payload = json.dumps(state)
+            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
+            self._local_setex(STRUCTURED_STATE_KEY.format(uid=uid), ttl, payload)
+        else:
+            self._local_setex(STRUCTURED_STATE_KEY.format(uid=uid), ttl, payload)
+
+    def get_structured_state(self, uid: str) -> Dict[str, Any]:
+        try:
+            raw = self.redis.get(STRUCTURED_STATE_KEY.format(uid=uid))
+            if raw:
+                try:
+                    self.redis.expire(STRUCTURED_STATE_KEY.format(uid=uid), self.kv_ttl)
+                except Exception:
+                    pass
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            pass
+        raw = self._local_get(STRUCTURED_STATE_KEY.format(uid=uid))
+        try:
+            parsed = json.loads(raw) if raw else {}
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    def set_product_memory_bank(self, uid: str, bank: Dict[str, Any], ttl_seconds: int | None = None) -> None:
+        try:
+            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
+            payload = json.dumps(bank)
+            self.redis.setex(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), ttl, payload)
+        except Exception:
+            payload = json.dumps(bank)
+            ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
+            self._local_setex(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), ttl, payload)
+        else:
+            self._local_setex(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), ttl, payload)
+
+    def get_product_memory_bank(self, uid: str) -> Dict[str, Any]:
+        try:
+            raw = self.redis.get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
+            if raw:
+                try:
+                    self.redis.expire(PRODUCT_MEMORY_BANK_KEY.format(uid=uid), self.kv_ttl)
+                except Exception:
+                    pass
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            pass
+        raw = self._local_get(PRODUCT_MEMORY_BANK_KEY.format(uid=uid))
+        try:
+            parsed = json.loads(raw) if raw else {}
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
     def append_agent_step(self, uid: str, step: Dict[str, Any], ttl_seconds: int | None = None) -> None:
         try:
             # read existing list
@@ -182,3 +258,63 @@ class Memory:
                 return json.loads(raw_local) if raw_local else []
             except Exception:
                 return []
+
+    # ── Layer 2: Observation log (append-only event stream) ──
+
+    def append_observation(self, uid: str, observation: Dict[str, Any], ttl_seconds: int | None = None) -> None:
+        """Append a raw agent observation to the session's observation log."""
+        key = OBSERVATION_LOG_KEY.format(uid=uid)
+        ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
+        try:
+            raw = self.redis.get(key)
+            log = json.loads(raw) if raw else []
+        except Exception:
+            raw = self._local_get(key)
+            log = json.loads(raw) if raw else []
+        observation["ts"] = observation.get("ts") or time.time()
+        log.append(observation)
+        # Cap at 500 raw entries to bound memory
+        if len(log) > 500:
+            log = log[-500:]
+        payload = json.dumps(log)
+        try:
+            self.redis.setex(key, ttl, payload)
+        except Exception:
+            self._local_setex(key, ttl, payload)
+
+    def get_observation_log(self, uid: str) -> list:
+        """Retrieve the raw observation log for a session."""
+        key = OBSERVATION_LOG_KEY.format(uid=uid)
+        try:
+            raw = self.redis.get(key)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+        raw = self._local_get(key)
+        return json.loads(raw) if raw else []
+
+    def set_observation_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None) -> None:
+        """Store compressed observation summary (output of Reflector)."""
+        key = OBSERVATION_SUMMARY_KEY.format(uid=uid)
+        ttl = self.kv_ttl if ttl_seconds is None else ttl_seconds
+        payload = json.dumps(summary)
+        try:
+            self.redis.setex(key, ttl, payload)
+        except Exception:
+            self._local_setex(key, ttl, payload)
+
+    def get_observation_summary(self, uid: str) -> Dict[str, Any]:
+        """Retrieve compressed observation summary."""
+        key = OBSERVATION_SUMMARY_KEY.format(uid=uid)
+        try:
+            raw = self.redis.get(key)
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+        raw = self._local_get(key)
+        try:
+            return json.loads(raw) if raw else {}
+        except Exception:
+            return {}

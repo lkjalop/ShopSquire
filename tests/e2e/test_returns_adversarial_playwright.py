@@ -190,6 +190,7 @@ def test_adversarial_cv_upload_mixed_images_and_trace(live_stack):
     decision_id = None
     case_id = None
     ui_variant = "unknown"
+    ui_security_matrix_asserted = False
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -227,6 +228,19 @@ def test_adversarial_cv_upload_mixed_images_and_trace(live_stack):
                 verdict = _extract_field(cv_text, "Verdict:")
                 decision_id = _extract_field(cv_text, "Decision:")
                 case_id = _extract_field(cv_text, "Case:")
+                # Hard UI assertion: Decision Trace Security Matrix must show CV/security signals.
+                if decision_id:
+                    try:
+                        page.get_by_title("Decision Trace").click()
+                        page.get_by_role("button", name="Security Matrix").click()
+                        page.wait_for_timeout(1200)
+                        sec_text = page.content()
+                        assert "Signals" in sec_text
+                        assert ("qr_" in sec_text.lower()) or ("prompt_injection" in sec_text.lower())
+                        assert "MITRE:" in sec_text and "OWASP:" in sec_text
+                        ui_security_matrix_asserted = True
+                    except Exception:
+                        ui_security_matrix_asserted = False
             else:
                 # Some storefront variants expose chat without CV upload controls.
                 ui_variant = "chat_storefront_no_cv_panel"
@@ -249,12 +263,44 @@ def test_adversarial_cv_upload_mixed_images_and_trace(live_stack):
     assert verdict is not None and verdict != ""
     assert decision_id is not None and decision_id != ""
     assert case_id is not None and case_id != ""
+    if ui_variant == "chat_storefront":
+        assert ui_security_matrix_asserted, "UI Decision Trace Security Matrix did not expose CV/security tags"
 
     # Validate decision trace and evidence payloads from backend APIs.
     trace = _http_json("GET", f"/api/v1/decisions/{urllib.parse.quote(decision_id)}/query?include_events=true")
     events = trace.get("events") or []
     event_types = {str(e.get("event_type")) for e in events if isinstance(e, dict)}
-    assert "security_scan" in event_types or "policy_gate" in event_types
+    assert "security_scan" in event_types, f"security_scan event missing; got {sorted(list(event_types))}"
+    sec_events = [e for e in events if isinstance(e, dict) and str(e.get("event_type")) == "security_scan"]
+    sec_payload = (sec_events[-1] or {}).get("payload") if sec_events else {}
+    sec_payload = sec_payload if isinstance(sec_payload, dict) else {}
+    sec_details = sec_payload.get("security") if isinstance(sec_payload.get("security"), dict) else {}
+    if not sec_details and isinstance(sec_payload.get("details"), dict):
+        sec_details = sec_payload.get("details") or {}
+    cv_signals = sec_details.get("cv_signals") if isinstance(sec_details.get("cv_signals"), dict) else {}
+    if not cv_signals and isinstance(sec_payload.get("cv_signals"), dict):
+        cv_signals = sec_payload.get("cv_signals") or {}
+    has_qr_signal = any(
+        bool(cv_signals.get(k))
+        for k in (
+            "qr_code_detected",
+            "qr_prompt_injection",
+            "qr_external_url_detected",
+            "qr_url_present",
+            "qr_url_suspicious",
+        )
+    )
+    assert has_qr_signal, f"security_scan missing QR CV signals: {cv_signals}"
+    mitre_tags = []
+    owasp_tags = []
+    if isinstance(sec_details, dict):
+        mitre_tags = list(sec_details.get("mitre_atlas") or sec_details.get("mitre") or [])
+        owasp_tags = list(sec_details.get("owasp_llm_top10") or sec_details.get("owasp_llm") or [])
+    if not mitre_tags:
+        mitre_tags = list(sec_payload.get("mitre") or [])
+    if not owasp_tags:
+        owasp_tags = list(sec_payload.get("owasp") or sec_payload.get("owasp_llm") or [])
+    assert (mitre_tags or owasp_tags), "security_scan missing Security Matrix taxonomy tags (MITRE/OWASP)"
 
     case_status = _http_json("GET", f"/api/v1/support/complaints/{urllib.parse.quote(case_id)}/status")
     evidence = _http_json("GET", f"/api/v1/support/complaints/{urllib.parse.quote(case_id)}/evidence")

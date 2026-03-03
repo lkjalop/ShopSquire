@@ -21,6 +21,10 @@ from src.app.services.security_playbooks import select_cv_playbook
 from src.app.security.email_enrichment import enrich_iocs, detonate_targets
 from src.app.security.email_attachment_intel import analyze_email_artifacts
 from src.app.security.email_attachment_parser import hydrate_attachments_from_bytes
+from src.app.security.email_header_forensics import analyze_email_headers
+from src.app.security.mailbox_compromise import analyze_mailbox_compromise
+from src.app.security.phishing_page_detector import analyze_phishing_targets
+from src.app.security.bec_kill_chain import infer_bec_kill_chain
 from src.app.security.bimi_verifier import verify_bimi_provider_backed
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
@@ -663,6 +667,26 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         ocr_sanitization_meta = {"gate": "ocr_qr_sanitization", "blocked_qr_url_count": 0, "error": "ocr_sanitize_failed"}
 
     extracted = extract_indicators(email, tenant_id=tenant_id)
+    header_forensics = {}
+    try:
+        header_forensics = analyze_email_headers(email)
+        h_risk = float(header_forensics.get("risk_score") or 0.0)
+        h_inds = []
+        if bool(header_forensics.get("timing_anomaly")):
+            h_inds.append({"type": "received_chain_timing_anomaly", "value": True, "reason": "Received chain timestamp ordering anomaly"})
+        if bool(header_forensics.get("header_injection_detected")):
+            h_inds.append({"type": "header_injection_detected", "value": True, "reason": "CRLF/null/oversized header anomaly"})
+        if bool(header_forensics.get("message_id_reuse")):
+            h_inds.append({"type": "message_id_reuse_detected", "value": True, "reason": "Message-ID replay/reuse detected"})
+        if bool(header_forensics.get("message_id_domain_mismatch")):
+            h_inds.append({"type": "message_id_domain_mismatch", "value": True, "reason": "Message-ID domain differs from From domain"})
+        if h_risk >= float((thr or {}).get("HEADER_FORENSICS_WARN_THRESHOLD", 0.45)):
+            h_inds.append({"type": "header_forensics_risk", "value": h_risk, "reason": f"Header forensics risk {h_risk:.2f}"})
+        if h_inds:
+            extracted["indicators"] = list(extracted.get("indicators") or []) + h_inds
+        extracted.setdefault("meta", {})["header_forensics"] = header_forensics
+    except Exception:
+        header_forensics = {}
     try:
         extra_inds = []
         if bool((ingest_gate_meta or {}).get("blocked")):
@@ -713,6 +737,19 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 pass
     except Exception:
         artifact_intel = {}
+    mailbox_compromise = {}
+    try:
+        mailbox_compromise = analyze_mailbox_compromise(email)
+        mc_inds = list((mailbox_compromise or {}).get("indicators") or [])
+        if mc_inds:
+            extracted["indicators"] = list(extracted.get("indicators") or []) + mc_inds
+        extracted.setdefault("meta", {})["mailbox_compromise"] = {
+            "risk_score": float((mailbox_compromise or {}).get("risk_score") or 0.0),
+            "compromised": bool((mailbox_compromise or {}).get("compromised")),
+            "signal_count": int((mailbox_compromise or {}).get("signal_count") or 0),
+        }
+    except Exception:
+        mailbox_compromise = {}
     trust = {}
     try:
         trust = score_sender_trust(email, extracted, tenant_id)
@@ -730,6 +767,54 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "type": "vendor_confidence_low",
                     "value": trust.get("vendor_relationship_confidence"),
                     "reason": "Vendor relationship confidence below threshold",
+                }
+            )
+        # §5: Require sender-domain aging before any payment-instruction bypass.
+        # If bank-change/payment indicators exist and domain trust age < 30d, force HITL.
+        try:
+            min_age = int((thr or {}).get("PAYMENT_BYPASS_MIN_DOMAIN_AGE_DAYS", 30) or 30)
+        except Exception:
+            min_age = 30
+        try:
+            age_days = int((trust or {}).get("domain_age_days") or 0)
+        except Exception:
+            age_days = 0
+        body_text = str(email.get("body") or "").lower()
+        has_payment_token = any(
+            tok in body_text
+            for tok in (
+                "bank account",
+                "beneficiary",
+                "wire transfer",
+                "remit",
+                "payment",
+                "invoice",
+            )
+        )
+        # Avoid false positives on explicit negation phrases such as
+        # "no payment changes" / "no remittance changes".
+        has_payment_negation = bool(
+            re.search(
+                r"(?i)\b(?:no|not|without)\b.{0,24}\b(?:payment|remittance|bank(?:ing)?\s+details?|invoice)\b",
+                body_text,
+            )
+            or re.search(
+                r"(?i)\b(?:payment|remittance|bank(?:ing)?\s+details?|invoice)\b.{0,24}\b(?:no|not|without)\b",
+                body_text,
+            )
+        )
+        payment_instruction = bool(has_payment_token and not has_payment_negation)
+        bank_change_flag = bool(
+            str(email.get("bank_fingerprint") or "")
+            and str(email.get("proposed_bank_fingerprint") or "")
+            and str(email.get("bank_fingerprint") or "") != str(email.get("proposed_bank_fingerprint") or "")
+        )
+        if (payment_instruction or bank_change_flag) and age_days < min_age:
+            indicators.append(
+                {
+                    "type": "domain_age_insufficient_for_payment_instruction",
+                    "value": age_days,
+                    "reason": f"Sender domain trust age {age_days}d < required {min_age}d for payment instruction bypass",
                 }
             )
         extracted["indicators"] = indicators
@@ -758,6 +843,10 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     dmarc_result = str(email.get("dmarc_result") or "").lower()
     dmarc_policy = str(email.get("dmarc_policy") or "").lower()
     v = compute_verdict(email, extracted, dmarc_fail=dmarc_fail)
+    try:
+        h_risk = float((header_forensics or {}).get("risk_score") or 0.0)
+    except Exception:
+        h_risk = 0.0
     # IOC confidence + conflict resolution thresholds
     ioc_cfg = (thr or {}) if isinstance(thr, dict) else {}
     ioc_quality = _ioc_quality(
@@ -791,11 +880,48 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 + [str(x) for x in ((ingest_gate_meta or {}).get("global_reasons") or [])]
             )
         )
-    if int((ocr_sanitization_meta or {}).get("blocked_qr_url_count") or 0) > 0 and v.get("route") != "security_review":
+    # Header forensics can escalate suspicious sender/header tampering patterns.
+    try:
+        hdr_warn = float((thr or {}).get("HEADER_FORENSICS_WARN_THRESHOLD", 0.45))
+        hdr_err = float((thr or {}).get("HEADER_FORENSICS_ERROR_THRESHOLD", 0.75))
+    except Exception:
+        hdr_warn, hdr_err = 0.45, 0.75
+    if h_risk >= hdr_err:
+        v["severity"] = "error"
+        v["route"] = "security_review"
+        v["verdict_action"] = "security_review"
+        v["escalation"] = "security_middleware"
+        v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["header_forensics_high_risk"]))
+    elif h_risk >= hdr_warn and v.get("route") == "auto_resolve":
         v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
         v["route"] = "human_review"
         v["verdict_action"] = "quarantine"
         v["escalation"] = "human_review"
+        v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["header_forensics_review"]))
+    try:
+        mc_risk = float((mailbox_compromise or {}).get("risk_score") or 0.0)
+        mc_warn = float((thr or {}).get("MAILBOX_COMPROMISE_WARN_THRESHOLD", 0.45))
+        mc_err = float((thr or {}).get("MAILBOX_COMPROMISE_ERROR_THRESHOLD", 0.7))
+        if bool((mailbox_compromise or {}).get("compromised")) or mc_risk >= mc_err:
+            v["severity"] = "error"
+            v["route"] = "security_review"
+            v["verdict_action"] = "security_review"
+            v["escalation"] = "security_middleware"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["mailbox_compromise_high_risk"]))
+        elif mc_risk >= mc_warn and v.get("route") == "auto_resolve":
+            v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+            v["route"] = "human_review"
+            v["verdict_action"] = "quarantine"
+            v["escalation"] = "human_review"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["mailbox_compromise_review"]))
+    except Exception:
+        pass
+    if int((ocr_sanitization_meta or {}).get("blocked_qr_url_count") or 0) > 0:
+        if v.get("route") != "security_review":
+            v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+            v["route"] = "human_review"
+            v["verdict_action"] = "quarantine"
+            v["escalation"] = "human_review"
         v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["qr_url_not_allowlisted"]))
     # Enforce auth-verdict gate: when sender policy is quarantine/reject and alignment fails, force security review.
     if (dmarc_result in ("fail", "reject", "quarantine") or dmarc_fail) and dmarc_policy in ("reject", "p=reject", "quarantine", "p=quarantine"):
@@ -833,6 +959,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             "dmarc_fail": bool(dmarc_fail),
         }
         v["evidence_snapshot"]["ioc_quality"] = ioc_quality
+        v["evidence_snapshot"]["header_forensics"] = header_forensics or {}
+        v["evidence_snapshot"]["mailbox_compromise"] = mailbox_compromise or {}
         try:
             v["evidence_snapshot"]["artifact_intel"] = {
                 "parsed_fields": (artifact_intel.get("parsed_fields") if isinstance(artifact_intel, dict) else {}) or {},
@@ -977,6 +1105,30 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             v["evidence_snapshot"]["sender_trust"] = trust
     except Exception:
         pass
+    phishing_page_stage = {}
+    try:
+        urls = [str(x.get("value") or "") for x in (v.get("iocs") or []) if str(x.get("type") or "") == "url" and x.get("value")]
+        phishing_page_stage = analyze_phishing_targets(urls, enrichment=enrichment, detonation=detonation, tenant_id=tenant_id)
+        p_inds = list((phishing_page_stage or {}).get("indicators") or [])
+        if p_inds:
+            v["indicators"] = list(v.get("indicators") or []) + p_inds
+            max_prisk = float((phishing_page_stage or {}).get("max_risk_score") or 0.0)
+            if max_prisk >= 0.85:
+                v["severity"] = "error"
+                v["route"] = "security_review"
+                v["verdict_action"] = "security_review"
+                v["escalation"] = "security_middleware"
+                v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["phishing_landing_page_high_risk"]))
+            elif v.get("route") == "auto_resolve":
+                v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+                v["route"] = "human_review"
+                v["verdict_action"] = "quarantine"
+                v["escalation"] = "human_review"
+                v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["phishing_landing_page_review"]))
+        if isinstance(v.get("evidence_snapshot"), dict):
+            v["evidence_snapshot"]["phishing_page_stage"] = phishing_page_stage or {}
+    except Exception:
+        phishing_page_stage = {}
 
     # Trust-score fusion: sender trust + IOC + sandbox + ingest controls -> progressive access policy.
     trust_case = None
@@ -1096,6 +1248,17 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             v["evidence_snapshot"]["ocr_qr_sanitization"] = ocr_sanitization_meta
     except Exception:
         pass
+    try:
+        bec_kill_chain = infer_bec_kill_chain(email, v)
+    except Exception:
+        bec_kill_chain = {"stage": "Reconnaissance", "stages": ["Reconnaissance"], "attack_flow": ["Reconnaissance"], "confidence": 0.3, "signal_count": 0}
+    try:
+        v["bec_kill_chain"] = bec_kill_chain
+        v["bec_kill_chain_stage"] = bec_kill_chain.get("stage")
+        if isinstance(v.get("evidence_snapshot"), dict):
+            v["evidence_snapshot"]["bec_kill_chain"] = bec_kill_chain
+    except Exception:
+        pass
     # Metrics: verdict
     try:
         from src.app.observability.metrics import record_email_security_verdict
@@ -1131,11 +1294,14 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         "enrichment": v.get("enrichment"),
         "detonation": v.get("detonation"),
         "sandbox_ioc_stage": sandbox_ioc,
+        "phishing_page_stage": phishing_page_stage,
         "llm_assist": llm_assist,
         "sender_trust": trust,
         "trust_case": trust_case,
         "access_policy": access_policy,
         "threat_correlation": threat,
+        "mailbox_compromise": mailbox_compromise,
+        "bec_kill_chain": bec_kill_chain,
     }
     try:
         telemetry_emit(evt, severity=v["severity"], sourcetype="shopsquire:security")
@@ -1259,6 +1425,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "ocr_qr_sanitization": ocr_sanitization_meta,
                 "sandbox_ioc_stage": sandbox_ioc,
                 "trust_case": trust_case,
+                "mailbox_compromise": mailbox_compromise,
+                "phishing_page_stage": phishing_page_stage,
+                "bec_kill_chain": bec_kill_chain,
             },
             proposed_action={
                 "severity": v.get("severity"),
@@ -1310,6 +1479,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "sandbox_ioc_stage": sandbox_ioc,
                     "trust_case": trust_case,
                     "access_policy": access_policy,
+                    "mailbox_compromise": mailbox_compromise,
+                    "phishing_page_stage": phishing_page_stage,
+                    "bec_kill_chain": bec_kill_chain,
                 },
             )
             log_trace_event(
@@ -1355,6 +1527,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "trust_case": trust_case or {},
                     "access_policy": access_policy or {},
                     "sandbox_ioc_stage": sandbox_ioc or {},
+                    "mailbox_compromise": mailbox_compromise or {},
+                    "phishing_page_stage": phishing_page_stage or {},
                 },
             )
             if v.get("fuzzy_signals", {}).get("canary_triggered"):
@@ -1375,6 +1549,15 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 target_type="security",
                 target_id=None,
                 payload=v.get("threat_correlation") or {},
+            )
+            log_trace_event(
+                trace_id=decision_id,
+                event_type="bec_kill_chain",
+                source_type="agent",
+                source_id="BEC_KillChain_Agent",
+                target_type="security",
+                target_id=None,
+                payload=bec_kill_chain or {},
             )
             if v.get("route") == "security_review":
                 log_trace_event(

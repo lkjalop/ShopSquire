@@ -1,0 +1,9 @@
+{
+  "primary_region": "us-east-1",
+  "regions": [
+    { "id": "us-east-1", "role": "primary", "active": true },
+    { "id": "us-west-2", "role": "replica", "active": false }
+  ],
+  "data_residency_mode": "single_region",
+  "replication_mode": "none"
+}

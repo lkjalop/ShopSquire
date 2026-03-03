@@ -1,0 +1,95 @@
+{
+  "buyer": [
+    {
+      "query": "How long do refunds take after return approval?",
+      "faq_question": "How long do refunds take?",
+      "faq_score": 5.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "Can I return a broken laptop after 20 days?",
+      "faq_question": "How do I start a return?",
+      "faq_score": 4.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "Where is my order and tracking link?",
+      "faq_question": "Where is my order?",
+      "faq_score": 6.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "Do you price match competitors?",
+      "faq_question": "Do you price match?",
+      "faq_score": 6.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "How do I register warranty for my laptop?",
+      "faq_question": "How do I register a warranty?",
+      "faq_score": 7.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "Can I upload photos for a refund claim?",
+      "faq_question": "Can I upload photos for a refund request?",
+      "faq_score": 8.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    }
+  ],
+  "admin": [
+    {
+      "query": "Show monthly sales trend for last 6 months",
+      "faq_question": "Do you charge sales tax?",
+      "faq_score": 1.0,
+      "nlp_intent": "product_search",
+      "nlp_confidence": 1.0
+    },
+    {
+      "query": "Which supplier has worst defect rate this month?",
+      "faq_question": null,
+      "faq_score": 0.0,
+      "nlp_intent": "product_search",
+      "nlp_confidence": 1.0
+    },
+    {
+      "query": "What are top 5 SKUs by margin decline?",
+      "faq_question": "What are your support hours?",
+      "faq_score": 2.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "How many security incidents were phishing vs prompt injection this week?",
+      "faq_question": "How do I report fraud?",
+      "faq_score": 2.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "Can I get CLV and churn by cohort?",
+      "faq_question": "Can I exchange my item?",
+      "faq_score": 2.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    },
+    {
+      "query": "What is decision autonomy trend and human review rate?",
+      "faq_question": "What is a decision trace?",
+      "faq_score": 4.0,
+      "nlp_intent": "multi_intent_query",
+      "nlp_confidence": 0.75
+    }
+  ],
+  "summary": {
+    "buyer_hit_ratio": 1.0,
+    "admin_hit_ratio": 0.6667,
+    "conclusion": "Current FAQ handles buyer/support intents reasonably; admin BI natural-language coverage is weak and should route to BI intent + SQL tools."
+  }
+}

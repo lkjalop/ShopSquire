@@ -22,6 +22,7 @@ from src.app.services.posthoc_labeling import record_outcome
 from src.app.services.decision_log import log_trace_event
 from src.app.security.threshold_tuning import recompute_thresholds_from_corrections
 from src.app.security.threat_intel_store import list_indicators, upsert_indicator
+from src.app.services.decision_replay import replay_decision
 from src.app.services.ml_decision_gate import score_with_learned_model, gate_decision
 from src.app.services.ml_decision_gate_training import train_gate_from_db, save_gate_artifact
 
@@ -1424,12 +1425,15 @@ def ml_gate_retrain(
     limit = int(payload.get("limit") or 8000)
     min_samples = int(payload.get("min_samples") or 40)
     min_tenant_samples = int(payload.get("min_tenant_samples") or 25)
+    model_kind = str(payload.get("model_kind") or "auto")
     output_path = str(payload.get("output_path") or "config/ml_decision_gate_model.json")
     out = train_gate_from_db(
         tenant_id=str(tenant_id) if tenant_id is not None else None,
         limit=max(200, limit),
         min_samples=max(10, min_samples),
         min_tenant_samples=max(10, min_tenant_samples),
+        model_kind=model_kind,
+        model_output_path=output_path,
     )
     run_id = f"mlr-{uuid.uuid4().hex}"
     artifact_path = None
@@ -1505,6 +1509,7 @@ def ml_gate_retrain(
     return {
         "run_id": run_id,
         "updated": bool(out.get("updated")),
+        "model_kind": model_kind,
         "artifact_path": artifact_path,
         "artifact_checksum": artifact_checksum,
         "result": out,
@@ -1665,6 +1670,10 @@ def get_investigation(
     trust_case = (evidence or {}).get("trust_case") if isinstance(evidence, dict) else {}
     access_policy = (evidence or {}).get("access_policy") if isinstance(evidence, dict) else {}
     sandbox_ioc_stage = (evidence or {}).get("sandbox_ioc_stage") if isinstance(evidence, dict) else {}
+    header_forensics = (evidence or {}).get("header_forensics") if isinstance(evidence, dict) else {}
+    mailbox_compromise = (evidence or {}).get("mailbox_compromise") if isinstance(evidence, dict) else {}
+    phishing_page_stage = (evidence or {}).get("phishing_page_stage") if isinstance(evidence, dict) else {}
+    bec_kill_chain = (evidence or {}).get("bec_kill_chain") if isinstance(evidence, dict) else {}
     timeline: List[Dict[str, Any]] = []
     if trace_id:
         try:
@@ -1748,6 +1757,10 @@ def get_investigation(
         "trust_case": trust_case or {},
         "access_policy": access_policy or {},
         "sandbox_ioc_stage": sandbox_ioc_stage or {},
+        "header_forensics": header_forensics or {},
+        "mailbox_compromise": mailbox_compromise or {},
+        "phishing_page_stage": phishing_page_stage or {},
+        "bec_kill_chain": bec_kill_chain or {},
         "top_signal_contributions": list((score_breakdown or {}).get("contributions") or [])[:10],
     }
     type_counts: Dict[str, int] = {}
@@ -1782,10 +1795,104 @@ def get_investigation(
         "trust_case": trust_case or {},
         "access_policy": access_policy or {},
         "sandbox_ioc_stage": sandbox_ioc_stage or {},
+        "header_forensics": header_forensics or {},
+        "mailbox_compromise": mailbox_compromise or {},
+        "phishing_page_stage": phishing_page_stage or {},
+        "bec_kill_chain": bec_kill_chain or {},
         "explain": explain,
         "recommended_actions": recommended_actions,
         "actions": actions,
         "feedback": feedback,
+    }
+
+
+@router.post("/replay_lab/run")
+def replay_lab_run(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    tenant_id = str(payload.get("tenant_id") or "").strip() or None
+    incident_ids = [str(x).strip() for x in (payload.get("incident_ids") or []) if str(x or "").strip()][:100]
+    decision_ids = [str(x).strip() for x in (payload.get("decision_ids") or []) if str(x or "").strip()][:200]
+    if incident_ids:
+        binds = {f"id{i}": incident_ids[i] for i in range(len(incident_ids))}
+        placeholders = ", ".join([f":id{i}" for i in range(len(incident_ids))])
+        try:
+            with db_session() as db:
+                rows = db.execute(
+                    text(
+                        f"""
+                        SELECT id, decision_id, trace_id, evidence_json
+                        FROM email_security_incidents
+                        WHERE id IN ({placeholders})
+                          AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                        """
+                    ),
+                    {**binds, "tenant_id": tenant_id},
+                ).fetchall()
+            for r in rows or []:
+                ev = _json_load(r[3], {})
+                d = str(r[1] or r[2] or (ev.get("decision_id") if isinstance(ev, dict) else "") or (ev.get("trace_id") if isinstance(ev, dict) else "") or "").strip()
+                if d:
+                    decision_ids.append(d)
+        except Exception:
+            try:
+                with db_session() as db:
+                    rows = db.execute(
+                        text(
+                            f"""
+                            SELECT id, evidence_json
+                            FROM email_security_incidents
+                            WHERE id IN ({placeholders})
+                              AND (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                            """
+                        ),
+                        {**binds, "tenant_id": tenant_id},
+                    ).fetchall()
+                for r in rows or []:
+                    ev = _json_load(r[1], {})
+                    d = str((ev.get("decision_id") if isinstance(ev, dict) else "") or (ev.get("trace_id") if isinstance(ev, dict) else "") or "").strip()
+                    if d:
+                        decision_ids.append(d)
+            except Exception:
+                pass
+    unique_ids: List[str] = []
+    seen: set[str] = set()
+    for d in decision_ids:
+        if d and d not in seen:
+            seen.add(d)
+            unique_ids.append(d)
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail="incident_ids_or_decision_ids_required")
+
+    results: List[Dict[str, Any]] = []
+    policy_verdict_counts: Dict[str, int] = {}
+    changed = 0
+    for did in unique_ids[:200]:
+        rep = replay_decision(did)
+        if not rep.get("available"):
+            continue
+        drift = rep.get("drift") or {}
+        if bool(drift.get("changed")):
+            changed += 1
+        pv = str(drift.get("new_policy_verdict") or "unknown")
+        policy_verdict_counts[pv] = int(policy_verdict_counts.get(pv, 0)) + 1
+        results.append(
+            {
+                "decision_id": rep.get("decision_id"),
+                "agent_name": rep.get("agent_name"),
+                "valid_from": rep.get("valid_from"),
+                "drift": drift,
+            }
+        )
+
+    evaluated = len(results)
+    return {
+        "evaluated": evaluated,
+        "changed_count": int(changed),
+        "changed_rate": round(float(changed) / float(max(1, evaluated)), 4),
+        "policy_verdict_counts": policy_verdict_counts,
+        "results": results,
     }
 
 

@@ -12,7 +12,8 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, R
 from src.app.safety.policies import get_policy, apply_post_policy
 from src.app.safety.redaction import redact_payload
 from src.app.services.faq_bank import match_faq
-from src.app.security.model_theft import enforce_model_theft_rate_limit
+from src.app.services.faq_v2 import semantic_match_faq
+from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
 
 
 router = APIRouter(prefix="/api/v1/support", tags=["support"])
@@ -20,6 +21,13 @@ tracer = get_tracer("support-router")
 
 
 def _answer_from_faq(question: str) -> Dict:
+    item2, score2, _intent = semantic_match_faq(question or "", role="buyer")
+    if item2 and score2 >= 0.2:
+        return {
+            "answer": str(item2.get("a") or ""),
+            "source": "faq_v2",
+            "confidence": float(score2),
+        }
     item, score = match_faq(question or "")
     if item and score >= 1.0:
         return {
@@ -57,6 +65,14 @@ def _answer_from_faq(question: str) -> Dict:
 def answer(question: str, request: Request, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("support.answer") as span:
         span.set_attribute("support.question_len", len(question or ""))
+        gate_ok, gate_reason = enforce_model_theft_policy_gate(
+            query=question,
+            uid=None,
+            source_ip=(request.client.host if request and request.client else None),
+            api_key_id=(request.headers.get("x-api-key") if request else None),
+        )
+        if not gate_ok:
+            raise HTTPException(status_code=429, detail={"message": "model_theft_policy_gate", "reason": gate_reason})
         allow_model, reason = enforce_model_theft_rate_limit(
             redis_client=redis,
             uid=None,

@@ -26,6 +26,9 @@ class UpsellCandidate:
     tags: list[str]
     reasons: list[str]
     factors: dict[str, float]
+    reason_codes: list[dict[str, Any]]
+    confidence: float
+    model_source: str
 
 
 def ensure_recommend_interactions_table(db) -> None:
@@ -289,11 +292,173 @@ def _lifecycle_profile(db, uid_hash: str | None) -> dict[str, Any]:
     return {"segment": seg, "orders": orders, "ltv_cents": ltv_cents}
 
 
-def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_hash: str | None = None) -> list[dict]:
+_UPSELL_REASON_LABELS: dict[str, str] = {
+    "bundle_affinity": "Frequently paired with your cart",
+    "frequently_bought_together": "Frequently bought together",
+    "margin_guardrail": "Healthy margin within policy guardrails",
+    "low_return_risk": "Historically low return risk",
+    "inventory_pressure": "Inventory pressure favors this add-on",
+}
+
+_UPSELL_REASON_BASE_WEIGHTS: dict[str, float] = {
+    "bundle_affinity": 0.34,
+    "frequently_bought_together": 0.28,
+    "margin_guardrail": 0.16,
+    "low_return_risk": 0.12,
+    "inventory_pressure": 0.10,
+}
+
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    d = float(denominator or 0.0)
+    if d <= 0.0:
+        return 0.0
+    return float(numerator or 0.0) / d
+
+
+def _bounded01(value: float) -> float:
+    v = float(value or 0.0)
+    return max(0.0, min(1.0, v))
+
+
+def _estimate_return_risk(interactions_for_sku: dict[str, int]) -> float:
+    refunds = float(interactions_for_sku.get("refund", 0) + interactions_for_sku.get("return", 0))
+    accepts = float(
+        interactions_for_sku.get("add_to_cart", 0)
+        + interactions_for_sku.get("atc", 0)
+        + interactions_for_sku.get("cart_add", 0)
+    )
+    views = float(interactions_for_sku.get("view", 0) + interactions_for_sku.get("click", 0))
+    base = _safe_ratio(refunds + 1.0, accepts + views + 4.0)
+    return _bounded01(base)
+
+
+def _estimate_margin_guardrail(price_cents: int) -> float:
+    # We use a conservative synthetic margin proxy until true COGS joins are wired.
+    price = max(0, int(price_cents or 0))
+    if price <= 0:
+        return 0.0
+    if price < 1500:
+        return 0.74
+    if price < 5000:
+        return 0.66
+    if price < 20000:
+        return 0.58
+    return 0.46
+
+
+def _build_reason_code_breakdown(
+    *,
+    co_purchase: float,
+    trend: float,
+    margin_guardrail: float,
+    low_return_risk: float,
+    stock_confidence: float,
+) -> list[dict[str, Any]]:
+    signal_strength = {
+        "bundle_affinity": _bounded01(co_purchase / 3.0),
+        "frequently_bought_together": _bounded01((co_purchase / 2.5) * 0.7 + ((trend - 1.0) / 1.2) * 0.3),
+        "margin_guardrail": _bounded01(margin_guardrail),
+        "low_return_risk": _bounded01(low_return_risk),
+        "inventory_pressure": _bounded01(1.0 - stock_confidence),
+    }
+    breakdown = []
+    for code, base_weight in _UPSELL_REASON_BASE_WEIGHTS.items():
+        conf = _bounded01(signal_strength.get(code, 0.0))
+        weighted = round(base_weight * conf, 4)
+        breakdown.append(
+            {
+                "code": code,
+                "label": _UPSELL_REASON_LABELS.get(code, code.replace("_", " ")),
+                "weight": round(base_weight, 4),
+                "confidence": round(conf, 4),
+                "weighted_score": weighted,
+            }
+        )
+    breakdown.sort(key=lambda item: float(item.get("weighted_score") or 0.0), reverse=True)
+    return breakdown
+
+
+def _train_and_score_conversion_model(
+    *,
+    candidates: list[dict[str, Any]],
+    interactions: dict[str, dict[str, int]],
+) -> tuple[dict[str, float], str]:
+    if not candidates:
+        return ({}, "none")
+    rows: list[tuple[list[float], float, str]] = []
+    for c in candidates:
+        sku = str(c.get("sku") or "")
+        if not sku:
+            continue
+        ints = interactions.get(sku, {})
+        pos = float(ints.get("add_to_cart", 0) + ints.get("atc", 0) + ints.get("cart_add", 0) + ints.get("click", 0))
+        neg = float(ints.get("view", 0) + ints.get("hover", 0) + ints.get("dismiss", 0))
+        target = _bounded01((pos + 1.0) / (pos + neg + 2.0))
+        x = [
+            float(c.get("co_purchase") or 0.0),
+            float(c.get("trend") or 0.0),
+            float(c.get("intent") or 0.0),
+            float(c.get("affordability") or 0.0),
+            float(c.get("stock_confidence") or 0.0),
+            float(c.get("lifecycle_boost") or 0.0),
+            float(c.get("margin_guardrail") or 0.0),
+            float(c.get("low_return_risk") or 0.0),
+            float(c.get("inventory_pressure") or 0.0),
+        ]
+        rows.append((x, target, sku))
+    if len(rows) < 6:
+        # Not enough supervised signal yet; fallback to weighted heuristics.
+        return ({sku: float(t) for _, t, sku in rows}, "heuristic_bootstrap")
+    try:
+        import lightgbm as lgb  # type: ignore
+    except Exception:
+        return ({sku: float(t) for _, t, sku in rows}, "heuristic_no_lightgbm")
+    try:
+        x_train = [x for x, _, _ in rows]
+        y_train = [y for _, y, _ in rows]
+        train = lgb.Dataset(x_train, label=y_train)
+        params = {
+            "objective": "regression",
+            "metric": "l2",
+            "learning_rate": 0.08,
+            "num_leaves": 24,
+            "feature_fraction": 0.9,
+            "bagging_fraction": 0.9,
+            "bagging_freq": 1,
+            "verbosity": -1,
+        }
+        model = lgb.train(params, train, num_boost_round=40)
+        preds = model.predict(x_train)
+        out: dict[str, float] = {}
+        for (_, _, sku), pred in zip(rows, preds):
+            out[sku] = _bounded01(float(pred))
+        return (out, "lightgbm_conversion_v1")
+    except Exception:
+        return ({sku: float(t) for _, t, sku in rows}, "heuristic_training_fallback")
+
+
+def recommend_checkout_upsell(
+    db,
+    *,
+    cart_skus: list[str],
+    limit: int = 3,
+    uid_hash: str | None = None,
+    use_case: str | None = None,
+) -> list[dict]:
     clean_cart = [str(s).strip() for s in (cart_skus or []) if str(s).strip()]
     cart_set = set(clean_cart)
     if not cart_set:
         return []
+
+    # Load use-case accessory affinities (pure config lookup, no I/O risk)
+    affinity_slugs: list[str] = []
+    try:
+        from src.app.services.use_case_advisor import get_accessory_affinities
+        affinity_slugs = get_accessory_affinities(use_case)
+    except Exception:
+        affinity_slugs = []
+    affinity_set = set(affinity_slugs)
 
     products = _product_catalog(db)
     if not products:
@@ -306,6 +471,7 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
     lifecycle = _lifecycle_profile(db, uid_hash)
 
     cart_price = sum(int((by_sku.get(s) or {}).get("price_cents") or 0) for s in cart_set)
+    feature_rows: list[dict[str, Any]] = []
     candidates: list[UpsellCandidate] = []
     for p in products:
         sku = p["sku"]
@@ -330,6 +496,10 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
         intent = clicks * 0.35 + hovers * 0.08
         affordability = 1.0 if cart_price <= 0 else max(0.0, 1.0 - (price / float(max(1, cart_price))))
         stock_conf = _stock_confidence(int(p.get("stock") or 0), recent)
+        margin_guardrail = _estimate_margin_guardrail(price)
+        return_risk = _estimate_return_risk(ints)
+        low_return_risk = _bounded01(1.0 - return_risk)
+        inventory_pressure = _bounded01(1.0 - stock_conf)
         lifecycle_boost = 0.0
         if lifecycle.get("segment") == "new_user":
             lifecycle_boost = 0.25 if affordability >= 0.5 else 0.0
@@ -337,7 +507,27 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
             lifecycle_boost = 0.2 if co >= 1.5 else 0.0
         elif lifecycle.get("segment") == "high_ltv":
             lifecycle_boost = 0.22 if trend >= 1.1 else 0.0
-        score = co * 2.2 + trend * 0.9 + intent * 0.35 + affordability * 0.8 + stock_conf * 0.6 + lifecycle_boost
+        # Affinity boost: use-case accessories match gives a small positive nudge
+        affinity_boost = 0.0
+        if affinity_set:
+            specs_dict = p.get("specs") or {}
+            if isinstance(specs_dict, str):
+                try:
+                    specs_dict = json.loads(specs_dict)
+                except Exception:
+                    specs_dict = {}
+            cat_tags = {
+                str(t).lower().replace(" ", "_")
+                for t in (
+                    [str(specs_dict.get("category") or "")]
+                    + list(specs_dict.get("tags") or [])
+                    + [str(p.get("category") or "")]
+                )
+                if t
+            }
+            if cat_tags & affinity_set:
+                affinity_boost = 0.30
+        score = co * 2.2 + trend * 0.9 + intent * 0.35 + affordability * 0.8 + stock_conf * 0.6 + lifecycle_boost + affinity_boost
         factors = {
             "co_purchase": round(co, 4),
             "trend": round(trend, 4),
@@ -345,10 +535,28 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
             "affordability": round(affordability, 4),
             "stock_confidence": round(stock_conf, 4),
             "lifecycle_boost": round(lifecycle_boost, 4),
+            "affinity_boost": round(affinity_boost, 4),
+            "margin_guardrail": round(margin_guardrail, 4),
+            "low_return_risk": round(low_return_risk, 4),
+            "inventory_pressure": round(inventory_pressure, 4),
         }
         poisoned, poison_reason = _looks_poisoned(name, sku, factors, ints, recent)
         if poisoned:
             continue
+        feature_rows.append(
+            {
+                "sku": sku,
+                "co_purchase": co,
+                "trend": trend,
+                "intent": intent,
+                "affordability": affordability,
+                "stock_confidence": stock_conf,
+                "lifecycle_boost": lifecycle_boost,
+                "margin_guardrail": margin_guardrail,
+                "low_return_risk": low_return_risk,
+                "inventory_pressure": inventory_pressure,
+            }
+        )
 
         tags: list[str] = []
         reasons: list[str] = []
@@ -367,6 +575,9 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
         if stock_conf >= 0.75:
             tags.append("stock_confident")
             reasons.append("Inventory coverage is stable for current demand")
+        if affinity_boost > 0.0:
+            tags.append("use_case_affinity")
+            reasons.append("Matches recommended accessories for your use-case")
         if lifecycle.get("segment") == "new_user" and affordability >= 0.5:
             tags.append("lifecycle_new_user_fit")
             reasons.append("Priced for first-time buyer conversion")
@@ -382,6 +593,14 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
         if poison_reason:
             tags.append("poison_guard")
             reasons.append(f"Poison guard activated: {poison_reason}")
+        reason_codes = _build_reason_code_breakdown(
+            co_purchase=co,
+            trend=trend,
+            margin_guardrail=margin_guardrail,
+            low_return_risk=low_return_risk,
+            stock_confidence=stock_conf,
+        )
+        confidence = round(sum(float(x.get("confidence") or 0.0) for x in reason_codes[:3]) / 3.0, 4)
 
         candidates.append(
             UpsellCandidate(
@@ -393,10 +612,35 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
                 tags=tags[:4],
                 reasons=reasons[:4],
                 factors=factors,
+                reason_codes=reason_codes[:5],
+                confidence=confidence,
+                model_source="rules_heuristic",
             )
         )
 
-    ranked = sorted(candidates, key=lambda c: c.score, reverse=True)[: max(1, int(limit))]
+    conversion_scores, model_source = _train_and_score_conversion_model(candidates=feature_rows, interactions=interactions)
+    rescored: list[UpsellCandidate] = []
+    for c in candidates:
+        conv = float(conversion_scores.get(c.sku, 0.0))
+        # Rule-first hard constraints already filtered candidates; model only reorders survivors.
+        final = (c.score * 0.72) + (conv * 2.1)
+        rescored.append(
+            UpsellCandidate(
+                sku=c.sku,
+                name=c.name,
+                price_cents=c.price_cents,
+                stock=c.stock,
+                score=round(final, 4),
+                tags=c.tags,
+                reasons=c.reasons,
+                factors={**c.factors, "conversion_model_score": round(conv, 4)},
+                reason_codes=c.reason_codes,
+                confidence=c.confidence,
+                model_source=model_source,
+            )
+        )
+
+    ranked = sorted(rescored, key=lambda c: c.score, reverse=True)[: max(1, int(limit))]
     return [
         {
             "sku": c.sku,
@@ -407,6 +651,9 @@ def recommend_checkout_upsell(db, *, cart_skus: list[str], limit: int = 3, uid_h
             "tags": c.tags,
             "reasons": c.reasons,
             "factors": c.factors,
+            "reason_codes": c.reason_codes,
+            "reason_confidence": c.confidence,
+            "model_source": c.model_source,
             "lifecycle_segment": lifecycle.get("segment"),
         }
         for c in ranked

@@ -76,12 +76,24 @@ async def run_exploration_dag(
     budget: int | None = None,
 ) -> Dict[str, Any]:
     pools = TenantPoolManager().limits_for_tenant(tenant_id)
-    # If budget explicitly exhausted, skip expensive exploration and return placeholders
+    # If budget explicitly exhausted, escalate to human-in-the-loop review
+    # instead of returning null placeholders (Red Team finding M03).
     if budget is not None and int(budget or 0) <= 0:
+        import logging
+        logging.getLogger("agent_dag").warning(
+            "Budget exhausted for tenant=%s — escalating to HITL queue", tenant_id
+        )
         return {
             "phase1": {"security": None, "cv": None},
             "phase2": {"fraud": None, "inventory": None},
-            "meta": {"tenant_id": tenant_id, "dag_version": "v1", "budget_skipped": True},
+            "meta": {
+                "tenant_id": tenant_id,
+                "dag_version": "v1",
+                "budget_skipped": True,
+                "needs_human_review": True,
+                "escalation_reason": "budget_exhausted",
+                "action": "queued_for_human_review",
+            },
         }
 
     # Phase 1: read-only exploration

@@ -1160,6 +1160,75 @@ def _execute_action(action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str
     # fallback noop for unknown action type (do not fail the entire flow)
     return {"ok": True, "action_type": action_type, "noop": True}
 
+
+def _ctx_get(ctx: Dict[str, Any], path: str | None, default: Any = None) -> Any:
+    if not isinstance(ctx, dict):
+        return default
+    p = str(path or "").strip()
+    if not p:
+        return default
+    cur: Any = ctx
+    for part in p.split("."):
+        key = str(part).strip()
+        if not key:
+            continue
+        if isinstance(cur, dict) and key in cur:
+            cur = cur.get(key)
+        else:
+            return default
+    return cur
+
+
+def _coerce_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return float(v) != 0.0
+    s = str(v or "").strip().lower()
+    if s in ("1", "true", "yes", "on"):
+        return True
+    if s in ("0", "false", "no", "off", ""):
+        return False
+    return True
+
+
+def _eval_condition(condition: Dict[str, Any], ctx: Dict[str, Any]) -> bool:
+    if not isinstance(condition, dict) or not condition:
+        return False
+    op = str(condition.get("op") or condition.get("operator") or "eq").strip().lower()
+    left = _ctx_get(ctx, condition.get("path"), None)
+    right = condition.get("value")
+    try:
+        if op in ("exists",):
+            return left is not None
+        if op in ("truthy",):
+            return _coerce_bool(left)
+        if op in ("falsy",):
+            return not _coerce_bool(left)
+        if op in ("eq", "=="):
+            return left == right
+        if op in ("ne", "!="):
+            return left != right
+        if op in ("gt", ">"):
+            return float(left) > float(right)
+        if op in ("gte", ">="):
+            return float(left) >= float(right)
+        if op in ("lt", "<"):
+            return float(left) < float(right)
+        if op in ("lte", "<="):
+            return float(left) <= float(right)
+        if op == "in":
+            if isinstance(right, list):
+                return left in right
+            return str(left) in str(right)
+        if op == "contains":
+            if isinstance(left, list):
+                return right in left
+            return str(right) in str(left)
+    except Exception:
+        return False
+    return False
+
 def _get_trace_for_run(run_id: str) -> Optional[str]:
     try:
         with db_session() as db:
@@ -1190,61 +1259,118 @@ def execute_typed_actions(
     ensure_playbook_run_tables()
     ctx = context or {}
     max_retries = max(0, int(os.getenv("PLAYBOOK_ACTION_MAX_RETRIES", "2") or 2))
-    out = {"executed": [], "failed": [], "skipped": []}
-    for idx, raw_action in enumerate(actions or []):
-        if not isinstance(raw_action, dict):
-            out["skipped"].append({"step_index": idx, "reason": "non_typed_action"})
-            continue
-        mode = str(raw_action.get("mode") or "automatic").lower()
-        if mode not in ("automatic", "manual_approval"):
-            mode = "automatic"
-        if mode == "manual_approval":
-            out["skipped"].append({"step_index": idx, "reason": "manual_approval_required", "action": raw_action})
-            continue
-        action_type = str(raw_action.get("type") or "unknown")
-        idempotency_key = f"{run_id}:{idx}:{action_type}"
-        if _action_already_done(idempotency_key):
-            out["skipped"].append({"step_index": idx, "reason": "idempotent_already_completed", "action_type": action_type})
-            continue
-        last_err = None
-        completed = False
-        for attempt in range(1, max_retries + 2):
-            try:
-                result = _execute_action(raw_action, ctx)
-                _record_action_attempt(
+    max_loop_iterations = max(1, min(int(os.getenv("PLAYBOOK_LOOP_MAX_ITERATIONS", "20") or 20), 200))
+    max_depth = max(1, min(int(os.getenv("PLAYBOOK_BRANCH_MAX_DEPTH", "6") or 6), 16))
+    out = {"executed": [], "failed": [], "skipped": [], "branches": []}
+    step_counter = 0
+
+    def _next_step_index() -> int:
+        nonlocal step_counter
+        cur = int(step_counter)
+        step_counter += 1
+        return cur
+
+    def _run_action_list(action_list: List[Any], local_ctx: Dict[str, Any], depth: int) -> None:
+        if depth > max_depth:
+            out["skipped"].append({"step_index": _next_step_index(), "reason": "branch_depth_exceeded"})
+            return
+        for raw_action in action_list or []:
+            if not isinstance(raw_action, dict):
+                out["skipped"].append({"step_index": _next_step_index(), "reason": "non_typed_action"})
+                continue
+            action_type = str(raw_action.get("type") or "unknown").strip().lower()
+
+            if action_type in ("if", "branch_if"):
+                branch_idx = _next_step_index()
+                condition = raw_action.get("condition") if isinstance(raw_action.get("condition"), dict) else {}
+                ok = _eval_condition(condition or {}, local_ctx)
+                then_actions = raw_action.get("then") if isinstance(raw_action.get("then"), list) else []
+                else_actions = raw_action.get("else") if isinstance(raw_action.get("else"), list) else []
+                chosen = then_actions if ok else else_actions
+                out["branches"].append({"step_index": branch_idx, "type": "if", "matched": bool(ok), "condition": condition})
+                _run_action_list(chosen, local_ctx, depth + 1)
+                continue
+
+            if action_type in ("for_each", "foreach", "loop_each"):
+                loop_idx = _next_step_index()
+                items_path = str(raw_action.get("items_path") or "").strip()
+                item_var = str(raw_action.get("item_var") or "item").strip() or "item"
+                do_actions = raw_action.get("do") if isinstance(raw_action.get("do"), list) else []
+                items = _ctx_get(local_ctx, items_path, []) if items_path else []
+                if not isinstance(items, list):
+                    items = []
+                capped = items[:max_loop_iterations]
+                out["branches"].append({"step_index": loop_idx, "type": "for_each", "count": len(capped), "items_path": items_path})
+                for item in capped:
+                    child_ctx = dict(local_ctx)
+                    child_ctx[item_var] = item
+                    _run_action_list(do_actions, child_ctx, depth + 1)
+                continue
+
+            if action_type in ("while", "loop_while"):
+                loop_idx = _next_step_index()
+                condition = raw_action.get("condition") if isinstance(raw_action.get("condition"), dict) else {}
+                do_actions = raw_action.get("do") if isinstance(raw_action.get("do"), list) else []
+                max_iter = max(1, min(int(raw_action.get("max_iterations") or max_loop_iterations), max_loop_iterations))
+                iter_count = 0
+                while iter_count < max_iter and _eval_condition(condition or {}, local_ctx):
+                    _run_action_list(do_actions, local_ctx, depth + 1)
+                    iter_count += 1
+                out["branches"].append({"step_index": loop_idx, "type": "while", "iterations": iter_count, "max_iterations": max_iter})
+                continue
+
+            idx = _next_step_index()
+            mode = str(raw_action.get("mode") or "automatic").lower()
+            if mode not in ("automatic", "manual_approval"):
+                mode = "automatic"
+            if mode == "manual_approval":
+                out["skipped"].append({"step_index": idx, "reason": "manual_approval_required", "action": raw_action})
+                continue
+            idempotency_key = f"{run_id}:{idx}:{action_type}"
+            if _action_already_done(idempotency_key):
+                out["skipped"].append({"step_index": idx, "reason": "idempotent_already_completed", "action_type": action_type})
+                continue
+            last_err = None
+            completed = False
+            for attempt in range(1, max_retries + 2):
+                try:
+                    result = _execute_action(raw_action, local_ctx)
+                    _record_action_attempt(
+                        run_id=run_id,
+                        step_index=idx,
+                        action_type=action_type,
+                        idempotency_key=idempotency_key,
+                        attempt=attempt,
+                        status="completed",
+                        result=result,
+                    )
+                    out["executed"].append({"step_index": idx, "action_type": action_type, "result": result})
+                    completed = True
+                    break
+                except Exception as exc:
+                    last_err = str(exc)
+                    _record_action_attempt(
+                        run_id=run_id,
+                        step_index=idx,
+                        action_type=action_type,
+                        idempotency_key=idempotency_key,
+                        attempt=attempt,
+                        status="failed",
+                        result=None,
+                        error=last_err,
+                    )
+            if not completed:
+                _send_to_dlq(
                     run_id=run_id,
                     step_index=idx,
                     action_type=action_type,
                     idempotency_key=idempotency_key,
-                    attempt=attempt,
-                    status="completed",
-                    result=result,
+                    payload=raw_action,
+                    last_error=last_err,
                 )
-                out["executed"].append({"step_index": idx, "action_type": action_type, "result": result})
-                completed = True
-                break
-            except Exception as exc:
-                last_err = str(exc)
-                _record_action_attempt(
-                    run_id=run_id,
-                    step_index=idx,
-                    action_type=action_type,
-                    idempotency_key=idempotency_key,
-                    attempt=attempt,
-                    status="failed",
-                    result=None,
-                    error=last_err,
-                )
-        if not completed:
-            _send_to_dlq(
-                run_id=run_id,
-                step_index=idx,
-                action_type=action_type,
-                idempotency_key=idempotency_key,
-                payload=raw_action,
-                last_error=last_err,
-            )
-            out["failed"].append({"step_index": idx, "action_type": action_type, "error": last_err})
+                out["failed"].append({"step_index": idx, "action_type": action_type, "error": last_err})
+
+    _run_action_list(actions or [], ctx, depth=0)
     return out
 
 

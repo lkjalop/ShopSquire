@@ -411,37 +411,44 @@ export default function RightPanelExtras({
         issue_type: issueType || undefined,
         description: description || undefined,
       });
-      const resolvedTraceId = (up as any)?.case_id || (up as any)?.trace_id || null;
+      const t2 = (up as any)?.cv_tier2 || (up as any)?.cv_analysis || null;
+      const resolvedTraceId = (up as any)?.trace_id || (up as any)?.decision_trace_id || (up as any)?.case_id || (t2 as any)?.trace_id || null;
       onTraceId?.(resolvedTraceId);
       const actions = (up as any)?.next_actions || [];
+      const needsReview = actions.some((a: string) => ['human_review', 'manual_approval', 'policy_escalation'].includes(String(a || '')));
+      const evidenceTags = Array.isArray((up as any)?.evidence_tags)
+        ? ((up as any).evidence_tags as string[])
+        : Array.isArray((t2 as any)?.evidence_tags)
+          ? ((t2 as any).evidence_tags as string[])
+          : [];
       setResult({
         decision_id: (up as any)?.case_id,
         trace_id: resolvedTraceId || undefined,
         case_id: (up as any)?.case_id,
-        analysis: (up as any)?.cv_tier2 || (up as any)?.cv_analysis,
+        analysis: t2,
         cv_tiered_analysis: (up as any)?.cv_tier2 ? { tier2: (up as any)?.cv_tier2 } : undefined,
-        suggested_routing: actions.includes('human_review') ? 'security_review' : 'standard_queue',
-        human_review: actions.includes('human_review') ? { status: 'pending', ticket_id: null } : false,
-        evidence_tags: (up as any)?.evidence_tags || [],
+        suggested_routing: (up as any)?.suggested_routing || (needsReview ? 'security_review' : 'standard_queue'),
+        human_review: (up as any)?.human_review || (needsReview ? { status: 'pending', ticket_id: null } : false),
+        evidence_tags: evidenceTags,
         playbook_preview: undefined,
         image_consistency: undefined,
         order_validation: null,
         user_prompt: null,
-        ui_actions: { chat_with_admin: actions.includes('human_review') },
+        ui_actions: { chat_with_admin: needsReview },
       });
       onResult?.({
         decision_id: (up as any)?.case_id,
         case_id: (up as any)?.case_id,
-        suggested_routing: actions.includes('human_review') ? 'security_review' : 'standard_queue',
-        analysis: (up as any)?.cv_tier2 || (up as any)?.cv_analysis,
+        suggested_routing: (up as any)?.suggested_routing || (needsReview ? 'security_review' : 'standard_queue'),
+        analysis: t2,
         cv_tiered_analysis: (up as any)?.cv_tier2 ? { tier2: (up as any)?.cv_tier2 } : undefined,
-        human_review: actions.includes('human_review') ? { status: 'pending', ticket_id: null } : false,
-        evidence_tags: (up as any)?.evidence_tags || [],
+        human_review: (up as any)?.human_review || (needsReview ? { status: 'pending', ticket_id: null } : false),
+        evidence_tags: evidenceTags,
         playbook_preview: undefined,
         image_consistency: undefined,
         order_validation: null,
         user_prompt: null,
-        ui_actions: { chat_with_admin: actions.includes('human_review') },
+        ui_actions: { chat_with_admin: needsReview },
       });
     } catch (e: any) {
       setError(e?.message || 'Upload via nonce failed');

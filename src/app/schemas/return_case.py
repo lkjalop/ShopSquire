@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 class ReturnCase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     id: str
     tenant_id: Optional[str] = None
     order_id: Optional[str] = None

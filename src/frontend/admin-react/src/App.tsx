@@ -20,6 +20,7 @@ import { MerchantBIPro } from './components/MerchantBIPro';
 import { EscalationsConsole } from './components/EscalationsConsole';
 import { EmailXdr } from './components/EmailXdr';
 import { SupplyChainSim } from './components/SupplyChainSim';
+import { AgentIntelligence } from './components/AgentIntelligence';
 import { fetchMe, setApiKeyCookie, setClientApiKey } from './api';
 
 type Role = 'merchant' | 'owner' | 'developer';
@@ -88,7 +89,7 @@ export default function App() {
 
         <div className="nav-section">Merchant</div>
         <div className="nav">
-          {['merchant-bi', 'overview', 'decisions', 'security', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc'].map((key) => {
+          {['merchant-bi', 'overview', 'decisions', 'security', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
             const locked = (key === 'compliance' && !canOwner) || (key === 'rules' && !(canOwner || canDeveloper)) || (key === 'grc' && !(canOwner || canDeveloper));
             return (
               <button
@@ -188,6 +189,7 @@ export default function App() {
             {active === 'developer' && 'Developer Hub'}
             {active === 'grc' && 'GRC Consultant Console'}
             {active === 'sc-sim' && 'Supply Chain Attack Simulation'}
+            {active === 'agent-intelligence' && 'Agent Intelligence'}
           </h1>
           <p className="page-sub">
             {active === 'merchant-bi' && 'Custom charts for revenue and security without Grafana.'}
@@ -210,6 +212,7 @@ export default function App() {
             {active === 'developer' && 'API keys, webhooks, and integration status.'}
             {active === 'grc' && 'Risk register, fingerprint threat monitoring, control mapping, and multi-format reporting.'}
             {active === 'sc-sim' && 'Safe supply-chain attack simulation with parallel agent swarms, real-time SSE streaming, and bitemporal decision trace.'}
+            {active === 'agent-intelligence' && 'Citation memory, observation summaries, behavioral models, and agent trust scoring.'}
           </p>
           {!canOwner && !canDeveloper && (
             <div className="callout" style={{ marginTop: 8 }}>
@@ -239,6 +242,7 @@ export default function App() {
         {active === 'owner' && <OwnerPanel role={canOwner ? role : 'merchant'} />}
         {active === 'developer' && <DeveloperPanel role={canDeveloper ? role : 'merchant'} />}
         {active === 'sc-sim' && <SupplyChainSim role={role} />}
+        {active === 'agent-intelligence' && <AgentIntelligence role={role} />}
 
         {!authReady && (
           <div className="callout" style={{ marginTop: 12 }}>

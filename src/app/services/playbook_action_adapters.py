@@ -35,12 +35,30 @@ def _run_async(coro):
     try:
         return asyncio.run(coro)
     except RuntimeError:
-        # Running inside an event loop (e.g., test runtime); use a new loop.
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+        # Running inside an event loop (e.g., test runtime): execute in a dedicated thread.
+        import threading
+
+        out: Dict[str, Any] = {"value": None, "error": None}
+
+        def _worker():
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                out["value"] = loop.run_until_complete(coro)
+            except Exception as exc:  # pragma: no cover - defensive
+                out["error"] = exc
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
+
+        th = threading.Thread(target=_worker, daemon=True)
+        th.start()
+        th.join(timeout=20)
+        if out.get("error") is not None:
+            raise out["error"]  # type: ignore[misc]
+        return out.get("value")
 
 
 def _send_via_smtp(*, to: str, subject: str, body: str) -> Dict[str, Any]:

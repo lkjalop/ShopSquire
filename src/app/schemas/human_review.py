@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 
 class HumanReviewTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     id: str
     case_id: str
     decision_id: Optional[str] = None

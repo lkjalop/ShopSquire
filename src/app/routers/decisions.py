@@ -537,9 +537,13 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
 async def websocket_trace_events(trace_id: str, websocket: WebSocket):
     """WebSocket endpoint that streams decision trace events for a trace_id.
 
-    Clients may connect to `/api/v1/decisions/{trace_id}/events/ws` and will
-    receive JSON arrays of events whenever new events are available.
+    Clients connect to `/api/v1/decisions/{trace_id}/events/ws` and receive
+    real-time JSON arrays pushed via the in-process trace broker (same pub/sub
+    used by the SSE stream).  Falls back to DB polling only when the broker
+    queue is unavailable.
     """
+    from src.app.services.trace_broker import subscribe as _sub, unsubscribe as _unsub
+
     # Basic in-process connection limits to protect the server
     global _WS_GLOBAL_COUNT
     per_count = _WS_CONN_COUNTS.get(trace_id, 0)
@@ -561,51 +565,91 @@ async def websocket_trace_events(trace_id: str, websocket: WebSocket):
     try:
         await websocket.accept()
     except Exception:
-        # roll back counts
         _WS_CONN_COUNTS[trace_id] = max(0, _WS_CONN_COUNTS.get(trace_id, 1) - 1)
         _WS_GLOBAL_COUNT = max(0, _WS_GLOBAL_COUNT - 1)
         raise
-    last_seen = None
+
+    q = None
     try:
-        while True:
-            events = _fetch_trace_events(trace_id, since=last_seen)
-            if events:
-                last_seen = events[-1].get("created_at")
+        q = _sub(trace_id)
+    except Exception:
+        q = None
+
+    async def _cleanup():
+        global _WS_GLOBAL_COUNT
+        if q is not None:
+            try:
+                _unsub(trace_id, q)
+            except Exception:
+                pass
+        try:
+            _WS_CONN_COUNTS[trace_id] = max(0, _WS_CONN_COUNTS.get(trace_id, 1) - 1)
+        except Exception:
+            pass
+        _WS_GLOBAL_COUNT = max(0, _WS_GLOBAL_COUNT - 1)
+
+    try:
+        # Send initial snapshot so the client has all existing events immediately
+        initial = _fetch_trace_events(trace_id)
+        if initial:
+            await websocket.send_text(json.dumps(initial, ensure_ascii=False, default=str))
+
+        if q is not None:
+            # Real-time path: trace_broker pushes events via asyncio.Queue
+            # Also listen for client close/pong via a receive task
+            async def _recv_loop():
+                """Consume client frames so we detect disconnects."""
                 try:
-                    await websocket.send_text(json.dumps(events, ensure_ascii=False))
+                    while True:
+                        await websocket.receive_text()
+                except (WebSocketDisconnect, Exception):
+                    pass
+
+            recv_task = asyncio.create_task(_recv_loop())
+            try:
+                while True:
+                    try:
+                        ev = await asyncio.wait_for(q.get(), timeout=30.0)
+                        await websocket.send_text(json.dumps([ev], ensure_ascii=False, default=str))
+                    except asyncio.TimeoutError:
+                        # Send heartbeat to detect dead connections
+                        try:
+                            await websocket.send_text(json.dumps([], ensure_ascii=False))
+                        except Exception:
+                            break
+                    except (WebSocketDisconnect, Exception):
+                        break
+            finally:
+                recv_task.cancel()
+                try:
+                    await recv_task
                 except Exception:
-                    # if send fails, break and close
-                    break
-            await asyncio.sleep(1.0)
+                    pass
+        else:
+            # Fallback: poll DB (broker unavailable)
+            last_seen = initial[-1].get("created_at") if initial else None
+            while True:
+                events = _fetch_trace_events(trace_id, since=last_seen)
+                if events:
+                    last_seen = events[-1].get("created_at")
+                    try:
+                        await websocket.send_text(json.dumps(events, ensure_ascii=False, default=str))
+                    except Exception:
+                        break
+                await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         try:
             from src.app.observability.metrics import record_ws_disconnect
             record_ws_disconnect("decisions.trace_events_ws")
         except Exception:
             pass
-        # Deregister connection
-        try:
-            _WS_CONN_COUNTS[trace_id] = max(0, _WS_CONN_COUNTS.get(trace_id, 1) - 1)
-        except Exception:
-            pass
-        try:
-            _WS_GLOBAL_COUNT = max(0, _WS_GLOBAL_COUNT - 1)
-        except Exception:
-            pass
-        return
     except Exception:
         try:
             await websocket.close()
         except Exception:
             pass
-        try:
-            _WS_CONN_COUNTS[trace_id] = max(0, _WS_CONN_COUNTS.get(trace_id, 1) - 1)
-        except Exception:
-            pass
-        try:
-            _WS_GLOBAL_COUNT = max(0, _WS_GLOBAL_COUNT - 1)
-        except Exception:
-            pass
+    finally:
+        await _cleanup()
 
 
 @router.get("/{trace_id}/events/stream")

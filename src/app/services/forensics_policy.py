@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Tuple
+import os
 
 from src.app.services.image_forensics import ForensicsResult
 
@@ -32,8 +33,17 @@ def evaluate(forensics: ForensicsResult, context: Dict[str, Any] | None = None, 
     blur = float(forensics.blur_score or 0.0)
     flags = set(forensics.metadata_flags or [])
 
+    # Configurable thresholds for stricter production tuning.
+    deny_manip_min = float(os.getenv("CV_FORENSICS_DENY_MANIP_MIN", "0.8") or 0.8)
+    deny_splice_min = float(os.getenv("CV_FORENSICS_DENY_SPLICE_MIN", "0.75") or 0.75)
+    deny_splice_area_min = float(os.getenv("CV_FORENSICS_DENY_SPLICE_AREA_MIN", "0.06") or 0.06)
+    approve_manip_max = float(os.getenv("CV_FORENSICS_APPROVE_MANIP_MAX", "0.2") or 0.2)
+    approve_splice_max = float(os.getenv("CV_FORENSICS_APPROVE_SPLICE_MAX", "0.25") or 0.25)
+    approve_copy_max = float(os.getenv("CV_FORENSICS_APPROVE_COPY_MAX", "0.25") or 0.25)
+    approve_double_comp_max = float(os.getenv("CV_FORENSICS_APPROVE_DOUBLE_COMP_MAX", "0.25") or 0.25)
+
     # Auto-deny
-    if manip >= 0.85 or (splice >= 0.8 and ela_mask_area_ratio >= 0.08):
+    if manip >= deny_manip_min or (splice >= deny_splice_min and ela_mask_area_ratio >= deny_splice_area_min):
         reasons.append("High manipulation/splice confidence")
         return {
             "verdict": "deny",
@@ -79,8 +89,36 @@ def evaluate(forensics: ForensicsResult, context: Dict[str, Any] | None = None, 
         reasons.append("Image too blurry")
         actions.extend(["upload_high_quality", "second_angle", "macro_damage_area"])
 
+    # Ensemble vote for document-forensics mismatch. This intentionally weighs
+    # document mismatch and manipulation signals more heavily to prevent invoice spoof bypasses.
+    mismatch_votes = 0
+    if "invoice_mismatch" in evidence_tags:
+        mismatch_votes += 3
+    if "serial_mismatch" in evidence_tags:
+        mismatch_votes += 1
+    if "manipulation_detected" in evidence_tags:
+        mismatch_votes += 3
+    if manip >= float(os.getenv("CV_DOC_MISMATCH_MANIP_MIN", "0.5") or 0.5):
+        mismatch_votes += 1
+    if splice >= float(os.getenv("CV_DOC_MISMATCH_SPLICE_MIN", "0.48") or 0.48):
+        mismatch_votes += 1
+    if double_comp >= float(os.getenv("CV_DOC_MISMATCH_DCOMP_MIN", "0.5") or 0.5):
+        mismatch_votes += 1
+    if "jpeg_dct_anomaly" in evidence_tags or "steg_dct_anomaly" in evidence_tags:
+        mismatch_votes += 2
+    mismatch_vote_threshold = int(float(os.getenv("CV_DOC_MISMATCH_VOTE_THRESHOLD", "4") or 4))
+    if mismatch_votes >= mismatch_vote_threshold:
+        reasons.append("Document-forensics mismatch vote threshold met")
+        actions.extend(["manual_review", "nonce_live_capture", "reupload_original_invoice"])
+        return {
+            "verdict": "request_more_data",
+            "reasons": reasons,
+            "required_actions": sorted(set(actions)),
+            "score": max(manip, splice, copy_move, double_comp, blur),
+        }
+
     # Default approve threshold (for CV-only use, conservative)
-    if manip <= 0.25 and splice <= 0.3 and copy_move <= 0.3 and double_comp <= 0.3 and blur <= 0.6:
+    if manip <= approve_manip_max and splice <= approve_splice_max and copy_move <= approve_copy_max and double_comp <= approve_double_comp_max and blur <= 0.6:
         reasons.append("Low-risk image characteristics")
         return {
             "verdict": "approve",

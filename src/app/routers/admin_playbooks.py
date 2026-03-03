@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 import uuid
 import json
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 
@@ -27,6 +28,8 @@ from src.app.services.playbook_engine import (
 )
 from src.app.services.trace_broker import recover_pending, replay_recent, stream_health
 from src.app.services.llm import get_llm_routing_metrics
+from src.app.services.playbook_scheduler import run_scheduled_playbooks_cycle
+from src.app.services.debate_coordinator import run_structured_debate
 
 
 router = APIRouter(prefix="/api/v1/admin/playbooks", tags=["admin-playbooks"])
@@ -329,6 +332,14 @@ def reprocess_dlq(
     return reprocess_playbook_dlq(limit=limit)
 
 
+@router.post("/ops/scheduler/run_cycle")
+def run_scheduler_cycle(
+    role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    return run_scheduled_playbooks_cycle()
+
+
 @router.get("/ops/streams/health")
 async def get_streams_health(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
@@ -361,3 +372,106 @@ def get_llm_routing(
     role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     return get_llm_routing_metrics(window_minutes=window_minutes, tenant_id=tenant_id)
+
+
+@router.post("/ops/debate/run")
+def run_debate(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    scenario = str(payload.get("scenario") or "general")
+    proposal = payload.get("proposal") if isinstance(payload.get("proposal"), dict) else {}
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
+    return run_structured_debate(scenario=scenario, proposal=proposal, evidence=evidence)
+
+
+@router.get("/ops/drift-alerts")
+def playbook_drift_alerts(
+    days: int = 30,
+    role: str = Depends(require_role_or_oidc([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    days = max(7, min(int(days or 30), 180))
+    out: Dict[str, Any] = {"status": "ok", "days": days, "alerts": []}
+    since = datetime.utcnow() - timedelta(days=days)
+    try:
+        with db_session() as db:
+            try:
+                rows = db.execute(
+                    """
+                    SELECT playbook_id, playbook_version, status, started_at
+                    FROM playbook_runs
+                    ORDER BY started_at DESC
+                    LIMIT 5000
+                    """
+                ).fetchall()
+            except Exception:
+                rows = []
+            per_pb: Dict[str, Dict[str, Any]] = {}
+            for r in rows or []:
+                playbook_id = str(r[0] or "").strip()
+                if not playbook_id:
+                    continue
+                version = str(r[1] or "unknown")
+                status = str(r[2] or "").lower()
+                started_raw = str(r[3] or "")
+                try:
+                    started = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
+                    if started.tzinfo is not None:
+                        started = started.replace(tzinfo=None)
+                except Exception:
+                    started = None
+                if started is None or started < since:
+                    continue
+                slot = per_pb.setdefault(
+                    playbook_id,
+                    {
+                        "total": 0,
+                        "failed": 0,
+                        "versions": {},
+                        "latest_version": version,
+                        "latest_started": started,
+                    },
+                )
+                slot["total"] += 1
+                if status in ("failed", "error"):
+                    slot["failed"] += 1
+                slot["versions"][version] = int(slot["versions"].get(version, 0)) + 1
+                latest_started = slot.get("latest_started")
+                if latest_started is None or (started is not None and started > latest_started):
+                    slot["latest_started"] = started
+                    slot["latest_version"] = version
+
+            for playbook_id, stats in per_pb.items():
+                total = int(stats.get("total") or 0)
+                failed = int(stats.get("failed") or 0)
+                fail_rate = (100.0 * failed / max(1, total))
+                versions = stats.get("versions") if isinstance(stats.get("versions"), dict) else {}
+                if len(versions) > 1:
+                    out["alerts"].append(
+                        {
+                            "type": "version_drift",
+                            "severity": "medium",
+                            "playbook_id": playbook_id,
+                            "message": f"Multiple versions active in window: {', '.join(sorted(versions.keys()))}",
+                            "stats": {"versions": versions, "run_count": total, "failure_rate": round(fail_rate, 2)},
+                        }
+                    )
+                if fail_rate >= 20.0 and total >= 5:
+                    out["alerts"].append(
+                        {
+                            "type": "failure_rate_drift",
+                            "severity": "high" if fail_rate >= 35.0 else "medium",
+                            "playbook_id": playbook_id,
+                            "message": f"Failure rate elevated at {round(fail_rate, 2)}% over last {days} days.",
+                            "stats": {"run_count": total, "failed": failed, "failure_rate": round(fail_rate, 2)},
+                        }
+                    )
+    except Exception as exc:
+        return {"status": "error", "days": days, "alerts": [], "detail": str(exc)[:240]}
+    out["alerts"] = sorted(
+        out["alerts"],
+        key=lambda a: (0 if a.get("severity") == "high" else 1, str(a.get("playbook_id") or "")),
+    )
+    return out

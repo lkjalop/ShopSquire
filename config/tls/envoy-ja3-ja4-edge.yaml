@@ -1,0 +1,72 @@
+static_resources:
+  listeners:
+    - name: https_edge
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 443
+      listener_filters:
+        - name: envoy.filters.listener.tls_inspector
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain:
+                      filename: /etc/envoy/tls/tls.crt
+                    private_key:
+                      filename: /etc/envoy/tls/tls.key
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                codec_type: AUTO
+                stat_prefix: ingress_http
+                request_headers_to_add:
+                  # Replace metadata keys below with the keys exposed by your JA3/JA4 Envoy extension.
+                  # Common patterns:
+                  # - %DYNAMIC_METADATA(envoy.filters.listener.tls_inspector:ja3)%
+                  # - %DYNAMIC_METADATA(tls.inspector:ja3_hash)%
+                  - header:
+                      key: x-ja3-hash
+                      value: "%DYNAMIC_METADATA(tls.inspector:ja3_hash)%"
+                    append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                  - header:
+                      key: x-ja4-hash
+                      value: "%DYNAMIC_METADATA(tls.inspector:ja4_hash)%"
+                    append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                  - header:
+                      key: x-forwarded-proto
+                      value: https
+                    append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: shopsquire_api
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: /
+                          route:
+                            cluster: shopsquire_api
+                http_filters:
+                  - name: envoy.filters.http.router
+
+  clusters:
+    - name: shopsquire_api
+      type: STRICT_DNS
+      connect_timeout: 1s
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: shopsquire_api
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: api
+                      port_value: 8080

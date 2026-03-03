@@ -22,7 +22,25 @@ SECURITY_CRITICAL_FLAGS = frozenset({
     "USE_AGENT_CAPABILITIES",
     "AGENT_ROLLOUT_PERCENT",
     "DECISION_LOG_WRITES_ENABLED",
+    "ABAC_ENABLED",
+    "METRICS_REQUIRE_AUTH",
+    "DISABLE_SECURITY_MIDDLEWARE",
+    "MODEL_THEFT_GUARD_ENABLED",
+    "MODEL_THEFT_STRICT_POLICY_GATE",
 })
+
+
+def changed_security_critical_flags(current: dict, proposed: dict) -> list[dict]:
+    """Return list of security-critical flag changes (for 4-eyes approvals)."""
+    out: list[dict] = []
+    cur = current or {}
+    nxt = proposed or {}
+    for key in SECURITY_CRITICAL_FLAGS:
+        old_val = cur.get(key)
+        new_val = nxt.get(key)
+        if old_val != new_val:
+            out.append({"flag": key, "old": old_val, "new": new_val})
+    return out
 
 
 def _get_hmac_key() -> Optional[bytes]:

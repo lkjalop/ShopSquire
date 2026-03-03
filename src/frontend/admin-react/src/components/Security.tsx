@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchSecurityEvents, fetchSecurityEventsFiltered, fetchSecurityMetrics, fetchSupplyChainStatus, fetchIamEvents, fetchAbacDenySummary, fetchSecurityAttackTimeseries, fetchSecurityGeoAsnTrends, type AbacDenyGroup, type SecurityAttackBucket, type SecurityGeoAsnTrend, type SecurityEvent, escalateEvent, blockEvent, sendAlertmanagerTest, fetchEmailSecurityIncidents, type EmailSecurityIncident, getEmailSecurityIncident, fetchUpsellPerformance, type UpsellPerformance, fetchSecurityEscalationSummary, type SecurityEscalationSummary, fetchSupplierRiskSummary, fetchInventoryDriftCheck, fetchNetworkProbeSummary, fetchKillchainProgression, fetchEmailIocFeedbackQuality } from '../api';
+import { fetchSecurityEvents, fetchSecurityEventsFiltered, fetchSecurityMetrics, fetchSupplyChainStatus, fetchIamEvents, fetchAbacDenySummary, fetchSecurityAttackTimeseries, fetchSecurityGeoAsnTrends, type AbacDenyGroup, type SecurityAttackBucket, type SecurityGeoAsnTrend, type SecurityEvent, escalateEvent, blockEvent, sendAlertmanagerTest, fetchEmailSecurityIncidents, type EmailSecurityIncident, getEmailSecurityIncident, fetchUpsellPerformance, type UpsellPerformance, fetchSecurityEscalationSummary, type SecurityEscalationSummary, fetchSupplierRiskSummary, fetchInventoryDriftCheck, fetchNetworkProbeSummary, fetchKillchainProgression, fetchEmailIocFeedbackQuality, fetchIncidentAlertSummary, type IncidentAlertSummary } from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
 
@@ -17,6 +17,7 @@ export function Security({ role }: Props) {
   const [networkProbes, setNetworkProbes] = useState<any | null>(null);
   const [killchain, setKillchain] = useState<any | null>(null);
   const [iocQuality, setIocQuality] = useState<any | null>(null);
+  const [incidentAlerts, setIncidentAlerts] = useState<IncidentAlertSummary | null>(null);
   const [compactLoading, setCompactLoading] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [supplyChain, setSupplyChain] = useState<any | null>(null);
@@ -76,7 +77,7 @@ export function Security({ role }: Props) {
       setCompactLoading(true);
       setCompactError(null);
       try {
-        const [upsell, sec, sup, drift, probes, kc, iocq] = await Promise.all([
+        const [upsell, sec, sup, drift, probes, kc, iocq, incAlerts] = await Promise.all([
           fetchUpsellPerformance(24, 5),
           fetchSecurityEscalationSummary(24, 2000),
           fetchSupplierRiskSummary(24 * 7),
@@ -84,6 +85,7 @@ export function Security({ role }: Props) {
           fetchNetworkProbeSummary(24),
           fetchKillchainProgression(24),
           fetchEmailIocFeedbackQuality(),
+          fetchIncidentAlertSummary(24, 20),
         ]);
         if (cancelled) return;
         setUpsellPerf(upsell as any);
@@ -93,6 +95,7 @@ export function Security({ role }: Props) {
         setNetworkProbes(probes as any);
         setKillchain(kc as any);
         setIocQuality(iocq as any);
+        setIncidentAlerts(incAlerts as any);
       } catch (e: any) {
         if (!cancelled) setCompactError(e.message || 'Failed to load compact metrics');
       } finally {
@@ -309,6 +312,47 @@ export function Security({ role }: Props) {
             </div>
           )}
         </div>
+      </div>
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>Incident Alert Loop (24h)</h3>
+        <div className="page-sub">Explicit operational alerts for SLA breaches and runbook failures.</div>
+        {compactLoading && !incidentAlerts && <div className="page-sub" style={{ marginTop: 10 }}>Loading...</div>}
+        {compactError && !incidentAlerts && <div className="page-sub" style={{ marginTop: 10, color: '#9f2d1b' }}>{compactError}</div>}
+        {!!incidentAlerts && (
+          <>
+            <div className="list" style={{ marginTop: 10 }}>
+              <div className="list-item"><div>SLA breach alerts</div><strong>{incidentAlerts.totals?.sla_breach_alerts || 0}</strong></div>
+              <div className="list-item"><div>Runbook failure alerts</div><strong>{incidentAlerts.totals?.runbook_failure_alerts || 0}</strong></div>
+              <div className="list-item"><div>Impacted incidents</div><strong>{incidentAlerts.totals?.incidents_with_alerts || 0}</strong></div>
+            </div>
+            {!!incidentAlerts.recent?.length && (
+              <table className="table" style={{ marginTop: 10 }}>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Incident</th>
+                    <th>Severity</th>
+                    <th>Status</th>
+                    <th>Alerted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incidentAlerts.recent.slice(0, 6).map((a) => (
+                    <tr key={`${a.type}:${a.incident_id}:${a.alerted_at || a.created_at || ''}`}>
+                      <td>{a.type}</td>
+                      <td>
+                        <a href={`/admin?tab=escalations&incident=${encodeURIComponent(a.incident_id)}`}>{a.incident_id.slice(0, 12)}</a>
+                      </td>
+                      <td>{a.severity || '-'}</td>
+                      <td>{a.status || '-'}</td>
+                      <td>{a.alerted_at || a.created_at || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
       </div>
       <div className="card" style={{ marginTop: 14 }}>
         <h3>Supplier Risk + Quarantine (7d)</h3>

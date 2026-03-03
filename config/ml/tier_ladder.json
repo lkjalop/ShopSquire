@@ -1,0 +1,62 @@
+{
+  "_doc": "Dynamic N-tier LLM complexity scoring → model ladder. Score 0-10 mapped to tiers.",
+  "tiers": [
+    {
+      "name": "nano",
+      "score_min": 0,
+      "score_max": 2,
+      "model": null,
+      "description": "Rule-based only, no LLM call. Simple greetings, FAQ redirect, single-word queries."
+    },
+    {
+      "name": "small",
+      "score_min": 3,
+      "score_max": 4,
+      "model": "llama3:8b",
+      "description": "Lightweight model. Single-constraint product searches, simple follow-ups."
+    },
+    {
+      "name": "medium",
+      "score_min": 5,
+      "score_max": 6,
+      "model": "mixtral:8x7b",
+      "description": "Mid-range model. Multi-constraint queries, contextual follow-ups with budget+specs."
+    },
+    {
+      "name": "large",
+      "score_min": 7,
+      "score_max": 8,
+      "model": "mixtral:8x7b",
+      "description": "High-capacity model. Comparisons, technical analysis, multi-turn reasoning."
+    },
+    {
+      "name": "expert",
+      "score_min": 9,
+      "score_max": 10,
+      "model": "mixtral:8x7b",
+      "description": "Expert tier. Complex multi-turn reasoning, policy questions, detailed justifications."
+    }
+  ],
+  "signals": {
+    "length_100": {"points": 1, "description": "Query length > 100 characters"},
+    "length_200": {"points": 2, "description": "Query length > 200 characters"},
+    "comparison_keywords": {"points": 2, "description": "Comparison/tradeoff keywords detected"},
+    "technical_keywords": {"points": 1, "description": "Technical domain keywords (GPU, VRAM, CUDA, etc.)"},
+    "conjunction_count": {"points": 1, "description": "Multiple conjunctions/clauses (≥2)"},
+    "multi_turn_depth": {"points": 1, "description": "Conversation turn count > 3"},
+    "multimodal": {"points": 1, "description": "Image + text combined input"},
+    "followup_explain": {"points": 1, "description": "Follow-up explain/why/list request"},
+    "fully_constrained": {"points": 1, "description": "Budget + specs + use_case all present"},
+    "negation_constraints": {"points": 1, "description": "Negation constraints (not X, except, exclude)"}
+  },
+  "escalation": {
+    "enabled": true,
+    "max_escalations_per_query": 1,
+    "triggers": ["empty_results", "low_confidence"]
+  },
+  "env_overrides": {
+    "OLLAMA_SMALL_MODEL": "Model override for small/medium tiers",
+    "OLLAMA_BIG_MODEL": "Model override for large/expert tiers",
+    "TIER_LADDER_PATH": "Path to custom tier ladder JSON"
+  }
+}

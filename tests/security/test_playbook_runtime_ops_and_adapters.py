@@ -22,6 +22,32 @@ def test_typed_action_adapters_execute():
     assert len(out.get("failed") or []) == 0
 
 
+def test_typed_actions_support_branching_and_looping():
+    run_id = f"run:{uuid.uuid4()}"
+    actions = [
+        {
+            "type": "if",
+            "condition": {"path": "risk.score", "op": "gte", "value": 0.8},
+            "then": [{"type": "notify_ops", "params": {"channel": "pager"}}],
+            "else": [{"type": "notify_ops", "params": {"channel": "email"}}],
+        },
+        {
+            "type": "for_each",
+            "items_path": "targets",
+            "item_var": "target",
+            "do": [{"type": "notify_ops", "params": {"channel": "email"}}],
+        },
+    ]
+    out = execute_typed_actions(
+        run_id=run_id,
+        actions=actions,
+        context={"risk": {"score": 0.9}, "targets": ["a", "b"]},
+    )
+    assert len(out.get("failed") or []) == 0
+    assert len(out.get("branches") or []) >= 2
+    assert len(out.get("executed") or []) >= 3
+
+
 def test_playbook_ops_stream_and_dlq_routes():
     app = create_app()
     client = TestClient(app)
@@ -62,3 +88,17 @@ def test_playbook_ops_stream_and_dlq_routes():
     assert r7.status_code == 200
     body7 = r7.json()
     assert body7.get("tenant_id") == "tenant-a"
+
+    r8 = client.post("/api/v1/admin/playbooks/ops/scheduler/run_cycle", headers=h)
+    assert r8.status_code == 200
+    body8 = r8.json()
+    assert "checked" in body8
+
+    r9 = client.post(
+        "/api/v1/admin/playbooks/ops/debate/run",
+        json={"scenario": "supplier_change", "proposal": {"action": "allow"}, "evidence": {"bank_account_changed": True}},
+        headers=h,
+    )
+    assert r9.status_code == 200
+    body9 = r9.json()
+    assert "judge" in body9

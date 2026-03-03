@@ -319,6 +319,35 @@ export function EmailXdr({ role }: Props) {
               </div>
 
               <div style={{ marginTop: 10 }}>
+                <div className="page-sub" style={{ fontWeight: 600 }}>BEC Kill-Chain</div>
+                <pre className="panel" style={{ maxHeight: 200, overflow: 'auto' }}>
+                  {JSON.stringify(
+                    investigation?.bec_kill_chain ||
+                    selectedFull?.evidence_snapshot?.bec_kill_chain ||
+                    { stage: selectedFull?.evidence_snapshot?.kill_chain_stage || '-' },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div className="page-sub" style={{ fontWeight: 600 }}>Mailbox Compromise + Phishing Stage</div>
+                <pre className="panel" style={{ maxHeight: 220, overflow: 'auto' }}>
+                  {JSON.stringify(
+                    {
+                      mailbox_compromise:
+                        investigation?.mailbox_compromise || selectedFull?.evidence_snapshot?.mailbox_compromise || {},
+                      phishing_page_stage:
+                        investigation?.phishing_page_stage || selectedFull?.evidence_snapshot?.phishing_page_stage || {},
+                    },
+                    null,
+                    2,
+                  )}
+                </pre>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
                 <div className="page-sub" style={{ fontWeight: 600 }}>Timeline</div>
                 <pre className="panel" style={{ maxHeight: 220, overflow: 'auto' }}>
                   {JSON.stringify({

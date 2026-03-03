@@ -39,3 +39,21 @@ def test_sbom_snapshot_unknown_when_missing(monkeypatch):
     )
     sbom = out.get("sbom") or {}
     assert sbom.get("sbom_path") in (None, "sbom.json")
+
+
+def test_d3fend_auto_suggestions_present_for_security_signals():
+    out = correlate_security_analysis(
+        channel="email",
+        severity="high",
+        tags=["dmarc"],
+        reasons=["auth failure and prompt abuse"],
+        threat_correlation={},
+        signals={"prompt_injection": True, "dmarc_fail": True, "data_exfiltration": True},
+        evidence={},
+    )
+    suggestions = out.get("d3fend_suggestions") or []
+    assert isinstance(suggestions, list)
+    assert suggestions, "Expected at least one D3FEND suggestion"
+    controls = {str(s.get("control") or "") for s in suggestions}
+    assert "Input Validation / Canonicalization" in controls
+    assert "Email Authentication Enforcement (DMARC/DKIM/SPF)" in controls

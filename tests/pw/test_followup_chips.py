@@ -2,15 +2,13 @@ import os
 import pytest
 
 
-@pytest.mark.skipif(not os.getenv("SHOPSQUIRE_UI_URL"), reason="SHOPSQUIRE_UI_URL not set")
-def test_followup_chips_render_and_are_clickable(page):
+def test_followup_chips_render_and_are_clickable(page, test_server):
     """Lightweight Playwright test scaffold for follow-up chips.
 
-    This test is skipped unless the environment variable `SHOPSQUIRE_UI_URL`
-    is set to a running UI that includes the widget. It's intentionally
-    conservative to provide fast feedback without flakiness in CI.
+    Falls back to ``test_server`` fixture when ``SHOPSQUIRE_UI_URL`` is not
+    set, so the test can run in local dev without extra configuration.
     """
-    url = os.getenv("SHOPSQUIRE_UI_URL")
+    url = os.getenv("SHOPSQUIRE_UI_URL") or test_server["base_url"]
     page.goto(url)
 
     # Wait briefly for widget to initialize

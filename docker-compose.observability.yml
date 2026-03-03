@@ -7,9 +7,7 @@ services:
       - ./config/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./config/observability/rules:/etc/prometheus/rules:ro
     ports:
-      - "9090:9090"
-    depends_on:
-      - alertmanager
+      - "127.0.0.1:9090:9090"
 
   grafana-json:
     image: node:20-alpine
@@ -23,7 +21,7 @@ services:
       API_KEY: ${OBS_API_KEY:-merchant-key-replace-me}
       PORT: 3333
     ports:
-      - "3333:3333"
+      - "127.0.0.1:3333:3333"
 
   grafana-livefeed:
     image: node:20-alpine
@@ -37,7 +35,7 @@ services:
       API_KEY: ${OBS_OWNER_API_KEY:-owner-key-replace-me}
       PORT: 3334
     ports:
-      - "3334:3334"
+      - "127.0.0.1:3334:3334"
 
   kev-cron:
     image: python:3.12-alpine
@@ -51,7 +49,7 @@ services:
     image: grafana/grafana:latest
     container_name: shopsquire_grafana
     ports:
-      - "3005:3000"
+      - "127.0.0.1:3005:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana-change-me}

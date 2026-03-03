@@ -159,6 +159,17 @@ def _detect_signals(payload: Dict[str, Any]) -> Dict[str, bool]:
     has_deception = bool(deception.get("signals"))
     has_authority = any(s.get("type") == "authority_impersonation" for s in deception.get("signals", []))
     has_social = any(s.get("type") == "social_engineering" for s in deception.get("signals", []))
+    # Network-correlated PCAP hints (when caller supplies parsed PCAP signals).
+    pcap_dns_tunnel = False
+    pcap_high_entropy_dns = False
+    try:
+        if isinstance(payload, dict):
+            pcap = payload.get("pcap_signals") if isinstance(payload.get("pcap_signals"), dict) else {}
+            pcap_dns_tunnel = bool(pcap.get("pcap_dns_tunnel_suspected"))
+            pcap_high_entropy_dns = float(pcap.get("dns_high_entropy_ratio") or 0.0) >= 0.2
+    except Exception:
+        pcap_dns_tunnel = False
+        pcap_high_entropy_dns = False
     return {
         "jailbreak": has_jailbreak,
         "embedding_jailbreak": bool(emb_jb.get("detected")),
@@ -181,6 +192,8 @@ def _detect_signals(payload: Dict[str, Any]) -> Dict[str, bool]:
         "unexpected_code_exec": has_code_exec,
         "cascading_failure": has_cascading_failure,
         "rogue_agent": has_rogue_agent,
+        "pcap_dns_tunnel": pcap_dns_tunnel,
+        "pcap_high_entropy_dns": pcap_high_entropy_dns,
         "cv_prompt_injection": has_cv_prompt_injection,
         "deception": has_deception,
         "authority_impersonation": has_authority,
@@ -350,7 +363,7 @@ def _owasp_api_tags(signals: Dict[str, bool]) -> List[str]:
     return tags
 
 
-def _stride_tags(signals: Dict[str, bool]) -> List[str]:
+def _stride_tags(signals: Dict[str, bool], cv_signals: Dict[str, Any] | None = None) -> List[str]:
     tags: List[str] = []
     if signals.get("pii") or signals.get("pci") or signals.get("data_exfiltration"):
         tags.append("InformationDisclosure")
@@ -360,6 +373,14 @@ def _stride_tags(signals: Dict[str, bool]) -> List[str]:
         tags.append("ElevationOfPrivilege")
     if signals.get("ip_risk"):
         tags.append("Spoofing")
+    # ── Fix 5: CV image signals → STRIDE mapping ──
+    cv_signals = cv_signals or {}
+    if cv_signals.get("adversarial_detected") or cv_signals.get("steg_suspicious") or cv_signals.get("manipulation_detected"):
+        tags.append("Tampering")
+    if cv_signals.get("qr_code_detected") or cv_signals.get("qr_external_url_detected"):
+        tags.append("Spoofing")
+    if cv_signals.get("ocr_prompt_injection") or cv_signals.get("qr_prompt_injection"):
+        tags.append("Tampering")
     return tags
 
 
@@ -449,6 +470,8 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         mitre_score += float(mitre.get("AML.T0048", {}).get("weight", 1.0)) * 80
     if signals.get("training_poisoning") or signals.get("poisoning_attempt"):
         mitre_score += float(mitre.get("AML.T0020", {}).get("weight", 1.0)) * 90
+    if signals.get("pcap_dns_tunnel") or signals.get("pcap_high_entropy_dns"):
+        mitre_score += float(mitre.get("AML.T0015", {}).get("weight", 0.8)) * 70
     if signals.get("model_drift"):
         mitre_score += float(mitre.get("AML.T0015", {}).get("weight", 0.8)) * 50
     # CV lane: encoded prompts / QR indirection / image manipulation raise MITRE score as well.
@@ -457,6 +480,10 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
             mitre_score += float(mitre.get("AML.T0043", {}).get("weight", 1.0)) * 70
         if cv_signals.get("duplicate_image_detected") or cv_signals.get("manipulation_detected"):
             mitre_score += float(mitre.get("AML.T0015", {}).get("weight", 0.8)) * 60
+        if cv_signals.get("adversarial_detected"):
+            mitre_score += float(mitre.get("AML.T0015", {}).get("weight", 0.8)) * 70
+        if cv_signals.get("steg_suspicious"):
+            mitre_score += float(mitre.get("AML.T0015", {}).get("weight", 0.8)) * 65
     except Exception:
         pass
 
@@ -473,8 +500,15 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         stride_sum += float(stride.get("information_disclosure", 0))
     if signals.get("ip_risk"):
         stride_sum += float(stride.get("spoofing", 0))
+    if signals.get("pcap_dns_tunnel") or signals.get("pcap_high_entropy_dns"):
+        stride_sum += float(stride.get("information_disclosure", 0))
     if velocity_asn_anomaly:
         stride_sum += float(stride.get("spoofing", 0)) * 0.5
+    # ── Fix 5: CV signals → STRIDE scoring ──
+    if cv_signals.get("adversarial_detected") or cv_signals.get("steg_suspicious"):
+        stride_sum += float(stride.get("tampering", 0))
+    if cv_signals.get("qr_code_detected") or cv_signals.get("qr_external_url_detected"):
+        stride_sum += float(stride.get("spoofing", 0))
 
     dread_avg = sum(dread.values()) / max(len(dread.values()) or 1, 1)
     cvss_score = cvss.get("LOW", 0.2)
@@ -559,7 +593,7 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         "owasp_llm_top10": _owasp_llm_tags(signals, cv_signals=cv_signals),
         "owasp_agentic_top10": _owasp_agentic_tags(signals, cv_signals=cv_signals),
         "owasp_api_top10": _owasp_api_tags(signals),
-        "stride_categories": _stride_tags(signals),
+        "stride_categories": _stride_tags(signals, cv_signals=cv_signals),
         "stride_score": stride_sum,
         "dread_avg": dread_avg,
         "dread": dread,

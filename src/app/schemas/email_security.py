@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Any, Dict, List, Optional
 
 
 class EmailAttachment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(..., description="Attachment filename.")
     content_type: Optional[str] = None
     size_bytes: Optional[int] = Field(default=None, ge=0)
@@ -28,12 +29,17 @@ class EmailAttachment(BaseModel):
 
 
 class EmailEvaluateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     tenant_id: Optional[str] = Field(default=None, description="Optional tenant scope; can also be provided via X-Tenant-Id header.")
     message_id: Optional[str] = Field(default=None, description="Stable message id (used for dedupe).")
     from_addr: str
     reply_to: Optional[str] = None
     subject: Optional[str] = ""
     body: Optional[str] = ""
+    headers: Optional[Dict[str, Any]] = Field(default=None, description="Optional raw message headers map.")
+    received_headers: List[str] = Field(default_factory=list, description="Optional explicit Received header chain entries.")
+    x_originating_ip: Optional[str] = Field(default=None, description="Optional X-Originating-IP value.")
+    x_mailer: Optional[str] = Field(default=None, description="Optional X-Mailer fingerprint string.")
     attachments: List[EmailAttachment] = Field(default_factory=list)
     dmarc_fail: bool = Field(default=False, description="If caller already validated DMARC/SPF/DKIM and determined fail.")
     spf_result: Optional[str] = Field(default=None, description="Authentication-Results SPF verdict (pass/fail/softfail/neutral).")
@@ -50,6 +56,7 @@ class EmailEvaluateRequest(BaseModel):
 
 
 class EmailEvaluateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     severity: str
     verdict_action: Optional[str] = None
     route: Optional[str] = None
@@ -71,5 +78,13 @@ class EmailEvaluateResponse(BaseModel):
     trust_case: Optional[Dict[str, Any]] = None
     access_policy: Optional[Dict[str, Any]] = None
     policy_actions: Optional[List[str]] = None
+    ml_gate: Optional[Dict[str, Any]] = None
+    ml_gate_shadow: Optional[Dict[str, Any]] = None
+    threat_correlation: Optional[Dict[str, Any]] = None
+    latency: Optional[Dict[str, Any]] = None
+    sender_trust: Optional[Dict[str, Any]] = None
+    applied_thresholds: Optional[Dict[str, Any]] = None
+    bec_kill_chain: Optional[Dict[str, Any]] = None
+    bec_kill_chain_stage: Optional[str] = None
     decision_id: Optional[str] = None
     decision_trace_id: Optional[str] = None

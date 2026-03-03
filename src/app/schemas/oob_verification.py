@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class OOBCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     vendor_domain: str = Field(..., description="Vendor domain that triggered the bank-change signal")
     trigger_signal: str = Field(..., description="Signal type that triggered OOB (e.g. bank_fingerprint_baseline_mismatch)")
     invoice_ref: str = ""
@@ -18,6 +19,7 @@ class OOBCreateRequest(BaseModel):
 
 
 class OOBCreateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     request_id: str
     status: str
     channel: str
@@ -26,11 +28,13 @@ class OOBCreateResponse(BaseModel):
 
 
 class OOBConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     request_id: str
     token: str
 
 
 class OOBConfirmResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     ok: bool
     status: Optional[str] = None
     error: Optional[str] = None
@@ -39,6 +43,7 @@ class OOBConfirmResponse(BaseModel):
 
 
 class OOBStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     request_id: str
     vendor_domain: str
     trigger_signal: str

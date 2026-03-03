@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Dict
 import time
@@ -33,7 +33,7 @@ def health(redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERC
 def monitor_inventory(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))):
     """Return current low-stock alerts detected by the InventoryAgent."""
     try:
-        from src.app.services.inventory_agent import InventoryAgent
+        from src.app.services.inventory_agent import InventoryAgent, ReorderRecommendation
         from src.app.observability.metrics import decisions_events_counter
         agent = InventoryAgent()
         alerts = agent.monitor_stock_levels()
@@ -74,21 +74,54 @@ class ReorderRequest(BaseModel):
     supplier_id: str | None = None
     quantity: int = 0
     approval: str | None = None
+    po_invoice_confirmed: bool = False
+    carrier_asn_ack: bool = False
+    erp_ack: bool = False
+    tenant_id: str | None = None
+    owner_id: str | None = None
+    supplier_trust_score: float | None = None
+    supplier_trust_band: str | None = None
+    anomaly_score: float | None = None
 
 
 @router.post("/reorder")
-def reorder(req: ReorderRequest, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))):
+def reorder(req: ReorderRequest, request: Request, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))):
     """Execute a reorder recommendation (may require approval)."""
     try:
-        from src.app.services.inventory_agent import InventoryAgent
+        from src.app.services.inventory_agent import InventoryAgent, ReorderRecommendation
         from src.app.services.decision_log import log_trace_event
         from src.app.observability.metrics import decisions_events_counter
         from src.app.services.ticketing import TicketingAgent
+        from src.app.security.object_authz import enforce_object_scope
         agent = InventoryAgent()
+        # BOLA/BFLA guard: enforce tenant + owner scoped access when object scope is supplied.
+        if req.tenant_id and req.owner_id:
+            enforce_object_scope(
+                request=request,
+                resource_id=req.sku,
+                tenant_id=req.tenant_id,
+                owner_id=req.owner_id,
+                trace_id=None,
+            )
         # Build a simple recommendation object for execution
         rec = None
         try:
-            rec = agent.ReorderRecommendation(sku=req.sku, supplier_id=req.supplier_id, quantity=int(req.quantity or 0), estimated_cost=0.0, lead_time_days=7, urgency="normal")
+            rec = ReorderRecommendation(
+                sku=req.sku,
+                supplier_id=req.supplier_id,
+                quantity=int(req.quantity or 0),
+                estimated_cost=0.0,
+                lead_time_days=7,
+                urgency="normal",
+                supplier_trust_score=float(req.supplier_trust_score or 0.7),
+                supplier_trust_band=str(req.supplier_trust_band or "medium"),
+                anomaly_score=float(req.anomaly_score or 0.0),
+                source_confirmations={
+                    "po_invoice": bool(req.po_invoice_confirmed),
+                    "carrier_asn": bool(req.carrier_asn_ack),
+                    "erp_ack": bool(req.erp_ack),
+                },
+            )
         except Exception:
             # fallback lightweight dict-based
             rec = type("R", (), {"sku": req.sku, "supplier_id": req.supplier_id, "quantity": int(req.quantity or 0), "estimated_cost": 0.0, "lead_time_days": 7, "urgency": "normal"})()
@@ -118,6 +151,8 @@ def reorder(req: ReorderRequest, role: str = Depends(require_role([ROLE_MERCHANT
         except Exception:
             pass
         return {"status": "ok", "result": result}
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=500, detail="reorder failed")
 

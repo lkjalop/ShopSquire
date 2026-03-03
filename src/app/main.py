@@ -3,6 +3,7 @@ import json
 import re
 from typing import Any
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from fastapi.responses import ORJSONResponse, HTMLResponse, RedirectResponse
@@ -23,6 +24,7 @@ from src.app.routers.session_memory import router as session_memory_router
 from src.app.routers.decisions import router as decisions_router
 from src.app.routers.voice import router as voice_router
 from src.app.routers.vision import router as vision_router
+from src.app.routers.image_sidecar import router as image_sidecar_router
 from src.app.routers.cv import router as cv_router
 from src.app.routers.recruiting import router as recruiting_router
 from src.app.routers.scoring import router as scoring_router
@@ -38,6 +40,7 @@ from src.app.routers.graph import router as graph_router
 from src.app.routers.analytics import router as analytics_router
 from src.app.routers.query_clusters import router as clusters_router
 from src.app.routers.security_integrations import router as security_integrations_router
+from src.app.routers.shipping_security import router as shipping_security_router
 from src.app.routers.support_complaints import router as support_complaints_router
 from src.app.routers.query import router as query_router
 from src.app.routers.session_events import router as session_events_router
@@ -72,6 +75,7 @@ from src.app.security.compliance import ComplianceMiddleware
 from src.app.security.headers import SecurityHeadersMiddleware
 from src.app.security.rate_limit import RateLimitMiddleware
 from src.app.security.internal_mtls import InternalMTLSMiddleware
+from src.app.security.tls_fingerprint_middleware import TLSFingerprintMiddleware
 from src.app.security.request_shape import GlobalRequestShapeMiddleware
 
 
@@ -103,6 +107,11 @@ def create_app() -> FastAPI:
         try:
             from src.app.models.decision_trace_events import ensure_decision_trace_events_table
             ensure_decision_trace_events_table()
+        except Exception:
+            pass
+        try:
+            from src.app.security.security_event_ingest import ensure_security_event_ingest_table
+            ensure_security_event_ingest_table()
         except Exception:
             pass
         try:
@@ -292,6 +301,17 @@ def create_app() -> FastAPI:
         pass
     # Enforce webhook signature + replay protection on inbound webhooks
     app.add_middleware(WebhookSecurityMiddleware)
+    # M06: Patch httpx globally to enforce egress domain allowlist (dead-drop prevention)
+    try:
+        from src.app.security.egress_allowlist import patch_outbound_egress_guard
+        patch_outbound_egress_guard()
+    except Exception:
+        pass
+    # Capture JA3/JA4 headers from trusted ingress proxies for fraud scoring.
+    try:
+        app.add_middleware(TLSFingerprintMiddleware)
+    except Exception:
+        pass
     # Enforce proxy-validated mTLS headers for internal service routes when enabled.
     try:
         app.add_middleware(InternalMTLSMiddleware)
@@ -673,6 +693,25 @@ def create_app() -> FastAPI:
     from fastapi import status
     from src.app.observability.metrics import record_exception
 
+    @app.exception_handler(RequestValidationError)
+    async def _request_validation_exception_handler(request: Request, exc: RequestValidationError):
+        # FastAPI's default encoder can crash when validation error payload includes raw bytes
+        # (e.g., multipart binary uploads sent to JSON endpoints). Return a safe 422 payload.
+        def _safe(v):
+            if isinstance(v, bytes):
+                return f"<binary:{len(v)} bytes>"
+            if isinstance(v, dict):
+                return {k: _safe(val) for k, val in v.items()}
+            if isinstance(v, list):
+                return [_safe(x) for x in v]
+            return v
+
+        try:
+            detail = _safe(exc.errors())
+        except Exception:
+            detail = [{"type": "validation_error", "msg": "Request validation failed"}]
+        return ORJSONResponse({"detail": detail}, status_code=422)
+
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception):
         try:
@@ -878,11 +917,24 @@ def create_app() -> FastAPI:
 
     @app.get("/readyz")
     def readyz():
-        """Readiness probe: verifies DB connectivity and key dependencies."""
-        # Basic DB connectivity check
+        """Readiness probe: verifies DB + key service dependencies."""
         ok = True
-        reasons = []
+        reasons: list[str] = []
         config_report = {"ok": True, "missing": [], "warnings": [], "contract": {}}
+        components: dict[str, dict[str, Any]] = {
+            "backend": {"status": "ready", "details": {"liveness": "ok"}},
+            "frontend": {"status": "unknown", "details": {}},
+            "ollama": {"status": "unknown", "details": {}},
+            "cv_ocr": {"status": "unknown", "details": {}},
+            "redis": {"status": "unknown", "details": {}},
+            "db": {"status": "unknown", "details": {}},
+        }
+
+        def _set_component(name: str, ready: bool, details: dict[str, Any] | None = None) -> None:
+            if name not in components:
+                return
+            components[name] = {"status": "ready" if ready else "not_ready", "details": details or {}}
+
         try:
             from src.app.config import validate_runtime_contract
 
@@ -893,31 +945,83 @@ def create_app() -> FastAPI:
         except Exception:
             ok = False
             reasons.append("config_contract_check_failed")
+
         try:
             eng = getattr(app.state, "engine", None)
             if eng is None:
                 ok = False
                 reasons.append("no_engine")
+                _set_component("db", False, {"error": "no_engine"})
             else:
                 try:
                     with eng.connect() as conn:
                         conn.execute(sql_text("SELECT 1"))
+                    _set_component("db", True)
                 except Exception:
                     ok = False
                     reasons.append("db_connect_failed")
+                    _set_component("db", False, {"error": "db_connect_failed"})
         except Exception:
             ok = False
             reasons.append("ready_check_failed")
+            _set_component("db", False, {"error": "ready_check_failed"})
+
+        try:
+            from src.app.observability.health import dependency_health_snapshot
+
+            snap = dependency_health_snapshot(force=True)
+            deps = (snap or {}).get("dependencies") or {}
+            redis_dep = deps.get("redis") if isinstance(deps, dict) else None
+            if isinstance(redis_dep, dict):
+                redis_ok = str(redis_dep.get("status") or "").lower() == "healthy"
+                _set_component("redis", redis_ok, redis_dep)
+                if not redis_ok:
+                    ok = False
+                    reasons.append("redis_unhealthy")
+        except Exception:
+            _set_component("redis", False, {"error": "health_snapshot_failed"})
+            ok = False
+            reasons.append("redis_check_failed")
+
+        try:
+            import urllib.request as _urlreq
+
+            frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+            req = _urlreq.Request(frontend_url, method="GET")
+            with _urlreq.urlopen(req, timeout=1.5) as resp:
+                status_code = int(getattr(resp, "status", 0) or 0)
+                _set_component("frontend", status_code < 500, {"url": frontend_url, "status_code": status_code})
+        except Exception as exc:
+            _set_component("frontend", False, {"url": os.getenv("FRONTEND_URL", "http://127.0.0.1:5173"), "error": str(exc)})
+
+        try:
+            import urllib.request as _urlreq
+
+            ollama_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+            req = _urlreq.Request(f"{ollama_url.rstrip('/')}/api/tags", method="GET")
+            with _urlreq.urlopen(req, timeout=1.5) as resp:
+                status_code = int(getattr(resp, "status", 0) or 0)
+                _set_component("ollama", status_code < 500, {"url": ollama_url, "status_code": status_code})
+        except Exception as exc:
+            _set_component("ollama", False, {"url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"), "error": str(exc)})
+
+        try:
+            provider = (os.getenv("CV_OCR_PROVIDER", "auto") or "auto").strip().lower()
+            deps: dict[str, bool] = {}
+            for pkg in ("pytesseract", "cv2", "paddleocr"):
+                try:
+                    __import__(pkg)
+                    deps[pkg] = True
+                except Exception:
+                    deps[pkg] = False
+            provider_ready = bool(deps.get("paddleocr") or deps.get("pytesseract"))
+            _set_component("cv_ocr", provider_ready, {"provider": provider, "deps": deps})
+        except Exception as exc:
+            _set_component("cv_ocr", False, {"provider": os.getenv("CV_OCR_PROVIDER", "auto"), "error": str(exc)})
+
         status = "ok" if ok else "unavailable"
         code = 200 if ok else 503
-        return ORJSONResponse(
-            {
-                "status": status,
-                "reasons": reasons,
-                "config": config_report,
-            },
-            status_code=code,
-        )
+        return ORJSONResponse({"status": status, "reasons": reasons, "config": config_report, "components": components}, status_code=code)
 
     @app.get("/status/summary")
     def status_summary():
@@ -1127,6 +1231,7 @@ def create_app() -> FastAPI:
     app.include_router(decisions_router)
     app.include_router(voice_router)
     app.include_router(vision_router)
+    app.include_router(image_sidecar_router)
     # CV analysis endpoint (complaints triage)
     try:
         app.include_router(cv_router)
@@ -1337,7 +1442,14 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include merchant_dashboard router: %s", e)
+    try:
+        from src.app.routers.merchant_intelligence import router as merchant_intelligence_router
+        app.include_router(merchant_intelligence_router)
+    except Exception as e:
+        import logging
+        logging.getLogger("shopsquire.startup").exception("failed to include merchant_intelligence router: %s", e)
     app.include_router(security_integrations_router)
+    app.include_router(shipping_security_router)
     app.include_router(support_complaints_router)
     app.include_router(chat_router)
     app.include_router(safe_links_router)
@@ -1502,6 +1614,9 @@ def create_app() -> FastAPI:
         merchant_dist = os.path.join(os.getcwd(), "src", "frontend", "admin-react", "dist")
         if os.path.isdir(merchant_dist):
             app.mount("/merchant/app", StaticFiles(directory=merchant_dist, html=True), name="merchant_app")
+            merchant_assets = os.path.join(merchant_dist, "assets")
+            if os.path.isdir(merchant_assets):
+                app.mount("/assets", StaticFiles(directory=merchant_assets), name="merchant_app_assets")
     except Exception:
         pass
     app.include_router(cart_router)
@@ -1674,6 +1789,42 @@ def create_app() -> FastAPI:
 
         app.add_event_handler("startup", lambda: start_playbook_scheduler(app))
         app.add_event_handler("shutdown", lambda: stop_playbook_scheduler(app))
+    except Exception:
+        pass
+
+    # Incident SLA monitor (escalation room)
+    try:
+        from src.app.services.incident_sla_scheduler import start_incident_sla_scheduler, stop_incident_sla_scheduler
+
+        app.add_event_handler("startup", lambda: start_incident_sla_scheduler(app))
+        app.add_event_handler("shutdown", lambda: stop_incident_sla_scheduler(app))
+    except Exception:
+        pass
+
+    # Automated SBOM correlation scheduler
+    try:
+        from src.app.services.sbom_scheduler import start_sbom_scheduler, stop_sbom_scheduler
+
+        app.add_event_handler("startup", lambda: start_sbom_scheduler(app))
+        app.add_event_handler("shutdown", lambda: stop_sbom_scheduler(app))
+    except Exception:
+        pass
+
+    # Automated threat intel feed ingestion scheduler
+    try:
+        from src.app.services.threat_intel_scheduler import start_threat_intel_scheduler, stop_threat_intel_scheduler
+
+        app.add_event_handler("startup", lambda: start_threat_intel_scheduler(app))
+        app.add_event_handler("shutdown", lambda: stop_threat_intel_scheduler(app))
+    except Exception:
+        pass
+
+    # Async phishing-page analysis worker for queued email landing-page jobs.
+    try:
+        from src.app.services.phishing_page_worker import start_phishing_page_worker, stop_phishing_page_worker
+
+        app.add_event_handler("startup", lambda: start_phishing_page_worker(app))
+        app.add_event_handler("shutdown", lambda: stop_phishing_page_worker(app))
     except Exception:
         pass
 

@@ -27,11 +27,13 @@ from src.app.services.risk_quantification import quantify as quantify_risk
 from src.app.services.security_playbooks import select_playbook, build_evidence_snapshot, select_cv_playbook, get_cv_playbook_by_id
 from src.app.services.cv_evidence import build_evidence_bundle, persist_evidence_bundle, get_evidence_bundle
 from src.app.services.erp_edi import ERPEDIConnector
-from src.app.services.intake_gate import strict_binary_ingest_gate
+from src.app.services.intake_gate import strict_image_ingest_gate
 from src.app.flows.nqe import NextQuestionEngine, NQEInput
 from src.app.flows.catalog import QuestionTemplateCatalog
 from src.app.rag.retrieve import Retriever
 from src.app.security.observer import analyze_payload, emit_security_event
+from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints_from_request
+from src.app.services.geoip import enrich_ip
 from src.app.policy.gate import evaluate_policy_gate
 from src.app.feature_flags import get_flags
 
@@ -68,6 +70,82 @@ def _get_support_thresholds() -> Dict[str, Any]:
         "auto_process_confidence_min_signed_in": _f("auto_process_confidence_min_signed_in", 0.8),
         "auto_process_confidence_min_guest": _f("auto_process_confidence_min_guest", 0.85),
         "auto_process_fraud_levels": [str(x) for x in levels if str(x).strip()],
+    }
+
+
+def _geoip_routing_thresholds() -> Dict[str, float]:
+    def _f(name: str, default: float) -> float:
+        try:
+            return float(os.getenv(name, str(default)) or default)
+        except Exception:
+            return default
+
+    return {
+        "security_review_risk_threshold": _f("GEOIP_SECURITY_REVIEW_RISK_THRESHOLD", 0.75),
+        "hard_block_risk_threshold": _f("GEOIP_HARD_BLOCK_RISK_THRESHOLD", 0.9),
+    }
+
+
+def _load_bad_asn_set() -> set[int]:
+    try:
+        path = os.path.join("config", "security", "bad_asn.json")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        vals = data.get("bad_asn", []) if isinstance(data, dict) else []
+        out: set[int] = set()
+        for v in vals:
+            try:
+                out.add(int(v))
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return set()
+
+
+def _build_geoip_trace(source_ip: str | None) -> Dict[str, Any]:
+    ip = str(source_ip or "").strip()
+    if not ip:
+        return {
+            "source_ip": None,
+            "thresholds": _geoip_routing_thresholds(),
+            "route_reason": "no_source_ip",
+            "force_security_review": False,
+            "hard_block_candidate": False,
+        }
+    geo = enrich_ip(ip)
+    thresholds = _geoip_routing_thresholds()
+    risk = float(geo.get("risk") or 0.0)
+    asn = geo.get("asn")
+    try:
+        asn_i = int(asn) if asn is not None else None
+    except Exception:
+        asn_i = None
+    bad_asn_hit = bool(asn_i is not None and asn_i in _load_bad_asn_set())
+    force_security = bool(
+        bad_asn_hit
+        or risk >= float(thresholds.get("security_review_risk_threshold") or 0.75)
+        or bool(geo.get("is_vpn"))
+        or bool(geo.get("is_hosting"))
+    )
+    hard_block = bool(risk >= float(thresholds.get("hard_block_risk_threshold") or 0.9) and bad_asn_hit)
+    return {
+        "source_ip": ip,
+        "country": geo.get("country"),
+        "asn": asn_i,
+        "asn_org": geo.get("asn_org"),
+        "is_vpn": bool(geo.get("is_vpn")),
+        "is_hosting": bool(geo.get("is_hosting")),
+        "risk": round(risk, 4),
+        "bad_asn_hit": bad_asn_hit,
+        "thresholds": thresholds,
+        "route_reason": (
+            "hard_block_candidate"
+            if hard_block
+            else ("geoip_risk_or_asn_threshold" if force_security else "none")
+        ),
+        "force_security_review": force_security,
+        "hard_block_candidate": hard_block,
     }
 
 
@@ -1108,7 +1186,7 @@ async def submit_complaint(
     blocked_uploads: List[Dict[str, Any]] = []
     for idx, img in enumerate(images or []):
         content = await img.read()
-        gate = strict_binary_ingest_gate(
+        gate = strict_image_ingest_gate(
             filename=_safe_filename(getattr(img, "filename", None), idx),
             content_type=getattr(img, "content_type", None),
             blob=content,
@@ -1432,6 +1510,40 @@ async def submit_complaint(
         tier2_summary = None
     # Compute trust + fraud signals (MVP placeholders)
     history = {"account_age_days": 0, "loyalty_tier": None, "total_orders": 0, "email_verified": False, "phone_verified": False, "return_rate": 0.0, "fraud_flags": 0, "returns_last_30_days": 0}
+    try:
+        tls_fp = extract_tls_fingerprints_from_request(request) if request is not None else {}
+        source_ip = str((tls_fp or {}).get("source_ip") or getattr(getattr(request, "client", None), "host", "") or "").strip()
+        if source_ip:
+            history["source_ip"] = source_ip
+            history["ip"] = source_ip
+        if request is not None and getattr(request, "headers", None):
+            headers = request.headers
+            device_fp = str(headers.get("x-device-fingerprint") or headers.get("x-device-id") or "").strip()
+            if device_fp:
+                history["device_fingerprint"] = device_fp[:128]
+        ja3_hash = str((tls_fp or {}).get("ja3_hash") or "").strip()
+        ja4_hash = str((tls_fp or {}).get("ja4_hash") or "").strip()
+        if ja3_hash:
+            history["ja3_hash"] = ja3_hash[:128]
+        if ja4_hash:
+            history["ja4_hash"] = ja4_hash[:128]
+        known_ja3 = [h.strip() for h in str(os.getenv("FRAUD_KNOWN_JA3_HASHES", "")).split(",") if h.strip()]
+        known_ja4 = [h.strip() for h in str(os.getenv("FRAUD_KNOWN_JA4_HASHES", "")).split(",") if h.strip()]
+        if known_ja3:
+            history["known_fraud_ja3_hashes"] = known_ja3
+        if known_ja4:
+            history["known_fraud_ja4_hashes"] = known_ja4
+    except Exception:
+        pass
+    geoip_trace = _build_geoip_trace(history.get("source_ip"))
+    try:
+        if geoip_trace.get("asn") is not None:
+            history["asn"] = geoip_trace.get("asn")
+        if geoip_trace.get("country"):
+            history["country"] = geoip_trace.get("country")
+        history["geo_risk"] = float(geoip_trace.get("risk") or 0.0)
+    except Exception:
+        pass
     trust = compute_trust_score(history)
     thresholds = auto_approve_thresholds(trust)
     from src.app.services.cv_evidence import _extract_serial
@@ -1551,6 +1663,7 @@ async def submit_complaint(
             # Merge CV rule signals with fraud/forensics signals so the observer can map them
             # into MITRE/OWASP and raise severity when appropriate.
             "cv_signals": {**(rule_eval.get("signals") or {}), **(signals or {})},
+            "geoip_trace": geoip_trace,
         }
         security_analysis = analyze_payload(security_payload)
         security_details = security_analysis.get("details") or {}
@@ -1633,6 +1746,8 @@ async def submit_complaint(
         recommended_route = "security_review"
     if gate_force_review:
         recommended_route = "security_review"
+    if bool(geoip_trace.get("force_security_review")):
+        recommended_route = "security_review"
     risk_quant = {}
     try:
         risk_quant = quantify_risk(
@@ -1705,6 +1820,9 @@ async def submit_complaint(
                 {"id": "CV44", "name": "order_id_not_found", "severity": "high", "reason": "order_not_found_risk_threshold"}
             )
         rule_eval["signals"]["order_id_not_found"] = True
+    if bool(geoip_trace.get("force_security_review")):
+        recommended_route = "security_review"
+        rule_eval["signals"]["high_risk_region"] = True
 
     # Trust routing override based on trust tier + risk band + exposure.
     # Security and soft-verify routes are sticky and cannot be downgraded by trust.
@@ -1843,6 +1961,7 @@ async def submit_complaint(
             "order_validation": order_validation,
             "qr_codes": qr_decode_hits[:10],
             "supplier_signals": supplier_signals,
+            "geoip_trace": geoip_trace,
             "agent_chain": agent_chain,
             "risk_quantification": risk_quant,
             "customer_tier": customer_tier,
@@ -1860,6 +1979,7 @@ async def submit_complaint(
             "suggested_routing": recommended_route,
             "image_consistency": image_consistency,
             "order_validation": order_validation,
+            "geoip_trace": geoip_trace,
             "user_prompt": image_consistency.get("prompt"),
             "ui_actions": {"chat_with_admin": bool(recommended_route == "security_review")},
         },
@@ -2104,6 +2224,7 @@ async def submit_complaint(
         "evidence_tags": evidence_tags,
         "playbook_preview": playbook_preview,
         "suggested_routing": recommended_route,
+        "geoip_trace": geoip_trace,
         "image_consistency": image_consistency,
         "order_validation": order_validation,
         "user_prompt": image_consistency.get("prompt"),
@@ -2139,7 +2260,7 @@ async def submit_complaint_guest(
     except Exception:
         sanitize_t0 = None
     rec_bytes = await receipt_image.read()
-    rec_gate = strict_binary_ingest_gate(
+    rec_gate = strict_image_ingest_gate(
         filename=_safe_filename(getattr(receipt_image, "filename", None), 0),
         content_type=getattr(receipt_image, "content_type", None),
         blob=rec_bytes,
@@ -2166,7 +2287,7 @@ async def submit_complaint_guest(
     blocked_uploads: List[Dict[str, Any]] = []
     for idx, img in enumerate(damage_images or []):
         raw = await img.read()
-        gate = strict_binary_ingest_gate(
+        gate = strict_image_ingest_gate(
             filename=_safe_filename(getattr(img, "filename", None), idx),
             content_type=getattr(img, "content_type", None),
             blob=raw,
@@ -2260,6 +2381,31 @@ async def submit_complaint_guest(
     except Exception:
         triage_ms = None
     history = {"account_age_days": 0, "loyalty_tier": None, "total_orders": 0, "email_verified": False, "phone_verified": False, "return_rate": 0.0, "fraud_flags": 0, "returns_last_30_days": 0}
+    try:
+        tls_fp = extract_tls_fingerprints_from_request(request) if request is not None else {}
+        source_ip = str((tls_fp or {}).get("source_ip") or getattr(getattr(request, "client", None), "host", "") or "").strip()
+        if source_ip:
+            history["source_ip"] = source_ip
+            history["ip"] = source_ip
+        if request is not None and getattr(request, "headers", None):
+            headers = request.headers
+            device_fp = str(headers.get("x-device-fingerprint") or headers.get("x-device-id") or "").strip()
+            if device_fp:
+                history["device_fingerprint"] = device_fp[:128]
+        ja3_hash = str((tls_fp or {}).get("ja3_hash") or "").strip()
+        ja4_hash = str((tls_fp or {}).get("ja4_hash") or "").strip()
+        if ja3_hash:
+            history["ja3_hash"] = ja3_hash[:128]
+        if ja4_hash:
+            history["ja4_hash"] = ja4_hash[:128]
+        known_ja3 = [h.strip() for h in str(os.getenv("FRAUD_KNOWN_JA3_HASHES", "")).split(",") if h.strip()]
+        known_ja4 = [h.strip() for h in str(os.getenv("FRAUD_KNOWN_JA4_HASHES", "")).split(",") if h.strip()]
+        if known_ja3:
+            history["known_fraud_ja3_hashes"] = known_ja3
+        if known_ja4:
+            history["known_fraud_ja4_hashes"] = known_ja4
+    except Exception:
+        pass
     trust = compute_trust_score(history)
     thresholds = auto_approve_thresholds(trust)
     from src.app.services.cv_evidence import _extract_serial
@@ -2342,6 +2488,7 @@ async def submit_complaint_guest(
             "reverse_hits": reverse_hits,
             "cv_rules": rule_eval.get("rules"),
             "cv_signals": rule_eval.get("signals"),
+            "geoip_trace": geoip_trace,
         }
         security_analysis = analyze_payload(security_payload)
         security_details = security_analysis.get("details") or {}
@@ -2418,6 +2565,16 @@ async def submit_complaint_guest(
         security_details = {}
         security_sev = None
 
+    geoip_trace = _build_geoip_trace(history.get("source_ip"))
+    try:
+        if geoip_trace.get("asn") is not None:
+            history["asn"] = geoip_trace.get("asn")
+        if geoip_trace.get("country"):
+            history["country"] = geoip_trace.get("country")
+        history["geo_risk"] = float(geoip_trace.get("risk") or 0.0)
+    except Exception:
+        pass
+
     recommended_route = "standard_queue"
     # Evaluate NLP compliance rules for guest flow (ensure variable defined)
     nlp_rules = _evaluate_nlp_rules(description)
@@ -2431,6 +2588,8 @@ async def submit_complaint_guest(
     if any(r.get("severity") == "high" for r in (rule_eval.get("rules") or [])):
         recommended_route = "security_review"
     if gate_force_review:
+        recommended_route = "security_review"
+    if bool(geoip_trace.get("force_security_review")):
         recommended_route = "security_review"
     try:
         trust_dec = route_from_trust(
@@ -2574,6 +2733,7 @@ async def submit_complaint_guest(
             "cv_rules": rule_eval.get("rules"),
             "nlp_rules": nlp_rules.get("rules"),
             "security_analysis": security_details,
+            "geoip_trace": geoip_trace,
         },
         proposed_action={"analysis": analysis, "suggested_routing": recommended_route},
         agent_reasoning="guest_flow_placeholder",
@@ -2721,6 +2881,7 @@ async def submit_complaint_guest(
         "evidence_tags": evidence_tags,
         "playbook_preview": playbook_preview,
         "suggested_routing": recommended_route,
+        "geoip_trace": geoip_trace,
         "agent_chain": agent_chain,
         "risk_quantification": risk_quant,
         "human_review": {"status": "pending" if needs_human else "not_required", "ticket_id": ticket_id},
@@ -2815,7 +2976,7 @@ async def add_images(case_id: str, images: list[UploadFile] = File(...), db=Depe
     blocked_uploads: List[Dict[str, Any]] = []
     for idx, img in enumerate(images or []):
         raw = await img.read()
-        gate = strict_binary_ingest_gate(
+        gate = strict_image_ingest_gate(
             filename=_safe_filename(getattr(img, "filename", None), idx),
             content_type=getattr(img, "content_type", None),
             blob=raw,

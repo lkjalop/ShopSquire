@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from celery import Celery
 from kombu import Queue
+from celery.schedules import crontab
 
 
 def _setup_hmac_signing(celery: Celery) -> None:
@@ -153,12 +154,50 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     else:
         celery.conf.update(task_serializer="json", accept_content=["json"], result_serializer="json")
 
+    poll_enabled = str(os.getenv("SECURITY_CROWDSTRIKE_POLL_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    poll_min = max(1, min(60, int(float(os.getenv("SECURITY_CROWDSTRIKE_POLL_MINUTES", "5") or 5))))
+    poll_tenant = str(os.getenv("SECURITY_CROWDSTRIKE_POLL_TENANT_ID", "default") or "default")
+    poll_limit = max(1, min(500, int(float(os.getenv("SECURITY_CROWDSTRIKE_POLL_LIMIT", "100") or 100))))
+    reco_cf_enabled = str(os.getenv("RECO_CF_NIGHTLY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    reco_cf_hour = max(0, min(23, int(float(os.getenv("RECO_CF_NIGHTLY_HOUR_UTC", "2") or 2))))
+    reco_cf_minute = max(0, min(59, int(float(os.getenv("RECO_CF_NIGHTLY_MINUTE_UTC", "15") or 15))))
+    forecast_gov_enabled = str(os.getenv("FORECAST_GOVERNANCE_SNAPSHOT_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    forecast_gov_hour = max(0, min(23, int(float(os.getenv("FORECAST_GOVERNANCE_HOUR_UTC", "3") or 3))))
+    forecast_gov_minute = max(0, min(59, int(float(os.getenv("FORECAST_GOVERNANCE_MINUTE_UTC", "10") or 10))))
+
+    beat_schedule = {}
+    if poll_enabled:
+        beat_schedule["security-crowdstrike-poll"] = {
+            "task": "src.app.tasks.security_poll_tasks.poll_crowdstrike",
+            "schedule": crontab(minute=f"*/{poll_min}"),
+            "args": (poll_tenant, poll_limit, poll_min),
+        }
+    if reco_cf_enabled:
+        beat_schedule["recommend-cf-nightly-train"] = {
+            "task": "src.app.tasks.model_ops_tasks.train_recommend_cf_nightly",
+            "schedule": crontab(minute=str(reco_cf_minute), hour=str(reco_cf_hour)),
+            "args": (),
+        }
+    if forecast_gov_enabled:
+        beat_schedule["forecast-governance-snapshot"] = {
+            "task": "src.app.tasks.model_ops_tasks.snapshot_forecast_governance",
+            "schedule": crontab(minute=str(forecast_gov_minute), hour=str(forecast_gov_hour)),
+            "args": (),
+        }
+
     celery.conf.update(
         timezone="UTC",
         enable_utc=True,
         task_default_queue=default_q,
         task_queues=(Queue(default_q), Queue(swarm_q)),
-        task_routes={"src.app.tasks.swarm_tasks.run_swarm": {"queue": swarm_q}},
+        task_routes={
+            "src.app.tasks.swarm_tasks.run_swarm": {"queue": swarm_q},
+            "src.app.tasks.security_poll_tasks.poll_crowdstrike": {"queue": default_q},
+            "src.app.tasks.model_ops_tasks.train_recommend_cf_nightly": {"queue": default_q},
+            "src.app.tasks.model_ops_tasks.snapshot_forecast_governance": {"queue": default_q},
+        },
+        imports=("src.app.tasks.swarm_tasks", "src.app.tasks.security_poll_tasks", "src.app.tasks.model_ops_tasks"),
+        beat_schedule=beat_schedule,
         task_create_missing_queues=False,
         worker_prefetch_multiplier=1,
         task_acks_late=True,

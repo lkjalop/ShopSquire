@@ -25,6 +25,7 @@ def _ensure_table() -> None:
                     CREATE TABLE IF NOT EXISTS email_sender_trust (
                       tenant_id TEXT NOT NULL,
                       sender_domain_hash TEXT NOT NULL,
+                                            first_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
                       seen_count INTEGER NOT NULL DEFAULT 0,
                       bank_change_count INTEGER NOT NULL DEFAULT 0,
                       oob_verified_count INTEGER NOT NULL DEFAULT 0,
@@ -36,6 +37,10 @@ def _ensure_table() -> None:
                     """
                 )
             )
+            try:
+                db.execute(text("ALTER TABLE email_sender_trust ADD COLUMN first_seen_at TEXT"))
+            except Exception:
+                pass
             db.commit()
     except Exception:
         pass
@@ -54,12 +59,14 @@ def score_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], tenant_
     bank_change_count = 0
     oob_verified_count = 0
     mismatch_count = 0
+    first_seen_at = None
     try:
         with db_session() as db:
             row = db.execute(
                 text(
                     """
                     SELECT seen_count, bank_change_count, oob_verified_count, reply_chain_mismatch_count
+                    , first_seen_at
                     FROM email_sender_trust
                     WHERE tenant_id=:tenant AND sender_domain_hash=:sender
                     """
@@ -71,6 +78,7 @@ def score_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], tenant_
             bank_change_count = int(row[1] or 0)
             oob_verified_count = int(row[2] or 0)
             mismatch_count = int(row[3] or 0)
+            first_seen_at = row[4]
     except Exception:
         pass
 
@@ -83,6 +91,20 @@ def score_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], tenant_
     vendor_relationship_confidence = 0.2 + (0.5 if vendor_domain and vendor_domain == from_domain else 0.0) + (0.3 * hist)
     vendor_relationship_confidence = max(0.0, min(1.0, vendor_relationship_confidence))
     mismatch_rate = (float(mismatch_count) / float(max(1, seen_count))) if seen_count > 0 else 0.0
+    domain_age_days = 0
+    try:
+        from datetime import datetime, timezone
+
+        if isinstance(first_seen_at, str) and first_seen_at.strip():
+            dt = datetime.fromisoformat(first_seen_at.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            domain_age_days = max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 86400))
+        elif seen_count > 0:
+            # Coarse fallback when first_seen_at unavailable in legacy rows.
+            domain_age_days = min(365, seen_count)
+    except Exception:
+        domain_age_days = min(365, seen_count) if seen_count > 0 else 0
     trust_score = max(
         0.0,
         min(
@@ -101,6 +123,7 @@ def score_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], tenant_
         "vendor_relationship_confidence": round(vendor_relationship_confidence, 4),
         "historical_bank_change_count": bank_change_count,
         "historical_oob_verified_count": oob_verified_count,
+        "domain_age_days": int(domain_age_days),
     }
 
 
@@ -121,8 +144,8 @@ def update_sender_trust(email: Dict[str, Any], extracted: Dict[str, Any], verdic
                 text(
                     """
                     INSERT INTO email_sender_trust
-                    (tenant_id, sender_domain_hash, seen_count, bank_change_count, oob_verified_count, reply_chain_mismatch_count, last_reply_chain_hash, updated_at)
-                    VALUES (:tenant, :sender, 1, :bank_change, :oob_verified, :mismatch, :chain_hash, CURRENT_TIMESTAMP)
+                                        (tenant_id, sender_domain_hash, first_seen_at, seen_count, bank_change_count, oob_verified_count, reply_chain_mismatch_count, last_reply_chain_hash, updated_at)
+                                        VALUES (:tenant, :sender, CURRENT_TIMESTAMP, 1, :bank_change, :oob_verified, :mismatch, :chain_hash, CURRENT_TIMESTAMP)
                     ON CONFLICT(tenant_id, sender_domain_hash) DO UPDATE SET
                       seen_count = seen_count + 1,
                       bank_change_count = bank_change_count + :bank_change,

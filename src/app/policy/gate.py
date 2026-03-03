@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Literal
 import os
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.security.refund_window_guard import evaluate_refund_aggregate_window
 
 
 Decision = Literal["allow", "review", "deny"]
@@ -128,6 +129,29 @@ def evaluate_policy_gate(context: Dict[str, Any]) -> PolicyGateResult:
         rule_hits["refund_above_threshold"] = 0.7
         reasons.append("Refund exceeds auto-approval threshold.")
         approval_required = True
+
+    # §3.8 — aggregate refund action window guard (cumulative USD/hour per actor)
+    try:
+        is_refund_action = bool(
+            tool in ("refund.issue", "refund.create", "return.refund")
+            or request_type in ("refund", "refund_request", "return_request")
+            or refund_value is not None
+        )
+        if is_refund_action:
+            actor = str(
+                context.get("actor_id")
+                or context.get("uid")
+                or context.get("source_ip")
+                or context.get("ip")
+                or "anon"
+            )
+            triggered, agg = evaluate_refund_aggregate_window(actor=actor, params=params)
+            if triggered:
+                rule_hits["refund_aggregate_hourly_limit"] = 0.8
+                reasons.append("Cumulative refund amount in 1h exceeds threshold; human review required.")
+                approval_required = True
+    except Exception:
+        pass
 
     discount_pct = params.get("discount_pct") or params.get("discount_percent") or params.get("override_percent")
     try:

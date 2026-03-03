@@ -180,3 +180,39 @@ def test_tenant_calibration_low_samples_reverts_to_global(tmp_path, monkeypatch)
         canary_percent=100,
     )
     assert s.get("calibration_source") == "global_platt"
+
+
+def test_runtime_gate_supports_gradient_boosting_artifact_via_runtime_predictor(tmp_path, monkeypatch):
+    artifact = {
+        "version": "ml_decision_gate_v1",
+        "domains": {
+            "email_security": {
+                "model": {
+                    "kind": "xgboost",
+                    "model_path": str(tmp_path / "dummy-xgb.json"),
+                    "feature_order": ["signal_density", "auth_fail"],
+                },
+                "calibration": {"method": "platt", "params": {"a": 1.0, "b": 0.0}},
+                "calibration_policy": {"tenant_min_samples": 10, "tenant_min_quality": 0.55},
+            }
+        },
+    }
+    path = tmp_path / "model.json"
+    save_gate_artifact(artifact, output_path=str(path))
+    monkeypatch.setenv("ML_DECISION_GATE_MODEL_PATH", str(path))
+    _load_model_artifact.cache_clear()
+
+    monkeypatch.setattr(
+        "src.app.services.ml_decision_gate._predict_boosting_probability",
+        lambda **kwargs: 0.82,
+    )
+    score = score_with_learned_model(
+        domain="email_security",
+        tenant_id="tenant-live",
+        features={"signal_density": 0.9, "auth_fail": 1.0},
+        fallback_weights={"signal_density": 0.05},
+        rollout_enabled=True,
+        canary_percent=100,
+    )
+    assert score.get("model_source") == "learned_xgboost"
+    assert abs(float(score.get("raw_score") or 0.0) - 0.82) < 1e-6

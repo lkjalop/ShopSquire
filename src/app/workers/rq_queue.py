@@ -20,6 +20,7 @@ except Exception:  # pragma: no cover
 import os
 import time
 import json
+from urllib.parse import urlparse
 
 from src.app.observability.metrics import (
     record_worker_queue_depth,
@@ -32,6 +33,17 @@ def _get_redis_connection() -> Optional["redis.Redis"]:
         return None
     try:
         url = os.getenv("REDIS_URL") or "redis://localhost:6379/0"
+        env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+        non_dev = env not in ("local", "dev", "development", "test", "testing")
+        parsed = urlparse(str(url))
+        acl_user = str(os.getenv("REDIS_ACL_USERNAME", "") or "").strip()
+        acl_pass = str(os.getenv("REDIS_ACL_PASSWORD", "") or "").strip()
+        if non_dev:
+            if str(parsed.scheme or "").lower() != "rediss":
+                return None
+            if not acl_user or not acl_pass:
+                return None
+            return redis.from_url(url, username=acl_user, password=acl_pass)  # type: ignore
         return redis.from_url(url)  # type: ignore
     except Exception:
         return None

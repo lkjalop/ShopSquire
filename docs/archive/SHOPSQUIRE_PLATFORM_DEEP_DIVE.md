@@ -1,4 +1,4 @@
-# ShopSquire — Full Platform Deep Dive
+﻿# ShopSquire â€” Full Platform Deep Dive
 > **Classification:** Internal / Investor / Architecture Review
 > **Date:** February 2026
 > **Author:** AI-assisted full-codebase analysis (every file read)
@@ -29,7 +29,7 @@
 
 ## 1. What Is ShopSquire?
 
-ShopSquire is a **security-first, agentic AI platform for e-commerce operations** — designed from the ground up to be **product-agnostic** (it works alongside Shopify, Magento, WooCommerce, custom platforms, or any backend) and **modular** (each agent, connector, and security layer can be enabled or disabled independently via feature flags).
+ShopSquire is a **security-first, agentic AI platform for e-commerce operations** â€” designed from the ground up to be **product-agnostic** (it works alongside Shopify, Magento, WooCommerce, custom platforms, or any backend) and **modular** (each agent, connector, and security layer can be enabled or disabled independently via feature flags).
 
 ### Core Value Proposition
 
@@ -37,7 +37,7 @@ ShopSquire is a **security-first, agentic AI platform for e-commerce operations*
 Traditional E-Commerce Stack:
   Gorgias (support) + Riskified (fraud) + Klevu (search)
   + custom CV + manual audit + separate compliance tool
-  = 5–7 vendors, 5–7 integrations, 5–7 monthly invoices
+  = 5â€“7 vendors, 5â€“7 integrations, 5â€“7 monthly invoices
 
 ShopSquire:
   One platform, one API, one audit trail, one admin dashboard.
@@ -50,86 +50,86 @@ ShopSquire:
 |-----------|---------------------|
 | **Agent architecture** | DAG-based multi-agent orchestration with phase-gated execution |
 | **Security** | OWASP LLM Top 10 built-in, not bolted on; 530+ LOC security observer |
-| **Auditability** | Bi-temporal decision logs — every AI decision is traceable to data, context, and policy version |
-| **Data sovereignty** | Full Ollama (local LLM) support — zero external API dependency for core operations |
+| **Auditability** | Bi-temporal decision logs â€” every AI decision is traceable to data, context, and policy version |
+| **Data sovereignty** | Full Ollama (local LLM) support â€” zero external API dependency for core operations |
 | **Modularity** | Feature flags on every subsystem; agents toggled independently per tenant |
 | **Compliance** | ISO 27001, NIST CSF, GDPR, SOC 2, EU AI Act alignment baked into data model |
 | **Multi-tenancy** | Per-tenant agent pool limits, quota guards, isolated decision trees |
-| **Deployment** | Docker-first, Kubernetes-ready, supports SQLite (dev) → PostgreSQL/TimescaleDB (prod) |
+| **Deployment** | Docker-first, Kubernetes-ready, supports SQLite (dev) â†’ PostgreSQL/TimescaleDB (prod) |
 
 ---
 
 ## 2. Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                         USER LAYER                                       │
-│   BUYER (Consumer)              ADMIN (Merchant / Operator)              │
-│   · Chat / NLP queries          · React Admin Dashboard                  │
-│   · Product search              · Approvals, Decisions, Analytics        │
-│   · Checkout / Returns          · Playbooks, Rules, Compliance           │
-└──────────────────────┬───────────────────────────┬───────────────────────┘
-                       │                           │
-                       ▼                           ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                    FASTAPI GATEWAY (155+ endpoints)                      │
-│   · Input sanitization (InputSanitizer)   · Rate limiting               │
-│   · PII redaction                         · API key auth + RBAC         │
-│   · Session guard                         · OWASP LLM firewall          │
-│   · Tool intent gate                      · Janusec WAF integration     │
-└──────────────────────┬───────────────────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                     TIER ROUTER (Tier 0 / 1 / 2)                        │
-│   Tier 0: Cache hit (SemanticCache / Redis) — zero LLM cost             │
-│   Tier 1: Fast model, single-pass, preserved thinking                   │
-│   Tier 2: Interleaved, multi-agent DAG, bounded tool budget             │
-│                                                                          │
-│   Pre-LLM Funnel → TF-IDF Classifier → XGBoost Intent → LLM            │
-└──────────────────────┬───────────────────────────────────────────────────┘
-                       │
-           ┌───────────┴───────────┐
-           ▼                       ▼
-┌──────────────────┐   ┌──────────────────────────────────────────────────┐
-│  ORCHESTRATOR    │   │           AGENT DAG RUNTIME                      │
-│  (Master coord.) │   │                                                  │
-│  · Memory        │   │   PHASE 1 (parallel, read-only):                 │
-│  · Policy gate   │   │   ┌──────────────────┬───────────────────┐       │
-│  · Rule engine   │   │   │  Security Agent  │   CV Agent         │       │
-│  · LLM client    │   │   │  (530+ LOC obs.) │  (YOLOv8 + OCR)   │       │
-│  · Debate coord. │   │   └──────────────────┴───────────────────┘       │
-│  · Playbook eng. │   │                                                  │
-│  · A/B testing   │   │   PHASE 2 (parallel, scored):                   │
-└──────────────────┘   │   ┌──────────────────┬───────────────────┐       │
-                       │   │  Fraud Agent     │  Inventory Agent   │       │
-                       │   │  (11 signals)    │  (ERP sync)        │       │
-                       │   └──────────────────┴───────────────────┘       │
-                       └──────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-                          ┌──────────────────────────────┐
-                          │   ML DECISION GATE           │
-                          │   Platt-scaled confidence    │
-                          │   Domain-aware thresholds    │
-                          │   Model Fallback Ladder      │
-                          │   L1 (cheap) → L2 → L3       │
-                          └──────────────────────────────┘
-                                         │
-                          ┌──────────────┴──────────────┐
-                          ▼                             ▼
-               ┌──────────────────┐       ┌──────────────────────┐
-               │  AUTO-EXECUTE    │       │  HUMAN REVIEW QUEUE  │
-               │  (policy allow)  │       │  (escalated, HITL)   │
-               └──────────────────┘       └──────────────────────┘
-                                         │
-                                         ▼
-                          ┌──────────────────────────────┐
-                          │   BI-TEMPORAL DECISION LOG   │
-                          │   valid_from/to + sys_from   │
-                          │   RAGAS quality score        │
-                          │   Full trace events chain    │
-                          └──────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                         USER LAYER                                       â”‚
+â”‚   BUYER (Consumer)              ADMIN (Merchant / Operator)              â”‚
+â”‚   Â· Chat / NLP queries          Â· React Admin Dashboard                  â”‚
+â”‚   Â· Product search              Â· Approvals, Decisions, Analytics        â”‚
+â”‚   Â· Checkout / Returns          Â· Playbooks, Rules, Compliance           â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                       â”‚                           â”‚
+                       â–¼                           â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                    FASTAPI GATEWAY (155+ endpoints)                      â”‚
+â”‚   Â· Input sanitization (InputSanitizer)   Â· Rate limiting               â”‚
+â”‚   Â· PII redaction                         Â· API key auth + RBAC         â”‚
+â”‚   Â· Session guard                         Â· OWASP LLM firewall          â”‚
+â”‚   Â· Tool intent gate                      Â· Janusec WAF integration     â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                       â”‚
+                       â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                     TIER ROUTER (Tier 0 / 1 / 2)                        â”‚
+â”‚   Tier 0: Cache hit (SemanticCache / Redis) â€” zero LLM cost             â”‚
+â”‚   Tier 1: Fast model, single-pass, preserved thinking                   â”‚
+â”‚   Tier 2: Interleaved, multi-agent DAG, bounded tool budget             â”‚
+â”‚                                                                          â”‚
+â”‚   Pre-LLM Funnel â†’ TF-IDF Classifier â†’ XGBoost Intent â†’ LLM            â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                       â”‚
+           â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+           â–¼                       â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  ORCHESTRATOR    â”‚   â”‚           AGENT DAG RUNTIME                      â”‚
+â”‚  (Master coord.) â”‚   â”‚                                                  â”‚
+â”‚  Â· Memory        â”‚   â”‚   PHASE 1 (parallel, read-only):                 â”‚
+â”‚  Â· Policy gate   â”‚   â”‚   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”       â”‚
+â”‚  Â· Rule engine   â”‚   â”‚   â”‚  Security Agent  â”‚   CV Agent         â”‚       â”‚
+â”‚  Â· LLM client    â”‚   â”‚   â”‚  (530+ LOC obs.) â”‚  (YOLOv8 + OCR)   â”‚       â”‚
+â”‚  Â· Debate coord. â”‚   â”‚   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜       â”‚
+â”‚  Â· Playbook eng. â”‚   â”‚                                                  â”‚
+â”‚  Â· A/B testing   â”‚   â”‚   PHASE 2 (parallel, scored):                   â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”       â”‚
+                       â”‚   â”‚  Fraud Agent     â”‚  Inventory Agent   â”‚       â”‚
+                       â”‚   â”‚  (11 signals)    â”‚  (ERP sync)        â”‚       â”‚
+                       â”‚   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜       â”‚
+                       â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                                         â”‚
+                                         â–¼
+                          â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                          â”‚   ML DECISION GATE           â”‚
+                          â”‚   Platt-scaled confidence    â”‚
+                          â”‚   Domain-aware thresholds    â”‚
+                          â”‚   Model Fallback Ladder      â”‚
+                          â”‚   L1 (cheap) â†’ L2 â†’ L3       â”‚
+                          â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                                         â”‚
+                          â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                          â–¼                             â–¼
+               â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”       â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+               â”‚  AUTO-EXECUTE    â”‚       â”‚  HUMAN REVIEW QUEUE  â”‚
+               â”‚  (policy allow)  â”‚       â”‚  (escalated, HITL)   â”‚
+               â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜       â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                                         â”‚
+                                         â–¼
+                          â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                          â”‚   BI-TEMPORAL DECISION LOG   â”‚
+                          â”‚   valid_from/to + sys_from   â”‚
+                          â”‚   RAGAS quality score        â”‚
+                          â”‚   Full trace events chain    â”‚
+                          â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ---
@@ -141,13 +141,13 @@ ShopSquire:
 ### 3.1 Orchestrator Agent
 | Aspect | Current State | Improvement Path to Exceed Competitors |
 |--------|--------------|----------------------------------------|
-| **Role** | Master coordinator — routes queries, manages memory, runs DAG, evaluates policy | Already among the most capable open-source implementations |
-| **Strengths** | Interleaving control, A/B test framework, chaos injection, debug trace, learned tier router | — |
+| **Role** | Master coordinator â€” routes queries, manages memory, runs DAG, evaluates policy | Already among the most capable open-source implementations |
+| **Strengths** | Interleaving control, A/B test framework, chaos injection, debug trace, learned tier router | â€” |
 | **Context management** | Session memory, semantic cache, CAG context, dynamic context provider | Add cross-session persistent user profiling; vector memory compression |
 | **Tool budget** | Per-tier tool budget limits (Tier 2 = 4 calls max) | Add ML-driven adaptive budget: reward budget frugality in RL loop |
 | **Improve** | Currently single-node; no distributed task queue integration at orchestrator level | Integrate Celery DAG for distributed agent pools |
-| **vs. LangChain** | Significantly ahead: e-commerce native, bi-temporal audit, built-in security | ✅ Already exceeds |
-| **vs. CrewAI** | More structured DAG, better auditability, stronger security | ✅ Already exceeds |
+| **vs. LangChain** | Significantly ahead: e-commerce native, bi-temporal audit, built-in security | âœ… Already exceeds |
+| **vs. CrewAI** | More structured DAG, better auditability, stronger security | âœ… Already exceeds |
 
 ### 3.2 NLP / Intent Agent
 | Aspect | Current State | Improvement Path |
@@ -157,7 +157,7 @@ ShopSquire:
 | **Multi-language** | Implicit only (LLM handles) | Explicit language detection + route to multilingual model |
 | **Sentiment** | Basic inferred from intent | Add dedicated VADER/transformer sentiment + urgency scoring |
 | **Conversation management** | Session memory with chat history | Add conversation graph tracking for multi-turn resolution tracking |
-| **vs. Gorgias** | ShopSquire has stronger ML backbone | ✅ Comparable; ShopSquire has better auditability |
+| **vs. Gorgias** | ShopSquire has stronger ML backbone | âœ… Comparable; ShopSquire has better auditability |
 | **vs. Intercom AI** | Feature-rich equivalent with more transparency | Improve UX chat widget for parity |
 
 ### 3.3 Computer Vision (CV) Agent
@@ -167,7 +167,7 @@ ShopSquire:
 | **OCR pipeline** | Multi-stage OCR with post-processing, serial number extraction | Add structured document extraction (invoices, shipping labels) |
 | **Adversarial detection** | 5-method ensemble (FFT, JPEG stability, gradient anomaly, bit-plane, channel correlation) | Add GAN fingerprinting for deepfake product photos |
 | **Document layout** | DocumentLayoutDetector module | Extend to structured data extraction from PDFs (invoices, BOL) |
-| **CV tiers** | Tier 1 (quick check) → Tier 2 (full pipeline with OCR + fraud) | Add async GPU offload queue for high-volume processing |
+| **CV tiers** | Tier 1 (quick check) â†’ Tier 2 (full pipeline with OCR + fraud) | Add async GPU offload queue for high-volume processing |
 | **Steganography** | StegDetector for hidden payloads in images | Add DCT-based JPEG steg detection for richer coverage |
 | **vs. Amazon Rekognition** | Local, private, no per-image cost, more security-aware | Need fine-tuned models for specialized damage categories |
 | **vs. Google Vision** | Same sovereignty advantage; more integrated with pipeline | Add GCP Vision as optional fallback provider |
@@ -192,7 +192,7 @@ ShopSquire:
 | **Supply chain** | KEV catalog monitoring, dep_confusion_monitor | Add SBOM ingestion + automated CVE correlation |
 | **Dead drop** | Dead drop detector for C2 via legitimate services | Add pastebin/GitHub raw monitoring |
 | **Framework correlation** | MITRE ATT&CK + ATLAS framework mapping | Add D3FEND defensive mapping auto-suggestion |
-| **vs. CrowdStrike Falcon AI** | ShopSquire is ecommerce-scoped; CrowdStrike is endpoint-wide | Not competing — complementary; add CrowdStrike webhook ingest |
+| **vs. CrowdStrike Falcon AI** | ShopSquire is ecommerce-scoped; CrowdStrike is endpoint-wide | Not competing â€” complementary; add CrowdStrike webhook ingest |
 | **vs. Palo Alto XSIAM** | Different scope; Palo Alto = network/endpoint | ShopSquire could ingest Palo Alto alerts as security signals |
 
 ### 3.6 Email Security Agent
@@ -256,7 +256,7 @@ ShopSquire:
 ### 3.12 Debate Coordinator Agent
 | Aspect | Current State | Improvement Path |
 |--------|--------------|-----------------|
-| **Pattern** | Proposer → Challenger → Judge for high-risk/high-value | Current implementation is deterministic (not LLM-based debate) |
+| **Pattern** | Proposer â†’ Challenger â†’ Judge for high-risk/high-value | Current implementation is deterministic (not LLM-based debate) |
 | **Use case** | Orders > $2,500 or high security/fraud risk | Extend to supplier changes, policy updates, CV ambiguity |
 | **Improve** | Add actual LLM-based multi-turn adversarial debate | Use structured LLM debate with tool-use for evidence gathering |
 
@@ -272,12 +272,12 @@ ShopSquire:
 
 ## 4. What You Can and Cannot Do
 
-### ✅ What ShopSquire Can Do Today
+### âœ… What ShopSquire Can Do Today
 
 #### E-Commerce Operations
 - Natural language product search with semantic understanding
 - Hybrid NLP + CV product recommendations (text + image input)
-- Automated complaint intake: intent → CV damage detection → fraud scoring → routing
+- Automated complaint intake: intent â†’ CV damage detection â†’ fraud scoring â†’ routing
 - Order status querying with history paging
 - Return/refund automation with trust-tier routing (Gold: auto-approve, Standard: review, Flagged: escalate)
 - Cart retrieval and canonical cart management
@@ -316,7 +316,7 @@ ShopSquire:
 - Bi-temporal decision logs (full audit trail with business + system time)
 - RAGAS-scored decision quality evaluation
 - Confidence calibration (Platt scaling per domain)
-- Model fallback ladder (Tier 1 cheap → Tier 2 standard → Tier 3 premium)
+- Model fallback ladder (Tier 1 cheap â†’ Tier 2 standard â†’ Tier 3 premium)
 - A/B testing framework with quality drop monitoring
 - XGBoost intent classification
 - TF-IDF pre-classification (before LLM, near-zero cost)
@@ -351,48 +351,48 @@ ShopSquire:
 
 ---
 
-### ❌ What ShopSquire Cannot Do Today (Gaps)
+### âŒ What ShopSquire Cannot Do Today (Gaps)
 
 #### Commerce
-- **No native storefront** — requires existing ecommerce platform; ShopSquire is the intelligence layer
-- **No payment gateway** — orchestrates existing providers; does not process cards itself
-- **No ERP of record** — syncs with ERPs but is not one
-- **No B2B/wholesale module** — pricing tiers, contract pricing, quote workflows not implemented
+- **No native storefront** â€” requires existing ecommerce platform; ShopSquire is the intelligence layer
+- **No payment gateway** â€” orchestrates existing providers; does not process cards itself
+- **No ERP of record** â€” syncs with ERPs but is not one
+- **No B2B/wholesale module** â€” pricing tiers, contract pricing, quote workflows not implemented
 - **No subscription/recurring billing** management
-- **No shipping carrier integration** — no direct FedEx/UPS/DHL API for tracking
-- **No marketplace connector** — no Amazon/eBay/Etsy integration
+- **No shipping carrier integration** â€” no direct FedEx/UPS/DHL API for tracking
+- **No marketplace connector** â€” no Amazon/eBay/Etsy integration
 
 #### AI/ML
-- **No cross-session user profiling** — recommendations reset per session
-- **No collaborative filtering** — no "users like you also bought" signal
-- **No demand forecasting** — inventory prediction based on rules, not ML time series
-- **No A/B test result analysis** — framework exists but no statistical significance testing
-- **No fine-tuned domain models** — relies on base LLMs; no merchant-specific fine-tuning pipeline
-- **No LLM-based debate** — Debate Coordinator is deterministic, not true LLM multi-agent debate
+- **No cross-session user profiling** â€” recommendations reset per session
+- **Collaborative filtering is now baseline-only** -- user-item collaborative and clickstream features exist, but not yet full identity graph/CDP-grade profiling
+- **Demand forecasting is now baseline-only** -- ARIMA/Prophet/EWMA with anti-poison quarantine exists, but still needs enterprise forecasting ops hardening
+- **No A/B test result analysis** â€” framework exists but no statistical significance testing
+- **No fine-tuned domain models** â€” relies on base LLMs; no merchant-specific fine-tuning pipeline
+- **No LLM-based debate** â€” Debate Coordinator is deterministic, not true LLM multi-agent debate
 
 #### Finance & Accounting
-- **No Xero integration** — cannot push invoices, payments, or reconciliation data
-- **No MYOB integration** — same gap
-- **No QuickBooks Online write-back** — reads inventory but does not write accounting entries
+- **No Xero integration** â€” cannot push invoices, payments, or reconciliation data
+- **No MYOB integration** â€” same gap
+- **No QuickBooks Online write-back** â€” reads inventory but does not write accounting entries
 - **No automated bank reconciliation**
-- **No P&L / margin analytics** — BI dashboard shows operational metrics, not financial statements
-- **No tax calculation** — no VAT/GST engine
+- **No P&L / margin analytics** â€” BI dashboard shows operational metrics, not financial statements
+- **No tax calculation** â€” no VAT/GST engine
 
 #### Security
-- **No endpoint detection** — no EDR/EPP capability; not an endpoint security tool
-- **No network-layer security** — no firewall, no PCAP analysis, no NDR
-- **No CASB/SSE** — no cloud access security brokering
-- **No vulnerability scanning** — depends on KEV catalog feeds, not active scanning
-- **No penetration testing module** — passive detection only
-- **LLM10 (Model Theft) not covered** — model watermarking/fingerprinting not implemented
+- **No endpoint detection** â€” no EDR/EPP capability; not an endpoint security tool
+- **Network-layer security is partial** -- PCAP ingestion/correlation exists; still no full firewall/NDR stack
+- **No CASB/SSE** â€” no cloud access security brokering
+- **No vulnerability scanning** â€” depends on KEV catalog feeds, not active scanning
+- **No penetration testing module** â€” passive detection only
+- **LLM10 (Model Theft) is partial** -- watermarking/fingerprinting controls are present; full model-theft hardening remains
 
 #### Operations
-- **No multi-region deployment** — single-region Docker/K8s; no geo-replication
-- **No SaaS multi-tenant billing** — no usage metering, invoicing, or tenant onboarding portal
-- **No mobile app** — admin dashboard is web-only
-- **No voice interface** — voice flags exist in config but not implemented
-- **No CDP (Customer Data Platform)** — no unified customer identity graph
-- **No email marketing** — no campaign management, segmentation, or automation
+- **No multi-region deployment** â€” single-region Docker/K8s; no geo-replication
+- **No SaaS multi-tenant billing** â€” no usage metering, invoicing, or tenant onboarding portal
+- **No mobile app** â€” admin dashboard is web-only
+- **No voice interface** â€” voice flags exist in config but not implemented
+- **No CDP (Customer Data Platform)** â€” no unified customer identity graph
+- **No email marketing** â€” no campaign management, segmentation, or automation
 
 ---
 
@@ -403,18 +403,18 @@ ShopSquire achieves genuine product-agnosticism through three architectural pill
 ### 5.1 Connector Abstraction
 ```
 ERP Connector Interface (base.py)
-├── ArConnector     (Ariba)
-├── CoupaConnector  (Coupa)
-├── SAPConnector    (SAP)
-├── SalesforceConnector
-├── NetSuiteConnector
-├── DynamicsConnector
-├── HubSpotConnector
-├── QuickBooksConnector
-├── ShopifyConnector
-├── CSVConnector    (universal flat-file)
-├── HTTPConnector   (any REST API)
-└── SQLiteConnector (local dev)
+â”œâ”€â”€ ArConnector     (Ariba)
+â”œâ”€â”€ CoupaConnector  (Coupa)
+â”œâ”€â”€ SAPConnector    (SAP)
+â”œâ”€â”€ SalesforceConnector
+â”œâ”€â”€ NetSuiteConnector
+â”œâ”€â”€ DynamicsConnector
+â”œâ”€â”€ HubSpotConnector
+â”œâ”€â”€ QuickBooksConnector
+â”œâ”€â”€ ShopifyConnector
+â”œâ”€â”€ CSVConnector    (universal flat-file)
+â”œâ”€â”€ HTTPConnector   (any REST API)
+â””â”€â”€ SQLiteConnector (local dev)
 ```
 Adding a new ERP = implement `base.py` interface. No orchestrator changes required.
 
@@ -435,19 +435,19 @@ Every subsystem is individually togglable via `config/feature_flags.json`:
 This means a merchant with no CV needs can disable the entire CV pipeline. A merchant without Redis can fall back to in-process semantic cache. Nothing is mandatory except the gateway + orchestrator.
 
 ### 5.3 Multi-Vertical Config
-`config/verticals/` allows per-industry configuration — the same platform can serve fashion retail, electronics, industrial supplies, or B2B distributors with different thresholds, agent policies, and NLP templates.
+`config/verticals/` allows per-industry configuration â€” the same platform can serve fashion retail, electronics, industrial supplies, or B2B distributors with different thresholds, agent policies, and NLP templates.
 
 ### 5.4 Plugin System
-`config/plugins.yml` defines a plugin registry — external capability modules can be registered without modifying core code.
+`config/plugins.yml` defines a plugin registry â€” external capability modules can be registered without modifying core code.
 
 ### 5.5 Agent Policies as Code
-`config/agent_policies.yml` defines per-role allowed actions, data scopes, approval requirements, and rate limits. Security constraints are declarative — change a YAML file to modify agent behavior without touching Python.
+`config/agent_policies.yml` defines per-role allowed actions, data scopes, approval requirements, and rate limits. Security constraints are declarative â€” change a YAML file to modify agent behavior without touching Python.
 
 ---
 
 ## 6. Context Rot Mitigation & Decision Auditability
 
-"Context rot" — the degradation of an AI agent's reasoning quality due to stale, irrelevant, or accumulated noise in context — is a critical problem in agentic systems. ShopSquire addresses this at multiple layers.
+"Context rot" â€” the degradation of an AI agent's reasoning quality due to stale, irrelevant, or accumulated noise in context â€” is a critical problem in agentic systems. ShopSquire addresses this at multiple layers.
 
 ### 6.1 Context Rot Mitigation Strategies
 
@@ -472,31 +472,31 @@ Every AI decision is recorded with **two time dimensions**:
 
 ```sql
 decision_logs:
-├── id (UUID)
-├── trace_id (links all events in one decision chain)
-├── session_id
-├── agent_type           -- which agent made the decision
-├── input_data           -- what came in (PII-redacted)
-├── retrieved_context    -- what RAG/cache returned
-├── agent_reasoning      -- the LLM's chain-of-thought
-├── proposed_action      -- what the agent wanted to do
-├── policy_version       -- which policy applied at decision time
-├── confidence_score     -- calibrated confidence
-├── ragas_score          -- retrieval quality score
-├── approval_required    -- was human needed?
-├── approved_by          -- who approved (if applicable)
-├── approved_at          -- when approved
-├── execution_status     -- what actually happened
-│
-├── valid_from           -- [BUSINESS TIME] when decision is effective
-├── valid_to             -- [BUSINESS TIME] when decision expires
-├── system_from          -- [AUDIT TIME] when record was inserted
-└── system_to            -- [AUDIT TIME] when record was superseded
+â”œâ”€â”€ id (UUID)
+â”œâ”€â”€ trace_id (links all events in one decision chain)
+â”œâ”€â”€ session_id
+â”œâ”€â”€ agent_type           -- which agent made the decision
+â”œâ”€â”€ input_data           -- what came in (PII-redacted)
+â”œâ”€â”€ retrieved_context    -- what RAG/cache returned
+â”œâ”€â”€ agent_reasoning      -- the LLM's chain-of-thought
+â”œâ”€â”€ proposed_action      -- what the agent wanted to do
+â”œâ”€â”€ policy_version       -- which policy applied at decision time
+â”œâ”€â”€ confidence_score     -- calibrated confidence
+â”œâ”€â”€ ragas_score          -- retrieval quality score
+â”œâ”€â”€ approval_required    -- was human needed?
+â”œâ”€â”€ approved_by          -- who approved (if applicable)
+â”œâ”€â”€ approved_at          -- when approved
+â”œâ”€â”€ execution_status     -- what actually happened
+â”‚
+â”œâ”€â”€ valid_from           -- [BUSINESS TIME] when decision is effective
+â”œâ”€â”€ valid_to             -- [BUSINESS TIME] when decision expires
+â”œâ”€â”€ system_from          -- [AUDIT TIME] when record was inserted
+â””â”€â”€ system_to            -- [AUDIT TIME] when record was superseded
 ```
 
 This bi-temporal model means:
-1. **"What did the AI decide on January 5th?"** — query by `valid_from`
-2. **"What did we *know* on January 5th when it decided?"** — query by `system_from`
+1. **"What did the AI decide on January 5th?"** â€” query by `valid_from`
+2. **"What did we *know* on January 5th when it decided?"** â€” query by `system_from`
 3. **Retrospective audits** can reconstruct exactly what context and policy existed at any historical decision point
 4. **EU AI Act Article 13** (transparency) and **Article 14** (human oversight) requirements are met by design
 
@@ -504,16 +504,16 @@ This bi-temporal model means:
 Every multi-agent decision creates a linked chain of trace events:
 ```
 trace_id: abc-123
-├── [t=0ms]   INPUT_RECEIVED
-├── [t=12ms]  TIER_ROUTED → Tier 2
-├── [t=15ms]  SECURITY_SCAN → clean
-├── [t=22ms]  CV_SCAN → damage_detected: 0.78
-├── [t=35ms]  FRAUD_SCORE → 0.31 (low risk)
-├── [t=36ms]  INVENTORY_CHECK → in_stock: true
-├── [t=40ms]  ML_GATE → auto_approve (confidence: 0.82)
-├── [t=41ms]  POLICY_EVALUATED → allow
-├── [t=42ms]  DECISION_LOGGED → decision_id: xyz
-└── [t=42ms]  RESPONSE_SENT
+â”œâ”€â”€ [t=0ms]   INPUT_RECEIVED
+â”œâ”€â”€ [t=12ms]  TIER_ROUTED â†’ Tier 2
+â”œâ”€â”€ [t=15ms]  SECURITY_SCAN â†’ clean
+â”œâ”€â”€ [t=22ms]  CV_SCAN â†’ damage_detected: 0.78
+â”œâ”€â”€ [t=35ms]  FRAUD_SCORE â†’ 0.31 (low risk)
+â”œâ”€â”€ [t=36ms]  INVENTORY_CHECK â†’ in_stock: true
+â”œâ”€â”€ [t=40ms]  ML_GATE â†’ auto_approve (confidence: 0.82)
+â”œâ”€â”€ [t=41ms]  POLICY_EVALUATED â†’ allow
+â”œâ”€â”€ [t=42ms]  DECISION_LOGGED â†’ decision_id: xyz
+â””â”€â”€ [t=42ms]  RESPONSE_SENT
 ```
 
 ---
@@ -527,44 +527,44 @@ trace_id: abc-123
 | **TF-IDF pre-filter** | Cheap lexical classifier before any LLM call | Eliminates ~40% of LLM calls for clear-intent queries |
 | **XGBoost intent** | ML model trained on domain-specific intents | Reduces misclassification vs. pure LLM |
 | **Confidence Calibration (Platt)** | Converts raw scores to calibrated probabilities per domain | Prevents overconfident false positives |
-| **Confidence Bands** | High/low/uncertain bands; uncertain → human review | Sends ambiguous cases to humans, not auto-decisions |
+| **Confidence Bands** | High/low/uncertain bands; uncertain â†’ human review | Sends ambiguous cases to humans, not auto-decisions |
 | **Ensemble adversarial detection** | 5 independent methods must agree on adversarial image | Reduces false positive CV alerts |
 | **Debate Coordinator** | Proposer-Challenger-Judge for high-risk; challenger must defeat proposal | Forces re-examination of risky decisions |
 | **Post-LLM Verifier** | Checks LLM output for policy violations, hallucination markers | Catches false positives from LLM reasoning errors |
 | **Rule engine** | Hard rules override LLM decisions when patterns are unambiguous | Prevents LLM hallucinations overriding known-safe patterns |
-| **RAGAS evaluation** | Measures retrieval quality; low RAGAS → question the answer | Systematic quality gate |
-| **Model Fallback Ladder** | Low confidence → escalate to better model | Expensive model used only when needed |
+| **RAGAS evaluation** | Measures retrieval quality; low RAGAS â†’ question the answer | Systematic quality gate |
+| **Model Fallback Ladder** | Low confidence â†’ escalate to better model | Expensive model used only when needed |
 | **A/B testing** | Parallel decision paths compared | Identifies which approach reduces FP empirically |
 
 ### 7.2 What to Add Next (Highest Impact)
 
-#### Near-term (1–3 months)
-1. **Online learning feedback loop** — When a human reviewer overrides a decision, feed that as a negative training example. A simple online logistic regression on the ML Decision Gate would reduce FP rate within weeks.
-2. **SHAP attribution** — Add SHAP values to every ML Decision Gate output so operators can identify which features are causing false positives and tune thresholds.
-3. **Per-merchant calibration** — Currently calibration is global. Each merchant's fraud/return patterns are unique. Add per-tenant Platt scaling coefficients.
-4. **Contextual bandit** — Replace A/B testing with a contextual bandit (e.g., LinUCB) that auto-tunes routing decisions based on outcome quality.
+#### Near-term (1â€“3 months)
+1. **Online learning feedback loop** â€” When a human reviewer overrides a decision, feed that as a negative training example. A simple online logistic regression on the ML Decision Gate would reduce FP rate within weeks.
+2. **SHAP attribution** â€” Add SHAP values to every ML Decision Gate output so operators can identify which features are causing false positives and tune thresholds.
+3. **Per-merchant calibration** â€” Currently calibration is global. Each merchant's fraud/return patterns are unique. Add per-tenant Platt scaling coefficients.
+4. **Contextual bandit** â€” Replace A/B testing with a contextual bandit (e.g., LinUCB) that auto-tunes routing decisions based on outcome quality.
 
-#### Medium-term (3–6 months)
-5. **Semantic jailbreak detection** — Current jailbreak detection uses keyword patterns. A semantic approach (embedding distance from known jailbreak embeddings) would catch novel zero-day jailbreaks without needing pattern updates.
-6. **LLM-based debate** — Implement true multi-LLM debate for high-risk cases: two independent LLMs argue for/against, a third judges. Reduces systematic biases in single-model decisions.
-7. **Causal ML for fraud** — Move from correlation-based fraud scoring to causal models that distinguish genuine unusual behavior from fraud.
-8. **Temporal graph fraud detection** — Use TimescaleDB time-series + graph edges to detect fraud velocity patterns (e.g., 10 accounts created in 2 hours, all same IP, all returning electronics).
+#### Medium-term (3â€“6 months)
+5. **Semantic jailbreak detection** â€” Current jailbreak detection uses keyword patterns. A semantic approach (embedding distance from known jailbreak embeddings) would catch novel zero-day jailbreaks without needing pattern updates.
+6. **LLM-based debate** â€” Implement true multi-LLM debate for high-risk cases: two independent LLMs argue for/against, a third judges. Reduces systematic biases in single-model decisions.
+7. **Causal ML for fraud** â€” Move from correlation-based fraud scoring to causal models that distinguish genuine unusual behavior from fraud.
+8. **Temporal graph fraud detection** â€” Use TimescaleDB time-series + graph edges to detect fraud velocity patterns (e.g., 10 accounts created in 2 hours, all same IP, all returning electronics).
 
 ### 7.3 Smarter Autonomous Agents
 
 #### What Makes ShopSquire Agents Already "Smart"
-- **Dynamic context injection** — Agents pull live context at decision time, not just at startup
-- **Tool intent gating** — Agents cannot invoke tools outside their declared scope
-- **Budget enforcement** — Agents cannot make unlimited tool calls (prevents runaway loops)
-- **Policy-as-code** — Agent behavior is governed by declarative policy, not hardcoded logic
-- **Learned tier routing** — ML decides which agent tier to invoke, not static rules
+- **Dynamic context injection** â€” Agents pull live context at decision time, not just at startup
+- **Tool intent gating** â€” Agents cannot invoke tools outside their declared scope
+- **Budget enforcement** â€” Agents cannot make unlimited tool calls (prevents runaway loops)
+- **Policy-as-code** â€” Agent behavior is governed by declarative policy, not hardcoded logic
+- **Learned tier routing** â€” ML decides which agent tier to invoke, not static rules
 
 #### What to Add for True Autonomous Intelligence
-1. **Self-healing agents** — Detect when an agent's decisions have declining quality (via RAGAS drift) and auto-downgrade to rule-based fallback until re-calibrated
-2. **Goal decomposition** — For complex multi-step tasks (e.g., "resolve this complaint end-to-end"), implement hierarchical task decomposition with sub-goal tracking
-3. **Memory consolidation** — Nightly background job compresses episodic session memory into semantic long-term memory (similar to MemGPT approach)
-4. **Cross-agent learning** — If Fraud Agent detects a new pattern, automatically update Security Agent's IOC list; implement a shared threat intelligence bus
-5. **Counterfactual reasoning** — For each decision, generate counterfactual: "If the return frequency was lower, would this have been approved?" — exposes decision logic to operators
+1. **Self-healing agents** â€” Detect when an agent's decisions have declining quality (via RAGAS drift) and auto-downgrade to rule-based fallback until re-calibrated
+2. **Goal decomposition** â€” For complex multi-step tasks (e.g., "resolve this complaint end-to-end"), implement hierarchical task decomposition with sub-goal tracking
+3. **Memory consolidation** â€” Nightly background job compresses episodic session memory into semantic long-term memory (similar to MemGPT approach)
+4. **Cross-agent learning** â€” If Fraud Agent detects a new pattern, automatically update Security Agent's IOC list; implement a shared threat intelligence bus
+5. **Counterfactual reasoning** â€” For each decision, generate counterfactual: "If the return frequency was lower, would this have been approved?" â€” exposes decision logic to operators
 
 ---
 
@@ -574,39 +574,39 @@ trace_id: abc-123
 
 | Category | What's Implemented | Coverage |
 |----------|--------------------|----------|
-| **Input security** | InputSanitizer, PII redaction, tool intent gate | ✅ Strong |
-| **LLM security** | OWASP LLM 1-9, 35+ jailbreak patterns, prompt injection detection | ✅ Strong |
-| **Email security** | BEC, DMARC/DKIM/SPF, attachment analysis, steg detection, DNS tunnel | ✅ Excellent |
-| **Image security** | 5-method ensemble adversarial detection, steganography | ✅ Strong |
-| **API security** | Rate limiting, API key auth, RBAC, Janusec WAF | ⚠️ Needs hardening |
-| **Session security** | SessionGuard, OAuth2 lifecycle, IAM event logging | ✅ Good |
-| **Supply chain** | KEV catalog, dep_confusion_monitor, dead drop detection | ✅ Good |
-| **Audit** | Bi-temporal logs, full trace events, approval chains | ✅ Excellent |
-| **Data protection** | PII redaction, data sovereignty, Vault/AWS Secrets Manager | ✅ Good |
-| **Compliance** | ISO 27001, NIST, GDPR, SOC 2, EU AI Act mapping | ✅ Good |
+| **Input security** | InputSanitizer, PII redaction, tool intent gate | âœ… Strong |
+| **LLM security** | OWASP LLM 1-9, 35+ jailbreak patterns, prompt injection detection | âœ… Strong |
+| **Email security** | BEC, DMARC/DKIM/SPF, attachment analysis, steg detection, DNS tunnel | âœ… Excellent |
+| **Image security** | 5-method ensemble adversarial detection, steganography | âœ… Strong |
+| **API security** | Rate limiting, API key auth, RBAC, Janusec WAF | âš ï¸ Needs hardening |
+| **Session security** | SessionGuard, OAuth2 lifecycle, IAM event logging | âœ… Good |
+| **Supply chain** | KEV catalog, dep_confusion_monitor, dead drop detection | âœ… Good |
+| **Audit** | Bi-temporal logs, full trace events, approval chains | âœ… Excellent |
+| **Data protection** | PII redaction, data sovereignty, Vault/AWS Secrets Manager | âœ… Good |
+| **Compliance** | ISO 27001, NIST, GDPR, SOC 2, EU AI Act mapping | âœ… Good |
 
 ### 8.2 Priority Security Improvements
 
 #### Critical (Do Now)
-1. **mTLS between internal services** — Currently inter-service calls are plain HTTP internally. Add mTLS for service mesh security.
-2. **Rate limit per API key, not just per route** — Prevent a compromised API key from exhausting resources across all routes.
-3. **OWASP LLM10 (Model Theft)** — Add model output watermarking/fingerprinting to detect if the LLM is being reverse-engineered via systematic querying.
-4. **Signed audit log integrity** — Add HMAC or blockchain anchor to decision log entries to prove they haven't been tampered with post-hoc.
-5. **Secrets rotation automation** — Add automated secret rotation pipeline; currently secrets can become stale.
+1. **mTLS between internal services** â€” Currently inter-service calls are plain HTTP internally. Add mTLS for service mesh security.
+2. **Rate limit per API key, not just per route** â€” Prevent a compromised API key from exhausting resources across all routes.
+3. **OWASP LLM10 (Model Theft)** â€” Add model output watermarking/fingerprinting to detect if the LLM is being reverse-engineered via systematic querying.
+4. **Signed audit log integrity** â€” Add HMAC or blockchain anchor to decision log entries to prove they haven't been tampered with post-hoc.
+5. **Secrets rotation automation** â€” Add automated secret rotation pipeline; currently secrets can become stale.
 
 #### High Priority
-6. **Webhook signature verification** — Incoming webhooks must have HMAC-SHA256 signature; reject unsigned webhooks from all providers.
-7. **Content Security Policy (CSP) hardening** — Admin React frontend should enforce strict CSP with nonce-based script whitelisting.
-8. **Database connection encryption** — Ensure all PostgreSQL connections use SSL/TLS with certificate verification, not just `sslmode=require`.
-9. **CSRF protection** — Add CSRF tokens to all state-changing frontend requests.
-10. **JWT short lifetimes** — Ensure admin JWT tokens expire within 15 minutes with refresh token rotation.
+6. **Webhook signature verification** â€” Incoming webhooks must have HMAC-SHA256 signature; reject unsigned webhooks from all providers.
+7. **Content Security Policy (CSP) hardening** â€” Admin React frontend should enforce strict CSP with nonce-based script whitelisting.
+8. **Database connection encryption** â€” Ensure all PostgreSQL connections use SSL/TLS with certificate verification, not just `sslmode=require`.
+9. **CSRF protection** â€” Add CSRF tokens to all state-changing frontend requests.
+10. **JWT short lifetimes** â€” Ensure admin JWT tokens expire within 15 minutes with refresh token rotation.
 
 #### Medium Priority
-11. **Zero-trust internal API** — All internal API calls should carry a signed service identity token, not rely on network position for trust.
-12. **Immutable audit storage** — Ship decision logs to S3/GCS with object lock (WORM) for tamper-evident compliance storage.
-13. **Dependency SBOM** — Generate SBOM at CI/CD time and monitor for new CVEs in runtime dependencies.
-14. **LLM output filtering** — Add secondary output filter to prevent LLM from returning PII, credentials, or system prompt content in responses.
-15. **Red team continuous** — Schedule automated adversarial testing (based on Live_Red_Team_Walkthrough.md patterns) as part of CI pipeline.
+11. **Zero-trust internal API** â€” All internal API calls should carry a signed service identity token, not rely on network position for trust.
+12. **Immutable audit storage** â€” Ship decision logs to S3/GCS with object lock (WORM) for tamper-evident compliance storage.
+13. **Dependency SBOM** â€” Generate SBOM at CI/CD time and monitor for new CVEs in runtime dependencies.
+14. **LLM output filtering** â€” Add secondary output filter to prevent LLM from returning PII, credentials, or system prompt content in responses.
+15. **Red team continuous** â€” Schedule automated adversarial testing (based on Live_Red_Team_Walkthrough.md patterns) as part of CI pipeline.
 
 ---
 
@@ -615,17 +615,22 @@ trace_id: abc-123
 ### 9.1 Current Recommendation Engine
 ```
 User Query / Image
-      │
-      ▼
+      â”‚
+      â–¼
 SmartRecommender.recommend()
-├── NLP: Build merged query (text + image labels + OCR + chat history)
-├── ML: Analyze query intent (RecommendationService.analyze_query)
-├── Retrieve: Candidate products (semantic similarity)
-├── Rerank: Score candidates with constraints (use-case, specs, price)
-└── Return: Top-N with match_type (exact/similar/alternative) + follow-ups
+â”œâ”€â”€ NLP: Build merged query (text + image labels + OCR + chat history)
+â”œâ”€â”€ ML: Analyze query intent (RecommendationService.analyze_query)
+â”œâ”€â”€ Retrieve: Candidate products (semantic similarity)
+â”œâ”€â”€ Rerank: Score candidates with constraints (use-case, specs, price)
+â””â”€â”€ Return: Top-N with match_type (exact/similar/alternative) + follow-ups
 ```
 
 ### 9.2 Improvement Roadmap
+
+**Implementation status (February 2026 update)**:
+- **Delivered baseline**: cross-session identity-link graph for recommendation events, collaborative precompute pipeline with nightly-train endpoint (`/api/v1/recommend/cf/train`), clickstream + collaborative blending, query reformulation/synonym/spell normalization, supplier-performance weighting, and LinUCB contextual strategy selection.
+- **Delivered baseline**: cross-encoder rerank stage with safe lexical fallback when external cross-encoder model is unavailable.
+- **Still to harden for enterprise scale**: full CDP-grade identity graph governance, strict offline/online feature parity, and scheduled production retraining orchestration.
 
 #### Personalisation Layer (High Impact)
 | Technique | Expected Lift | Complexity |
@@ -649,10 +654,10 @@ SmartRecommender.recommend()
 Replace fixed reranking weights with a **LinUCB contextual bandit** that learns which recommendation strategy works best for each user segment. This auto-tunes without redeployment.
 
 #### Supplier-Aware Recommendations
-When inventory is low on a preferred product, automatically surface similar products from suppliers with better fill rates and delivery performance — connecting the recommendation layer to the supplier intelligence layer.
+When inventory is low on a preferred product, automatically surface similar products from suppliers with better fill rates and delivery performance â€” connecting the recommendation layer to the supplier intelligence layer.
 
 #### "Why This Recommendation" Explainability
-Surface the reasoning behind each recommendation to the buyer: *"Based on your interest in XPS 13 laptops, your budget under $1,500, and your image showing a damaged Dell keyboard"* — drives conversion and trust.
+Surface the reasoning behind each recommendation to the buyer: *"Based on your interest in XPS 13 laptops, your budget under $1,500, and your image showing a damaged Dell keyboard"* â€” drives conversion and trust.
 
 ---
 
@@ -661,13 +666,17 @@ Surface the reasoning behind each recommendation to the buyer: *"Based on your i
 ### 10.1 Current BI Capabilities
 - MerchantBIPro React dashboard with analytics panels
 - Isolation Forest anomaly detection on business metrics
-- XGBoost intent classification (customer intent → business signal)
+- XGBoost intent classification (customer intent â†’ business signal)
 - RAGAS decision quality scoring
 - RL traces exporter (policy optimiser feedback)
 - Risk scoring pipeline
 - A/B testing with quality monitoring
 
 ### 10.2 What to Build for World-Class BI
+
+**Implementation status (February 2026 update)**:
+- **Delivered baseline APIs** under `/api/v1/admin/bi`: margin intelligence, supplier scorecard, CLV, churn, and seasonal anomaly + causal-factor attribution.
+- **Still to harden**: richer financial joins (true P&L ledger integration), BTYD calibration against historical cohorts, and causal attribution with counterfactual modeling.
 
 #### Demand Forecasting
 ```python
@@ -676,7 +685,7 @@ Surface the reasoning behind each recommendation to the buyer: *"Based on your i
 # Output: 30/60/90-day demand forecast with confidence intervals
 # Integration: Feed forecasts into inventory agent thresholds
 ```
-This directly enables **autonomous restocking** — the Inventory Agent auto-creates purchase orders when forecast demand approaches safety stock.
+This directly enables **autonomous restocking** â€” the Inventory Agent auto-creates purchase orders when forecast demand approaches safety stock.
 
 #### Margin Intelligence
 Track gross margin per SKU, per supplier, per customer segment:
@@ -709,7 +718,7 @@ Time-series on customer purchase recency/frequency/monetary (RFM):
 Current: Isolation Forest on general metrics.
 Add:
 - **Seasonal decomposition** before anomaly detection (prevent "Black Friday spike" false alarms)
-- **Causal attribution**: "sales dropped 23% — which factor caused it?" (new competitor? supplier outage? search ranking drop?)
+- **Causal attribution**: "sales dropped 23% â€” which factor caused it?" (new competitor? supplier outage? search ranking drop?)
 
 ---
 
@@ -720,19 +729,23 @@ ShopSquire already has 12+ ERP connectors. This is a significant differentiator.
 
 ### 11.2 What to Expand
 
+**Implementation status (February 2026 update)**:
+- **Delivered baseline**: native parser support for EDI X12/EDIFACT documents with coverage for 850/856/810/832 classes (purchase order/ASN/invoice/catalog mapping).
+- **Still to harden**: full production transport adapters (AS2/SFTP/VAN), partner-specific mapping profiles, and schema validation packs per trading partner.
+
 #### EDI Support (Critical for B2B/Wholesale)
 Many traditional suppliers communicate via EDI (Electronic Data Interchange):
-- **EDI 850** — Purchase Order
-- **EDI 856** — Advance Ship Notice (ASN)
-- **EDI 810** — Invoice
-- **EDI 832** — Price/Sales Catalog
+- **EDI 850** â€” Purchase Order
+- **EDI 856** â€” Advance Ship Notice (ASN)
+- **EDI 810** â€” Invoice
+- **EDI 832** â€” Price/Sales Catalog
 
 Add an EDI parser module that converts EDI X12/EDIFACT documents to ShopSquire's internal schema. This opens the platform to traditional/legacy supply chains (grocery, manufacturing, government).
 
 #### Advanced Inventory Intelligence
-- **Safety stock calculation**: Demand variability × supplier lead time variance → statistical safety stock formula
+- **Safety stock calculation**: Demand variability Ã— supplier lead time variance â†’ statistical safety stock formula
 - **Economic Order Quantity (EOQ)**: Optimize order size to balance holding cost vs. ordering cost
-- **ABC analysis**: Classify inventory as A (high-value), B (medium), C (low-value) — focus AI attention accordingly
+- **ABC analysis**: Classify inventory as A (high-value), B (medium), C (low-value) â€” focus AI attention accordingly
 - **Seasonal planning**: Pre-build inventory buffers for known seasonal peaks
 - **Multi-location inventory**: Track stock across multiple warehouses; route orders to nearest stocked location
 
@@ -765,13 +778,13 @@ ShopSquire currently has **zero accounting integration**. This is a significant 
 | Data | Trigger | Xero Object |
 |------|---------|-------------|
 | Approved refund | Return auto-approved | Credit Note |
-| Approved return → restock | Stock received back | Inventory Adjustment |
+| Approved return â†’ restock | Stock received back | Inventory Adjustment |
 | Supplier purchase order | PO approved via HITL | Purchase Order / Bill |
 | Payment received | Order confirmed | Invoice / Payment |
 | Fraud write-off | Chargeback accepted | Bad Debt Write-off |
 
 #### To MYOB
-Same data types — MYOB AccountRight and MYOB Business have REST APIs. Implementation mirrors Xero.
+Same data types â€” MYOB AccountRight and MYOB Business have REST APIs. Implementation mirrors Xero.
 
 #### To QuickBooks Online
 Already have QuickBooks inventory connector. Extend to write:
@@ -791,7 +804,7 @@ class XeroConnector:
     def reconcile_payments(self, date_range: tuple) -> dict
 ```
 
-**Key design principle**: Every accounting write is traceable back to a ShopSquire decision ID. This creates a full audit chain from AI decision → accounting entry — critical for tax and compliance.
+**Key design principle**: Every accounting write is traceable back to a ShopSquire decision ID. This creates a full audit chain from AI decision â†’ accounting entry â€” critical for tax and compliance.
 
 ### 12.4 Finance Intelligence Layer
 
@@ -865,7 +878,7 @@ Required:
 
 | Category | Score | Notes |
 |----------|-------|-------|
-| **Architecture design** | 9/10 | DAG, bi-temporal, feature flags, fallback ladder — enterprise-grade design |
+| **Architecture design** | 9/10 | DAG, bi-temporal, feature flags, fallback ladder â€” enterprise-grade design |
 | **Security integration** | 9/10 | Exceptionally deep for an ecommerce platform |
 | **ML/AI depth** | 8/10 | RAGAS, XGBoost, Isolation Forest, calibration, RL traces |
 | **Auditability** | 9/10 | Bi-temporal + trace chain + RAGAS = audit-ready |
@@ -875,41 +888,41 @@ Required:
 | **Test coverage** | 7/10 | 150+ test files; coverage varies by module |
 | **Documentation** | 8/10 | 80+ docs files; exceptional for a solo project |
 | **Production readiness** | 6/10 | Works locally; needs hardening for true multi-tenant SaaS |
-| **Go-to-market** | 3/10 | Zero brand, no sales team, no support — biggest risk |
+| **Go-to-market** | 3/10 | Zero brand, no sales team, no support â€” biggest risk |
 
 ### 14.2 vs. Major Platform Categories
 
 | Platform Type | Leader | ShopSquire vs. |
 |--------------|--------|----------------|
-| **Generic AI agent framework** | LangChain, CrewAI | ✅ ShopSquire wins on ecommerce domain depth, security, and auditability |
-| **E-commerce native AI** | Shopify AI, BigCommerce AI | ✅ ShopSquire wins on platform-agnosticism and decision explainability |
-| **Enterprise AI platform** | Salesforce Einstein, MS Copilot | ✅ ShopSquire wins on price, sovereignty, setup time |
-| **Fraud prevention** | Riskified, Signifyd | ⚠️ ShopSquire competitive but lacks proprietary training data |
-| **Customer service AI** | Gorgias, Intercom AI | ✅ ShopSquire more powerful; needs UX polish |
-| **Inventory management** | NetSuite, Cin7 | ⚠️ ShopSquire is the AI layer, not the ERP of record |
-| **Search/Recommendations** | Klevu, Bloomreach | ⚠️ ShopSquire competitive; needs more personalisation data signals |
+| **Generic AI agent framework** | LangChain, CrewAI | âœ… ShopSquire wins on ecommerce domain depth, security, and auditability |
+| **E-commerce native AI** | Shopify AI, BigCommerce AI | âœ… ShopSquire wins on platform-agnosticism and decision explainability |
+| **Enterprise AI platform** | Salesforce Einstein, MS Copilot | âœ… ShopSquire wins on price, sovereignty, setup time |
+| **Fraud prevention** | Riskified, Signifyd | âš ï¸ ShopSquire competitive but lacks proprietary training data |
+| **Customer service AI** | Gorgias, Intercom AI | âœ… ShopSquire more powerful; needs UX polish |
+| **Inventory management** | NetSuite, Cin7 | âš ï¸ ShopSquire is the AI layer, not the ERP of record |
+| **Search/Recommendations** | Klevu, Bloomreach | âš ï¸ ShopSquire competitive; needs more personalisation data signals |
 
 ---
 
 ## 15. Comparison with Agentic Security Platforms
 
-> **Important framing**: ShopSquire is **not** a security platform. It is an **ecommerce operations platform with exceptional built-in security**. The comparison below is contextual — how ShopSquire's security capabilities compare to dedicated security vendors that potential buyers may already use or be evaluating.
+> **Important framing**: ShopSquire is **not** a security platform. It is an **ecommerce operations platform with exceptional built-in security**. The comparison below is contextual â€” how ShopSquire's security capabilities compare to dedicated security vendors that potential buyers may already use or be evaluating.
 
 ### 15.1 CrowdStrike Falcon vs. ShopSquire Security
 
 | Dimension | CrowdStrike Falcon | ShopSquire |
 |-----------|-------------------|------------|
 | **Primary scope** | Endpoint detection, EDR, cloud workload | E-commerce agentic AI with LLM security |
-| **LLM-specific threats** | Limited (not primary focus) | ✅ Core: OWASP LLM Top 10, jailbreak, prompt injection |
-| **BEC detection** | Email module add-on | ✅ Native, deep: DMARC/DKIM/SPF + behavioral |
-| **Supply chain** | Package-level monitoring | ✅ Native: KEV catalog + dep confusion + dead drop |
-| **MITRE ATT&CK mapping** | ✅ Excellent, comprehensive | ✅ Framework correlation built-in |
-| **Agent/AI guardrails** | Not applicable | ✅ Native: tool intent gate, agent policies |
-| **Ecommerce context** | None | ✅ Native: orders, returns, fraud, inventory |
-| **Audit trail depth** | Good for endpoint events | ✅ Excellent: bi-temporal + trace chain for AI decisions |
+| **LLM-specific threats** | Limited (not primary focus) | âœ… Core: OWASP LLM Top 10, jailbreak, prompt injection |
+| **BEC detection** | Email module add-on | âœ… Native, deep: DMARC/DKIM/SPF + behavioral |
+| **Supply chain** | Package-level monitoring | âœ… Native: KEV catalog + dep confusion + dead drop |
+| **MITRE ATT&CK mapping** | âœ… Excellent, comprehensive | âœ… Framework correlation built-in |
+| **Agent/AI guardrails** | Not applicable | âœ… Native: tool intent gate, agent policies |
+| **Ecommerce context** | None | âœ… Native: orders, returns, fraud, inventory |
+| **Audit trail depth** | Good for endpoint events | âœ… Excellent: bi-temporal + trace chain for AI decisions |
 | **Deployment** | Cloud-native, agent-based | Self-hosted / Docker |
 | **Price** | $15-$60+/endpoint/month | Significantly lower |
-| **Complementary?** | ✅ Yes — ingest CrowdStrike alerts as ShopSquire security signals |
+| **Complementary?** | âœ… Yes â€” ingest CrowdStrike alerts as ShopSquire security signals |
 
 **Verdict**: CrowdStrike protects the infrastructure. ShopSquire protects the AI/LLM decision layer and business operations. **They are complementary, not competitive.**
 
@@ -918,13 +931,13 @@ Required:
 | Dimension | Netskope | ShopSquire |
 |-----------|---------|------------|
 | **Primary scope** | SSE, CASB, ZTNA, cloud security | Ecommerce AI with LLM security |
-| **Cloud app visibility** | ✅ Deep: 65,000+ apps catalogued | Not applicable |
-| **Data loss prevention** | ✅ Deep DLP across cloud apps | Basic: PII redaction in logs |
-| **Zero trust network** | ✅ Full ZTNA | Not applicable |
-| **LLM prompt security** | Basic (Netskope AI) | ✅ Deep: 35+ patterns, OWASP LLM |
-| **Email security** | Partial (email coexists with SSE) | ✅ Deeper for ecommerce BEC patterns |
-| **Ecommerce AI** | None | ✅ Native |
-| **Complementary?** | ✅ Yes — Netskope secures the network; ShopSquire secures AI decisions |
+| **Cloud app visibility** | âœ… Deep: 65,000+ apps catalogued | Not applicable |
+| **Data loss prevention** | âœ… Deep DLP across cloud apps | Basic: PII redaction in logs |
+| **Zero trust network** | âœ… Full ZTNA | Not applicable |
+| **LLM prompt security** | Basic (Netskope AI) | âœ… Deep: 35+ patterns, OWASP LLM |
+| **Email security** | Partial (email coexists with SSE) | âœ… Deeper for ecommerce BEC patterns |
+| **Ecommerce AI** | None | âœ… Native |
+| **Complementary?** | âœ… Yes â€” Netskope secures the network; ShopSquire secures AI decisions |
 
 **Verdict**: Different scopes. Netskope doesn't touch LLM agent behavior. **Complementary.**
 
@@ -933,27 +946,27 @@ Required:
 | Dimension | Island.io | ShopSquire |
 |-----------|----------|------------|
 | **Primary scope** | Chromium-based enterprise browser with built-in security | Ecommerce AI platform |
-| **Session isolation** | ✅ Browser-level isolation | Session guard (application-level) |
-| **Data exfiltration prevention** | ✅ Browser clipboard/screenshot controls | N/A |
-| **LLM security** | ✅ Browser-level prompt intercept for SaaS LLM use | ✅ API/agent-level LLM security |
-| **Ecommerce AI** | None | ✅ Native |
-| **Complementary?** | ✅ Yes — Island protects the user's browser; ShopSquire protects the AI backend |
+| **Session isolation** | âœ… Browser-level isolation | Session guard (application-level) |
+| **Data exfiltration prevention** | âœ… Browser clipboard/screenshot controls | N/A |
+| **LLM security** | âœ… Browser-level prompt intercept for SaaS LLM use | âœ… API/agent-level LLM security |
+| **Ecommerce AI** | None | âœ… Native |
+| **Complementary?** | âœ… Yes â€” Island protects the user's browser; ShopSquire protects the AI backend |
 
-**Verdict**: Different layers. **Complementary** — Island secures access, ShopSquire secures decisions.
+**Verdict**: Different layers. **Complementary** â€” Island secures access, ShopSquire secures decisions.
 
 ### 15.4 Palo Alto Networks (Cortex XSIAM/XSOAR) vs. ShopSquire
 
 | Dimension | Palo Alto Cortex | ShopSquire |
 |-----------|-----------------|------------|
 | **Primary scope** | SOC platform, SIEM/SOAR, network security | Ecommerce AI operations |
-| **SOAR capabilities** | ✅ 500+ integrations, mature playbooks | ✅ Emerging: typed playbooks, typed actions |
-| **Threat intelligence** | ✅ Unit 42, massive global threat intel | Limited: KEV catalog + MITRE |
-| **ML for security** | ✅ Cortex ML, stitched AI | ✅ Domain-specific ML (fraud, CV, intent) |
-| **LLM-specific security** | Basic (AI model protection add-on) | ✅ Deep: OWASP LLM native |
-| **Ecommerce context** | None | ✅ Native |
-| **SIEM** | ✅ Full SIEM | No (SIEM adapter for handoff only) |
-| **Ecommerce AI** | None | ✅ Native |
-| **Integration possible?** | ✅ Yes — ShopSquire SIEM adapter can feed Cortex XSIAM |
+| **SOAR capabilities** | âœ… 500+ integrations, mature playbooks | âœ… Emerging: typed playbooks, typed actions |
+| **Threat intelligence** | âœ… Unit 42, massive global threat intel | Limited: KEV catalog + MITRE |
+| **ML for security** | âœ… Cortex ML, stitched AI | âœ… Domain-specific ML (fraud, CV, intent) |
+| **LLM-specific security** | Basic (AI model protection add-on) | âœ… Deep: OWASP LLM native |
+| **Ecommerce context** | None | âœ… Native |
+| **SIEM** | âœ… Full SIEM | No (SIEM adapter for handoff only) |
+| **Ecommerce AI** | None | âœ… Native |
+| **Integration possible?** | âœ… Yes â€” ShopSquire SIEM adapter can feed Cortex XSIAM |
 
 **Verdict**: Palo Alto is the SOC backbone. ShopSquire is the ecommerce AI layer. **Complementary and integrable.** ShopSquire's SIEM adapter can feed events into Cortex XSIAM for enterprise SOC visibility.
 
@@ -961,7 +974,7 @@ Required:
 
 ShopSquire is best positioned **not** as a replacement for any of the above, but as:
 
-> **"The AI intelligence layer that sits between your ecommerce platform and your security tools — the only platform that understands both an order refund and a BEC attack in the same context."**
+> **"The AI intelligence layer that sits between your ecommerce platform and your security tools â€” the only platform that understands both an order refund and a BEC attack in the same context."**
 
 No CrowdStrike, Netskope, Island, or Palo Alto product can approve a product return, recommend a substitute product, detect a fraudulent claim in the same image, monitor your supplier's dependency confusion risk, and log the entire chain in a bi-temporal audit trail. **That is ShopSquire's moat.**
 
@@ -990,7 +1003,7 @@ The platform includes:
 - RAGAS evaluation
 - OWASP LLM Top 10 coverage
 
-This would take a 4–6 person team 12–18 months at a funded startup. It's been built solo. The architectural decisions are sound — DAG execution, bi-temporal audit, confidence calibration, ensemble detection, policy-as-code — these are PhD-level concepts implemented pragmatically.
+This would take a 4â€“6 person team 12â€“18 months at a funded startup. It's been built solo. The architectural decisions are sound â€” DAG execution, bi-temporal audit, confidence calibration, ensemble detection, policy-as-code â€” these are PhD-level concepts implemented pragmatically.
 
 ### 16.2 The Honest Downsides
 
@@ -1010,17 +1023,17 @@ This would take a 4–6 person team 12–18 months at a funded startup. It's bee
 **Option A: Bootstrapped SaaS**
 - Open source the core framework
 - Charge for hosted version + enterprise features
-- Build community → inbound leads
+- Build community â†’ inbound leads
 
 **Option B: Acquisition Target**
 - Position for acquisition by: Shopify, BigCommerce, a payments company, or an enterprise software house
 - The technical depth + architecture + documentation makes due diligence straightforward
-- Realistic exit: $2M–$10M acqui-hire or product acquisition
+- Realistic exit: $2Mâ€“$10M acqui-hire or product acquisition
 
 **Option C: Funded Startup**
-- Raise a seed round ($500K–$2M)
+- Raise a seed round ($500Kâ€“$2M)
 - Use capital for: 2 engineers, 1 sales, 1 customer success
-- Target: 5 pilot customers → $500K ARR → Series A
+- Target: 5 pilot customers â†’ $500K ARR â†’ Series A
 
 **Option D: White Label / OEM**
 - License the platform to larger software companies to embed in their products
@@ -1043,7 +1056,7 @@ This would take a 4–6 person team 12–18 months at a funded startup. It's bee
 
 ## 17. Strategic Roadmap Priorities
 
-### Phase 1: Harden (Months 1–3) — "Production Ready"
+### Phase 1: Harden (Months 1â€“3) â€” "Production Ready"
 1. mTLS between internal services
 2. Xero integration (revenue-unlocking for accountants)
 3. Signed audit log integrity (HMAC/S3 object lock)
@@ -1052,26 +1065,28 @@ This would take a 4–6 person team 12–18 months at a funded startup. It's bee
 6. Stripe metered billing for SaaS monetisation
 7. 2-3 pilot customer deployments
 
-### Phase 2: Expand (Months 4–6) — "Competitive Parity"
-8. Collaborative filtering for recommendations
-9. Demand forecasting (Prophet per SKU)
+### Phase 2: Expand (Months 4â€“6) â€” "Competitive Parity"
+8. Collaborative filtering for recommendations (baseline delivered; scale/identity graph pending)
+9. Demand forecasting (baseline delivered with ARIMA/Prophet/EWMA; MLOps hardening pending)
 10. Contextual bandit replacing A/B testing
 11. Online learning feedback loop for ML Decision Gate
 12. EDI support (850/856/810) for B2B
 13. SHAP attribution in decision gate outputs
 14. LLM-based multi-agent debate (true adversarial)
 
-### Phase 3: Scale (Months 7–12) — "Market Leadership"
+### Phase 3: Scale (Months 7â€“12) â€” "Market Leadership"
 15. Multi-region deployment
 16. Supplier financial health monitoring
 17. CLV prediction model
 18. Cross-session user preference graph
 19. Full MYOB/QuickBooks Online write-back
 20. CrowdStrike/Cortex XSIAM integration for enterprise SOC
-21. Semantic jailbreak detection
-22. OWASP LLM10 (Model Theft) completion
+21. Semantic jailbreak detection (embedding-distance baseline delivered; expansion pending)
+22. OWASP LLM10 (Model Theft) completion (watermark/fingerprint baseline delivered; full hardening pending)
 
 ---
 
-*Document generated from full codebase analysis — every Python file, config, test, and documentation file examined.*
+*Document generated from full codebase analysis â€” every Python file, config, test, and documentation file examined.*
 *Classification: Internal / Investor Grade*
+
+

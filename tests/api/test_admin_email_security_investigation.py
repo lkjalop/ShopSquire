@@ -20,6 +20,9 @@ def test_admin_investigation_payload_and_actions():
                 "contributions": [{"type": "vendor_homoglyph_impersonation", "weight": 35.0}],
             }
         },
+        "mailbox_compromise": {"risk_score": 0.81, "compromised": True, "signal_count": 3},
+        "phishing_page_stage": {"stage": "queued", "detected": True, "max_risk_score": 0.78},
+        "bec_kill_chain": {"stage": "Execution", "stages": ["Initial Access", "Execution"]},
     }
     with db_session() as db:
         db.execute(
@@ -100,6 +103,9 @@ def test_admin_investigation_payload_and_actions():
     assert isinstance(body.get("recommended_actions"), list)
     assert isinstance(body.get("explain"), dict)
     assert isinstance(body.get("timeline_summary"), dict)
+    assert body.get("mailbox_compromise", {}).get("compromised") is True
+    assert body.get("phishing_page_stage", {}).get("detected") is True
+    assert body.get("bec_kill_chain", {}).get("stage") == "Execution"
     assert "feedback" in body
 
     r2 = client.post(

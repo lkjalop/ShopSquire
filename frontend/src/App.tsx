@@ -23,6 +23,15 @@ export type Product = {
   model_source?: string;
 };
 type RightPanelMode = 'none' | 'grid' | 'list' | 'compare' | 'cv' | 'cart' | 'faq' | 'security' | 'visual_search' | 'image_context';
+type NqeInteraction = {
+  questionId: string;
+  questionText: string;
+  optionId: string;
+  optionLabel: string;
+  optionValue?: string;
+  appliedConstraints?: Record<string, any>;
+  ts: number;
+};
 type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
@@ -30,9 +39,11 @@ type ChatMessage = {
   images?: string[];           // data-URL thumbnails shown inline
   disambiguation?: boolean;    // true → render DisambiguationButtons
   disambiguationOptions?: string[];
-  nextQuestions?: { id: string; text: string; goal?: string; options?: { id: string; label: string; value?: string }[] }[];
+  nextQuestions?: { id: string; text: string; goal?: string; why_hint?: string; options?: { id: string; label: string; value?: string }[] }[];
   complexity?: { score: number; tier: string; model: string };
   voiceUsed?: boolean;
+  nqeSelection?: NqeInteraction;         // set on user msgs triggered by NQE option click
+  nqeSelectionApplied?: Record<string, any>;  // echoed back from backend on assistant msgs
 };
 type PendingImageContext = {
   labels: string[];
@@ -45,6 +56,26 @@ type BackendStatus = {
   latencyMs: number | null;
   checkedAt: Date | null;
   error?: string | null;
+};
+
+type ReadyComponent = {
+  status?: string;
+  details?: Record<string, any>;
+};
+
+type ReadyzResponse = {
+  status?: string;
+  components?: Record<string, ReadyComponent>;
+  reasons?: string[];
+};
+
+type ProductWhyExplanation = {
+  sku?: string;
+  reason_summary?: string;
+  matched_constraints?: string[];
+  rank_factors?: any[];
+  disqualifiers?: string[];
+  alternatives_not_selected?: any[];
 };
 
 
@@ -182,6 +213,9 @@ export default function App() {
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>({ ok: false, latencyMs: null, checkedAt: null, error: null });
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const [readyz, setReadyz] = useState<ReadyzResponse | null>(null);
+  const [readyzLoading, setReadyzLoading] = useState(false);
   const [escalationOpen, setEscalationOpen] = useState(false);
   const [escalationIncidentId, setEscalationIncidentId] = useState<string | null>(null);
   const [escalationBuyerToken, setEscalationBuyerToken] = useState<string | null>(null);
@@ -194,8 +228,15 @@ export default function App() {
   const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
   const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
   const [lastCvSecurityNoteKey, setLastCvSecurityNoteKey] = useState<string | null>(null);
+  const [whyDrawerSku, setWhyDrawerSku] = useState<string | null>(null);
+  const [whyDrawerData, setWhyDrawerData] = useState<ProductWhyExplanation | null>(null);
+  const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
+  const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = (localStorage.getItem('uid') || 'demo-user');
   const [cart, setCart] = useState<any | null>(null);
+
+  // NQE history: tracks every question-option interaction for backend context
+  const [nqeHistory, setNqeHistory] = useState<NqeInteraction[]>([]);
 
   // Multimodal: attached images queued for Send
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -328,7 +369,7 @@ export default function App() {
 
   const hasRightPanel = rightPanelMode !== 'none';
 
-  const normalizeNextQuestions = (items: any[]): { id: string; text: string; goal?: string; options?: { id: string; label: string; value?: string }[] }[] => {
+  const normalizeNextQuestions = (items: any[]): { id: string; text: string; goal?: string; why_hint?: string; options?: { id: string; label: string; value?: string }[] }[] => {
     if (!Array.isArray(items)) return [];
     const out = items
       .map((item: any, idx: number) => {
@@ -349,6 +390,7 @@ export default function App() {
             id: String(item.id || `nq_${idx + 1}`),
             text,
             goal: item.goal ? String(item.goal) : undefined,
+            why_hint: item.why_hint ? String(item.why_hint) : undefined,
             options,
           };
         }
@@ -356,7 +398,7 @@ export default function App() {
         if (!text) return null;
         return { id: `nq_${idx + 1}`, text };
       })
-      .filter(Boolean) as { id: string; text: string; goal?: string; options?: { id: string; label: string; value?: string }[] }[];
+      .filter(Boolean) as { id: string; text: string; goal?: string; why_hint?: string; options?: { id: string; label: string; value?: string }[] }[];
     return out.slice(0, 3);
   };
 
@@ -435,6 +477,55 @@ export default function App() {
     };
   }, [chatOpen]);
 
+  useEffect(() => {
+    if (!chatOpen) return;
+    let mounted = true;
+    let iv: any = null;
+
+    const pollReadyz = async () => {
+      setReadyzLoading(true);
+      try {
+        const r = await fetch(apiUrl('/readyz'));
+        const data = await safeJson(r);
+        if (!mounted) return;
+        if (r.ok && data) setReadyz(data as ReadyzResponse);
+      } catch {
+        if (!mounted) return;
+        setReadyz(null);
+      } finally {
+        if (mounted) setReadyzLoading(false);
+      }
+    };
+
+    pollReadyz();
+    iv = setInterval(pollReadyz, 10000);
+    return () => {
+      mounted = false;
+      if (iv) clearInterval(iv);
+    };
+  }, [chatOpen]);
+
+  const handleWhyProduct = async (sku: string) => {
+    if (!sku || !traceId) return;
+    setWhyDrawerSku(sku);
+    setWhyDrawerData(null);
+    setWhyDrawerError(null);
+    setWhyDrawerLoading(true);
+    try {
+      const params = new URLSearchParams({ uid, sku, trace_id: traceId });
+      const r = await fetch(apiUrl(`/api/v1/recommend/why_product?${params.toString()}`), {
+        headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+      });
+      const data = await safeJson(r);
+      if (!r.ok || !data) throw new Error(`why_product_failed (${r.status})`);
+      setWhyDrawerData((data.explanation || {}) as ProductWhyExplanation);
+    } catch (e: any) {
+      setWhyDrawerError(String(e?.message || 'Failed to load explanation'));
+    } finally {
+      setWhyDrawerLoading(false);
+    }
+  };
+
   const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string } }) => {
     const q = String(opts?.queryOverride ?? inputValue).trim();
     if (!q) return;
@@ -453,7 +544,10 @@ export default function App() {
       return;
     }
 
-    const userMsg: ChatMessage = { role: 'user', content: q, timestamp: new Date(), images: [...attachedThumbs], voiceUsed: stt.source !== null };
+    const userMsg: ChatMessage = {
+      role: 'user', content: q, timestamp: new Date(), images: [...attachedThumbs], voiceUsed: stt.source !== null,
+      ...(opts?.nqeSelection ? { nqeSelection: { questionId: opts.nqeSelection.question_id, questionText: '', optionId: opts.nqeSelection.option_id, optionLabel: opts.nqeSelection.option_label, optionValue: opts.nqeSelection.option_value, ts: Date.now() } } : {}),
+    };
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
     const currentAttachedFiles = [...attachedFiles];
@@ -612,7 +706,18 @@ export default function App() {
           chatPayload.image_hash = requestImageContext.imageHash || undefined;
           chatPayload.image_intent = 'visual_search';
         }
-        chatPayload.recent_messages = messages.slice(-6).map(m => ({ role: m.role, content: m.content }));
+        chatPayload.recent_messages = messages.slice(-6).map(m => {
+          const entry: any = { role: m.role, content: m.content };
+          if (m.nqeSelection) entry.nqe_selection = m.nqeSelection;
+          if (m.nqeSelectionApplied) entry.nqe_selection_applied = m.nqeSelectionApplied;
+          if (m.nextQuestions && m.nextQuestions.length > 0) {
+            entry.nqe_questions_shown = m.nextQuestions.map(nq => nq.id);
+          }
+          return entry;
+        });
+        if (nqeHistory.length > 0) {
+          chatPayload.nqe_history = nqeHistory.slice(-10);
+        }
 
         const r = await fetch(apiUrl('/api/v1/chat/query'), {
           method: 'POST',
@@ -630,7 +735,19 @@ export default function App() {
         const isDisambiguation = data.disambiguation === true;
         const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
         const complexity = data.complexity || null;
-        setTraceId(data.decision_trace_id || null);
+        const backendApplied = data.nqe_selection_applied || null;
+        // Update NQE history with backend-confirmed applied constraints
+        if (backendApplied && Object.keys(backendApplied).length > 0 && nqeHistory.length > 0) {
+          setNqeHistory(prev => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last && !last.appliedConstraints) {
+              updated[updated.length - 1] = { ...last, appliedConstraints: backendApplied };
+            }
+            return updated;
+          });
+        }
+        setTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
 
         if (isDisambiguation) {
           // Show disambiguation buttons instead of products
@@ -641,6 +758,7 @@ export default function App() {
             disambiguation: true,
             disambiguationOptions: disambiguationOpts,
             complexity,
+            ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else if (prods.length > 0) {
@@ -660,6 +778,7 @@ export default function App() {
             timestamp: new Date(),
             complexity,
             nextQuestions: normalizedNextQuestions,
+            ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
@@ -671,6 +790,7 @@ export default function App() {
             timestamp: new Date(),
             complexity,
             nextQuestions: normalizedNextQuestions,
+            ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         }
@@ -707,6 +827,16 @@ export default function App() {
   ) => {
     const label = String(option?.label || '').trim();
     if (!label) return;
+    // Record in NQE history for cross-turn context
+    const interaction: NqeInteraction = {
+      questionId: question.id,
+      questionText: question.text,
+      optionId: option.id,
+      optionLabel: label,
+      optionValue: option.value,
+      ts: Date.now(),
+    };
+    setNqeHistory(prev => [...prev, interaction]);
     setInputValue(label);
     setTimeout(() => handleSend({
       queryOverride: label,
@@ -813,6 +943,7 @@ export default function App() {
                   </span>
                 </div>
                 <div className={styles.chatHeaderActions}>
+                  <button className={styles.iconBtn} onClick={() => setReadinessOpen((v) => !v)} title="System Readiness">●</button>
                   <button
                     className={styles.iconBtn}
                     onClick={() => setTraceOpen(true)}
@@ -870,6 +1001,11 @@ export default function App() {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
                           {msg.nextQuestions.map((nq) => (
                             <div key={nq.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
+                              {nq.why_hint && (
+                                <button type="button" className={styles.hintBtn} title={nq.why_hint}>
+                                  Why this question?
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className={styles.filterBtn}
@@ -975,6 +1111,20 @@ export default function App() {
                     <button className={viewMode === 'list' ? styles.active : ''} onClick={() => setViewMode('list')}><ListIcon /></button>
                   </div>
                 </div>
+                {readinessOpen && (
+                  <div className={styles.readinessPanel}>
+                    <div className={styles.readinessTitle}>System Readiness {readyzLoading ? '(checking...)' : ''}</div>
+                    {(readyz?.components ? Object.entries(readyz.components) : []).map(([name, comp]) => (
+                      <div key={name} className={styles.readinessRow}>
+                        <span>{name}</span>
+                        <span className={comp?.status === 'ready' ? styles.readyOk : styles.readyBad}>{comp?.status || 'unknown'}</span>
+                      </div>
+                    ))}
+                    {Array.isArray(readyz?.reasons) && readyz?.reasons.length > 0 && (
+                      <div className={styles.readinessReasons}>Issues: {readyz.reasons.join(', ')}</div>
+                    )}
+                  </div>
+                )}
                 <div className={styles.rightBody}>
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
@@ -1042,9 +1192,29 @@ export default function App() {
                       <ProductGrid
                         products={displayProducts}
                         onAdd={addToCart}
+                        onWhy={handleWhyProduct}
                         viewMode={viewMode === 'list' || rightPanelMode === 'list' ? 'detailed' : 'grid'}
                       />
                     )
+                  )}
+                  {whyDrawerSku && (
+                    <div className={styles.whyDrawer}>
+                      <div className={styles.whyDrawerHeader}>
+                        <span>Why this product: {whyDrawerSku}</span>
+                        <button className={styles.iconBtn} onClick={() => { setWhyDrawerSku(null); setWhyDrawerData(null); setWhyDrawerError(null); }}>×</button>
+                      </div>
+                      {whyDrawerLoading && <div className={styles.muted}>Loading explanation...</div>}
+                      {whyDrawerError && <div className={styles.muted}>{whyDrawerError}</div>}
+                      {!whyDrawerLoading && whyDrawerData && (
+                        <div className={styles.whyBody}>
+                          <div><strong>Matched constraints:</strong> {(whyDrawerData.matched_constraints || []).join(', ') || '--'}</div>
+                          <div><strong>Rank factors:</strong> {Array.isArray(whyDrawerData.rank_factors) ? whyDrawerData.rank_factors.length : 0}</div>
+                          <div><strong>Disqualifiers:</strong> {(whyDrawerData.disqualifiers || []).join(', ') || '--'}</div>
+                          <div><strong>Alternatives not selected:</strong> {Array.isArray(whyDrawerData.alternatives_not_selected) ? whyDrawerData.alternatives_not_selected.length : 0}</div>
+                          <div><strong>Summary:</strong> {whyDrawerData.reason_summary || '--'}</div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>

@@ -8,7 +8,7 @@ from src.app.security.pci import contains_pci_data
 from src.app.config import load_feature_flags, get_settings
 from src.app.observability.tracing import get_tracer
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
-from src.app.security.payment_threats import evaluate_payment_threat
+from src.app.security.transaction_firewall import evaluate_transaction_firewall
 
 router = APIRouter(prefix="/api/v1/payments/afterpay", tags=["payments-afterpay"])
 tracer = get_tracer("payments-afterpay")
@@ -30,7 +30,7 @@ def create_intent(
             raise HTTPException(status_code=503, detail="Afterpay disabled by feature flags")
         if contains_pci_data(description or ""):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
-        risk = evaluate_payment_threat(
+        risk = evaluate_transaction_firewall(
             provider="afterpay",
             uid=uid,
             amount_cents=amount_cents,
@@ -39,9 +39,14 @@ def create_intent(
             request_ip=(request.client.host if request and request.client else None),
             idempotency_key=idempotency_key,
             tenant_id=None,
+            trace_id=None,
         )
-        if risk.get("decision") == "block":
+        if risk.get("action") == "hard_block":
             raise HTTPException(status_code=403, detail={"message": "Payment request blocked by security policy", "security": risk})
+        if risk.get("action") in ("step_up_mfa", "manual_review"):
+            code = 401 if risk.get("action") == "step_up_mfa" else 202
+            detail = "mfa_stepup_required" if code == 401 else "manual_review_required"
+            raise HTTPException(status_code=code, detail={"message": detail, "security": risk})
         base_url = os.getenv("AFTERPAY_API_BASE_URL", "").strip()
         api_key = os.getenv("AFTERPAY_API_KEY", "").strip()
         if not (base_url and api_key):
@@ -69,6 +74,8 @@ def create_intent(
                 "idempotency_key": idempotency_key,
                 "status": data.get("status") or "created",
                 "security": risk,
+                "pci_scope": "tokenized_provider_managed",
+                "card_data_stored": ["token", "last4", "provider_ref"],
             }
         except HTTPException:
             raise

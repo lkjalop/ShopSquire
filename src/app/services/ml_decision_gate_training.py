@@ -235,6 +235,31 @@ def _metric_summary(xs: Sequence[Sequence[float]], ys: Sequence[int], weights: S
     }
 
 
+def _metric_summary_from_probs(probs: Sequence[float], ys: Sequence[int]) -> Dict[str, float]:
+    if not probs:
+        return {"samples": 0, "positive_rate": 0.0, "accuracy": 0.0, "precision": 0.0, "recall": 0.0}
+    tp = fp = tn = fn = 0
+    for i, p in enumerate(probs):
+        pred = 1 if float(p) >= 0.5 else 0
+        y = int(ys[i])
+        if pred == 1 and y == 1:
+            tp += 1
+        elif pred == 1 and y == 0:
+            fp += 1
+        elif pred == 0 and y == 0:
+            tn += 1
+        else:
+            fn += 1
+    total = max(1, tp + tn + fp + fn)
+    return {
+        "samples": float(total),
+        "positive_rate": round(float(tp + fn) / float(total), 4),
+        "accuracy": round(float(tp + tn) / float(total), 4),
+        "precision": round(float(tp) / float(max(1, tp + fp)), 4),
+        "recall": round(float(tp) / float(max(1, tp + fn)), 4),
+    }
+
+
 def _quality_score(metrics: Dict[str, float]) -> float:
     acc = float(metrics.get("accuracy", 0.0) or 0.0)
     precision = float(metrics.get("precision", 0.0) or 0.0)
@@ -254,12 +279,98 @@ def _fit_platt(scores: Sequence[float], ys: Sequence[int], *, epochs: int = 240,
     return a, float(b)
 
 
+def _train_boosting_classifier(
+    *,
+    xs: Sequence[Sequence[float]],
+    ys: Sequence[int],
+    feature_names: Sequence[str],
+    preferred_kind: str,
+    model_output_path: str | None,
+    domain: str,
+) -> tuple[Dict[str, Any] | None, List[float], str | None]:
+    candidates: List[str]
+    pref = str(preferred_kind or "auto").strip().lower()
+    if pref in ("xgboost", "xgb"):
+        candidates = ["xgboost"]
+    elif pref in ("lightgbm", "lgbm", "lgb"):
+        candidates = ["lightgbm"]
+    else:
+        candidates = ["xgboost", "lightgbm"]
+
+    base_path = str(model_output_path or "").strip()
+    last_err: str | None = None
+    for kind in candidates:
+        if kind == "xgboost":
+            try:
+                import xgboost as xgb  # type: ignore
+
+                mdl = xgb.XGBClassifier(
+                    n_estimators=72,
+                    max_depth=4,
+                    learning_rate=0.08,
+                    subsample=0.9,
+                    colsample_bytree=0.85,
+                    objective="binary:logistic",
+                    eval_metric="logloss",
+                    random_state=42,
+                )
+                mdl.fit(xs, ys)
+                probs = [float(p[1]) for p in mdl.predict_proba(xs)]
+                out_path = base_path
+                if out_path:
+                    p = Path(out_path)
+                    stem = p.stem if p.suffix else p.name
+                    out_path = str(p.with_name(f"{stem}.{domain}.xgboost.json"))
+                    mdl.save_model(out_path)
+                return {
+                    "kind": "xgboost",
+                    "model_path": out_path,
+                    "feature_order": [str(x) for x in feature_names],
+                }, probs, None
+            except Exception as exc:
+                last_err = str(exc)
+                continue
+        if kind == "lightgbm":
+            try:
+                import lightgbm as lgb  # type: ignore
+
+                mdl = lgb.LGBMClassifier(
+                    n_estimators=96,
+                    learning_rate=0.07,
+                    max_depth=6,
+                    num_leaves=31,
+                    subsample=0.9,
+                    colsample_bytree=0.85,
+                    objective="binary",
+                    random_state=42,
+                )
+                mdl.fit(xs, ys)
+                probs = [float(p[1]) for p in mdl.predict_proba(xs)]
+                out_path = base_path
+                if out_path:
+                    p = Path(out_path)
+                    stem = p.stem if p.suffix else p.name
+                    out_path = str(p.with_name(f"{stem}.{domain}.lightgbm.txt"))
+                    mdl.booster_.save_model(out_path)
+                return {
+                    "kind": "lightgbm",
+                    "model_path": out_path,
+                    "feature_order": [str(x) for x in feature_names],
+                }, probs, None
+            except Exception as exc:
+                last_err = str(exc)
+                continue
+    return None, [], (last_err or "boosting_dependencies_unavailable")
+
+
 def train_gate_from_samples(
     samples: Sequence[GateTrainingSample],
     *,
     domain: str = "email_security",
     min_samples: int = 40,
     min_tenant_samples: int = 25,
+    model_kind: str = "auto",
+    model_output_path: str | None = None,
 ) -> Dict[str, Any]:
     if len(samples) < min_samples:
         return {
@@ -275,15 +386,69 @@ def train_gate_from_samples(
     for s in samples:
         xs.append([float(s.features.get(k, 0.0) or 0.0) for k in features])
         ys.append(int(s.label))
-    w, b = _fit_logistic(xs, ys)
-    metrics = _metric_summary(xs, ys, w, b)
+    train_notes: List[str] = []
+    scores: List[float] = []
+    metrics: Dict[str, float]
+    model_descriptor: Dict[str, Any]
 
-    scores = []
-    for x in xs:
-        z = float(b)
-        for j, ww in enumerate(w):
-            z += float(ww) * float(x[j])
-        scores.append(_sigmoid(z))
+    requested_kind = str(model_kind or "auto").strip().lower()
+    if requested_kind not in ("auto", "logistic", "xgboost", "xgb", "lightgbm", "lgb", "lgbm"):
+        requested_kind = "auto"
+
+    if requested_kind in ("auto", "xgboost", "xgb", "lightgbm", "lgb", "lgbm"):
+        boost_meta, boost_scores, boost_err = _train_boosting_classifier(
+            xs=xs,
+            ys=ys,
+            feature_names=features,
+            preferred_kind=requested_kind,
+            model_output_path=model_output_path,
+            domain=domain,
+        )
+        if boost_meta is not None and boost_scores:
+            scores = [max(0.0, min(1.0, float(s))) for s in boost_scores]
+            metrics = _metric_summary_from_probs(scores, ys)
+            model_descriptor = {
+                **boost_meta,
+                "metrics": metrics,
+                "quality_score": _quality_score(metrics),
+                "sample_size": len(samples),
+            }
+        else:
+            if boost_err:
+                train_notes.append(f"boosting_fallback:{boost_err}")
+            w, b = _fit_logistic(xs, ys)
+            metrics = _metric_summary(xs, ys, w, b)
+            for x in xs:
+                z = float(b)
+                for j, ww in enumerate(w):
+                    z += float(ww) * float(x[j])
+                scores.append(_sigmoid(z))
+            coef = {k: round(float(w[i]), 6) for i, k in enumerate(features)}
+            model_descriptor = {
+                "kind": "logistic",
+                "bias": round(float(b), 6),
+                "coefficients": coef,
+                "metrics": metrics,
+                "quality_score": _quality_score(metrics),
+                "sample_size": len(samples),
+            }
+    else:
+        w, b = _fit_logistic(xs, ys)
+        metrics = _metric_summary(xs, ys, w, b)
+        for x in xs:
+            z = float(b)
+            for j, ww in enumerate(w):
+                z += float(ww) * float(x[j])
+            scores.append(_sigmoid(z))
+        coef = {k: round(float(w[i]), 6) for i, k in enumerate(features)}
+        model_descriptor = {
+            "kind": "logistic",
+            "bias": round(float(b), 6),
+            "coefficients": coef,
+            "metrics": metrics,
+            "quality_score": _quality_score(metrics),
+            "sample_size": len(samples),
+        }
     cal_a, cal_b = _fit_platt(scores, ys)
 
     per_tenant: Dict[str, Dict[str, Any]] = {}
@@ -306,25 +471,18 @@ def train_gate_from_samples(
             "metrics": t_metrics,
         }
 
-    coef = {k: round(float(w[i]), 6) for i, k in enumerate(features)}
     return {
         "updated": True,
         "domain": domain,
         "sample_size": len(samples),
         "feature_count": len(features),
+        "training_notes": train_notes,
         "artifact": {
             "version": "ml_decision_gate_v1",
             "trained_at": datetime.now(timezone.utc).isoformat(),
             "domains": {
                 domain: {
-                    "model": {
-                        "kind": "logistic",
-                        "bias": round(float(b), 6),
-                        "coefficients": coef,
-                        "metrics": metrics,
-                        "quality_score": _quality_score(metrics),
-                        "sample_size": len(samples),
-                    },
+                    "model": model_descriptor,
                     "calibration": {
                         "method": "platt",
                         "params": {"a": round(float(cal_a), 6), "b": round(float(cal_b), 6)},
@@ -348,6 +506,8 @@ def train_gate_from_db(
     limit: int = 8000,
     min_samples: int = 40,
     min_tenant_samples: int = 25,
+    model_kind: str = "auto",
+    model_output_path: str | None = None,
 ) -> Dict[str, Any]:
     samples = collect_training_samples(tenant_id=tenant_id, limit=limit)
     result = train_gate_from_samples(
@@ -355,6 +515,8 @@ def train_gate_from_db(
         domain=domain,
         min_samples=min_samples,
         min_tenant_samples=min_tenant_samples,
+        model_kind=model_kind,
+        model_output_path=model_output_path,
     )
     result["tenant_id"] = tenant_id
     result["collected_samples"] = len(samples)

@@ -798,6 +798,9 @@ def merchant_email_lab(request: Request):
               document.getElementById('status').textContent='Simulation events sent';
             }catch(e){ document.getElementById('status').textContent='Simulation error'; }
           }
+          // Explicit exports for Playwright/runtime checks.
+          window.analyze = analyze;
+          window.simulateAgents = simulateAgents;
           // Preload defaults
           newEmailPreset();
         </script>

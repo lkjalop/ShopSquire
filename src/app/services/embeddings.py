@@ -1,9 +1,128 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import os
+import logging
 import httpx
+
+_log = logging.getLogger("shopsquire.embeddings")
+
+
+def _cosine_dense(a: List[float], b: List[float]) -> float:
+    """Cosine similarity between two dense float vectors."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na < 1e-12 or nb < 1e-12:
+        return 0.0
+    return float(dot / (na * nb))
+
+
+def embed_text_ollama(
+    text: str,
+    *,
+    model: str | None = None,
+    base_url: str | None = None,
+    timeout: float = 8.0,
+) -> List[float]:
+    """Embed *text* using a local Ollama embedding model (nomic-embed-text by default).
+
+    Returns an empty list if Ollama is unavailable so callers can fall back to BoW.
+    Environment variables:
+        OLLAMA_BASE_URL   — Ollama server URL (default: http://localhost:11434)
+        OLLAMA_EMBED_MODEL — model to use (default: nomic-embed-text)
+    """
+    base = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
+    mdl = model or os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    url = f"{base}/api/embeddings"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(url, json={"model": mdl, "prompt": text or ""})
+            resp.raise_for_status()
+            data = resp.json()
+            emb = data.get("embedding") or []
+            if isinstance(emb, list) and emb:
+                return [float(v) for v in emb]
+    except Exception as exc:
+        _log.debug("Ollama embed_text failed (%s); falling back to BoW", exc)
+    return []
+
+
+def embed_text_openai(
+    text: str,
+    *,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    timeout: float = 10.0,
+) -> List[float]:
+    """Embed *text* via OpenAI / compatible API. Returns [] on failure."""
+    key = api_key or os.getenv("OPENAI_API_KEY", "")
+    if not key:
+        return []
+    base = (base_url or os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")).rstrip("/")
+    mdl = model or os.getenv("OPENAI_EMBEDDINGS_MODEL", "text-embedding-3-small")
+    url = f"{base}/embeddings"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(
+                url,
+                json={"model": mdl, "input": text or ""},
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            arr = (data.get("data") or [{}])[0].get("embedding") or []
+            if isinstance(arr, list):
+                return [float(x) for x in arr]
+    except Exception as exc:
+        _log.debug("OpenAI embed_text failed (%s); falling back to BoW", exc)
+    return []
+
+
+def embed_text_dense(text: str) -> Tuple[List[float], str]:
+    """Return a dense embedding vector using the best available provider.
+
+    Provider resolution order (controlled by EMBEDDINGS_PROVIDER env var):
+        ollama    → calls local Ollama API (nomic-embed-text)
+        openai    → calls OpenAI /v1/embeddings
+        bow       → falls through to BoW (always available)
+    Falls back to BoW when the selected provider is unavailable.
+
+    Returns (vector, provider_name).
+    """
+    provider = (os.getenv("EMBEDDINGS_PROVIDER") or "bow").strip().lower()
+
+    if provider in ("ollama",):
+        vec = embed_text_ollama(text)
+        if vec:
+            return vec, "ollama"
+        _log.debug("Ollama embedding unavailable; falling back to openai/bow")
+        provider = "bow"
+
+    if provider in ("openai",):
+        vec = embed_text_openai(text)
+        if vec:
+            return vec, "openai"
+        _log.debug("OpenAI embedding unavailable; falling back to bow")
+        provider = "bow"
+
+    # BoW fallback: project sparse TF dict into a dense vector via hash-bucket trick
+    bag: Dict[str, float] = {}
+    for token in (text or "").lower().split():
+        bag[token] = bag.get(token, 0.0) + 1.0
+    norm = math.sqrt(sum(v * v for v in bag.values())) or 1.0
+    # Fixed 512-dim projection using FNV-like hash
+    DIM = 512
+    vec = [0.0] * DIM
+    for tok, w in bag.items():
+        idx = abs(hash(tok)) % DIM
+        vec[idx] += w / norm
+    vnorm = math.sqrt(sum(v * v for v in vec)) or 1.0
+    return [v / vnorm for v in vec], "bow"
 
 
 class SimpleEmbeddings:

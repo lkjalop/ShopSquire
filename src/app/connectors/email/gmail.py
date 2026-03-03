@@ -152,8 +152,19 @@ def normalize_message(*, msg: Dict[str, Any], tenant_id: str | None = None) -> D
 
     attachments = _attachments_meta(payload)
 
-    # DMARC/SPF/DKIM from Authentication-Results when present
-    auth = validate_email_auth({"Authentication-Results": hdrs.get("authentication-results") or ""})
+    # DMARC/SPF/DKIM + ARC/BIMI from headers when present.
+    auth = validate_email_auth(
+        {
+            "Authentication-Results": hdrs.get("authentication-results") or "",
+            "Received-SPF": hdrs.get("received-spf") or "",
+            "DKIM-Signature": hdrs.get("dkim-signature") or "",
+            "ARC-Authentication-Results": hdrs.get("arc-authentication-results") or "",
+            "ARC-Seal": hdrs.get("arc-seal") or "",
+            "ARC-Message-Signature": hdrs.get("arc-message-signature") or "",
+            "BIMI-Location": hdrs.get("bimi-location") or "",
+            "BIMI-Indicator": hdrs.get("bimi-indicator") or "",
+        }
+    )
     dmarc_fail = auth.get("dmarc_pass") is False
 
     return {
@@ -167,4 +178,13 @@ def normalize_message(*, msg: Dict[str, Any], tenant_id: str | None = None) -> D
         "body": body,
         "attachments": attachments,
         "dmarc_fail": bool(dmarc_fail),
+        "spf_result": auth.get("spf_result"),
+        "dkim_result": auth.get("dkim_result"),
+        "dmarc_result": auth.get("dmarc_result"),
+        "arc_present": bool(auth.get("arc_present")),
+        "arc_cv": auth.get("arc_cv"),
+        "arc_chain_valid": auth.get("arc_chain_valid"),
+        "bimi_present": bool(auth.get("bimi_present")),
+        "bimi_result": auth.get("bimi_result"),
+        "bimi_location": auth.get("bimi_location"),
     }

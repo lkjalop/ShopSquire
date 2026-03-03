@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Request, Response, Cookie
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
 from src.app.security.iam import log_iam_event, check_bruteforce, check_impossible_travel, emit_iam_anomaly
@@ -195,15 +196,15 @@ def _ensure_auth_tables():
         )
         # Backward-compatible schema updates
         try:
-            db.execute("ALTER TABLE session_tokens ADD COLUMN token_hash TEXT")
+            db.execute(sql_text("ALTER TABLE session_tokens ADD COLUMN token_hash TEXT"))
         except Exception:
             pass
         try:
-            db.execute("ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT")
+            db.execute(sql_text("ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT"))
         except Exception:
             pass
         try:
-            db.execute("ALTER TABLE oauth_states ADD COLUMN nonce TEXT")
+            db.execute(sql_text("ALTER TABLE oauth_states ADD COLUMN nonce TEXT"))
         except Exception:
             pass
         db.commit()
@@ -492,9 +493,9 @@ def _user_from_token(token: str):
             if expires_at and datetime.utcnow() > datetime.fromisoformat(str(expires_at)):
                 # Attempt delete by hash first, then token
                 try:
-                    db.execute("DELETE FROM session_tokens WHERE token_hash = :th", {"th": token_hash})
+                    db.execute(sql_text("DELETE FROM session_tokens WHERE token_hash = :th"), {"th": token_hash})
                 except Exception:
-                    db.execute("DELETE FROM session_tokens WHERE token = :t", {"t": token})
+                    db.execute(sql_text("DELETE FROM session_tokens WHERE token = :t"), {"t": token})
                 db.commit()
                 return None
         except Exception:
@@ -506,11 +507,11 @@ def _user_from_token(token: str):
             user_email = row[1]
             if _is_forced_reauth(user_id=str(user_id or ""), email=str(user_email or "")):
                 try:
-                    db.execute("DELETE FROM session_tokens WHERE user_id = :uid", {"uid": str(user_id)})
+                    db.execute(sql_text("DELETE FROM session_tokens WHERE user_id = :uid"), {"uid": str(user_id)})
                 except Exception:
                     pass
                 try:
-                    db.execute("UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = :uid AND revoked_at IS NULL", {"uid": str(user_id)})
+                    db.execute(sql_text("UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = :uid AND revoked_at IS NULL"), {"uid": str(user_id)})
                 except Exception:
                     pass
                 db.commit()
@@ -564,7 +565,7 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
         user_id = secrets.token_hex(16)
         try:
             with db_session() as db:
-                exists = db.execute("SELECT 1 FROM user_accounts WHERE email = :email", {"email": email}).scalar()
+                exists = db.execute(sql_text("SELECT 1 FROM user_accounts WHERE email = :email"), {"email": email}).scalar()
                 if exists:
                     raise HTTPException(status_code=409, detail="Email already registered")
                 db.execute(
@@ -661,9 +662,9 @@ def logout(
                 user_row = None
             # Delete by hash if present, else token
             try:
-                db.execute("DELETE FROM session_tokens WHERE token_hash = :th", {"th": token_hash})
+                db.execute(sql_text("DELETE FROM session_tokens WHERE token_hash = :th"), {"th": token_hash})
             except Exception:
-                db.execute("DELETE FROM session_tokens WHERE token = :t", {"t": token_value})
+                db.execute(sql_text("DELETE FROM session_tokens WHERE token = :t"), {"t": token_value})
             try:
                 if user_row and user_row[0]:
                     db.execute(
@@ -778,7 +779,7 @@ def google_callback(code: str | None = None, state: str | None = None):
                 "SELECT return_to, expires_at, code_verifier, nonce FROM oauth_states WHERE state = :state",
                 {"state": state},
             ).fetchone()
-            db.execute("DELETE FROM oauth_states WHERE state = :state", {"state": state})
+            db.execute(sql_text("DELETE FROM oauth_states WHERE state = :state"), {"state": state})
             db.commit()
         if not row:
             raise HTTPException(status_code=400, detail="Invalid state")

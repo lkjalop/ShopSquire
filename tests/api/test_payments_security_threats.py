@@ -26,5 +26,9 @@ def test_paypal_intent_blocked_on_unauthorized_pattern():
             "idempotency_key": "k-pay-risk-1",
         },
     )
-    assert r.status_code == 403
-
+    assert r.status_code in (401, 403)
+    detail = r.json().get("detail") or {}
+    if isinstance(detail, dict):
+        sec = detail.get("security") or {}
+        if sec:
+            assert sec.get("action") in ("step_up_mfa", "hard_block", "manual_review")

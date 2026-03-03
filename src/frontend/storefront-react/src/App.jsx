@@ -224,6 +224,21 @@ const normalizeResults = (items) => {
   if (!Array.isArray(items)) return [];
   return items.map((item, idx) => {
     const name = item.name || item.sku || `Product ${idx + 1}`;
+    const reasonList = Array.isArray(item.reasons)
+      ? item.reasons
+      : (Array.isArray(item?.factors?.positive) ? item.factors.positive : []);
+    const conciseReason = (() => {
+      if (typeof item.contrastive_why === 'string' && item.contrastive_why.trim()) {
+        return item.contrastive_why.trim();
+      }
+      if (reasonList.length > 0) {
+        return String(reasonList[0]);
+      }
+      if (typeof item.why === 'string' && item.why.trim()) {
+        return item.why.trim();
+      }
+      return 'Closest relevant alternative for your query and constraints.';
+    })();
     return {
       id: item.id || item.sku || `result-${idx}`,
       sku: item.sku || item.id || `result-${idx}`,
@@ -232,7 +247,10 @@ const normalizeResults = (items) => {
       specs: typeof item.specs === 'string' ? item.specs : (item.specs ? Object.values(item.specs).join(', ') : 'Specs on request'),
       image: item.image || item.image_url || createImage(name),
       score: item.score,
+      score_norm: item.score_norm,
       why_not: item.why_not,
+      why: reasonList.slice(0, 3),
+      reason_summary: conciseReason,
     };
   });
 };
@@ -266,8 +284,71 @@ const MobileMenu = ({ isOpen, onClose }) => {
   );
 };
 
-const ProductGrid = ({ products, viewMode, onAddToCart, onViewDetail, isLoading }) => {
+const ProductGrid = ({ products, viewMode, onAddToCart, onViewDetail, isLoading, priceBuckets }) => {
   const items = Array.isArray(products) ? products : [];
+  const hasBuckets = !!(
+    priceBuckets
+    && (Array.isArray(priceBuckets.within_budget)
+      || Array.isArray(priceBuckets.closest_above_budget)
+      || Array.isArray(priceBuckets.closest_below_budget))
+  );
+
+  const renderWhyPanel = (product) => (
+    <div
+      style={{
+        flex: '0 0 230px',
+        border: '1px solid #e5e7eb',
+        borderRadius: '10px',
+        padding: '10px',
+        background: '#fbfbfb',
+        minWidth: '180px',
+      }}
+    >
+      <div className="text-xs font-semibold text-gray-700" style={{ marginBottom: '6px' }}>Why recommended</div>
+      <div className="text-xs text-gray-600 line-clamp-3">{product.reason_summary || 'Closest relevant alternative for your query.'}</div>
+      <div className="flex items-center gap-2" style={{ marginTop: '8px' }}>
+        <span
+          style={{
+            display: 'inline-block',
+            padding: '2px 8px',
+            borderRadius: '999px',
+            border: '1px solid #e5e7eb',
+            fontSize: '11px',
+            color: '#4b5563',
+            background: '#fff',
+          }}
+        >
+          Relevance {typeof product.score_norm === 'number' ? `${Math.round(product.score_norm)}%` : '-'}
+        </span>
+      </div>
+    </div>
+  );
+
+  const renderListRow = (product, keyPrefix = '') => (
+    <div key={`${keyPrefix}${product.id}`} className="border border-gray-200 rounded-lg p-4">
+      <div className="flex gap-4" style={{ alignItems: 'stretch' }}>
+        <img
+          src={product.image}
+          alt={product.name}
+          style={{ width: '72px', height: '72px', objectFit: 'cover', borderRadius: '10px', flex: '0 0 auto' }}
+          onError={(e)=>{ e.currentTarget.src = createImage(product.name); }}
+        />
+        <div className="flex-1" style={{ minWidth: 0 }}>
+          <h3 className="font-semibold text-gray-900 line-clamp-2">{product.name}</h3>
+          <p className="text-sm text-gray-600 mt-1 line-clamp-2">{product.specs}</p>
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-lg font-semibold text-gray-900">{formatPrice(product.price)}</span>
+            <div className="flex gap-2">
+              <button onClick={() => onViewDetail(product)} className="secondary sm">Details</button>
+              <button onClick={() => onAddToCart(product)} className="contrast sm">Add</button>
+            </div>
+          </div>
+        </div>
+        {renderWhyPanel(product)}
+      </div>
+    </div>
+  );
+
   if (isLoading) {
     const skeletons = new Array(8).fill(0);
     return (
@@ -295,6 +376,44 @@ const ProductGrid = ({ products, viewMode, onAddToCart, onViewDetail, isLoading 
     return (
       <div className="text-sm text-gray-600">
         No results. Try adjusting budget or specs. If this seems wrong, open Decision Trace to review agent steps.
+      </div>
+    );
+  }
+  if (hasBuckets) {
+    const bucketDefs = [
+      {
+        key: 'within_budget',
+        title: 'Within Budget',
+        subtitle: 'Best matches that fit your requested range',
+      },
+      {
+        key: 'closest_above_budget',
+        title: 'Closest Above Budget',
+        subtitle: 'Nearest higher-price alternatives with better fit',
+      },
+      {
+        key: 'closest_below_budget',
+        title: 'Closest Below Budget',
+        subtitle: 'Nearest lower-price alternatives',
+      },
+    ];
+    return (
+      <div className="flex flex-col gap-4">
+        {bucketDefs.map((b) => {
+          const bucketItems = Array.isArray(priceBuckets?.[b.key]) ? priceBuckets[b.key].slice(0, 4) : [];
+          if (!bucketItems.length) return null;
+          return (
+            <div key={`bucket-${b.key}`} className="border border-gray-200 rounded-lg" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '10px 12px', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                <div className="text-sm font-semibold text-gray-900">{b.title}</div>
+                <div className="text-xs text-gray-500">{b.subtitle} • {bucketItems.length} shown</div>
+              </div>
+              <div className="flex flex-col gap-3" style={{ padding: '12px' }}>
+                {bucketItems.map((p) => renderListRow(p, `${b.key}-`))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   }
@@ -364,29 +483,7 @@ const ProductGrid = ({ products, viewMode, onAddToCart, onViewDetail, isLoading 
   if (viewMode === 'list') {
     return (
       <div className="flex flex-col gap-3">
-        {items.map((product) => (
-          <div key={product.id} className="border border-gray-200 rounded-lg p-4">
-            <div className="flex gap-4">
-              <img
-                src={product.image}
-                alt={product.name}
-                style={{ width: '72px', height: '72px', objectFit: 'cover', borderRadius: '10px', flex: '0 0 auto' }}
-                onError={(e)=>{ e.currentTarget.src = createImage(product.name); }}
-              />
-              <div className="flex-1" style={{ minWidth: 0 }}>
-                <h3 className="font-semibold text-gray-900 line-clamp-2">{product.name}</h3>
-                <p className="text-sm text-gray-600 mt-1 line-clamp-2">{product.specs}</p>
-                <div className="flex items-center justify-between mt-3">
-                  <span className="text-lg font-semibold text-gray-900">{formatPrice(product.price)}</span>
-                  <div className="flex gap-2">
-                    <button onClick={() => onViewDetail(product)} className="secondary sm">Details</button>
-                    <button onClick={() => onAddToCart(product)} className="contrast sm">Add</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
+        {items.map((product) => renderListRow(product))}
       </div>
     );
   }
@@ -756,6 +853,7 @@ const RightPanel = ({
   privacyPrefs,
   isLoading,
   uid,
+  onQuickQuestion,
 }) => {
   if (!type) return null;
 
@@ -906,9 +1004,40 @@ const RightPanel = ({
           </small>
         </div>
       )}
+      {type === 'products' && Array.isArray(meta?.optional_nqe_questions) && meta.optional_nqe_questions.length > 0 && (
+        <div style={{ padding: '0.5rem 1rem', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
+          <div className="text-xs text-gray-500" style={{ marginBottom: '6px' }}>
+            Optional quick refine
+          </div>
+          <div className="flex" style={{ gap: '6px', flexWrap: 'wrap' }}>
+            {meta.optional_nqe_questions.slice(0, 4).map((q, idx) => {
+              const txt = typeof q === 'string' ? q : (q?.text || 'Refine');
+              return (
+                <button
+                  key={`opt-nqe-${idx}`}
+                  className="secondary sm"
+                  onClick={() => {
+                    if (typeof onQuickQuestion === 'function') onQuickQuestion(q);
+                  }}
+                  title={txt}
+                >
+                  {txt}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="panel-scroll" style={{ padding: '1rem', flex: 1, minHeight: 0 }}>
         {type === 'products' && (
-          <ProductGrid products={data} viewMode={viewMode} onAddToCart={onAddToCart} onViewDetail={onViewDetail} isLoading={!!isLoading} />
+          <ProductGrid
+            products={data}
+            viewMode={viewMode}
+            onAddToCart={onAddToCart}
+            onViewDetail={onViewDetail}
+            isLoading={!!isLoading}
+            priceBuckets={meta?.price_buckets || null}
+          />
         )}
         {type === 'incident_chat' && (
           <IncidentChatPanel
@@ -3234,7 +3363,7 @@ const ShopSquireApp = () => {
       };
       setMessages((prev) => [...prev, assistantMessage]);
       // Render clarifying questions when backend provides them
-      if (Array.isArray(data.next_questions) && data.next_questions.length > 0) {
+      if (Array.isArray(data.next_questions) && data.next_questions.length > 0 && results.length === 0) {
         const nqMessage = {
           role: 'assistant',
           content: 'Before I narrow this down, a few quick questions:',
@@ -3301,7 +3430,8 @@ const ShopSquireApp = () => {
         // ignore
       }
       if (assistantMessage.products) {
-        handleViewModeChange(backendViewMode, backendViewReason);
+        const preferredProductsView = backendViewMode === 'compare' ? 'compare' : 'list';
+        handleViewModeChange(preferredProductsView, backendViewReason || 'Showing nearest relevant alternatives with concise rationale.');
         setRightPanel({
           type: 'products',
           data: assistantMessage.products,
@@ -3309,7 +3439,9 @@ const ShopSquireApp = () => {
             why_not: data.why_not || [],
             policy_version: data.policy_version,
             decision_id: data.decision_id || null,
-            view_reason: backendViewReason,
+            view_reason: backendViewReason || 'Nearest relevant alternatives ranked by recommendation relevance.',
+            price_buckets: data.price_buckets || null,
+            optional_nqe_questions: Array.isArray(data.next_questions) ? data.next_questions : [],
           },
         });
         setLastProducts(assistantMessage.products);
@@ -3685,6 +3817,10 @@ const ShopSquireApp = () => {
               privacyPrefs={privacyPrefs}
               isLoading={isLoading}
               uid={uid}
+              onQuickQuestion={(q) => {
+                const txt = typeof q === 'string' ? q : (q?.text || '');
+                if (txt) setInputValue(txt);
+              }}
             />
           </div>
         )}

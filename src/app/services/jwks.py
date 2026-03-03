@@ -132,16 +132,20 @@ def jwks_document() -> Dict:
     return {"keys": keys}
 
 
-def issue_token(sub: str, scopes: List[str], ttl_seconds: int = 3600, issuer: Optional[str] = None, audience: Optional[str] = None) -> str:
+def issue_token(sub: str, scopes: List[str], ttl_seconds: int = 900, issuer: Optional[str] = None, audience: Optional[str] = None) -> str:
+    """Issue a signed JWT. Default TTL is 900s (15 minutes) per H04 hardening."""
     if jwt is None:
         raise RuntimeError("PyJWT not available")
     kid, priv = _get_active_priv()
     now = int(time.time())
+    max_ttl = int(os.getenv("JWT_MAX_TTL_SECONDS", "3600") or 3600)
+    effective_ttl = min(int(ttl_seconds or 900), max_ttl)
     payload = {
         "sub": sub,
         "iat": now,
-        "exp": now + int(ttl_seconds or 3600),
+        "exp": now + effective_ttl,
         "scope": " ".join(scopes or []),
+        "jti": base64.urlsafe_b64encode(os.urandom(16)).decode("ascii").rstrip("="),
     }
     if issuer:
         payload["iss"] = issuer
@@ -192,6 +196,34 @@ def verify_token(token: str) -> Tuple[bool, Dict]:
             # If we only have JWK fields, issue a failure
             return False, {"error": "kid_not_found"}
         payload = jwt.decode(token, pub_pem, algorithms=["RS256"], options={"verify_aud": False})
+        # H04: Check revocation blocklist
+        jti = payload.get("jti")
+        if jti and is_token_revoked(jti):
+            return False, {"error": "token_revoked"}
         return True, payload
     except Exception as exc:
         return False, {"error": "verify_failed", "detail": str(exc)}
+
+
+# ---- H04: JWT Revocation Blocklist ----
+
+def revoke_token(jti: str, ttl_seconds: int = 3600) -> bool:
+    """Add a JWT ID to the Redis-backed revocation blocklist."""
+    try:
+        from src.app.deps import get_redis
+        redis = get_redis()
+        key = f"jwt_revoked:{jti}"
+        redis.setex(key, max(60, ttl_seconds), "1")
+        return True
+    except Exception:
+        return False
+
+
+def is_token_revoked(jti: str) -> bool:
+    """Check if a JWT ID has been revoked."""
+    try:
+        from src.app.deps import get_redis
+        redis = get_redis()
+        return bool(redis.get(f"jwt_revoked:{jti}"))
+    except Exception:
+        return False

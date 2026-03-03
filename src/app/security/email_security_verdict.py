@@ -211,6 +211,7 @@ def verdict(
         or "account_name_mismatch" in ind_types
         or "legal_entity_mismatch" in ind_types
         or "reply_chain_hijack" in ind_types
+        or "domain_age_insufficient_for_payment_instruction" in ind_types
         or "ocr_overlay_payment_instruction" in ind_types
         or ("bank_change_request" in ind_types and ("urgency_language" in ind_types or "invoice_redirect" in ind_types))
     )

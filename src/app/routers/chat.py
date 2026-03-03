@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +13,7 @@ from sqlalchemy import text as sql_text
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.deps import get_redis
 from src.app.models.db import get_db
+from src.app.services.memory import Memory
 from src.app.services.llm_provider import select_ollama_model, ollama_generate, is_complex_query, score_query_complexity
 from src.app.services.search_events import log_search_event
 from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
@@ -81,6 +84,138 @@ def _store_chat_message(db, *, uid: str, role: str, content: str, trace_id: str 
     db.commit()
 
 
+def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
+    q = str(query or "").lower()
+    # Parse explicit budget expressions into a stable structured shape.
+    m_between = re.search(r"\bbetween\s*\$?([\d,]+)\s*(?:and|to|-)\s*\$?([\d,]+)\b", q)
+    if m_between:
+        lo = int(str(m_between.group(1)).replace(",", ""))
+        hi = int(str(m_between.group(2)).replace(",", ""))
+        return {"budget_min": min(lo, hi), "budget_max": max(lo, hi)}
+    m_under = re.search(r"\b(?:under|below|max(?:imum)?|up to)\s*\$?([\d,]+)\b", q)
+    if m_under:
+        return {"budget_min": None, "budget_max": int(str(m_under.group(1)).replace(",", ""))}
+    m_over = re.search(r"\b(?:over|above|min(?:imum)?|at least)\s*\$?([\d,]+)\b", q)
+    if m_over:
+        return {"budget_min": int(str(m_over.group(1)).replace(",", "")), "budget_max": None}
+    return {"budget_min": None, "budget_max": None}
+
+
+def _extract_brand_mentions(query: str) -> List[str]:
+    q = str(query or "").lower()
+    known = ("apple", "macbook", "dell", "lenovo", "asus", "hp", "acer", "msi", "microsoft", "surface", "samsung")
+    out: List[str] = []
+    for b in known:
+        if b in q:
+            mapped = "apple" if b == "macbook" else ("microsoft" if b == "surface" else b)
+            if mapped not in out:
+                out.append(mapped)
+    return out
+
+
+def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any]:
+    img = image_obj if isinstance(image_obj, dict) else {}
+    sec = img.get("security") if isinstance(img.get("security"), dict) else {}
+    sec_signals = {}
+    if isinstance(sec.get("signals"), dict):
+        sec_signals.update(sec.get("signals") or {})
+    if isinstance(sec.get("cv_signals"), dict):
+        sec_signals.update(sec.get("cv_signals") or {})
+    if isinstance(sec, dict):
+        for k, v in sec.items():
+            if isinstance(v, bool):
+                sec_signals[k] = v
+    reasons = []
+    if isinstance(img.get("reasons"), list):
+        reasons.extend(str(x) for x in (img.get("reasons") or []))
+    if isinstance(sec.get("reasons"), list):
+        reasons.extend(str(x) for x in (sec.get("reasons") or []))
+    qr_detected = bool(
+        sec_signals.get("qr_code_detected")
+        or sec_signals.get("qr_detected")
+        or sec_signals.get("qr_url_present")
+        or sec_signals.get("qr_url_suspicious")
+        or ("qr_code_detected" in reasons)
+    )
+    qr_external = bool(
+        sec_signals.get("qr_external_url_detected")
+        or sec_signals.get("qr_external_url")
+        or sec_signals.get("qr_url_present")
+        or sec_signals.get("qr_url_suspicious")
+        or ("qr_external_url_detected" in reasons)
+    )
+    qr_injection = bool(
+        sec_signals.get("qr_prompt_injection")
+        or sec_signals.get("prompt_injection_text_suspected")
+        or ("qr_prompt_injection" in reasons)
+    )
+    manipulation = bool(
+        sec_signals.get("manipulation_detected")
+        or sec_signals.get("adversarial_detected")
+        or sec_signals.get("steg_suspicious")
+        or sec_signals.get("duplicate_image_detected")
+        or ("manipulation_detected" in reasons)
+    )
+    return {
+        "qr_code_detected": qr_detected,
+        "qr_prompt_injection": qr_injection,
+        "qr_external_url_detected": qr_external,
+        "ocr_prompt_injection": bool(sec_signals.get("ocr_prompt_injection")),
+        "manipulation_detected": manipulation,
+        "adversarial_score": float(sec_signals.get("adversarial_score") or 0.0),
+    }
+
+
+def _persist_chat_structured_state(
+    *,
+    redis,
+    uid: str,
+    query: str,
+    products: List[Dict[str, Any]] | None,
+    trace_id: str | None,
+) -> None:
+    mem = Memory(redis)
+    prior = mem.get_structured_state(uid) or {}
+    budget = _extract_budget_bounds(query)
+    brands = _extract_brand_mentions(query)
+    skus = [str((p or {}).get("sku") or "") for p in (products or []) if isinstance(p, dict)]
+    skus = [s for s in skus if s][:12]
+
+    out = dict(prior)
+    out["last_chat_query"] = str(query or "")[:500]
+    out["last_chat_trace_id"] = trace_id
+    out["last_chat_ts"] = int(time.time())
+    if budget.get("budget_min") is not None:
+        out["budget_min"] = budget.get("budget_min")
+    if budget.get("budget_max") is not None:
+        out["budget_max"] = budget.get("budget_max")
+    if brands:
+        out["brands"] = brands[:6]
+    if skus:
+        out["last_shortlist_skus"] = skus
+        out["last_valid_shortlist_skus"] = skus
+
+    mem.set_structured_state(uid, out)
+
+    bank = mem.get_product_memory_bank(uid) or {}
+    hist = list(bank.get("chat_turns") or [])
+    hist.append(
+        {
+            "ts": int(time.time()),
+            "trace_id": trace_id,
+            "query": str(query or "")[:300],
+            "shortlist_skus": skus,
+            "budget_min": out.get("budget_min"),
+            "budget_max": out.get("budget_max"),
+        }
+    )
+    bank["chat_turns"] = hist[-20:]
+    if skus:
+        bank["last_shortlist_skus"] = skus
+    bank["last_trace_id"] = trace_id
+    mem.set_product_memory_bank(uid, bank)
+
+
 @router.post("/query")
 async def chat_query(
     request: Request,
@@ -115,6 +250,7 @@ async def chat_query(
     image_ocr_text_in = (payload or {}).get("image_ocr_text")
     image_hash_in = (payload or {}).get("image_hash")
     image_intent_in = (payload or {}).get("image_intent")
+    image_cv_signals_in: Dict[str, Any] = {}
     damage_score_in: float = 0.0
     is_product_photo_in: bool = False
 
@@ -127,11 +263,30 @@ async def chat_query(
             if not image_ocr_text_in:
                 image_ocr_text_in = first.get("ocr_text")
             if not image_hash_in:
-                image_hash_in = first.get("hash")
+                image_hash_in = first.get("image_hash") or first.get("hash")
             damage_score_in = float(first.get("damage_score") or 0.0)
             is_product_photo_in = bool(first.get("is_product_photo"))
+            image_cv_signals_in = _extract_image_cv_signals(first)
 
     has_image = bool(image_labels_in or images_array)
+    if images_array and isinstance(images_array, list):
+        # Merge CV/security signals across all uploaded images so a QR hit on
+        # any frame is forwarded to the recommendation/security pipeline.
+        merged = dict(image_cv_signals_in or {})
+        for img in images_array:
+            sig = _extract_image_cv_signals(img if isinstance(img, dict) else {})
+            merged["qr_code_detected"] = bool(merged.get("qr_code_detected") or sig.get("qr_code_detected"))
+            merged["qr_prompt_injection"] = bool(merged.get("qr_prompt_injection") or sig.get("qr_prompt_injection"))
+            merged["qr_external_url_detected"] = bool(
+                merged.get("qr_external_url_detected") or sig.get("qr_external_url_detected")
+            )
+            merged["ocr_prompt_injection"] = bool(merged.get("ocr_prompt_injection") or sig.get("ocr_prompt_injection"))
+            merged["manipulation_detected"] = bool(merged.get("manipulation_detected") or sig.get("manipulation_detected"))
+            merged["adversarial_score"] = max(
+                float(merged.get("adversarial_score") or 0.0),
+                float(sig.get("adversarial_score") or 0.0),
+            )
+        image_cv_signals_in = merged
 
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
@@ -162,7 +317,10 @@ async def chat_query(
         merged_text = " ".join(merged_text_parts)
 
         from src.app.security.observer import analyze_payload
-        sec_result = analyze_payload({"query": merged_text, "source": "chat_multimodal"})
+        _sec_payload: Dict[str, Any] = {"query": merged_text, "source": "chat_multimodal"}
+        if image_cv_signals_in:
+            _sec_payload["cv_signals"] = image_cv_signals_in
+        sec_result = analyze_payload(_sec_payload)
         if isinstance(sec_result, dict):
             sev = str(sec_result.get("severity") or "").lower()
             if sev in ("critical", "high"):
@@ -229,6 +387,7 @@ async def chat_query(
             uid = str((payload or {}).get("uid") or "demo-user")
             _store_chat_message(db, uid=uid, role="user", content=q, trace_id=None)
             _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=None)
+            _persist_chat_structured_state(redis=redis, uid=uid, query=q, products=[], trace_id=None)
         except Exception:
             pass
         return out
@@ -268,11 +427,14 @@ async def chat_query(
         qid = str(nqe_selection.get("question_id") or "").strip()
         oid = str(nqe_selection.get("option_id") or "").strip()
         olbl = str(nqe_selection.get("option_label") or "").strip()
+        oval = str(nqe_selection.get("option_value") or "").strip()
         if qid and oid:
             params["nqe_question_id"] = qid
             params["nqe_option_id"] = oid
             if olbl:
                 params["nqe_option_label"] = olbl[:120]
+            if oval:
+                params["nqe_option_value"] = oval[:120]
     try:
         labels_list: List[str] = []
         if isinstance(image_labels_in, list):
@@ -287,6 +449,8 @@ async def chat_query(
             params["image_hash"] = image_hash_in.strip()[:128]
         if isinstance(image_intent_in, str) and image_intent_in.strip():
             params["image_intent"] = image_intent_in.strip()[:32]
+        if image_cv_signals_in:
+            params["image_cv_signals"] = json.dumps(image_cv_signals_in, separators=(",", ":"))[:1000]
     except Exception:
         pass
     try:
@@ -339,6 +503,13 @@ async def chat_query(
                         uid=uid,
                         role="assistant",
                         content=str(out.get("assistant_message") or ""),
+                        trace_id=decision_trace_id,
+                    )
+                    _persist_chat_structured_state(
+                        redis=redis,
+                        uid=uid,
+                        query=q,
+                        products=[],
                         trace_id=decision_trace_id,
                     )
                 except Exception:
@@ -454,6 +625,23 @@ async def chat_query(
                     "ocr_text": str(image_ocr_text_in or "")[:200],
                 },
             )
+            log_trace_event(
+                trace_id=decision_trace_id, event_type="image_security_scan",
+                source_type="agent", source_id="Image_Security_Sidecar",
+                target_type="chat", target_id=None,
+                payload={
+                    "qr_detected": bool(image_cv_signals_in.get("qr_code_detected")),
+                    "qr_prompt_injection": bool(image_cv_signals_in.get("qr_prompt_injection")),
+                    "qr_external_url_detected": bool(image_cv_signals_in.get("qr_external_url_detected")),
+                    "adversarial_score": float(image_cv_signals_in.get("adversarial_score") or 0.0),
+                    "reupload_needed": bool(
+                        image_cv_signals_in.get("qr_code_detected")
+                        or image_cv_signals_in.get("qr_prompt_injection")
+                        or image_cv_signals_in.get("qr_external_url_detected")
+                        or image_cv_signals_in.get("manipulation_detected")
+                    ),
+                },
+            )
     except Exception:
         pass
     next_questions = data.get("next_questions") or []
@@ -516,6 +704,13 @@ async def chat_query(
             content=str(out.get("assistant_message") or ""),
             trace_id=decision_trace_id,
             session_id=session_id,
+        )
+        _persist_chat_structured_state(
+            redis=redis,
+            uid=uid,
+            query=q,
+            products=products,
+            trace_id=decision_trace_id,
         )
     except Exception:
         pass

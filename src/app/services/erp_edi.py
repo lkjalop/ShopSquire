@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import json
 from typing import Dict, Any
+from src.app.services.edi_parser import parse_edi_document
 
 
 class ERPEDIConnector:
-    """ERP/EDI connector stub with configurable mock response."""
+    """ERP/EDI connector with optional mock mode and native EDI parser."""
 
     def __init__(self) -> None:
         self.enabled = os.getenv("ERP_EDI_ENABLED", "0").lower() in ("1", "true", "yes")
@@ -21,7 +22,9 @@ class ERPEDIConnector:
             if isinstance(stub, dict):
                 by_order = stub.get("orders", {}).get(order_id)
                 if isinstance(by_order, dict):
-                    return {"order_id": order_id, **by_order}
+                    raw_edi = str(by_order.get("edi_raw") or "").strip()
+                    parsed = parse_edi_document(raw_edi) if raw_edi else {}
+                    return {"order_id": order_id, **by_order, "edi_parsed": parsed}
             return {
                 "supplier_verified": True,
                 "edi_status": "ok",
@@ -40,6 +43,13 @@ class ERPEDIConnector:
             "invoice_verified": None,
             "order_id": order_id,
         }
+
+    def parse_document(self, payload: str | Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(payload, dict):
+            raw = str(payload.get("raw") or payload.get("edi_raw") or "")
+        else:
+            raw = str(payload or "")
+        return parse_edi_document(raw)
 
     def _load_stub(self) -> Dict[str, Any]:
         path = os.getenv("ERP_EDI_STUB_PATH", os.path.join("config", "erp_edi_stub.json"))

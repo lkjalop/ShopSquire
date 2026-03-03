@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
+import os
+
+import httpx
 from sqlalchemy import text
 
 from src.app.models.db import db_session
@@ -98,3 +101,62 @@ class ReverseImageSearch:
                     continue
         results.sort(key=lambda x: x["distance"])
         return results[:limit]
+
+    def external_lookup(self, *, phash: str | None, sha256: str | None, sku: str | None = None) -> Dict[str, Any]:
+        """Query manufacturer and known-fraud reverse-image endpoints (best-effort).
+
+        Env config (comma-separated URLs):
+          - REVERSE_IMAGE_MANUFACTURER_ENDPOINTS
+          - REVERSE_IMAGE_FRAUD_DB_ENDPOINTS
+        Each endpoint receives query params: phash, sha256, sku.
+        Expected response shape (lenient):
+          {"matches": [{"source": "...", "url": "...", "confidence": 0.0-1.0, "fraud": bool}]}
+        """
+        out: Dict[str, Any] = {
+            "manufacturer_matches": [],
+            "fraud_db_matches": [],
+            "errors": [],
+        }
+        manu_eps = [x.strip() for x in str(os.getenv("REVERSE_IMAGE_MANUFACTURER_ENDPOINTS", "") or "").split(",") if x.strip()]
+        fraud_eps = [x.strip() for x in str(os.getenv("REVERSE_IMAGE_FRAUD_DB_ENDPOINTS", "") or "").split(",") if x.strip()]
+        if not manu_eps and not fraud_eps:
+            return out
+
+        params = {"phash": phash or "", "sha256": sha256 or "", "sku": sku or ""}
+        timeout = float(os.getenv("REVERSE_IMAGE_LOOKUP_TIMEOUT_SEC", "2.5") or 2.5)
+
+        def _query(endpoint: str) -> List[Dict[str, Any]]:
+            with httpx.Client(timeout=timeout) as client:
+                r = client.get(endpoint, params=params)
+                r.raise_for_status()
+                payload = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            matches = payload.get("matches") if isinstance(payload, dict) else []
+            if not isinstance(matches, list):
+                return []
+            normalized: List[Dict[str, Any]] = []
+            for m in matches:
+                if not isinstance(m, dict):
+                    continue
+                normalized.append(
+                    {
+                        "source": str(m.get("source") or endpoint),
+                        "url": str(m.get("url") or ""),
+                        "confidence": float(m.get("confidence") or 0.0),
+                        "fraud": bool(m.get("fraud") or False),
+                    }
+                )
+            return normalized
+
+        for ep in manu_eps:
+            try:
+                out["manufacturer_matches"].extend(_query(ep))
+            except Exception as exc:
+                out["errors"].append({"endpoint": ep, "error": str(exc)[:160]})
+
+        for ep in fraud_eps:
+            try:
+                out["fraud_db_matches"].extend(_query(ep))
+            except Exception as exc:
+                out["errors"].append({"endpoint": ep, "error": str(exc)[:160]})
+
+        return out

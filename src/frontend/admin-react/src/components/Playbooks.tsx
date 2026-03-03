@@ -5,6 +5,7 @@ import {
   fetchAdminPlaybookDiff,
   fetchAdminPlaybookKpis,
   fetchAdminPlaybookReliability,
+  fetchAdminPlaybookDriftAlerts,
   fetchAdminPlaybookTrail,
   fetchAdminPlaybooks,
   fetchAdminStreamHealth,
@@ -50,6 +51,7 @@ export function Playbooks() {
   const [kpiDays, setKpiDays] = useState(30);
   const [kpis, setKpis] = useState<any>(null);
   const [reliability, setReliability] = useState<any>(null);
+  const [driftAlerts, setDriftAlerts] = useState<any>(null);
   const [trail, setTrail] = useState<any>(null);
   const [trailActionFilter, setTrailActionFilter] = useState('');
   const [dlq, setDlq] = useState<any>(null);
@@ -105,6 +107,15 @@ export function Playbooks() {
       setReliability(data || null);
     } catch {
       setReliability(null);
+    }
+  }
+
+  async function loadDriftAlerts(days = kpiDays) {
+    try {
+      const data = await fetchAdminPlaybookDriftAlerts(days);
+      setDriftAlerts(data || null);
+    } catch {
+      setDriftAlerts(null);
     }
   }
 
@@ -173,6 +184,7 @@ export function Playbooks() {
     loadApprovals();
     loadKpis();
     loadReliability();
+    loadDriftAlerts();
     loadDlq();
     loadStreamHealth();
     loadLlmRouting();
@@ -485,6 +497,7 @@ export function Playbooks() {
             </select>
             <button className="btn secondary" onClick={() => loadKpis(kpiDays)}>Refresh</button>
             <button className="btn secondary" onClick={() => loadReliability(kpiDays)}>Reliability</button>
+            <button className="btn secondary" onClick={() => loadDriftAlerts(kpiDays)}>Drift Alerts</button>
           </div>
           {kpis && (
             <>
@@ -511,6 +524,41 @@ export function Playbooks() {
                       <td>{r.trigger_precision ?? '-'}</td>
                       <td>{r.false_positives ?? 0}</td>
                       <td>{r.mean_time_to_close_min ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+
+        <div className="card" style={{ marginTop: 14 }}>
+          <h3>Drift Alerts</h3>
+          <div className="page-sub">Playbook version/failure drift over selected KPI window.</div>
+          {!driftAlerts && <div className="page-sub">No drift data loaded.</div>}
+          {!!driftAlerts && (
+            <>
+              <div className="list">
+                <div className="list-item"><div>Window Days</div><strong>{driftAlerts.days ?? kpiDays}</strong></div>
+                <div className="list-item"><div>Alert Count</div><strong>{(driftAlerts.alerts || []).length}</strong></div>
+                <div className="list-item"><div>Status</div><strong>{driftAlerts.status || '-'}</strong></div>
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Severity</th>
+                    <th>Type</th>
+                    <th>Playbook</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(driftAlerts.alerts || []).map((a: any, idx: number) => (
+                    <tr key={`${a.playbook_id || 'pb'}-${a.type || 'type'}-${idx}`}>
+                      <td>{a.severity || '-'}</td>
+                      <td>{a.type || '-'}</td>
+                      <td>{a.playbook_id || '-'}</td>
+                      <td>{a.message || '-'}</td>
                     </tr>
                   ))}
                 </tbody>

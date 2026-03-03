@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any
 import time
+from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER, ROLE_MERCHANT
@@ -75,7 +76,7 @@ def score(payload: Dict[str, Any], role: str = Depends(require_role([ROLE_DEVELO
     if phash:
         try:
             with db_session() as db:
-                res = db.execute("SELECT times_seen, confirmed_fraud FROM fraud_image_hashes WHERE phash = :p", {"p": phash}).fetchone()
+                res = db.execute(sql_text("SELECT times_seen, confirmed_fraud FROM fraud_image_hashes WHERE phash = :p"), {"p": phash}).fetchone()
                 if res:
                     try:
                         ts = res[0]
@@ -97,12 +98,24 @@ def score(payload: Dict[str, Any], role: str = Depends(require_role([ROLE_DEVELO
         if len(device) < 10:
             score += 10
             signals.append({"signal": "weak_device_fp"})
+    try:
+        if float(payload.get("ip_velocity_per_hour") or 0.0) >= 20.0:
+            score += 25
+            signals.append({"signal": "ip_velocity_spike", "value": payload.get("ip_velocity_per_hour")})
+    except Exception:
+        pass
+    try:
+        if int(payload.get("shipping_address_cluster_size") or 0) >= 4:
+            score += 25
+            signals.append({"signal": "shipping_address_clustered", "value": payload.get("shipping_address_cluster_size")})
+    except Exception:
+        pass
 
     # Customer trust score heuristic
     if cid:
         try:
             with db_session() as db:
-                r = db.execute("SELECT trust_score FROM customer_trust_scores WHERE customer_id = :c", {"c": cid}).fetchone()
+                r = db.execute(sql_text("SELECT trust_score FROM customer_trust_scores WHERE customer_id = :c"), {"c": cid}).fetchone()
                 if r:
                     try:
                         ts = r[0]
@@ -123,7 +136,7 @@ def score(payload: Dict[str, Any], role: str = Depends(require_role([ROLE_DEVELO
     # Audit: write an entry to security_events
     try:
         with db_session() as db:
-            db.execute("INSERT INTO security_events (id, path, severity, details) VALUES (lower(hex(randomblob(16))), :p, :s, :d)", {"p": "/api/v1/fraud/score", "s": "info", "d": str(out)})
+            db.execute(sql_text("INSERT INTO security_events (id, path, severity, details) VALUES (lower(hex(randomblob(16))), :p, :s, :d)"), {"p": "/api/v1/fraud/score", "s": "info", "d": str(out)})
             try:
                 db.commit()
             except Exception:

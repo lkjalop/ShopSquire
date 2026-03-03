@@ -11,7 +11,38 @@ _BLOCKED_HOSTS = {
     "metadata.google.internal",
     "metadata",
     "169.254.169.254",
+    # H01: Additional cloud metadata endpoints
+    "metadata.google",
+    "metadata.google.com",
+    "100.100.100.200",           # Alibaba Cloud metadata
+    "fd00:ec2::254",             # AWS IPv6 metadata
+    "instance-data",             # Generic cloud metadata alias
 }
+
+_EGRESS_ALLOWLIST_CACHE: list[str] | None = None
+
+
+def _load_egress_allowlist_file() -> set[str]:
+    """Load egress allowlist from config/security/egress_allowlist.txt (one domain per line)."""
+    global _EGRESS_ALLOWLIST_CACHE
+    if _EGRESS_ALLOWLIST_CACHE is not None:
+        return set(_EGRESS_ALLOWLIST_CACHE)
+    path = os.getenv("EGRESS_ALLOWLIST_FILE", "config/security/egress_allowlist.txt")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [
+                line.strip().lower()
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
+        _EGRESS_ALLOWLIST_CACHE = lines
+        return set(lines)
+    except FileNotFoundError:
+        _EGRESS_ALLOWLIST_CACHE = []
+        return set()
+    except Exception:
+        _EGRESS_ALLOWLIST_CACHE = []
+        return set()
 
 
 def _is_prod() -> bool:
@@ -72,9 +103,34 @@ def validate_outbound_url(url: str) -> tuple[bool, str]:
     if host in _BLOCKED_HOSTS:
         return False, "blocked_host"
 
+    # Zero-trust egress mode: when EGRESS_ALLOWLIST_ONLY=1, ALL outbound
+    # connections must match the allowlist — no fallthrough to open internet.
+    egress_strict = str(os.getenv("EGRESS_ALLOWLIST_ONLY",
+                                   "1" if _is_prod() else "0")).lower() in ("1", "true", "yes")
+
     allow_hosts = set(_csv_env("SSRF_ALLOWLIST_HOSTS"))
+    # In strict mode, also load domain patterns from config file if present
+    if egress_strict:
+        allow_hosts.update(_load_egress_allowlist_file())
+
     if allow_hosts and host not in allow_hosts:
-        return False, "host_not_allowlisted"
+        # Check wildcard subdomains: *.example.com matches sub.example.com
+        wildcard_ok = any(
+            host.endswith("." + ah.lstrip("*."))
+            for ah in allow_hosts
+            if ah.startswith("*.")
+        )
+        if not wildcard_ok:
+            reason = "egress_blocked_not_allowlisted" if egress_strict else "host_not_allowlisted"
+            return False, reason
+
+    # In strict mode with no allowlist configured, block everything outbound
+    if egress_strict and not allow_hosts:
+        import logging
+        logging.getLogger("url_guard").error(
+            "EGRESS_ALLOWLIST_ONLY=1 but no allowlist configured — blocking all outbound"
+        )
+        return False, "egress_no_allowlist_configured"
 
     deny_hosts = set(_csv_env("SSRF_DENYLIST_HOSTS"))
     if host in deny_hosts:

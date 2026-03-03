@@ -31,11 +31,18 @@ from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_
 from src.app.security.dlp_export import dlp_sanitize_export_record
 from src.app.security.safe_requests import safe_post
 from src.app.services.timescale_admin import detect_timescale_state, apply_timescale_phase_b, apply_timescale_phase_c
+from src.app.services.platform_regions import region_readiness
 import ipaddress
 from urllib.parse import urlparse
 
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
+
+
+@router.get("/platform/regions/readiness")
+def platform_regions_readiness(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))):
+    return region_readiness()
+
 @router.get("/db/readiness")
 def db_readiness(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))):
     """Report DB connectivity, migrations/tables, and Timescale extension readiness."""
@@ -969,7 +976,7 @@ def set_flags(
     flags: Dict,
     role: str = Depends(require_role([ROLE_OWNER])),
 ) -> Dict:
-    from src.app.security.flag_integrity import sign_flags, SECURITY_CRITICAL_FLAGS
+    from src.app.security.flag_integrity import changed_security_critical_flags, sign_flags
     settings = get_settings()
     path = settings.feature_flags_path
 
@@ -980,12 +987,7 @@ def set_flags(
         current = {}
 
     # Identify security-critical changes that require a second approver
-    changed_critical = []
-    for key in SECURITY_CRITICAL_FLAGS:
-        old_val = current.get(key)
-        new_val = flags.get(key)
-        if old_val != new_val:
-            changed_critical.append({"flag": key, "old": old_val, "new": new_val})
+    changed_critical = changed_security_critical_flags(current, flags)
 
     if changed_critical:
         dual_enabled = str(os.getenv("FLAG_DUAL_APPROVAL_ENABLED", "1")).lower() in ("1", "true", "yes")
@@ -1485,10 +1487,10 @@ def security_metrics(
             metrics["by_severity"] = {r[0]: int(r[1]) for r in rows if r and r[0]}
             metrics["total"] = sum(metrics["by_severity"].values())
             metrics["escalated"] = int(
-                db.execute("SELECT COUNT(*) FROM security_events WHERE event_time >= :since AND escalated = 1", {"since": since}).scalar() or 0
+                db.execute(sql_text("SELECT COUNT(*) FROM security_events WHERE event_time >= :since AND escalated = 1"), {"since": since}).scalar() or 0
             )
             metrics["blocked"] = int(
-                db.execute("SELECT COUNT(*) FROM security_events WHERE event_time >= :since AND blocked = 1", {"since": since}).scalar() or 0
+                db.execute(sql_text("SELECT COUNT(*) FROM security_events WHERE event_time >= :since AND blocked = 1"), {"since": since}).scalar() or 0
             )
             try:
                 metrics["supply_chain"] = int(
@@ -2623,7 +2625,7 @@ def set_security_event_verdict(
     try:
         with db_session() as db:
             _ensure_security_event_correction_columns(db)
-            row = db.execute("SELECT id FROM security_events WHERE id = :id", {"id": event_id}).fetchone()
+            row = db.execute(sql_text("SELECT id FROM security_events WHERE id = :id"), {"id": event_id}).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Event not found")
             db.execute(
@@ -2679,7 +2681,7 @@ def set_email_incident_verdict(
     try:
         with db_session() as db:
             _ensure_email_incident_correction_columns(db)
-            row = db.execute("SELECT id FROM email_security_incidents WHERE id = :id", {"id": incident_id}).fetchone()
+            row = db.execute(sql_text("SELECT id FROM email_security_incidents WHERE id = :id"), {"id": incident_id}).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Incident not found")
             db.execute(
@@ -2948,7 +2950,7 @@ def escalate_security_event(request: Request, event_id: str, role: str = Depends
                 "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)",
                 {"id": iid, "event_id": event_id, "created_by": role, "severity": sev, "title": title, "description": desc, "status": "open"},
             )
-            res = db.execute("UPDATE security_events SET escalated = 1 WHERE id = :id", {"id": event_id})
+            res = db.execute(sql_text("UPDATE security_events SET escalated = 1 WHERE id = :id"), {"id": event_id})
             db.commit()
             # If no rows were updated (visibility issue), retry via module-level engine
             try:
@@ -2961,7 +2963,7 @@ def escalate_security_event(request: Request, event_id: str, role: str = Depends
                 # Additionally, update via module-level db_session to ensure consistency across engines in tests
                 try:
                     with db_session() as _db2:
-                        _db2.execute("UPDATE security_events SET escalated = 1 WHERE id = :id", {"id": event_id})
+                        _db2.execute(sql_text("UPDATE security_events SET escalated = 1 WHERE id = :id"), {"id": event_id})
                         _db2.commit()
                 except Exception:
                     pass
@@ -3053,11 +3055,11 @@ def escalate_security_event(request: Request, event_id: str, role: str = Depends
                     "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)",
                     {"id": iid, "event_id": event_id, "created_by": role, "severity": sev, "title": title, "description": desc, "status": "open"},
                 )
-                _db.execute("UPDATE security_events SET escalated = 1 WHERE id = :id", {"id": event_id})
+                _db.execute(sql_text("UPDATE security_events SET escalated = 1 WHERE id = :id"), {"id": event_id})
                 _db.commit()
         # Debug: verify escalated flag set
         try:
-            row = db.execute("SELECT escalated FROM security_events WHERE id = :id", {"id": event_id}).fetchone()
+            row = db.execute(sql_text("SELECT escalated FROM security_events WHERE id = :id"), {"id": event_id}).fetchone()
             import sys
             sys.stderr.write(f"[admin.escalate] escalated_after={row[0] if row else None} id={event_id}\n")
             sys.stderr.flush()
@@ -3148,7 +3150,7 @@ def block_security_event(event_id: str, role: str = Depends(require_role([ROLE_O
         sev = None
         details = None
         try:
-            row = db.execute("SELECT id, path, severity, details FROM security_events WHERE id = :id", {"id": event_id}).fetchone()
+            row = db.execute(sql_text("SELECT id, path, severity, details FROM security_events WHERE id = :id"), {"id": event_id}).fetchone()
             if row:
                 path, sev, details = row[1], row[2], row[3]
         except Exception:
@@ -3216,7 +3218,7 @@ def block_security_event(event_id: str, role: str = Depends(require_role([ROLE_O
                 "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)",
                 {"id": iid, "event_id": event_id, "created_by": role, "severity": sev, "title": title, "description": desc, "status": "blocked"},
             )
-            res = db.execute("UPDATE security_events SET blocked = 1 WHERE id = :id", {"id": event_id})
+            res = db.execute(sql_text("UPDATE security_events SET blocked = 1 WHERE id = :id"), {"id": event_id})
             db.commit()
             incident_id = iid
             if getattr(res, "rowcount", 0) == 0:
@@ -3234,7 +3236,7 @@ def block_security_event(event_id: str, role: str = Depends(require_role([ROLE_O
             # Fallback to module-level session (best-effort; don't hard-fail on visibility)
             with db_session() as _db:
                 try:
-                    row2 = _db.execute("SELECT id, path, severity, details FROM security_events WHERE id = :id", {"id": event_id}).fetchone()
+                    row2 = _db.execute(sql_text("SELECT id, path, severity, details FROM security_events WHERE id = :id"), {"id": event_id}).fetchone()
                     if row2:
                         path, sev, details = row2[1], row2[2], row2[3]
                 except Exception:
@@ -3243,7 +3245,7 @@ def block_security_event(event_id: str, role: str = Depends(require_role([ROLE_O
                     "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)",
                     {"id": iid, "event_id": event_id, "created_by": role, "severity": sev, "title": title, "description": desc, "status": "blocked"},
                 )
-                _db.execute("UPDATE security_events SET blocked = 1 WHERE id = :id", {"id": event_id})
+                _db.execute(sql_text("UPDATE security_events SET blocked = 1 WHERE id = :id"), {"id": event_id})
                 _db.commit()
                 incident_id = iid
 
@@ -3346,7 +3348,7 @@ def list_incidents(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, 
     with tracer.start_as_current_span("admin.incidents.list"):
         try:
             with db_session() as db:
-                rows = db.execute("SELECT id, event_id, created_at, created_by, severity, title, description, status FROM incidents ORDER BY created_at DESC LIMIT :limit OFFSET :offset", {"limit": limit, "offset": offset}).mappings().all()
+                rows = db.execute(sql_text("SELECT id, event_id, created_at, created_by, severity, title, description, status FROM incidents ORDER BY created_at DESC LIMIT :limit OFFSET :offset"), {"limit": limit, "offset": offset}).mappings().all()
                 return {"incidents": [dict(r) for r in rows]}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -3358,7 +3360,7 @@ def get_incident(incident_id: str, role: str = Depends(require_role([ROLE_MERCHA
         span.set_attribute("incident.id", incident_id)
         try:
             with db_session() as db:
-                row = db.execute("SELECT id, event_id, created_at, created_by, severity, title, description, status FROM incidents WHERE id = :id", {"id": incident_id}).mappings().first()
+                row = db.execute(sql_text("SELECT id, event_id, created_at, created_by, severity, title, description, status FROM incidents WHERE id = :id"), {"id": incident_id}).mappings().first()
                 if not row:
                     raise HTTPException(status_code=404, detail="Incident not found")
                 return dict(row)
@@ -3383,7 +3385,7 @@ def update_incident_status(incident_id: str, status: str, role: str = Depends(re
                             status_code=409,
                             detail={"error": "security_matrix_incomplete", "gate": gate},
                         )
-                res = db.execute("UPDATE incidents SET status = :status WHERE id = :id", {"status": status, "id": incident_id})
+                res = db.execute(sql_text("UPDATE incidents SET status = :status WHERE id = :id"), {"status": status, "id": incident_id})
                 db.commit()
                 if res.rowcount == 0:
                     raise HTTPException(status_code=404, detail="Incident not found")
@@ -3685,19 +3687,19 @@ def compliance_overview(
         with db_session() as db:
             try:
                 evidence["security_events"] = int(
-                    db.execute("SELECT COUNT(*) FROM security_events WHERE event_time >= :start", {"start": start}).scalar() or 0
+                    db.execute(sql_text("SELECT COUNT(*) FROM security_events WHERE event_time >= :start"), {"start": start}).scalar() or 0
                 )
             except Exception:
                 pass
             try:
                 evidence["decision_logs"] = int(
-                    db.execute("SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :start", {"start": start}).scalar() or 0
+                    db.execute(sql_text("SELECT COUNT(*) FROM decision_logs WHERE valid_from >= :start"), {"start": start}).scalar() or 0
                 )
             except Exception:
                 pass
             try:
                 evidence["incidents"] = int(
-                    db.execute("SELECT COUNT(*) FROM incidents WHERE created_at >= :start", {"start": start}).scalar() or 0
+                    db.execute(sql_text("SELECT COUNT(*) FROM incidents WHERE created_at >= :start"), {"start": start}).scalar() or 0
                 )
             except Exception:
                 pass

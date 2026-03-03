@@ -1,15 +1,5 @@
-# Redis ACL template for production.
-# Update passwords before use.
-#
-# Default user disabled.
-user default off
-
-# API/runtime user: constrained to shopsquire namespaces.
-user shopsquire_api on >replace-me-redis-api-password ~shopsquire:* ~trace:* ~decision:* ~security:* +@read +@write -@dangerous -flushall -flushdb -config
-
-# Celery worker user: queue/result namespaces only.
-user shopsquire_celery on >replace-me-redis-celery-password ~shopsquire.celery* ~shopsquire:celery:* +@read +@write +eval -@dangerous -flushall -flushdb -config
-
-# Observability user: metrics/counters only (read/write counters).
-user shopsquire_obs on >replace-me-redis-obs-password ~shopsquire:metrics:* +@read +@write -@dangerous -flushall -flushdb -config
+user default on >redis-change-me ~* &* +@all
+user shopsquire_api on >replace-me-redis-api-password ~shopsquire:* ~trace:* ~decision:* ~security:* &* +@read +@write -@dangerous -flushall -flushdb -config
+user shopsquire_celery on >replace-me-redis-celery-password ~shopsquire.celery* ~shopsquire:celery:* &* +@read +@write +eval -@dangerous -flushall -flushdb -config
+user shopsquire_obs on >replace-me-redis-obs-password ~shopsquire:metrics:* &* +@read +@write -@dangerous -flushall -flushdb -config
 

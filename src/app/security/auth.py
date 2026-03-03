@@ -13,12 +13,136 @@ from typing import Iterable, Optional
 
 from fastapi import Header, HTTPException, status, Request
 from typing import Callable, Dict
+from sqlalchemy import text as sql_text
+
+from src.app.deps import get_redis
+from src.app.models.db import db_session
 
 _JWKS_CACHE: Dict[str, Dict] = {}
 _JWKS_FETCHED_AT: Dict[str, float] = {}
 _INTROSPECTION_CACHE: Dict[str, tuple[float, dict]] = {}
 _INTROSPECTION_TTL = int(os.getenv("OIDC_INTROSPECTION_TTL_SEC", "30") or 30)
 _JWKS_CACHE_TTL = int(os.getenv("OIDC_JWKS_CACHE_TTL_SEC", "300") or 300)
+
+
+def _failed_auth_limit_per_hour() -> int:
+    try:
+        return max(1, int(float(os.getenv("FAILED_AUTH_IP_LIMIT_PER_HOUR", "50") or 50)))
+    except Exception:
+        return 50
+
+
+def _failed_auth_ttl_seconds() -> int:
+    try:
+        return max(60, int(float(os.getenv("FAILED_AUTH_IP_WINDOW_SECONDS", "3600") or 3600)))
+    except Exception:
+        return 3600
+
+
+def _auth_lockout_enabled() -> bool:
+    return str(os.getenv("FAILED_AUTH_IP_LOCKOUT_ENABLED", "1") or "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _auth_bucket(now: float | None = None) -> int:
+    ts = float(now if now is not None else time.time())
+    return int(ts // _failed_auth_ttl_seconds())
+
+
+def _auth_ip_key(ip: str | None) -> str:
+    return f"auth:failed_ip:{_auth_bucket()}:{str(ip or 'unknown')}"
+
+
+def _is_ip_locked_out(ip: str | None) -> tuple[bool, int]:
+    if not _auth_lockout_enabled():
+        return False, 0
+    try:
+        r = get_redis()
+        count = int(float(r.get(_auth_ip_key(ip)) or 0.0))
+    except Exception:
+        count = 0
+    limit = _failed_auth_limit_per_hour()
+    return count >= limit, max(0, limit - count)
+
+
+def _record_failed_auth(ip: str | None) -> None:
+    if not _auth_lockout_enabled():
+        return
+    try:
+        r = get_redis()
+        key = _auth_ip_key(ip)
+        try:
+            r.incrby(key, 1)
+            r.expire(key, _failed_auth_ttl_seconds() + 60)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _clear_failed_auth(ip: str | None) -> None:
+    if not _auth_lockout_enabled():
+        return
+    try:
+        get_redis().delete(_auth_ip_key(ip))
+    except Exception:
+        pass
+
+
+def _bearer_subject(auth_header: Optional[str]) -> Optional[str]:
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    # Local JWT path
+    try:
+        parts = token.split(".")
+        if len(parts) == 3:
+            p = parts[1]
+            pad = "=" * ((4 - len(p) % 4) % 4)
+            claims = json.loads(base64.urlsafe_b64decode((p + pad).encode("ascii")).decode("utf-8"))
+            sub = claims.get("sub") or claims.get("user_id") or claims.get("uid")
+            if sub:
+                return str(sub)
+    except Exception:
+        pass
+    # Introspection fallback
+    try:
+        data = _introspect_token(auth_header)
+        if isinstance(data, dict):
+            sub = data.get("sub") or data.get("uid") or data.get("user_id")
+            if sub:
+                return str(sub)
+    except Exception:
+        pass
+    return None
+
+
+def _assert_privileged_role_server_side(*, role: str, authorization: Optional[str], effective_key: Optional[str]) -> bool:
+    """§10 hardening: never trust privileged role solely from JWT claims.
+
+    - API key roles are server-side by construction and pass.
+    - Bearer-derived owner/developer roles require subject lookup in `user_accounts`.
+    """
+    if role not in (ROLE_OWNER, ROLE_DEVELOPER):
+        return True
+    if effective_key:
+        return True
+    subj = _bearer_subject(authorization)
+    if not subj:
+        return False
+    try:
+        with db_session() as db:
+            row = db.execute(
+                sql_text("SELECT 1 FROM user_accounts WHERE id = :id LIMIT 1"),
+                {"id": subj},
+            ).fetchone()
+            return bool(row)
+    except Exception:
+        return False
 
 
 def _abac_enabled() -> bool:
@@ -436,6 +560,10 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
         authorization: Optional[str] = Header(default=None, alias="Authorization"),
         request: Request = None,  # FastAPI injects Request
     ) -> str:
+        source_ip = request.client.host if request and request.client else "unknown"
+        locked, _remaining = _is_ip_locked_out(source_ip)
+        if locked:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="auth_ip_locked_out")
         effective_key = x_api_key
         try:
             if not effective_key and request is not None:
@@ -472,6 +600,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
         except Exception:
             pass
         if not role:
+            _record_failed_auth(source_ip)
             try:
                 if _emit_iam:
                     _emit_iam(
@@ -486,6 +615,9 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
             except Exception:
                 pass
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing credentials")
+        if not _assert_privileged_role_server_side(role=role, authorization=authorization, effective_key=effective_key):
+            _record_failed_auth(source_ip)
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="privileged_role_server_assertion_failed")
         if role not in allowed:
             try:
                 if effective_key and effective_key == _role_keys().get(ROLE_MERCHANT) and ROLE_MERCHANT in allowed:
@@ -540,6 +672,7 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                 )
         except Exception:
             pass
+        _clear_failed_auth(source_ip)
         return role
 
     return _dep
@@ -623,6 +756,10 @@ def require_role(allowed_roles: Iterable[str]):
         authorization: Optional[str] = Header(default=None, alias="Authorization"),
         request: Request = None,
     ) -> str:
+        source_ip = request.client.host if request and request.client else "unknown"
+        locked, _remaining = _is_ip_locked_out(source_ip)
+        if locked:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="auth_ip_locked_out")
         effective_key = x_api_key
         try:
             if not effective_key and request is not None:
@@ -644,6 +781,7 @@ def require_role(allowed_roles: Iterable[str]):
         except Exception:
             pass
         if not role:
+            _record_failed_auth(source_ip)
             try:
                 if _emit_iam:
                     _emit_iam(
@@ -658,6 +796,9 @@ def require_role(allowed_roles: Iterable[str]):
             except Exception:
                 pass
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key")
+        if not _assert_privileged_role_server_side(role=role, authorization=authorization, effective_key=effective_key):
+            _record_failed_auth(source_ip)
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="privileged_role_server_assertion_failed")
         if role not in allowed:
             # If the provided key equals the configured merchant key and merchant role is allowed,
             # accept it to support test environments using the default local key.
@@ -714,6 +855,7 @@ def require_role(allowed_roles: Iterable[str]):
                 )
         except Exception:
             pass
+        _clear_failed_auth(source_ip)
         return role
 
     return _dep

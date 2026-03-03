@@ -37,6 +37,7 @@ class ThreatCategory(str, Enum):
     webhook_spoofing = "webhook_spoofing"
     api_abuse = "api_abuse"
     anomalous_behavior = "anomalous_behavior"
+    dead_drop = "dead_drop"  # M06: outbound C2 / dead-drop channel detection
 
 
 @dataclass

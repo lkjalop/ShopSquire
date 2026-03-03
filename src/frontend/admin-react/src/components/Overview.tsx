@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchLiveFeed, fetchOverview, fetchComplianceLiveFeed, fetchDemoReadiness } from '../api';
+import { fetchLiveFeed, fetchOverview, fetchComplianceLiveFeed, fetchDemoReadiness, fetchPersonaSuccess } from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
 
@@ -73,6 +73,7 @@ export function Overview({ role }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showOnlyChanges, setShowOnlyChanges] = useState(true);
   const [demoReadiness, setDemoReadiness] = useState<any | null>(null);
+  const [personaSuccess, setPersonaSuccess] = useState<any | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +91,7 @@ export function Overview({ role }: Props) {
         .catch(() => {});
     }
     fetchDemoReadiness(24).then((d) => { if (!cancelled) setDemoReadiness(d); }).catch(() => {});
+    fetchPersonaSuccess(7).then((d) => { if (!cancelled) setPersonaSuccess(d); }).catch(() => {});
     return () => { cancelled = true; };
   }, [role]);
 
@@ -209,6 +211,29 @@ export function Overview({ role }: Props) {
             <div className="list-item"><div>Low-confidence fallback rate</div><strong>{(((demoReadiness?.model_quality?.low_confidence_fallback_rate ?? 0) as number) * 100).toFixed(1)}%</strong></div>
             <div className="list-item"><div>Fallback count</div><strong>{demoReadiness?.model_quality?.low_confidence_count ?? 0}</strong></div>
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Persona Success Dashboard</h3>
+        <div className="page-sub">Resolution turns, reformulation rate, and image reupload rate by inferred persona.</div>
+        <div className="list" style={{ marginTop: 8 }}>
+          {(!personaSuccess?.personas || personaSuccess.personas.length === 0) && (
+            <div className="page-sub">No persona metrics available for selected window.</div>
+          )}
+          {(personaSuccess?.personas || []).slice(0, 6).map((row: any) => (
+            <div key={String(row.persona)} className="list-item">
+              <div>
+                <strong>{String(row.persona || 'unknown')}</strong>
+                <div className="page-sub">Traces: {Number(row.traces || 0)}</div>
+              </div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <span className="badge">Resolution turns: {Number(row.resolution_turns_avg || 0).toFixed(2)}</span>
+                <span className="badge">Reformulation: {(Number(row.reformulation_rate || 0) * 100).toFixed(1)}%</span>
+                <span className="badge">Reupload: {(Number(row.reupload_rate || 0) * 100).toFixed(1)}%</span>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

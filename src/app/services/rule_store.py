@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Dict, Any, List, Optional
+from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
 
@@ -35,7 +36,7 @@ class RuleStore:
         try:
             with db_session() as db:
                 rows = db.execute(
-                    "SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE active = 1 AND (tenant_id IS NULL OR tenant_id = :tid) AND (:domain IS NULL OR domain = :domain) ORDER BY priority ASC",
+                    sql_text("SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE active = 1 AND (tenant_id IS NULL OR tenant_id = :tid) AND (:domain IS NULL OR domain = :domain) ORDER BY priority ASC"),
                     {"tid": tenant_id, "domain": domain},
                 ).fetchall()
         except Exception:
@@ -74,7 +75,7 @@ class RuleStore:
         try:
             with db_session() as db:
                 db.execute(
-                    "INSERT INTO rule_definitions (id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at) VALUES (:id, :tenant_id, :domain, :title, :pattern, :expression, :priority, :active, :created_by, :version, :effective_from, :effective_to, CURRENT_TIMESTAMP)",
+                    sql_text("INSERT INTO rule_definitions (id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at) VALUES (:id, :tenant_id, :domain, :title, :pattern, :expression, :priority, :active, :created_by, :version, :effective_from, :effective_to, CURRENT_TIMESTAMP)"),
                     {
                         "id": rule.get("id"),
                         "tenant_id": rule.get("tenant_id"),
@@ -124,7 +125,7 @@ class RuleStore:
                             pass
                     elif k == "active":
                         v = 1 if bool(v) else 0
-                    db.execute(stmt, {"id": rule_id, "v": v})
+                    db.execute(sql_text(stmt), {"id": rule_id, "v": v})
                     touched += 1
                 if touched == 0:
                     return False
@@ -138,7 +139,7 @@ class RuleStore:
     def delete_rule(self, rule_id: str) -> bool:
         try:
             with db_session() as db:
-                db.execute("DELETE FROM rule_definitions WHERE id = :id", {"id": rule_id})
+                db.execute(sql_text("DELETE FROM rule_definitions WHERE id = :id"), {"id": rule_id})
                 db.commit()
             self._cache.clear()
             return True
@@ -149,7 +150,7 @@ class RuleStore:
         try:
             with db_session() as db:
                 r = db.execute(
-                    "SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE id = :id",
+                    sql_text("SELECT id, tenant_id, domain, title, pattern, expression, priority, active, created_by, version, effective_from, effective_to, created_at FROM rule_definitions WHERE id = :id"),
                     {"id": rule_id},
                 ).fetchone()
             if not r:

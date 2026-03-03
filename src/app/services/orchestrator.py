@@ -66,6 +66,22 @@ except Exception:
     def persist_ragas_stub(*_, **__):
         return None
 
+# Layer 2 / 3 / 4 memory integrations (optional)
+try:
+    from src.app.services.episodic_memory import EpisodicMemory
+except Exception:
+    EpisodicMemory = None
+try:
+    from src.app.services.observation_engine import Observer, Reflector
+except Exception:
+    Observer = None
+    Reflector = None
+try:
+    from src.app.services.citation_memory import store_claim, get_agent_trust_score
+except Exception:
+    store_claim = None
+    get_agent_trust_score = None
+
 
 @dataclass
 class OrchestratorResult:
@@ -601,6 +617,11 @@ class Orchestrator:
     def retrieve(self, uid: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Forced retrieval for volatile facts (price/stock)
         context = self.memory.get_context(uid)
+        # Backward compatibility for memory test doubles that only implement get_context().
+        get_structured = getattr(self.memory, "get_structured_state", None)
+        get_bank = getattr(self.memory, "get_product_memory_bank", None)
+        structured_state = get_structured(uid) if callable(get_structured) else {}
+        product_memory_bank = get_bank(uid) if callable(get_bank) else {}
         chaos = self.flags.get("CHAOS", {"enabled": False, "latency_ms": 0, "probability": 0})
         if chaos.get("enabled") and random.random() < float(chaos.get("probability", 0)):
             lat_ms = float(chaos.get("latency_ms", 0))
@@ -640,9 +661,52 @@ class Orchestrator:
             "draft_order": (draft_order.line_items if draft_order else None),
         }
         # store full retrieved context (memory + live + dependency health) for observability
-        retrieved_context = {"memory": context, "live": live, "dependency_health": dependency_health_snapshot()}
+        retrieved_context = {
+            "memory": context,
+            "structured_state": structured_state,
+            "product_memory_bank": product_memory_bank,
+            "live": live,
+            "dependency_health": dependency_health_snapshot(),
+        }
+        # --- Layer 2/3/4 RECALL ---
+        episodic_profile = {}
+        observation_summary = {}
+        agent_trust_scores = {}
+        try:
+            if EpisodicMemory is not None:
+                ep = EpisodicMemory(self.memory, uid)
+                episodic_profile = ep.build_behavioral_model() or {}
+                retrieved_context["episodic_profile"] = episodic_profile
+        except Exception:
+            pass
+        try:
+            obs_raw = self.memory.get_observation_summary(uid)
+            if obs_raw:
+                observation_summary = obs_raw
+                retrieved_context["observation_summary"] = observation_summary
+        except Exception:
+            pass
+        try:
+            if callable(get_agent_trust_score):
+                for agent_name in ("fraud_scorer", "recommendation", "tier_router"):
+                    ts = get_agent_trust_score(agent_name)
+                    if ts is not None:
+                        agent_trust_scores[agent_name] = ts
+                retrieved_context["agent_trust_scores"] = agent_trust_scores
+        except Exception:
+            pass
         self.memory.set_recent_retrieval(uid, live)
-        return {"memory": context, "live": live, "retrieved_context": retrieved_context, "dependency_health": retrieved_context["dependency_health"]}
+        return {
+            "memory": context,
+            "structured_state": structured_state,
+            "product_memory_bank": product_memory_bank,
+            "live": live,
+            "retrieved_context": retrieved_context,
+            "dependency_health": retrieved_context["dependency_health"],
+            "episodic_profile": episodic_profile,
+            "observation_summary": observation_summary,
+            "agent_trust_scores": agent_trust_scores,
+        }
 
     def reason(self, ctx: Dict[str, Any]) -> Dict[str, Any]:
         # MVP: naive pricing policy based on cart total
@@ -2368,6 +2432,25 @@ class Orchestrator:
         if not ok:
             raise ValueError(msg)
         ctx = self.retrieve(uid, payload)
+        try:
+            if trace_id:
+                ss = ctx.get("structured_state") if isinstance(ctx, dict) else {}
+                pb = ctx.get("product_memory_bank") if isinstance(ctx, dict) else {}
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="memory_phase0_recall",
+                    source_type="orchestrator",
+                    source_id="memory_recall",
+                    target_type=None,
+                    target_id=None,
+                    payload={
+                        "structured_keys": sorted(list((ss or {}).keys()))[:20] if isinstance(ss, dict) else [],
+                        "product_bank_keys": sorted(list((pb or {}).keys()))[:20] if isinstance(pb, dict) else [],
+                        "has_shortlist": bool((ss or {}).get("last_shortlist_skus")) if isinstance(ss, dict) else False,
+                    },
+                )
+        except Exception:
+            pass
         # Apply tier-0 guardrails early to sanitize payloads and capture actions
         try:
             g = apply_guardrails(payload, metadata={"memory": ctx.get("memory") if isinstance(ctx, dict) else {}, "retrieved": ctx.get("retrieved_context") if isinstance(ctx, dict) else {}})
@@ -3290,6 +3373,96 @@ class Orchestrator:
                     status="completed" if executed else "failed",
                     outcome="effective" if executed else "review_required",
                 )
+        except Exception:
+            pass
+        try:
+            structured = self.memory.get_structured_state(uid) or {}
+            structured["last_orchestrator_trace_id"] = trace_id
+            structured["last_orchestrator_ts"] = int(time.time())
+            structured["last_orchestrator_executed"] = bool(executed)
+            structured["last_orchestrator_policy"] = {
+                "approval_required": bool(policy.get("approval_required", False)),
+                "allowed": bool(policy.get("allowed", False)),
+            }
+            if isinstance(proposal, dict):
+                if proposal.get("proposal_id"):
+                    structured["last_orchestrator_proposal_id"] = proposal.get("proposal_id")
+                if proposal.get("cart_total_cents") is not None:
+                    structured["last_orchestrator_cart_total_cents"] = proposal.get("cart_total_cents")
+            self.memory.set_structured_state(uid, structured)
+
+            bank = self.memory.get_product_memory_bank(uid) or {}
+            runs = list(bank.get("orchestrator_runs") or [])
+            runs.append(
+                {
+                    "ts": int(time.time()),
+                    "trace_id": trace_id,
+                    "executed": bool(executed),
+                    "approval_required": bool(policy.get("approval_required", False)),
+                    "ranked_skus": list((proposal or {}).get("ranked_skus") or [])[:12],
+                }
+            )
+            bank["orchestrator_runs"] = runs[-20:]
+            if isinstance(proposal, dict) and proposal.get("ranked_skus"):
+                bank["last_ranked_skus"] = list(proposal.get("ranked_skus") or [])[:12]
+            self.memory.set_product_memory_bank(uid, bank)
+
+            if trace_id:
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="memory_phase5_store",
+                    source_type="orchestrator",
+                    source_id="memory_store",
+                    target_type=None,
+                    target_id=None,
+                    payload={
+                        "executed": bool(executed),
+                        "approval_required": bool(policy.get("approval_required", False)),
+                    },
+                )
+        except Exception:
+            pass
+        # --- Layer 2/3/4 STORE: episodic save, observation compress, citation claim ---
+        try:
+            if EpisodicMemory is not None:
+                ep = EpisodicMemory(self.memory, uid)
+                ranked_skus = list((proposal or {}).get("ranked_skus") or [])[:12]
+                ep.save_episode(
+                    query=payload.get("query") or payload.get("user_input") or "",
+                    answer=str((proposal or {}).get("reason") or ""),
+                    products_shown=ranked_skus,
+                    debate_ran=bool((proposal or {}).get("debate_result")),
+                    model_used=str((proposal or {}).get("model_source") or ""),
+                )
+        except Exception:
+            pass
+        try:
+            if Observer is not None:
+                obs = Observer(self.memory, uid)
+                obs.log_recommendation(list((proposal or {}).get("ranked_skus") or [])[:6])
+                if (proposal or {}).get("debate_result"):
+                    obs.log_debate(
+                        scenario=(proposal or {}).get("debate_scenario", "unknown"),
+                        decision=(proposal or {}).get("debate_result", {}).get("decision", "unknown"),
+                        confidence=(proposal or {}).get("debate_result", {}).get("confidence"),
+                    )
+            if Reflector is not None:
+                ref = Reflector(self.memory, uid)
+                ref.maybe_compress()
+        except Exception:
+            pass
+        try:
+            if callable(store_claim) and isinstance(proposal, dict):
+                ranked = list((proposal or {}).get("ranked_skus") or [])[:3]
+                if ranked:
+                    store_claim(
+                        agent_name="recommendation",
+                        claim_type="product_ranking",
+                        claim_key=f"top3_{trace_id or 'unknown'}",
+                        claim_value=json.dumps(ranked),
+                        confidence=float((proposal or {}).get("why_confidence") or 0.5),
+                        session_id=uid,
+                    )
         except Exception:
             pass
         try:

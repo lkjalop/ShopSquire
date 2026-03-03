@@ -7,14 +7,41 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER, ROLE_MERCHANT
 from src.app.services.billing import (
     link_tenant_stripe,
+    list_billing_plans,
     onboard_pilot_tenant,
+    provision_tenant_core,
     record_meter_event,
     usage_summary,
 )
 from src.app.connectors.accounting.xero import XeroConnector
+from src.app.services.platform_regions import region_readiness
+from src.app.security.oob_verification import get_verification
 
 
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
+
+
+def _enforce_oob_for_beneficiary_change(payload: Dict[str, Any]) -> None:
+    """§14: require out-of-band verification for any beneficiary bank change."""
+    p = payload or {}
+    old_fp = str(p.get("bank_fingerprint") or "").strip()
+    new_fp = str(p.get("proposed_bank_fingerprint") or "").strip()
+    beneficiary_changed = bool(
+        (old_fp and new_fp and old_fp != new_fp)
+        or bool(p.get("beneficiary_changed"))
+        or bool(p.get("bank_account_changed"))
+    )
+    if not beneficiary_changed:
+        return
+    # Explicit OOB boolean short-circuit for trusted internal callers.
+    if bool(p.get("oob_verified")):
+        return
+    request_id = str(p.get("oob_request_id") or "").strip()
+    if not request_id:
+        raise HTTPException(status_code=409, detail="oob_verification_required_for_beneficiary_change")
+    rec = get_verification(request_id)
+    if not rec or str(rec.get("status") or "") != "confirmed":
+        raise HTTPException(status_code=409, detail="oob_verification_not_confirmed")
 
 
 @router.post("/admin/pilots/onboard")
@@ -85,11 +112,46 @@ def billing_usage(
     return usage_summary(tenant_id=tenant_id, days=days)
 
 
+@router.get("/admin/plans")
+def billing_plans(
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    return list_billing_plans()
+
+
+@router.post("/admin/tenants/provision")
+def provision_tenant(
+    payload: Dict[str, Any] = Body(default={}),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    tenant_id = str((payload or {}).get("tenant_id") or "").strip()
+    plan_id = str((payload or {}).get("plan_id") or "starter").strip().lower()
+    home_region = str((payload or {}).get("home_region") or "").strip().lower()
+    limits = (payload or {}).get("limits") if isinstance((payload or {}).get("limits"), dict) else {}
+    if not tenant_id or not home_region:
+        raise HTTPException(status_code=400, detail="tenant_id and home_region required")
+    topo = region_readiness()
+    known_regions = {
+        str((r or {}).get("id") or "").strip().lower()
+        for r in (topo.get("regions") or [])
+        if isinstance(r, dict)
+    }
+    if home_region not in known_regions:
+        raise HTTPException(status_code=400, detail="home_region_not_allowed_by_topology")
+    return provision_tenant_core(
+        tenant_id=tenant_id,
+        plan_id=plan_id,
+        home_region=home_region,
+        limits=limits,
+    )
+
+
 @router.post("/accounting/xero/credit-note")
 def xero_credit_note(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _enforce_oob_for_beneficiary_change(payload)
     connector = XeroConnector()
     return connector.push_credit_note(
         decision_id=str((payload or {}).get("decision_id") or ""),
@@ -103,6 +165,7 @@ def xero_invoice(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _enforce_oob_for_beneficiary_change(payload)
     connector = XeroConnector()
     return connector.push_invoice(dict(payload or {}))
 
@@ -112,6 +175,7 @@ def xero_purchase_order(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _enforce_oob_for_beneficiary_change(payload)
     connector = XeroConnector()
     return connector.push_purchase_order(dict(payload or {}))
 

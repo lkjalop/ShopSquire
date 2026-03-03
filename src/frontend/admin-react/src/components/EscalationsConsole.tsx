@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchIncidents, getIncident, issueIncidentStaffToken, updateIncidentStatus } from '../api';
+import { fetchIncidents, getIncident, issueIncidentStaffToken, updateIncidentStatus, fetchIncidentAlertSummary, type IncidentAlertSummary } from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer'; initialIncidentId?: string | null };
 
@@ -27,6 +27,7 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
   const [severity, setSeverity] = useState<'all' | 'critical' | 'high' | 'warn' | 'info'>('all');
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
+  const [incidentAlerts, setIncidentAlerts] = useState<IncidentAlertSummary | null>(null);
   const [selected, setSelected] = useState<any | null>(null);
   const [prefillApplied, setPrefillApplied] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<any | null>(null);
@@ -63,6 +64,25 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, severity]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const loadAlerts = async () => {
+      try {
+        const summary = await fetchIncidentAlertSummary(24, 20);
+        if (!cancelled) setIncidentAlerts(summary);
+      } catch {
+        if (!cancelled) setIncidentAlerts(null);
+      }
+    };
+    loadAlerts();
+    timer = setInterval(loadAlerts, 15000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     setPrefillApplied(false);
@@ -310,6 +330,50 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
 
   return (
     <div className="stagger">
+      <div className="grid-2" style={{ marginBottom: 12 }}>
+        <div className="card">
+          <h3>SLA Breach Alerts (24h)</h3>
+          <div className="list">
+            <div className="list-item"><div>Total SLA breaches alerted</div><strong>{incidentAlerts?.totals?.sla_breach_alerts ?? '-'}</strong></div>
+            <div className="list-item"><div>Incidents with alerts</div><strong>{incidentAlerts?.totals?.incidents_with_alerts ?? '-'}</strong></div>
+          </div>
+        </div>
+        <div className="card">
+          <h3>Runbook Failure Alerts (24h)</h3>
+          <div className="list">
+            <div className="list-item"><div>Runbook failures alerted</div><strong>{incidentAlerts?.totals?.runbook_failure_alerts ?? '-'}</strong></div>
+            <div className="list-item"><div>Recent alert cards</div><strong>{incidentAlerts?.recent?.length ?? 0}</strong></div>
+          </div>
+        </div>
+      </div>
+      {!!incidentAlerts?.recent?.length && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h3>Recent Operational Alerts</h3>
+          <div className="page-sub">Click an incident in the list to continue triage in the incident room.</div>
+          <table className="table" style={{ marginTop: 10 }}>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Incident</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Alerted At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {incidentAlerts.recent.slice(0, 8).map((a) => (
+                <tr key={`${a.type}:${a.incident_id}:${a.alerted_at || a.created_at || ''}`}>
+                  <td>{a.type}</td>
+                  <td>{a.incident_id.slice(0, 12)}</td>
+                  <td>{a.severity || '-'}</td>
+                  <td>{a.status || '-'}</td>
+                  <td>{a.alerted_at || a.created_at || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="grid-2">
         {sidebar}
         {room}

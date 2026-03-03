@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, Text, Integer
 from sqlalchemy.sql.sqltypes import TIMESTAMP
 from sqlalchemy.sql import func
+from sqlalchemy import text as sql_text
 from .orm import Base
 
 
@@ -49,7 +50,7 @@ def ensure_decision_trace_events_table():
             )
             # Add seq column if missing
             try:
-                db.execute("ALTER TABLE decision_trace_events ADD COLUMN seq INTEGER")
+                db.execute(sql_text("ALTER TABLE decision_trace_events ADD COLUMN seq INTEGER"))
             except Exception:
                 pass
             db.commit()

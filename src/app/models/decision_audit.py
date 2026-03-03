@@ -16,3 +16,9 @@ class DecisionAudit(Base):
     metadata_ = Column("metadata", Text, nullable=True)
     # Prefer CURRENT_TIMESTAMP for broad compatibility
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.current_timestamp())
+
+    # --- C01: Tamper-evidence hash chain (Merkle chain) ---
+    # SHA-256 hash of this record's canonical content (id + decision_id + action + actor + metadata + created_at + prev_hash).
+    record_hash = Column(String(64), nullable=True)
+    # SHA-256 hash of the immediately preceding record — forms a forward-linked chain.
+    prev_hash = Column(String(64), nullable=True)

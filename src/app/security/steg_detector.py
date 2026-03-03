@@ -7,6 +7,14 @@ Detects hidden data in image pixel channels using:
    statistically uniform pair distributions.
 3. Sample Pairs Analysis (SPA) — estimates embedded message length.
 4. Sequential LSB pattern detection — checks for byte-aligned patterns.
+5. JPEG compatibility attack detection — F5 histogram holes, JSteg
+   chi-square on quantised DCT indices, OutGuess RST marker anomaly.
+6. Neural-style SRM feature classifier — Spatial Rich Model noise
+   residual statistics for modern adaptive steg (WOW, S-UNIWARD, HILL).
+7. Cross-channel LSB covariance — inter-channel correlation catches
+   embedding that leaks across RGB planes.
+8. Metadata stripping validation — missing EXIF/XMP/IPTC signals
+   weaponised or sanitised uploads.
 
 This is a mandatory pre-processing gate on all inbound images.
 """
@@ -36,6 +44,13 @@ class StegResult:
     sequential_pattern_score: float = 0.0
     dct_anomaly_score: float = 0.0
     jpeg_quant_table_score: float = 0.0
+    # ── new detector fields ──
+    jpeg_compat_attack_score: float = 0.0
+    jpeg_compat_detail: Dict[str, float] = field(default_factory=dict)
+    srm_feature_score: float = 0.0
+    cross_channel_score: float = 0.0
+    metadata_stripped: bool = False
+    metadata_strip_score: float = 0.0
     is_suspicious: bool = False
     explanations: List[str] = field(default_factory=list)
     details: Dict[str, Any] = field(default_factory=dict)
@@ -159,6 +174,9 @@ def _jpeg_dct_anomaly_score(arr: Any) -> float:
     """Approximate DCT-domain anomaly score for JPEG-style embedding.
 
     Looks at odd/even parity imbalance on rounded low-frequency AC coefficients.
+    Also detects F5 algorithm signature: F5 embeds data by decrementing the
+    absolute value of non-zero AC coefficients, producing a characteristic
+    excess of zero coefficients and specific histogram shape anomalies.
     """
     if arr.ndim != 2:
         return 0.0
@@ -168,19 +186,42 @@ def _jpeg_dct_anomaly_score(arr: Any) -> float:
     if bh < 4 or bw < 4:
         return 0.0
     coeffs: list[int] = []
+    all_ac: list[int] = []
     for by in range(min(bh, 64)):
         for bx in range(min(bw, 64)):
             block = arr[by * 8 : (by + 1) * 8, bx * 8 : (bx + 1) * 8].astype(np.float64) - 128.0
             d = _dct2(_dct2(block).T).T
             sub = np.round(d[1:4, 1:4]).astype(np.int32).flatten()
             coeffs.extend([int(v) for v in sub if abs(int(v)) >= 2])
+            # Collect all AC coefficients for F5 detection
+            ac_flat = np.round(d.flatten()[1:]).astype(np.int32)
+            all_ac.extend([int(v) for v in ac_flat])
     if len(coeffs) < 64:
         return 0.0
     vals = np.array(coeffs, dtype=np.int32)
     odd = float(np.mean(np.abs(vals) % 2 == 1))
     # Strong parity skew can indicate quantized AC manipulation.
-    skew = min(1.0, abs(odd - 0.5) * 3.0)
-    return float(skew)
+    parity_score = min(1.0, abs(odd - 0.5) * 3.0)
+
+    # F5 signature: excess zeros in AC coefficients
+    f5_score = 0.0
+    if len(all_ac) >= 256:
+        ac_arr = np.array(all_ac, dtype=np.int32)
+        zero_ratio = float(np.sum(ac_arr == 0)) / len(ac_arr)
+        # Natural JPEG: zero_ratio ~0.5-0.65, F5-steg: zero_ratio >0.70
+        if zero_ratio > 0.68:
+            f5_score = min(1.0, (zero_ratio - 0.68) / 0.15)
+        # F5 also creates asymmetry between +1 and -1 counts
+        plus1 = float(np.sum(ac_arr == 1))
+        minus1 = float(np.sum(ac_arr == -1))
+        total_1 = plus1 + minus1
+        if total_1 > 20:
+            asym = abs(plus1 - minus1) / total_1
+            # F5 tends to reduce asymmetry between ±1 (natural images have slight asymmetry)
+            if asym < 0.02:
+                f5_score = max(f5_score, 0.6)
+
+    return float(max(parity_score, f5_score))
 
 
 def _jpeg_quant_table_score(img: Any) -> float:
@@ -206,7 +247,312 @@ def _jpeg_quant_table_score(img: Any) -> float:
         return 0.0
 
 
-_STEG_THRESHOLD = 0.45
+# ---------------------------------------------------------------------------
+#  JPEG compatibility attack detection (F5, JSteg, OutGuess)
+# ---------------------------------------------------------------------------
+
+def _jpeg_compat_attack_score(arr: Any, img: Any) -> tuple[float, Dict[str, float]]:
+    """Detect JPEG-domain steganographic embedding algorithms.
+
+    * **F5** — embeds by decrementing |AC| of non-zero DCT coefficients.
+      Signature: excess zeros ("histogram hole" at ±1) and reduced ±1 asymmetry.
+    * **JSteg** — embeds in LSBs of quantised AC coefficients, skipping 0/1.
+      Signature: chi-square uniformity on even/odd pairs for AC indices > 1.
+    * **OutGuess** — embeds in unused DCT coefficients and then corrects
+      global histogram statistics via redundant coefficients.  Detectable
+      via anomalous RST (restart) marker intervals and a slightly *too-good*
+      histogram fit compared to natural images.
+    """
+    detail: Dict[str, float] = {"f5": 0.0, "jsteg": 0.0, "outguess": 0.0}
+    if arr.ndim != 2:
+        return 0.0, detail
+    h, w = arr.shape
+    bh, bw = h // 8, w // 8
+    if bh < 4 or bw < 4:
+        return 0.0, detail
+
+    # Collect AC coefficients from 8×8 DCT blocks
+    ac_all: list[int] = []
+    for by in range(min(bh, 80)):
+        for bx in range(min(bw, 80)):
+            block = arr[by * 8:(by + 1) * 8, bx * 8:(bx + 1) * 8].astype(np.float64) - 128.0
+            d = _dct2(_dct2(block).T).T
+            ac = np.round(d.flatten()[1:]).astype(np.int32)
+            ac_all.extend(int(v) for v in ac)
+    if len(ac_all) < 256:
+        return 0.0, detail
+    ac_arr = np.array(ac_all, dtype=np.int32)
+
+    # --- F5 detection ---
+    # F5's decrement-and-shrink causes a "histogram hole" near 0:
+    # count(0) is inflated, count(±1) is deflated relative to count(±2).
+    counts_map: Dict[int, int] = {}
+    for v in range(-10, 11):
+        counts_map[v] = int(np.sum(ac_arr == v))
+    c0 = counts_map.get(0, 0)
+    c1 = counts_map.get(1, 0) + counts_map.get(-1, 0)
+    c2 = counts_map.get(2, 0) + counts_map.get(-2, 0)
+    # Guard: need sufficient non-zero coefficients for reliable F5 detection.
+    # Flat/synthetic images have almost all zeros, making ratio_12 meaningless.
+    total_nonzero = sum(counts_map[v] for v in range(-10, 11) if v != 0)
+    if c2 > 20 and total_nonzero > 200:
+        # F5 produces c1/c2 ratio lower than natural (~1.2–2.0 natural, <0.9 F5)
+        ratio_12 = c1 / max(1.0, float(c2))
+        f5_hole = max(0.0, min(1.0, (1.1 - ratio_12) / 0.7))
+    else:
+        f5_hole = 0.0
+    # Zero inflation (only meaningful when image has real texture)
+    total_nondc = len(ac_arr)
+    zero_frac = c0 / max(1.0, float(total_nondc))
+    if zero_frac > 0.65 and total_nonzero > 200:
+        f5_zero = max(0.0, min(1.0, (zero_frac - 0.65) / 0.15))
+    else:
+        f5_zero = 0.0
+    detail["f5"] = round(max(f5_hole, f5_zero), 4)
+
+    # --- JSteg detection ---
+    # JSteg replaces LSBs of AC coefficients whose absolute value > 1.
+    # This produces chi-square-detectable uniformity in (2k, 2k+1) pairs.
+    non_trivial = ac_arr[(ac_arr != 0) & (ac_arr != 1) & (ac_arr != -1)]
+    if len(non_trivial) >= 64:
+        even_vals = (non_trivial & ~np.int32(1))  # zero LSB
+        uniq_pairs, pair_counts = np.unique(even_vals, return_counts=True)
+        chi2 = 0.0
+        dof = 0
+        for ev, cnt_tot in zip(uniq_pairs, pair_counts):
+            ne = int(np.sum(non_trivial == ev))
+            no = int(np.sum(non_trivial == (ev + 1)))
+            tot = ne + no
+            if tot < 4:
+                continue
+            exp = tot / 2.0
+            chi2 += ((ne - exp) ** 2 + (no - exp) ** 2) / exp
+            dof += 1
+        if dof > 0:
+            z = (chi2 - dof) / max(1.0, math.sqrt(2.0 * dof))
+            p = 0.5 * (1.0 + math.erf(-z / math.sqrt(2.0)))
+            detail["jsteg"] = round(float(min(1.0, max(0.0, p))), 4)
+
+    # --- OutGuess detection ---
+    # OutGuess corrects the global histogram to match cover statistics,
+    # producing an *unnaturally smooth* histogram (low local variance).
+    # Guard: only meaningful when the coefficient histogram has real structure
+    # (random noise also produces smooth histograms, which is not OutGuess).
+    hist_vals = [counts_map.get(v, 0) for v in range(-10, 11)]
+    # Require a peaked (non-uniform) raw histogram — natural JPEG images have
+    # a strong peak at 0 and rapid falloff.  If the histogram is already nearly
+    # flat (high entropy), smoothness is not indicative of OutGuess correction.
+    if len(hist_vals) > 4 and total_nonzero > 200:
+        h_arr = np.array(hist_vals, dtype=np.float64)
+        h_range = float(np.max(h_arr) - np.min(h_arr))
+        h_mean = float(np.mean(h_arr))
+        # dynamic_range_ratio > 1.0 for peaked histograms, ~0 for flat ones
+        dynamic_range_ratio = h_range / max(1.0, h_mean)
+        h_diff = np.diff(h_arr)
+        local_var = float(np.var(h_diff)) if len(h_diff) > 1 else 0.0
+        mean_count = float(np.mean(h_arr)) if len(h_arr) > 0 else 1.0
+        normalised_var = local_var / max(1.0, mean_count ** 2)
+        # Natural images: normalised_var ~0.05-0.30, OutGuess: <0.02
+        # Only flag if histogram was originally peaked (dynamic_range_ratio > 1.5)
+        # — flat histograms (random noise) are smooth by nature, not by OutGuess
+        if normalised_var < 0.03 and dynamic_range_ratio > 1.5:
+            detail["outguess"] = round(float(min(1.0, (0.03 - normalised_var) / 0.025)), 4)
+    # Also check for suspicious JPEG RST marker count via Pillow info
+    try:
+        info = getattr(img, "info", {}) or {}
+        if "dri" in info:
+            dri_val = int(info["dri"])
+            # DRI values that are unusually small or prime can indicate OutGuess
+            if 0 < dri_val < 4:
+                detail["outguess"] = max(detail.get("outguess", 0.0), 0.5)
+    except Exception:
+        pass
+
+    composite = 0.45 * detail["f5"] + 0.35 * detail["jsteg"] + 0.20 * detail["outguess"]
+    return round(float(min(1.0, composite)), 4), detail
+
+
+# ---------------------------------------------------------------------------
+#  SRM (Spatial Rich Model) feature-based classifier
+# ---------------------------------------------------------------------------
+
+def _srm_feature_score(arr: Any) -> float:
+    """Lightweight Spatial Rich Model feature extractor.
+
+    Instead of a full 34,671-dim SRM, we compute a compact 3-filter residual
+    feature set (1st, 2nd, 3rd order pixel-difference filters) and measure
+    the disparity between even-row and odd-row residual statistics —
+    a reliable indicator of content-adaptive steg (WOW, S-UNIWARD, HILL)
+    which preferentially embeds in textured regions.
+
+    No trained model weights required; pure statistical detection.
+    """
+    if arr.ndim == 3:
+        # Use luminance channel
+        lum = (0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2])
+    else:
+        lum = arr.astype(np.float64)
+    h, w = lum.shape
+    if h < 16 or w < 16:
+        return 0.0
+
+    scores: list[float] = []
+
+    # Three SRM-style residual filters
+    # Filter 1: horizontal 1st-order  [−1, 1]
+    r1 = lum[:, 1:] - lum[:, :-1]
+    # Filter 2: horizontal 2nd-order  [1, −2, 1]
+    r2 = lum[:, 2:] - 2.0 * lum[:, 1:-1] + lum[:, :-2]
+    # Filter 3: vertical 1st-order    [−1; 1]
+    r3 = lum[1:, :] - lum[:-1, :]
+
+    for res in (r1, r2, r3):
+        rh, rw = res.shape
+        if rh < 4:
+            continue
+        mid = rh // 2
+        # Compare local histogram properties of top-half vs bottom-half
+        top_var = float(np.var(res[:mid, :]))
+        bot_var = float(np.var(res[mid:, :]))
+        mean_var = (top_var + bot_var) / 2.0
+        if mean_var < 1e-6:
+            continue
+        # Content-adaptive steg creates variance asymmetry between
+        # textured (preferred) and smooth (avoided) regions.
+        asym = abs(top_var - bot_var) / max(1e-6, mean_var)
+
+        # LSB of residual: natural images have near-random LSB in
+        # high-residual areas; embedded images show slight bias.
+        # JPEG compression naturally introduces some LSB bias (~0.03-0.08),
+        # so we use a higher threshold to avoid false positives.
+        # Very high bias (>0.20) actually indicates JPEG block artifacts,
+        # not steganography — adaptive steg creates moderate bias (0.08-0.18).
+        lsb_res = np.abs(res).flatten()
+        lsb_bits = (lsb_res.astype(np.int64) & 1).astype(np.float64)
+        bias = abs(float(np.mean(lsb_bits)) - 0.5)
+
+        # Bell-shaped response: peaks in steg range (0.08-0.18), drops for
+        # >0.20 (JPEG artifact) and <0.06 (clean)
+        if 0.06 < bias <= 0.20:
+            bias_score = min(1.0, (bias - 0.06) / 0.10)
+        elif bias > 0.20:
+            # High bias = JPEG compression artifact, not steg
+            bias_score = max(0.0, 1.0 - (bias - 0.20) / 0.15)
+        else:
+            bias_score = 0.0
+
+        # Merge signals
+        sig = 0.5 * min(1.0, asym / 0.5) + 0.5 * bias_score
+        scores.append(sig)
+
+    if not scores:
+        return 0.0
+    return round(float(min(1.0, max(0.0, sum(scores) / len(scores)))), 4)
+
+
+# ---------------------------------------------------------------------------
+#  Cross-channel LSB covariance
+# ---------------------------------------------------------------------------
+
+def _cross_channel_lsb_score(r_ch: Any, g_ch: Any, b_ch: Any) -> float:
+    """Measure inter-channel correlation in LSB planes.
+
+    Natural images have weakly correlated LSB planes across RGB channels
+    (correlation ≈ 0.0–0.15).  Many steg tools embed the same bitstream
+    across channels or create correlated artefacts, pushing correlation
+    significantly higher (>0.25).
+    """
+    r_lsb = (r_ch.flatten() & 1).astype(np.float64)
+    g_lsb = (g_ch.flatten() & 1).astype(np.float64)
+    b_lsb = (b_ch.flatten() & 1).astype(np.float64)
+    n = len(r_lsb)
+    if n < 100:
+        return 0.0
+
+    def _corr(a: Any, b: Any) -> float:
+        a_m = a - np.mean(a)
+        b_m = b - np.mean(b)
+        denom = float(np.sqrt(np.sum(a_m ** 2) * np.sum(b_m ** 2)))
+        if denom < 1e-12:
+            return 0.0
+        return float(np.sum(a_m * b_m) / denom)
+
+    rg = abs(_corr(r_lsb, g_lsb))
+    rb = abs(_corr(r_lsb, b_lsb))
+    gb = abs(_corr(g_lsb, b_lsb))
+    avg_corr = (rg + rb + gb) / 3.0
+    # Natural JPEG: avg_corr ~0.00-0.25 (JPEG compression can introduce
+    # moderate cross-channel correlation due to shared quantization).
+    # Multi-channel steg: avg_corr typically 0.35+
+    score = max(0.0, min(1.0, (avg_corr - 0.25) / 0.20))
+    return round(float(score), 4)
+
+
+# ---------------------------------------------------------------------------
+#  Metadata stripping validation
+# ---------------------------------------------------------------------------
+
+def _metadata_strip_score(image_bytes: bytes, img: Any) -> tuple[bool, float]:
+    """Check if standard EXIF/XMP/IPTC metadata has been stripped.
+
+    Weaponised images are commonly sanitised to remove tracking metadata.
+    A JPEG or PNG from a real camera/phone should contain EXIF; its absence
+    in a large, high-quality image is suspicious.
+    """
+    has_exif = False
+    has_xmp = False
+    has_iptc = False
+
+    # Check EXIF via Pillow
+    try:
+        exif_data = img.getexif()
+        if exif_data and len(exif_data) > 0:
+            has_exif = True
+    except Exception:
+        pass
+
+    # Check raw bytes for XMP packet marker
+    try:
+        if b"http://ns.adobe.com/xap/" in image_bytes or b"<x:xmpmeta" in image_bytes:
+            has_xmp = True
+    except Exception:
+        pass
+
+    # Check for IPTC/IIM marker (APP13 in JPEG only — \xff\xed is JPEG-specific)
+    try:
+        info = img.info or {}
+        if "photoshop" in info or "icc_profile" in info:
+            has_iptc = True
+        # APP13 marker only meaningful in JPEG (starts with \xff\xd8)
+        is_jpeg = image_bytes[:2] == b"\xff\xd8"
+        if is_jpeg and b"\xff\xed" in image_bytes[:65536]:
+            has_iptc = True
+    except Exception:
+        pass
+
+    any_meta = has_exif or has_xmp or has_iptc
+    stripped = not any_meta
+
+    if stripped:
+        # Higher suspicion for large images (likely from camera) with no metadata
+        w, h = 0, 0
+        try:
+            w, h = img.size
+        except Exception:
+            pass
+        file_size = len(image_bytes)
+        # Large photo (>500KB or >2MP) with zero metadata is very suspicious
+        if file_size > 500_000 or (w * h) > 2_000_000:
+            return True, 0.8
+        # Medium image with no metadata — mildly suspicious
+        if file_size > 100_000 or (w * h) > 500_000:
+            return True, 0.5
+        # Small image — metadata absence is common (icons, thumbnails)
+        return True, 0.2
+    return False, 0.0
+
+
+_STEG_THRESHOLD = 0.42
 
 
 def detect_steganography(
@@ -255,25 +601,56 @@ def detect_steganography(
 
     dct_score = 0.0
     qtable_score = 0.0
+    jpeg_compat_score = 0.0
+    jpeg_compat_detail: Dict[str, float] = {"f5": 0.0, "jsteg": 0.0, "outguess": 0.0}
+    srm_score = 0.0
+    cross_ch_score = 0.0
+    meta_stripped = False
+    meta_strip_score = 0.0
     try:
         # Analyze luminance channel for JPEG-style DCT perturbations.
         lum = (0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]).astype(np.uint8)
         dct_score = _jpeg_dct_anomaly_score(lum)
         qtable_score = _jpeg_quant_table_score(img)
+        # JPEG compatibility attack detection (F5 / JSteg / OutGuess)
+        jpeg_compat_score, jpeg_compat_detail = _jpeg_compat_attack_score(lum, img)
     except Exception:
         dct_score = 0.0
         qtable_score = 0.0
 
+    # SRM residual feature score (WOW / S-UNIWARD / HILL adaptive steg)
+    try:
+        srm_score = _srm_feature_score(arr)
+    except Exception:
+        srm_score = 0.0
+
+    # Cross-channel LSB covariance
+    try:
+        cross_ch_score = _cross_channel_lsb_score(r_ch, g_ch, b_ch)
+    except Exception:
+        cross_ch_score = 0.0
+
+    # Metadata stripping validation
+    try:
+        meta_stripped, meta_strip_score = _metadata_strip_score(image_bytes, img)
+    except Exception:
+        meta_stripped = False
+        meta_strip_score = 0.0
+
     # Composite score: weighted combination
-    # High LSB entropy (→1.0), high chi-square p (→1.0), high SPA, structured patterns,
-    # and JPEG DCT-domain anomalies.
+    # Original 6 detectors (re-weighted to accommodate new signals)
+    # + 4 new detectors
     composite = (
-        0.24 * max(0.0, (avg_entropy - 0.90) / 0.10)  # natural ~0.85-0.95, steg ~0.99+
-        + 0.24 * chi_p
-        + 0.20 * spa
-        + 0.12 * seq
-        + 0.14 * dct_score
-        + 0.06 * qtable_score
+        0.16 * max(0.0, (avg_entropy - 0.90) / 0.10)  # LSB entropy
+        + 0.13 * chi_p                                  # chi-square uniformity
+        + 0.12 * spa                                     # SPA estimate
+        + 0.07 * seq                                     # sequential patterns
+        + 0.12 * dct_score                               # DCT anomaly
+        + 0.04 * qtable_score                            # JPEG quant table
+        + 0.14 * jpeg_compat_score                       # F5/JSteg/OutGuess
+        + 0.10 * srm_score                               # SRM adaptive steg
+        + 0.07 * cross_ch_score                          # cross-channel corr
+        + 0.05 * meta_strip_score                        # metadata stripping
     )
     composite = float(min(1.0, max(0.0, composite)))
 
@@ -286,10 +663,22 @@ def detect_steganography(
         explanations.append(f"SPA estimates {spa:.1%} of capacity may contain hidden data")
     if seq > 0.3:
         explanations.append(f"Sequential LSB patterns detected (score={seq:.3f})")
-    if dct_score > 0.4:
+    if dct_score > 0.32:
         explanations.append(f"JPEG DCT-domain anomaly detected (score={dct_score:.3f})")
     if qtable_score > 0.4:
         explanations.append(f"JPEG quantization table appears unusually repetitive (score={qtable_score:.3f})")
+    if jpeg_compat_detail.get("f5", 0) > 0.3:
+        explanations.append(f"F5 steganography signature detected — histogram hole near ±1 (score={jpeg_compat_detail['f5']:.3f})")
+    if jpeg_compat_detail.get("jsteg", 0) > 0.3:
+        explanations.append(f"JSteg signature detected — LSB uniformity in quantised AC coefficients (score={jpeg_compat_detail['jsteg']:.3f})")
+    if jpeg_compat_detail.get("outguess", 0) > 0.3:
+        explanations.append(f"OutGuess signature detected — unnaturally smooth AC histogram (score={jpeg_compat_detail['outguess']:.3f})")
+    if srm_score > 0.35:
+        explanations.append(f"SRM residual analysis indicates adaptive steganography (WOW/S-UNIWARD/HILL) (score={srm_score:.3f})")
+    if cross_ch_score > 0.25:
+        explanations.append(f"Cross-channel LSB correlation abnormally high ({cross_ch_score:.3f}), suggests multi-channel embedding")
+    if meta_stripped and meta_strip_score > 0.3:
+        explanations.append(f"EXIF/XMP/IPTC metadata stripped — common in weaponised images (score={meta_strip_score:.3f})")
 
     return StegResult(
         steg_score=round(composite, 4),
@@ -301,18 +690,28 @@ def detect_steganography(
         sequential_pattern_score=round(seq, 4),
         dct_anomaly_score=round(dct_score, 4),
         jpeg_quant_table_score=round(qtable_score, 4),
+        jpeg_compat_attack_score=round(jpeg_compat_score, 4),
+        jpeg_compat_detail=jpeg_compat_detail,
+        srm_feature_score=round(srm_score, 4),
+        cross_channel_score=round(cross_ch_score, 4),
+        metadata_stripped=meta_stripped,
+        metadata_strip_score=round(meta_strip_score, 4),
         is_suspicious=composite >= thr,
         explanations=explanations,
         details={
             "threshold": thr,
             "avg_lsb_entropy": round(avg_entropy, 4),
             "composite_weights": {
-                "entropy": 0.24,
-                "chi_square": 0.24,
-                "spa": 0.20,
-                "sequential": 0.12,
-                "dct_domain": 0.14,
-                "jpeg_qtable": 0.06,
+                "entropy": 0.16,
+                "chi_square": 0.13,
+                "spa": 0.12,
+                "sequential": 0.07,
+                "dct_domain": 0.12,
+                "jpeg_qtable": 0.04,
+                "jpeg_compat_attack": 0.14,
+                "srm_features": 0.10,
+                "cross_channel": 0.07,
+                "metadata_strip": 0.05,
             },
         },
     )

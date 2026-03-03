@@ -1251,6 +1251,134 @@ def memory_health_api(
     return out
 
 
+@router.get("/persona-success")
+def persona_success_api(
+    days: int = Query(7, ge=1, le=90),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    now = datetime.utcnow()
+    start = now - timedelta(days=int(days))
+    start_s = start.strftime("%Y-%m-%d %H:%M:%S")
+    out: Dict[str, Any] = {
+        "window": {"start": start.date().isoformat(), "end": now.date().isoformat()},
+        "days": int(days),
+        "totals": {
+            "traces": 0,
+            "reformulated": 0,
+            "reupload_required": 0,
+        },
+        "personas": [],
+    }
+    try:
+        with db_session() as db:
+            dialect = _dialect_name(db)
+            ctime_expr = _normalized_ts_expr("created_at", dialect)
+            rows = db.execute(
+                sql_text(
+                    f"""
+                    SELECT trace_id, event_type, payload, created_at
+                    FROM decision_trace_events
+                    WHERE {ctime_expr} >= :start_ts
+                      AND event_type IN ('user_query', 'image_reupload_requested', 'session_summary_checkpoint')
+                    ORDER BY {ctime_expr} ASC
+                    """
+                ),
+                {"start_ts": start_s if _is_sqlite(dialect) else start},
+            ).fetchall()
+    except Exception:
+        rows = []
+
+    traces: Dict[str, Dict[str, Any]] = {}
+    reformulation_markers = (
+        "actually",
+        "instead",
+        "change",
+        "changed",
+        "not this",
+        "not that",
+        "different",
+        "rephrase",
+        "another option",
+    )
+    for r in rows or []:
+        trace_id = str((r[0] if len(r) > 0 else "") or "").strip()
+        if not trace_id:
+            continue
+        et = str((r[1] if len(r) > 1 else "") or "").strip().lower()
+        payload = _json_loads_safe(r[2] if len(r) > 2 else {})
+        st = traces.setdefault(
+            trace_id,
+            {
+                "persona": "unknown",
+                "persona_confidence": 0.0,
+                "resolved_turn": 0,
+                "reformulated": False,
+                "reupload_required": False,
+            },
+        )
+        if et == "user_query":
+            q = str(payload.get("query") or "").lower()
+            if any(m in q for m in reformulation_markers):
+                st["reformulated"] = True
+            constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+            p = str(
+                constraints.get("buyer_persona")
+                or constraints.get("buyer_persona_candidate")
+                or payload.get("buyer_persona")
+                or "unknown"
+            ).strip() or "unknown"
+            try:
+                conf = float(
+                    constraints.get("buyer_persona_confidence")
+                    or payload.get("buyer_persona_confidence")
+                    or 0.0
+                )
+            except Exception:
+                conf = 0.0
+            if conf >= float(st.get("persona_confidence") or 0.0):
+                st["persona"] = p
+                st["persona_confidence"] = conf
+        elif et == "image_reupload_requested":
+            st["reupload_required"] = True
+        elif et == "session_summary_checkpoint":
+            try:
+                turn = int(payload.get("turn") or 0)
+            except Exception:
+                turn = 0
+            if turn > int(st.get("resolved_turn") or 0):
+                st["resolved_turn"] = turn
+
+    rollup: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"traces": 0, "sum_resolution_turns": 0, "reformulated": 0, "reupload_required": 0}
+    )
+    for _, st in traces.items():
+        persona = str(st.get("persona") or "unknown")
+        grp = rollup[persona]
+        grp["traces"] += 1
+        grp["sum_resolution_turns"] += max(1, int(st.get("resolved_turn") or 0))
+        grp["reformulated"] += 1 if bool(st.get("reformulated")) else 0
+        grp["reupload_required"] += 1 if bool(st.get("reupload_required")) else 0
+
+    personas = []
+    for persona, grp in sorted(rollup.items(), key=lambda kv: kv[1]["traces"], reverse=True):
+        count = int(grp.get("traces") or 0)
+        personas.append(
+            {
+                "persona": persona,
+                "traces": count,
+                "resolution_turns_avg": round(float(grp.get("sum_resolution_turns") or 0) / float(max(1, count)), 3),
+                "reformulation_rate": round(float(grp.get("reformulated") or 0) / float(max(1, count)), 4),
+                "reupload_rate": round(float(grp.get("reupload_required") or 0) / float(max(1, count)), 4),
+            }
+        )
+        out["totals"]["traces"] += count
+        out["totals"]["reformulated"] += int(grp.get("reformulated") or 0)
+        out["totals"]["reupload_required"] += int(grp.get("reupload_required") or 0)
+    out["personas"] = personas
+    return out
+
+
 @router.get("/slo-alerts")
 def slo_alerts_api(
     window_hours: int = Query(24, ge=1, le=168),

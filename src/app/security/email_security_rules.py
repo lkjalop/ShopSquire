@@ -516,6 +516,10 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
     dmarc_result = str(email.get("dmarc_result") or "").strip().lower()
     dmarc_policy = str(email.get("dmarc_policy") or "").strip().lower()
     dmarc_fail = bool(email.get("dmarc_fail", False))
+    arc_cv = str(email.get("arc_cv") or "").strip().lower()
+    arc_chain_valid = email.get("arc_chain_valid")
+    bimi_result = str(email.get("bimi_result") or "").strip().lower()
+    bimi_present = bool(email.get("bimi_present")) or bool(email.get("bimi_location"))
     if not dmarc_fail and dmarc_result in ("fail", "quarantine", "reject"):
         dmarc_fail = True
     if spf_result in ("fail", "softfail") and dkim_result in ("fail", "neutral", "") and dmarc_policy in ("reject", "p=reject", "quarantine", "p=quarantine"):
@@ -532,6 +536,38 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
                 "type": "auth_softfail",
                 "value": "spf_dkim_softfail",
                 "reason": f"SPF={spf_result or 'n/a'} DKIM={dkim_result or 'n/a'}",
+            }
+        )
+    if arc_cv == "fail" or arc_chain_valid is False:
+        indicators.append(
+            {
+                "type": "arc_chain_invalid",
+                "value": arc_cv or "fail",
+                "reason": "ARC chain verification failed; forwarded authentication context untrusted",
+            }
+        )
+    elif arc_cv == "pass" or arc_chain_valid is True:
+        indicators.append(
+            {
+                "type": "arc_chain_valid",
+                "value": "pass",
+                "reason": "ARC chain present and valid",
+            }
+        )
+    if bimi_present and bimi_result in ("fail", "temperror", "permerror"):
+        indicators.append(
+            {
+                "type": "bimi_validation_failed",
+                "value": bimi_result,
+                "reason": "BIMI indicator present but validation failed",
+            }
+        )
+    elif bimi_present and bimi_result == "pass":
+        indicators.append(
+            {
+                "type": "bimi_validated",
+                "value": "pass",
+                "reason": "BIMI validation passed",
             }
         )
 
@@ -748,6 +784,10 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
                 "dmarc_result": dmarc_result or None,
                 "dmarc_policy": dmarc_policy or None,
                 "dmarc_fail": bool(dmarc_fail),
+                "arc_cv": arc_cv or None,
+                "arc_chain_valid": bool(arc_chain_valid) if arc_chain_valid is not None else None,
+                "bimi_result": bimi_result or None,
+                "bimi_present": bool(bimi_present),
             },
         },
     }
