@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
@@ -231,6 +231,143 @@ async def stream_trace_events(trace_id: str, request: Request):
                     pass
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+@router.websocket("/{trace_id}/events/ws")
+async def ws_trace_events(trace_id: str, websocket: WebSocket):
+    """WebSocket stream for decision trace events with initial snapshot + live updates."""
+    await websocket.accept()
+    q = None
+    try:
+        from src.app.services.trace_broker import subscribe as _sub
+
+        q = _sub(trace_id)
+    except Exception:
+        q = None
+
+    try:
+        initial: list[dict[str, Any]] = []
+        last_seen = "1970-01-01T00:00:00Z"
+        try:
+            with read_session(read_class="timeline") as db:
+                try:
+                    from src.app.models.db import db_session as _db_session
+
+                    with _db_session() as dbs:
+                        rows = dbs.execute(
+                            "SELECT id, seq, trace_id, event_type, source_type, source_id, target_type, target_id, payload, created_at "
+                            "FROM decision_trace_events WHERE trace_id = :trace_id "
+                            "ORDER BY CASE WHEN seq IS NULL THEN 1 ELSE 0 END, seq ASC, created_at ASC",
+                            {"trace_id": trace_id},
+                        ).fetchall()
+                except Exception:
+                    rows = []
+            for r in rows or []:
+                try:
+                    payload = json.loads(r[8]) if isinstance(r[8], str) else r[8]
+                except Exception:
+                    payload = r[8]
+                initial.append(
+                    {
+                        "id": r[0],
+                        "seq": r[1],
+                        "trace_id": r[2],
+                        "event_type": r[3],
+                        "source_type": r[4],
+                        "source_id": r[5],
+                        "target_type": r[6],
+                        "target_id": r[7],
+                        "payload": payload,
+                        "created_at": r[9],
+                    }
+                )
+                if r[9]:
+                    last_seen = str(r[9])
+        except Exception:
+            initial = []
+        if not initial:
+            try:
+                initial = get_cached_trace_events(trace_id)
+            except Exception:
+                initial = []
+            try:
+                if initial and isinstance(initial[-1], dict) and initial[-1].get("created_at"):
+                    last_seen = str(initial[-1].get("created_at"))
+            except Exception:
+                pass
+        await websocket.send_text(json.dumps(initial, ensure_ascii=False, default=str))
+
+        while True:
+            pushed = False
+            if q is not None:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=1.0)
+                    await websocket.send_text(json.dumps([ev], ensure_ascii=False, default=str))
+                    try:
+                        if isinstance(ev, dict) and ev.get("created_at"):
+                            last_seen = str(ev.get("created_at"))
+                    except Exception:
+                        pass
+                    pushed = True
+                except asyncio.TimeoutError:
+                    pushed = False
+            if pushed:
+                continue
+            # DB fallback polling for environments without active broker fanout.
+            items = []
+            try:
+                with read_session(read_class="timeline") as db:
+                    try:
+                        from src.app.models.db import db_session as _db_session
+
+                        with _db_session() as dbs:
+                            rows = dbs.execute(
+                                "SELECT id, seq, trace_id, event_type, source_type, source_id, target_type, target_id, payload, created_at "
+                                "FROM decision_trace_events WHERE trace_id = :trace_id AND created_at > :since "
+                                "ORDER BY created_at ASC",
+                                {"trace_id": trace_id, "since": last_seen},
+                            ).fetchall()
+                    except Exception:
+                        rows = []
+                for r in rows or []:
+                    try:
+                        payload = json.loads(r[8]) if isinstance(r[8], str) else r[8]
+                    except Exception:
+                        payload = r[8]
+                    items.append(
+                        {
+                            "id": r[0],
+                            "seq": r[1],
+                            "trace_id": r[2],
+                            "event_type": r[3],
+                            "source_type": r[4],
+                            "source_id": r[5],
+                            "target_type": r[6],
+                            "target_id": r[7],
+                            "payload": payload,
+                            "created_at": r[9],
+                        }
+                    )
+                    if r[9]:
+                        last_seen = str(r[9])
+            except Exception:
+                items = []
+            await websocket.send_text(json.dumps(items or [], ensure_ascii=False, default=str))
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+    finally:
+        if q is not None:
+            try:
+                from src.app.services.trace_broker import unsubscribe as _un
+
+                _un(trace_id, q)
+            except Exception:
+                pass
 
 
 @router.get("/{trace_id}/events")

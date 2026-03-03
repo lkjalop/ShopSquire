@@ -164,6 +164,10 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     forecast_gov_enabled = str(os.getenv("FORECAST_GOVERNANCE_SNAPSHOT_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
     forecast_gov_hour = max(0, min(23, int(float(os.getenv("FORECAST_GOVERNANCE_HOUR_UTC", "3") or 3))))
     forecast_gov_minute = max(0, min(59, int(float(os.getenv("FORECAST_GOVERNANCE_MINUTE_UTC", "10") or 10))))
+    incident_sla_enabled = str(os.getenv("INCIDENT_SLA_CELERY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    incident_sla_min = max(1, min(60, int(float(os.getenv("INCIDENT_SLA_CELERY_MINUTES", "1") or 1))))
+    trace_recovery_enabled = str(os.getenv("TRACE_BROKER_RECOVERY_CELERY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    trace_recovery_min = max(1, min(60, int(float(os.getenv("TRACE_BROKER_RECOVERY_CELERY_MINUTES", "5") or 5))))
 
     beat_schedule = {}
     if poll_enabled:
@@ -184,6 +188,18 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=str(forecast_gov_minute), hour=str(forecast_gov_hour)),
             "args": (),
         }
+    if incident_sla_enabled:
+        beat_schedule["incident-sla-breach-scan"] = {
+            "task": "src.app.tasks.incident_ops_tasks.check_incident_sla_breaches",
+            "schedule": crontab(minute=f"*/{incident_sla_min}"),
+            "args": (),
+        }
+    if trace_recovery_enabled:
+        beat_schedule["trace-broker-recovery"] = {
+            "task": "src.app.tasks.incident_ops_tasks.trace_broker_recovery",
+            "schedule": crontab(minute=f"*/{trace_recovery_min}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -195,8 +211,15 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.security_poll_tasks.poll_crowdstrike": {"queue": default_q},
             "src.app.tasks.model_ops_tasks.train_recommend_cf_nightly": {"queue": default_q},
             "src.app.tasks.model_ops_tasks.snapshot_forecast_governance": {"queue": default_q},
+            "src.app.tasks.incident_ops_tasks.check_incident_sla_breaches": {"queue": default_q},
+            "src.app.tasks.incident_ops_tasks.trace_broker_recovery": {"queue": default_q},
         },
-        imports=("src.app.tasks.swarm_tasks", "src.app.tasks.security_poll_tasks", "src.app.tasks.model_ops_tasks"),
+        imports=(
+            "src.app.tasks.swarm_tasks",
+            "src.app.tasks.security_poll_tasks",
+            "src.app.tasks.model_ops_tasks",
+            "src.app.tasks.incident_ops_tasks",
+        ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
         worker_prefetch_multiplier=1,
