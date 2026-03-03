@@ -4,6 +4,8 @@ import json
 import re
 import time
 import uuid
+import base64
+import hashlib
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -166,6 +168,43 @@ def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any
     }
 
 
+def _decode_image_b64(image_obj: Dict[str, Any] | None) -> bytes:
+    img = image_obj if isinstance(image_obj, dict) else {}
+    raw = (
+        img.get("image_b64")
+        or img.get("bytes_b64")
+        or img.get("b64")
+        or img.get("data_url")
+    )
+    if not isinstance(raw, str) or not raw.strip():
+        return b""
+    s = raw.strip()
+    if s.startswith("data:") and "," in s:
+        s = s.split(",", 1)[1]
+    try:
+        return base64.b64decode(s.encode("utf-8"), validate=False)
+    except Exception:
+        return b""
+
+
+def _stash_image_blob_for_recommend(mem: Memory, uid: str, image_hash: str, image_bytes: bytes) -> None:
+    if not uid or not image_hash or not image_bytes:
+        return
+    max_bytes = int(os.getenv("CHAT_IMAGE_BLOB_CACHE_MAX_BYTES", "262144") or 262144)
+    if len(image_bytes) > max_bytes:
+        return
+    kv = mem.get_kv(uid) or {}
+    blob_cache = kv.get("image_blob_cache") if isinstance(kv.get("image_blob_cache"), dict) else {}
+    blob_cache[str(image_hash)] = base64.b64encode(image_bytes).decode("ascii")
+    # Keep only latest 2 blobs to bound session size.
+    keys = list(blob_cache.keys())
+    if len(keys) > 2:
+        for k in keys[:-2]:
+            blob_cache.pop(k, None)
+    kv["image_blob_cache"] = blob_cache
+    mem.set_kv(uid, kv)
+
+
 def _persist_chat_structured_state(
     *,
     redis,
@@ -253,6 +292,7 @@ async def chat_query(
     image_cv_signals_in: Dict[str, Any] = {}
     damage_score_in: float = 0.0
     is_product_photo_in: bool = False
+    image_blob_bytes: bytes = b""
 
     if images_array and isinstance(images_array, list):
         # Merge first image's data into flat fields for backward compat
@@ -267,6 +307,13 @@ async def chat_query(
             damage_score_in = float(first.get("damage_score") or 0.0)
             is_product_photo_in = bool(first.get("is_product_photo"))
             image_cv_signals_in = _extract_image_cv_signals(first)
+            image_blob_bytes = _decode_image_b64(first)
+            if not image_hash_in and image_blob_bytes:
+                image_hash_in = hashlib.sha256(image_blob_bytes).hexdigest()[:32]
+    elif isinstance((payload or {}).get("image_b64"), str):
+        image_blob_bytes = _decode_image_b64({"image_b64": (payload or {}).get("image_b64")})
+        if not image_hash_in and image_blob_bytes:
+            image_hash_in = hashlib.sha256(image_blob_bytes).hexdigest()[:32]
 
     has_image = bool(image_labels_in or images_array)
     if images_array and isinstance(images_array, list):
@@ -399,6 +446,13 @@ async def chat_query(
         "has_image": has_image,
         "conversation_turn": int((payload or {}).get("conversation_turn") or 0),
     })
+    try:
+        uid_for_cache = str((payload or {}).get("uid") or "demo-user")
+        if uid_for_cache and isinstance(image_hash_in, str) and image_hash_in.strip() and image_blob_bytes:
+            mem = Memory(redis)
+            _stash_image_blob_for_recommend(mem, uid_for_cache, image_hash_in.strip()[:128], image_blob_bytes)
+    except Exception:
+        pass
 
     policy_ok, policy_reason = enforce_model_theft_policy_gate(
         query=q,

@@ -6,6 +6,7 @@ import os
 import uuid
 import re
 import json
+import base64
 from typing import Dict, Optional, Any, List, Tuple
 from datetime import datetime
 
@@ -51,6 +52,8 @@ from src.app.rag.retrieve import Retriever
 from src.app.services.trace_strategy_tags import build_strategy_trace_correlation
 from src.app.services.i18n import localize_recommend_payload
 from src.app.services.billing import record_meter_event
+from src.app.services.fraud_scorer import FraudScorer
+from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints_from_request
 from src.app.security.model_theft import (
     enforce_model_theft_rate_limit,
     enforce_model_theft_policy_gate,
@@ -257,6 +260,19 @@ def _confidence_band(conf: float) -> str:
     return "high"
 
 
+def _decode_session_image_blob(kv: Dict[str, Any], image_hash: str | None) -> bytes:
+    if not image_hash or not isinstance(kv, dict):
+        return b""
+    try:
+        cache = kv.get("image_blob_cache") if isinstance(kv.get("image_blob_cache"), dict) else {}
+        raw = cache.get(str(image_hash))
+        if not isinstance(raw, str) or not raw:
+            return b""
+        return base64.b64decode(raw.encode("utf-8"), validate=False)
+    except Exception:
+        return b""
+
+
 def _build_question_plan(
     *,
     constraints: Dict[str, Any],
@@ -440,6 +456,7 @@ def _is_followup_explain_query(query: str | None) -> bool:
             r"\b(why|detailed|detail|explain|those|these|them|that one|this one|"
             r"list them|list all|all \d+|those \d+|compare them|why this|why those|"
             r"why are they|why did you|how did you|what made you|tell me more|"
+            r"what does|how does|can you elaborate|walk me through|"
             r"why pick|why picked|why chose|why chosen|why recommend|"
             r"how is it|how are they|how are these|what.s the difference|"
             r"break it down|rank them|score them|rate them|pros and cons)\b",
@@ -2724,6 +2741,95 @@ def suggest(
     except Exception:
         pass
     severity = analysis.get("severity", "info")
+    fraud_summary: Dict[str, Any] = {}
+    try:
+        tls_fp = extract_tls_fingerprints_from_request(request) if request is not None else {}
+        source_ip_eff = str((tls_fp or {}).get("source_ip") or source_ip or "").strip()
+        fraud_session: Dict[str, Any] = {}
+        if source_ip_eff:
+            fraud_session["source_ip"] = source_ip_eff
+            fraud_session["ip"] = source_ip_eff
+        try:
+            if request is not None and getattr(request, "headers", None):
+                _device_fp = str(request.headers.get("x-device-fingerprint") or request.headers.get("x-device-id") or "").strip()
+                if _device_fp:
+                    fraud_session["device_fingerprint"] = _device_fp[:128]
+        except Exception:
+            pass
+        _ja3 = str((tls_fp or {}).get("ja3_hash") or "").strip().lower()
+        _ja4 = str((tls_fp or {}).get("ja4_hash") or "").strip().lower()
+        if _ja3:
+            fraud_session["ja3_hash"] = _ja3[:128]
+        if _ja4:
+            fraud_session["ja4_hash"] = _ja4[:128]
+        _known_ja3 = [h.strip().lower() for h in str(os.getenv("FRAUD_KNOWN_JA3_HASHES", "")).split(",") if h.strip()]
+        _known_ja4 = [h.strip().lower() for h in str(os.getenv("FRAUD_KNOWN_JA4_HASHES", "")).split(",") if h.strip()]
+        if _known_ja3:
+            fraud_session["known_fraud_ja3_hashes"] = _known_ja3
+        if _known_ja4:
+            fraud_session["known_fraud_ja4_hashes"] = _known_ja4
+        try:
+            from src.app.services.geoip import lookup as geoip_lookup
+
+            if source_ip_eff:
+                geo = geoip_lookup(source_ip_eff)
+                if geo:
+                    if geo.country:
+                        fraud_session["ip_country"] = str(geo.country).upper()
+                    if geo.asn is not None:
+                        fraud_session["asn"] = int(geo.asn)
+                    fraud_session["geo_risk"] = float(geo.risk or 0.0)
+            _billing_country = (
+                (constraints.get("locale") if isinstance(constraints.get("locale"), str) else None)
+                or (kv.get("country") if isinstance(kv, dict) else None)
+            )
+            if isinstance(_billing_country, str) and _billing_country.strip():
+                fraud_session["billing_country"] = _billing_country.strip().upper()[:2]
+            _prev_country = (kv.get("last_ip_country") if isinstance(kv, dict) else None)
+            if isinstance(_prev_country, str) and _prev_country.strip():
+                fraud_session["previous_ip_country"] = _prev_country.strip().upper()[:2]
+        except Exception:
+            pass
+        fraud = FraudScorer()
+        fraud_score, fraud_level, fraud_signals = fraud.score_with_enrichment(
+            base_signals={},
+            expected_serial=None,
+            observed_serial=None,
+            image_phash=str(image_context.get("hash") or ""),
+            session_data=fraud_session,
+            case_id=trace_id,
+        )
+        fraud_summary = {
+            "score": round(float(fraud_score), 4),
+            "level": str(fraud_level),
+            "signals": fraud_signals,
+            "ja3_hash": _ja3 or None,
+            "ja4_hash": _ja4 or None,
+            "source_ip": source_ip_eff or None,
+            "ip_country": fraud_session.get("ip_country"),
+            "asn": fraud_session.get("asn"),
+        }
+        try:
+            if isinstance(kv, dict):
+                kv["last_ip_country"] = fraud_session.get("ip_country")
+                kv["last_asn"] = fraud_session.get("asn")
+                mem.set_kv(uid, kv)
+        except Exception:
+            pass
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="fraud_score",
+                source_type="agent",
+                source_id="Fraud_Scoring_Agent",
+                target_type="system",
+                target_id=None,
+                payload=fraud_summary,
+            )
+        except Exception:
+            pass
+    except Exception:
+        fraud_summary = {}
 
     budget = TokenBudget(redis)
     tier = infer_tier(uid)
@@ -2904,6 +3010,18 @@ def suggest(
         },
     )
     nlp_ms = int((time.perf_counter() - nlp_start) * 1000)
+    followup_explain = _is_followup_explain_query(query)
+    complexity_context = {
+        "conversation_turn": int(kv.get("conversation_turn") or 0),
+        "has_image": bool(
+            image_context.get("labels")
+            or image_context.get("ocr")
+            or image_context.get("hash")
+            or incoming_image_payload
+        ),
+        "followup_explain": bool(followup_explain),
+    }
+
     # Expanded rules to reduce LLM usage when deterministic handling is sufficient
     rule_eval = RuleEngine().evaluate(query, {"nlp": nlp})
     if rule_eval.get("handled"):
@@ -2924,9 +3042,9 @@ def suggest(
     ollama_meta: Dict[str, Any] = {}
     ollama_rollout = _resolve_ollama_intent_rollout(flags, uid=uid, trace_id=trace_id)
     try:
-        model = select_ollama_model(query_effective)
-        complex_bool = is_complex_query(query_effective)
-        reason = complexity_explain(query_effective)
+        model = select_ollama_model(query_effective, context=complexity_context)
+        complex_bool = is_complex_query(query_effective, context=complexity_context)
+        reason = complexity_explain(query_effective, context=complexity_context)
         path = [os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b")] + ([os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")] if complex_bool else [])
         action = "escalate_to_big" if complex_bool else "prefer_small"
         rule_summary = _rule_intent_summary(query_effective, nlp if isinstance(nlp, dict) else {})
@@ -3006,8 +3124,8 @@ def suggest(
             },
         }
     except Exception:
-        r = complexity_explain(query_effective)
-        cb = is_complex_query(query_effective)
+        r = complexity_explain(query_effective, context=complexity_context)
+        cb = is_complex_query(query_effective, context=complexity_context)
         ollama_meta = {
             "provider": "rules",
             "model": None,
@@ -3031,8 +3149,8 @@ def suggest(
             },
         }
     if not ollama_meta:
-        r = complexity_explain(query_effective)
-        cb = is_complex_query(query_effective)
+        r = complexity_explain(query_effective, context=complexity_context)
+        cb = is_complex_query(query_effective, context=complexity_context)
         action = "escalate_to_big" if cb else "prefer_small"
         ollama_meta = {
             "model": None,
@@ -3061,7 +3179,6 @@ def suggest(
     complexity_signals = (ollama_meta.get("decision") or {}).get("triggers") or ollama_meta.get("reason") or {}
 
     parsed = service.parse_constraints(query_effective)
-    followup_explain = _is_followup_explain_query(query)
     explanation_request = _is_selection_rationale_query(query_effective)
     explicit_constraint_update = _has_explicit_constraint_update(parsed, query)
     followup_contract = _build_followup_contract(query, nlp.get("intent_chain") if isinstance(nlp, dict) else [])
@@ -3590,15 +3707,33 @@ def suggest(
     # ── Product Identity Agent: extract identity from image labels/OCR text ──
     _identity_constraints: Dict[str, Any] = {}
     _id_result: Dict[str, Any] = {}
+    _id_source = "none"
     try:
-        if image_context.get("labels") or image_context.get("ocr"):
-            from src.app.services.product_identity_agent import identify_product_from_text, specs_to_constraints as _id_to_constraints
+        from src.app.services.product_identity_agent import (
+            identify_product_from_image,
+            identify_product_from_text,
+            specs_to_constraints as _id_to_constraints,
+        )
+        _image_blob = _decode_session_image_blob(kv if isinstance(kv, dict) else {}, image_context.get("hash"))
+        _vision_min_conf = float(os.getenv("CV_IDENTITY_IMAGE_MIN_CONF", "0.6") or 0.6)
+        if _image_blob:
+            _id_candidate = identify_product_from_image(
+                _image_blob,
+                user_query=query or "",
+                trace_id=trace_id,
+            )
+            if bool(_id_candidate.get("identified")) and float(_id_candidate.get("confidence") or 0.0) >= _vision_min_conf:
+                _id_result = _id_candidate
+                _id_source = "vision_image"
+        if (not _id_result) and (image_context.get("labels") or image_context.get("ocr")):
             _id_result = identify_product_from_text(
                 labels=image_context.get("labels") or [],
                 ocr_text=image_context.get("ocr") or "",
                 user_query=query or "",
                 trace_id=trace_id,
             )
+            _id_source = "text_heuristic"
+        if _id_result:
             if _id_result.get("identified"):
                 _identity_constraints = _id_to_constraints(_id_result)
                 # Merge identity constraints into the main constraints dict
@@ -3636,6 +3771,7 @@ def suggest(
                         "form_factor": _identity_constraints.get("identity_form_factor"),
                         "product_type": _identity_constraints.get("identity_product_type"),
                         "confidence": _id_result.get("confidence"),
+                        "source": _id_source,
                         "constraints_added": list(_identity_constraints.keys()),
                     },
                 )
@@ -5496,6 +5632,7 @@ def suggest(
         "llm_model": llm_model,
         "model_tier": model_tier,
         "complexity_signals": complexity_signals,
+        "fraud": fraud_summary,
         "turn_type": turn_type,
         "referents": referents,
         "memory_confidence": round(float(memory_confidence), 4),
@@ -5505,6 +5642,7 @@ def suggest(
             {
                 **(analysis.get("details") or {}),
                 "risk_quantification": risk_quantification,
+                "fraud": fraud_summary,
             },
             severity,
         ),
@@ -6013,7 +6151,8 @@ def suggest(
     if _identity_constraints:
         payload["product_identity"] = {
             "constraints": _identity_constraints,
-            "source": "text_heuristic",
+            "source": _id_source,
+            "confidence": _id_result.get("confidence"),
         }
     if not results:
         try:
