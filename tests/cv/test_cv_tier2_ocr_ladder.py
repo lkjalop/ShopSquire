@@ -31,3 +31,24 @@ def test_cv_tier2_ocr_fallback_ladder_and_clarifier(monkeypatch):
     if (out.get("clarifiers") or []):
         assert (out.get("clarifiers") or [])[0].get("type") == "ocr_low_confidence"
 
+
+def test_cv_tier2_marks_ocr_degradation_tag(monkeypatch):
+    from src.app.services import cv_tier2_pipeline as t2
+
+    def _fake_extract(image_bytes, provider=None, fallback=None):
+        return {
+            "text": "",
+            "boxes": [],
+            "provider": provider or "tesseract",
+            "confidence": 0.0,
+            "error": "tesseract_binary_missing",
+            "degraded": True,
+            "degradation_reason": "tesseract_binary_missing",
+        }
+
+    monkeypatch.setattr(t2, "extract_text", _fake_extract)
+    out = t2.run_tier2(b"fake-image", meta={"case_id": "case-degraded"}, pack_id="agnostic_v1")
+    tags = out.get("evidence_tags") or []
+    assert "cv_ocr_degraded" in tags
+    ladder = (out.get("robustness") or {}).get("ocr_ladder") or {}
+    assert ladder.get("degraded") is True

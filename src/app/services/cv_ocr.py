@@ -33,6 +33,16 @@ def _embedded_ocr(image_bytes: bytes) -> Dict[str, Any]:
     return {"text": text[:2000], "confidence": 0.95, "boxes": boxes, "provider": "embedded"}
 
 
+def _annotate_degradation(out: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(out or {})
+    txt = str(payload.get("text") or "").strip()
+    err = str(payload.get("error") or "").strip()
+    degraded = bool((not txt) and err)
+    payload["degraded"] = degraded
+    payload["degradation_reason"] = err[:200] if degraded else None
+    return payload
+
+
 def _tesseract_ocr(image_bytes: bytes) -> Dict[str, Any]:
     try:
         from PIL import Image
@@ -119,18 +129,18 @@ def extract_text(image_bytes: bytes, provider: str | None = None, fallback: str 
     # Allow tests/integration to override without editing model packs.
     provider = (os.getenv("CV_OCR_PROVIDER") or provider or "tesseract").lower()
     if provider in ("disabled", "none", "off"):
-        return {"text": "", "confidence": 0.0, "boxes": [], "error": None, "provider": "disabled"}
+        return _annotate_degradation({"text": "", "confidence": 0.0, "boxes": [], "error": None, "provider": "disabled"})
     if provider == "paddle":
         out = _paddle_ocr(image_bytes)
         if out.get("text") or not fallback:
-            return out
-        return _tesseract_ocr(image_bytes)
+            return _annotate_degradation(out)
+        return _annotate_degradation(_tesseract_ocr(image_bytes))
     if provider == "embedded":
         out = _embedded_ocr(image_bytes)
         if out.get("text") or not fallback:
-            return out
+            return _annotate_degradation(out)
         # If embedded text is missing, honor fallback behavior.
         return extract_text(image_bytes, provider=fallback, fallback=None)
     if provider == "tesseract":
-        return _tesseract_ocr(image_bytes)
-    return _tesseract_ocr(image_bytes)
+        return _annotate_degradation(_tesseract_ocr(image_bytes))
+    return _annotate_degradation(_tesseract_ocr(image_bytes))

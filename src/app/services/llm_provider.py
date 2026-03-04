@@ -190,8 +190,8 @@ def score_query_complexity(
 # ---------------------------------------------------------------------------
 # Backward-compatible wrappers (used throughout codebase)
 # ---------------------------------------------------------------------------
-def is_complex_query(query: str) -> bool:
-    result = score_query_complexity(query)
+def is_complex_query(query: str, *, context: Optional[Dict[str, Any]] = None) -> bool:
+    result = score_query_complexity(query, context=context)
     return result["score"] >= 5
 
 

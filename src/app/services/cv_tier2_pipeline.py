@@ -251,11 +251,15 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         "selected_provider": ocr.get("provider"),
         "selected_confidence": ocr_conf,
         "fallback_used": False,
+        "degraded": bool(ocr.get("degraded")),
+        "degradation_reason": ocr.get("degradation_reason") or ocr.get("error"),
     }
     ocr_text = ocr.get("text") or ""
     ocr_boxes = ocr.get("boxes") or []
     document_like = _detect_document_like(ocr_boxes)
     evidence_tags: List[str] = []
+    if bool(ocr.get("degraded")):
+        evidence_tags.append("cv_ocr_degraded")
     doc_schema: Dict[str, Any] = {}
     try:
         doc_schema = extract_document_schema(ocr_text)

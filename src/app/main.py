@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import shutil
+import subprocess
 from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -84,6 +86,75 @@ def _is_non_dev_env() -> bool:
     return env not in ("local", "dev", "development", "test")
 
 
+def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
+    """Return CV OCR runtime readiness, including OS-level binary checks."""
+    selected = (provider or os.getenv("CV_OCR_PROVIDER", "auto") or "auto").strip().lower()
+    deps: dict[str, bool] = {}
+    for pkg in ("pytesseract", "cv2", "paddleocr", "pyzbar"):
+        try:
+            __import__(pkg)
+            deps[pkg] = True
+        except Exception:
+            deps[pkg] = False
+
+    runtime: dict[str, Any] = {}
+    reasons: list[str] = []
+
+    # pytesseract requires a runtime binary; import success alone is insufficient.
+    tess_path = shutil.which("tesseract")
+    runtime["tesseract_path"] = tess_path
+    runtime["tesseract_bin"] = bool(tess_path)
+    if deps.get("pytesseract") and tess_path:
+        try:
+            proc = subprocess.run([tess_path, "--version"], capture_output=True, text=True, timeout=2)
+            runtime["tesseract_version_ok"] = proc.returncode == 0
+            if proc.returncode != 0:
+                reasons.append("tesseract_version_probe_failed")
+        except Exception:
+            runtime["tesseract_version_ok"] = False
+            reasons.append("tesseract_version_probe_failed")
+    elif deps.get("pytesseract") and not tess_path:
+        reasons.append("tesseract_binary_missing")
+
+    # pyzbar requires libzbar runtime.
+    if deps.get("pyzbar"):
+        try:
+            from pyzbar.pyzbar import decode as _decode  # type: ignore
+
+            runtime["pyzbar_runtime"] = bool(_decode)
+        except Exception:
+            runtime["pyzbar_runtime"] = False
+            reasons.append("pyzbar_runtime_missing")
+    else:
+        runtime["pyzbar_runtime"] = False
+
+    if selected in ("disabled", "none", "off", "embedded"):
+        ready = True
+    elif selected == "tesseract":
+        ready = bool(deps.get("pytesseract") and runtime.get("tesseract_bin"))
+        if not ready:
+            reasons.append("tesseract_provider_not_ready")
+    elif selected == "paddle":
+        ready = bool(deps.get("paddleocr") and deps.get("cv2"))
+        if not ready:
+            reasons.append("paddle_provider_not_ready")
+    else:
+        ready = bool(
+            (deps.get("paddleocr") and deps.get("cv2"))
+            or (deps.get("pytesseract") and runtime.get("tesseract_bin"))
+        )
+        if not ready:
+            reasons.append("no_available_ocr_provider")
+
+    return {
+        "provider": selected,
+        "ready": bool(ready),
+        "deps": deps,
+        "runtime": runtime,
+        "reasons": list(dict.fromkeys([str(r) for r in reasons if str(r)])),
+    }
+
+
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -152,6 +223,16 @@ def create_app() -> FastAPI:
                 threading.Thread(target=_warm, daemon=True).start()
         except Exception:
             pass
+        try:
+            import logging
+
+            app.state.cv_ocr_smoke = _cv_ocr_runtime_snapshot()
+            if not bool((app.state.cv_ocr_smoke or {}).get("ready")):
+                logging.getLogger("shopsquire.startup").warning(
+                    "cv_ocr_runtime_not_ready: %s", app.state.cv_ocr_smoke
+                )
+        except Exception:
+            app.state.cv_ocr_smoke = {"ready": False, "error": "cv_ocr_smoke_check_failed"}
         try:
             from src.app.services.trace_broker import start_stream_consumer
             await start_stream_consumer()
@@ -1006,18 +1087,14 @@ def create_app() -> FastAPI:
             _set_component("ollama", False, {"url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"), "error": str(exc)})
 
         try:
-            provider = (os.getenv("CV_OCR_PROVIDER", "auto") or "auto").strip().lower()
-            deps: dict[str, bool] = {}
-            for pkg in ("pytesseract", "cv2", "paddleocr"):
-                try:
-                    __import__(pkg)
-                    deps[pkg] = True
-                except Exception:
-                    deps[pkg] = False
-            provider_ready = bool(deps.get("paddleocr") or deps.get("pytesseract"))
-            _set_component("cv_ocr", provider_ready, {"provider": provider, "deps": deps})
+            cv_smoke = _cv_ocr_runtime_snapshot()
+            _set_component("cv_ocr", bool(cv_smoke.get("ready")), cv_smoke)
         except Exception as exc:
-            _set_component("cv_ocr", False, {"provider": os.getenv("CV_OCR_PROVIDER", "auto"), "error": str(exc)})
+            _set_component(
+                "cv_ocr",
+                False,
+                {"provider": os.getenv("CV_OCR_PROVIDER", "auto"), "error": str(exc)},
+            )
 
         status = "ok" if ok else "unavailable"
         code = 200 if ok else 503

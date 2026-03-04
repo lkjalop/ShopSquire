@@ -28,5 +28,7 @@ class OCRPipeline:
             "boxes": out.get("boxes") or [],
             "provider": out.get("provider"),
             "error": out.get("error"),
+            "degraded": bool(out.get("degraded")),
+            "degradation_reason": out.get("degradation_reason"),
             "fields": fields,
         }

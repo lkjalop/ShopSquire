@@ -15,3 +15,14 @@ def test_select_ollama_model_defaults():
     # Defaults are set in service; ensure returns a non-empty model
     m = select_ollama_model("budget under $1000")
     assert isinstance(m, str) and len(m) > 0
+
+
+def test_select_ollama_model_uses_multimodal_context():
+    q = "compare alternatives like this under $1500"
+    without_img = select_ollama_model(q, context={"has_image": False})
+    with_img = select_ollama_model(q, context={"has_image": True})
+    assert without_img != ""
+    assert with_img != ""
+    # With image context, scorer should add multimodal + visual-similarity
+    # signals and route to a higher-capacity tier than text-only.
+    assert with_img != without_img
