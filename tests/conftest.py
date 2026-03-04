@@ -3,6 +3,9 @@ import asyncio
 import tempfile
 import uuid
 import threading
+from pathlib import Path
+
+import pytest
 
 
 _ORIG_ASYNCIO_RUN = asyncio.run
@@ -52,3 +55,19 @@ def pytest_sessionstart(session):
     os.environ.setdefault("PLAYBOOK_SCHEDULER_ENABLED", "0")
     os.environ.setdefault("PLAYBOOK_AUTORUN_ENABLED", "0")
     os.environ.setdefault("DISABLE_TRACING", "1")
+
+
+@pytest.fixture(autouse=True)
+def restore_feature_flags_file():
+    flags_path = Path(os.environ.get("FEATURE_FLAGS_PATH", "config/feature_flags.json"))
+    existed = flags_path.exists()
+    original = flags_path.read_bytes() if existed else None
+    yield
+    try:
+        if existed and original is not None:
+            flags_path.parent.mkdir(parents=True, exist_ok=True)
+            flags_path.write_bytes(original)
+        elif not existed and flags_path.exists():
+            flags_path.unlink()
+    except Exception:
+        pass

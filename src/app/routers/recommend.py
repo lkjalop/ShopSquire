@@ -2165,7 +2165,7 @@ def suggest(
         api_key_id=(request.headers.get("x-api-key") if request else None),
     )
     benign_shopping_query = (not _query_signals_unsupported_intent(query)) and not _query_signals_off_domain(query)
-    if not policy_gate_ok and not benign_shopping_query:
+    if not policy_gate_ok:
         raise HTTPException(
             status_code=429,
             detail={"message": "Request blocked by model theft policy gate", "reason": policy_gate_reason},
@@ -2190,7 +2190,7 @@ def suggest(
     )
     if bool(probe_result.get("detected")):
         block_probe = str(os.getenv("MODEL_THEFT_BLOCK_SYSTEMATIC_PROBING", "1")).lower() in ("1", "true", "yes")
-        if block_probe and not benign_shopping_query:
+        if block_probe:
             raise HTTPException(
                 status_code=429,
                 detail={
