@@ -132,6 +132,42 @@ def _ip2location_lookup(ip: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _ip_api_lookup(ip: str) -> Optional[Dict[str, Any]]:
+    """Free ip-api.com lookup (45 req/min, no key needed). HTTP only."""
+    if str(os.getenv("GEOIP_DISABLE_IP_API", "")).strip().lower() in ("1", "true"):
+        return None
+    try:
+        import httpx
+
+        # ip-api.com free tier: HTTP only, 45 req/min
+        url = f"http://ip-api.com/json/{ip}?fields=status,countryCode,isp,org,as,hosting,proxy,query"
+        r = httpx.get(url, timeout=2.0)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if data.get("status") != "success":
+            return None
+        as_str = data.get("as") or ""
+        asn_num = None
+        if as_str:
+            # Format: "AS15169 Google LLC"
+            parts = as_str.split(None, 1)
+            if parts and parts[0].upper().startswith("AS"):
+                try:
+                    asn_num = int(parts[0][2:])
+                except (ValueError, IndexError):
+                    pass
+        return {
+            "asn": asn_num,
+            "asn_org": data.get("isp") or data.get("org"),
+            "country": data.get("countryCode"),
+            "is_hosting": bool(data.get("hosting")),
+            "is_vpn": bool(data.get("proxy")),
+        }
+    except Exception:
+        return None
+
+
 def _override_match(ip: str) -> Optional[Dict[str, Any]]:
     import ipaddress
 
@@ -178,19 +214,20 @@ def _risk_from_asn(asn: Optional[int], org: Optional[str], country: Optional[str
 def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
     if not ip:
         return {}
-    cached = _cache.get(ip)
-    if cached:
-        record_geoip_cache_hit()
-        return cached
     record_geoip_lookup()
 
-    result: Dict[str, Any] = {}
+    # Evaluate CIDR overrides before cache so local policy changes apply
+    # immediately even when the IP was previously cached from provider data.
     override = _override_match(ip)
     if override:
         result = override
     else:
-        # Provider chain: MaxMind (local) → IP2Location (API) → defaults
-        provider_data = _mmdb_lookup(ip) or _ip2location_lookup(ip) or {}
+        cached = _cache.get(ip)
+        if cached:
+            record_geoip_cache_hit()
+            return cached
+        # Provider chain: MaxMind (local) -> IP2Location (API) -> ip-api.com (free) -> defaults
+        provider_data = _mmdb_lookup(ip) or _ip2location_lookup(ip) or _ip_api_lookup(ip) or {}
         asn = provider_data.get("asn")
         org = provider_data.get("asn_org")
         cc = provider_data.get("country") or os.getenv("GEOIP_COUNTRY_DEFAULT")
@@ -224,7 +261,6 @@ def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
     _cache.set(ip, result)
     return result
 
-
 def resolve_asn_country(ip: Optional[str]) -> Tuple[Optional[int], Optional[str]]:
     enriched = enrich_ip(ip)
     return enriched.get("asn"), enriched.get("country")
@@ -257,3 +293,4 @@ def lookup(ip: Optional[str]) -> Optional[GeoResult]:
         risk=max(0.0, min(1.0, risk)),
         matched_override=bool(enriched.get("matched_override")),
     )
+

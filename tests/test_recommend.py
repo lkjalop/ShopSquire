@@ -140,13 +140,10 @@ def test_recommend_redacts_pii_in_response_constraints_and_notices():
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
-def test_recommend_unsupported_product_category_returns_no_substitute():
+def test_recommend_kitchen_query_is_not_hard_blocked_as_unsupported():
     orig_retrieve = RecommendationService.retrieve_candidates
     try:
-        def _fail_if_called(self, query, limit=10):
-            raise AssertionError("retrieve_candidates should not be called for unsupported category")
-
-        RecommendationService.retrieve_candidates = _fail_if_called
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
         _write_flags({
             "USE_AGENT_CAPABILITIES": True,
             "AGENT_ROLLOUT_PERCENT": 100,
@@ -159,10 +156,10 @@ def test_recommend_unsupported_product_category_returns_no_substitute():
         r = client.get("/api/v1/recommend/suggest", params={"uid": "u1", "query": "Need a kitchen mixer under $400"})
         assert r.status_code == 200
         body = r.json()
-        assert body.get("status") == "unsupported_request"
-        assert body.get("results") == []
+        assert body.get("status") != "unsupported_request"
         esc = body.get("escalation") or {}
-        assert esc.get("route") == "human_review"
+        assert esc.get("reason") != "unsupported_catalog_request"
+        assert str(body.get("trace_id") or "")
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
 

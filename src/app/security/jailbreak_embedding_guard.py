@@ -52,10 +52,11 @@ _seed_cache_provider: str = ""
 
 
 def _invalidate_seed_cache_if_provider_changed(provider: str) -> None:
-    global _seed_cache, _seed_cache_provider
+    global _seed_cache_provider
     with _seed_cache_lock:
         if _seed_cache_provider != provider:
-            _seed_cache = {}
+            # Clear in place so external references (tests/importers) remain valid.
+            _seed_cache.clear()
             _seed_cache_provider = provider
 
 
