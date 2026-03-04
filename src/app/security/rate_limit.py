@@ -1,18 +1,141 @@
 from __future__ import annotations
 
-import time
+import hashlib
+import os
 import threading
-from typing import Dict, Tuple
-from fastapi import Request, HTTPException
+import time
+from typing import Dict, Tuple, Optional
+
+from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# Simple in-memory sliding window rate limiter. In production replace driver with Redis.
+from src.app.deps import get_redis
 
+# Fallback local stores when Redis is unavailable (dev/test).
 _LOCK = threading.Lock()
 _STATE: Dict[str, Tuple[float, int]] = {}
+_CONCURRENCY_STATE: Dict[str, int] = {}
 
-DEFAULT_PER_MIN_KEY = int(__import__("os").getenv("RATE_LIMIT_PER_MINUTE_KEY", "120"))
-DEFAULT_PER_MIN_IP = int(__import__("os").getenv("RATE_LIMIT_PER_MINUTE_IP", "60"))
+DEFAULT_PER_MIN_KEY = int(os.getenv("RATE_LIMIT_PER_MINUTE_KEY", "120"))
+DEFAULT_PER_MIN_IP = int(os.getenv("RATE_LIMIT_PER_MINUTE_IP", "60"))
+
+
+def _hash_token(value: str) -> str:
+    raw = str(value or "").encode("utf-8", errors="ignore")
+    return hashlib.sha256(raw).hexdigest()[:24]
+
+
+def _redis_client():
+    try:
+        r = get_redis()
+        if r.__class__.__name__ == "DummyRedis":
+            return None
+        return r
+    except Exception:
+        return None
+
+
+def consume_fixed_window_limit(
+    *,
+    key: str,
+    limit: int,
+    window_sec: int,
+    fallback_store: Optional[Dict[str, Tuple[float, int]]] = None,
+    now_ts: Optional[float] = None,
+) -> bool:
+    """Consume one token from a fixed-window limiter.
+
+    Returns True when request is allowed, False when over limit.
+    """
+    if int(limit or 0) <= 0:
+        return True
+    win = max(1, int(window_sec or 60))
+    redis_key = f"ratelimit:fw:{key}"
+
+    r = _redis_client()
+    if r is not None:
+        try:
+            cnt = int(r.incrby(redis_key, 1) or 0)
+            if cnt == 1:
+                r.expire(redis_key, win)
+            return cnt <= int(limit)
+        except (AttributeError, TypeError, ValueError, RuntimeError):
+            # Fall through to in-memory fallback.
+            pass
+
+    store = fallback_store if isinstance(fallback_store, dict) else _STATE
+    now = float(now_ts if now_ts is not None else time.time())
+    with _LOCK:
+        ts, cnt = store.get(key, (now, 0))
+        if now - float(ts) >= float(win):
+            ts, cnt = now, 0
+        cnt = int(cnt) + 1
+        store[key] = (ts, cnt)
+        return cnt <= int(limit)
+
+
+def acquire_concurrency_slot(
+    *,
+    key: str,
+    limit: int,
+    ttl_sec: int = 60,
+    fallback_store: Optional[Dict[str, int]] = None,
+) -> bool:
+    """Acquire a distributed concurrency slot.
+
+    Returns True if slot acquired, False when capacity is exhausted.
+    """
+    if int(limit or 0) <= 0:
+        return True
+    ttl = max(1, int(ttl_sec or 60))
+    redis_key = f"ratelimit:conc:{key}"
+
+    r = _redis_client()
+    if r is not None:
+        try:
+            cnt = int(r.incrby(redis_key, 1) or 0)
+            if cnt == 1:
+                r.expire(redis_key, ttl)
+            if cnt > int(limit):
+                try:
+                    r.incrby(redis_key, -1)
+                except Exception:
+                    pass
+                return False
+            return True
+        except (AttributeError, TypeError, ValueError, RuntimeError):
+            pass
+
+    store = fallback_store if isinstance(fallback_store, dict) else _CONCURRENCY_STATE
+    with _LOCK:
+        cur = int(store.get(key, 0))
+        if cur >= int(limit):
+            return False
+        store[key] = cur + 1
+        return True
+
+
+def release_concurrency_slot(*, key: str, fallback_store: Optional[Dict[str, int]] = None) -> None:
+    redis_key = f"ratelimit:conc:{key}"
+    r = _redis_client()
+    if r is not None:
+        try:
+            rem = int(r.incrby(redis_key, -1) or 0)
+            if rem <= 0:
+                r.delete(redis_key)
+            return
+        except (AttributeError, TypeError, ValueError, RuntimeError):
+            pass
+
+    store = fallback_store if isinstance(fallback_store, dict) else _CONCURRENCY_STATE
+    with _LOCK:
+        cur = int(store.get(key, 0))
+        nxt = cur - 1
+        if nxt <= 0:
+            store.pop(key, None)
+        else:
+            store[key] = nxt
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, per_min_key: int = DEFAULT_PER_MIN_KEY, per_min_ip: int = DEFAULT_PER_MIN_IP):
@@ -22,43 +145,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         try:
-            # Non-positive values mean rate limiting is disabled for that scope.
             enforce_key = self.per_min_key > 0
             enforce_ip = self.per_min_ip > 0
             if not enforce_key and not enforce_ip:
                 return await call_next(request)
 
-            now = time.time()
-            # determine bucket keys
-            hdr_key = request.headers.get("x-api-key") or request.cookies.get("shopsquire_api_key") or "anon"
+            hdr_raw = request.headers.get("x-api-key") or request.cookies.get("shopsquire_api_key") or "anon"
+            hdr_key = _hash_token(hdr_raw)
             ip = request.client.host if request.client else "unknown"
-            key_bucket = f"k:{hdr_key}"
-            ip_bucket = f"i:{ip}"
-            over = False
-            reason = None
-            with _LOCK:
-                # key bucket
-                ts, cnt = _STATE.get(key_bucket, (now, 0))
-                if now - ts >= 60:
-                    ts, cnt = now, 0
-                cnt += 1
-                _STATE[key_bucket] = (ts, cnt)
-                if enforce_key and cnt > self.per_min_key:
-                    over = True
-                    reason = f"key_rate_limit_exceeded ({self.per_min_key}/min)"
-                # ip bucket
-                ts2, cnt2 = _STATE.get(ip_bucket, (now, 0))
-                if now - ts2 >= 60:
-                    ts2, cnt2 = now, 0
-                cnt2 += 1
-                _STATE[ip_bucket] = (ts2, cnt2)
-                if enforce_ip and cnt2 > self.per_min_ip:
-                    over = True
-                    reason = f"ip_rate_limit_exceeded ({self.per_min_ip}/min)"
-            if over:
-                raise HTTPException(status_code=429, detail=reason)
+            key_bucket = f"key:{hdr_key}"
+            ip_bucket = f"ip:{ip}"
+
+            if enforce_key and not consume_fixed_window_limit(key=key_bucket, limit=self.per_min_key, window_sec=60):
+                raise HTTPException(status_code=429, detail=f"key_rate_limit_exceeded ({self.per_min_key}/min)")
+            if enforce_ip and not consume_fixed_window_limit(key=ip_bucket, limit=self.per_min_ip, window_sec=60):
+                raise HTTPException(status_code=429, detail=f"ip_rate_limit_exceeded ({self.per_min_ip}/min)")
         except HTTPException:
             raise
-        except Exception:
+        except (TypeError, ValueError, RuntimeError):
+            # Fail-open by design for middleware stability; detailed limits are
+            # still enforced by route-level backpressure middleware.
             pass
         return await call_next(request)

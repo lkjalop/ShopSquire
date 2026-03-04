@@ -69,6 +69,7 @@ import logging
 
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
 tracer = get_tracer("recommend-router")
+logger = logging.getLogger("shopsquire.recommend")
 
 
 class RecommendInteractionPayload(BaseModel):
@@ -130,6 +131,37 @@ def _decision_log_writes_enabled(flags: Dict[str, Any] | None) -> bool:
     except Exception:
         pass
     return bool((flags or {}).get("DECISION_LOG_WRITES_ENABLED"))
+
+
+def _trace_system_error(
+    *,
+    trace_id: str | None,
+    stage: str,
+    exc: Exception,
+    source_id: str = "Recommend_Agent",
+    extra: Dict[str, Any] | None = None,
+) -> None:
+    """Emit structured runtime failures without breaking user-facing flow."""
+    msg = str(exc)[:240]
+    logger.warning("recommend.%s_failed: %s", stage, msg)
+    if not trace_id:
+        return
+    payload: Dict[str, Any] = {"stage": stage, "error": msg}
+    if isinstance(extra, dict) and extra:
+        payload["details"] = security_sanitize(extra)
+    try:
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="system_error",
+            source_type="system",
+            source_id=source_id,
+            target_type="system",
+            target_id=None,
+            payload=payload,
+        )
+    except Exception:
+        # Never raise from error telemetry.
+        pass
 
 
 _SUPPORTED_PRODUCT_TERMS = {
@@ -2754,8 +2786,8 @@ def suggest(
                 _device_fp = str(request.headers.get("x-device-fingerprint") or request.headers.get("x-device-id") or "").strip()
                 if _device_fp:
                     fraud_session["device_fingerprint"] = _device_fp[:128]
-        except Exception:
-            pass
+        except (AttributeError, TypeError, ValueError) as exc:
+            _trace_system_error(trace_id=trace_id, stage="fraud_session.device_fingerprint", exc=exc)
         _ja3 = str((tls_fp or {}).get("ja3_hash") or "").strip().lower()
         _ja4 = str((tls_fp or {}).get("ja4_hash") or "").strip().lower()
         if _ja3:
@@ -2769,18 +2801,19 @@ def suggest(
         if _known_ja4:
             fraud_session["known_fraud_ja4_hashes"] = _known_ja4
         try:
-            from src.app.services.geoip import lookup as geoip_lookup
+            from src.app.services.geoip import enrich_ip
 
             if source_ip_eff:
-                geo = geoip_lookup(source_ip_eff)
+                geo = enrich_ip(source_ip_eff) or {}
                 if geo:
-                    if geo.country:
-                        fraud_session["ip_country"] = str(geo.country).upper()
-                    if geo.asn is not None:
-                        fraud_session["asn"] = int(geo.asn)
-                    fraud_session["geo_risk"] = float(geo.risk or 0.0)
+                    if geo.get("country"):
+                        fraud_session["ip_country"] = str(geo.get("country")).upper()
+                    if geo.get("asn") is not None:
+                        fraud_session["asn"] = int(geo.get("asn"))
+                    fraud_session["geo_risk"] = float(geo.get("risk") or 0.0)
+            _constraints = locals().get("constraints")
             _billing_country = (
-                (constraints.get("locale") if isinstance(constraints.get("locale"), str) else None)
+                (_constraints.get("locale") if isinstance(_constraints, dict) and isinstance(_constraints.get("locale"), str) else None)
                 or (kv.get("country") if isinstance(kv, dict) else None)
             )
             if isinstance(_billing_country, str) and _billing_country.strip():
@@ -2788,8 +2821,8 @@ def suggest(
             _prev_country = (kv.get("last_ip_country") if isinstance(kv, dict) else None)
             if isinstance(_prev_country, str) and _prev_country.strip():
                 fraud_session["previous_ip_country"] = _prev_country.strip().upper()[:2]
-        except Exception:
-            pass
+        except (ImportError, RuntimeError, TypeError, ValueError) as exc:
+            _trace_system_error(trace_id=trace_id, stage="fraud_session.geoip", exc=exc, extra={"source_ip": source_ip_eff})
         fraud = FraudScorer()
         fraud_score, fraud_level, fraud_signals = fraud.score_with_enrichment(
             base_signals={},
@@ -2814,8 +2847,8 @@ def suggest(
                 kv["last_ip_country"] = fraud_session.get("ip_country")
                 kv["last_asn"] = fraud_session.get("asn")
                 mem.set_kv(uid, kv)
-        except Exception:
-            pass
+        except (TypeError, ValueError, RuntimeError) as exc:
+            _trace_system_error(trace_id=trace_id, stage="fraud_session.persist", exc=exc, extra={"uid": uid})
         try:
             log_trace_event(
                 trace_id=trace_id,
@@ -2826,9 +2859,10 @@ def suggest(
                 target_id=None,
                 payload=fraud_summary,
             )
-        except Exception:
-            pass
-    except Exception:
+        except (TypeError, ValueError, RuntimeError) as exc:
+            _trace_system_error(trace_id=trace_id, stage="fraud_summary.trace_emit", exc=exc)
+    except (TypeError, ValueError, RuntimeError, ImportError) as exc:
+        _trace_system_error(trace_id=trace_id, stage="fraud_summary.build", exc=exc)
         fraud_summary = {}
 
     budget = TokenBudget(redis)

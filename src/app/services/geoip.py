@@ -228,3 +228,32 @@ def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
 def resolve_asn_country(ip: Optional[str]) -> Tuple[Optional[int], Optional[str]]:
     enriched = enrich_ip(ip)
     return enriched.get("asn"), enriched.get("country")
+
+
+def lookup(ip: Optional[str]) -> Optional[GeoResult]:
+    """Backward-compatible GeoIP contract used by fraud/recommend codepaths.
+
+    Prefer ``enrich_ip`` for new code. This adapter preserves the historical
+    object-shaped return expected by callers.
+    """
+    enriched = enrich_ip(ip)
+    if not enriched:
+        return None
+    try:
+        asn_raw = enriched.get("asn")
+        asn = int(asn_raw) if asn_raw is not None else None
+    except (TypeError, ValueError):
+        asn = None
+    try:
+        risk = float(enriched.get("risk", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        risk = 0.0
+    return GeoResult(
+        asn=asn,
+        asn_org=str(enriched.get("asn_org")) if enriched.get("asn_org") else None,
+        country=str(enriched.get("country")).upper() if enriched.get("country") else None,
+        is_hosting=bool(enriched.get("is_hosting")),
+        is_vpn=bool(enriched.get("is_vpn")),
+        risk=max(0.0, min(1.0, risk)),
+        matched_override=bool(enriched.get("matched_override")),
+    )

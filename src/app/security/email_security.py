@@ -6,6 +6,7 @@ import zipfile
 import io
 import re
 import os
+import logging
 
 from src.app.observability.telemetry import telemetry_emit
 from src.app.config import load_feature_flags, get_settings
@@ -39,11 +40,28 @@ from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.services.trust_routing import fuse_security_trust_score
 
 _RATE_BUCKETS: dict[str, list[float]] = {}
+logger = logging.getLogger("shopsquire.email_security")
 
 
 def _hash16(value: str | None) -> str | None:
     if not value:
         return None
+
+
+def _record_runtime_error(
+    errors: list[dict[str, Any]],
+    *,
+    stage: str,
+    exc: Exception,
+    severity: str = "warning",
+    details: Dict[str, Any] | None = None,
+) -> None:
+    msg = str(exc)[:240]
+    logger.warning("email_security.%s_failed: %s", stage, msg)
+    row: dict[str, Any] = {"stage": stage, "error": msg, "severity": severity}
+    if isinstance(details, dict) and details:
+        row["details"] = details
+    errors.append(row)
     try:
         return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
     except Exception:
@@ -623,6 +641,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     rt_cfg = ff.get("TICKET_RATE_LIMIT", {"enabled": False, "per_min": 5})
     per_min = int(rt_cfg.get("per_min", 5))
     enabled = bool(rt_cfg.get("enabled", False))
+    runtime_errors: list[dict[str, Any]] = []
 
     # Normalize auth fields from both flat and nested payload styles.
     try:
@@ -1018,8 +1037,13 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 severity="warning",
                 sourcetype="shopsquire:security",
             )
-        except Exception:
-            pass
+        except (TypeError, ValueError, RuntimeError) as exc:
+            _record_runtime_error(
+                runtime_errors,
+                stage="load_shed.telemetry_emit",
+                exc=exc,
+                details={"tenant_id": tenant_id, "load_shed_active": bool(load_shed.get("active"))},
+            )
     # P1 enrichment and safe detonation (best-effort, non-blocking) with flood load-shed.
     enrichment_error = None
     detonation_error = None
@@ -1047,8 +1071,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             from src.app.observability.metrics import record_email_enrichment_latency
 
             record_email_enrichment_latency("local_cache", max(0.0, enrichment_t1 - enrichment_t0))
-        except Exception:
-            pass
+        except (TypeError, ValueError, RuntimeError) as exc:
+            _record_runtime_error(runtime_errors, stage="metrics.record_email_enrichment_latency", exc=exc)
         detonation_t0 = time.perf_counter()
         try:
             urls = [str(x.get("value") or "") for x in (v.get("iocs") or []) if str(x.get("type") or "") == "url" and x.get("value")]
@@ -1062,8 +1086,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             from src.app.observability.metrics import record_email_detonation_latency
 
             record_email_detonation_latency(str(detonation.get("provider") or "none"), max(0.0, detonation_t1 - detonation_t0))
-        except Exception:
-            pass
+        except (TypeError, ValueError, RuntimeError) as exc:
+            _record_runtime_error(runtime_errors, stage="metrics.record_email_detonation_latency", exc=exc)
     try:
         v["enrichment"] = enrichment
         v["detonation"] = detonation
@@ -1103,8 +1127,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["sender_trust"] = trust
         if isinstance(v.get("evidence_snapshot"), dict):
             v["evidence_snapshot"]["sender_trust"] = trust
-    except Exception:
-        pass
+    except (TypeError, ValueError, RuntimeError) as exc:
+        _record_runtime_error(runtime_errors, stage="enrichment.assign_results", exc=exc)
     phishing_page_stage = {}
     try:
         urls = [str(x.get("value") or "") for x in (v.get("iocs") or []) if str(x.get("type") or "") == "url" and x.get("value")]
@@ -1127,7 +1151,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["phishing_landing_page_review"]))
         if isinstance(v.get("evidence_snapshot"), dict):
             v["evidence_snapshot"]["phishing_page_stage"] = phishing_page_stage or {}
-    except Exception:
+    except (TypeError, ValueError, RuntimeError) as exc:
+        _record_runtime_error(runtime_errors, stage="phishing_page_stage", exc=exc)
         phishing_page_stage = {}
 
     # Trust-score fusion: sender trust + IOC + sandbox + ingest controls -> progressive access policy.
@@ -1346,23 +1371,23 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                         from src.app.observability.metrics import record_email_security_ticket
 
                         record_email_security_ticket(tenant_id, v["severity"])
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                    except (TypeError, ValueError, RuntimeError) as exc:
+                        _record_runtime_error(runtime_errors, stage="metrics.record_email_security_ticket", exc=exc)
+                except (TypeError, ValueError, RuntimeError) as exc:
+                    _record_runtime_error(runtime_errors, stage="ticket.create", exc=exc)
         else:
             # Emit aggregation telemetry but do not open ticket
             ticket_rate_limited = True
             try:
                 telemetry_emit({"type": "email_security", "subtype": "ticket_rate_limited", "count": count, "tenant_id": tenant_id}, severity=v["severity"], sourcetype="shopsquire:security")
-            except Exception:
-                pass
+            except (TypeError, ValueError, RuntimeError) as exc:
+                _record_runtime_error(runtime_errors, stage="telemetry.ticket_rate_limited", exc=exc)
             try:
                 from src.app.observability.metrics import record_email_security_rate_limited
 
                 record_email_security_rate_limited(tenant_id)
-            except Exception:
-                pass
+            except (TypeError, ValueError, RuntimeError) as exc:
+                _record_runtime_error(runtime_errors, stage="metrics.record_email_security_rate_limited", exc=exc)
 
     # Bitemporal decision + trace events
     decision_id = None
@@ -1381,7 +1406,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "unicode_confusable": any(str((i or {}).get("type") or "") in ("confusable_homoglyph_domain", "vendor_homoglyph_impersonation") for i in (v.get("indicators") or [])),
                 "thread_hijack": bool(email.get("prior_reply_chain_id")) and bool(email.get("reply_chain_id")) and str(email.get("prior_reply_chain_id")) != str(email.get("reply_chain_id")),
             }
-        except Exception:
+        except Exception as exc:
+            _record_runtime_error(runtime_errors, stage="security_signal_map", exc=(exc if isinstance(exc, Exception) else RuntimeError(str(exc))))
             sig = {"dmarc_fail": bool(dmarc_fail)}
         security_analysis = correlate_security_analysis(
             channel="email",
@@ -1399,7 +1425,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "trust_case": trust_case,
             },
         )
-    except Exception:
+    except Exception as exc:
+        _record_runtime_error(runtime_errors, stage="security_framework_correlation", exc=(exc if isinstance(exc, Exception) else RuntimeError(str(exc))))
         security_analysis = None
 
     try:
@@ -1445,7 +1472,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             execution_status="review_required" if v.get("route") in ("human_review", "security_review") else "approved",
             event_type="email_security_verdict",
         )
-    except Exception:
+    except Exception as exc:
+        _record_runtime_error(runtime_errors, stage="decision_log.persist", exc=(exc if isinstance(exc, Exception) else RuntimeError(str(exc))))
         decision_id = None
     try:
         if decision_id:
@@ -1579,11 +1607,28 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     target_id=None,
                     payload={"ticket_id": ticket_id, "reason": v.get("reasons")},
                 )
-    except Exception:
-        pass
+    except Exception as exc:
+        _record_runtime_error(runtime_errors, stage="trace.emit_core", exc=(exc if isinstance(exc, Exception) else RuntimeError(str(exc))))
+
+    if decision_id and runtime_errors:
+        for err in runtime_errors[:12]:
+            try:
+                log_trace_event(
+                    trace_id=decision_id,
+                    event_type="system_error",
+                    source_type="system",
+                    source_id="Email_Security_Agent",
+                    target_type="system",
+                    target_id=None,
+                    payload=err,
+                )
+            except Exception:
+                pass
 
     v["decision_id"] = decision_id
     v["decision_trace_id"] = decision_id
+    if runtime_errors:
+        v["runtime_errors"] = runtime_errors[:20]
 
     # Playbook-driven response (best-effort): start a run and execute typed automatic actions.
     # Manual approval actions are skipped by execute_typed_actions() and land in "skipped".

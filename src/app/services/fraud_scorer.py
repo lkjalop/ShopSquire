@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Optional, Tuple, Any, List
+import logging
 
 from sqlalchemy import text
 from src.app.models.db import db_session
@@ -9,6 +10,8 @@ from src.app.services.neo4j_graph import (
     shipping_address_cluster_signal,
     upsert_account_device_ip_event,
 )
+
+logger = logging.getLogger("shopsquire.fraud_scorer")
 
 
 class FraudScorer:
@@ -360,32 +363,32 @@ class BehavioralFraudDetector:
 
         # ── GeoIP + ASN signals ──
         try:
-            from src.app.services.geoip import lookup as geoip_lookup
+            from src.app.services.geoip import enrich_ip
             source_ip = str(session_data.get("ip") or session_data.get("source_ip") or "")
             if source_ip:
-                geo = geoip_lookup(source_ip)
+                geo = enrich_ip(source_ip) or {}
                 if geo:
                     # High-risk country
-                    if geo.risk and geo.risk >= 0.7:
+                    if float(geo.get("risk") or 0.0) >= 0.7:
                         signals["geoip_high_risk_country"] = True
                     # Country mismatch (IP country vs billing country)
                     billing_country = str(session_data.get("billing_country") or "").upper()
-                    ip_country = str(geo.country or "").upper()
+                    ip_country = str(geo.get("country") or "").upper()
                     if billing_country and ip_country and billing_country != ip_country:
                         signals["geoip_country_mismatch"] = True
                     # ASN: datacenter / hosting provider
-                    if geo.is_hosting:
+                    if bool(geo.get("is_hosting")):
                         signals["asn_datacenter_session"] = True
                     # ASN: known VPN/proxy/Tor
-                    if geo.is_vpn:
+                    if bool(geo.get("is_vpn")):
                         signals["asn_known_proxy_tor"] = True
             # Mid-session country change
             prev_country = str(session_data.get("previous_ip_country") or "").upper()
             curr_country = str(session_data.get("ip_country") or "").upper()
             if prev_country and curr_country and prev_country != curr_country:
                 signals["mid_session_country_change"] = True
-        except Exception:
-            pass
+        except (ImportError, RuntimeError, TypeError, ValueError) as exc:
+            logger.warning("fraud_scorer.geoip_enrichment_failed: %s", exc)
 
         # ── Behavioral biometrics (mouse, typing, tap, scroll) ──
         try:

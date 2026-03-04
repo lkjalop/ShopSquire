@@ -3,11 +3,19 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 import uuid
+import os
 
 from src.app.models.db import db_session
 from src.app.models.decision_trace_events import ensure_decision_trace_events_table
 from src.app.deps import security_sanitize
-from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.security.auth import (
+    require_role,
+    ROLE_DEVELOPER,
+    ROLE_MERCHANT,
+    ROLE_OWNER,
+    get_role_from_key,
+    get_role_from_bearer,
+)
 from src.app.services.trace_broker import publish as publish_trace
 from src.app.services.decision_log import get_cached_trace_events
 from src.app.services.trace_contracts import apply_trace_contract
@@ -17,6 +25,37 @@ from src.app.services.dependency_resilience import call_with_resilience
 from src.app.services.trace_taxonomy import normalize_trace_event_type
 
 router = APIRouter(prefix="/api/v1/trace", tags=["decision-trace"])
+
+
+_TRACE_READ_ALLOWED_ROLES = {ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER}
+
+
+def _trace_read_auth_required() -> bool:
+    raw = os.getenv("TRACE_READ_REQUIRE_AUTH")
+    if raw is not None:
+        return str(raw).strip().lower() in ("1", "true", "yes", "on")
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    return env not in ("local", "dev", "development", "test", "testing")
+
+
+def _authorize_trace_read_request(request: Request) -> None:
+    if not _trace_read_auth_required():
+        return
+    dep = require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])
+    _ = dep(
+        x_api_key=request.headers.get("x-api-key"),
+        authorization=request.headers.get("authorization"),
+        request=request,
+    )
+
+
+def _authorize_trace_read_websocket(websocket: WebSocket) -> bool:
+    if not _trace_read_auth_required():
+        return True
+    role = get_role_from_key(websocket.headers.get("x-api-key"))
+    if not role:
+        role = get_role_from_bearer(websocket.headers.get("authorization"))
+    return bool(role in _TRACE_READ_ALLOWED_ROLES)
 
 
 @router.post("/events")
@@ -119,6 +158,7 @@ def append_trace_events(events: List[Dict[str, Any]], role: str = Depends(requir
 async def stream_trace_events(trace_id: str, request: Request):
     """SSE stream for decision trace events for the given trace_id."""
     from starlette.responses import StreamingResponse
+    _authorize_trace_read_request(request)
 
     q = subscribe = None
     try:
@@ -236,6 +276,9 @@ async def stream_trace_events(trace_id: str, request: Request):
 @router.websocket("/{trace_id}/events/ws")
 async def ws_trace_events(trace_id: str, websocket: WebSocket):
     """WebSocket stream for decision trace events with initial snapshot + live updates."""
+    if not _authorize_trace_read_websocket(websocket):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     q = None
     try:
@@ -371,7 +414,8 @@ async def ws_trace_events(trace_id: str, websocket: WebSocket):
 
 
 @router.get("/{trace_id}/events")
-def list_trace_events(trace_id: str):
+def list_trace_events(trace_id: str, request: Request):
+    _authorize_trace_read_request(request)
     try:
         from src.app.models.db import db_session as _db_session
         with _db_session() as db:
@@ -414,12 +458,13 @@ def list_trace_events(trace_id: str):
 
 
 @router.get("/{trace_id}/timeline")
-def get_decision_timeline(trace_id: str):
+def get_decision_timeline(trace_id: str, request: Request):
     """Lightweight timeline with summary stats for decision trace panel.
 
     This endpoint is defensive: it tolerates malformed payloads and extracts
     latency and display tags safely.
     """
+    _authorize_trace_read_request(request)
     try:
         from src.app.models.db import db_session as _db_session
         with _db_session() as db:
@@ -526,13 +571,15 @@ def get_decision_timeline(trace_id: str):
 
 
 @router.get("/{trace_id}/summary/by_time")
-def summarize_by_time(trace_id: str, bucket_seconds: int = 1):
+def summarize_by_time(trace_id: str, bucket_seconds: int = 1, request: Request = None):
     """Aggregate decision trace by time bucket with agent counts and latency.
 
     - Groups events by created_at truncated to N-second buckets
     - Counts agents invoked, lists agent names, sums latency
     - Flags complexity escalation when tier >= 2 or interleaving engaged
     """
+    if request is not None:
+        _authorize_trace_read_request(request)
     try:
         from src.app.models.db import db_session as _db_session
         with _db_session() as db:

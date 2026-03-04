@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple, List
 import asyncio
+import logging
 
 from src.app.models.db import db_session
 from src.app.repositories.catalog import CatalogRepository
@@ -55,6 +56,8 @@ from src.app.services.playbook_engine import (
 from src.app.policy.gate import evaluate_policy_gate
 from src.app.security.tool_intent_gate import evaluate_tool_intent
 from src.app.security.agent_guardrails import assess_agent_interaction
+
+logger = logging.getLogger("shopsquire.orchestrator")
 
 # analytics.ragas is optional; provide no-op fallbacks when missing
 try:
@@ -138,6 +141,34 @@ class Orchestrator:
         # Per-trace runtime flags (best-effort), used for SLO-triggered degrade paths.
         self._trace_runtime_flags: Dict[str, Dict[str, Any]] = {}
 
+    def _emit_runtime_error(
+        self,
+        *,
+        trace_id: str | None,
+        stage: str,
+        exc: Exception,
+        extra: Dict[str, Any] | None = None,
+    ) -> None:
+        msg = str(exc)[:240]
+        logger.warning("orchestrator.%s_failed: %s", stage, msg)
+        if not trace_id:
+            return
+        payload: Dict[str, Any] = {"stage": stage, "error": msg}
+        if isinstance(extra, dict) and extra:
+            payload["details"] = extra
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="system_error",
+                source_type="system",
+                source_id="Orchestrator",
+                target_type="system",
+                target_id=None,
+                payload=payload,
+            )
+        except (TypeError, ValueError, RuntimeError) as exc:
+            self._emit_runtime_error(trace_id=trace_id, stage="memory.reflect", exc=exc)
+
     def _init_trace_runtime(self, trace_id: str | None) -> None:
         if not trace_id:
             return
@@ -147,8 +178,8 @@ class Orchestrator:
                 "degrade_reasons": [],
                 "adaptive_budget": {},
             }
-        except Exception:
-            pass
+        except (TypeError, ValueError, RuntimeError) as exc:
+            self._emit_runtime_error(trace_id=trace_id, stage="citation.store_claim", exc=exc)
 
     def _mark_trace_degraded(self, trace_id: str | None, reason: str) -> None:
         if not trace_id:
@@ -3505,6 +3536,12 @@ class Orchestrator:
                 print(f"[orch.run] exception fallback: {e}")
             except Exception:
                 pass
+            self._emit_runtime_error(
+                trace_id=str(pid or trace_id or ""),
+                stage="run_wrapper",
+                exc=e if isinstance(e, Exception) else RuntimeError(str(e)),
+                extra={"simulate_only": bool(simulate_only), "use_rules": bool(use_rules)},
+            )
             # Build a minimal proposal with tier metadata for tests
             try:
                 spec = self.choose_model_tier(payload or {}, {"live": {"cart_total_cents": (payload or {}).get("cart_total_cents", 0)}}, {"risk_adj": 0.0})

@@ -75,7 +75,12 @@ from src.app.security.admin_mfa import AdminMfaMiddleware
 from src.app.security.pci_boundary import PciBoundaryMiddleware
 from src.app.security.compliance import ComplianceMiddleware
 from src.app.security.headers import SecurityHeadersMiddleware
-from src.app.security.rate_limit import RateLimitMiddleware
+from src.app.security.rate_limit import (
+    RateLimitMiddleware,
+    consume_fixed_window_limit,
+    acquire_concurrency_slot,
+    release_concurrency_slot,
+)
 from src.app.security.internal_mtls import InternalMTLSMiddleware
 from src.app.security.tls_fingerprint_middleware import TLSFingerprintMiddleware
 from src.app.security.request_shape import GlobalRequestShapeMiddleware
@@ -489,19 +494,13 @@ def create_app() -> FastAPI:
             return int(os.getenv(env_key, str(defaults.get((scope, kind), 0))) or 0)
 
         def _consume_fixed_window(bucket_store: dict, key: str, limit: int, win_sec: int, now_ts: float) -> bool:
-            if limit <= 0:
-                return True
-            b = bucket_store.get(key)
-            if not b:
-                b = {"start": now_ts, "count": 0}
-                bucket_store[key] = b
-            if now_ts - float(b.get("start", now_ts)) >= float(max(1, win_sec)):
-                b["start"] = now_ts
-                b["count"] = 0
-            if int(b.get("count", 0)) >= int(limit):
-                return False
-            b["count"] = int(b.get("count", 0)) + 1
-            return True
+            return consume_fixed_window_limit(
+                key=key,
+                limit=limit,
+                window_sec=win_sec,
+                fallback_store=bucket_store,
+                now_ts=now_ts,
+            )
 
         def _write_allowlist_for(p: str, m: str) -> dict[str, Any] | None:
             if m not in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -653,21 +652,18 @@ def create_app() -> FastAPI:
                 pass
             if rl > 0:
                 ip = request.client.host if request.client else "unknown"
-                key = f"{ip}:{request.url.path}"
+                key = f"ip:{ip}:path:{request.url.path}"
                 now = time()
                 win = int(app.state.rate_limit_window_sec or 60)
-                bucket = app.state.rate_buckets.get(key)
-                if not bucket:
-                    bucket = {"start": now, "count": 0}
-                    app.state.rate_buckets[key] = bucket
-                # reset when window elapsed
-                if now - float(bucket.get("start", now)) >= float(win):
-                    bucket["start"] = now
-                    bucket["count"] = 0
-                if int(bucket.get("count", 0)) >= rl:
+                if not consume_fixed_window_limit(
+                    key=key,
+                    limit=rl,
+                    window_sec=win,
+                    fallback_store=app.state.rate_buckets,
+                    now_ts=now,
+                ):
                     record_rate_limit_exceeded(request.url.path, "ip_rate")
                     return ORJSONResponse({"detail": "rate limited"}, status_code=429)
-                bucket["count"] = int(bucket.get("count", 0)) + 1
         except Exception:
             pass
         # Scoped P0 limits (per-IP + per-tenant) for recommend/cart/checkout/admin paths.
@@ -697,11 +693,18 @@ def create_app() -> FastAPI:
                 app.state.tenant_concurrency = {}
             lim = int(os.getenv("TENANT_MAX_CONCURRENCY", "0") or 0)
             if lim > 0:
-                cur = app.state.tenant_concurrency.get(tenant, 0)
-                if cur >= lim:
+                ttl = int(os.getenv("TENANT_CONCURRENCY_TTL_SEC", "75") or 75)
+                tenant_slot_key = f"tenant:{tenant}"
+                acquired = acquire_concurrency_slot(
+                    key=tenant_slot_key,
+                    limit=lim,
+                    ttl_sec=ttl,
+                    fallback_store=app.state.tenant_concurrency,
+                )
+                if not acquired:
                     record_rate_limit_exceeded(request.url.path, "tenant_concurrency")
                     return ORJSONResponse({"detail": "tenant busy"}, status_code=503)
-                app.state.tenant_concurrency[tenant] = cur + 1
+                request.state._tenant_concurrency_slot = tenant_slot_key
         except Exception:
             pass
         # Degrade flag header for downstreams based on concurrency
@@ -724,9 +727,12 @@ def create_app() -> FastAPI:
                 pass
             # Release tenant slot
             try:
-                tenant = request.headers.get("x-tenant-id") or request.query_params.get("tenant_id") or "default"
-                if hasattr(app.state, "tenant_concurrency"):
-                    app.state.tenant_concurrency[tenant] = max(app.state.tenant_concurrency.get(tenant, 1) - 1, 0)
+                slot_key = getattr(request.state, "_tenant_concurrency_slot", None)
+                if slot_key:
+                    release_concurrency_slot(
+                        key=str(slot_key),
+                        fallback_store=(app.state.tenant_concurrency if hasattr(app.state, "tenant_concurrency") else None),
+                    )
             except Exception:
                 pass
 
