@@ -16,6 +16,7 @@ from src.app.security.adversarial_image_detector import detect_adversarial
 from src.app.security.steg_detector import detect_steganography
 from src.app.services.cv_vision_ollama import vision_analyze_with_ollama
 from src.app.security.url_guard import ensure_safe_outbound_url
+from src.app.services.decision_log import log_trace_event
 
 import difflib
 import math
@@ -254,6 +255,8 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         "degraded": bool(ocr.get("degraded")),
         "degradation_reason": ocr.get("degradation_reason") or ocr.get("error"),
     }
+    _ocr_degraded_initial = bool(ocr_ladder.get("degraded"))
+    _ocr_degraded_reason_initial = str(ocr_ladder.get("degradation_reason") or "").strip()
     ocr_text = ocr.get("text") or ""
     ocr_boxes = ocr.get("boxes") or []
     document_like = _detect_document_like(ocr_boxes)
@@ -319,6 +322,30 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
                         "doc_type": doc_type,
                     }
                 )
+    except Exception:
+        pass
+    # Emit an explicit trace event when OCR provider/runtime is unavailable or degraded.
+    try:
+        _trace_id = str(meta.get("trace_id") or meta.get("case_id") or "").strip()
+        _ocr_degraded_final = bool(ocr.get("degraded") or ocr_ladder.get("degraded"))
+        _ocr_degraded_reason_final = str(ocr.get("degradation_reason") or ocr.get("error") or "").strip()
+        if _ocr_degraded_initial or _ocr_degraded_final:
+            log_trace_event(
+                trace_id=_trace_id or None,
+                event_type="cv_ocr_degraded",
+                source_type="cv_provider",
+                source_id=str(ocr_ladder.get("selected_provider") or ocr.get("provider") or "unknown"),
+                target_type="system",
+                target_id=None,
+                payload={
+                    "degraded_initial": bool(_ocr_degraded_initial),
+                    "degraded_final": bool(_ocr_degraded_final),
+                    "reason_initial": _ocr_degraded_reason_initial or None,
+                    "reason_final": _ocr_degraded_reason_final or None,
+                    "fallback_used": bool(ocr_ladder.get("fallback_used")),
+                    "attempts": list(ocr_ladder.get("attempts") or []),
+                },
+            )
     except Exception:
         pass
 

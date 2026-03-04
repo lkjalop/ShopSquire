@@ -34,6 +34,7 @@ def test_cv_tier2_ocr_fallback_ladder_and_clarifier(monkeypatch):
 
 def test_cv_tier2_marks_ocr_degradation_tag(monkeypatch):
     from src.app.services import cv_tier2_pipeline as t2
+    events = []
 
     def _fake_extract(image_bytes, provider=None, fallback=None):
         return {
@@ -46,9 +47,23 @@ def test_cv_tier2_marks_ocr_degradation_tag(monkeypatch):
             "degradation_reason": "tesseract_binary_missing",
         }
 
+    monkeypatch.setattr(
+        t2,
+        "log_trace_event",
+        lambda trace_id, event_type, source_type, source_id, target_type, target_id, payload=None: events.append(
+            {
+                "trace_id": trace_id,
+                "event_type": event_type,
+                "source_type": source_type,
+                "source_id": source_id,
+                "payload": payload or {},
+            }
+        ),
+    )
     monkeypatch.setattr(t2, "extract_text", _fake_extract)
     out = t2.run_tier2(b"fake-image", meta={"case_id": "case-degraded"}, pack_id="agnostic_v1")
     tags = out.get("evidence_tags") or []
     assert "cv_ocr_degraded" in tags
     ladder = (out.get("robustness") or {}).get("ocr_ladder") or {}
     assert ladder.get("degraded") is True
+    assert any(str(e.get("event_type") or "") == "cv_ocr_degraded" for e in events)

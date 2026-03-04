@@ -47,3 +47,18 @@ def test_trace_events_ws_streams_initial_and_live_events():
         live = json.loads(ws.receive_text())
         assert isinstance(live, list) and live
         assert str((live[0] or {}).get("event_type") or "") == "agent_invocation"
+
+
+def test_trace_events_ws_falls_back_when_broker_unavailable(monkeypatch):
+    trace_id = "trace-ws-fallback-1"
+    monkeypatch.setattr(
+        "src.app.services.trace_broker.subscribe",
+        lambda _trace_id: (_ for _ in ()).throw(RuntimeError("broker_down")),
+    )
+    with client.websocket_connect(f"/api/v1/trace/{trace_id}/events/ws") as ws:
+        initial = json.loads(ws.receive_text())
+        assert isinstance(initial, list)
+        # With broker unavailable, websocket should still stay alive and emit
+        # DB-poll fallback frames (often empty arrays).
+        follow = json.loads(ws.receive_text())
+        assert isinstance(follow, list)
