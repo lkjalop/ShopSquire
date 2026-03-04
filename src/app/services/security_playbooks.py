@@ -10,6 +10,17 @@ from src.app.services.playbook_engine import (
 )
 
 
+_RISK_ORDER = ["low", "medium", "high", "critical"]
+
+
+def _risk_rank(band: str | None) -> int:
+    b = str(band or "").strip().lower()
+    try:
+        return _RISK_ORDER.index(b)
+    except ValueError:
+        return 0
+
+
 def select_playbook(signals: Dict[str, Any], severity: str | None = None) -> Optional[Dict[str, Any]]:
     """Select a playbook from the unified config registry.
 
@@ -38,18 +49,35 @@ def select_playbook(signals: Dict[str, Any], severity: str | None = None) -> Opt
         if cid and cid not in seen:
             seen.add(cid)
             ordered.append(cid)
+    if not ordered:
+        return None
 
+    by_id = {str(p.get("id") or ""): p for p in playbooks if isinstance(p, dict)}
+    wanted_rank = _risk_rank(severity) if severity else None
+
+    ranked: List[tuple[int, int, int, str, Dict[str, Any]]] = []
     for pb_id in ordered:
-        pb = next((p for p in playbooks if p.get("id") == pb_id), None)
+        pb = by_id.get(str(pb_id))
         if not pb:
             continue
-        if severity and pb.get("severity") and str(pb.get("severity")).lower() != str(severity).lower():
+        if not bool(pb.get("enabled", True)):
             continue
-        return pb
-    # fallback: return first matching playbook by id without severity filter
+        min_rank = _risk_rank(pb.get("risk_band_min"))
+        if wanted_rank is not None and min_rank > wanted_rank:
+            # Requested severity is lower than this playbook's minimum risk band.
+            continue
+        exact_severity = 1 if severity and str(pb.get("severity") or "").lower() == str(severity).lower() else 0
+        priority = int(pb.get("priority") or 100)
+        ranked.append((exact_severity, min_rank, -priority, str(pb.get("id") or ""), pb))
+
+    if ranked:
+        ranked.sort(reverse=True)
+        return ranked[0][4]
+
+    # Fallback: return first existing (enabled) playbook for compatibility.
     for pb_id in ordered:
-        pb = next((p for p in playbooks if p.get("id") == pb_id), None)
-        if pb:
+        pb = by_id.get(str(pb_id))
+        if pb and bool(pb.get("enabled", True)):
             return pb
     return None
 
