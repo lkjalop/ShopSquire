@@ -1106,13 +1106,7 @@ def create_app() -> FastAPI:
         code = 200 if ok else 503
         return ORJSONResponse({"status": status, "reasons": reasons, "config": config_report, "components": components}, status_code=code)
 
-    @app.get("/status/summary")
-    def status_summary():
-        """Public demo-friendly summary of key Email XDR counts.
-
-        Returns counts for incidents (warning/error) and outbound anomalies
-        without requiring an admin API key.
-        """
+    def _status_summary_payload() -> dict[str, Any]:
         warn_count = 0
         err_count = 0
         outbound_count = 0
@@ -1147,13 +1141,21 @@ def create_app() -> FastAPI:
         except Exception:
             pass
 
-        return ORJSONResponse(
-            {
-                "status": "ok",
-                "email_xdr": {"warnings": warn_count, "errors": err_count},
-                "outbound_anomalies": outbound_count,
-            }
-        )
+        return {
+            "status": "ok",
+            "email_xdr": {"warnings": warn_count, "errors": err_count},
+            "outbound_anomalies": outbound_count,
+        }
+
+    @app.get("/status/summary")
+    def status_summary():
+        """Public demo-friendly summary of key Email XDR counts."""
+        return ORJSONResponse(_status_summary_payload())
+
+    @app.get("/api/v1/status/summary")
+    def status_summary_v1():
+        """Compatibility alias for frontend clients expecting /api/v1 prefix."""
+        return ORJSONResponse(_status_summary_payload())
 
     @app.get("/demo", response_class=HTMLResponse)
     @app.get("/demo/links", response_class=HTMLResponse)
@@ -1318,6 +1320,12 @@ def create_app() -> FastAPI:
     # CV analysis endpoint (complaints triage)
     try:
         app.include_router(cv_router)
+    except Exception:
+        pass
+    # Visual similarity search (CLIP + FAISS)
+    try:
+        from src.app.routers.visual_search import router as visual_search_router
+        app.include_router(visual_search_router)
     except Exception:
         pass
     try:

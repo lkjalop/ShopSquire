@@ -26,6 +26,14 @@ def _interval_sec() -> float:
         return 30.0
 
 
+def _repeat_interval_sec() -> int:
+    try:
+        hours = float(os.getenv("INCIDENT_SLA_BREACH_REPEAT_HOURS", "4") or 4)
+    except Exception:
+        hours = 4.0
+    return max(900, int(hours * 3600))
+
+
 def _parse_ts(ts: str | None) -> datetime | None:
     if not ts:
         return None
@@ -82,7 +90,8 @@ def run_cycle() -> dict:
                     db.execute(text("UPDATE incidents SET sla_status = 'breached' WHERE id = :id"), {"id": iid})
                     breached += 1
                     st = "breached"
-                if due and due < now and st == "breached" and alerted is None:
+                repeat_due = bool(alerted is None or int((now - alerted).total_seconds()) >= _repeat_interval_sec())
+                if due and due < now and st == "breached" and repeat_due:
                     out = dispatch_incident_alert(
                         "incident_sla_breached",
                         {
@@ -93,7 +102,11 @@ def run_cycle() -> dict:
                             "status": status,
                             "sla_due_at": due.isoformat(),
                         },
-                        details={"source": "incident_sla_scheduler"},
+                        details={
+                            "source": "incident_sla_scheduler",
+                            "repeat_alert": bool(alerted),
+                            "repeat_interval_seconds": _repeat_interval_sec(),
+                        },
                     )
                     if bool(out.get("sent_total")):
                         ts = now.isoformat()
@@ -114,6 +127,7 @@ def run_cycle() -> dict:
                                 "dispatch": out,
                                 "incident_id": iid,
                                 "sla_due_at": due.isoformat(),
+                                "repeat_alert": bool(alerted),
                             },
                         )
                     except Exception:

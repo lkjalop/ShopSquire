@@ -1101,6 +1101,209 @@ def test_recommend_uses_vision_product_identity_from_cached_image_blob(monkeypat
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
+def test_recommend_auto_creates_incident_when_human_review_required(monkeypatch):
+    from types import SimpleNamespace
+
+    with db_session() as db:
+        db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS incidents (
+                  id TEXT PRIMARY KEY,
+                  event_id TEXT,
+                  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                  created_by TEXT,
+                  severity TEXT,
+                  title TEXT,
+                  description TEXT,
+                  status TEXT DEFAULT 'open'
+                )
+                """
+            )
+        )
+        db.commit()
+
+    _write_flags({
+        "USE_AGENT_CAPABILITIES": True,
+        "AGENT_ROLLOUT_PERCENT": 100,
+        "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+        "KILL_SWITCH": False,
+        "DECISION_LOG_WRITES_ENABLED": False,
+        "DEGRADATION": {"enabled": True},
+        "TEST_FORCE_BAD_SKU": False,
+        "TEST_BYPASS_POLICY_GATE": False,
+    })
+    monkeypatch.setenv("RECOMMEND_AUTO_INCIDENT_ON_HUMAN_REVIEW", "1")
+    monkeypatch.delenv("TEST_BYPASS_POLICY_GATE", raising=False)
+    monkeypatch.setattr(
+        recommend_router,
+        "evaluate_policy_gate",
+        lambda _payload: SimpleNamespace(
+            decision="review",
+            action=None,
+            approval_required=True,
+            reasons=["risk_review"],
+            rule_hits=["risk"],
+            policy_version="v1",
+            compliance_tags=[],
+        ),
+    )
+
+    r = client.get("/api/v1/recommend/suggest", params={"uid": "u-auto-incident-1", "query": "show me options"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("status") == "review_required"
+    assert body.get("needs_human_review") is True
+    incident_id = str(body.get("incident_id") or "")
+    assert incident_id
+    assert str((body.get("escalation") or {}).get("incident_id") or "") == incident_id
+
+    with db_session() as db:
+        row = db.execute(
+            text("SELECT id, event_id FROM incidents WHERE id = :id LIMIT 1"),
+            {"id": incident_id},
+        ).fetchone()
+        assert row is not None
+        assert str(row[0]) == incident_id
+        assert str(row[1] or "") == str(body.get("trace_id") or "")
+
+
+def test_nqe_open_ended_uses_image_product_type_category(monkeypatch):
+    import src.app.services.product_identity_agent as pia
+
+    _write_flags({
+        "USE_AGENT_CAPABILITIES": True,
+        "AGENT_ROLLOUT_PERCENT": 100,
+        "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+        "KILL_SWITCH": False,
+        "DECISION_LOG_WRITES_ENABLED": False,
+        "DEGRADATION": {"enabled": True},
+        "TEST_FORCE_BAD_SKU": False,
+    })
+
+    monkeypatch.setattr(
+        RecommendationService,
+        "analyze_query",
+        lambda self, *args, **kwargs: {
+            "intent": "product_search",
+            "intent_confidence": 0.2,
+            "intent_chain": [],
+            "slots": {},
+            "preferences": {},
+            "entities": {},
+        },
+    )
+    monkeypatch.setattr(
+        RecommendationService,
+        "retrieve_candidates",
+        lambda self, query, limit=10: [],
+    )
+    monkeypatch.setattr(
+        pia,
+        "identify_product_from_text",
+        lambda labels, ocr_text, user_query=None, trace_id=None: {
+            "ok": True,
+            "identified": True,
+            "product_type": "tablet",
+            "confidence": 0.88,
+        },
+    )
+    monkeypatch.setattr(
+        pia,
+        "specs_to_constraints",
+        lambda identity: {"identity_product_type": "tablet"} if identity.get("identified") else {},
+    )
+
+    r = client.get(
+        "/api/v1/recommend/suggest",
+        params={"uid": "u-nqe-open-cat-1", "query": "help me choose this", "image_labels": "tablet,display"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    trace_id = str(body.get("trace_id") or "")
+    assert trace_id
+
+    ev = client.get(f"/api/v1/trace/{trace_id}/events")
+    assert ev.status_code == 200
+    events = ev.json().get("events") or []
+    shown = [
+        e for e in events
+        if str(e.get("event_type") or "") == "nqe_question_shown"
+        and str((e.get("payload") or {}).get("category") or "") == "tablet"
+    ]
+    assert shown
+
+
+def test_nqe_post_results_uses_image_product_type_category(monkeypatch):
+    import src.app.services.product_identity_agent as pia
+
+    _write_flags({
+        "USE_AGENT_CAPABILITIES": True,
+        "AGENT_ROLLOUT_PERCENT": 100,
+        "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+        "KILL_SWITCH": False,
+        "DECISION_LOG_WRITES_ENABLED": False,
+        "DEGRADATION": {"enabled": True},
+        "TEST_FORCE_BAD_SKU": False,
+    })
+
+    monkeypatch.setattr(
+        RecommendationService,
+        "analyze_query",
+        lambda self, *args, **kwargs: {
+            "intent": "product_search",
+            "intent_confidence": 0.99,
+            "intent_chain": [],
+            "slots": {},
+            "preferences": {},
+            "entities": {},
+        },
+    )
+    monkeypatch.setattr(
+        RecommendationService,
+        "retrieve_candidates",
+        lambda self, query, limit=10: [
+            {"id": "p1", "sku": "CAT-1", "name": "Tablet A", "price_cents": 89900, "currency": "USD", "stock": 4, "specs": {"ram_gb": 8}},
+            {"id": "p2", "sku": "CAT-2", "name": "Tablet B", "price_cents": 109900, "currency": "USD", "stock": 3, "specs": {"ram_gb": 8}},
+        ],
+    )
+    monkeypatch.setattr(recommend_router, "_infer_missing_fields", lambda **kwargs: ["use_case"])
+    monkeypatch.setattr(
+        pia,
+        "identify_product_from_text",
+        lambda labels, ocr_text, user_query=None, trace_id=None: {
+            "ok": True,
+            "identified": True,
+            "product_type": "tablet",
+            "confidence": 0.9,
+        },
+    )
+    monkeypatch.setattr(
+        pia,
+        "specs_to_constraints",
+        lambda identity: {"identity_product_type": "tablet"} if identity.get("identified") else {},
+    )
+
+    r = client.get(
+        "/api/v1/recommend/suggest",
+        params={"uid": "u-nqe-post-cat-1", "query": "under $1200", "image_labels": "tablet,display"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    trace_id = str(body.get("trace_id") or "")
+    assert trace_id
+
+    ev = client.get(f"/api/v1/trace/{trace_id}/events")
+    assert ev.status_code == 200
+    events = ev.json().get("events") or []
+    shown = [
+        e for e in events
+        if str(e.get("event_type") or "") == "nqe_question_shown"
+        and str((e.get("payload") or {}).get("category") or "") == "tablet"
+    ]
+    assert shown
+
+
 def test_recommend_includes_fraud_summary_from_tls_geo_context(monkeypatch):
     orig_retrieve = RecommendationService.retrieve_candidates
     captured = {"session_data": None}

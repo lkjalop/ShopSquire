@@ -115,8 +115,11 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
         pass
     if not trace_id:
         return payload
-    if "trace_id" not in payload:
-        payload["trace_id"] = trace_id
+    # Enforce canonical trace correlation fields after sanitization/redaction
+    # so IDs never drift from the active request trace context.
+    payload["trace_id"] = trace_id
+    if "decision_trace_id" not in payload:
+        payload["decision_trace_id"] = trace_id
     if "decision_id" not in payload:
         payload["decision_id"] = trace_id
     return payload
@@ -162,6 +165,154 @@ def _trace_system_error(
     except Exception:
         # Never raise from error telemetry.
         pass
+
+
+def _incident_auto_create_enabled() -> bool:
+    return str(os.getenv("RECOMMEND_AUTO_INCIDENT_ON_HUMAN_REVIEW", "1") or "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _auto_create_incident_for_review(
+    *,
+    payload: Dict[str, Any] | None,
+    trace_id: str | None,
+    uid: str | None,
+    query: str | None,
+    severity: str | None = None,
+    source: str = "recommend",
+    extra_context: Dict[str, Any] | None = None,
+) -> None:
+    if not _incident_auto_create_enabled():
+        return
+    if not trace_id or not isinstance(payload, dict):
+        return
+    if not bool(payload.get("needs_human_review")):
+        return
+    if payload.get("incident_id"):
+        return
+    escalation = payload.get("escalation") if isinstance(payload.get("escalation"), dict) else {}
+    reason = str(
+        (escalation or {}).get("reason")
+        or payload.get("status")
+        or "ai_flagged_human_review"
+    ).strip()[:120]
+    context: Dict[str, Any] = {
+        "surface": source,
+        "uid_hash": hash_uid(uid or "guest_user"),
+        "query": scrub_pii(query or "")[:300],
+        "trace": {
+            "trace_id": trace_id,
+            "severity": severity,
+            "findings": list((payload.get("policy_notes") or {}).get("compliance_tags") or [])[:8],
+        },
+    }
+    if isinstance(extra_context, dict) and extra_context:
+        context.update(security_sanitize(extra_context))
+    try:
+        from src.app.routers.escalation_room import create_incident_record
+
+        incident = create_incident_record(
+            case_id=None,
+            trace_id=trace_id,
+            reason=reason,
+            context=context,
+            created_by="assistant",
+            severity="high" if str(severity or "").lower() in ("high", "critical", "error") else "warn",
+            title="AI escalation: human review required",
+            dedupe_by_event=True,
+        )
+        incident_id = str((incident or {}).get("incident_id") or "").strip()
+        if not incident_id:
+            return
+        buyer_token = str((incident or {}).get("buyer_token") or "").strip() or None
+        payload["incident_id"] = incident_id
+        if buyer_token:
+            payload["buyer_token"] = buyer_token
+        esc_out = dict(escalation or {})
+        esc_out["route"] = "human_review"
+        esc_out["chat_with_admin"] = True
+        esc_out["incident_id"] = incident_id
+        if buyer_token:
+            esc_out["buyer_token"] = buyer_token
+        payload["escalation"] = esc_out
+        payload["human_review"] = {
+            "status": "pending",
+            "incident_id": incident_id,
+            "approval_id": payload.get("approval_id"),
+        }
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="incident_auto_created",
+            source_type="agent",
+            source_id="Escalation_Router_Agent",
+            target_type="system",
+            target_id=incident_id,
+            payload={
+                "reason": reason,
+                "incident_id": incident_id,
+                "has_buyer_token": bool(buyer_token),
+            },
+        )
+    except Exception as exc:
+        _trace_system_error(
+            trace_id=trace_id,
+            stage="incident.auto_create",
+            exc=exc,
+            source_id="Escalation_Router_Agent",
+        )
+
+
+def _normalize_product_type_label(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    aliases = {
+        "notebook": "laptop",
+        "ultrabook": "laptop",
+        "macbook": "laptop",
+        "chromebook": "laptop",
+        "pc": "desktop",
+        "mobile": "phone",
+        "smartphone": "phone",
+    }
+    normalized = aliases.get(raw, raw)
+    # Guard categories known to route into generic templates.
+    if normalized in {"unknown", "other", "fruit", "document"}:
+        return ""
+    return normalized
+
+
+def _resolve_nqe_product_category(
+    *,
+    query: str | None,
+    constraints: Dict[str, Any] | None,
+    identity_constraints: Dict[str, Any] | None,
+    identity_result: Dict[str, Any] | None,
+) -> str:
+    c = constraints if isinstance(constraints, dict) else {}
+    ic = identity_constraints if isinstance(identity_constraints, dict) else {}
+    ir = identity_result if isinstance(identity_result, dict) else {}
+    for candidate in (
+        c.get("product_type"),
+        ic.get("identity_product_type"),
+        ir.get("product_type"),
+    ):
+        pt = _normalize_product_type_label(candidate)
+        if pt:
+            return pt
+    # Use the category router for automatic detection from query text
+    try:
+        from src.app.services.category_router import detect_category
+        detected = detect_category(query=query, constraints=constraints)
+        if detected and detected != "general":
+            return detected
+    except Exception:
+        pass
+    return "laptop" if "laptop" in str(query or "").lower() else "general"
 
 
 _SUPPORTED_PRODUCT_TERMS = {
@@ -743,12 +894,13 @@ def _compute_envelope_diff(previous: Dict[str, Any] | None, current: Dict[str, A
 
 
 def _query_signals_unsupported_intent(query: str | None) -> bool:
-    text = (query or "").lower()
-    if not text:
-        return False
-    has_supported = any(tok in text for tok in _SUPPORTED_PRODUCT_TERMS)
-    has_unsupported = any(tok in text for tok in _UNSUPPORTED_PRODUCT_TERMS)
-    return bool(has_unsupported and not has_supported)
+    """Check if query is about a category we used to hard-reject.
+
+    Now returns False (never blocks) because the category router can direct
+    kitchen/furniture/TV queries to the correct NQE template bank.
+    The old blocklist is kept only for analytics tagging.
+    """
+    return False
 
 
 def _query_signals_off_domain(query: str | None) -> bool:
@@ -2550,8 +2702,17 @@ def suggest(
                 "model_tier": None,
                 "complexity_signals": {},
                 "policy_notes": policy_notes,
+                "needs_human_review": True,
                 "escalation": {"route": "human_review", "reason": "gdpr_opt_out"},
             }
+            _auto_create_incident_for_review(
+                payload=payload,
+                trace_id=trace_id,
+                uid=uid,
+                query=query,
+                severity="info",
+                source="recommend.gdpr_opt_out",
+            )
             payload = _ensure_trace_response(payload, trace_id, flags)
             return _with_trace(payload, trace_id)
         else:
@@ -2730,6 +2891,7 @@ def suggest(
             "model_tier": None,
             "complexity_signals": {},
             "security": _build_security_payload(details, review_severity),
+            "needs_human_review": True,
             "escalation": {"approval_required": True, "approval_id": approval_id, "reason": "policy_gate"},
             "policy_notes": policy_notes,
             "policy_gate": {
@@ -2741,6 +2903,15 @@ def suggest(
                 "action": gate.action,
             },
         }
+        _auto_create_incident_for_review(
+            payload=payload,
+            trace_id=trace_id,
+            uid=uid,
+            query=query,
+            severity=review_severity,
+            source="recommend.policy_gate",
+            extra_context={"approval_id": approval_id, "gate_decision": gate.decision},
+        )
         payload = _ensure_trace_response(payload, trace_id, flags)
         if gate.decision == "deny":
             return _block_response(_with_trace(payload, trace_id), 403)
@@ -4099,7 +4270,12 @@ def suggest(
             pass
         # Propose next questions and return early without random products
         try:
-            category = "laptop" if "laptop" in (query or "").lower() else "general"
+            category = _resolve_nqe_product_category(
+                query=query,
+                constraints=constraints,
+                identity_constraints=_identity_constraints,
+                identity_result=_id_result,
+            )
             _nqe_asked = list((structured_state.get("nqe_asked_ids") or kv.get("nqe_asked_ids") or []))
             for _e in (recent_asked_entries or []):
                 _turn = int((_e or {}).get("turn") or 0)
@@ -4249,7 +4425,7 @@ def suggest(
                     target_id=None,
                     payload={
                         "intent": "product_search",
-                        "category": "laptop" if "laptop" in (query or "").lower() else "general",
+                        "category": category,
                         "missing_fields": missing_fields_open,
                         "questions": next_questions,
                         **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["nqe_templates"]),
@@ -4265,7 +4441,7 @@ def suggest(
                     target_id=None,
                     payload={
                         "intent": "product_search",
-                        "category": "laptop" if "laptop" in (query or "").lower() else "general",
+                        "category": category,
                         "missing_fields": missing_fields_open,
                         "questions": next_questions,
                         **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["nqe_templates"]),
@@ -5441,9 +5617,19 @@ def suggest(
             "model_tier": model_tier,
             "complexity_signals": complexity_signals,
             "security": _build_security_payload(sec_details, "high"),
+            "needs_human_review": True,
             "escalation": {"approval_required": True, "approval_id": approval_id, "reason": "invalid_sku"},
             "policy_notes": policy_notes,
         }
+        _auto_create_incident_for_review(
+            payload=payload,
+            trace_id=trace_id,
+            uid=uid,
+            query=query,
+            severity="high",
+            source="recommend.invalid_sku",
+            extra_context={"approval_id": approval_id},
+        )
         payload = _ensure_trace_response(payload, trace_id, flags)
         return _block_response(_with_trace(payload, trace_id), 403)
 
@@ -5501,9 +5687,19 @@ def suggest(
             "model_tier": model_tier,
             "complexity_signals": complexity_signals,
             "security": _build_security_payload(out_details, out_sev),
+            "needs_human_review": True,
             "escalation": {"approval_required": True, "approval_id": approval_id, "reason": "security_output"},
             "policy_notes": policy_notes,
         }
+        _auto_create_incident_for_review(
+            payload=payload,
+            trace_id=trace_id,
+            uid=uid,
+            query=query,
+            severity=out_sev,
+            source="recommend.security_output",
+            extra_context={"approval_id": approval_id},
+        )
         payload = _ensure_trace_response(payload, trace_id, flags)
         return _block_response(_with_trace(payload, trace_id), 403)
 
@@ -5803,7 +5999,12 @@ def suggest(
         _skip_nqe_clarify = bool(followup_explain or shortlist_lock_active)
         missing_fields = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
         if missing_fields and not _skip_nqe_clarify:
-            category = "laptop" if "laptop" in (query or "").lower() else "general"
+            category = _resolve_nqe_product_category(
+                query=query,
+                constraints=constraints,
+                identity_constraints=_identity_constraints,
+                identity_result=_id_result,
+            )
             _nqe_asked2 = list((structured_state.get("nqe_asked_ids") or kv.get("nqe_asked_ids") or []))
             for _e in (recent_asked_entries or []):
                 _turn = int((_e or {}).get("turn") or 0)

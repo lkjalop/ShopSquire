@@ -3360,10 +3360,52 @@ def get_incident(incident_id: str, role: str = Depends(require_role([ROLE_MERCHA
         span.set_attribute("incident.id", incident_id)
         try:
             with db_session() as db:
-                row = db.execute(sql_text("SELECT id, event_id, created_at, created_by, severity, title, description, status FROM incidents WHERE id = :id"), {"id": incident_id}).mappings().first()
+                row = db.execute(
+                    sql_text(
+                        "SELECT id, event_id, created_at, created_by, severity, title, description, status, "
+                        "assigned_to, team, sla_status, sla_due_at, runbook_id, runbook_run_id "
+                        "FROM incidents WHERE id = :id"
+                    ),
+                    {"id": incident_id},
+                ).mappings().first()
                 if not row:
                     raise HTTPException(status_code=404, detail="Incident not found")
-                return dict(row)
+                out = dict(row)
+                desc_raw = out.get("description")
+                desc_obj: Any = desc_raw
+                if isinstance(desc_raw, str):
+                    try:
+                        parsed = json.loads(desc_raw)
+                        if isinstance(parsed, dict):
+                            desc_obj = parsed
+                    except Exception:
+                        desc_obj = desc_raw
+
+                reason = None
+                trace_id = out.get("event_id")
+                case_id = None
+                if isinstance(desc_obj, dict):
+                    reason = desc_obj.get("reason")
+                    trace_id = desc_obj.get("trace_id") or out.get("event_id")
+                    case_id = desc_obj.get("case_id")
+
+                out["description_raw"] = desc_raw
+                out["description"] = desc_obj
+                # Compatibility aliases for older admin/escalation UIs.
+                out["eventId"] = out.get("event_id")
+                out["createdAt"] = out.get("created_at")
+                out["createdBy"] = out.get("created_by")
+                out["assignedTo"] = out.get("assigned_to")
+                out["slaStatus"] = out.get("sla_status")
+                out["slaDueAt"] = out.get("sla_due_at")
+                out["runbookId"] = out.get("runbook_id")
+                out["runbookRunId"] = out.get("runbook_run_id")
+                out["trace_id"] = trace_id
+                out["traceId"] = trace_id
+                out["reason"] = reason
+                out["case_id"] = case_id
+                out["caseId"] = case_id
+                return out
         except HTTPException:
             raise
         except Exception as e:

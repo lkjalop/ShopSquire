@@ -75,7 +75,7 @@ def test_sla_scheduler_dispatches_alert_once(tmp_path, monkeypatch):
     assert len(calls) == 1
     assert calls[0]["event_type"] == "incident_sla_breached"
 
-    # Run a second cycle; dedupe column prevents repeat alert dispatch.
+    # Run a second cycle immediately; repeat window suppresses duplicate alerts.
     out2 = incident_sla_scheduler.run_cycle()
     assert int(out2.get("checked") or 0) >= 1
     assert len(calls) == 1
@@ -87,6 +87,57 @@ def test_sla_scheduler_dispatches_alert_once(tmp_path, monkeypatch):
         ).fetchone()
         assert str(row[0] or "").lower() == "breached"
         assert str(row[1] or "").strip() != ""
+
+
+def test_sla_scheduler_repeats_alert_after_repeat_window(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "incident_sla_repeat.sqlite")
+    _init_sqlite(db_path)
+    incident_sla_scheduler._ensure_columns()
+    monkeypatch.setenv("INCIDENT_SLA_BREACH_REPEAT_HOURS", "4")
+
+    now = datetime.now(timezone.utc)
+    with db_session() as db:
+        db.execute(
+            text(
+                "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) "
+                "VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)"
+            ),
+            {
+                "id": "inc-sla-repeat-1",
+                "event_id": "evt-repeat-1",
+                "created_by": "tester",
+                "severity": "high",
+                "title": "SLA repeat candidate",
+                "description": "desc",
+                "status": "open",
+            },
+        )
+        db.execute(
+            text(
+                "UPDATE incidents SET sla_due_at = :due, sla_status = :st, sla_breach_alerted_at = :alerted "
+                "WHERE id = :id"
+            ),
+            {
+                "id": "inc-sla-repeat-1",
+                "due": (now - timedelta(hours=6)).isoformat(),
+                "st": "breached",
+                "alerted": (now - timedelta(hours=5)).isoformat(),
+            },
+        )
+        db.commit()
+
+    calls = []
+
+    def _fake_dispatch(event_type, incident, details=None):
+        calls.append({"event_type": event_type, "incident": incident, "details": details})
+        return {"ok": True, "sent_total": 1}
+
+    monkeypatch.setattr(incident_sla_scheduler, "dispatch_incident_alert", _fake_dispatch)
+    out = incident_sla_scheduler.run_cycle()
+    assert int(out.get("checked") or 0) >= 1
+    assert len(calls) == 1
+    assert calls[0]["event_type"] == "incident_sla_breached"
+    assert bool((calls[0].get("details") or {}).get("repeat_alert")) is True
 
 
 def test_runbook_failure_dispatches_alert(tmp_path, monkeypatch):
@@ -194,3 +245,58 @@ def test_incident_alert_summary_endpoint(tmp_path):
     assert int(totals.get("runbook_failure_alerts") or 0) >= 1
     recent = body.get("recent") or []
     assert any(str(x.get("incident_id") or "") == "inc-sum-1" for x in recent if isinstance(x, dict))
+
+
+def test_manual_sla_scan_repeats_alert_after_repeat_window(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "incident_sla_scan_repeat.sqlite")
+    os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{db_path}"
+    _init_sqlite(db_path)
+    incident_sla_scheduler._ensure_columns()
+    monkeypatch.setenv("INCIDENT_SLA_BREACH_REPEAT_HOURS", "4")
+
+    from src.app.routers import escalation_room as er
+
+    er._ensure_incident_runtime_tables()
+    now = datetime.now(timezone.utc)
+    with db_session() as db:
+        db.execute(
+            text(
+                "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) "
+                "VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)"
+            ),
+            {
+                "id": "inc-scan-repeat-1",
+                "event_id": "evt-scan-repeat-1",
+                "created_by": "tester",
+                "severity": "high",
+                "title": "Manual scan repeat candidate",
+                "description": "desc",
+                "status": "open",
+            },
+        )
+        db.execute(
+            text(
+                "UPDATE incidents SET sla_status='breached', sla_due_at=:due, sla_breach_alerted_at=:alerted WHERE id=:id"
+            ),
+            {
+                "id": "inc-scan-repeat-1",
+                "due": (now - timedelta(hours=6)).isoformat(),
+                "alerted": (now - timedelta(hours=5)).isoformat(),
+            },
+        )
+        db.commit()
+
+    calls = []
+
+    def _fake_dispatch(event_type, incident, details=None):
+        calls.append({"event_type": event_type, "incident": incident, "details": details})
+        return {"ok": True, "sent_total": 1}
+
+    monkeypatch.setattr(er, "dispatch_incident_alert", _fake_dispatch)
+    app = create_app()
+    client = TestClient(app)
+    r = client.post("/api/v1/admin/incidents/sla/scan", headers={"x-api-key": "local-merchant-key"})
+    assert r.status_code == 200
+    assert len(calls) == 1
+    assert calls[0]["event_type"] == "incident_sla_breached"
+    assert bool((calls[0].get("details") or {}).get("repeat_alert")) is True

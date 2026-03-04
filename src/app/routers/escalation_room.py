@@ -7,7 +7,7 @@ import uuid
 import time
 import base64
 import hashlib
-from typing import Dict
+from typing import Dict, Any
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
@@ -276,6 +276,23 @@ def _incident_sla_minutes(severity: str | None) -> int:
         return 120
 
 
+def _incident_sla_repeat_seconds() -> int:
+    """Repeat SLA breach alerts at a fixed interval while incident remains open."""
+    try:
+        hours = float(os.getenv("INCIDENT_SLA_BREACH_REPEAT_HOURS", "4") or 4)
+    except Exception:
+        hours = 4.0
+    # Keep at least 15m to avoid alert storms from bad env values.
+    return max(900, int(hours * 3600))
+
+
+def _should_dispatch_sla_breach_alert(alerted_at: datetime | None, now: datetime | None = None) -> bool:
+    if alerted_at is None:
+        return True
+    now_dt = now or _utc_now()
+    return int((now_dt - alerted_at).total_seconds()) >= _incident_sla_repeat_seconds()
+
+
 def _apply_sla_if_missing(incident_id: str) -> Dict:
     _ensure_incident_runtime_tables()
     eng = get_engine()
@@ -388,12 +405,44 @@ def get_incident(incident_id: str, role: str = Depends(require_role([ROLE_MERCHA
             ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="incident_not_found")
+        desc_raw = row[4]
+        desc_obj: Any = desc_raw
+        if isinstance(desc_raw, str):
+            try:
+                parsed = json.loads(desc_raw)
+                if isinstance(parsed, dict):
+                    desc_obj = parsed
+            except Exception:
+                desc_obj = desc_raw
+        reason = None
+        trace_id = None
+        case_id = None
+        if isinstance(desc_obj, dict):
+            reason = desc_obj.get("reason")
+            trace_id = desc_obj.get("trace_id") or row[1]
+            case_id = desc_obj.get("case_id")
+        else:
+            trace_id = row[1]
         return {
             "id": row[0], "event_id": row[1], "severity": row[2], "title": row[3],
-            "description": row[4], "status": row[5], "created_at": str(row[6]), "created_by": row[7],
+            "description": desc_obj, "description_raw": desc_raw, "status": row[5], "created_at": str(row[6]), "created_by": row[7],
             "assigned_to": row[8], "team": row[9],
             "sla_status": row[10], "sla_due_at": row[11],
             "runbook_id": row[12], "runbook_run_id": row[13],
+            # Compatibility aliases for older UI variants.
+            "eventId": row[1],
+            "createdAt": str(row[6]),
+            "createdBy": row[7],
+            "assignedTo": row[8],
+            "slaStatus": row[10],
+            "slaDueAt": row[11],
+            "runbookId": row[12],
+            "runbookRunId": row[13],
+            "trace_id": trace_id,
+            "traceId": trace_id,
+            "reason": reason,
+            "case_id": case_id,
+            "caseId": case_id,
             "sla": _apply_sla_if_missing(incident_id),
         }
     except HTTPException:
@@ -432,6 +481,108 @@ def update_incident_status(
         return {"ok": True, "incident_id": incident_id, "status": status, "sla": _apply_sla_if_missing(incident_id)}
     except Exception:
         raise HTTPException(status_code=500, detail="db_error")
+
+
+@router.post("/{incident_id}/collect-matrix")
+def collect_security_matrix(
+    incident_id: str,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    """On-demand trigger: run security observer for this incident and store
+    the ``security_scan`` trace event so the closure gate can pass."""
+    _ = role
+    from src.app.security.observer import compute_risk
+
+    _ensure_incident_runtime_tables()
+    eng = get_engine()
+    with eng.begin() as conn:
+        row = conn.execute(
+            sql_text("SELECT id, event_id, severity FROM incidents WHERE id = :id LIMIT 1"),
+            {"id": incident_id},
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="incident_not_found")
+
+    # Fetch the original trace payload (if stored) to feed the observer
+    trace_id = row[1] or incident_id
+    payload: Dict = {}
+    try:
+        with eng.begin() as conn:
+            te = conn.execute(
+                sql_text(
+                    "SELECT payload FROM decision_trace_events "
+                    "WHERE trace_id = :tid ORDER BY created_at ASC LIMIT 1"
+                ),
+                {"tid": trace_id},
+            ).fetchone()
+            if te and te[0]:
+                payload = json.loads(te[0]) if isinstance(te[0], str) else te[0]
+    except Exception:
+        payload = {}
+
+    severity, risk_raw, risk_adj, details = compute_risk(payload)
+
+    # Store as a security_scan trace event
+    scan_event_id = str(uuid.uuid4())
+    from datetime import datetime as _dt
+
+    now_iso = _dt.utcnow().isoformat()
+    scan_payload = {
+        "severity": severity,
+        "route": "block" if severity in ("critical", "error") else ("review" if severity in ("high", "warn") else "allow"),
+        "threshold_version": "security-v1",
+        "confidence": None,
+        "signals": details.get("signals", {}),
+        "mitre_atlas": details.get("mitre_atlas", []),
+        "mitre_attack": [],
+        "owasp_llm_top10": details.get("owasp_llm_top10", []),
+        "owasp_agentic_top10": details.get("owasp_agentic_top10", []),
+        "owasp_api_top10": details.get("owasp_api_top10", []),
+        "stride_categories": details.get("stride_categories", []),
+        "dread": details.get("dread"),
+        "pasta": details.get("pasta") if "pasta" in details else None,
+        "evidence": details.get("evidence", {}),
+        "containment_actions": [],
+        "input_hash": None,
+        "ocr_text_hash": None,
+        "entities": {},
+        "bitemporal": {
+            "valid_from": now_iso,
+            "valid_to": "infinity",
+            "system_from": now_iso,
+            "system_to": "infinity",
+        },
+    }
+
+    try:
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="security_scan",
+            source_type="system",
+            source_id="collect_matrix_ondemand",
+            target_type="incident",
+            target_id=incident_id,
+            payload=scan_payload,
+        )
+    except Exception:
+        raise HTTPException(status_code=500, detail="failed_to_store_security_scan")
+
+    # Re-check gate
+    gate: Dict = {"ok": True}
+    try:
+        with eng.begin() as conn:
+            gate = validate_incident_matrix_gate(conn, incident_id)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "incident_id": incident_id,
+        "trace_id": trace_id,
+        "severity": severity,
+        "risk_adj": risk_adj,
+        "gate": gate,
+    }
 
 
 @router.websocket("/{incident_id}/room/ws")
@@ -743,13 +894,14 @@ def scan_incident_sla_breaches(
         description = str(row[3] or "")
         status = str(row[4] or "open")
         due_at = str(row[5] or "") or None
-        alerted = str(row[6] or "") or None
+        alerted_raw = str(row[6] or "") or None
+        alerted = _parse_ts(alerted_raw)
         checked += 1
         sla = _apply_sla_if_missing(incident_id)
         if str(sla.get("sla_status") or "").lower() == "breached":
             breached += 1
             _append_chat(incident_id, "system", "SLA breached for this incident.", meta={"sla": sla})
-            if not alerted:
+            if _should_dispatch_sla_breach_alert(alerted, now=_utc_now()):
                 out = dispatch_incident_alert(
                     "incident_sla_breached",
                     {
@@ -760,7 +912,11 @@ def scan_incident_sla_breaches(
                         "status": status,
                         "sla_due_at": due_at or sla.get("sla_due_at"),
                     },
-                    details={"source": "manual_sla_scan"},
+                    details={
+                        "source": "manual_sla_scan",
+                        "repeat_alert": bool(alerted),
+                        "repeat_interval_seconds": _incident_sla_repeat_seconds(),
+                    },
                 )
                 if bool(out.get("sent_total")):
                     try:
@@ -779,12 +935,13 @@ def scan_incident_sla_breaches(
                         source_id="Escalation_Room",
                         target_type="system",
                         target_id=None,
-                        payload={
-                            "event_type": "incident_sla_breached",
-                            "dispatch": out,
-                            "incident_id": incident_id,
-                        },
-                    )
+                            payload={
+                                "event_type": "incident_sla_breached",
+                                "dispatch": out,
+                                "incident_id": incident_id,
+                                "repeat_alert": bool(alerted),
+                            },
+                        )
                 except Exception:
                     pass
     return {"ok": True, "checked": checked, "breached": breached}
@@ -975,57 +1132,22 @@ class EscalateRequest(BaseModel):
     context: dict | None = None
 
 
-@public_router.post("/escalate", response_model=IncidentEscalateResponse)
-def public_escalate(body: EscalateRequest, request: Request) -> Dict:
-    """Create an incident + issue buyer/staff chat tokens (local-dev demo only).
-
-    In production this should be bound to an authenticated user session.
-    """
-    if not _allow_public_escalation(request):
-        raise HTTPException(status_code=403, detail="public_escalation_disabled")
-    incident_id = str(uuid.uuid4())
-    event_id = (body.case_id or body.trace_id or f"public-{incident_id}")[:64]
-    title = "Buyer escalation: human review requested"
-    desc = {
-        "reason": body.reason or "human_review_requested",
-        "case_id": body.case_id,
-        "trace_id": body.trace_id,
-        "context": body.context or {},
-    }
-    try:
-        _ensure_incident_runtime_tables()
-        eng = get_engine()
-        with eng.begin() as conn:
-            conn.execute(
-                sql_text(
-                    "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status, sla_status, sla_due_at) "
-                    "VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status, :sla_status, :sla_due_at)"
-                ),
-                {
-                    "id": incident_id,
-                    "event_id": event_id,
-                    "created_by": "buyer",
-                    "severity": "warn",
-                    "title": title,
-                    "description": json.dumps(desc, ensure_ascii=False),
-                    "status": "open",
-                    "sla_status": "active",
-                    "sla_due_at": (_utc_now() + timedelta(minutes=_incident_sla_minutes("warn"))).isoformat(),
-                },
-            )
-    except Exception:
-        # Incident table exists in Postgres; ignore failures in local demo mode.
-        pass
-    toks = _issue_tokens(incident_id)
-    # Seed a first assistant message with context so staff can join with immediate triage facts.
+def _seed_incident_chat_context(
+    incident_id: str,
+    *,
+    case_id: str | None,
+    trace_id: str | None,
+    context: dict | None,
+) -> None:
+    # Seed a first assistant message so buyers/staff can triage immediately.
     try:
         trace_ctx = {}
-        if isinstance(body.context, dict):
-            t = body.context.get("trace")
+        if isinstance(context, dict):
+            t = context.get("trace")
             if isinstance(t, dict):
                 trace_ctx = t
-        ctx_case = trace_ctx.get("case_id") or body.case_id
-        ctx_trace = trace_ctx.get("trace_id") or body.trace_id
+        ctx_case = trace_ctx.get("case_id") or case_id
+        ctx_trace = trace_ctx.get("trace_id") or trace_id
         ctx_sev = trace_ctx.get("severity")
         ctx_findings = trace_ctx.get("findings") if isinstance(trace_ctx.get("findings"), list) else []
         summary_bits = []
@@ -1047,14 +1169,156 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
             message=seed_msg,
             meta={
                 "source": "system",
-                "case_id": body.case_id,
-                "trace_id": body.trace_id,
+                "case_id": case_id,
+                "trace_id": trace_id,
                 "trace_context": trace_ctx,
             },
         )
     except Exception:
         pass
+
+
+def create_incident_record(
+    *,
+    case_id: str | None,
+    trace_id: str | None,
+    reason: str | None,
+    context: dict | None,
+    created_by: str,
+    severity: str = "warn",
+    title: str = "Buyer escalation: human review requested",
+    dedupe_by_event: bool = True,
+) -> Dict[str, Any]:
+    """
+    Shared backend helper to create/lookup an escalation incident and issue chat tokens.
+    """
+    incident_id = str(uuid.uuid4())
+    event_id = (case_id or trace_id or f"public-{incident_id}")[:64]
+    desc = {
+        "reason": reason or "human_review_requested",
+        "case_id": case_id,
+        "trace_id": trace_id,
+        "context": context or {},
+    }
+    created = False
+    try:
+        _ensure_incident_runtime_tables()
+        eng = get_engine()
+        with eng.begin() as conn:
+            if dedupe_by_event and event_id:
+                existing = conn.execute(
+                    sql_text(
+                        "SELECT id FROM incidents "
+                        "WHERE event_id = :event_id AND status IN ('open', 'review', 'triaged') "
+                        "ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"event_id": event_id},
+                ).fetchone()
+                if existing and existing[0]:
+                    incident_id = str(existing[0])
+            row = conn.execute(sql_text("SELECT id FROM incidents WHERE id = :id LIMIT 1"), {"id": incident_id}).fetchone()
+            if not row:
+                params = {
+                    "id": incident_id,
+                    "event_id": event_id,
+                    "created_by": created_by,
+                    "severity": severity,
+                    "title": title,
+                    "description": json.dumps(desc, ensure_ascii=False),
+                    "status": "open",
+                    "sla_status": "active",
+                    "sla_due_at": (_utc_now() + timedelta(minutes=_incident_sla_minutes(severity))).isoformat(),
+                }
+                try:
+                    conn.execute(
+                        sql_text(
+                            "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status, sla_status, sla_due_at) "
+                            "VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status, :sla_status, :sla_due_at)"
+                        ),
+                        params,
+                    )
+                except Exception:
+                    # Fallback for environments where incidents schema has not yet
+                    # been upgraded with SLA columns.
+                    conn.execute(
+                        sql_text(
+                            "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) "
+                            "VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)"
+                        ),
+                        params,
+                    )
+                created = True
+    except Exception:
+        # Final fallback for bootstrap/runtime drift: create base table then insert.
+        try:
+            eng = get_engine()
+            with eng.begin() as conn:
+                conn.execute(
+                    sql_text(
+                        "CREATE TABLE IF NOT EXISTS incidents ("
+                        "id TEXT PRIMARY KEY, event_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, "
+                        "created_by TEXT, severity TEXT, title TEXT, description TEXT, status TEXT DEFAULT 'open'"
+                        ")"
+                    )
+                )
+                existing = conn.execute(
+                    sql_text(
+                        "SELECT id FROM incidents "
+                        "WHERE event_id = :event_id AND status IN ('open', 'review', 'triaged') "
+                        "ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"event_id": event_id},
+                ).fetchone()
+                if existing and existing[0]:
+                    incident_id = str(existing[0])
+                else:
+                    conn.execute(
+                        sql_text(
+                            "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) "
+                            "VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)"
+                        ),
+                        {
+                            "id": incident_id,
+                            "event_id": event_id,
+                            "created_by": created_by,
+                            "severity": severity,
+                            "title": title,
+                            "description": json.dumps(desc, ensure_ascii=False),
+                            "status": "open",
+                        },
+                    )
+                created = True
+        except Exception:
+            logging.getLogger(__name__).exception("incident_auto_create_failed")
+    toks = _issue_tokens(incident_id)
+    _seed_incident_chat_context(
+        incident_id,
+        case_id=case_id,
+        trace_id=trace_id,
+        context=context,
+    )
+    _ = created
     return {"ok": True, "incident_id": incident_id, **toks}
+
+
+@public_router.post("/escalate", response_model=IncidentEscalateResponse)
+def public_escalate(body: EscalateRequest, request: Request) -> Dict:
+    """Create an incident + issue buyer/staff chat tokens (local-dev demo only).
+
+    In production this should be bound to an authenticated user session.
+    """
+    if not _allow_public_escalation(request):
+        raise HTTPException(status_code=403, detail="public_escalation_disabled")
+    return create_incident_record(
+        case_id=body.case_id,
+        trace_id=body.trace_id,
+        reason=body.reason,
+        context=body.context,
+        created_by="buyer",
+        severity="warn",
+        title="Buyer escalation: human review requested",
+        dedupe_by_event=True,
+    )
 
 
 class PublicChatMessage(BaseModel):

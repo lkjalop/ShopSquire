@@ -59,16 +59,26 @@ export default function EscalationRoom({
         }
         if (!mounted) return;
 
-        let reason = '';
-        let traceId = '';
-        try {
-          const desc = j && typeof j.description === 'string' ? JSON.parse(j.description) : null;
-          reason = String(desc?.reason || '');
-          traceId = String(desc?.trace_id || desc?.context?.trace_id || '');
-        } catch {
-          reason = '';
-          traceId = '';
+        let descObj: any = null;
+        if (j && typeof j.description === 'string') {
+          try {
+            descObj = JSON.parse(j.description);
+          } catch {
+            descObj = null;
+          }
+        } else if (j && typeof j.description === 'object' && j.description !== null) {
+          descObj = j.description;
         }
+        const reason = String(j?.reason || descObj?.reason || '');
+        const traceId = String(
+          j?.trace_id ||
+          j?.traceId ||
+          descObj?.trace_id ||
+          descObj?.context?.trace_id ||
+          j?.event_id ||
+          j?.eventId ||
+          '',
+        );
         setIncidentSummary({
           id: j?.id || incidentId,
           severity: j?.severity || 'unknown',
@@ -76,8 +86,8 @@ export default function EscalationRoom({
           title: j?.title || 'Escalated incident',
           reason,
           traceId,
-          createdAt: j?.created_at || '',
-          createdBy: j?.created_by || '',
+          createdAt: j?.created_at || j?.createdAt || '',
+          createdBy: j?.created_by || j?.createdBy || '',
         });
       } catch (e: any) {
         if (mounted) {
