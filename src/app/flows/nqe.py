@@ -227,6 +227,32 @@ class NextQuestionEngine:
                     pass
             return []
 
+        # ── Risk register context injection ──
+        # When a risk domain is elevated, inject a contextual warning.
+        try:
+            from src.app.routers.admin_grc import get_latest_risk_bands
+            _rr_bands = get_latest_risk_bands()
+            _high_domains = [d for d, b in _rr_bands.items() if b in ("high", "critical")]
+            if _high_domains and "risk_context_shown" not in inp.answered_fields:
+                _domain_labels = {
+                    "supplier_trust": "supplier verification",
+                    "insider_threat": "identity verification",
+                    "email_deliverability": "communication security",
+                    "inventory_resilience": "stock availability",
+                }
+                _reasons = [_domain_labels.get(d, d.replace("_", " ")) for d in _high_domains[:2]]
+                questions.append(
+                    NextQuestion(
+                        id="risk_context_notice",
+                        text=f"Note: Due to current {' and '.join(_reasons)} conditions, this order may require additional verification steps.",
+                        goal="risk_context",
+                        evidence_needed=["none"],
+                        source="risk_register",
+                    )
+                )
+        except Exception:
+            pass
+
         # ── Detect implicit context from query ──
         detected_games = inp.detected_games or detect_games_in_text(query_text)
         detected_software = inp.detected_software or detect_software_in_text(query_text)

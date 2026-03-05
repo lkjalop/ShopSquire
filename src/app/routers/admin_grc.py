@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
@@ -359,3 +361,242 @@ def grc_report_export_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="shopsquire-grc-report-{days}d.pdf"'},
     )
+
+
+# ── Persistent Risk Register Snapshots ────────────────────────────────
+
+def _ensure_rr_table() -> None:
+    """Idempotent DDL for risk_register_snapshots (safe for SQLite + PG)."""
+    try:
+        with db_session() as db:
+            db.execute(text(
+                "CREATE TABLE IF NOT EXISTS risk_register_snapshots ("
+                "  id TEXT PRIMARY KEY,"
+                "  domain TEXT NOT NULL,"
+                "  risk_score REAL NOT NULL,"
+                "  risk_band TEXT NOT NULL,"
+                "  snapshot_date TEXT NOT NULL,"
+                "  risk_owner TEXT,"
+                "  mitigation_strategy TEXT,"
+                "  mitigation_deadline TEXT,"
+                "  residual_risk_score REAL,"
+                "  status TEXT NOT NULL DEFAULT 'open',"
+                "  signals_json TEXT,"
+                "  created_at TEXT DEFAULT CURRENT_TIMESTAMP"
+                ")"
+            ))
+            db.commit()
+    except Exception:
+        pass
+
+
+def _take_snapshot(days: int = 30) -> List[Dict[str, Any]]:
+    """Compute current risk register and persist one row per domain."""
+    _ensure_rr_table()
+    rr = _build_risk_register(days)
+    rows: List[Dict[str, Any]] = []
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    with db_session() as db:
+        for domain in rr.get("domains", []):
+            rid = str(uuid.uuid4())
+            db.execute(
+                text(
+                    "INSERT INTO risk_register_snapshots "
+                    "(id, domain, risk_score, risk_band, snapshot_date, signals_json, status) "
+                    "VALUES (:id, :domain, :score, :band, :date, :signals, 'open')"
+                ),
+                {
+                    "id": rid,
+                    "domain": domain["domain"],
+                    "score": domain["risk_score"],
+                    "band": domain["risk_band"],
+                    "date": today,
+                    "signals": json.dumps(domain.get("signals", {})),
+                },
+            )
+            rows.append({"id": rid, "domain": domain["domain"], "risk_score": domain["risk_score"], "risk_band": domain["risk_band"]})
+        db.commit()
+    return rows
+
+
+@router.post("/risk-register/snapshot")
+def create_risk_register_snapshot(
+    days: int = Query(30, ge=1, le=365),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Take a point-in-time snapshot of all risk domains."""
+    rows = _take_snapshot(days)
+    return {"ok": True, "snapshot_count": len(rows), "snapshots": rows}
+
+
+@router.get("/risk-register/history")
+def risk_register_history(
+    domain: str | None = Query(None),
+    days: int = Query(90, ge=1, le=730),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Return historical risk register snapshots."""
+    _ensure_rr_table()
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    with db_session() as db:
+        if domain:
+            rows = db.execute(
+                text(
+                    "SELECT id, domain, risk_score, risk_band, snapshot_date, risk_owner, "
+                    "mitigation_strategy, mitigation_deadline, residual_risk_score, status, signals_json "
+                    "FROM risk_register_snapshots WHERE domain = :d AND snapshot_date >= :since "
+                    "ORDER BY snapshot_date DESC"
+                ), {"d": domain, "since": since},
+            ).fetchall()
+        else:
+            rows = db.execute(
+                text(
+                    "SELECT id, domain, risk_score, risk_band, snapshot_date, risk_owner, "
+                    "mitigation_strategy, mitigation_deadline, residual_risk_score, status, signals_json "
+                    "FROM risk_register_snapshots WHERE snapshot_date >= :since "
+                    "ORDER BY snapshot_date DESC"
+                ), {"since": since},
+            ).fetchall()
+    snapshots = []
+    for r in rows:
+        snapshots.append({
+            "id": r[0], "domain": r[1], "risk_score": r[2], "risk_band": r[3],
+            "snapshot_date": r[4], "risk_owner": r[5], "mitigation_strategy": r[6],
+            "mitigation_deadline": r[7], "residual_risk_score": r[8], "status": r[9],
+            "signals": json.loads(r[10]) if r[10] else {},
+        })
+    return {"snapshots": snapshots, "count": len(snapshots)}
+
+
+@router.patch("/risk-register/snapshots/{snapshot_id}")
+def update_risk_register_snapshot(
+    snapshot_id: str,
+    risk_owner: str | None = Query(None),
+    mitigation_strategy: str | None = Query(None),
+    mitigation_deadline: str | None = Query(None),
+    residual_risk_score: float | None = Query(None, ge=0, le=100),
+    status: str | None = Query(None, pattern="^(open|mitigating|accepted|closed)$"),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Update ownership, mitigation, or status of a risk snapshot."""
+    _ensure_rr_table()
+    updates: List[str] = []
+    params: Dict[str, Any] = {"sid": snapshot_id}
+    if risk_owner is not None:
+        updates.append("risk_owner = :owner")
+        params["owner"] = risk_owner
+    if mitigation_strategy is not None:
+        updates.append("mitigation_strategy = :strat")
+        params["strat"] = mitigation_strategy
+    if mitigation_deadline is not None:
+        updates.append("mitigation_deadline = :dl")
+        params["dl"] = mitigation_deadline
+    if residual_risk_score is not None:
+        updates.append("residual_risk_score = :rrs")
+        params["rrs"] = residual_risk_score
+    if status is not None:
+        updates.append("status = :st")
+        params["st"] = status
+    if not updates:
+        raise HTTPException(status_code=400, detail="no_fields_to_update")
+    sql = f"UPDATE risk_register_snapshots SET {', '.join(updates)} WHERE id = :sid"
+    with db_session() as db:
+        result = db.execute(text(sql), params)
+        db.commit()
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="snapshot_not_found")
+    return {"ok": True, "snapshot_id": snapshot_id}
+
+
+def get_latest_risk_bands() -> Dict[str, str]:
+    """Return the most recent risk_band per domain from snapshots.
+
+    Used by the policy gate and orchestrator for dynamic threshold adjustment.
+    Returns e.g. {"supplier_trust": "high", "insider_threat": "low"}.
+    """
+    _ensure_rr_table()
+    bands: Dict[str, str] = {}
+    try:
+        with db_session() as db:
+            rows = db.execute(text(
+                "SELECT domain, risk_band FROM risk_register_snapshots "
+                "WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM risk_register_snapshots)"
+            )).fetchall()
+            for r in rows:
+                bands[r[0]] = r[1]
+    except Exception:
+        pass
+    return bands
+
+
+# ---------------------------------------------------------------------------
+# FAIR Monte Carlo CRQ endpoint (auditor / CISO facing)
+# ---------------------------------------------------------------------------
+
+@router.post("/crq/fair")
+def run_fair_crq(
+    asset_value: float = Query(100_000.0, ge=0, description="Estimated asset value ($)"),
+    tef_low: float = Query(1.0, ge=0),
+    tef_mode: float = Query(5.0, ge=0),
+    tef_high: float = Query(20.0, ge=0),
+    vuln_low: float = Query(0.1, ge=0, le=1),
+    vuln_mode: float = Query(0.3, ge=0, le=1),
+    vuln_high: float = Query(0.7, ge=0, le=1),
+    plm_low: float = Query(500.0, ge=0),
+    plm_mode: float = Query(5_000.0, ge=0),
+    plm_high: float = Query(50_000.0, ge=0),
+    slm_low: float = Query(0.0, ge=0),
+    slm_mode: float = Query(2_000.0, ge=0),
+    slm_high: float = Query(20_000.0, ge=0),
+    simulations: int = Query(5_000, ge=100, le=50_000),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Run an on-demand FAIR Monte Carlo risk quantification.
+
+    Intended for CISO / board-level reporting.  Returns ALE distribution,
+    loss-event frequency, single-loss expectancy percentiles, histogram,
+    and risk-band classification.
+    """
+    from src.app.services.risk_quantification import fair_monte_carlo
+    return fair_monte_carlo(
+        tef_low=tef_low, tef_mode=tef_mode, tef_high=tef_high,
+        vuln_low=vuln_low, vuln_mode=vuln_mode, vuln_high=vuln_high,
+        plm_low=plm_low, plm_mode=plm_mode, plm_high=plm_high,
+        slm_low=slm_low, slm_mode=slm_mode, slm_high=slm_high,
+        asset_value=asset_value,
+        simulations=simulations,
+    )
+
+
+@router.post("/crq/fair/from-signals")
+def run_fair_crq_from_signals(
+    monetary_exposure: float = Query(1_000.0, ge=0),
+    fraud_level: str = Query("low", pattern="^(minimal|low|medium|high)$"),
+    cv_severity: str = Query("minor", pattern="^(minor|moderate|major|high|critical)$"),
+    signal_count: int = Query(1, ge=0, le=100),
+    simulations: int = Query(5_000, ge=100, le=50_000),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Derive FAIR inputs from live signal data and run Monte Carlo."""
+    from src.app.services.risk_quantification import fair_from_signals
+    return fair_from_signals(
+        security={"signals": ["sig"] * signal_count},
+        cv_analysis={"severity": cv_severity},
+        fraud={"level": fraud_level},
+        monetary_exposure=monetary_exposure,
+        simulations=simulations,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DREAD calibration summary (historical predicted-vs-actual)
+# ---------------------------------------------------------------------------
+
+@router.get("/dread-calibration")
+def dread_calibration_summary(
+    days: int = Query(90, ge=1, le=3650),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Return aggregate DREAD calibration data (predicted vs actual damage)."""
+    from src.app.services.dread_calibration import get_calibration_summary
+    return get_calibration_summary(days=days)

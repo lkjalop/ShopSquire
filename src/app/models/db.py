@@ -29,11 +29,9 @@ def _register_sqlite_now(engine):
             )
         except Exception:
             pass
-    # Rewrite plain INSERT statements issued through raw connections to
-    # `INSERT OR REPLACE` so tests that insert duplicate primary keys using
-    # engine-level `conn.execute` don't fail under SQLite. The session-level
-    # wrapper already performs this transformation; this ensures parity for
-    # code paths that use the connection/engine directly.
+    # SQLite-only: Rewrite plain INSERT into INSERT OR REPLACE so tests
+    # with duplicate primary keys do not fail. This ONLY fires on SQLite
+    # engines and should NEVER be applied to Postgres/production.
     @event.listens_for(engine, "before_cursor_execute", retval=True)
     def _rewrite_insert(conn, cursor, statement, parameters, context, executemany):
         try:
@@ -885,6 +883,49 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                # DREAD calibration log — stores predicted vs actual damage for Bayesian tuning
+                try:
+                    conn.execute(sql_text(
+                        "CREATE TABLE IF NOT EXISTS dread_calibration_log (\n"
+                        "  id TEXT PRIMARY KEY,\n"
+                        "  incident_id TEXT,\n"
+                        "  trace_id TEXT,\n"
+                        "  predicted_damage REAL,\n"
+                        "  predicted_reproducibility REAL,\n"
+                        "  predicted_exploitability REAL,\n"
+                        "  predicted_affected_users REAL,\n"
+                        "  predicted_discoverability REAL,\n"
+                        "  predicted_weighted_avg REAL,\n"
+                        "  predicted_kill_chain_stage TEXT,\n"
+                        "  actual_damage REAL,\n"
+                        "  actual_impact_notes TEXT,\n"
+                        "  signal_types TEXT,\n"
+                        "  closed_by TEXT,\n"
+                        "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
+                        ")"
+                    ))
+                except Exception:
+                    pass
+                # Persistent risk register snapshots for GRC audit trail
+                try:
+                    conn.execute(sql_text(
+                        "CREATE TABLE IF NOT EXISTS risk_register_snapshots (\n"
+                        "  id TEXT PRIMARY KEY,\n"
+                        "  domain TEXT NOT NULL,\n"
+                        "  risk_score REAL NOT NULL,\n"
+                        "  risk_band TEXT NOT NULL,\n"
+                        "  snapshot_date TEXT NOT NULL,\n"
+                        "  risk_owner TEXT,\n"
+                        "  mitigation_strategy TEXT,\n"
+                        "  mitigation_deadline TEXT,\n"
+                        "  residual_risk_score REAL,\n"
+                        "  status TEXT NOT NULL DEFAULT 'open',\n"
+                        "  signals_json TEXT,\n"
+                        "  created_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
+                        ")"
+                    ))
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -1146,3 +1187,25 @@ def upsert(session, table: str, values: dict, conflict_columns: list[str]):
         dialect = ""
     stmt, params = _build_upsert_sql(dialect, table, values, conflict_columns)
     return session.execute(stmt, params)
+
+
+async def async_db_op(fn, *args, **kwargs):
+    """Run a synchronous ``db_session``-based callable on the default
+    executor (thread pool) so async route handlers do not block the
+    event loop.
+
+    Usage::
+
+        result = await async_db_op(lambda db: db.execute(...).fetchall())
+
+    The callable receives a ``db_session`` context as its first argument.
+    Additional *args / **kwargs are forwarded.
+    """
+    import asyncio
+
+    def _run():
+        with db_session() as _db:
+            return fn(_db, *args, **kwargs)
+
+    return await asyncio.to_thread(_run)
+

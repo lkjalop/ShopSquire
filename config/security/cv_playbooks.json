@@ -1,6 +1,6 @@
 {
   "schema_version": "2.0",
-  "published_at": "2026-03-04T06:28:22.212278+00:00",
+  "published_at": "2026-03-05T01:41:12.165478+00:00",
   "risk_band_order": [
     "low",
     "medium",
@@ -9,42 +9,26 @@
   ],
   "playbooks": [
     {
-      "id": "PB-PAYMENT-FRAUD",
-      "title": "Payment Fraud Containment",
+      "id": "PB-TEST-1",
+      "title": "Updated Title",
       "domain": "security",
       "priority": 10,
       "enabled": true,
-      "version": "1.0.43",
+      "version": "1.0.1",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "hold_payment",
-          "mode": "automatic",
-          "params": {
-            "hold_minutes": 30
-          }
-        },
-        {
-          "type": "create_ticket",
-          "mode": "automatic",
-          "params": {
-            "queue": "fraud"
-          }
-        },
-        {
           "type": "notify_ops",
-          "mode": "automatic",
           "params": {
-            "channel": "oncall"
+            "channel": "email"
           }
         }
       ],
-      "sla_minutes": 60,
-      "risk_band_min": "high",
+      "sla_minutes": 30,
+      "risk_band_min": "low",
       "owners": [
-        "FraudOps",
-        "SecurityOps"
+        "owner@test"
       ],
       "checks": [],
       "closure_criteria": [],
@@ -53,96 +37,117 @@
         "strategy": "manual"
       },
       "requires_approval_roles": [],
-      "severity": "critical",
-      "updated_by": "owner",
-      "updated_at": "2026-03-04T06:28:22.211276+00:00"
+      "severity": "medium",
+      "updated_by": "tester",
+      "updated_at": "2026-03-05T00:00:00.000000+00:00"
     },
     {
       "id": "PB-SEC-001",
-      "title": "Prompt Injection Containment",
+      "title": "Prompt Injection Response",
       "domain": "security",
-      "priority": 9,
+      "priority": 90,
       "enabled": true,
       "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "create_ticket",
-          "mode": "automatic",
+          "type": "block_request",
+          "params": {}
+        },
+        {
+          "type": "notify_ops",
           "params": {
-            "queue": "soc"
+            "channel": "slack"
           }
+        },
+        {
+          "type": "log_incident",
+          "params": {}
         }
       ],
-      "sla_minutes": 30,
+      "sla_minutes": 15,
       "risk_band_min": "high",
       "owners": [
-        "SecurityOps"
+        "security@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
-        "enabled": false,
-        "strategy": "manual"
+        "enabled": true,
+        "strategy": "auto"
       },
       "requires_approval_roles": [],
       "severity": "high"
     },
     {
       "id": "PB-SEC-002",
-      "title": "Data Exfiltration Investigation",
+      "title": "Data Exfiltration Response",
       "domain": "security",
-      "priority": 8,
+      "priority": 95,
       "enabled": true,
       "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "create_ticket",
-          "mode": "automatic",
+          "type": "quarantine_session",
+          "params": {}
+        },
+        {
+          "type": "notify_ops",
           "params": {
-            "queue": "soc"
+            "channel": "pagerduty"
+          }
+        },
+        {
+          "type": "create_incident",
+          "params": {
+            "severity": "critical"
           }
         }
       ],
-      "sla_minutes": 60,
-      "risk_band_min": "critical",
+      "sla_minutes": 5,
+      "risk_band_min": "high",
       "owners": [
-        "SecurityOps"
+        "security@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
-        "enabled": false,
-        "strategy": "manual"
+        "enabled": true,
+        "strategy": "auto"
       },
-      "requires_approval_roles": [],
+      "requires_approval_roles": [
+        "security_lead"
+      ],
       "severity": "critical"
     },
     {
-      "id": "PB-CV-SERIAL-001",
-      "title": "Serial Number Mismatch Review",
-      "domain": "cv",
-      "priority": 30,
+      "id": "PB-FRAUD-001",
+      "title": "Serial Number Mismatch Fraud Investigation",
+      "domain": "fraud",
+      "priority": 80,
       "enabled": true,
       "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "create_ticket",
-          "mode": "automatic",
+          "type": "flag_for_review",
+          "params": {}
+        },
+        {
+          "type": "notify_ops",
           "params": {
-            "queue": "fraud"
+            "channel": "email"
           }
         }
       ],
-      "sla_minutes": 120,
+      "sla_minutes": 60,
       "risk_band_min": "medium",
       "owners": [
-        "FraudOps"
+        "fraud@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
@@ -154,27 +159,63 @@
       "severity": "high"
     },
     {
-      "id": "PB-DATA-001",
-      "title": "Data Readiness Hold",
-      "domain": "governance",
-      "priority": 40,
+      "id": "PB-CV-SERIAL-001",
+      "title": "CV Serial Mismatch Verification",
+      "domain": "cv",
+      "priority": 75,
       "enabled": true,
       "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "create_ticket",
-          "mode": "automatic",
+          "type": "request_manual_review",
+          "params": {}
+        },
+        {
+          "type": "log_cv_event",
+          "params": {}
+        }
+      ],
+      "sla_minutes": 120,
+      "risk_band_min": "medium",
+      "owners": [
+        "cv-ops@shopsquire.ai"
+      ],
+      "checks": [],
+      "closure_criteria": [],
+      "rollback": {
+        "enabled": false,
+        "strategy": "manual"
+      },
+      "requires_approval_roles": [],
+      "severity": "medium"
+    },
+    {
+      "id": "PB-DATA-001",
+      "title": "Data Not Ready — Graceful Degradation",
+      "domain": "data",
+      "priority": 50,
+      "enabled": true,
+      "version": "1.0.0",
+      "trigger_logic": "any",
+      "entry_conditions": {},
+      "actions": [
+        {
+          "type": "serve_cached_response",
+          "params": {}
+        },
+        {
+          "type": "alert_data_team",
           "params": {
-            "queue": "ops"
+            "channel": "email"
           }
         }
       ],
       "sla_minutes": 240,
       "risk_band_min": "low",
       "owners": [
-        "Ops"
+        "data@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
@@ -186,27 +227,75 @@
       "severity": "low"
     },
     {
-      "id": "PB-EMAIL-001",
-      "title": "Email Security Review",
+      "id": "PB-PAYMENT-FRAUD",
+      "title": "Payment Fraud Response",
       "domain": "security",
-      "priority": 50,
+      "priority": 90,
       "enabled": true,
-      "version": "1.0.1",
+      "version": "1.0.9",
+      "trigger_logic": "any",
+      "entry_conditions": {
+        "channel": "payments"
+      },
+      "actions": [
+        {
+          "type": "block_transaction",
+          "params": {}
+        },
+        {
+          "type": "notify_ops",
+          "params": {
+            "channel": "pagerduty"
+          }
+        },
+        {
+          "type": "create_incident",
+          "params": {
+            "severity": "high"
+          }
+        }
+      ],
+      "sla_minutes": 10,
+      "risk_band_min": "high",
+      "owners": [
+        "fraud@shopsquire.ai"
+      ],
+      "checks": [],
+      "closure_criteria": [],
+      "rollback": {
+        "enabled": true,
+        "strategy": "auto"
+      },
+      "requires_approval_roles": [],
+      "severity": "high",
+      "updated_by": "owner",
+      "updated_at": "2026-03-05T01:41:12.165478+00:00"
+    },
+    {
+      "id": "PB-EMAIL-001",
+      "title": "Email Security General Response",
+      "domain": "security",
+      "priority": 60,
+      "enabled": true,
+      "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "create_ticket",
-          "mode": "automatic",
+          "type": "quarantine_email",
+          "params": {}
+        },
+        {
+          "type": "notify_ops",
           "params": {
-            "queue": "soc"
+            "channel": "email"
           }
         }
       ],
-      "sla_minutes": 60,
+      "sla_minutes": 30,
       "risk_band_min": "low",
       "owners": [
-        "SecurityOps"
+        "security@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
@@ -219,66 +308,111 @@
     },
     {
       "id": "PB-EMAIL-002",
-      "title": "Reply-To Mismatch and Brand Impersonation",
+      "title": "Reply-To Mismatch / Brand Impersonation Response",
       "domain": "security",
-      "priority": 5,
+      "priority": 80,
       "enabled": true,
       "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "create_ticket",
-          "mode": "automatic",
-          "params": {
-            "queue": "soc"
-          }
+          "type": "quarantine_email",
+          "params": {}
+        },
+        {
+          "type": "block_sender",
+          "params": {}
         },
         {
           "type": "notify_ops",
-          "mode": "automatic",
           "params": {
-            "channel": "email"
+            "channel": "slack"
           }
         }
       ],
-      "sla_minutes": 30,
+      "sla_minutes": 15,
       "risk_band_min": "medium",
       "owners": [
-        "SecurityOps"
+        "security@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
       "rollback": {
-        "enabled": false,
-        "strategy": "manual"
+        "enabled": true,
+        "strategy": "auto"
       },
       "requires_approval_roles": [],
       "severity": "high"
     },
     {
       "id": "PB-EMAIL-003",
-      "title": "Invoice Attachment Verification",
+      "title": "BEC Kill Chain Response",
       "domain": "security",
-      "priority": 20,
+      "priority": 85,
       "enabled": true,
       "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "create_ticket",
-          "mode": "automatic",
+          "type": "quarantine_email",
+          "params": {}
+        },
+        {
+          "type": "disable_auto_financial_changes",
+          "params": {}
+        },
+        {
+          "type": "human_review",
+          "params": {}
+        }
+      ],
+      "sla_minutes": 5,
+      "risk_band_min": "high",
+      "owners": [
+        "security@shopsquire.ai"
+      ],
+      "checks": [],
+      "closure_criteria": [],
+      "rollback": {
+        "enabled": true,
+        "strategy": "auto"
+      },
+      "requires_approval_roles": [
+        "security_lead"
+      ],
+      "severity": "critical"
+    },
+    {
+      "id": "PB-EMAIL-004",
+      "title": "Malicious Attachment Response",
+      "domain": "security",
+      "priority": 75,
+      "enabled": true,
+      "version": "1.0.0",
+      "trigger_logic": "any",
+      "entry_conditions": {},
+      "actions": [
+        {
+          "type": "quarantine_email",
+          "params": {}
+        },
+        {
+          "type": "sandbox_attachment",
+          "params": {}
+        },
+        {
+          "type": "notify_ops",
           "params": {
-            "queue": "ap"
+            "channel": "slack"
           }
         }
       ],
-      "sla_minutes": 90,
+      "sla_minutes": 20,
       "risk_band_min": "medium",
       "owners": [
-        "FinanceOps",
-        "SecurityOps"
+        "security@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
@@ -290,67 +424,34 @@
       "severity": "high"
     },
     {
-      "id": "PB-EMAIL-004",
-      "title": "Banking Details Change Hold",
+      "id": "PB-EMAIL-005",
+      "title": "DMARC Anomaly Response",
       "domain": "security",
-      "priority": 8,
+      "priority": 70,
       "enabled": true,
       "version": "1.0.0",
       "trigger_logic": "any",
       "entry_conditions": {},
       "actions": [
         {
-          "type": "hold_payment",
-          "mode": "automatic",
+          "type": "quarantine_email",
+          "params": {}
+        },
+        {
+          "type": "notify_ops",
           "params": {
-            "hold_minutes": 1440
+            "channel": "email"
           }
         },
         {
-          "type": "create_ticket",
-          "mode": "automatic",
-          "params": {
-            "queue": "ap"
-          }
+          "type": "log_incident",
+          "params": {}
         }
       ],
-      "sla_minutes": 120,
+      "sla_minutes": 30,
       "risk_band_min": "high",
       "owners": [
-        "FinanceOps",
-        "SecurityOps"
-      ],
-      "checks": [],
-      "closure_criteria": [],
-      "rollback": {
-        "enabled": false,
-        "strategy": "manual"
-      },
-      "requires_approval_roles": [],
-      "severity": "critical"
-    },
-    {
-      "id": "PB-EMAIL-005",
-      "title": "DMARC/SPF/DKIM Anomaly Investigation",
-      "domain": "security",
-      "priority": 6,
-      "enabled": true,
-      "version": "1.0.0",
-      "trigger_logic": "any",
-      "entry_conditions": {},
-      "actions": [
-        {
-          "type": "create_ticket",
-          "mode": "automatic",
-          "params": {
-            "queue": "soc"
-          }
-        }
-      ],
-      "sla_minutes": 60,
-      "risk_band_min": "high",
-      "owners": [
-        "SecurityOps"
+        "security@shopsquire.ai"
       ],
       "checks": [],
       "closure_criteria": [],
@@ -363,31 +464,38 @@
     }
   ],
   "signal_map": {
+    "email_security": [
+      "PB-EMAIL-001"
+    ],
     "prompt_injection": [
       "PB-SEC-001"
     ],
     "jailbreak": [
       "PB-SEC-001"
     ],
-    "systematic_probing": [
-      "PB-SEC-001"
-    ],
-    "model_theft": [
-      "PB-SEC-001"
-    ],
     "data_exfiltration": [
       "PB-SEC-002"
     ],
-    "pii_exfiltration": [
+    "pii": [
       "PB-SEC-002"
     ]
   },
   "tag_map": {
+    "dmarc_fail": [
+      "PB-TEST-1"
+    ],
+    "dmarc": [
+      "PB-EMAIL-005"
+    ],
+    "serial_mismatch": [
+      "PB-FRAUD-001",
+      "PB-CV-SERIAL-001"
+    ],
+    "data_not_ready": [
+      "PB-DATA-001"
+    ],
     "payment_fraud": [
       "PB-PAYMENT-FRAUD"
-    ],
-    "email_security": [
-      "PB-EMAIL-001"
     ],
     "reply_to_mismatch": [
       "PB-EMAIL-002"
@@ -395,20 +503,17 @@
     "brand_impersonation": [
       "PB-EMAIL-002"
     ],
-    "invoice_attachment": [
+    "bec_detected": [
       "PB-EMAIL-003"
     ],
-    "bank_details_change": [
+    "malicious_attachment": [
       "PB-EMAIL-004"
     ],
-    "dmarc": [
-      "PB-EMAIL-005"
+    "html_attachment": [
+      "PB-EMAIL-004"
     ],
-    "serial_mismatch": [
-      "PB-CV-SERIAL-001"
-    ],
-    "data_not_ready": [
-      "PB-DATA-001"
+    "invoice_attachment": [
+      "PB-EMAIL-004"
     ]
   }
 }

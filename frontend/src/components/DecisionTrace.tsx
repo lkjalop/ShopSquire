@@ -169,7 +169,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'raw'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'audit' | 'raw'>('events');
+  const [auditTrail, setAuditTrail] = useState<any | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll'>('poll');
@@ -687,6 +689,14 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
               <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
               <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
               <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
+              <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
+                setActiveTab('audit');
+                if (!auditTrail && traceId && !auditLoading) {
+                  setAuditLoading(true);
+                  fetch(apiUrl(`/api/v1/decisions/${traceId}/audit-trail`), { headers: authHeaders })
+                    .then(r => r.json()).then(d => setAuditTrail(d)).catch(() => {}).finally(() => setAuditLoading(false));
+                }
+              }}>Audit Trail</button>
               <button className={activeTab === 'raw' ? styles.activeTab : ''} onClick={() => setActiveTab('raw')}>Raw</button>
             </div>
 
@@ -1241,6 +1251,93 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                         ))}
                         {stages.length === 0 && <span className={styles.muted}>No workflow data.</span>}
                       </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'audit' && (
+                <div className={styles.summaryPane}>
+                  {auditLoading && <div className={styles.empty}>Loading audit trail...</div>}
+                  {!auditLoading && !auditTrail && <div className={styles.empty}>No audit trail data. Click the tab to fetch.</div>}
+                  {auditTrail && (
+                    <>
+                      <div className={styles.sectionTitle}>Bitemporal Decision Audit</div>
+                      <div className={styles.kvRow}><span>Decisions</span><span>{auditTrail.decision_count}</span></div>
+                      <div className={styles.kvRow}><span>Events</span><span>{auditTrail.event_count}</span></div>
+                      <div className={styles.kvRow}><span>Hash Chain Length</span><span>{auditTrail.immutability?.chain_length}</span></div>
+                      <div className={styles.kvRow}><span>Tip Hash</span><span className={styles.mono}>{auditTrail.immutability?.tip_hash}</span></div>
+                      <div className={styles.kvRow}><span>Chain Verified</span><span>{auditTrail.immutability?.verified ? '\u2705 Yes' : '\u274c No'}</span></div>
+
+                      <div className={styles.sectionTitle}>Storage & Immutability</div>
+                      <div className={styles.kvRow}><span>Backend</span><span>{auditTrail.storage?.backend}</span></div>
+                      <div className={styles.kvRow}><span>Encryption at Rest</span><span>{auditTrail.storage?.encryption_at_rest ? 'Yes' : 'No'}</span></div>
+                      <div className={styles.kvRow}><span>Backup</span><span>{auditTrail.storage?.backup_enabled ? 'Enabled' : 'Not configured'}</span></div>
+
+                      {(auditTrail.decisions || []).length > 0 && (
+                        <>
+                          <div className={styles.sectionTitle}>Agent Decisions (Bitemporal)</div>
+                          <table className={styles.smallTable}>
+                            <thead><tr><th>Agent</th><th>Valid From</th><th>Valid To</th><th>System From</th><th>Status</th><th>Approval</th></tr></thead>
+                            <tbody>
+                              {(auditTrail.decisions || []).map((d: any, i: number) => (
+                                <tr key={i}>
+                                  <td>{d.agent_name}</td>
+                                  <td className={styles.mono}>{d.valid_from?.slice(0, 19)}</td>
+                                  <td className={styles.mono}>{d.valid_to === 'infinity' ? '\u221e' : d.valid_to?.slice(0, 19)}</td>
+                                  <td className={styles.mono}>{d.system_from?.slice(0, 19)}</td>
+                                  <td>{d.execution_status}</td>
+                                  <td>{d.approval_required ? '\u26a0\ufe0f Required' : '\u2705 Auto'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      )}
+
+                      <div className={styles.sectionTitle}>Hash Chain (Tamper Evidence)</div>
+                      <div style={{maxHeight: '200px', overflow: 'auto'}}>
+                        <table className={styles.smallTable}>
+                          <thead><tr><th>#</th><th>Type</th><th>Timestamp</th><th>Hash</th><th>Prev</th></tr></thead>
+                          <tbody>
+                            {(auditTrail.hash_chain || []).slice(0, 50).map((h: any, i: number) => (
+                              <tr key={i}>
+                                <td>{i + 1}</td>
+                                <td>{h.type}</td>
+                                <td className={styles.mono}>{h.timestamp?.slice(0, 19) || '--'}</td>
+                                <td className={styles.mono}>{h.hash}</td>
+                                <td className={styles.mono}>{h.prev_hash === 'genesis' ? 'genesis' : h.prev_hash}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className={styles.sectionTitle}>Compliance Retention Policy</div>
+                      <div className={styles.sectionTitle} style={{fontSize: '11px', marginTop: '4px'}}>Must Retain</div>
+                      {(auditTrail.retention_policy?.retain_mandatory || []).map((r: any, i: number) => (
+                        <div key={i} className={styles.kvRow}>
+                          <span style={{fontFamily: 'monospace', fontSize: '11px'}}>{r.field}</span>
+                          <span title={r.reason}>{r.min_retention_days}d \u2014 {r.reason?.slice(0, 60)}</span>
+                        </div>
+                      ))}
+                      <div className={styles.sectionTitle} style={{fontSize: '11px', marginTop: '8px'}}>Purge Eligible</div>
+                      {(auditTrail.retention_policy?.purge_eligible || []).map((r: any, i: number) => (
+                        <div key={i} className={styles.kvRow}>
+                          <span style={{fontFamily: 'monospace', fontSize: '11px'}}>{r.field}</span>
+                          <span>After {r.after_days}d \u2014 {r.reason?.slice(0, 60)}</span>
+                        </div>
+                      ))}
+                      {(auditTrail.retention_policy?.pii_fields_detected || []).length > 0 && (
+                        <>
+                          <div className={styles.sectionTitle} style={{fontSize: '11px', marginTop: '8px', color: '#dc2626'}}>PII Fields Detected</div>
+                          <div className={styles.tagRow}>
+                            {auditTrail.retention_policy.pii_fields_detected.map((f: string) => (
+                              <span key={f} className={styles.tag} style={{background: '#dc2626'}}>{f}</span>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
                 </div>

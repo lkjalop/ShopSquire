@@ -1,34 +1,7 @@
 {
-  "USE_AGENT_CAPABILITIES": true,
-  "AGENT_ROLLOUT_PERCENT": 100,
   "CAPABILITIES": {
-    "recommend": {
-      "enabled": true,
-      "rollout_percent": 100
-    }
-  },
-  "KILL_SWITCH": false,
-  "DECISION_LOG_WRITES_ENABLED": false,
-  "DEGRADATION": {
-    "enabled": true
-  },
-  "TEST_FORCE_BAD_SKU": false,
-  "SEASONAL_CONTEXT": {
-    "active_season": null,
-    "boosts": {
-      "back_to_school": {
-        "portability": 1.15,
-        "battery": 1.1,
-        "value": 1.08
-      },
-      "holiday_sales": {
-        "value": 1.18,
-        "build_quality": 1.08
-      },
-      "travel": {
-        "portability": 1.2,
-        "battery": 1.12
-      }
+    "paypal": {
+      "enabled": true
     }
   }
 }

@@ -187,8 +187,19 @@ async def analyze(
                     labels, extracted_text = await ManagedCVProvider().get_labels_and_text(
                         sanitized_images[0].get("bytes") or b""
                     )
-            except Exception:
-                pass
+            except Exception as _cv_exc:
+                import logging as _lg
+                _lg.getLogger("cv.analyze").warning("ManagedCVProvider failed: %s", _cv_exc, exc_info=True)
+
+            # If ManagedCVProvider yielded no text, try local tesseract directly
+            # so downstream security analysis has OCR evidence even when Ollama is down.
+            if not extracted_text and sanitized_images and str(sanitized_images[0].get("status") or "") == "sanitized":
+                try:
+                    from src.app.services.cv_provider import ManagedCVProvider as _MCP
+                    _prov = _MCP()
+                    extracted_text = _prov._tesseract_text(sanitized_images[0].get("bytes") or b"")
+                except Exception:
+                    pass
 
             # Tier2 scan on first image so /cv/analyze exposes security evidence
             # (QR URLs, overlay/prompt-injection tags, manipulation signals).
@@ -206,7 +217,9 @@ async def analyze(
                         tier2_result = run_tier2(bytes(_img0), meta=_meta, pack_id=resolve_pack_id(req.description or req.issue_type or "electronics"))
                         tier2_evidence_tags = list(tier2_result.get("evidence_tags") or [])
                         tier2_security = (tier2_result.get("security_analysis") or {}) if isinstance(tier2_result.get("security_analysis"), dict) else {}
-            except Exception:
+            except Exception as _tier2_exc:
+                import logging as _lg
+                _lg.getLogger("cv.analyze").warning("tier2 scan failed: %s", _tier2_exc, exc_info=True)
                 tier2_result = {}
                 tier2_evidence_tags = []
                 tier2_security = {}
@@ -592,6 +605,11 @@ async def analyze(
             "image_consistency": image_consistency,
             "qr_codes": qr_decode_hits[:10],
             "qr_prompt_injection": qr_prompt_injection,
+            "security_matrix": {
+                "details": security_details,
+                "severity": security_sev,
+                "signals": {k: v for k, v in (security_details.get("signals") or {}).items() if isinstance(v, bool)} if isinstance(security_details, dict) else {},
+            } if security_details else None,
             "ui_actions": {"chat_with_admin": _needs_chat},
             "suggested_routing": "security_review" if _needs_chat else "standard_queue",
         }

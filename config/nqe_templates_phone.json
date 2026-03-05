@@ -1,0 +1,12 @@
+{
+  "phone": {
+    "templates": [
+      {"id": "ask_budget_tier", "intent": "recommend", "product_category": "phone", "text": "What's your budget for a phone?", "goal": "clarify_details"},
+      {"id": "ask_platform", "intent": "recommend", "product_category": "phone", "text": "Do you prefer iOS (iPhone) or Android?", "goal": "clarify_details"},
+      {"id": "ask_use_case", "intent": "recommend", "product_category": "phone", "text": "What matters most — camera, battery life, performance, or compact size?", "goal": "clarify_details"},
+      {"id": "ask_brand_pref", "intent": "recommend", "product_category": "phone", "text": "Any brand preferences (Apple, Samsung, Google, OnePlus)?", "goal": "clarify_details"},
+      {"id": "ask_storage", "intent": "recommend", "product_category": "phone", "text": "How much storage do you need (128GB, 256GB, 512GB+)?", "goal": "clarify_details"},
+      {"id": "ask_carrier", "intent": "recommend", "product_category": "phone", "text": "Do you need it unlocked or tied to a specific carrier?", "goal": "clarify_details"}
+    ]
+  }
+}

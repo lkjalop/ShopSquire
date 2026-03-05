@@ -273,6 +273,17 @@ class Orchestrator:
             factor += 0.10
         if complexity_hits >= 2:
             factor += 0.15
+        # ── Risk register domain-aware budget boost ──
+        # When org risk posture is elevated, boost relevant agents.
+        _rr_high_domains: list = []
+        try:
+            from src.app.routers.admin_grc import get_latest_risk_bands
+            _rr_bands = get_latest_risk_bands()
+            _rr_high_domains = [d for d, b in _rr_bands.items() if b in ("high", "critical")]
+        except Exception:
+            pass
+        if _rr_high_domains:
+            factor += 0.15  # global budget bump
         global_budget = max(1, min(12, int(round(float(base_tool_budget or 1) * factor))))
         agent_weights = {
             "Security_Observer_Agent": 0.20,
@@ -283,6 +294,12 @@ class Orchestrator:
             "Inventory_Agent": 0.06,
             "Fraud_Scoring_Agent": 0.06,
         }
+        # Domain-specific weight boosts from risk register
+        if any(d in ("supplier_trust", "inventory_resilience") for d in _rr_high_domains):
+            agent_weights["Inventory_Agent"] = 0.18  # +200% budget for inventory checks
+            agent_weights["Fraud_Scoring_Agent"] = 0.12
+        if any(d in ("insider_threat", "email_deliverability") for d in _rr_high_domains):
+            agent_weights["Security_Observer_Agent"] = 0.30  # +50% more security scrutiny
         per_agent: Dict[str, int] = {}
         remaining = global_budget
         keys = list(agent_weights.keys())
@@ -2064,8 +2081,13 @@ class Orchestrator:
                         _tag(res)
                         return res
                     from src.app.services.cv_object_detector import CVObjectDetector
-                    det = CVObjectDetector(model_path=self.flags.get("CV_DETECTOR_MODEL")).detect(img)
-                    res = {"detections": det, "summary": CVObjectDetector.summarize(det)}
+                    _det_path = self.flags.get("CV_DETECTOR_MODEL") or None
+                    if not hasattr(self, "_cv_detector_cache"):
+                        self._cv_detector_cache: dict = {}
+                    if _det_path not in self._cv_detector_cache:
+                        self._cv_detector_cache[_det_path] = CVObjectDetector(model_path=_det_path)
+                    det = self._cv_detector_cache[_det_path].detect(img)
+                    res = {"detections": det, "summary": self._cv_detector_cache[_det_path].summarize(det)}
                     _tag(res)
                     return res
                 except Exception:
@@ -2073,10 +2095,15 @@ class Orchestrator:
             if tool_name == "cv_damage_classify":
                 try:
                     from src.app.services.cv_damage_classifier import DamageClassifier
-                    dmg = DamageClassifier(
-                        model_path=self.flags.get("CV_DAMAGE_MODEL"),
-                        yolo_model_path=self.flags.get("CV_DAMAGE_YOLO_MODEL"),
-                    ).classify(img)
+                    _dmg_key = (self.flags.get("CV_DAMAGE_MODEL") or None, self.flags.get("CV_DAMAGE_YOLO_MODEL") or None)
+                    if not hasattr(self, "_cv_damage_cache"):
+                        self._cv_damage_cache: dict = {}
+                    if _dmg_key not in self._cv_damage_cache:
+                        self._cv_damage_cache[_dmg_key] = DamageClassifier(
+                            model_path=_dmg_key[0],
+                            yolo_model_path=_dmg_key[1],
+                        )
+                    dmg = self._cv_damage_cache[_dmg_key].classify(img)
                     res = dmg or {}
                     _tag(res)
                     return res

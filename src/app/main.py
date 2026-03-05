@@ -216,16 +216,14 @@ def create_app() -> FastAPI:
             pass
         try:
             if str(os.getenv("CV_WARMUP_ON_START", "")).lower() in ("1", "true", "yes"):
-                from src.app.services.cv_warmup import warmup_cv_models
-                import threading
+                from src.app.workers.task_runner import submit_task, register_handler
 
-                def _warm():
-                    try:
-                        warmup_cv_models()
-                    except Exception:
-                        pass
+                def _cv_warmup_handler(payload):
+                    from src.app.services.cv_warmup import warmup_cv_models
+                    warmup_cv_models()
 
-                threading.Thread(target=_warm, daemon=True).start()
+                register_handler("cv_warmup", _cv_warmup_handler)
+                submit_task("cv_warmup", {})
         except Exception:
             pass
         try:
@@ -243,7 +241,55 @@ def create_app() -> FastAPI:
             await start_stream_consumer()
         except Exception:
             pass
+        # Build visual search index in background on startup
+        try:
+            if str(os.getenv("VISUAL_SEARCH_INDEX_ON_START", "1")).lower() in ("1", "true", "yes"):
+                from src.app.workers.task_runner import submit_task, register_handler
+
+                def _vs_index_handler(payload):
+                    import logging
+                    from src.app.services.visual_search import build_index, is_available
+                    if not is_available():
+                        return
+                    from src.app.models.db import db_session
+                    from sqlalchemy import text as sql_text
+                    import json as _json
+
+                    products = []
+                    with db_session() as session:
+                        rows = session.execute(sql_text(
+                            "SELECT sku, name, brand, price_cents, specs FROM products LIMIT 50000"
+                        )).fetchall()
+                        for r in rows:
+                            specs = {}
+                            if r[4]:
+                                try:
+                                    specs = _json.loads(r[4]) if isinstance(r[4], str) else r[4]
+                                except Exception:
+                                    pass
+                            products.append({"sku": r[0], "name": r[1], "brand": r[2], "price_cents": r[3], "specs": specs})
+                    if products:
+                        n = build_index(products)
+                        logging.getLogger("shopsquire.startup").info("Visual search index built: %d products", n)
+
+                register_handler("vs_index_build", _vs_index_handler)
+                submit_task("vs_index_build", {})
+        except Exception:
+            pass
+        # Start task runner consumer (Redis Streams)
+        try:
+            from src.app.workers.task_runner import start_consumer
+            start_consumer()
+        except Exception:
+            pass
         yield
+        # Stop task runner consumer
+        try:
+            from src.app.workers.task_runner import stop_consumer, shutdown_fallback_pool
+            stop_consumer()
+            shutdown_fallback_pool()
+        except Exception:
+            pass
         try:
             from src.app.services.trace_broker import stop_stream_consumer
             await stop_stream_consumer()
@@ -308,18 +354,20 @@ def create_app() -> FastAPI:
                     except Exception:
                         pass
                 elif target_is_sqlite and existing_is_sqlite and url and existing_url and existing_url != url:
-                    # If tests request a custom sqlite DB (not the default test.sqlite),
-                    # honor that override even if an existing sqlite engine is present.
-                    if url != default_sqlite:
-                        eng = create_engine(url, pool_pre_ping=True, future=True)
-                        try:
-                            setattr(eng, "_shopsquire_managed", True)
-                        except Exception:
-                            pass
-                        try:
-                            dbmod.set_engine(eng)
-                        except Exception:
-                            pass
+                    # If tests request a sqlite DB different from the existing engine's URL,
+                    # always create a new engine for that URL (including the default
+                    # test.sqlite). This preserves per-URL DB isolation so tests that
+                    # monkeypatch DATABASE_URL don't share the session engine and
+                    # contaminate unrelated test data.
+                    eng = create_engine(url, pool_pre_ping=True, future=True)
+                    try:
+                        setattr(eng, "_shopsquire_managed", True)
+                    except Exception:
+                        pass
+                    try:
+                        dbmod.set_engine(eng)
+                    except Exception:
+                        pass
                 elif managed and url and existing_url and existing_url != url:
                     eng = create_engine(url, pool_pre_ping=True, future=True)
                     try:
@@ -383,6 +431,12 @@ def create_app() -> FastAPI:
     # Enforce webhook signature + replay protection on inbound webhooks
     try:
         app.add_middleware(SecurityHeadersMiddleware)
+    except Exception:
+        pass
+    # API version deprecation headers (RFC-8594 Deprecation / Sunset)
+    try:
+        from src.app.versioning import VersionDeprecationMiddleware
+        app.add_middleware(VersionDeprecationMiddleware)
     except Exception:
         pass
     # Enforce webhook signature + replay protection on inbound webhooks
@@ -801,11 +855,23 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception):
+        # ── Handle structured ShopSquireError subclasses ──
+        try:
+            from src.app.exceptions import ShopSquireError
+            if isinstance(exc, ShopSquireError):
+                try:
+                    record_exception(request.url.path)
+                except Exception:
+                    pass
+                return ORJSONResponse(exc.to_dict(), status_code=exc.status_code)
+        except ImportError:
+            pass
+
         try:
             record_exception(request.url.path)
         except Exception:
             pass
-        # Log full traceback to stderr to help triage intermittent 500s during tests
+        # Log full traceback to stderr to help triage intermittent 500s
         try:
             import sys, traceback
             tb = traceback.format_exc()
@@ -813,15 +879,6 @@ def create_app() -> FastAPI:
             sys.stderr.flush()
         except Exception:
             pass
-        # Choose tolerant behavior for GET requests when enabled by env var
-        try:
-            import os
-            tolerant = os.getenv("TEST_TOLERANT_GET_ERRORS", "0") in ("1", "true", "yes")
-        except Exception:
-            tolerant = False
-        if tolerant and request.method.upper() == "GET":
-            payload = {"error": "bad_request", "message": "Request could not be processed"}
-            return ORJSONResponse(payload, status_code=400)
         # Basic structured payload; avoid leaking sensitive info
         payload = {
             "error": "internal_error",
@@ -1543,6 +1600,12 @@ def create_app() -> FastAPI:
     app.include_router(shipping_security_router)
     app.include_router(support_complaints_router)
     app.include_router(chat_router)
+    # Chat streaming SSE endpoint
+    try:
+        from src.app.routers.chat_stream import router as chat_stream_router
+        app.include_router(chat_stream_router)
+    except Exception:
+        pass
     app.include_router(safe_links_router)
     app.include_router(billing_router)
     app.include_router(admin_webhooks_router)
@@ -1556,6 +1619,25 @@ def create_app() -> FastAPI:
     app.include_router(audit_router)
     app.include_router(posthoc_router)
     app.include_router(health_router)
+    # API version metadata endpoint
+    try:
+        from src.app.versioning import get_api_version_info
+        from fastapi import APIRouter as _APIRouter
+        _ver_router = _APIRouter(tags=["meta"])
+
+        @_ver_router.get("/api/version", include_in_schema=True)
+        def api_version_info():
+            return get_api_version_info()
+
+        app.include_router(_ver_router)
+    except Exception:
+        pass
+    # Admin/executive status summary
+    try:
+        from src.app.routers.status_summary import router as status_summary_router
+        app.include_router(status_summary_router)
+    except Exception:
+        pass
     app.include_router(data_readiness_router)
     app.include_router(trace_debug_router)
     # DMARC ingestion + summary endpoints

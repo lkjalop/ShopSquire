@@ -38,3 +38,4 @@ def test_upsert_sqlite_executes_and_replaces():
         assert r is not None
         # active stored as integer in SQLite; our wrappers normalize when mapping rows
         assert r[0] == "two"
+    # Engine restoration is handled globally by _restore_db_engine in conftest.py

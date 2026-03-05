@@ -44,11 +44,27 @@ pytest = "^7.4.4"
 pytest-asyncio = "^0.23.5"
 pytest-playwright = "^0.4.4"
 playwright = "^1.41.2"
+pytest-cov = "^4.1.0"
 ruff = "^0.3.0"
 mypy = "^1.8.0"
 types-redis = "^4.6.0.20240106"
 requests = "^2.31.0"
 neo4j = "^5.18.0"
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "src/app/migrations/*",
+    "src/app/workers/celery_app.py",
+    "*/__pycache__/*",
+    "*/sitecustomize.py",
+]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 60
 
 [tool.ruff]
 line-length = 100

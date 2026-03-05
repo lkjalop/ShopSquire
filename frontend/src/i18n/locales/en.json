@@ -1,0 +1,56 @@
+{
+  "nav": {
+    "home": "Home",
+    "cart": "Cart",
+    "orders": "Orders",
+    "help": "Help"
+  },
+  "cart": {
+    "title": "Your Cart",
+    "empty": "Your cart is empty.",
+    "subtotal": "Subtotal",
+    "checkout": "Checkout",
+    "remove": "Remove",
+    "clear": "Clear Cart",
+    "add": "Add to Cart",
+    "itemCount_one": "{{count}} item",
+    "itemCount_other": "{{count}} items"
+  },
+  "chat": {
+    "placeholder": "Ask ShopSquire anything...",
+    "send": "Send",
+    "clear": "Clear chat",
+    "close": "Close"
+  },
+  "auth": {
+    "login": "Log in",
+    "logout": "Log out",
+    "email": "Email address",
+    "password": "Password",
+    "signIn": "Sign in",
+    "forgotPassword": "Forgot password?"
+  },
+  "product": {
+    "compare": "Compare",
+    "details": "View details",
+    "addToCart": "Add to cart",
+    "noResults": "No products found.",
+    "loading": "Loading products..."
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "notFound": "Page not found.",
+    "unauthorized": "You need to log in to access this.",
+    "rateLimited": "Too many requests. Please wait a moment.",
+    "serverError": "Server error. Our team has been notified."
+  },
+  "a11y": {
+    "openCart": "Open shopping cart",
+    "closeCart": "Close shopping cart",
+    "openChat": "Open chat assistant",
+    "closeChat": "Close chat assistant",
+    "loading": "Loading, please wait",
+    "removeItem": "Remove {{name}} from cart",
+    "productImage": "Product image for {{name}}"
+  }
+}

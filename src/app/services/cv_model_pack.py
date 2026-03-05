@@ -34,3 +34,17 @@ def get_model_pack(pack_id: str | None = None, *, tenant_id: str | None = None) 
 
 def get_all_model_packs() -> Dict[str, Any]:
     return _load_packs()
+
+
+def get_model_pack_for_category(category: str | None = None, *, tenant_id: str | None = None) -> Dict[str, Any]:
+    """Resolve the best CV model pack for a product category.
+
+    Uses the ``category_defaults`` mapping in cv_model_packs.json.
+    Falls back to the global default if no category-specific pack exists.
+    """
+    if not category:
+        return get_model_pack(tenant_id=tenant_id)
+    cfg = _load_packs()
+    cat_defaults = cfg.get("category_defaults") or {}
+    pack_id = cat_defaults.get(category.lower())
+    return get_model_pack(pack_id, tenant_id=tenant_id)

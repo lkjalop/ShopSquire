@@ -478,6 +478,36 @@ def update_incident_status(
                 sql_text("UPDATE incidents SET status = :status, sla_status = CASE WHEN :status IN ('resolved', 'closed') THEN 'met' ELSE sla_status END WHERE id = :id"),
                 {"status": status, "id": incident_id},
             )
+        # Log DREAD calibration on closure for historical tuning
+        if status in ("resolved", "closed"):
+            try:
+                from src.app.services.dread_calibration import log_calibration
+                # Fetch the DREAD prediction from the last security_scan trace event
+                with eng.begin() as conn:
+                    te = conn.execute(
+                        sql_text(
+                            "SELECT payload FROM decision_trace_events "
+                            "WHERE trace_id = :tid AND event_type = 'security_scan' "
+                            "ORDER BY created_at DESC LIMIT 1"
+                        ),
+                        {"tid": incident_id},
+                    ).fetchone()
+                _dread_data = {}
+                _signal_list: list = []
+                if te and te[0]:
+                    _payload_raw = json.loads(te[0]) if isinstance(te[0], str) else te[0]
+                    _dread_data = _payload_raw.get("dread") or {}
+                    _sigs = _payload_raw.get("signals") or {}
+                    _signal_list = [k for k, v in _sigs.items() if v] if isinstance(_sigs, dict) else []
+                log_calibration(
+                    incident_id=incident_id,
+                    trace_id=incident_id,
+                    dread=_dread_data,
+                    signal_types=_signal_list,
+                    closed_by=role,
+                )
+            except Exception:
+                pass
         return {"ok": True, "incident_id": incident_id, "status": status, "sla": _apply_sla_if_missing(incident_id)}
     except Exception:
         raise HTTPException(status_code=500, detail="db_error")

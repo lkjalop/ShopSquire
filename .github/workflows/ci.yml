@@ -97,6 +97,9 @@ jobs:
           else
             alembic -c alembic.ini upgrade head
           fi
+      - name: Check for sync db_session() in async routes
+        run: |
+          python scripts/check_async_db.py src/app/routers || true
       - name: Shadow migration check
         run: |
           python scripts/shadow_migration_check.py --db-url "${{ env.DATABASE_URL }}"
@@ -108,7 +111,12 @@ jobs:
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
         run: |
-          python -m pytest -q
+          python -m pytest -q --cov=src --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.python-version }}
+          path: coverage.xml
       - name: Emit Splunk test event (optional)
         if: env.SPLUNK_HEC_URL != '' && env.SPLUNK_HEC_TOKEN != ''
         run: |

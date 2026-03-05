@@ -276,15 +276,20 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
         ensure_event_log_table()
         ev_id = str(uuid.uuid4())
         payload = json.dumps(resp, ensure_ascii=False)
-        with db_session() as db:
-            db.execute(
-                "INSERT INTO event_log (id, type, payload, status) VALUES (:id, :type, :payload, 'pending')",
-                {"id": ev_id, "type": "vision.triage", "payload": payload},
-            )
-            try:
-                db.commit()
-            except Exception:
-                pass
+
+        def _persist_event():
+            with db_session() as db:
+                db.execute(
+                    "INSERT INTO event_log (id, type, payload, status) VALUES (:id, :type, :payload, 'pending')",
+                    {"id": ev_id, "type": "vision.triage", "payload": payload},
+                )
+                try:
+                    db.commit()
+                except Exception:
+                    pass
+
+        import asyncio
+        await asyncio.to_thread(_persist_event)
         resp["event_id"] = ev_id
     except Exception:
         pass

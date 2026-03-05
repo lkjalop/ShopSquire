@@ -1,0 +1,12 @@
+{
+  "tv": {
+    "templates": [
+      {"id": "ask_budget_tier", "intent": "recommend", "product_category": "tv", "text": "What's your budget for a TV?", "goal": "clarify_details"},
+      {"id": "ask_screen_size", "intent": "recommend", "product_category": "tv", "text": "What screen size are you looking for (43\", 55\", 65\", 75\")?", "goal": "clarify_details"},
+      {"id": "ask_use_case", "intent": "recommend", "product_category": "tv", "text": "Will this be mainly for movies, sports, gaming, or general viewing?", "goal": "clarify_details"},
+      {"id": "ask_display_tech", "intent": "recommend", "product_category": "tv", "text": "Any preference for display technology (OLED, QLED, LED)?", "goal": "clarify_details"},
+      {"id": "ask_smart_features", "intent": "recommend", "product_category": "tv", "text": "Do you need specific smart TV features or streaming apps?", "goal": "clarify_details"},
+      {"id": "ask_brand_pref", "intent": "recommend", "product_category": "tv", "text": "Any brand preferences (Samsung, LG, Sony, TCL)?", "goal": "clarify_details"}
+    ]
+  }
+}

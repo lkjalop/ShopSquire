@@ -1,0 +1,59 @@
+{{- if .Values.dbBackup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "shopsquire.fullname" . }}-db-backup
+  labels:
+    {{- include "shopsquire.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.dbBackup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "shopsquire.serviceAccountName" . }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999  # postgres user
+          containers:
+            - name: pg-backup
+              image: postgres:16
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop:
+                    - ALL
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  FILENAME="shopsquire_$(date +%Y%m%d_%H%M%S).sql.gz"
+                  pg_dump -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+                    --no-owner --no-acl --format=plain | gzip > /tmp/$FILENAME
+                  echo "Backup created: /tmp/$FILENAME"
+                  {{- if .Values.dbBackup.s3Bucket }}
+                  aws s3 cp /tmp/$FILENAME s3://{{ .Values.dbBackup.s3Bucket }}/pg-backups/$FILENAME --sse aws:kms
+                  {{- end }}
+              envFrom:
+                {{- toYaml .Values.envFrom | nindent 16 }}
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 2Gi
+{{- end }}

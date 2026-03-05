@@ -1,0 +1,56 @@
+{
+  "nav": {
+    "home": "Accueil",
+    "cart": "Panier",
+    "orders": "Commandes",
+    "help": "Aide"
+  },
+  "cart": {
+    "title": "Votre panier",
+    "empty": "Votre panier est vide.",
+    "subtotal": "Sous-total",
+    "checkout": "Commander",
+    "remove": "Supprimer",
+    "clear": "Vider le panier",
+    "add": "Ajouter au panier",
+    "itemCount_one": "{{count}} article",
+    "itemCount_other": "{{count}} articles"
+  },
+  "chat": {
+    "placeholder": "Posez une question à ShopSquire...",
+    "send": "Envoyer",
+    "clear": "Effacer le chat",
+    "close": "Fermer"
+  },
+  "auth": {
+    "login": "Se connecter",
+    "logout": "Se déconnecter",
+    "email": "Adresse e-mail",
+    "password": "Mot de passe",
+    "signIn": "Connexion",
+    "forgotPassword": "Mot de passe oublié ?"
+  },
+  "product": {
+    "compare": "Comparer",
+    "details": "Voir les détails",
+    "addToCart": "Ajouter au panier",
+    "noResults": "Aucun produit trouvé.",
+    "loading": "Chargement des produits..."
+  },
+  "errors": {
+    "generic": "Une erreur est survenue. Veuillez réessayer.",
+    "notFound": "Page introuvable.",
+    "unauthorized": "Vous devez vous connecter pour accéder à cela.",
+    "rateLimited": "Trop de requêtes. Veuillez patienter.",
+    "serverError": "Erreur serveur. Notre équipe a été notifiée."
+  },
+  "a11y": {
+    "openCart": "Ouvrir le panier",
+    "closeCart": "Fermer le panier",
+    "openChat": "Ouvrir l'assistant de chat",
+    "closeChat": "Fermer l'assistant de chat",
+    "loading": "Chargement en cours, veuillez patienter",
+    "removeItem": "Supprimer {{name}} du panier",
+    "productImage": "Image du produit {{name}}"
+  }
+}

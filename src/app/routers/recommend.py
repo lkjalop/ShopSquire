@@ -39,7 +39,7 @@ from src.app.services.decision_log import log_trace_event, log_decision
 from src.app.services.agent_bus import AgentBus
 from src.app.services.agent_handoff import request_handoff_best_effort
 from src.app.deps import hash_uid
-from src.app.services.risk_quantification import quantify as quantify_risk
+from src.app.services.risk_quantification import quantify as quantify_risk, fair_from_signals
 from src.app.policy.gate import evaluate_policy_gate
 from src.app.services.search_events import log_search_event
 from src.app.services.checkout_upsell import recommend_checkout_upsell, ensure_recommend_interactions_table
@@ -306,7 +306,7 @@ def _resolve_nqe_product_category(
             return pt
     # Use the category router for automatic detection from query text
     try:
-        from src.app.services.category_router import detect_category
+        from src.app.services.category_router import detect_category, detect_entities
         detected = detect_category(query=query, constraints=constraints)
         if detected and detected != "general":
             return detected
@@ -1992,6 +1992,15 @@ def _build_security_payload(details: Dict[str, Any] | None, severity: str | None
         "kev": sec.get("kev_ids"),
         "maestro": sec.get("maestro_tags", []),
         "cyber_risk_quantification": sec.get("risk_quantification"),
+        "tls_fingerprint": {
+            "ja3": (sec.get("fraud") or {}).get("ja3_hash"),
+            "ja4": (sec.get("fraud") or {}).get("ja4_hash"),
+        } if (sec.get("fraud") or {}).get("ja3_hash") or (sec.get("fraud") or {}).get("ja4_hash") else None,
+        "gnn_fraud": {
+            "score": (sec.get("fraud") or {}).get("gnn_score"),
+            "method": (sec.get("fraud") or {}).get("gnn_method"),
+            "ring_detected": (sec.get("fraud") or {}).get("gnn_ring_detected"),
+        } if (sec.get("fraud") or {}).get("gnn_score") is not None else None,
     }
 
 
@@ -3032,6 +3041,20 @@ def suggest(
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             _trace_system_error(trace_id=trace_id, stage="fraud_summary.trace_emit", exc=exc)
+        # GNN fraud ring detection (layered on top of rule-based fraud scorer)
+        try:
+            from src.app.services.gnn_fraud_detector import predict_fraud_risk
+            gnn_result = predict_fraud_risk(uid or "anonymous")
+            fraud_summary["gnn_score"] = round(float(gnn_result.gnn_score), 4)
+            fraud_summary["gnn_method"] = gnn_result.method
+            fraud_summary["gnn_ring_detected"] = gnn_result.ring_detected
+            if gnn_result.gnn_score > 0.6:
+                fraud_summary["level"] = "high"
+                fraud_summary["gnn_explanation"] = gnn_result.explanation
+            elif gnn_result.gnn_score > 0.3 and fraud_summary.get("level") in ("minimal", "low"):
+                fraud_summary["level"] = "medium"
+        except Exception:
+            pass
     except (TypeError, ValueError, RuntimeError, ImportError) as exc:
         _trace_system_error(trace_id=trace_id, stage="fraud_summary.build", exc=exc)
         fraud_summary = {}
@@ -3200,8 +3223,35 @@ def suggest(
 
     nlp_start = time.perf_counter()
     q_for_memory = (query or "").lower()
+
+    # -----------------------------------------------------------------------
+    # Recent conversation messages — stored by chat.py in structured_state.
+    # Used to detect follow-up intent and build richer LLM context.
+    # -----------------------------------------------------------------------
+    recent_conv_messages: list = []
+    try:
+        recent_conv_messages = structured_state.get("recent_messages") or []
+        if not isinstance(recent_conv_messages, list):
+            recent_conv_messages = []
+    except Exception:
+        recent_conv_messages = []
+
+    # Build a compact conversation-history summary for the LLM prompt
+    _conv_history_lines: list = []
+    for _cm in recent_conv_messages[-8:]:
+        if isinstance(_cm, dict):
+            _cr = str(_cm.get("role", ""))
+            _cc = str(_cm.get("content", ""))[:200]
+            if _cr and _cc:
+                _conv_history_lines.append(f"{_cr}: {_cc}")
+    conversation_history_text = "\n".join(_conv_history_lines) if _conv_history_lines else ""
+
+    # Detect follow-up intent more broadly: if there are recent conversation
+    # messages, any pronoun-like or short query likely refers to prior context.
+    _has_conv_context = bool(recent_conv_messages)
     allow_budget_memory = bool(
-        re.search(r"\b(same|that|it|similar|previous|this|these|those|earlier|above|them)\b", q_for_memory)
+        _has_conv_context  # any conversation history implies continuity
+        or re.search(r"\b(same|that|it|similar|previous|this|these|those|earlier|above|them)\b", q_for_memory)
         or re.search(r"\b(all \d+|those \d+|why (they|those|are they)|list all|detail(ed)?|explain)\b", q_for_memory)
         or _is_followup_explain_query(q_for_memory)
     )
@@ -3489,6 +3539,18 @@ def suggest(
     except Exception:
         _session_context_summary = ""
         _user_profile_dict = {}
+
+    # Augment session context with live conversation history if available.
+    # This ensures the LLM sees the actual recent user/assistant exchanges,
+    # preventing "context rot" on follow-up queries.
+    if conversation_history_text:
+        if _session_context_summary:
+            _session_context_summary = (
+                f"Recent conversation:\n{conversation_history_text}\n\n"
+                f"Session summary:\n{_session_context_summary}"
+            )
+        else:
+            _session_context_summary = f"Recent conversation:\n{conversation_history_text}"
 
     # Apply profile preferences if this turn did not explicitly set brand filters.
     try:
@@ -5468,6 +5530,35 @@ def suggest(
     except Exception:
         pass
 
+    # FAIR Monte Carlo risk model (runs alongside CRQ v1)
+    fair_risk = None
+    try:
+        fair_risk = fair_from_signals(
+            security=analysis.get("details") or {},
+            fraud=retrieved_context.get("fraud_summary") or {},
+            monetary_exposure=float(
+                (nlp.get("preferences") or {}).get("budget_max")
+                or (nlp.get("preferences") or {}).get("budget_min")
+                or 1000
+            ),
+            simulations=1000,
+        )
+        retrieved_context["fair_risk"] = fair_risk
+    except Exception:
+        pass
+
+    # Multi-category NER extraction
+    try:
+        from src.app.services.category_router import detect_entities
+        ner_entities = detect_entities(
+            query=query,
+            image_labels=image_context.get("labels") if isinstance(image_context, dict) else None,
+            constraints=constraints,
+        )
+        retrieved_context["ner_entities"] = ner_entities
+    except Exception:
+        pass
+
     decision_id = None
     try:
         prefs = nlp.get("preferences", {}) or {}
@@ -6775,6 +6866,18 @@ def suggest(
                 {"proposal": redacted.get("proposal"), "analysis": {**final_out.get("details", {}), "critique_deltas": deltas}},
                 request=request,
             )
+    except Exception:
+        pass
+    # Final escalation: auto-create incident for main happy-path reviews
+    try:
+        _auto_create_incident_for_review(
+            payload=redacted,
+            trace_id=trace_id,
+            uid=uid,
+            query=query,
+            severity=severity,
+            source="recommend_main",
+        )
     except Exception:
         pass
     return redacted

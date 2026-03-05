@@ -31,6 +31,7 @@ from src.app.observability.worm import append_worm_record
 from src.app.services.geoip import enrich_ip
 from src.app.observability.metrics import record_geo_velocity_anomaly
 from src.app.security.jailbreak_embedding_guard import is_embedding_jailbreak
+from src.app.security.dread_scorer import compute_dread, infer_kill_chain_stage as dread_kill_chain
 
 
 def _load_json(path: str) -> Dict:
@@ -510,7 +511,32 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
     if cv_signals.get("qr_code_detected") or cv_signals.get("qr_external_url_detected"):
         stride_sum += float(stride.get("spoofing", 0))
 
-    dread_avg = sum(dread.values()) / max(len(dread.values()) or 1, 1)
+    # Dynamic per-event DREAD scoring (replaces static constant)
+    dread_dynamic = compute_dread(
+        signals=signals,
+        cv_signals=cv_signals,
+        severity="info",  # pre-severity; will be refined after risk_adj
+        actor_context=actor_context,
+    )
+    # ── Attack campaign correlation ──
+    _campaign_result = None
+    _ek_val = ""
+    try:
+        from src.app.services.campaign_correlator import check_campaign, apply_campaign_boost, entity_key as _ek
+        _ip_for_ek = ip or ""
+        _asn_for_ek = str(geo.get("asn") or "") if isinstance(geo, dict) else ""
+        _uid_for_ek = str((actor_context or {}).get("uid_hash") or (actor_context or {}).get("uid") or "") if isinstance(actor_context, dict) else ""
+        _ek_val = _ek(_ip_for_ek, _asn_for_ek, _uid_for_ek)
+        _campaign_result = check_campaign(
+            ek=_ek_val,
+            current_signals=signals,
+            current_kill_chain_stage=str(dread_dynamic.get("kill_chain_stage") or "Reconnaissance"),
+        )
+        if _campaign_result.detected:
+            dread_dynamic = apply_campaign_boost(dread_dynamic, _campaign_result)
+    except Exception:
+        pass
+    dread_avg = dread_dynamic["avg"] / 10.0  # normalise 0-10 → 0-1 for risk formula
     cvss_score = cvss.get("LOW", 0.2)
     if (
         signals.get("jailbreak")
@@ -595,8 +621,12 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         "owasp_api_top10": _owasp_api_tags(signals),
         "stride_categories": _stride_tags(signals, cv_signals=cv_signals),
         "stride_score": stride_sum,
-        "dread_avg": dread_avg,
-        "dread": dread,
+        "dread_avg": dread_dynamic["avg"],
+        "dread_weighted_avg": dread_dynamic.get("weighted_avg", dread_dynamic["avg"]),
+        "dread_kill_chain_stage": dread_dynamic.get("kill_chain_stage", ""),
+        "dread": dread_dynamic,
+        "entity_key": _ek_val,
+        "campaign": _campaign_result.to_dict() if _campaign_result and _campaign_result.detected else None,
         "cvss_score": cvss_score,
         "kev_ids": kev_ids,
         "risk_raw": risk_raw,
@@ -700,6 +730,17 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
             current = "Stage5"
         if severity in ("high", "critical"):
             current = "Stage6"
+        # DREAD-driven PASTA floor: if weighted DREAD is severe at advanced kill-chain
+        # stages, ensure PASTA reflects the urgency (minimum Stage6: Risk Response).
+        try:
+            _dw_avg = float(dread_dynamic.get("weighted_avg") or 0)
+            _dw_kc = str(dread_dynamic.get("kill_chain_stage") or "")
+            if _dw_avg >= 7.5 and _dw_kc in ("Exploitation", "Installation", "CommandAndControl", "ActionsOnObjectives"):
+                _stage_num = int(current.replace("Stage", "") or "1")
+                if _stage_num < 6:
+                    current = "Stage6"
+        except Exception:
+            pass
         workflow = []
         reached = False
         for s in stages:

@@ -1,0 +1,166 @@
+# helm/shopsquire/values.yaml — Default values for the ShopSquire Helm chart.
+# Override with: helm upgrade --install shopsquire ./helm/shopsquire -f my-values.yaml
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/shopsquire/shopsquire
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to chart appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: api.shopsquire.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: shopsquire-tls
+      hosts:
+        - api.shopsquire.io
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 3
+
+env:
+  APP_ENV: production
+  API_PORT: "8080"
+  CV_WARMUP_ON_START: "1"
+  VISUAL_SEARCH_INDEX_ON_START: "1"
+  METRICS_INTERNAL_ONLY: "1"
+
+envFrom:
+  - secretRef:
+      name: shopsquire-secrets
+
+# ── Migrations job ──
+migrations:
+  enabled: true
+  image: {}  # inherits global image
+  command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
+
+# ── Workers ──
+syncWorker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ── Backup ──
+dbBackup:
+  enabled: true
+  schedule: "0 2 * * *"  # daily at 02:00 UTC
+  s3Bucket: ""
+  retentionDays: 7
+
+# ── In-cluster dependencies ──
+postgresql:
+  enabled: false  # use external managed Postgres in production
+  auth:
+    postgresPassword: change-me
+    database: shopsquire
+
+redis:
+  enabled: false  # use external managed Redis in production
+  auth:
+    password: change-me
+
+# ── External managed services ──
+externalDatabase:
+  host: ""
+  port: 5432
+  name: shopsquire
+  existingSecret: shopsquire-secrets
+  secretKeys:
+    databaseUrl: DATABASE_URL
+
+externalRedis:
+  host: ""
+  port: 6379
+  existingSecret: shopsquire-secrets
+  secretKeys:
+    redisUrl: REDIS_URL
+
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - shopsquire
+          topologyKey: kubernetes.io/hostname

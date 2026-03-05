@@ -25,6 +25,21 @@ import re
 import unicodedata
 from urllib.parse import urlparse
 
+# ---------------------------------------------------------------------------
+# Module-level model cache — prevents loading 200-600 MB YOLO weights once
+# per HTTP request.  Keyed on model_path (str | None) so different packs
+# that share the same path reuse the same instance.  Thread-safe: the GIL
+# protects the dict assignment, and CVObjectDetector.__init__ is idempotent.
+# ---------------------------------------------------------------------------
+_DETECTOR_CACHE: dict[str | None, "CVObjectDetector"] = {}
+
+
+def _get_detector(model_path: str | None) -> "CVObjectDetector":
+    """Return a cached CVObjectDetector for *model_path*, creating it once."""
+    if model_path not in _DETECTOR_CACHE:
+        _DETECTOR_CACHE[model_path] = CVObjectDetector(model_path=model_path)
+    return _DETECTOR_CACHE[model_path]
+
 
 _URL_RE = re.compile(r"https?://[^\s<>()\"']+")
 _PROMPT_INJECTION_RE = re.compile(
@@ -228,7 +243,7 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     detections = []
     det_summary = {"labels": [], "mapped": [], "unique": [], "counts": {}}
     try:
-        detector = CVObjectDetector(model_path=model_path)
+        detector = _get_detector(model_path)
         detections = detector.detect(image_bytes)
         det_summary = detector.summarize(detections)
     except Exception as exc:

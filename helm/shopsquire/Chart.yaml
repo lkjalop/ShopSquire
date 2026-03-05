@@ -1,0 +1,23 @@
+apiVersion: v2
+name: shopsquire
+description: ShopSquire Agentic Commerce Platform — Kubernetes Helm chart
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - commerce
+  - ai
+  - fastapi
+home: https://shopsquire.io
+maintainers:
+  - name: ShopSquire Platform Team
+    email: platform@shopsquire.io
+dependencies:
+  - name: postgresql
+    version: "13.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled

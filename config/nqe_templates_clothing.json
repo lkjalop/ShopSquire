@@ -1,0 +1,12 @@
+{
+  "clothing": {
+    "templates": [
+      {"id": "ask_budget_tier", "intent": "recommend", "product_category": "clothing", "text": "What's your budget range for this item?", "goal": "clarify_details"},
+      {"id": "ask_size", "intent": "recommend", "product_category": "clothing", "text": "What size do you usually wear (S/M/L/XL or numeric)?", "goal": "clarify_details"},
+      {"id": "ask_occasion", "intent": "recommend", "product_category": "clothing", "text": "Is this for casual wear, work, sport, or a special occasion?", "goal": "clarify_details"},
+      {"id": "ask_material_pref", "intent": "recommend", "product_category": "clothing", "text": "Any fabric preferences (cotton, linen, synthetic, etc.)?", "goal": "clarify_details"},
+      {"id": "ask_color_pref", "intent": "recommend", "product_category": "clothing", "text": "Do you have a colour or pattern preference?", "goal": "clarify_details"},
+      {"id": "ask_brand_pref", "intent": "recommend", "product_category": "clothing", "text": "Any brand preferences or brands to avoid?", "goal": "clarify_details"}
+    ]
+  }
+}

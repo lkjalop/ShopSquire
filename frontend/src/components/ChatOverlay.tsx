@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import styles from './ChatOverlay.module.css';
 import type { Product } from '../App';
+import { focusFirst, trapFocus } from '../utils/a11y';
 
 // Inline SVG icons to avoid heroicons dependency issues
 const CogIcon = () => (
@@ -26,6 +27,22 @@ export default function ChatOverlay({
   onOpenTrace: () => void;
 }) {
   const [q, setQ] = useState('');
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = 'chat-overlay-title';
+
+  // Focus management: move focus into dialog when opened, restore when closed
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (open) {
+      previousFocusRef.current = document.activeElement as HTMLElement;
+      focusFirst(dialogRef.current);
+      const cleanup = trapFocus(dialogRef.current!);
+      return cleanup;
+    } else {
+      previousFocusRef.current?.focus();
+    }
+  }, [open]);
 
   const handleSend = () => {
     if (q.trim()) {
@@ -35,15 +52,26 @@ export default function ChatOverlay({
   };
 
   return (
-    <div className={`${styles.wrap} ${open ? styles.open : ''}`} aria-hidden={!open}>
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-hidden={!open}
+      className={`${styles.wrap} ${open ? styles.open : ''}`}
+    >
       <div className={styles.header}>
-        <span className={styles.headerTitle}>ShopSquire AI Assistant</span>
-        <button className={styles.closeBtn} onClick={onClose}>Close</button>
+        <span id={titleId} className={styles.headerTitle}>ShopSquire AI Assistant</span>
+        <button
+          className={styles.closeBtn}
+          onClick={onClose}
+          aria-label="Close chat assistant"
+        >Close</button>
       </div>
 
       <div className={styles.body}>
         {/* Quick Action Buttons */}
-        <div className={styles.quickActions}>
+        <div className={styles.quickActions} role="group" aria-label="Quick search suggestions">
           <button className={styles.quickBtn} onClick={() => onSend('budget laptop under $1000')}>Budget</button>
           <button className={styles.quickBtn} onClick={() => onSend('gaming laptop RTX')}>Gaming</button>
           <button className={styles.quickBtn} onClick={() => onSend('compare top laptops')}>Compare</button>
@@ -55,20 +83,20 @@ export default function ChatOverlay({
         {products.length > 0 ? (
           <>
             {products.slice(0, 5).map((p) => (
-              <div key={p.sku} className={styles.card}>
+              <div key={p.sku} className={styles.card} role="article" aria-label={`Product: ${p.name}`}>
                 <div className={styles.cardImage}>
                   <img
                     src={p.image_url || `/static/images/${p.sku}.svg`}
-                    alt={p.name}
+                    alt={`Product image for ${p.name}`}
                     onError={(e) => { (e.target as HTMLImageElement).src = '/static/images/placeholder.svg'; }}
                   />
                 </div>
                 <div className={styles.cardContent}>
                   <div className={styles.cardName}>{p.name}</div>
-                  <div className={styles.cardPrice}>${p.price.toLocaleString()}</div>
+                  <div className={styles.cardPrice} aria-label={`Price: $${p.price.toLocaleString()}`}>${p.price.toLocaleString()}</div>
                   <div className={styles.cardFeatures}>{(p.features || []).slice(1, 3).join(' • ')}</div>
                 </div>
-                <button className={styles.addBtn}>Add</button>
+                <button className={styles.addBtn} aria-label={`Add ${p.name} to cart`}>Add</button>
               </div>
             ))}
             {products.length > 5 && (
@@ -93,14 +121,23 @@ export default function ChatOverlay({
       </div>
 
       <div className={styles.footer}>
+        <label htmlFor="chat-input" className="sr-only">Ask ShopSquire anything</label>
         <input
+          id="chat-input"
+          ref={inputRef}
           className={styles.input}
           placeholder="Ask about laptops..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          aria-label="Chat message input"
         />
-        <button className={styles.sendBtn} onClick={handleSend}>Send</button>
+        <button
+          className={styles.sendBtn}
+          onClick={handleSend}
+          aria-label="Send message"
+          disabled={!q.trim()}
+        >Send</button>
       </div>
     </div>
   );

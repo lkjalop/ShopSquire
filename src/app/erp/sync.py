@@ -229,27 +229,60 @@ def sync_inventory(
                         continue
 
                     if upsert_products and not is_quarantined:
-                        # Ensure a product exists for sku; use sku as name fallback.
-                        row = db.execute(text("SELECT id FROM products WHERE sku = :sku"), {"sku": r.sku}).fetchone()
-                        if row:
-                            pid = row[0]
-                        else:
-                            pid = str(uuid.uuid4())
-                            db.execute(
-                                text("INSERT INTO products (id, sku, name, active, updated_at) VALUES (:id, :sku, :name, 1, :ts)"),
-                                {"id": pid, "sku": r.sku, "name": r.sku, "ts": _now_iso()},
-                            )
-                        # Upsert inventory row for product/warehouse
-                        inv_id = str(uuid.uuid4())
+                        # Race-safe product upsert: use INSERT … ON CONFLICT DO NOTHING so
+                        # concurrent sync workers do not race to insert the same SKU.
+                        pid = str(uuid.uuid4())
                         try:
+                            dialect = str(getattr(getattr(db.bind, "dialect", None), "name", "")).lower()
+                        except Exception:
+                            dialect = ""
+                        if "postgres" in dialect:
                             db.execute(
                                 text(
-                                    "INSERT INTO inventory (id, product_id, stock, warehouse, updated_at) VALUES (:id, :pid, :stock, :wh, :ts)"
+                                    "INSERT INTO products (id, sku, name, active, updated_at) "
+                                    "VALUES (:id, :sku, :name, 1, :ts) "
+                                    "ON CONFLICT (sku) DO NOTHING"
                                 ),
-                                {"id": inv_id, "pid": pid, "stock": int(r.stock or 0), "wh": r.warehouse, "ts": _now_iso()},
+                                {"id": pid, "sku": r.sku, "name": r.sku, "ts": _now_iso()},
                             )
+                            # Re-fetch the actual id (might be a pre-existing row)
+                            row = db.execute(text("SELECT id FROM products WHERE sku = :sku"), {"sku": r.sku}).fetchone()
+                            if row:
+                                pid = row[0]
+                        else:
+                            # SQLite: INSERT OR IGNORE then fetch
+                            db.execute(
+                                text(
+                                    "INSERT OR IGNORE INTO products (id, sku, name, active, updated_at) "
+                                    "VALUES (:id, :sku, :name, 1, :ts)"
+                                ),
+                                {"id": pid, "sku": r.sku, "name": r.sku, "ts": _now_iso()},
+                            )
+                            row = db.execute(text("SELECT id FROM products WHERE sku = :sku"), {"sku": r.sku}).fetchone()
+                            if row:
+                                pid = row[0]
+                        # Upsert inventory row for product/warehouse — dialect-aware
+                        inv_id = str(uuid.uuid4())
+                        try:
+                            if "postgres" in dialect:
+                                db.execute(
+                                    text(
+                                        "INSERT INTO inventory (id, product_id, stock, warehouse, updated_at) "
+                                        "VALUES (:id, :pid, :stock, :wh, :ts) "
+                                        "ON CONFLICT (product_id, warehouse) DO UPDATE "
+                                        "SET stock = EXCLUDED.stock, updated_at = EXCLUDED.updated_at"
+                                    ),
+                                    {"id": inv_id, "pid": pid, "stock": int(r.stock or 0), "wh": r.warehouse, "ts": _now_iso()},
+                                )
+                            else:
+                                db.execute(
+                                    text(
+                                        "INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse, updated_at) "
+                                        "VALUES (:id, :pid, :stock, :wh, :ts)"
+                                    ),
+                                    {"id": inv_id, "pid": pid, "stock": int(r.stock or 0), "wh": r.warehouse, "ts": _now_iso()},
+                                )
                         except Exception:
-                            # best-effort update if unique constraints exist in other envs
                             db.execute(
                                 text(
                                     "UPDATE inventory SET stock = :stock, updated_at = :ts WHERE product_id = :pid AND warehouse = :wh"

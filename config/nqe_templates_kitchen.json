@@ -1,0 +1,12 @@
+{
+  "kitchen": {
+    "templates": [
+      {"id": "ask_budget_tier", "intent": "recommend", "product_category": "kitchen", "text": "What's your budget for this kitchen item?", "goal": "clarify_details"},
+      {"id": "ask_use_case", "intent": "recommend", "product_category": "kitchen", "text": "What will you mainly use it for (daily cooking, baking, entertaining)?", "goal": "clarify_details"},
+      {"id": "ask_kitchen_size", "intent": "recommend", "product_category": "kitchen", "text": "How much counter or kitchen space do you have available?", "goal": "clarify_details"},
+      {"id": "ask_capacity", "intent": "recommend", "product_category": "kitchen", "text": "How many people are you typically cooking for?", "goal": "clarify_details"},
+      {"id": "ask_brand_pref", "intent": "recommend", "product_category": "kitchen", "text": "Any brand preferences (KitchenAid, Cuisinart, Ninja, etc.)?", "goal": "clarify_details"},
+      {"id": "ask_power_source", "intent": "recommend", "product_category": "kitchen", "text": "Do you need gas, electric, or does it not matter?", "goal": "clarify_details"}
+    ]
+  }
+}

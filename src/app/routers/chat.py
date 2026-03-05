@@ -472,6 +472,26 @@ async def chat_query(
     if not allowed_model_use:
         raise HTTPException(status_code=429, detail={"message": "model_theft_guard", "reason": model_use_reason})
 
+    # -----------------------------------------------------------------------
+    # Persist recent conversation messages so the recommend pipeline can
+    # reference them for context continuity (avoids "context rot").
+    # -----------------------------------------------------------------------
+    try:
+        _uid_msg = str((payload or {}).get("uid") or "demo-user")
+        _recent_msgs_raw = (payload or {}).get("recent_messages") or []
+        if isinstance(_recent_msgs_raw, list) and _recent_msgs_raw:
+            _mem_state = Memory(redis)
+            _ss = _mem_state.get_structured_state(_uid_msg) or {}
+            # Keep at most 12 recent messages to cap Redis size
+            _ss["recent_messages"] = [
+                {"role": str(m.get("role", ""))[:10], "content": str(m.get("content", ""))[:500]}
+                for m in _recent_msgs_raw[-12:]
+                if isinstance(m, dict)
+            ]
+            _mem_state.set_structured_state(_uid_msg, _ss)
+    except Exception:
+        pass
+
     # Call internal recommend endpoint to leverage agentic pipeline
     base = str(request.base_url).rstrip("/")
     url = f"{base}/api/v1/recommend/suggest"

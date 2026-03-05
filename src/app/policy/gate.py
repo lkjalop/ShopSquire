@@ -77,6 +77,21 @@ def evaluate_policy_gate(context: Dict[str, Any]) -> PolicyGateResult:
     require_approval_for_review = _thr_bool("require_approval_for_policy_review", False)
     risk_medium_min = _thr_float("risk_score_medium_min", 0.6)
     risk_high_min = _thr_float("risk_score_high_min", 0.8)
+
+    # Dynamic threshold adjustment from persistent risk register snapshots.
+    # When any domain is "high" risk, tighten auto-approve thresholds.
+    try:
+        from src.app.routers.admin_grc import get_latest_risk_bands
+        rr_bands = get_latest_risk_bands()
+        high_domains = [d for d, b in rr_bands.items() if b == "high"]
+        if high_domains:
+            # Tighten thresholds proportionally: each high domain reduces them
+            factor = max(0.3, 1.0 - 0.15 * len(high_domains))
+            risk_high_min = max(0.3, risk_high_min * factor)
+            risk_medium_min = max(0.2, risk_medium_min * factor)
+            auto_refund_max = max(25.0, auto_refund_max * factor)
+    except Exception:
+        pass
     high_risk_tools = thresholds.get("high_risk_tools") or ["refund.issue", "payout.send", "chargeback.override", "price.override"]
     cancel_after_ship_statuses = thresholds.get("cancel_after_ship_statuses") or ["shipped", "delivered", "out_for_delivery"]
     repeat_refund_24h_min = int(thresholds.get("repeat_refund_24h_min", 2) or 2)

@@ -123,7 +123,7 @@ def _stride_from_signals(signals: Dict[str, Any], tags: List[str]) -> List[str]:
     return [x for x in out if x and (x not in seen and not seen.add(x))]
 
 
-def _pasta(signals: Dict[str, Any], severity: str | None) -> Dict[str, Any]:
+def _pasta(signals: Dict[str, Any], severity: str | None, *, dread: Dict[str, Any] | None = None) -> Dict[str, Any]:
     # Mirror the observer's staging logic for consistent trace drilldowns.
     stages = [
         {"id": "Stage1", "name": "DefineObjectives"},
@@ -146,6 +146,14 @@ def _pasta(signals: Dict[str, Any], severity: str | None) -> Dict[str, Any]:
             current = "Stage5"
         if str(severity or "").lower() in ("high", "critical", "error"):
             current = "Stage6"
+        # DREAD-driven PASTA floor: weighted DREAD >= 7.5 at advanced kill-chain stage → min Stage6
+        if isinstance(dread, dict):
+            _dw_avg = float(dread.get("weighted_avg") or 0)
+            _dw_kc = str(dread.get("kill_chain_stage") or "")
+            if _dw_avg >= 7.5 and _dw_kc in ("Exploitation", "Installation", "CommandAndControl", "ActionsOnObjectives"):
+                _sn = int(current.replace("Stage", "") or "1")
+                if _sn < 6:
+                    current = "Stage6"
     except Exception:
         pass
     workflow: List[Dict[str, Any]] = []
@@ -437,9 +445,9 @@ def correlate_security_analysis(
     atlas, attack = _split_mitre([str(x) for x in mitre_in])
     owasp_llm = map_signals_to_owasp({k: bool(v) for k, v in signals_l.items()})
     stride = _stride_from_signals(signals_l, tags_l)
-    pasta = _pasta(signals_l, severity)
     cvss = threat.get("cvss") if isinstance(threat.get("cvss"), dict) else None
     dread = threat.get("dread") if isinstance(threat.get("dread"), dict) else None
+    pasta = _pasta(signals_l, severity, dread=dread)
     kev = threat.get("kev") if isinstance(threat.get("kev"), list) else []
 
     comp = _compliance(signals_l, tags_l)

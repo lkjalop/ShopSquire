@@ -1,5 +1,12 @@
 {
   "default": "agnostic_v1",
+  "category_defaults": {
+    "clothing": "clothing_v1",
+    "kitchen": "kitchen_v1",
+    "furniture": "furniture_v1",
+    "tv": "electronics_v1",
+    "phone": "electronics_v1"
+  },
   "packs": {
     "agnostic_v1": {
       "title": "Agnostic CV Pack v1",
@@ -36,6 +43,118 @@
       },
       "forensics": true,
       "phash": true
+    },
+    "clothing_v1": {
+      "title": "Clothing CV Pack v1",
+      "description": "Clothing/fashion category — style, colour, condition, fabric detection.",
+      "detector": {
+        "type": "yolo",
+        "model": "yolov8s.pt"
+      },
+      "ocr": {
+        "provider": "tesseract",
+        "fallback": "tesseract"
+      },
+      "quality": {
+        "type": "clip",
+        "labels": [
+          "clothing item", "shoe", "shirt", "jacket", "dress",
+          "stain", "tear", "fabric damage", "colour faded",
+          "new with tags", "worn garment", "blurry photo",
+          "care label", "size label", "brand tag"
+        ]
+      },
+      "forensics": true,
+      "phash": true,
+      "category_signals": {
+        "condition_labels": ["stain", "tear", "fabric damage", "colour faded", "worn garment"],
+        "identity_labels": ["care label", "size label", "brand tag"],
+        "style_labels": ["clothing item", "shoe", "shirt", "jacket", "dress"]
+      }
+    },
+    "kitchen_v1": {
+      "title": "Kitchen Appliance CV Pack v1",
+      "description": "Kitchen/appliance category — appliance type, damage, accessories.",
+      "detector": {
+        "type": "yolo",
+        "model": "yolov8s.pt"
+      },
+      "ocr": {
+        "provider": "tesseract",
+        "fallback": "tesseract"
+      },
+      "quality": {
+        "type": "clip",
+        "labels": [
+          "kitchen appliance", "blender", "mixer", "toaster", "coffee maker",
+          "cracked glass", "dented metal", "rust", "missing part",
+          "new appliance", "used appliance", "blurry photo",
+          "serial number label", "model label", "rating plate"
+        ]
+      },
+      "forensics": true,
+      "phash": true,
+      "category_signals": {
+        "condition_labels": ["cracked glass", "dented metal", "rust", "missing part"],
+        "identity_labels": ["serial number label", "model label", "rating plate"],
+        "type_labels": ["blender", "mixer", "toaster", "coffee maker"]
+      }
+    },
+    "furniture_v1": {
+      "title": "Furniture CV Pack v1",
+      "description": "Furniture category — material, condition, style, room scene.",
+      "detector": {
+        "type": "yolo",
+        "model": "yolov8s.pt"
+      },
+      "ocr": {
+        "provider": "tesseract",
+        "fallback": "tesseract"
+      },
+      "quality": {
+        "type": "clip",
+        "labels": [
+          "sofa", "chair", "table", "bed", "desk", "bookshelf",
+          "scratch", "water damage", "broken leg", "torn upholstery",
+          "new furniture", "used furniture", "blurry photo",
+          "room scene", "living room", "bedroom", "office"
+        ]
+      },
+      "forensics": true,
+      "phash": true,
+      "category_signals": {
+        "condition_labels": ["scratch", "water damage", "broken leg", "torn upholstery"],
+        "scene_labels": ["room scene", "living room", "bedroom", "office"],
+        "type_labels": ["sofa", "chair", "table", "bed", "desk", "bookshelf"]
+      }
+    },
+    "electronics_v1": {
+      "title": "Electronics CV Pack v1",
+      "description": "TV/phone/consumer electronics — screen, body, accessory detection.",
+      "detector": {
+        "type": "yolo",
+        "model": "yolov8s.pt"
+      },
+      "ocr": {
+        "provider": "tesseract",
+        "fallback": "tesseract"
+      },
+      "quality": {
+        "type": "clip",
+        "labels": [
+          "television", "smartphone", "tablet", "monitor",
+          "cracked screen", "dead pixels", "dented body", "scratched surface",
+          "new device", "used device", "blurry photo",
+          "serial sticker", "model label", "IMEI label"
+        ]
+      },
+      "forensics": true,
+      "phash": true,
+      "category_signals": {
+        "condition_labels": ["cracked screen", "dead pixels", "dented body", "scratched surface"],
+        "identity_labels": ["serial sticker", "model label", "IMEI label"],
+        "type_labels": ["television", "smartphone", "tablet", "monitor"]
+      }
     }
   }
 }

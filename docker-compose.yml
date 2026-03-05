@@ -223,5 +223,40 @@ services:
     depends_on:
       - prometheus
 
+  db-backup:
+    image: postgres:16
+    container_name: shopsquire_db_backup
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: shopsquire
+      BACKUP_DIR: /var/backups/shopsquire
+      BACKUP_RETENTION_DAYS: "7"
+    volumes:
+      - ./scripts/pg_backup.sh:/usr/local/bin/pg_backup.sh:ro
+      - db-backups:/var/backups/shopsquire
+    depends_on:
+      db:
+        condition: service_healthy
+    # Run daily at 02:00 UTC via a simple sleep loop
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chmod +x /usr/local/bin/pg_backup.sh
+        echo "[db-backup] Running initial backup..."
+        /usr/local/bin/pg_backup.sh
+        echo "[db-backup] Entering daily schedule (every 86400s)"
+        while true; do sleep 86400; /usr/local/bin/pg_backup.sh; done
+    restart: unless-stopped
+    user: "postgres"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512M
+
 volumes:
   pgdata:
+  db-backups:

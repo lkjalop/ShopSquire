@@ -9,6 +9,7 @@ import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
 import CartPanel from './components/CartPanel';
+import LoginModal from './components/LoginModal';
 
 export type Product = {
   sku: string;
@@ -234,6 +235,13 @@ export default function App() {
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = (localStorage.getItem('uid') || 'demo-user');
   const [cart, setCart] = useState<any | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [authUser, setAuthUser] = useState<{ email: string; name: string } | null>(() => {
+    const t = localStorage.getItem('access_token');
+    const e = localStorage.getItem('auth_email');
+    const n = localStorage.getItem('auth_name');
+    return t && e ? { email: e, name: n || e } : null;
+  });
 
   // NQE history: tracks every question-option interaction for backend context
   const [nqeHistory, setNqeHistory] = useState<NqeInteraction[]>([]);
@@ -894,7 +902,22 @@ export default function App() {
             <button className={styles.headerBtn} onClick={() => { refreshCart(); setRightPanelMode('cart'); }}>
               Cart ({(cart?.items || []).length || 0})
             </button>
-            <button className={styles.headerBtn}>Login</button>
+            {authUser ? (
+              <>
+                <span style={{ fontSize: 13, color: '#555', marginRight: 4 }}>{authUser.name}</span>
+                <button className={styles.headerBtn} onClick={() => {
+                  localStorage.removeItem('access_token');
+                  localStorage.removeItem('refresh_token');
+                  localStorage.removeItem('auth_email');
+                  localStorage.removeItem('auth_name');
+                  localStorage.removeItem('role');
+                  setAuthUser(null);
+                  fetch(apiUrl('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
+                }}>Logout</button>
+              </>
+            ) : (
+              <button className={styles.headerBtn} onClick={() => setShowLogin(true)}>Login</button>
+            )}
           </div>
         </div>
       </header>
@@ -1229,6 +1252,19 @@ export default function App() {
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (
         <EscalationRoom incidentId={escalationIncidentId} buyerToken={escalationBuyerToken} onClose={() => setEscalationOpen(false)} />
+      )}
+
+      {/* Login Modal */}
+      {showLogin && (
+        <LoginModal
+          onClose={() => setShowLogin(false)}
+          onLogin={(u) => {
+            localStorage.setItem('auth_email', u.email);
+            localStorage.setItem('auth_name', u.name);
+            setAuthUser({ email: u.email, name: u.name });
+            setShowLogin(false);
+          }}
+        />
       )}
     </div>
   );

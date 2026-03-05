@@ -1,0 +1,56 @@
+{
+  "nav": {
+    "home": "Inicio",
+    "cart": "Carrito",
+    "orders": "Pedidos",
+    "help": "Ayuda"
+  },
+  "cart": {
+    "title": "Tu carrito",
+    "empty": "Tu carrito está vacío.",
+    "subtotal": "Subtotal",
+    "checkout": "Pagar",
+    "remove": "Eliminar",
+    "clear": "Vaciar carrito",
+    "add": "Añadir al carrito",
+    "itemCount_one": "{{count}} artículo",
+    "itemCount_other": "{{count}} artículos"
+  },
+  "chat": {
+    "placeholder": "Pregunta a ShopSquire...",
+    "send": "Enviar",
+    "clear": "Limpiar chat",
+    "close": "Cerrar"
+  },
+  "auth": {
+    "login": "Iniciar sesión",
+    "logout": "Cerrar sesión",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "signIn": "Entrar",
+    "forgotPassword": "¿Olvidaste tu contraseña?"
+  },
+  "product": {
+    "compare": "Comparar",
+    "details": "Ver detalles",
+    "addToCart": "Añadir al carrito",
+    "noResults": "No se encontraron productos.",
+    "loading": "Cargando productos..."
+  },
+  "errors": {
+    "generic": "Algo salió mal. Por favor, inténtalo de nuevo.",
+    "notFound": "Página no encontrada.",
+    "unauthorized": "Necesitas iniciar sesión para acceder a esto.",
+    "rateLimited": "Demasiadas solicitudes. Espera un momento.",
+    "serverError": "Error del servidor. Nuestro equipo ha sido notificado."
+  },
+  "a11y": {
+    "openCart": "Abrir carrito de compras",
+    "closeCart": "Cerrar carrito de compras",
+    "openChat": "Abrir asistente de chat",
+    "closeChat": "Cerrar asistente de chat",
+    "loading": "Cargando, por favor espera",
+    "removeItem": "Eliminar {{name}} del carrito",
+    "productImage": "Imagen del producto {{name}}"
+  }
+}

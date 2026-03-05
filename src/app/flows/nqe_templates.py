@@ -6,9 +6,19 @@ import hashlib
 from typing import Any, Dict, List, Optional
 
 
+# Category-specific template bank files auto-loaded alongside the main file
+_CATEGORY_BANK_FILES = [
+    "nqe_templates_clothing.json",
+    "nqe_templates_kitchen.json",
+    "nqe_templates_furniture.json",
+    "nqe_templates_tv.json",
+    "nqe_templates_phone.json",
+]
+
+
 class TemplateStore:
     def __init__(self, path: str | None = None):
-        self.path = path or os.environ.get("NQE_TEMPLATES_PATH", os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "config", "nqe_templates.json"))
+        self.path = path or os.environ.get("NQE_TEMPLATES_PATH", os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", "config", "nqe_templates.json"))
         self._cache: Dict[str, Any] = {}
         self._load()
 
@@ -18,6 +28,18 @@ class TemplateStore:
                 self._cache = json.load(f)
         except Exception:
             self._cache = {"default": {"templates": []}}
+        # Auto-load category-specific template banks from same directory
+        config_dir = os.path.dirname(self.path)
+        for fname in _CATEGORY_BANK_FILES:
+            fpath = os.path.join(config_dir, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    bank = json.load(f)
+                self._cache.update(bank)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                pass
 
     def _normalize_group(self, group: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(group, dict):
@@ -76,6 +98,13 @@ class TemplateStore:
     ) -> List[Dict[str, Any]]:
         key = tenant_id or "default"
         group_raw = self._cache.get(key) or self._cache.get("default") or {}
+        # If the matched group has no templates for this category, try the
+        # category-specific bank (e.g. "clothing", "kitchen", "tv")
+        if product_category and product_category != "general":
+            cat_group = self._cache.get(product_category)
+            if cat_group:
+                # Prefer category bank when default has no category-matched templates
+                group_raw = cat_group
         group = self._normalize_group(group_raw)
         if version and str(version) != str(group.get("version")):
             fallback = self._normalize_group(self._cache.get("default") or {})

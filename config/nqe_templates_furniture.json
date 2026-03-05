@@ -1,0 +1,12 @@
+{
+  "furniture": {
+    "templates": [
+      {"id": "ask_budget_tier", "intent": "recommend", "product_category": "furniture", "text": "What's your budget for this furniture piece?", "goal": "clarify_details"},
+      {"id": "ask_room", "intent": "recommend", "product_category": "furniture", "text": "Which room is this for (living room, bedroom, office, dining)?", "goal": "clarify_details"},
+      {"id": "ask_dimensions", "intent": "recommend", "product_category": "furniture", "text": "Do you have size constraints or specific dimensions in mind?", "goal": "clarify_details"},
+      {"id": "ask_style", "intent": "recommend", "product_category": "furniture", "text": "What style are you going for (modern, mid-century, rustic, minimalist)?", "goal": "clarify_details"},
+      {"id": "ask_material_pref", "intent": "recommend", "product_category": "furniture", "text": "Any material preferences (wood, metal, upholstered, glass)?", "goal": "clarify_details"},
+      {"id": "ask_brand_pref", "intent": "recommend", "product_category": "furniture", "text": "Any brand preferences or brands to avoid?", "goal": "clarify_details"}
+    ]
+  }
+}

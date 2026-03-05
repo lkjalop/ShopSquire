@@ -108,46 +108,57 @@ async def ingest_shipping_webhook(
     tenant_id = str(payload.get("tenant_id") or "default")
     if not shipment_id or not status:
         raise HTTPException(status_code=400, detail="shipment_id_and_status_required")
-    with db_session() as db:
-        # Nonce replay guard
-        if nonce:
-            row = db.execute(text("SELECT 1 FROM shipping_events WHERE nonce = :n LIMIT 1"), {"n": nonce}).fetchone()
-            if row:
-                raise HTTPException(status_code=409, detail="shipping_replay_detected")
-        prev = db.execute(
-            text(
-                """
-                SELECT status FROM shipping_events
-                WHERE shipment_id = :sid
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            ),
-            {"sid": shipment_id},
-        ).fetchone()
-        prev_status = str(prev[0]).lower() if prev and prev[0] else "created"
-        legal_next = _LEGAL_TRANSITIONS.get(prev_status, set())
-        if legal_next and status not in legal_next:
-            raise HTTPException(status_code=422, detail=f"illegal_shipment_transition:{prev_status}->{status}")
-        event_id = str(uuid.uuid4())
-        db.execute(
-            text(
-                """
-                INSERT INTO shipping_events (id, tenant_id, shipment_id, provider, status, payload_json, nonce)
-                VALUES (:id, :tenant_id, :shipment_id, :provider, :status, :payload_json, :nonce)
-                """
-            ),
-            {
-                "id": event_id,
-                "tenant_id": tenant_id,
-                "shipment_id": shipment_id,
-                "provider": provider,
-                "status": status,
-                "payload_json": json.dumps(payload, ensure_ascii=False),
-                "nonce": nonce or None,
-            },
-        )
-        db.commit()
+
+    import asyncio
+
+    def _process_event():
+        with db_session() as db:
+            # Nonce replay guard
+            if nonce:
+                row = db.execute(text("SELECT 1 FROM shipping_events WHERE nonce = :n LIMIT 1"), {"n": nonce}).fetchone()
+                if row:
+                    return "replay"
+            prev = db.execute(
+                text(
+                    """
+                    SELECT status FROM shipping_events
+                    WHERE shipment_id = :sid
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {"sid": shipment_id},
+            ).fetchone()
+            prev_status = str(prev[0]).lower() if prev and prev[0] else "created"
+            legal_next = _LEGAL_TRANSITIONS.get(prev_status, set())
+            if legal_next and status not in legal_next:
+                return f"illegal:{prev_status}->{status}"
+            event_id = str(uuid.uuid4())
+            db.execute(
+                text(
+                    """
+                    INSERT INTO shipping_events (id, tenant_id, shipment_id, provider, status, payload_json, nonce)
+                    VALUES (:id, :tenant_id, :shipment_id, :provider, :status, :payload_json, :nonce)
+                    """
+                ),
+                {
+                    "id": event_id,
+                    "tenant_id": tenant_id,
+                    "shipment_id": shipment_id,
+                    "provider": provider,
+                    "status": status,
+                    "payload_json": json.dumps(payload, ensure_ascii=False),
+                    "nonce": nonce or None,
+                },
+            )
+            db.commit()
+            return "ok"
+
+    result = await asyncio.to_thread(_process_event)
+    if result == "replay":
+        raise HTTPException(status_code=409, detail="shipping_replay_detected")
+    if result and result.startswith("illegal:"):
+        raise HTTPException(status_code=422, detail=f"illegal_shipment_transition:{result[8:]}")
     # Simple hijack/poison checks
     reason_codes = []
     if bool(payload.get("carrier_switch")):

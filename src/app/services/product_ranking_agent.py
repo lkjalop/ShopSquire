@@ -43,65 +43,116 @@ def _extract_diversity_key(product: Dict[str, Any]) -> str:
     return f"{brand}|{cpu_fam}|{ram_tier}"
 
 
+# ── Category-specific ranking signal definitions ──
+_CATEGORY_RANKING_DIMENSIONS: Dict[str, list] = {
+    # Each entry: (required_spec_key, product_key, comparison_mode)
+    # comparison_mode: "ratio" (higher is better), "exact" (must match), "bool" (has/not)
+    "laptop": [
+        ("min_ram_gb", "ram_gb", "ratio"),
+        ("gpu_needed", "has_dedicated_gpu", "bool"),
+        ("min_gpu_vram_gb", "gpu_vram_gb", "ratio"),
+        ("min_storage_gb", "storage_gb", "ratio"),
+        ("min_display_inches", "display_inches", "ratio"),
+        ("min_refresh_hz", "refresh_hz", "ratio"),
+        ("touch_screen_required", "has_touch_screen", "bool"),
+    ],
+    "clothing": [
+        ("size", "size", "exact"),
+        ("color", "color", "exact"),
+        ("material", "material", "exact"),
+        ("occasion", "occasion", "exact"),
+        ("gender", "gender", "exact"),
+    ],
+    "kitchen": [
+        ("capacity", "capacity", "ratio"),
+        ("power_watts", "power_watts", "ratio"),
+        ("energy_rating", "energy_rating", "exact"),
+        ("material", "material", "exact"),
+    ],
+    "furniture": [
+        ("max_width_cm", "width_cm", "ratio_inverse"),  # product must be ≤ max
+        ("max_height_cm", "height_cm", "ratio_inverse"),
+        ("material", "material", "exact"),
+        ("style", "style", "exact"),
+        ("seats", "seats", "ratio"),
+    ],
+    "tv": [
+        ("min_screen_inches", "screen_inches", "ratio"),
+        ("display_tech", "display_tech", "exact"),  # OLED/QLED/LED
+        ("min_refresh_hz", "refresh_hz", "ratio"),
+        ("smart_platform", "smart_platform", "exact"),
+        ("hdr_support", "hdr_support", "bool"),
+    ],
+    "phone": [
+        ("min_storage_gb", "storage_gb", "ratio"),
+        ("min_ram_gb", "ram_gb", "ratio"),
+        ("platform", "platform", "exact"),  # ios/android
+        ("min_screen_inches", "screen_inches", "ratio"),
+        ("camera_mp", "camera_mp", "ratio"),
+    ],
+}
+
+
+def _detect_product_category(product: Dict[str, Any]) -> str:
+    """Infer category from product metadata."""
+    cat = str(product.get("category") or product.get("product_type") or "").lower()
+    if cat in _CATEGORY_RANKING_DIMENSIONS:
+        return cat
+    # Heuristic fallback
+    if product.get("ram_gb") or product.get("cpu"):
+        return "laptop"
+    if product.get("size") and product.get("material"):
+        return "clothing"
+    return "laptop"  # default
+
+
 def _spec_match_score(
     product: Dict[str, Any],
     required_specs: Dict[str, Any],
 ) -> float:
     """Score how well a product matches required specs (0.0 - 1.0).
 
+    Uses category-specific ranking dimensions when available.
     Each matched dimension contributes equally.  Over-spec gives full credit,
     under-spec is penalized proportionally.
     """
     if not required_specs:
         return 0.5  # neutral when no requirements
 
+    category = _detect_product_category(product)
+    dims = _CATEGORY_RANKING_DIMENSIONS.get(category, _CATEGORY_RANKING_DIMENSIONS["laptop"])
+
     dimensions = 0
     total = 0.0
 
-    # RAM
-    req_ram = required_specs.get("min_ram_gb") or required_specs.get("recommended_ram_gb")
-    prod_ram = product.get("ram_gb")
-    if req_ram and prod_ram:
-        dimensions += 1
-        total += min(prod_ram / req_ram, 1.0)
+    for spec_key, prod_key, mode in dims:
+        req_val = required_specs.get(spec_key)
+        prod_val = product.get(prod_key)
+        if req_val is None:
+            continue
 
-    # GPU
-    if required_specs.get("gpu_needed"):
-        dimensions += 1
-        has_gpu = product.get("has_dedicated_gpu", False)
-        total += 1.0 if has_gpu else 0.0
-        # VRAM
-        req_vram = required_specs.get("min_gpu_vram_gb")
-        prod_vram = product.get("gpu_vram_gb")
-        if req_vram and prod_vram:
+        if mode == "ratio":
+            if prod_val and req_val:
+                try:
+                    dimensions += 1
+                    total += min(float(prod_val) / float(req_val), 1.0)
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+        elif mode == "ratio_inverse":
+            # Product value must be ≤ required (e.g., max width)
+            if prod_val and req_val:
+                try:
+                    dimensions += 1
+                    total += 1.0 if float(prod_val) <= float(req_val) else max(0.0, 1.0 - (float(prod_val) - float(req_val)) / float(req_val))
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+        elif mode == "exact":
+            if prod_val:
+                dimensions += 1
+                total += 1.0 if str(prod_val).lower().strip() == str(req_val).lower().strip() else 0.2
+        elif mode == "bool":
             dimensions += 1
-            total += min(prod_vram / req_vram, 1.0)
-
-    # Storage
-    req_storage = required_specs.get("min_storage_gb")
-    prod_storage = product.get("storage_gb")
-    if req_storage and prod_storage:
-        dimensions += 1
-        total += min(prod_storage / req_storage, 1.0)
-
-    # Display
-    req_display = required_specs.get("min_display_inches")
-    prod_display = product.get("display_inches")
-    if req_display and prod_display:
-        dimensions += 1
-        total += min(prod_display / req_display, 1.0)
-
-    # Refresh rate
-    req_hz = required_specs.get("min_refresh_hz")
-    prod_hz = product.get("refresh_hz")
-    if req_hz and prod_hz:
-        dimensions += 1
-        total += min(prod_hz / req_hz, 1.0)
-
-    # Touch screen
-    if required_specs.get("touch_screen_required"):
-        dimensions += 1
-        total += 1.0 if product.get("has_touch_screen") else 0.0
+            total += 1.0 if prod_val else 0.0
 
     if dimensions == 0:
         return 0.5
