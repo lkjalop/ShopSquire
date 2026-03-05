@@ -448,7 +448,6 @@ export async function rejectApproval(id: string): Promise<void> {
   await http(`/api/v1/approvals/${encodeURIComponent(id)}/reject`, { method: 'POST' });
 }
 
-// Placeholder: Security events endpoint not present yet; wire when available.
 export type SecurityEvent = { id: string; time: string; severity: string; technique: string; action: string; user: string; risk: number; raw: string; normalized: string; detection: string };
 export async function fetchSecurityEvents(limit = 50, offset = 0): Promise<SecurityEvent[]> {
   const data = await http<{ events: any[] }>(`/api/v1/admin/security/events?limit=${limit}&offset=${offset}`);

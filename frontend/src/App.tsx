@@ -10,6 +10,7 @@ import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
 import CartPanel from './components/CartPanel';
 import LoginModal from './components/LoginModal';
+import AdminDashboard from './components/AdminDashboard';
 
 export type Product = {
   sku: string;
@@ -254,6 +255,7 @@ export default function App() {
   const uid = (localStorage.getItem('uid') || 'demo-user');
   const [cart, setCart] = useState<any | null>(null);
   const [showLogin, setShowLogin] = useState(false);
+  const [showAdminDash, setShowAdminDash] = useState(false);
   const [authUser, setAuthUser] = useState<{ email: string; name: string } | null>(() => {
     const t = localStorage.getItem('access_token');
     const e = localStorage.getItem('auth_email');
@@ -943,6 +945,7 @@ export default function App() {
                   setAuthUser(null);
                   fetch(apiUrl('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
                 }}>Logout</button>
+                <button className={styles.headerBtn} onClick={() => setShowAdminDash(true)}>Dashboard</button>
               </>
             ) : (
               <button className={styles.headerBtn} onClick={() => setShowLogin(true)}>Login</button>
@@ -1295,6 +1298,17 @@ export default function App() {
             setShowLogin(false);
           }}
         />
+      )}
+
+      {/* Admin / Operator Dashboard — rendered for authenticated users */}
+      {showAdminDash && authUser && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1100, background: '#fff', overflow: 'auto' }}>
+          <button
+            style={{ position: 'fixed', top: 12, right: 16, zIndex: 1200, padding: '6px 14px', cursor: 'pointer' }}
+            onClick={() => setShowAdminDash(false)}
+          >✕ Close</button>
+          <AdminDashboard />
+        </div>
       )}
     </div>
   );

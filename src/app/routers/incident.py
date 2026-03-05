@@ -10,6 +10,8 @@ import os
 from src.app.observability.metrics import record_incident_alert, record_ticket
 from src.app.observability.tracing import get_tracer
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.services.incident_alert_adapters import dispatch_incident_alert
+from src.app.services.ticketing_connectors import create_jira_issue, create_servicenow_incident
 
 router = APIRouter(prefix="/api/v1/incident", tags=["incident"])
 tracer = get_tracer("incident-router")
@@ -35,15 +37,21 @@ def send_alert(topic: str, message: str, severity: Optional[str] = None, role: s
             raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
         if contains_pci_data(message):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
-        # Stub connectors: pretend we sent to Slack/Discord/Teams
         severity_val = severity or _route_threshold(topic)
         record_incident_alert(topic, severity_val)
+        # Dispatch to real channels (Slack webhook, PagerDuty, SMTP) — env-gated; no-ops when not configured
+        alert_result = dispatch_incident_alert(
+            event_type="incident.alert",
+            incident={"id": f"alert-{int(time.time())}", "severity": severity_val, "title": message, "status": "open", "description": message},
+            details={"topic": topic},
+        )
         return {
             "routed": True,
-            "channels": ["slack", "discord", "teams"],
+            "channels": list(alert_result.get("channels", {}).keys()),
             "topic": topic,
             "severity": severity_val,
             "timestamp": int(time.time()),
+            "dispatch": alert_result,
         }
 
 
@@ -56,15 +64,18 @@ def create_ticket(topic: str, title: str, description: str, priority: Optional[s
             raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
         if contains_pci_data(description):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
-        # Stub Jira creation
         priority_val = priority or _route_threshold(topic)
         record_ticket(topic, priority_val)
+        # Create real ticket in Jira or ServiceNow — env-gated; returns None when not configured
+        ext_id = create_jira_issue(title, description, priority_val)
+        if not ext_id:
+            ext_id = create_servicenow_incident(title, description, priority_val)
         return {
-            "created": True,
-            "system": "jira",
+            "created": ext_id is not None,
+            "system": "jira" if ext_id else "none",
             "topic": topic,
             "priority": priority_val,
-            "key": "JIRA-TEST-1",
+            "key": ext_id,
         }
 
 
@@ -84,10 +95,18 @@ def block_action(target: str, reason: str, severity: Optional[str] = None, role:
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
         sev = severity or _route_threshold("security_block")
         record_incident_alert("security_block", sev)
+        # Dispatch real alert + create ticket for block actions
+        alert_result = dispatch_incident_alert(
+            event_type="incident.block",
+            incident={"id": f"block-{int(time.time())}", "severity": sev, "title": f"Block: {target}", "status": "open", "description": reason},
+            details={"target": target, "reason": reason},
+        )
+        create_jira_issue(f"Block: {target}", reason, sev)
         return {
             "blocked": True,
             "target": target,
             "reason": reason,
             "severity": sev,
             "timestamp": int(time.time()),
+            "dispatch": alert_result,
         }

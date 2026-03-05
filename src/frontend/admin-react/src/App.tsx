@@ -35,6 +35,40 @@ export default function App() {
   const [keyInput, setKeyInput] = useState('');
   const [authVersion, setAuthVersion] = useState(0);
   const [authError, setAuthError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const _TAB_KEYWORDS: Record<string, string[]> = {
+    decisions: ['decision', 'decisions', 'log', 'audit'],
+    security: ['security', 'event', 'events', 'threat', 'attack', 'mitre'],
+    overview: ['overview', 'summary', 'dashboard'],
+    'email-xdr': ['email', 'phishing', 'xdr', 'bec'],
+    escalations: ['escalation', 'escalate', 'incident'],
+    rules: ['rule', 'rules', 'policy'],
+    approvals: ['approval', 'approvals', 'approve'],
+    orders: ['order', 'orders'],
+    analytics: ['analytics', 'ragas', 'eval'],
+    compliance: ['compliance', 'gdpr', 'pci'],
+    grc: ['grc', 'risk'],
+    'cv-incidents': ['cv', 'image', 'computer vision'],
+    'merchant-bi': ['bi', 'metrics', 'kpi'],
+    playbooks: ['playbook', 'runbook'],
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return;
+    for (const [tab, kws] of Object.entries(_TAB_KEYWORDS)) {
+      if (kws.some((k) => q.includes(k) || k.includes(q))) {
+        setActive(tab);
+        setSearchQuery('');
+        return;
+      }
+    }
+    // Fallback: route decisions for unrecognised queries
+    setActive('decisions');
+    setSearchQuery('');
+  };
 
   useEffect(() => {
     try {
@@ -149,7 +183,15 @@ export default function App() {
       <main className="content">
         <div className="topbar">
           <div className="search">
-            <input placeholder="Search decisions, events, users" />
+            <form onSubmit={handleSearch} style={{ display: 'flex', gap: 4 }}>
+              <input
+                placeholder="Search decisions, events, users"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Navigate to section"
+              />
+              <button type="submit" style={{ padding: '0 10px' }}>Go</button>
+            </form>
           </div>
           <div className="controls">
             <div className="pill">Env: Sandbox</div>

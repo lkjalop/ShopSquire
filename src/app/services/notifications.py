@@ -75,8 +75,22 @@ class NotificationService:
             return None
 
     async def _send_sms(self, to: str, body: str) -> None:
-        # Placeholder: integrate Twilio in production; no-op by default
-        return None
+        import os
+        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_number = os.getenv("TWILIO_FROM_NUMBER")
+        if not (account_sid and auth_token and from_number):
+            return None
+        try:
+            from twilio.rest import Client as TwilioClient
+            client = TwilioClient(account_sid, auth_token)
+            client.messages.create(to=to, from_=from_number, body=body[:1600])
+        except ImportError:
+            # twilio package not installed — log and skip rather than crash
+            import logging
+            logging.getLogger("shopsquire.notifications").warning("twilio package not installed; SMS skipped")
+        except Exception:
+            pass
 
     def _render_email(self, event: str, ctx: Dict) -> str:
         # Minimal plaintext body

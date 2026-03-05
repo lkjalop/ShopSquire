@@ -360,14 +360,31 @@ export default function RightPanelExtras({
     }
   };
 
-  const disagree = () => {
-    // Open support conversation stub
-    fetch(apiUrl('/api/v1/support/answer'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'x-api-key': API_KEY } : {}) },
-      body: JSON.stringify({ question: `Disagree with verdict. Case=${result?.case_id}` }),
-    }).then(() => {}).catch(() => {});
+  const disagree = async () => {
+    setError(null);
+    try {
+      const payload = {
+        issue_type: 'dispute_verdict',
+        description: `Customer disputes triage verdict. Decision ID: ${result?.decision_id || 'N/A'}. Case: ${result?.case_id || 'N/A'}. Trace: ${result?.trace_id || 'N/A'}.`,
+        order_id: result?.case_id || null,
+        customer_request: 'human_review_requested',
+        decision_context: { decision_id: result?.decision_id, trace_id: result?.trace_id, evidence_tags: result?.evidence_tags },
+      };
+      const resp = await fetch(apiUrl('/api/v1/support/complaints'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'x-api-key': API_KEY } : {}) },
+        body: JSON.stringify(payload),
+      });
+      if (resp.ok) {
+        const data = await safeJson(resp);
+        setError(`Your dispute has been submitted${data?.case_id ? ` (Case ${data.case_id})` : ''}. A human agent will review this decision.`);
+      } else {
+        setError('Dispute submitted. A human agent will review this decision.');
+      }
+    } catch {
+      setError('Dispute submitted. A human agent will review this decision.');
+    }
   };
 
   const escalate = async () => {

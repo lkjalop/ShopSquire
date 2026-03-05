@@ -98,19 +98,61 @@ def run_vulnerability_scan(
         }
 
     findings: list[dict[str, Any]] = []
-    if provider_n in ("mock", "nuclei", "openvas"):
+    if provider_n == "mock":
         for t in scope["allowed_targets"]:
-            # deterministic synthetic severity until real provider adapter wiring.
             sev = "medium" if ("admin" in t or "api" in t) else "low"
             findings.append(
                 {
                     "target": t,
-                    "id": f"{provider_n.upper()}-{abs(hash((t, profile_n))) % 100000}",
+                    "id": f"MOCK-{abs(hash((t, profile_n))) % 100000}",
                     "severity": sev,
                     "title": "Potential misconfiguration",
                     "confidence": 0.62 if sev == "medium" else 0.44,
                 }
             )
+    elif provider_n in ("nuclei", "openvas"):
+        # Attempt real subprocess invocation (binary must be on PATH or VULN_SCAN_BINARY env var).
+        import shutil, subprocess, tempfile
+        binary_name = os.getenv("VULN_SCAN_BINARY") or provider_n
+        binary_path = shutil.which(binary_name)
+        if not binary_path:
+            return {
+                "ok": False,
+                "reason": "provider_binary_not_found",
+                "provider": provider_n,
+                "hint": f"Install {provider_n} and ensure it is on PATH, or set VULN_SCAN_BINARY env var.",
+                "scope": scope,
+                "findings": [],
+            }
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+                out_path = tmp.name
+            cmd = [binary_path, "-l", ",".join(scope["allowed_targets"]), "-json", "-o", out_path]
+            if profile_n and profile_n != "baseline":
+                cmd += ["-t", profile_n]
+            result_proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result_proc.returncode == 0:
+                import json as _json
+                with open(out_path, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        try:
+                            row = _json.loads(line.strip())
+                            findings.append({
+                                "target": row.get("host") or row.get("ip"),
+                                "id": row.get("template-id") or row.get("info", {}).get("id"),
+                                "severity": (row.get("info", {}).get("severity") or "info").lower(),
+                                "title": row.get("info", {}).get("name") or row.get("matched-at"),
+                                "confidence": 0.9,
+                                "raw": row,
+                            })
+                        except Exception:
+                            continue
+            else:
+                return {"ok": False, "reason": "provider_execution_failed", "stderr": result_proc.stderr[:500], "scope": scope, "findings": []}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "reason": "provider_timeout", "scope": scope, "findings": []}
+        except Exception as exc:
+            return {"ok": False, "reason": str(exc)[:200], "scope": scope, "findings": []}
     return {
         "ok": True,
         "dry_run": False,

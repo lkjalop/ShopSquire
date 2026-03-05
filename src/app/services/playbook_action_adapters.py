@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 from src.app.services.erp_edi import ERPEDIConnector
 from src.app.services.notifications import NotificationService
-from src.app.services.shipping_stub import ShippingService
+from src.app.services.shipping_providers import get_default_shipping_provider
 from src.app.services.secrets_manager import get_secret
 import time
 
@@ -119,10 +119,11 @@ def email_action(action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, A
 
 def shipping_action(action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     params = action.get("params") if isinstance(action.get("params"), dict) else {}
-    service = ShippingService()
+    provider = get_default_shipping_provider()
     case_id = str(params.get("case_id") or context.get("case_id") or f"case-{uuid.uuid4().hex[:8]}")
-    label = _run_async(service.create_return_label(case_id=case_id))
-    return {"ok": True, "provider": "shipping", "case_id": case_id, "label": label}
+    shipment_info = {"case_id": case_id, "from_address": params.get("from_address"), "to_address": params.get("to_address"), "parcel": params.get("parcel")}
+    label = provider.create_label(shipment_info)
+    return {"ok": label.get("ok", False), "provider": provider.name, "case_id": case_id, "label": label}
 
 
 def erp_action(action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
