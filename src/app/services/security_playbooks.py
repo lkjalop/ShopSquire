@@ -102,8 +102,11 @@ def build_evidence_snapshot(details: Dict[str, Any]) -> Dict[str, Any]:
 def select_cv_playbook(
     evidence_tags: List[str],
     risk_band: str | None,
+    *,
+    agent_role: str | None = None,
 ) -> Optional[Dict[str, Any]]:
-    return select_playbook_from_tags(evidence_tags, risk_band)
+    context = {"agent_role": agent_role} if agent_role else {}
+    return select_playbook_from_tags(evidence_tags, risk_band, context=context)
 
 
 def get_cv_playbook_map() -> Dict[str, Any]:

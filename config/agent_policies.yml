@@ -9,6 +9,22 @@ roles:
       - emit_security_event
       - quarantine_request
       - annotate_evidence
+    playbook_action_types:
+      - block_request
+      - notify_ops
+      - log_incident
+      - quarantine_session
+      - flag_for_review
+      - ip_block
+      - rate_limit
+      - log_cv_event
+      - request_manual_review
+      - create_ticket
+      - create_incident
+      - escalate_ticket
+      - step_up_auth
+      - session_revoke
+      - suspend_account
     approvals_required: []
     data_scope:
       - pii_min
@@ -23,6 +39,17 @@ roles:
       - recommend_quarantine
       - release_request
       - update_email_policy
+    playbook_action_types:
+      - quarantine_email
+      - block_sender
+      - release_email
+      - notify_ops
+      - sandbox_attachment
+      - log_incident
+      - disable_auto_financial_changes
+      - human_review
+      - create_ticket
+      - create_incident
     approvals_required:
       - release_high_severity
     data_scope:
@@ -37,6 +64,12 @@ roles:
       - suggest_update
       - flag_anomaly
       - request_verification
+    playbook_action_types:
+      - notify_ops
+      - log_incident
+      - flag_for_review
+      - request_manual_review
+      - create_ticket
     approvals_required:
       - critical_profile_change
     data_scope:
@@ -49,6 +82,16 @@ roles:
       - prepare_disbursement
       - verify_beneficiary
       - hold_payment
+    playbook_action_types:
+      - hold_payment
+      - block_transaction
+      - verify_beneficiary
+      - notify_ops
+      - create_incident
+      - log_incident
+      - apply_compensation
+      - offer_discount
+      - create_ticket
     approvals_required:
       - any_disbursement
       - beneficiary_change

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
 from sqlalchemy import text
 
 from src.app.deps import redact_for_trace, security_sanitize
@@ -27,6 +28,50 @@ SUPPORTED_RUN_STATUS = {"started", "running", "completed", "failed", "cancelled"
 
 _CFG_CACHE_LOCK = threading.Lock()
 _CFG_CACHE: Dict[str, Any] = {"mtime": None, "payload": None}
+
+_POLICIES_CACHE_LOCK = threading.Lock()
+_POLICIES_CACHE: Dict[str, Any] = {"mtime": None, "payload": None}
+
+
+def _agent_policies_path() -> Path:
+    return Path("config") / "agent_policies.yml"
+
+
+def _load_agent_policies() -> Dict[str, Any]:
+    """Load agent_policies.yml with mtime caching.  Returns {role: {playbook_action_types: [...], ...}}."""
+    path = _agent_policies_path()
+    with _POLICIES_CACHE_LOCK:
+        current_mtime: Optional[float] = None
+        try:
+            current_mtime = path.stat().st_mtime
+        except Exception:
+            current_mtime = None
+        if _POLICIES_CACHE.get("payload") is not None and _POLICIES_CACHE.get("mtime") == current_mtime:
+            return copy.deepcopy(_POLICIES_CACHE["payload"])
+        payload: Dict[str, Any] = {}
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+            payload = raw.get("roles") or {}
+        except Exception:
+            payload = {}
+        _POLICIES_CACHE["mtime"] = current_mtime
+        _POLICIES_CACHE["payload"] = payload
+        return copy.deepcopy(payload)
+
+
+def get_agent_allowed_playbook_action_types(agent_role: str | None) -> Optional[List[str]]:
+    """Return the playbook_action_types allowlist for *agent_role*, or None if unrestricted."""
+    if not agent_role:
+        return None
+    policies = _load_agent_policies()
+    role_cfg = policies.get(str(agent_role))
+    if not isinstance(role_cfg, dict):
+        return None
+    pat = role_cfg.get("playbook_action_types")
+    if isinstance(pat, list):
+        return [str(t) for t in pat if t]
+    return None
 
 
 def _utc_now() -> str:
@@ -256,6 +301,14 @@ def select_playbook_from_tags(
             continue
         if not include_disabled and not bool(pb.get("enabled", True)):
             continue
+        # Agent-role scoping: if the playbook declares allowed_agent_roles and
+        # the caller supplied an agent_role, reject the playbook unless the role
+        # is in the allowlist.  An empty/absent allowed_agent_roles means unrestricted.
+        allowed_roles = pb.get("allowed_agent_roles")
+        caller_role = str(ctx.get("agent_role") or "").strip()
+        if isinstance(allowed_roles, list) and allowed_roles and caller_role:
+            if caller_role not in [str(r) for r in allowed_roles if r]:
+                continue
         min_band = pb.get("risk_band_min") or "low"
         if _get_risk_rank(risk_band, risk_order) < _get_risk_rank(min_band, risk_order):
             continue
@@ -1258,6 +1311,9 @@ def execute_typed_actions(
 ) -> Dict[str, Any]:
     ensure_playbook_run_tables()
     ctx = context or {}
+    # Resolve per-role action allowlist once for the whole execution run.
+    caller_role = str(ctx.get("agent_role") or "").strip()
+    _allowed_action_types = get_agent_allowed_playbook_action_types(caller_role) if caller_role else None
     max_retries = max(0, int(os.getenv("PLAYBOOK_ACTION_MAX_RETRIES", "2") or 2))
     max_loop_iterations = max(1, min(int(os.getenv("PLAYBOOK_LOOP_MAX_ITERATIONS", "20") or 20), 200))
     max_depth = max(1, min(int(os.getenv("PLAYBOOK_BRANCH_MAX_DEPTH", "6") or 6), 16))
@@ -1325,6 +1381,15 @@ def execute_typed_actions(
                 mode = "automatic"
             if mode == "manual_approval":
                 out["skipped"].append({"step_index": idx, "reason": "manual_approval_required", "action": raw_action})
+                continue
+            # Policy enforcement: skip actions the caller's role is not permitted to execute.
+            if _allowed_action_types is not None and action_type not in _allowed_action_types:
+                out["skipped"].append({
+                    "step_index": idx,
+                    "reason": "agent_role_not_permitted",
+                    "agent_role": caller_role,
+                    "action_type": action_type,
+                })
                 continue
             idempotency_key = f"{run_id}:{idx}:{action_type}"
             if _action_already_done(idempotency_key):

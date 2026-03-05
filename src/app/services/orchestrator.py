@@ -3097,6 +3097,22 @@ class Orchestrator:
             except Exception:
                 risk_band = None
             evidence_tags = list(proposal.get("evidence_tags") or [])
+            # Derive agent role: explicit in payload takes precedence; fall back to tag inference.
+            _agent_role: Optional[str] = None
+            try:
+                _agent_role = str(payload.get("agent_role") or "").strip() or None
+                if not _agent_role:
+                    _tag_set = {str(t).lower() for t in evidence_tags}
+                    if any("email" in t for t in _tag_set):
+                        _agent_role = "email_agent"
+                    elif any(t in _tag_set for t in ("payment_fraud", "hold_payment", "disbursement")):
+                        _agent_role = "payments_agent"
+                    elif any(t in _tag_set for t in ("supplier", "vendor")):
+                        _agent_role = "supplier_agent"
+                    else:
+                        _agent_role = "detection_agent"
+            except Exception:
+                _agent_role = "detection_agent"
             # Add tier & fallback tags
             try:
                 td = model_choice.get("tier_decision") if isinstance(model_choice, dict) else None
@@ -3110,10 +3126,11 @@ class Orchestrator:
                     evidence_tags.append("model_fallback")
             except Exception:
                 pass
-            sel = select_cv_playbook(evidence_tags, risk_band)
+            sel = select_cv_playbook(evidence_tags, risk_band, agent_role=_agent_role)
             if isinstance(sel, dict):
                 selected_playbook = sel
                 proposal["selected_playbook"] = sel
+                proposal["agent_role"] = _agent_role
                 pb = sel.get("playbook") if isinstance(sel.get("playbook"), dict) else {}
                 pbid = pb.get("id")
                 pbver = pb.get("version")
@@ -3151,7 +3168,7 @@ class Orchestrator:
                             action_exec = execute_typed_actions(
                                 run_id=playbook_run_id,
                                 actions=(pb.get("actions") if isinstance(pb.get("actions"), list) else []),
-                                context={"trace_id": trace_id, "tenant_id": payload.get("tenant_id")},
+                                context={"trace_id": trace_id, "tenant_id": payload.get("tenant_id"), "agent_role": _agent_role},
                             )
                             proposal["playbook_actions"] = action_exec
                             append_playbook_step(

@@ -10,6 +10,7 @@
   "playbooks": [
     {
       "id": "PB-TEST-1",
+      "allowed_agent_roles": [],
       "title": "Updated Title",
       "domain": "security",
       "priority": 10,
@@ -43,6 +44,7 @@
     },
     {
       "id": "PB-SEC-001",
+      "allowed_agent_roles": ["detection_agent"],
       "title": "Prompt Injection Response",
       "domain": "security",
       "priority": 90,
@@ -82,6 +84,7 @@
     },
     {
       "id": "PB-SEC-002",
+      "allowed_agent_roles": ["detection_agent"],
       "title": "Data Exfiltration Response",
       "domain": "security",
       "priority": 95,
@@ -125,6 +128,7 @@
     },
     {
       "id": "PB-FRAUD-001",
+      "allowed_agent_roles": ["detection_agent", "payments_agent"],
       "title": "Serial Number Mismatch Fraud Investigation",
       "domain": "fraud",
       "priority": 80,
@@ -160,6 +164,7 @@
     },
     {
       "id": "PB-CV-SERIAL-001",
+      "allowed_agent_roles": ["detection_agent"],
       "title": "CV Serial Mismatch Verification",
       "domain": "cv",
       "priority": 75,
@@ -193,6 +198,7 @@
     },
     {
       "id": "PB-DATA-001",
+      "allowed_agent_roles": [],
       "title": "Data Not Ready — Graceful Degradation",
       "domain": "data",
       "priority": 50,
@@ -228,6 +234,7 @@
     },
     {
       "id": "PB-PAYMENT-FRAUD",
+      "allowed_agent_roles": ["payments_agent", "detection_agent"],
       "title": "Payment Fraud Response",
       "domain": "security",
       "priority": 90,
@@ -273,6 +280,7 @@
     },
     {
       "id": "PB-EMAIL-001",
+      "allowed_agent_roles": ["email_agent", "detection_agent"],
       "title": "Email Security General Response",
       "domain": "security",
       "priority": 60,
@@ -308,6 +316,7 @@
     },
     {
       "id": "PB-EMAIL-002",
+      "allowed_agent_roles": ["email_agent", "detection_agent"],
       "title": "Reply-To Mismatch / Brand Impersonation Response",
       "domain": "security",
       "priority": 80,
@@ -347,6 +356,7 @@
     },
     {
       "id": "PB-EMAIL-003",
+      "allowed_agent_roles": ["email_agent", "detection_agent"],
       "title": "BEC Kill Chain Response",
       "domain": "security",
       "priority": 85,
@@ -386,6 +396,7 @@
     },
     {
       "id": "PB-EMAIL-004",
+      "allowed_agent_roles": ["email_agent", "detection_agent"],
       "title": "Malicious Attachment Response",
       "domain": "security",
       "priority": 75,
@@ -425,6 +436,7 @@
     },
     {
       "id": "PB-EMAIL-005",
+      "allowed_agent_roles": ["email_agent", "detection_agent"],
       "title": "DMARC Anomaly Response",
       "domain": "security",
       "priority": 70,
