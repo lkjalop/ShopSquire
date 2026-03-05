@@ -59,12 +59,16 @@ export default function RightPanelExtras({
   onTraceId,
   initialImages,
   onResult,
+  autoIssueType,
 }: {
   mode: 'faq' | 'cv' | 'visual_search' | 'image_context';
   onEscalate?: (payload: any) => void;
   onTraceId?: (traceId: string | null) => void;
   initialImages?: File[];
   onResult?: (result: CVResult | null) => void;
+  /** When set, automatically switches the CV issueType dropdown to this value.
+   *  Useful for NLP-driven intent routing (e.g. `"warranty"` when user asks about a warranty claim). */
+  autoIssueType?: string;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
@@ -120,6 +124,13 @@ export default function RightPanelExtras({
       setImages(initialImages);
     }
   }, [initialImages]);
+
+  // Auto-switch issueType when NLP detects a warranty/return intent
+  useEffect(() => {
+    if (autoIssueType && mode === 'cv') {
+      setIssueType(autoIssueType);
+    }
+  }, [autoIssueType, mode]);
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];

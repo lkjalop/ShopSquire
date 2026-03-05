@@ -132,6 +132,35 @@ def extract_domain(addr: str | None) -> str | None:
         return None
 
 
+def _extract_raw_domain(addr: str | None) -> str | None:
+    """Extract the domain from an address WITHOUT Unicode normalization.
+
+    Used to detect Cyrillic/Greek lookalike characters that NFKC normalization
+    would silently convert to ASCII (e.g. Cyrillic U+0430 'а' → Latin 'a').
+    """
+    if not addr:
+        return None
+    try:
+        from email.utils import parseaddr
+
+        candidate = str(parseaddr(addr)[1] or "").strip()
+        if not candidate:
+            candidate = str(addr or "").strip()
+        if "<" in candidate and ">" in candidate:
+            m2 = re.search(r"<([^>]+)>", candidate)
+            if m2:
+                candidate = m2.group(1).strip()
+        if "@" not in candidate:
+            m = re.search(r"@([^\s>;,]+)", candidate)
+            raw = (m.group(1) if m else None) or ""
+        else:
+            raw = candidate.rsplit("@", 1)[-1].strip().strip(">").strip()
+            raw = raw.rstrip(".,;:")
+        return raw.lower() if raw else None
+    except Exception:
+        return None
+
+
 def _confusable_skeleton(text: str | None) -> str:
     if not text:
         return ""
@@ -461,6 +490,7 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
 
     # Lookalike/homoglyph domain checks
     from_domain_norm = extract_domain(from_addr)
+    from_domain_raw = _extract_raw_domain(from_addr)  # pre-NFKC, preserves Cyrillic/Greek chars
     reply_domain_norm = extract_domain(reply_to)
     lookalike, brand = is_lookalike_domain(from_domain_norm)
     if lookalike:
@@ -470,11 +500,14 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
         reply_skel = _confusable_skeleton(reply_domain_norm)
         vendor_domain_norm = normalize_domain(str(email.get("vendor_domain") or "").strip().lower())
         vendor_skel = _confusable_skeleton(vendor_domain_norm)
-        if _has_non_ascii(from_domain_norm) and from_skel and from_skel != (from_domain_norm or ""):
+        # Fire on raw domain non-ASCII (catches Cyrillic/Greek lookalikes that NFKC folds to ASCII)
+        raw_has_non_ascii = _has_non_ascii(from_domain_raw)
+        norm_has_non_ascii = _has_non_ascii(from_domain_norm)
+        if (raw_has_non_ascii or norm_has_non_ascii) and from_skel and from_skel != (from_domain_norm or ""):
             indicators.append(
                 {
                     "type": "confusable_homoglyph_domain",
-                    "value": from_domain_norm,
+                    "value": from_domain_raw or from_domain_norm,
                     "reason": "Sender domain contains confusable Unicode characters",
                 }
             )

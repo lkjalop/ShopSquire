@@ -183,6 +183,13 @@ function detectPanelMode(query: string): RightPanelMode {
   return 'none';
 }
 
+function detectCVIssueType(query: string): string {
+  const q = query.toLowerCase();
+  if (/warranty|under warranty|warranty claim|warranty repair|warranty coverage/.test(q)) return 'warranty';
+  if (/return|send back|ship back/.test(q)) return 'return';
+  return 'refund';
+}
+
 function isComplaintIntent(query: string): boolean {
   const q = query.toLowerCase();
   const action = /return|refund|complaint/.test(q);
@@ -208,6 +215,16 @@ export default function App() {
   const { products, loading } = useProducts();
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [headerSearchValue, setHeaderSearchValue] = useState('');
+
+  const handleHeaderSearch = () => {
+    const q = headerSearchValue.trim();
+    if (!q) return;
+    setInputValue(q);
+    setHeaderSearchValue('');
+    setChatOpen(true);
+    setTimeout(() => handleSend({ queryOverride: q }), 120);
+  };
   const [inputValue, setInputValue] = useState('');
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
@@ -226,6 +243,7 @@ export default function App() {
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [cvPrefillImages, setCvPrefillImages] = useState<File[]>([]);
+  const [cvAutoIssueType, setCvAutoIssueType] = useState<string | undefined>(undefined);
   const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
   const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
   const [lastCvSecurityNoteKey, setLastCvSecurityNoteKey] = useState<string | null>(null);
@@ -576,6 +594,7 @@ export default function App() {
     if (hasPendingImage && explicitComplaintIntent && !hasImages) {
       setPendingImageContext(null);
       setRightPanelMode('cv');
+      setCvAutoIssueType(detectCVIssueType(q));
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Opening return/complaint flow with your uploaded photo.',
@@ -622,6 +641,7 @@ export default function App() {
         if (anyDamage && (explicitComplaintIntent || complaintIntent)) {
           setCvPrefillImages(currentAttachedFiles);
           setRightPanelMode('cv');
+          setCvAutoIssueType(detectCVIssueType(q));
           setMessages(prev => [...prev, {
             role: 'assistant',
             content: 'I detected likely damage in your photo and opened the return/complaint panel.',
@@ -672,6 +692,7 @@ export default function App() {
         if (prods.length > 0) {
           setDisplayProducts(prods);
           setRightPanelMode('cv');
+          setCvAutoIssueType(detectCVIssueType(q));
           const assistantMsg: ChatMessage = {
             role: 'assistant',
             content: `I've started a return review. I also found ${prods.length} related items if you want comparisons.`,
@@ -680,6 +701,7 @@ export default function App() {
           setMessages(prev => [...prev, assistantMsg]);
         } else {
           setRightPanelMode('cv');
+          setCvAutoIssueType(detectCVIssueType(q));
           const assistantMsg: ChatMessage = {
             role: 'assistant',
             content: "I've started a return review. Please add photos if you have them.",
@@ -895,8 +917,15 @@ export default function App() {
         <div className={styles.headerInner}>
           <div className={styles.logo}>Shop<span>Squire</span></div>
           <div className={styles.searchBox}>
-            <input type="text" placeholder="Search products..." className={styles.searchInput} />
-            <button className={styles.searchBtn}>Search</button>
+            <input
+              type="text"
+              placeholder="Search products..."
+              className={styles.searchInput}
+              value={headerSearchValue}
+              onChange={(e) => setHeaderSearchValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleHeaderSearch(); }}
+            />
+            <button className={styles.searchBtn} onClick={handleHeaderSearch}>Search</button>
           </div>
           <div className={styles.headerActions}>
             <button className={styles.headerBtn} onClick={() => { refreshCart(); setRightPanelMode('cart'); }}>
@@ -1158,6 +1187,7 @@ export default function App() {
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"
+                      autoIssueType={cvAutoIssueType}
                       initialImages={cvPrefillImages}
                       onEscalate={(payload) => {
                         const incId = payload?.incident_id;

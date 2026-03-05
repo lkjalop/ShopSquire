@@ -401,6 +401,10 @@ export async function fetchDecisionTraceQuery(traceId: string): Promise<Decision
   return http(`/api/v1/decisions/${encodeURIComponent(traceId)}/query?include_events=true`);
 }
 
+export async function fetchDecisionSession(sessionId: string): Promise<{ session_id: string; count: number; decisions: any[] }> {
+  return http(`/api/v1/decisions/session/${encodeURIComponent(sessionId)}`);
+}
+
 export async function fetchDecisionCausal(traceId: string): Promise<DecisionCausalGraph> {
   return http(`/api/v1/decisions/trace/${encodeURIComponent(traceId)}/causal`);
 }

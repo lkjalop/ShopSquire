@@ -428,6 +428,8 @@ export function MerchantBIPro({ role }: Props) {
   const [mlGovernance, setMlGovernance] = useState<any>(null);
   const [reviewerConsistency, setReviewerConsistency] = useState<any>(null);
   const [memoryHealth, setMemoryHealth] = useState<MemoryHealthSummary | null>(null);
+  const [liveThreatEvents, setLiveThreatEvents] = useState<Array<Record<string, string>>>([]);
+  const [liveThreatConnected, setLiveThreatConnected] = useState(false);
   const [overviewDemoSeeded, setOverviewDemoSeeded] = useState(false);
   const [upsellDemoSeeded, setUpsellDemoSeeded] = useState(false);
 
@@ -700,6 +702,32 @@ export function MerchantBIPro({ role }: Props) {
       cancelled = true;
     };
   }, [start, end]);
+
+  // Live Threat Feed — SSE stream from /api/v1/admin/bi/security-events/stream
+  useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/v1/admin/bi/security-events/stream');
+      es.onopen = () => setLiveThreatConnected(true);
+      es.onerror = () => setLiveThreatConnected(false);
+      es.onmessage = (ev) => {
+        try {
+          const row = JSON.parse(ev.data);
+          if (row && typeof row === 'object' && row.id) {
+            setLiveThreatEvents((prev) => [row, ...prev].slice(0, 50));
+          }
+        } catch {
+          // heartbeat or malformed — ignore
+        }
+      };
+    } catch {
+      setLiveThreatConnected(false);
+    }
+    return () => {
+      if (es) es.close();
+      setLiveThreatConnected(false);
+    };
+  }, []);
 
   const txOrdersPoints = useMemo(() => {
     const series = tx?.series || [];
@@ -1147,6 +1175,43 @@ export function MerchantBIPro({ role }: Props) {
             </>
           )}
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3>
+          Live Threat Feed
+          <span className="badge" style={{ marginLeft: 8, background: liveThreatConnected ? 'rgba(22,163,74,0.12)' : 'rgba(107,114,128,0.12)', borderColor: liveThreatConnected ? 'rgba(22,163,74,0.3)' : 'rgba(107,114,128,0.3)', color: liveThreatConnected ? '#166534' : '#374151' }}>
+            {liveThreatConnected ? '● live' : '○ offline'}
+          </span>
+        </h3>
+        <div className="page-sub">Real-time security events via SSE — last 50 events, newest first.</div>
+        {liveThreatEvents.length === 0 && !liveThreatConnected && (
+          <div className="page-sub" style={{ marginTop: 10 }}>Connecting…</div>
+        )}
+        {liveThreatEvents.length === 0 && liveThreatConnected && (
+          <div className="page-sub" style={{ marginTop: 10 }}>No events yet — waiting for incoming security events.</div>
+        )}
+        {liveThreatEvents.length > 0 && (
+          <table className="table" style={{ marginTop: 10 }}>
+            <thead><tr><th>#</th><th>Time</th><th>Type</th><th>Severity</th><th>Vendor</th><th>Tenant</th></tr></thead>
+            <tbody>
+              {liveThreatEvents.map((e, idx) => {
+                const sev = String(e.severity || '').toLowerCase();
+                const sevColor = sev === 'critical' ? '#991b1b' : sev === 'high' ? '#92400e' : sev === 'medium' ? '#92600e' : '#374151';
+                return (
+                  <tr key={`${e.id}-${idx}`}>
+                    <td style={{ opacity: 0.5 }}>{e.id}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{String(e.event_time || '').slice(0, 19)}</td>
+                    <td>{e.event_type || '—'}</td>
+                    <td><span style={{ color: sevColor, fontWeight: 600 }}>{e.severity || '—'}</span></td>
+                    <td>{e.vendor || '—'}</td>
+                    <td style={{ opacity: 0.7 }}>{e.tenant_id || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

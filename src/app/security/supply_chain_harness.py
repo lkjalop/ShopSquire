@@ -265,6 +265,15 @@ def _run_agent_step(
             "reason": f"{scenario['scenario_id']}: {severity} severity, supply-chain attack pattern" if should_escalate else "below_threshold",
         }
         context["escalation"] = outputs
+        if should_escalate:
+            try:
+                from src.app.workers.task_runner import submit_task
+                submit_task("threat_intel_sync", {
+                    "tenant_id": scenario.get("tenant_id", "default"),
+                    "reason": f"escalation:{scenario['scenario_id']}",
+                })
+            except Exception:
+                pass
 
     else:
         reasoning = f"Agent {agent.agent_id}: no specific handler, pass-through."

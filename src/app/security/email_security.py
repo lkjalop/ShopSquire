@@ -29,6 +29,7 @@ from src.app.security.bec_kill_chain import infer_bec_kill_chain
 from src.app.security.bimi_verifier import verify_bimi_provider_backed
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
+from src.app.security.email_dns_verify import run_dns_auth_checks
 import time
 from src.app.services.intake_gate import (
     normalize_email_intake,
@@ -92,15 +93,47 @@ def _llm_assist_summary(email: Dict[str, Any], extracted: Dict[str, Any], verdic
     subject = str(email.get("subject") or "")
     reasons = list(verdict.get("reasons") or [])
     ind_types = [str((x or {}).get("type") or "") for x in (extracted.get("indicators") or [])]
-    summary = (
+    heuristic_summary = (
         f"Rule-first verdict={verdict.get('verdict_action')} route={verdict.get('route')}. "
         f"Signals={', '.join(ind_types[:8]) or 'none'}. Subject='{subject[:120]}'."
     )
     secondary_risk = min(1.0, (len(ind_types) * 0.08) + (0.25 if verdict.get("severity") == "error" else 0.0))
+
+    if enabled:
+        try:
+            from src.app.services.llm_providers import get_provider
+
+            body_snippet = str(email.get("body") or "")[:300]
+            prompt = (
+                "System: You are a non-authoritative email security analyst. "
+                "Summarize the findings and flag anything the rule engine may have missed. "
+                "Do not override the verdict. Be concise (2-3 sentences).\n\n"
+                f"Email subject: {subject[:120]}\n"
+                f"Body snippet: {body_snippet}\n"
+                f"Rule-engine verdict: {verdict.get('verdict_action')} / route={verdict.get('route')}\n"
+                f"Detected signal types: {', '.join(ind_types[:12]) or 'none'}\n"
+                f"Reasons: {'; '.join(reasons[:6])}\n"
+            )
+            result = get_provider().generate(prompt, max_tokens=256)
+            llm_text = str(result.get("text") or "").strip()
+            # Reject stub/error responses (providers return "[...stub...]" when no key configured)
+            if llm_text and not llm_text.startswith("["):
+                return {
+                    "enabled": True,
+                    "source": "llm_assist",
+                    "provider": result.get("provider"),
+                    "summary": llm_text,
+                    "secondary_risk_signal": round(float(secondary_risk), 3),
+                    "non_authoritative": True,
+                    "reasons": reasons[:6],
+                }
+        except Exception:
+            pass  # fall through to heuristic
+
     return {
         "enabled": enabled,
         "source": "heuristic_assist",
-        "summary": summary,
+        "summary": heuristic_summary,
         "secondary_risk_signal": round(float(secondary_risk), 3),
         "non_authoritative": True,
         "reasons": reasons[:6],
@@ -667,6 +700,21 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     except Exception:
         intake_meta = {"gate": "intake_only", "error": "normalize_failed"}
 
+    # Live DNS verification of SPF/DMARC/DKIM — non-authoritative, adds discrepancy indicators.
+    dns_auth_result: dict[str, Any] = {}
+    try:
+        dns_auth_result = run_dns_auth_checks(email)
+        dns_indicators = list(dns_auth_result.get("discrepancy_indicators") or [])
+        if dns_indicators:
+            logger.info(
+                "DNS auth discrepancy found for domain=%s indicators=%d",
+                dns_auth_result.get("domain"),
+                len(dns_indicators),
+            )
+    except Exception as _dns_exc:
+        logger.debug("DNS auth check failed: %s", _dns_exc)
+        dns_auth_result = {"skipped": True, "error": str(_dns_exc)[:120]}
+
     # Strict ingest controls before deep parsing: MIME/ext/size/archive/AV.
     try:
         email, ingest_gate_meta = strict_attachment_ingest_gate(email)
@@ -686,6 +734,24 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         ocr_sanitization_meta = {"gate": "ocr_qr_sanitization", "blocked_qr_url_count": 0, "error": "ocr_sanitize_failed"}
 
     extracted = extract_indicators(email, tenant_id=tenant_id)
+
+    # Inject DNS discrepancy indicators discovered above.
+    try:
+        dns_inds = list(dns_auth_result.get("discrepancy_indicators") or [])
+        if dns_inds:
+            extracted["indicators"] = list(extracted.get("indicators") or []) + dns_inds
+        extracted.setdefault("meta", {})["dns_auth"] = {
+            "skipped": bool(dns_auth_result.get("skipped")),
+            "domain": dns_auth_result.get("domain"),
+            "spf_available": bool((dns_auth_result.get("spf") or {}).get("available")),
+            "dmarc_available": bool((dns_auth_result.get("dmarc") or {}).get("available")),
+            "dmarc_policy": (dns_auth_result.get("dmarc") or {}).get("policy"),
+            "dkim_available": bool((dns_auth_result.get("dkim") or {}).get("available")),
+            "discrepancy_count": len(dns_inds),
+        }
+    except Exception:
+        pass
+
     header_forensics = {}
     try:
         header_forensics = analyze_email_headers(email)
@@ -1733,5 +1799,18 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 )
     except Exception:
         pass
+
+    # Surface DNS auth findings in the response for caller visibility.
+    if not dns_auth_result.get("skipped"):
+        try:
+            v["dns_auth"] = {
+                "domain": dns_auth_result.get("domain"),
+                "spf_record_found": bool((dns_auth_result.get("spf") or {}).get("available")),
+                "dmarc_policy": (dns_auth_result.get("dmarc") or {}).get("policy"),
+                "dkim_selector_found": bool((dns_auth_result.get("dkim") or {}).get("available")),
+                "discrepancy_count": len(dns_auth_result.get("discrepancy_indicators") or []),
+            }
+        except Exception:
+            pass
 
     return v

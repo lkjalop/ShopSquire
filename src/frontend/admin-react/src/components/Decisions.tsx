@@ -10,6 +10,7 @@ import {
   fetchDecisionTraceQuery,
   fetchDecisionCausal,
   fetchInterleavingSummary,
+  fetchDecisionSession,
   type DecisionTraceEvent,
   type DecisionTraceQuery,
   type DecisionCausalGraph,
@@ -224,6 +225,8 @@ export function Decisions({ role }: Props) {
   const [categoryFilter, setCategoryFilter] = useState<'All' | EventCategory>('All');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [focusedEventId, setFocusedEventId] = useState<string | null>(null);
+  const [sessionDecisions, setSessionDecisions] = useState<any[]>([]);
+  const [sessionLoading, setSessionLoading] = useState(false);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
@@ -273,6 +276,22 @@ export function Decisions({ role }: Props) {
       });
     return () => { cancelled = true; };
   }, [selected?.id]);
+
+  // Load session timeline when selected decision has a session_id
+  useEffect(() => {
+    const sid = (selected as any)?.session_id as string | undefined;
+    if (!sid) {
+      setSessionDecisions([]);
+      return;
+    }
+    let cancelled = false;
+    setSessionLoading(true);
+    fetchDecisionSession(sid)
+      .then((r) => { if (!cancelled) setSessionDecisions(Array.isArray(r.decisions) ? r.decisions : []); })
+      .catch(() => { if (!cancelled) setSessionDecisions([]); })
+      .finally(() => { if (!cancelled) setSessionLoading(false); });
+    return () => { cancelled = true; };
+  }, [(selected as any)?.session_id]);
 
   const traceEvents = useMemo(() => (trace?.events || []) as DecisionTraceEvent[], [trace?.events]);
 
@@ -575,7 +594,40 @@ export function Decisions({ role }: Props) {
           <h3>Decision Trace</h3>
           <div className="page-sub" style={{ marginBottom: 10 }}>
             Trace ID: <code>{selected.id}</code>
+            {(selected as any).session_id && (
+              <span style={{ marginLeft: 12 }}>
+                Session: <code>{(selected as any).session_id}</code>
+              </span>
+            )}
           </div>
+
+          {/* Session timeline sidebar */}
+          {(selected as any).session_id && (
+            <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(30,64,175,0.05)', borderRadius: 10, border: '1px solid rgba(30,64,175,0.14)' }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Session Timeline — {(selected as any).session_id}</div>
+              {sessionLoading && <div className="page-sub">Loading session turns…</div>}
+              {!sessionLoading && sessionDecisions.length === 0 && (
+                <div className="page-sub">No other decisions found in this session.</div>
+              )}
+              {!sessionLoading && sessionDecisions.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {sessionDecisions.map((d: any, idx: number) => {
+                    const isActive = d.id === selected.id;
+                    return (
+                      <button
+                        key={d.id || idx}
+                        className={`trace-tab${isActive ? ' active' : ''}`}
+                        style={{ fontSize: 12 }}
+                        onClick={() => !isActive && setSelected(d as DecisionRow)}
+                      >
+                        #{idx + 1} {d.agent_name || '—'} <span style={{ opacity: 0.6, marginLeft: 4 }}>{String(d.valid_from || '').slice(11, 19)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <div className="trace-tabs">
             <button className={`trace-tab ${tab === 'summary' ? 'active' : ''}`} onClick={() => setTab('summary')}>Summary</button>
             <button className={`trace-tab ${tab === 'agents' ? 'active' : ''}`} onClick={() => setTab('agents')}>Agents</button>

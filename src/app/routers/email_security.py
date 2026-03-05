@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, Request
-from typing import Optional, Dict, Any
+import base64
+import email as _email_lib
+from email import policy as _email_policy
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile, File
+from typing import Optional, Dict, Any, List
 
 from src.app.schemas.email_security import EmailEvaluateRequest, EmailEvaluateResponse
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
 from src.app.security.email_security import evaluate_email_security
+
+_ALLOWED_UPLOAD_EXTENSIONS = {".eml", ".pdf", ".msg"}
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 router = APIRouter(prefix="/api/v1/email_security", tags=["email-security"])
@@ -135,3 +142,165 @@ def simulate_attack(
 
     verdict = evaluate_email_security(base, tenant_id=tenant_id)
     return {"status": "ok", "scenario": s, "tenant_id": tenant_id, "result": verdict}
+
+
+def _parse_eml_to_email_dict(content: bytes) -> Dict[str, Any]:
+    """Parse raw .eml bytes into the canonical email dict used by evaluate_email_security."""
+    msg = _email_lib.message_from_bytes(content, policy=_email_policy.compat32)
+
+    from_addr = str(msg.get("From") or "")
+    reply_to = str(msg.get("Reply-To") or "") or None
+    subject = str(msg.get("Subject") or "")
+    message_id = str(msg.get("Message-ID") or "") or None
+
+    # Auth-Results extraction
+    auth_results_raw = str(msg.get("Authentication-Results") or "").lower()
+    spf_result = None
+    dkim_result = None
+    dmarc_result = None
+    if "spf=" in auth_results_raw:
+        import re
+        m = re.search(r"spf=(\S+)", auth_results_raw)
+        if m:
+            spf_result = m.group(1).strip(";")
+    if "dkim=" in auth_results_raw:
+        import re
+        m = re.search(r"dkim=(\S+)", auth_results_raw)
+        if m:
+            dkim_result = m.group(1).strip(";")
+    if "dmarc=" in auth_results_raw:
+        import re
+        m = re.search(r"dmarc=(\S+)", auth_results_raw)
+        if m:
+            dmarc_result = m.group(1).strip(";")
+
+    dkim_sig = str(msg.get("DKIM-Signature") or "")
+    received_headers: List[str] = [str(v) for v in msg.get_all("Received") or []]
+    x_originating_ip = str(msg.get("X-Originating-IP") or "") or None
+    x_mailer = str(msg.get("X-Mailer") or "") or None
+
+    # Headers map (top-level keys only, no body)
+    headers: Dict[str, Any] = {}
+    for key in msg.keys():
+        val = msg.get(key)
+        if val:
+            headers[key] = str(val)
+
+    # Body extraction
+    body_parts: List[str] = []
+    attachments: List[Dict[str, Any]] = []
+
+    if msg.is_multipart():
+        for part in msg.walk():
+            ct = str(part.get_content_type() or "")
+            cd = str(part.get("Content-Disposition") or "")
+            fname = part.get_filename()
+            charset = part.get_content_charset() or "utf-8"
+            if ct.startswith("text/") and not fname and "attachment" not in cd:
+                try:
+                    payload_bytes = part.get_payload(decode=True)
+                    if payload_bytes:
+                        body_parts.append(payload_bytes.decode(charset, errors="replace"))
+                except Exception:
+                    pass
+            elif fname or "attachment" in cd:
+                try:
+                    att_bytes = part.get_payload(decode=True) or b""
+                    attachments.append(
+                        {
+                            "name": str(fname or "attachment"),
+                            "content_type": ct,
+                            "size_bytes": len(att_bytes),
+                            "content_b64": base64.b64encode(att_bytes).decode("ascii"),
+                        }
+                    )
+                except Exception:
+                    pass
+    else:
+        try:
+            payload_bytes = msg.get_payload(decode=True)
+            charset = msg.get_content_charset() or "utf-8"
+            if payload_bytes:
+                body_parts.append(payload_bytes.decode(charset, errors="replace"))
+        except Exception:
+            pass
+
+    return {
+        "message_id": message_id,
+        "from_addr": from_addr,
+        "reply_to": reply_to,
+        "subject": subject,
+        "body": "\n".join(body_parts),
+        "headers": headers,
+        "received_headers": received_headers,
+        "x_originating_ip": x_originating_ip,
+        "x_mailer": x_mailer,
+        "attachments": attachments,
+        "dkim_signature": dkim_sig,
+        "spf_result": spf_result,
+        "dkim_result": dkim_result,
+        "dmarc_result": dmarc_result,
+        "dmarc_fail": bool(dmarc_result and dmarc_result not in ("pass",)),
+        "external_sender": True,
+    }
+
+
+@router.post("/upload")
+async def upload_email_file(
+    file: UploadFile = File(...),
+    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Accept a raw .eml, .pdf, or .msg upload and run full email security analysis.
+
+    - **.eml**: full RFC 5322 parse — headers, body, inline attachments
+    - **.pdf / .msg**: single-attachment analysis (content forwarded as attachment bytes)
+    """
+    import os as _os
+    filename = str(file.filename or "upload")
+    _, ext = _os.path.splitext(filename.lower())
+    if ext not in _ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"unsupported_file_type: allowed extensions are {sorted(_ALLOWED_UPLOAD_EXTENSIONS)}",
+        )
+
+    content = await file.read()
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="upload_too_large: max 10 MB")
+    if not content:
+        raise HTTPException(status_code=400, detail="empty_upload")
+
+    if ext == ".eml":
+        email_dict = _parse_eml_to_email_dict(content)
+    else:
+        # .pdf / .msg — treat as a single attachment; caller must supply From via a query param
+        # or the filename is used as a stub identifier so evaluation still runs usefully.
+        email_dict = {
+            "message_id": None,
+            "from_addr": f"upload@{filename}",
+            "reply_to": None,
+            "subject": f"[Upload] {filename}",
+            "body": "",
+            "headers": {},
+            "received_headers": [],
+            "attachments": [
+                {
+                    "name": filename,
+                    "content_type": file.content_type or "application/octet-stream",
+                    "size_bytes": len(content),
+                    "content_b64": base64.b64encode(content).decode("ascii"),
+                }
+            ],
+            "external_sender": True,
+            "dmarc_fail": False,
+        }
+
+    verdict = evaluate_email_security(email_dict, tenant_id=x_tenant_id)
+    return {
+        "status": "ok",
+        "filename": filename,
+        "file_type": ext.lstrip("."),
+        "size_bytes": len(content),
+        "result": verdict,
+    }

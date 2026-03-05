@@ -19,11 +19,14 @@ from src.app.security.url_guard import ensure_safe_outbound_url
 from src.app.services.decision_log import log_trace_event
 
 import difflib
+import logging
 import math
 import os
 import re
 import unicodedata
 from urllib.parse import urlparse
+
+_log = logging.getLogger("shopsquire.cv.tier2")
 
 # ---------------------------------------------------------------------------
 # Module-level model cache — prevents loading 200-600 MB YOLO weights once
@@ -125,14 +128,12 @@ def _resolve_redirect_chain(url: str, max_hops: int = 5) -> Dict[str, Any]:
     """Resolve redirect chain in a bounded, safe manner.
 
     Each hop is validated with SSRF guard before any request. Redirects are
-    resolved manually with `allow_redirects=False` to keep hop control explicit.
+    resolved manually with follow_redirects=False to keep hop control explicit.
+    Uses httpx (already a project dependency) so the caller is free to run this
+    inside asyncio.to_thread() without importing the sync-only requests library.
     """
     out: Dict[str, Any] = {"start_url": str(url or "")[:2048], "hops": [], "final_url": str(url or "")[:2048], "error": None}
-    try:
-        import requests
-    except Exception:
-        out["error"] = "requests_unavailable"
-        return out
+    import httpx
 
     current = str(url or "").strip()
     timeout_s = float(os.getenv("QR_REDIRECT_TIMEOUT_SEC", "2.0") or 2.0)
@@ -145,7 +146,8 @@ def _resolve_redirect_chain(url: str, max_hops: int = 5) -> Dict[str, Any]:
             out["error"] = f"unsafe_redirect_url:{exc}"
             break
         try:
-            resp = requests.get(current, allow_redirects=False, timeout=timeout_s)
+            with httpx.Client(timeout=timeout_s) as _client:
+                resp = _client.get(current, follow_redirects=False)
         except Exception as exc:
             out["error"] = f"redirect_request_failed:{str(exc)[:140]}"
             break
@@ -488,7 +490,8 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             if steganography.get("is_suspicious"):
                 evidence_tags.append("steganography_suspected")
                 record_cv_fraud("robustness_steganography_suspected")
-    except Exception:
+    except Exception as _exc:
+        _log.warning("steganography detector failed: %s", _exc, exc_info=True)
         steganography = {"error": "steg_detector_failed"}
 
     # Evidence tags derived from tier2 signals
@@ -496,8 +499,8 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         oc = meta.get("order_ctx")
         if isinstance(oc, dict) and oc.get("found") is False:
             evidence_tags.append("order_id_not_found")
-    except Exception:
-        pass
+    except Exception as _exc:
+        _log.debug("order_ctx tag skipped: %s", _exc)
     if filename_unicode_nfkc:
         evidence_tags.append("filename_nfkc_changed")
     if filename_unicode_any:
@@ -581,13 +584,14 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
                 qr_risks.append(risk)
             else:
                 qr_risks.append(_qr_url_risk(u))
-    except Exception:
+    except Exception as _exc:
+        _log.warning("QR redirect resolution failed: %s", _exc, exc_info=True)
         qr_risks = []
     try:
         if any(float(r.get("risk") or 0.0) >= 0.6 for r in (qr_risks or [])):
             evidence_tags.append("qr_url_suspicious")
-    except Exception:
-        pass
+    except Exception as _exc:
+        _log.debug("qr_url_suspicious tag skipped: %s", _exc)
 
     # Optional vision lane (Ollama) for coarse category checks (laptop vs non-laptop) and visible damage.
     vision = None
@@ -660,7 +664,8 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
                 },
                 ela_mask_area_ratio=ela_area_ratio,
             )
-    except Exception:
+    except Exception as _exc:
+        _log.warning("forensics policy evaluation failed: %s", _exc, exc_info=True)
         verdict = {"verdict": "request_more_data", "reasons": ["policy_error"], "required_actions": ["manual_review"], "score": 0.0}
 
     # Framework correlation for decision trace drilldown (CV lane).

@@ -45,22 +45,60 @@ def emit_to_splunk(event: Dict[str, Any]) -> None:
     _bg(_send)
 
 
-def emit_to_crowdstrike(event: Dict[str, Any]) -> None:
-    """Stub: forward event metadata to CrowdStrike (requires token flow).
+# CrowdStrike OAuth token cache — module-level for cross-call reuse.
+_cs_lock = threading.Lock()
+_cs_token: str | None = None
+_cs_token_expiry: float = 0.0
 
-    For MVP, just no-op unless CROWDSTRIKE envs are present. In production,
-    map to detections or IOC APIs.
+
+def _get_crowdstrike_token(cid: str, csec: str, base: str) -> str | None:
+    """Return a valid CrowdStrike bearer token, refreshing if within 60s of expiry."""
+    global _cs_token, _cs_token_expiry
+    with _cs_lock:
+        if _cs_token and time.monotonic() < _cs_token_expiry - 60:
+            return _cs_token
+        try:
+            import httpx
+
+            resp = httpx.post(
+                f"{base}/oauth2/token",
+                data={"client_id": cid, "client_secret": csec, "grant_type": "client_credentials"},
+                timeout=5.0,
+            )
+            if resp.status_code == 201 or resp.status_code == 200:
+                body = resp.json()
+                _cs_token = body.get("access_token")
+                expires_in = int(body.get("expires_in", 1799))
+                _cs_token_expiry = time.monotonic() + expires_in
+                return _cs_token
+        except Exception:
+            pass
+        return None
+
+
+def emit_to_crowdstrike(event: Dict[str, Any]) -> None:
+    """Forward security event to CrowdStrike via OAuth2 client-credentials + Events API.
+
+    Env: CROWDSTRIKE_CLIENT_ID, CROWDSTRIKE_CLIENT_SECRET,
+         CROWDSTRIKE_API_URL (default https://api.crowdstrike.com),
+         CROWDSTRIKE_EVENTS_PATH (default /api/v1/events)
     """
     cid = os.getenv("CROWDSTRIKE_CLIENT_ID")
     csec = os.getenv("CROWDSTRIKE_CLIENT_SECRET")
     base = os.getenv("CROWDSTRIKE_API_URL", "https://api.crowdstrike.com")
-    if not (cid and csec and base):
+    path = os.getenv("CROWDSTRIKE_EVENTS_PATH", "/api/v1/events")
+    if not (cid and csec):
         return
 
     def _send():
-        # Minimal placeholder: do nothing but keep shape for future expansion.
-        # Could push to a local outbox or metrics.
-        return
+        token = _get_crowdstrike_token(cid, csec, base)
+        if not token:
+            return
+        _post_json(
+            f"{base}{path}",
+            {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            {"resources": [event]},
+        )
 
     _bg(_send)
 

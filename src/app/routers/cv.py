@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
+import logging
 import time
 import base64
 import io
+
+_log = logging.getLogger("shopsquire.cv")
 
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.services.cv_triage_basic import BasicCVTriage
@@ -25,6 +28,7 @@ from src.app.services.tenant_quota import TenantQuotaGuard
 from src.app.policy.vertical_pack import load_vertical_pack, resolve_pack_id
 from src.app.rules.image_quality import assess_image_quality
 from src.app.services.dependency_resilience import call_with_resilience
+import asyncio as _asyncio
 from src.app.models.db import db_session
 from sqlalchemy import text as sql_text
 from src.app.services.intake_gate import strict_image_ingest_gate
@@ -100,8 +104,8 @@ async def analyze(
                 raise HTTPException(status_code=429, detail={"error": "tenant_quota_exceeded", **qmeta})
         except HTTPException:
             raise
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.debug("tenant quota check skipped: %s", _exc)
         # Optional async offload to worker queue for autoscaled CV processing.
         try:
             if str(__import__("os").getenv("CV_ASYNC_QUEUE_ENABLED", "0")).strip().lower() in ("1", "true", "yes"):
@@ -124,8 +128,8 @@ async def analyze(
                         "job_id": job_id,
                         "case_id": req.case_id,
                     }
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("CV async queue enqueue failed, falling back to sync: %s", _exc)
         # If raw images are provided, do real CV/OCR + consistency checks.
         # Otherwise, this endpoint is metadata-only and cannot validate mismatched images.
         sanitized_images: List[Dict[str, Any]] = []
@@ -176,7 +180,8 @@ async def analyze(
                     sanitized_images.append(meta)
             except HTTPException:
                 raise
-            except Exception:
+            except Exception as _exc:
+                _log.warning("image sanitization failed: %s", _exc, exc_info=True)
                 sanitized_images = []
 
             # OCR/labels from the first sanitized image (best-effort).
@@ -198,8 +203,8 @@ async def analyze(
                     from src.app.services.cv_provider import ManagedCVProvider as _MCP
                     _prov = _MCP()
                     extracted_text = _prov._tesseract_text(sanitized_images[0].get("bytes") or b"")
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _log.debug("tesseract fallback failed: %s", _exc)
 
             # Tier2 scan on first image so /cv/analyze exposes security evidence
             # (QR URLs, overlay/prompt-injection tags, manipulation signals).
@@ -214,7 +219,10 @@ async def analyze(
                             "issue_type": req.issue_type,
                             "order_id": req.order_id,
                         }
-                        tier2_result = run_tier2(bytes(_img0), meta=_meta, pack_id=resolve_pack_id(req.description or req.issue_type or "electronics"))
+                        tier2_result = await _asyncio.to_thread(
+                            run_tier2, bytes(_img0), meta=_meta,
+                            pack_id=resolve_pack_id(req.description or req.issue_type or "electronics"),
+                        )
                         tier2_evidence_tags = list(tier2_result.get("evidence_tags") or [])
                         tier2_security = (tier2_result.get("security_analysis") or {}) if isinstance(tier2_result.get("security_analysis"), dict) else {}
             except Exception as _tier2_exc:
@@ -235,7 +243,8 @@ async def analyze(
                     issue_type=req.issue_type,
                     order_id=req.order_id,
                 )
-            except Exception:
+            except Exception as _exc:
+                _log.warning("image consistency eval failed: %s", _exc, exc_info=True)
                 image_consistency = None
 
             # Barcode/QR payload scan (best-effort) to catch encoded prompt-injection text.
@@ -256,7 +265,8 @@ async def analyze(
                     if _detect_ocr_prompt_injection(str(c.get("data") or "")):
                         qr_prompt_injection = True
                         break
-            except Exception:
+            except Exception as _exc:
+                _log.warning("QR/barcode decode failed: %s", _exc, exc_info=True)
                 qr_decode_hits = []
                 qr_prompt_injection = False
 
@@ -358,8 +368,8 @@ async def analyze(
                         if qr_external_url
                         else "For your security, please reupload a new, unedited photo without any QR codes or overlays."
                     )
-            except Exception:
-                pass
+            except Exception as _exc:
+                _log.debug("QR tag folding into image_consistency skipped: %s", _exc)
         # Security observer scan for CV evidence (DREAD/STRIDE/PASTA/OWASP etc.) for Decision Trace Security Matrix.
         security_details = {}
         security_sev = None
@@ -395,7 +405,8 @@ async def analyze(
                 emit_security_event("/api/v1/cv/analyze", {"payload": security_payload, "analysis": security_details}, request=request)
             except Exception:
                 pass
-        except Exception:
+        except Exception as _exc:
+            _log.warning("security observer scan failed: %s", _exc, exc_info=True)
             security_details = {}
             security_sev = None
 
@@ -450,8 +461,8 @@ async def analyze(
                 bundle["qr_codes"] = qr_decode_hits[:10]
             if qr_prompt_injection:
                 bundle["qr_prompt_injection"] = True
-        except Exception:
-            pass
+        except Exception as _exc:
+            _log.warning("evidence bundle enrichment failed: %s", _exc)
         evidence_id = persist_evidence_bundle(case_id, bundle)
 
         # Attach decision trace event best-effort
@@ -568,10 +579,10 @@ async def analyze(
                     execution_status=exec_status,
                     decision_id=case_id,
                 )
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as _exc:
+                _log.warning("decision log failed: %s", _exc)
+        except Exception as _exc:
+            _log.warning("approval check block failed: %s", _exc)
 
         # Derive ui_actions based on evidence signals
         qr_external_url_detected = False

@@ -1329,6 +1329,114 @@ def query_decision_trace(
     }
 
 
+@router.get("/session/{session_id}")
+def get_session_decisions(
+    session_id: str,
+    limit: int = 200,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    db=Depends(get_db),
+) -> Dict:
+    """Return all decision log rows for a given session_id, ordered chronologically.
+
+    The `session_id` column is added via migration `add_session_id_to_decision_logs`.
+    Falls back to scanning `input_data` JSON for a `session_id` key when the column is absent
+    (schema not yet migrated), so the endpoint is safe against partial rollouts.
+    """
+    flags = load_feature_flags(get_settings().feature_flags_path)
+    if not _decision_reads_enabled(flags):
+        raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
+
+    sid = (session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="session_id_required")
+
+    safe_limit = max(1, min(int(limit), 500))
+    rows_out = []
+    try:
+        # Try column-based query first (post-migration)
+        rows = db.execute(
+            text(
+                """
+                SELECT id, agent_name, valid_from, valid_to, system_from, system_to,
+                       input_data, proposed_action, policy_version, approval_required,
+                       execution_status, session_id
+                FROM decision_logs
+                WHERE session_id = :sid
+                ORDER BY valid_from ASC
+                LIMIT :lim
+                """
+            ),
+            {"sid": sid, "lim": safe_limit},
+        ).fetchall()
+        for r in rows:
+            rows_out.append(
+                {
+                    "id": r[0],
+                    "agent_name": r[1],
+                    "valid_from": str(r[2] or ""),
+                    "valid_to": str(r[3] or ""),
+                    "system_from": str(r[4] or ""),
+                    "system_to": str(r[5] or ""),
+                    "input_data": _safe_json_parse(r[6]),
+                    "proposed_action": _safe_json_parse(r[7]),
+                    "policy_version": r[8],
+                    "approval_required": bool(r[9]),
+                    "execution_status": r[10],
+                    "session_id": r[11],
+                }
+            )
+    except Exception:
+        # Column absent (pre-migration): fallback to scanning input_data JSON
+        try:
+            all_rows = db.execute(
+                text(
+                    """
+                    SELECT id, agent_name, valid_from, valid_to, system_from, system_to,
+                           input_data, proposed_action, policy_version, approval_required,
+                           execution_status
+                    FROM decision_logs
+                    ORDER BY valid_from ASC
+                    LIMIT 5000
+                    """
+                )
+            ).fetchall()
+            for r in all_rows:
+                try:
+                    id_data = json.loads(str(r[6] or "{}"))
+                    if not isinstance(id_data, dict):
+                        continue
+                    if id_data.get("session_id") != sid:
+                        continue
+                    rows_out.append(
+                        {
+                            "id": r[0],
+                            "agent_name": r[1],
+                            "valid_from": str(r[2] or ""),
+                            "valid_to": str(r[3] or ""),
+                            "system_from": str(r[4] or ""),
+                            "system_to": str(r[5] or ""),
+                            "input_data": id_data,
+                            "proposed_action": _safe_json_parse(r[7]),
+                            "policy_version": r[8],
+                            "approval_required": bool(r[9]),
+                            "execution_status": r[10],
+                            "session_id": sid,
+                        }
+                    )
+                    if len(rows_out) >= safe_limit:
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            rows_out = []
+
+    return {
+        "session_id": sid,
+        "count": len(rows_out),
+        "decisions": rows_out,
+    }
+
+
 @router.get("/{trace_id}")
 def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])), db=Depends(get_db)) -> Dict:
     """Canonical decision trace payload for UI gear icon.

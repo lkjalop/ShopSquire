@@ -497,24 +497,43 @@ class NextQuestionEngine:
                 )
             except Exception:
                 pass
-        def relevance(tmpl_id: str) -> int:
-            id_low = (tmpl_id or '').lower()
-            score = 0
+        def relevance(tmpl: dict) -> float:
+            """Return embedding cosine similarity between user query and template text.
+
+            Falls back to a keyword-based score when the template has no text.
+            The existing keyword boost is added as a fractional tie-breaker so that
+            two templates with equal cosine scores are still ordered by field coverage.
+            """
+            tmpl_text = str(tmpl.get("text") or tmpl.get("id") or "")
+            if tmpl_text and _nqe_query_vec:
+                tmpl_vec = self.rag.embedder.embed_text(tmpl_text)
+                base = float(self.rag.embedder.cosine(_nqe_query_vec, tmpl_vec))
+            else:
+                base = 0.0
+            # Add keyword boost (0–6 range) scaled to a small decimal so it only breaks ties
+            id_low = (tmpl.get("id") or "").lower()
+            kw = 0
             for mf in (inp.missing_fields or []):
-                mfl = str(mf or '').lower()
-                if not mfl:
-                    continue
-                # Map common fields to template ids
-                if mfl in ('budget', 'price') and ('budget' in id_low):
-                    score += 2
-                if mfl in ('use_case', 'intent') and ('use_case' in id_low or 'platform' in id_low):
-                    score += 2
-                if mfl in ('brand_preference', 'brand') and ('brand' in id_low):
-                    score += 2
-                if mfl in ('specs', 'spec') and ('spec' in id_low):
-                    score += 1
-            return score
-        prioritized = sorted(raw_templates, key=lambda t: (-relevance(t.get('id')), t.get('id')))
+                mfl = str(mf or "").lower()
+                if mfl in ("budget", "price") and "budget" in id_low:
+                    kw += 2
+                if mfl in ("use_case", "intent") and ("use_case" in id_low or "platform" in id_low):
+                    kw += 2
+                if mfl in ("brand_preference", "brand") and "brand" in id_low:
+                    kw += 2
+                if mfl in ("specs", "spec") and "spec" in id_low:
+                    kw += 1
+            return base + kw * 0.01
+
+        # Build a single query vector once for all template comparisons
+        _nqe_query_parts = " ".join(filter(None, [
+            inp.query or "",
+            inp.intent or "",
+            inp.product_category or "",
+            " ".join(str(m) for m in (inp.missing_fields or [])),
+        ]))
+        _nqe_query_vec = self.rag.embedder.embed_text(_nqe_query_parts) if _nqe_query_parts.strip() else {}
+        prioritized = sorted(raw_templates, key=lambda t: (-relevance(t), t.get("id") or ""))
         # Ensure coverage: include one question per key missing field before capping
         def find_tmpl(ids: List[str]) -> Optional[dict]:
             idset = {i for i in ids if i}

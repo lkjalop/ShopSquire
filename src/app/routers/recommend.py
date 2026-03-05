@@ -7363,6 +7363,10 @@ def nqe_feedback(
     variant = str(payload.get("variant") or "control")
     converted = bool(payload.get("converted", False))
     latency_ms = int(payload.get("latency_ms") or 0)
+    # Additional signals for template re-ranking
+    answer_value = str(payload.get("answer_value") or "")[:255]
+    helpful = payload.get("helpful")
+    helpful_int = None if helpful is None else (1 if bool(helpful) else 0)
     try:
         db.execute(
             text(
@@ -7375,16 +7379,27 @@ def nqe_feedback(
                     question_id TEXT,
                     variant TEXT,
                     converted INTEGER,
-                    latency_ms INTEGER
+                    latency_ms INTEGER,
+                    answer_value TEXT,
+                    helpful INTEGER
                 )
                 """
             )
         )
+        # Migrate: add new columns to existing tables gracefully
+        for col_sql in (
+            "ALTER TABLE nqe_feedback_events ADD COLUMN answer_value TEXT",
+            "ALTER TABLE nqe_feedback_events ADD COLUMN helpful INTEGER",
+        ):
+            try:
+                db.execute(text(col_sql))
+            except Exception:
+                pass  # column already exists
         db.execute(
             text(
                 """
-                INSERT INTO nqe_feedback_events (id, tenant_id, trace_id, question_id, variant, converted, latency_ms)
-                VALUES (:id, :tenant_id, :trace_id, :question_id, :variant, :converted, :latency_ms)
+                INSERT INTO nqe_feedback_events (id, tenant_id, trace_id, question_id, variant, converted, latency_ms, answer_value, helpful)
+                VALUES (:id, :tenant_id, :trace_id, :question_id, :variant, :converted, :latency_ms, :answer_value, :helpful)
                 """
             ),
             {
@@ -7395,6 +7410,8 @@ def nqe_feedback(
                 "variant": variant,
                 "converted": 1 if converted else 0,
                 "latency_ms": max(0, latency_ms),
+                "answer_value": answer_value,
+                "helpful": helpful_int,
             },
         )
         try:
@@ -7416,6 +7433,8 @@ def nqe_feedback(
                 "converted": converted,
                 "latency_ms": latency_ms,
                 "tenant_id": tenant_id,
+                "answer_value": answer_value,
+                "helpful": helpful,
                 **_trace_meta_payload(policy_version="nqe_v1", context_ids=["nqe_feedback"]),
             },
         )

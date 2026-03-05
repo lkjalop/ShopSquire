@@ -374,6 +374,28 @@ def emit_security_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
         configured_targets += 1
         _dispatch_target("cspm", cspm_url, {"Content-Type": "application/json"}, event, persist_payload=event)
 
+    # CyberStash MDR — CYBERSTASH_INGEST_URL + optional CYBERSTASH_API_KEY
+    cyberstash_url = os.getenv("CYBERSTASH_INGEST_URL")
+    cyberstash_key = os.getenv("CYBERSTASH_API_KEY")
+    if cyberstash_url:
+        configured_targets += 1
+        cs_headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if cyberstash_key:
+            cs_headers["x-api-key"] = cyberstash_key
+        _dispatch_target("cyberstash", cyberstash_url, cs_headers, event, persist_payload=event)
+
+    # Generic EDR JSON-webhook — GENERIC_EDR_INGEST_URL + optional GENERIC_EDR_API_KEY
+    # Supports any vendor that accepts POST JSON (SentinelOne, Carbon Black, Cybereason, etc.)
+    generic_edr_url = os.getenv("GENERIC_EDR_INGEST_URL")
+    generic_edr_key = os.getenv("GENERIC_EDR_API_KEY")
+    generic_edr_vendor = os.getenv("GENERIC_EDR_VENDOR", "generic_edr")
+    if generic_edr_url:
+        configured_targets += 1
+        edr_headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if generic_edr_key:
+            edr_headers["Authorization"] = f"Bearer {generic_edr_key}"
+        _dispatch_target(generic_edr_vendor, generic_edr_url, edr_headers, event, persist_payload=event)
+
     if configured_targets == 0:
         hid = _handoff_id(str(event.get("trace_id") or ""), str(event.get("decision_id") or ""), "no_receiver")
         status["details"].append(

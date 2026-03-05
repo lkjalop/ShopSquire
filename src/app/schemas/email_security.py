@@ -88,3 +88,4 @@ class EmailEvaluateResponse(BaseModel):
     bec_kill_chain_stage: Optional[str] = None
     decision_id: Optional[str] = None
     decision_trace_id: Optional[str] = None
+    dns_auth: Optional[Dict[str, Any]] = None

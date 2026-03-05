@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import text as sql_text
 from prometheus_client import generate_latest
 
@@ -1552,3 +1554,105 @@ def slo_alerts_api(
         "alerts": alerts,
         "status": "critical" if any(a["state"] == "critical" for a in alerts) else ("warn" if any(a["state"] == "warn" for a in alerts) else "ok"),
     }
+
+
+@router.get("/security-events/stream")
+async def security_events_stream(
+    request: Request,
+    last_id: int = Query(default=0, ge=0, description="Last seen row id; returns only newer events"),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> StreamingResponse:
+    """Server-Sent Events stream for live security events.
+
+    Polls both `security_event_ingest` and `security_events` tables every 3 s and
+    pushes new rows to the client as ``data: <JSON>\\n\\n`` frames.
+
+    Query params:
+    - **last_id**: cursor — only rows with `id > last_id` are emitted (default 0 = all recent)
+
+    The stream closes after 120 s of inactivity or on client disconnect.
+    """
+    _ = role
+
+    async def event_gen():
+        cursor = int(last_id)
+        deadline = asyncio.get_event_loop().time() + 120
+        while asyncio.get_event_loop().time() < deadline:
+            if await request.is_disconnected():
+                break
+            rows: List[Dict[str, Any]] = []
+            try:
+                with db_session() as db:
+                    # Primary: security_event_ingest (has rowid-like id)
+                    try:
+                        raw = db.execute(
+                            sql_text(
+                                """
+                                SELECT id, event_time, event_type, severity, vendor, tenant_id
+                                FROM security_event_ingest
+                                WHERE id > :cursor
+                                ORDER BY id ASC
+                                LIMIT 50
+                                """
+                            ),
+                            {"cursor": cursor},
+                        ).fetchall()
+                        for r in raw or []:
+                            rows.append(
+                                {
+                                    "id": int(r[0] or 0),
+                                    "event_time": str(r[1] or ""),
+                                    "event_type": str(r[2] or ""),
+                                    "severity": str(r[3] or "unknown"),
+                                    "vendor": str(r[4] or ""),
+                                    "tenant_id": str(r[5] or ""),
+                                    "source": "security_event_ingest",
+                                }
+                            )
+                    except Exception:
+                        pass
+                    # Fallback: security_events
+                    if not rows:
+                        try:
+                            raw2 = db.execute(
+                                sql_text(
+                                    """
+                                    SELECT id, event_time, severity, details, tenant_id
+                                    FROM security_events
+                                    WHERE id > :cursor
+                                    ORDER BY id ASC
+                                    LIMIT 50
+                                    """
+                                ),
+                                {"cursor": cursor},
+                            ).fetchall()
+                            for r in raw2 or []:
+                                rows.append(
+                                    {
+                                        "id": int(r[0] or 0),
+                                        "event_time": str(r[1] or ""),
+                                        "event_type": _security_type_from_details(r[3]),
+                                        "severity": str(r[2] or "unknown"),
+                                        "vendor": "",
+                                        "tenant_id": str(r[4] or ""),
+                                        "source": "security_events",
+                                    }
+                                )
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            for row in rows:
+                new_id = int(row.get("id") or 0)
+                if new_id > cursor:
+                    cursor = new_id
+                yield f"data: {json.dumps(row)}\n\n"
+
+            if not rows:
+                # Heartbeat keeps the connection alive
+                yield ": heartbeat\n\n"
+
+            await asyncio.sleep(3)
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")

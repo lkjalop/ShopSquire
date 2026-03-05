@@ -1,7 +1,16 @@
 {
   "CAPABILITIES": {
-    "paypal": {
-      "enabled": true
+    "recommend": {
+      "enabled": true,
+      "rollout_percent": 100
     }
-  }
+  },
+  "USE_AGENT_CAPABILITIES": true,
+  "AGENT_ROLLOUT_PERCENT": 100,
+  "KILL_SWITCH": false,
+  "DECISION_LOG_WRITES_ENABLED": false,
+  "DEGRADATION": {
+    "enabled": true
+  },
+  "TEST_FORCE_BAD_SKU": false
 }
