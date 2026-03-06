@@ -14,8 +14,11 @@ services:
       - redis
     command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
     user: "shopsquire"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
 
   db:
     image: postgres:16

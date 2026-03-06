@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 
 _KB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "use_case_knowledge_base.json")
+_MIN_VIABLE_KB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "use_case_knowledge.json")
 
 
 @lru_cache(maxsize=1)
@@ -24,11 +25,43 @@ def _load_kb() -> Dict[str, Any]:
         return json.load(f)
 
 
+@lru_cache(maxsize=1)
+def _load_min_viable_kb() -> Dict[str, Any]:
+    path = os.path.normpath(_MIN_VIABLE_KB_PATH)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def get_use_case_specs(use_case_key: str) -> Dict[str, Any] | None:
     """Return the spec requirements for a given use-case key, or None."""
     kb = _load_kb()
     cases = kb.get("use_cases") or {}
     return cases.get(use_case_key)
+
+
+def get_use_case_min_price_floor(use_case_key: str) -> Optional[int]:
+    """Return minimum viable budget floor for a use-case key, if configured."""
+    if not use_case_key:
+        return None
+    try:
+        kb2 = _load_min_viable_kb()
+        row = (kb2.get("use_cases") or {}).get(use_case_key) or {}
+        for key in ("min_price_floor", "min_price", "price_floor"):
+            if row.get(key) is not None:
+                return int(float(row.get(key)))
+    except Exception:
+        pass
+    # Fallback to base KB if min floor is embedded there.
+    try:
+        base = get_use_case_specs(use_case_key) or {}
+        for key in ("min_price_floor", "min_price", "price_floor"):
+            if base.get(key) is not None:
+                return int(float(base.get(key)))
+    except Exception:
+        pass
+    return None
 
 
 def list_use_cases() -> List[str]:

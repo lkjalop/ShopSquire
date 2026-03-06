@@ -1,1 +1,57 @@
-{"USE_AGENT_CAPABILITIES": true, "AGENT_ROLLOUT_PERCENT": 100, "CAPABILITIES": {"recommend": {"enabled": true, "rollout_percent": 100}}, "KILL_SWITCH": false, "DECISION_LOG_WRITES_ENABLED": false, "DEGRADATION": {"enabled": false}, "TEST_FORCE_BAD_SKU": false}
+{
+  "USE_AGENT_CAPABILITIES": true,
+  "AGENT_ROLLOUT_PERCENT": 100,
+  "CAPABILITIES": {
+    "recommend": {
+      "enabled": true,
+      "rollout_percent": 100
+    }
+  },
+  "KILL_SWITCH": false,
+  "DECISION_LOG_WRITES_ENABLED": false,
+  "DEGRADATION": {
+    "enabled": true
+  },
+  "TEST_FORCE_BAD_SKU": false,
+  "SUPPORT_THRESHOLDS": {
+    "cv_confidence_low_min": 0.5,
+    "manipulation_score_high_min": 0.7,
+    "excessive_returns_last_30_days_min": 3,
+    "auto_process_confidence_min_signed_in": 0.8,
+    "auto_process_confidence_min_guest": 0.85,
+    "auto_process_fraud_levels": [
+      "minimal",
+      "low"
+    ]
+  },
+  "TRUST_THRESHOLDS": {
+    "high_trust_min": 0.9,
+    "medium_trust_min": 0.7,
+    "guarded_trust_min": 0.4,
+    "max_amount_usd_high": 500.0,
+    "max_amount_usd_medium": 200.0,
+    "max_amount_usd_guarded": 50.0,
+    "max_amount_usd_low": 0.0,
+    "supervisor_review_amount_usd_min": 10.0
+  },
+  "SEASONAL_CONTEXT": {
+    "active_season": null,
+    "boosts": {
+      "back_to_school": {
+        "portability": 1.08,
+        "battery": 1.1,
+        "value": 1.05
+      },
+      "holiday_gaming": {
+        "gpu": 1.1,
+        "cooling": 1.08,
+        "value": 1.04
+      },
+      "travel_season": {
+        "portability": 1.1,
+        "battery": 1.08,
+        "build_quality": 1.04
+      }
+    }
+  }
+}

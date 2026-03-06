@@ -21,8 +21,11 @@ services:
         condition: service_healthy
     command: ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
     user: "shopsquire"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
     read_only: true
     tmpfs:
       - /tmp:size=256M
@@ -78,8 +81,11 @@ services:
     command: ["python", "scripts/sync_worker.py"]
     restart: unless-stopped
     user: "shopsquire"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
 
   security-crowdstrike-poll:
     build: .
@@ -102,8 +108,11 @@ services:
     command: ["python", "scripts/run_crowdstrike_poll_worker.py"]
     restart: unless-stopped
     user: "shopsquire"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
 
   security-syslog-listener:
     build: .
@@ -127,8 +136,11 @@ services:
     command: ["python", "scripts/run_syslog_listener.py"]
     restart: unless-stopped
     user: "shopsquire"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
 
   security-celery-worker:
     build: .
@@ -152,8 +164,11 @@ services:
     command: ["celery", "-A", "src.app.workers.celery_app.celery_app", "worker", "--loglevel=INFO"]
     restart: unless-stopped
     user: "shopsquire"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
 
   security-celery-beat:
     build: .
@@ -175,8 +190,11 @@ services:
     command: ["celery", "-A", "src.app.workers.celery_app.celery_app", "beat", "--loglevel=INFO"]
     restart: unless-stopped
     user: "shopsquire"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
 
   prometheus:
     image: prom/prometheus:latest
@@ -251,8 +269,11 @@ services:
         while true; do sleep 86400; /usr/local/bin/pg_backup.sh; done
     restart: unless-stopped
     user: "postgres"
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+      - seccomp=default
     read_only: true
     tmpfs:
       - /tmp:size=512M

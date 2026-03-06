@@ -10,7 +10,11 @@ from src.app.config import get_settings
 
 def test_approve_and_reject_decision(monkeypatch, tmp_path):
     # shared in-memory sqlite
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    db_file = tmp_path / "decision_lifecycle.sqlite"
+    db_url = f"sqlite+pysqlite:///{db_file}"
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("DATABASE_URL_RO", db_url)
+    engine = create_engine(db_url, connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     SessionLocal = sessionmaker(bind=engine, future=True)
     import src.app.models.db as dbmod
     monkeypatch.setattr(dbmod, "engine", engine)
@@ -47,8 +51,17 @@ def test_approve_and_reject_decision(monkeypatch, tmp_path):
 
     # enable decision log writes in flags
     settings = get_settings()
+    merged_flags = {}
+    try:
+        with open(settings.feature_flags_path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+            if isinstance(loaded, dict):
+                merged_flags.update(loaded)
+    except Exception:
+        pass
+    merged_flags["DECISION_LOG_WRITES_ENABLED"] = True
     with open(settings.feature_flags_path, "w", encoding="utf-8") as f:
-        json.dump({"DECISION_LOG_WRITES_ENABLED": True}, f)
+        json.dump(merged_flags, f)
 
     from src.app.main import create_app
     app = create_app()

@@ -1,0 +1,176 @@
+{
+  "version": "1.0",
+  "use_cases": {
+    "note_taking_student": {
+      "label": "Note Taking Student",
+      "min_price_floor": 350,
+      "min_specs": {
+        "ram_gb": 8,
+        "storage_gb": 256,
+        "gpu": "integrated"
+      }
+    },
+    "university_general": {
+      "label": "University General",
+      "min_price_floor": 400,
+      "min_specs": {
+        "ram_gb": 8,
+        "storage_gb": 256,
+        "gpu": "integrated"
+      }
+    },
+    "computer_science_student": {
+      "label": "Computer Science Student",
+      "min_price_floor": 600,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "integrated_or_entry_discrete"
+      }
+    },
+    "engineering_student": {
+      "label": "Engineering Student",
+      "min_price_floor": 1000,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_6gb"
+      }
+    },
+    "architecture_student": {
+      "label": "Architecture Student",
+      "min_price_floor": 1000,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_6gb"
+      }
+    },
+    "data_science_student": {
+      "label": "Data Science Student",
+      "min_price_floor": 900,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_6gb_optional"
+      }
+    },
+    "design_student": {
+      "label": "Design Student",
+      "min_price_floor": 700,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_6gb"
+      }
+    },
+    "content_creator": {
+      "label": "Content Creator",
+      "min_price_floor": 900,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_6gb"
+      }
+    },
+    "music_production": {
+      "label": "Music Production",
+      "min_price_floor": 800,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "integrated_or_entry_discrete"
+      }
+    },
+    "ai_ml_workstation": {
+      "label": "AI/ML Workstation",
+      "min_price_floor": 1500,
+      "min_specs": {
+        "ram_gb": 32,
+        "storage_gb": 1000,
+        "gpu": "discrete_8gb_plus"
+      }
+    },
+    "gaming_light": {
+      "label": "Gaming Light",
+      "min_price_floor": 500,
+      "min_specs": {
+        "ram_gb": 8,
+        "storage_gb": 512,
+        "gpu": "integrated_or_entry_discrete"
+      }
+    },
+    "gaming_casual": {
+      "label": "Gaming Casual",
+      "min_price_floor": 600,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_4gb"
+      }
+    },
+    "gaming_competitive": {
+      "label": "Gaming Competitive",
+      "min_price_floor": 900,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "discrete_6gb"
+      }
+    },
+    "gaming_aaa_heavy": {
+      "label": "Gaming AAA Heavy",
+      "min_price_floor": 1200,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 1000,
+        "gpu": "discrete_8gb_plus"
+      }
+    },
+    "office_general": {
+      "label": "Office General",
+      "min_price_floor": 350,
+      "min_specs": {
+        "ram_gb": 8,
+        "storage_gb": 256,
+        "gpu": "integrated"
+      }
+    },
+    "office_finance": {
+      "label": "Office Finance",
+      "min_price_floor": 500,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "integrated"
+      }
+    },
+    "office_executive": {
+      "label": "Office Executive",
+      "min_price_floor": 600,
+      "min_specs": {
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "gpu": "integrated"
+      }
+    },
+    "medical_student": {
+      "label": "Medical Student",
+      "min_price_floor": 500,
+      "min_specs": {
+        "ram_gb": 8,
+        "storage_gb": 256,
+        "gpu": "integrated"
+      }
+    },
+    "law_student": {
+      "label": "Law Student",
+      "min_price_floor": 400,
+      "min_specs": {
+        "ram_gb": 8,
+        "storage_gb": 256,
+        "gpu": "integrated"
+      }
+    }
+  }
+}

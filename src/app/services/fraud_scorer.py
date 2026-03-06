@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Dict, Optional, Tuple, Any, List
 import logging
+import json
+import os
+import re
 
 from sqlalchemy import text
 from src.app.models.db import db_session
@@ -12,6 +15,47 @@ from src.app.services.neo4j_graph import (
 )
 
 logger = logging.getLogger("shopsquire.fraud_scorer")
+
+
+def _coerce_hash_set(raw: Any) -> set[str]:
+    out: set[str] = set()
+    if raw is None:
+        return out
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return out
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                raw = parsed
+            else:
+                raw = re.split(r"[,\s]+", s)
+        except Exception:
+            raw = re.split(r"[,\s]+", s)
+    if isinstance(raw, list):
+        for item in raw:
+            v = str(item or "").strip().lower()
+            if v:
+                out.add(v)
+    return out
+
+
+def _load_hash_intel(*, env_hashes: str, env_path: str) -> set[str]:
+    out: set[str] = set()
+    try:
+        out.update(_coerce_hash_set(os.getenv(env_hashes)))
+    except Exception:
+        pass
+    try:
+        p = str(os.getenv(env_path) or "").strip()
+        if p and os.path.isfile(p):
+            with open(p, "r", encoding="utf-8") as f:
+                raw = f.read()
+            out.update(_coerce_hash_set(raw))
+    except Exception:
+        pass
+    return out
 
 
 class FraudScorer:
@@ -36,6 +80,7 @@ class FraudScorer:
         "price_manipulation_attempt": 0.35,
         "ip_velocity_spike": 0.30,
         "shipping_address_clustered": 0.30,
+        "account_device_ip_ring_hit": 0.30,
         "ja3_known_fraud_tool": 0.35,
         "ja4_known_fraud_tool": 0.35,
         "geoip_high_risk_country": 0.20,
@@ -80,6 +125,7 @@ class FraudScorer:
         "price_manipulation_attempt": "commerce",
         "ip_velocity_spike": "network",
         "shipping_address_clustered": "graph",
+        "account_device_ip_ring_hit": "graph",
         "ja3_known_fraud_tool": "tls_fingerprint",
         "ja4_known_fraud_tool": "tls_fingerprint",
         "geoip_high_risk_country": "geo",
@@ -344,6 +390,7 @@ class BehavioralFraudDetector:
             )
             if bool(ring.get("ring_hit")):
                 signals["shipping_address_clustered"] = True
+                signals["account_device_ip_ring_hit"] = True
             session_data["neo4j_account_device_ip_ring"] = ring
         except Exception:
             pass
@@ -352,11 +399,21 @@ class BehavioralFraudDetector:
         try:
             ja3_hash = str(session_data.get("ja3_hash") or "").strip()
             ja4_hash = str(session_data.get("ja4_hash") or "").strip()
-            known_fraud_ja3 = set(session_data.get("known_fraud_ja3_hashes") or [])
-            known_fraud_ja4 = set(session_data.get("known_fraud_ja4_hashes") or [])
-            if ja3_hash and ja3_hash in known_fraud_ja3:
+            known_fraud_ja3 = _coerce_hash_set(session_data.get("known_fraud_ja3_hashes"))
+            known_fraud_ja4 = _coerce_hash_set(session_data.get("known_fraud_ja4_hashes"))
+            known_fraud_ja3.update(
+                _load_hash_intel(env_hashes="FRAUD_KNOWN_JA3_HASHES", env_path="FRAUD_JA3_INTEL_PATH")
+            )
+            known_fraud_ja4.update(
+                _load_hash_intel(env_hashes="FRAUD_KNOWN_JA4_HASHES", env_path="FRAUD_JA4_INTEL_PATH")
+            )
+            if ja3_hash and ja3_hash.lower() in known_fraud_ja3:
                 signals["ja3_known_fraud_tool"] = True
-            if ja4_hash and ja4_hash in known_fraud_ja4:
+            if ja4_hash and ja4_hash.lower() in known_fraud_ja4:
+                signals["ja4_known_fraud_tool"] = True
+            if bool(session_data.get("ja3_intel_hit")):
+                signals["ja3_known_fraud_tool"] = True
+            if bool(session_data.get("ja4_intel_hit")):
                 signals["ja4_known_fraud_tool"] = True
         except Exception:
             pass

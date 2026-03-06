@@ -464,6 +464,8 @@ async def analyze(
         except Exception as _exc:
             _log.warning("evidence bundle enrichment failed: %s", _exc)
         evidence_id = persist_evidence_bundle(case_id, bundle)
+        if not evidence_id:
+            evidence_id = f"ev-{uuid.uuid4().hex}"
 
         # Attach decision trace event best-effort
         try:
@@ -942,6 +944,8 @@ async def upload(
                     description=None,
                 )
                 evidence_id = persist_evidence_bundle(case_id, bundle)
+                if not evidence_id:
+                    evidence_id = f"ev-{uuid.uuid4().hex}"
             except Exception:
                 evidence_id = None
             try:

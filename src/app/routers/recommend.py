@@ -53,6 +53,7 @@ from src.app.services.trace_strategy_tags import build_strategy_trace_correlatio
 from src.app.services.i18n import localize_recommend_payload
 from src.app.services.billing import record_meter_event
 from src.app.services.fraud_scorer import FraudScorer
+from src.app.services.use_case_advisor import get_use_case_min_price_floor
 from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints_from_request
 from src.app.security.model_theft import (
     enforce_model_theft_rate_limit,
@@ -648,6 +649,41 @@ def _is_followup_explain_query(query: str | None) -> bool:
     )
 
 
+def _classify_turn_intent(
+    *,
+    query: str | None,
+    nlp: Dict[str, Any] | None,
+    followup_explain: bool,
+    explicit_constraint_update: bool,
+) -> str:
+    q = str(query or "").strip().lower()
+    if followup_explain:
+        return "EXPLAIN"
+    if re.search(r"\b(compare|vs|versus|difference|which one|better)\b", q):
+        return "COMPARE"
+    n_intent = str(((nlp or {}).get("intent") or "")).strip().lower()
+    if n_intent == "compare":
+        return "COMPARE"
+    if explicit_constraint_update or re.search(r"\b(under|below|between|over|above|budget|brand|ram|ssd|gpu|cpu|16gb|32gb)\b", q):
+        return "FILTER"
+    return "SEARCH"
+
+
+def _suppress_missing_fields_for_turn_intent(missing_fields: list[str] | None, *, turn_intent: str) -> list[str]:
+    fields = [str(x or "").strip().lower() for x in (missing_fields or []) if str(x or "").strip()]
+    if str(turn_intent or "").upper() == "EXPLAIN":
+        fields = [f for f in fields if f not in {"budget", "price", "budget_min", "budget_max"}]
+    return fields
+
+
+def _suppress_nqe_questions_for_turn_intent(questions: list[dict] | None, *, turn_intent: str) -> list[dict]:
+    out = [q for q in (questions or []) if isinstance(q, dict)]
+    if str(turn_intent or "").upper() == "EXPLAIN":
+        block_ids = {"ask_budget", "ask_budget_tier"}
+        out = [q for q in out if str((q or {}).get("id") or "").strip().lower() not in block_ids]
+    return out
+
+
 def _infer_missing_fields(
     *, constraints: Dict[str, Any], nlp: Dict[str, Any], kv: Dict[str, Any] | None = None
 ) -> list[str]:
@@ -1181,7 +1217,7 @@ def _assess_budget_fitness(
     """
     if not use_case or not budget_max:
         return {"status": "unknown"}
-    floor = _USE_CASE_BUDGET_FLOORS.get(use_case)
+    floor = get_use_case_min_price_floor(str(use_case)) or _USE_CASE_BUDGET_FLOORS.get(use_case)
     if not floor:
         return {"status": "unknown"}
     bmax = float(budget_max)
@@ -1190,6 +1226,11 @@ def _assess_budget_fitness(
             "status": "low",
             "floor": floor,
             "gap": round(floor - bmax),
+            "alternatives": [
+                "show_best_within_budget",
+                f"raise_budget_to_{int(floor)}",
+                "consider_refurbished_or_previous_gen",
+            ],
             "advice": (
                 f"For {use_case.replace('_', ' ')}, most new laptops start around ${floor}. "
                 f"At ${int(bmax)} you'll be looking at older or refurbished models. "
@@ -1201,6 +1242,11 @@ def _assess_budget_fitness(
             "status": "high",
             "floor": floor,
             "excess": round(bmax - floor * 2),
+            "alternatives": [
+                "show_best_value_pick",
+                "show_balanced_mid_tier",
+                "show_premium_only_if_needed",
+            ],
             "advice": (
                 f"Your budget is generous for {use_case.replace('_', ' ')}. "
                 f"You won't feel much real-world difference beyond ~${floor * 2}. "
@@ -3458,6 +3504,18 @@ def suggest(
     parsed = service.parse_constraints(query_effective)
     explanation_request = _is_selection_rationale_query(query_effective)
     explicit_constraint_update = _has_explicit_constraint_update(parsed, query)
+    turn_intent = _classify_turn_intent(
+        query=query_effective,
+        nlp=nlp if isinstance(nlp, dict) else {},
+        followup_explain=followup_explain,
+        explicit_constraint_update=explicit_constraint_update,
+    )
+    confirmed_slots_src = (
+        structured_state.get("confirmed_slots")
+        if isinstance(structured_state.get("confirmed_slots"), dict)
+        else kv.get("confirmed_slots")
+    )
+    confirmed_slots = dict(confirmed_slots_src or {}) if isinstance(confirmed_slots_src, dict) else {}
     followup_contract = _build_followup_contract(query, nlp.get("intent_chain") if isinstance(nlp, dict) else [])
     intent_execution_plan = _build_multi_intent_execution_plan(nlp.get("intent_chain") if isinstance(nlp, dict) else [])
     prior_shortlist_src = structured_state.get("last_shortlist_skus") if isinstance(structured_state.get("last_shortlist_skus"), list) else kv.get("last_shortlist_skus")
@@ -3485,20 +3543,21 @@ def suggest(
     nqe_selection_applied: Dict[str, Any] = {}
     constraints = {
         "uid_hash": uid_hash,
-        "budget_max": budget_max or parsed.get("budget_max") or nlp.get("preferences", {}).get("budget_max") or _decayed_pref("budget_max"),
-        "budget_min": parsed.get("budget_min") or nlp.get("preferences", {}).get("budget_min") or _decayed_pref("budget_min"),
-        "brands": parsed.get("brands") or nlp.get("preferences", {}).get("brands") or _decayed_pref("brands", []),
-        "specs": parsed.get("specs") or nlp.get("preferences", {}).get("specs") or _decayed_pref("specs", []),
-        "brand_excludes": parsed.get("brand_excludes") or nlp.get("preferences", {}).get("brand_excludes") or _decayed_pref("brand_excludes", []),
-        "availability": parsed.get("availability") or nlp.get("preferences", {}).get("availability") or _decayed_pref("availability"),
-        "condition": parsed.get("condition") or nlp.get("preferences", {}).get("condition") or _decayed_pref("condition"),
+        "budget_max": budget_max or parsed.get("budget_max") or nlp.get("preferences", {}).get("budget_max") or _decayed_pref("budget_max") or confirmed_slots.get("budget_max"),
+        "budget_min": parsed.get("budget_min") or nlp.get("preferences", {}).get("budget_min") or _decayed_pref("budget_min") or confirmed_slots.get("budget_min"),
+        "brands": parsed.get("brands") or nlp.get("preferences", {}).get("brands") or _decayed_pref("brands", []) or confirmed_slots.get("brands") or [],
+        "specs": parsed.get("specs") or nlp.get("preferences", {}).get("specs") or _decayed_pref("specs", []) or confirmed_slots.get("specs") or [],
+        "brand_excludes": parsed.get("brand_excludes") or nlp.get("preferences", {}).get("brand_excludes") or _decayed_pref("brand_excludes", []) or confirmed_slots.get("brand_excludes") or [],
+        "availability": parsed.get("availability") or nlp.get("preferences", {}).get("availability") or _decayed_pref("availability") or confirmed_slots.get("availability"),
+        "condition": parsed.get("condition") or nlp.get("preferences", {}).get("condition") or _decayed_pref("condition") or confirmed_slots.get("condition"),
         "intent": nlp.get("intent"),
-        "use_case": nlp.get("preferences", {}).get("use_case") or _decayed_pref("use_case"),
-        "use_case_tags": nlp.get("preferences", {}).get("use_case_tags") or _decayed_pref("use_case_tags", []),
+        "use_case": nlp.get("preferences", {}).get("use_case") or _decayed_pref("use_case") or confirmed_slots.get("use_case"),
+        "use_case_tags": nlp.get("preferences", {}).get("use_case_tags") or _decayed_pref("use_case_tags", []) or confirmed_slots.get("use_case_tags") or [],
         "locale": kv.get("locale"),
         "query": scrub_pii(query or ""),
         "slots": nlp.get("slots") or {},
         "shortlist_lock_active": shortlist_lock_active,
+        "turn_intent": turn_intent,
     }
     if not constraints.get("use_case"):
         inferred_use_case, inferred_tags = _infer_use_case_from_query_text(query_effective)
@@ -3599,6 +3658,26 @@ def suggest(
                 constraints["use_case_tags"] = _accumulated["use_case_tags"]
             if _accumulated.get("gpu_preference") and not constraints.get("gpu_preference"):
                 constraints["gpu_preference"] = _accumulated["gpu_preference"]
+    except Exception:
+        pass
+    # Confirmed slots (chat turn-end contract): reload at turn start.
+    try:
+        _confirmed_slots = structured_state.get("confirmed_slots") if isinstance(structured_state.get("confirmed_slots"), dict) else kv.get("confirmed_slots")
+        if _confirmed_slots and isinstance(_confirmed_slots, dict):
+            if constraints.get("budget_min") is None and _confirmed_slots.get("budget_min") is not None:
+                constraints["budget_min"] = _confirmed_slots.get("budget_min")
+            if constraints.get("budget_max") is None and _confirmed_slots.get("budget_max") is not None:
+                constraints["budget_max"] = _confirmed_slots.get("budget_max")
+            if not constraints.get("use_case") and _confirmed_slots.get("use_case"):
+                constraints["use_case"] = _confirmed_slots.get("use_case")
+            if not (constraints.get("brands") or []) and isinstance(_confirmed_slots.get("brands"), list):
+                constraints["brands"] = list(_confirmed_slots.get("brands"))[:8]
+            if not (constraints.get("specs") or []) and isinstance(_confirmed_slots.get("specs"), list):
+                constraints["specs"] = list(_confirmed_slots.get("specs"))[:12]
+            if not constraints.get("availability") and _confirmed_slots.get("availability"):
+                constraints["availability"] = _confirmed_slots.get("availability")
+            if not constraints.get("condition") and _confirmed_slots.get("condition"):
+                constraints["condition"] = _confirmed_slots.get("condition")
     except Exception:
         pass
     # ── Fix 7: persist text-extracted constraints into nqe_answered_fields in Redis ──
@@ -4365,7 +4444,14 @@ def suggest(
             results_count=0,
             persona_confidence=constraints.get("buyer_persona_confidence"),
         )
-        missing_fields_open = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
+        missing_fields_open = _suppress_missing_fields_for_turn_intent(
+            _infer_missing_fields(
+                constraints=constraints,
+                nlp=nlp if isinstance(nlp, dict) else {},
+                kv=kv if isinstance(kv, dict) else None,
+            ),
+            turn_intent=turn_intent,
+        )
         try:
             log_trace_event(
                 trace_id=trace_id,
@@ -4436,6 +4522,7 @@ def suggest(
                 detected_software=detect_software_in_text(query or ""),
                 chat_history_summary=_session_context_summary,
                 user_profile=_user_profile_dict,
+                turn_intent=turn_intent,
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
@@ -4448,6 +4535,7 @@ def suggest(
                 query=query_effective,
                 constraints=constraints,
             )
+            next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
             next_questions, fatigue_blocked_ids = _question_fatigue_filter(
                 next_questions,
                 recent_asked=recent_asked_entries,
@@ -4513,6 +4601,7 @@ def suggest(
         next_questions = (next_questions or [])[:2]
         if gpu_followup_question_needed:
             next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
+        next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
         next_questions = _append_standard_nqe_options(next_questions, query_effective)
         next_questions = _apply_nqe_confidence_gating(
             next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
@@ -6007,6 +6096,7 @@ def suggest(
         "complexity_signals": complexity_signals,
         "fraud": fraud_summary,
         "turn_type": turn_type,
+        "turn_intent": turn_intent,
         "referents": referents,
         "memory_confidence": round(float(memory_confidence), 4),
         "view_mode": view_hint.get("view_mode"),
@@ -6139,8 +6229,15 @@ def suggest(
         # already have (e.g. "explain top 3", "list those", "why these?"), skip
         # the clarifying-question loop entirely — they don't need "What budget?"
         # while they're reviewing a shortlist.  NQE still fires on fresh queries.
-        _skip_nqe_clarify = bool(followup_explain or shortlist_lock_active)
-        missing_fields = _infer_missing_fields(constraints=constraints, nlp=nlp if isinstance(nlp, dict) else {}, kv=kv if isinstance(kv, dict) else None)
+        _skip_nqe_clarify = bool(str(turn_intent or "").upper() == "EXPLAIN" or followup_explain or shortlist_lock_active)
+        missing_fields = _suppress_missing_fields_for_turn_intent(
+            _infer_missing_fields(
+                constraints=constraints,
+                nlp=nlp if isinstance(nlp, dict) else {},
+                kv=kv if isinstance(kv, dict) else None,
+            ),
+            turn_intent=turn_intent,
+        )
         if missing_fields and not _skip_nqe_clarify:
             category = _resolve_nqe_product_category(
                 query=query,
@@ -6194,6 +6291,7 @@ def suggest(
                 detected_software=detect_software_in_text(query or ""),
                 chat_history_summary=_session_context_summary,
                 user_profile=_user_profile_dict,
+                turn_intent=turn_intent,
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
@@ -6206,6 +6304,7 @@ def suggest(
                 query=query_effective,
                 constraints=constraints,
             )
+            next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
             next_questions, fatigue_blocked_ids2 = _question_fatigue_filter(
                 next_questions,
                 recent_asked=recent_asked_entries,
@@ -6264,6 +6363,7 @@ def suggest(
             next_questions = (next_questions or [])[:2]
             if gpu_followup_question_needed:
                 next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
+            next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
             next_questions = _append_standard_nqe_options(next_questions, query_effective)
             next_questions = _apply_nqe_confidence_gating(
                 next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
@@ -6380,6 +6480,29 @@ def suggest(
     )
     if nqe_selection_applied:
         payload["nqe_selection_applied"] = nqe_selection_applied
+    try:
+        _bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
+        payload["budget_viability"] = _bf or {"status": "unknown"}
+        if str(turn_intent or "").upper() != "EXPLAIN" and str(_bf.get("status") or "") == "low":
+            _floor = int(float(_bf.get("floor") or 0)) if _bf.get("floor") is not None else 0
+            _viability_q = {
+                "id": "budget_viability_path",
+                "text": (
+                    f"Your goal may need around ${_floor:,}. Do you want best options at your current budget, "
+                    "or should I raise the budget target?"
+                ) if _floor > 0 else "Your goal may need a higher budget. Should I optimize for value now or raise budget target?",
+                "goal": "resolve_budget_viability",
+                "options": [
+                    {"id": "budget_viability_keep", "label": "Keep budget, best value", "value": "keep"},
+                    {"id": "budget_viability_raise", "label": f"Raise toward ${_floor:,}" if _floor > 0 else "Raise budget", "value": "raise"},
+                    {"id": "budget_viability_refurb", "label": "Include refurbished", "value": "refurb"},
+                ],
+            }
+            _nq = payload.get("next_questions") if isinstance(payload.get("next_questions"), list) else []
+            if not any(str((q or {}).get("id") or "").strip().lower() == "budget_viability_path" for q in _nq if isinstance(q, dict)):
+                payload["next_questions"] = [_viability_q] + list(_nq)
+    except Exception:
+        pass
     assistant_message = None
     llm_summary_job_id = None
     llm_summary_requested = bool(nlp.get("llm_fallback") or explanation_request)
@@ -6405,6 +6528,22 @@ def suggest(
             pass
     if not assistant_message:
         assistant_message = _deterministic_assistant_message(query, results, constraints)
+    try:
+        _bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
+        _bf_status = str(_bf.get("status") or "").strip().lower()
+        _bf_advice = str(_bf.get("advice") or "").strip()
+        if _bf_status in {"low", "high"} and _bf_advice:
+            assistant_message = f"{assistant_message} {_bf_advice}" if assistant_message else _bf_advice
+        if _bf_status == "low":
+            _alts = payload.get("alternatives") if isinstance(payload.get("alternatives"), list) else []
+            _floor = int(float(_bf.get("floor") or 0)) if _bf.get("floor") is not None else 0
+            if _floor > 0:
+                _alts.append(f"Raise budget to around ${_floor:,} for this use-case")
+            _alts.append("Keep budget and prioritize refurbished / previous generation")
+            _alts.append("Relax one or two strict specs to widen options")
+            payload["alternatives"] = list(dict.fromkeys([str(x) for x in _alts if str(x).strip()]))[:4]
+    except Exception:
+        pass
     if image_brand_mismatch_note:
         assistant_message = f"{assistant_message} {image_brand_mismatch_note}" if assistant_message else image_brand_mismatch_note
     if gpu_inference_note:
@@ -6679,10 +6818,12 @@ def suggest(
         )
         structured_state_out["last_result_envelope"] = dict(kv_out["last_result_envelope"])
         kv_out["last_turn_type"] = turn_type
+        kv_out["last_turn_intent"] = turn_intent
         kv_out["last_referents"] = referents
         kv_out["last_followup_contract"] = followup_contract
         kv_out["last_intent_execution_plan"] = intent_execution_plan
         structured_state_out["last_turn_type"] = turn_type
+        structured_state_out["last_turn_intent"] = turn_intent
         structured_state_out["last_referents"] = referents
         structured_state_out["last_followup_contract"] = followup_contract
         structured_state_out["last_intent_execution_plan"] = intent_execution_plan
@@ -6699,6 +6840,26 @@ def suggest(
             shortlist_skus=shortlist_skus,
             turn_type=turn_type,
         )
+        confirmed_slots_out = (
+            kv_out.get("confirmed_slots")
+            if isinstance(kv_out.get("confirmed_slots"), dict)
+            else structured_state_out.get("confirmed_slots")
+        )
+        confirmed_slots_out = dict(confirmed_slots_out or {})
+        for _key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition"):
+            _val = constraints.get(_key)
+            if _val is not None:
+                confirmed_slots_out[_key] = _val
+        if constraints.get("brands"):
+            confirmed_slots_out["brands"] = list(constraints.get("brands") or [])[:8]
+        if constraints.get("specs"):
+            confirmed_slots_out["specs"] = list(constraints.get("specs") or [])[:12]
+        if constraints.get("brand_excludes"):
+            confirmed_slots_out["brand_excludes"] = list(constraints.get("brand_excludes") or [])[:12]
+        if constraints.get("use_case_tags"):
+            confirmed_slots_out["use_case_tags"] = list(constraints.get("use_case_tags") or [])[:12]
+        kv_out["confirmed_slots"] = confirmed_slots_out
+        structured_state_out["confirmed_slots"] = dict(confirmed_slots_out)
         if image_context.get("labels") or image_context.get("ocr") or image_context.get("hash") or image_context.get("intent"):
             kv_out["image_context"] = {
                 "hash": image_context.get("hash"),

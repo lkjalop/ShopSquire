@@ -180,8 +180,11 @@ class PolicyGate:
 
         ip_allowlist = cond.get("ip_allowlist") if isinstance(cond.get("ip_allowlist"), list) else []
         source_ip = _normalize_ip(ctx.get("source_ip") or "")
-        if ip_allowlist and source_ip and not _ip_allowed(source_ip, ip_allowlist):
-            violations.append("source_ip_not_allowlisted")
+        if ip_allowlist:
+            if not source_ip:
+                violations.append("source_ip_missing_for_allowlist")
+            elif not _ip_allowed(source_ip, ip_allowlist):
+                violations.append("source_ip_not_allowlisted")
 
         min_trust_raw = cond.get("min_trust_score")
         if min_trust_raw is not None:

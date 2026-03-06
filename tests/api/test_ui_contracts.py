@@ -75,3 +75,44 @@ def test_incident_room_public_contracts():
     assert msg.status_code == 200
     IncidentMessageResponse.model_validate(msg.json())
 
+
+def test_status_summary_frontend_contract_for_overview_panel():
+    app = create_app()
+    client = TestClient(app, headers=default_headers())
+    root = client.get("/status/summary")
+    assert root.status_code == 200
+    body = root.json()
+    assert body.get("status") == "ok"
+    assert isinstance(body.get("email_xdr"), dict)
+    assert "warnings" in (body.get("email_xdr") or {})
+    assert "errors" in (body.get("email_xdr") or {})
+    assert "outbound_anomalies" in body
+
+    alias = client.get("/api/v1/status/summary")
+    assert alias.status_code == 200
+    assert alias.json() == body
+
+
+def test_admin_incident_detail_frontend_contract_for_summary_panel():
+    os.environ["ALLOW_UNAUTH_MERCHANT_DASHBOARD"] = "1"
+    app = create_app()
+    client = TestClient(app, headers=default_headers())
+
+    esc = client.post(
+        "/api/v1/incidents/escalate",
+        json={"case_id": "contract-front-incident", "trace_id": "contract-front-trace", "reason": "frontend_contract"},
+        headers={"host": "localhost"},
+    )
+    assert esc.status_code == 200
+    incident_id = str((esc.json() or {}).get("incident_id") or "")
+    assert incident_id
+
+    detail = client.get(f"/api/v1/admin/incidents/{incident_id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body.get("id") == incident_id
+    assert body.get("event_id")
+    assert body.get("eventId") == body.get("event_id")
+    assert body.get("trace_id")
+    assert body.get("traceId") == body.get("trace_id")
+    assert "status" in body

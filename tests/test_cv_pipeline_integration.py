@@ -163,6 +163,17 @@ class TestCVAnalyzePipeline:
                     {"tid": case_id},
                 ).fetchall()
             event_types = [r[0] for r in rows]
+            if not event_types:
+                # In full-suite runs, direct db_session() can point at a different
+                # test-scoped SQLite engine. Fall back to API trace retrieval
+                # from the same app instance that handled /cv/analyze.
+                ev_resp = self.client.get(f"/api/v1/trace/{case_id}/events")
+                if ev_resp.status_code == 200:
+                    event_types = [
+                        str(e.get("event_type") or "")
+                        for e in (ev_resp.json().get("events") or [])
+                        if isinstance(e, dict)
+                    ]
             assert "security_scan" in event_types or "cv_analyze" in event_types, (
                 f"Expected security_scan or cv_analyze in trace events for {case_id}. "
                 f"Got: {event_types}"

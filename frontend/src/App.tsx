@@ -751,14 +751,75 @@ export default function App() {
           chatPayload.nqe_history = nqeHistory.slice(-10);
         }
 
-        const r = await fetch(apiUrl('/api/v1/chat/query'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
-          body: JSON.stringify(chatPayload),
-        });
-        const data = await safeJson(r);
-        if (!r.ok || !data) {
-          throw new Error((data && data.detail) ? data.detail : `chat_query_failed (${r.status})`);
+        const apiHeaders = {
+          'Content-Type': 'application/json',
+          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+        };
+        const tryStreamChat = async (): Promise<any | null> => {
+          const resp = await fetch(apiUrl('/api/v1/chat/stream'), {
+            method: 'POST',
+            headers: apiHeaders,
+            body: JSON.stringify(chatPayload),
+          });
+          if (!resp.ok || !resp.body) return null;
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let answerPayload: any = null;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            buffer = buffer.replace(/\r\n/g, '\n');
+            let splitIdx = buffer.indexOf('\n\n');
+            while (splitIdx >= 0) {
+              const frame = buffer.slice(0, splitIdx);
+              buffer = buffer.slice(splitIdx + 2);
+              const lines = frame.split('\n');
+              let eventName = 'message';
+              const dataLines: string[] = [];
+              for (const line of lines) {
+                if (line.startsWith('event:')) {
+                  eventName = line.slice(6).trim();
+                } else if (line.startsWith('data:')) {
+                  dataLines.push(line.slice(5).trim());
+                }
+              }
+              const raw = dataLines.join('\n');
+              let parsed: any = null;
+              try {
+                parsed = raw ? JSON.parse(raw) : null;
+              } catch {
+                parsed = null;
+              }
+              if (eventName === 'error') {
+                throw new Error((parsed && parsed.message) ? parsed.message : 'chat_stream_failed');
+              }
+              if (eventName === 'answer' && parsed) {
+                answerPayload = parsed;
+              }
+              splitIdx = buffer.indexOf('\n\n');
+            }
+          }
+          return answerPayload;
+        };
+
+        let data: any = null;
+        try {
+          data = await tryStreamChat();
+        } catch {
+          data = null;
+        }
+        if (!data) {
+          const r = await fetch(apiUrl('/api/v1/chat/query'), {
+            method: 'POST',
+            headers: apiHeaders,
+            body: JSON.stringify(chatPayload),
+          });
+          data = await safeJson(r);
+          if (!r.ok || !data) {
+            throw new Error((data && data.detail) ? data.detail : `chat_query_failed (${r.status})`);
+          }
         }
         const prods = (data.products || []) as Product[];
         const respAssistant = data.assistant_message || '';

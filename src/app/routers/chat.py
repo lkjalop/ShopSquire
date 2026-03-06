@@ -6,6 +6,8 @@ import time
 import uuid
 import base64
 import hashlib
+import os
+from threading import RLock
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -24,6 +26,72 @@ from src.app.services.decision_log import log_trace_event
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+
+_CHAT_REPLAY_LOCAL: Dict[str, float] = {}
+_CHAT_REPLAY_LOCK = RLock()
+
+
+def _normalize_recent_messages(raw: Any, *, limit: int = 16) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    rows = raw if isinstance(raw, list) else []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if role not in {"user", "assistant", "system"} or not content:
+            continue
+        out.append({"role": role[:10], "content": content[:500]})
+    return out[-max(1, int(limit or 1)) :]
+
+
+def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    budget = _extract_budget_bounds(query)
+    if budget.get("budget_min") is not None:
+        out["budget_min"] = budget.get("budget_min")
+    if budget.get("budget_max") is not None:
+        out["budget_max"] = budget.get("budget_max")
+    brands = _extract_brand_mentions(query)
+    if brands:
+        out["brands"] = brands[:6]
+
+    data = response if isinstance(response, dict) else {}
+    applied = data.get("nqe_selection_applied") if isinstance(data.get("nqe_selection_applied"), dict) else {}
+    used = data.get("constraints_used") if isinstance(data.get("constraints_used"), dict) else {}
+    for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition"):
+        v = applied.get(key)
+        if v is None:
+            v = used.get(key)
+        if v is not None:
+            out[key] = v
+    for key in ("brands", "specs", "brand_excludes", "use_case_tags"):
+        vv = applied.get(key)
+        if vv is None:
+            vv = used.get(key)
+        if isinstance(vv, list) and vv:
+            out[key] = vv[:12]
+    return out
+
+
+def _chat_replay_mark_once(redis, *, replay_key: str, ttl_seconds: int) -> bool:
+    ttl = max(1, int(ttl_seconds or 1))
+    redis_key = f"chat:replay:{replay_key}"
+    try:
+        # NX+EX ensures only the first request in the replay window is accepted.
+        ok = redis.set(redis_key, "1", ex=ttl, nx=True)
+        return bool(ok)
+    except Exception:
+        now = time.time()
+        with _CHAT_REPLAY_LOCK:
+            exp = float(_CHAT_REPLAY_LOCAL.get(replay_key) or 0.0)
+            if exp > now:
+                return False
+            _CHAT_REPLAY_LOCAL[replay_key] = now + ttl
+            stale = [k for k, v in _CHAT_REPLAY_LOCAL.items() if float(v or 0.0) <= now]
+            for k in stale[:128]:
+                _CHAT_REPLAY_LOCAL.pop(k, None)
+        return True
 
 
 def _ensure_chat_messages_table(db) -> None:
@@ -212,6 +280,9 @@ def _persist_chat_structured_state(
     query: str,
     products: List[Dict[str, Any]] | None,
     trace_id: str | None,
+    assistant_message: str | None = None,
+    recent_messages: List[Dict[str, Any]] | None = None,
+    confirmed_slots: Dict[str, Any] | None = None,
 ) -> None:
     mem = Memory(redis)
     prior = mem.get_structured_state(uid) or {}
@@ -224,12 +295,37 @@ def _persist_chat_structured_state(
     out["last_chat_query"] = str(query or "")[:500]
     out["last_chat_trace_id"] = trace_id
     out["last_chat_ts"] = int(time.time())
+
+    merged_slots = out.get("confirmed_slots") if isinstance(out.get("confirmed_slots"), dict) else {}
+    merged_slots = dict(merged_slots)
     if budget.get("budget_min") is not None:
-        out["budget_min"] = budget.get("budget_min")
+        merged_slots["budget_min"] = budget.get("budget_min")
     if budget.get("budget_max") is not None:
-        out["budget_max"] = budget.get("budget_max")
+        merged_slots["budget_max"] = budget.get("budget_max")
     if brands:
-        out["brands"] = brands[:6]
+        merged_slots["brands"] = brands[:6]
+    if isinstance(confirmed_slots, dict):
+        for key, value in confirmed_slots.items():
+            if value is None:
+                continue
+            if isinstance(value, list) and not value:
+                continue
+            merged_slots[str(key)] = value
+    if merged_slots:
+        out["confirmed_slots"] = merged_slots
+        if merged_slots.get("budget_min") is not None:
+            out["budget_min"] = merged_slots.get("budget_min")
+        if merged_slots.get("budget_max") is not None:
+            out["budget_max"] = merged_slots.get("budget_max")
+        if isinstance(merged_slots.get("brands"), list) and merged_slots.get("brands"):
+            out["brands"] = list(merged_slots.get("brands"))[:6]
+
+    base_recent = recent_messages if isinstance(recent_messages, list) and recent_messages else out.get("recent_messages")
+    recent = _normalize_recent_messages(base_recent, limit=16)
+    recent.append({"role": "user", "content": str(query or "")[:500]})
+    if str(assistant_message or "").strip():
+        recent.append({"role": "assistant", "content": str(assistant_message or "")[:500]})
+    out["recent_messages"] = _normalize_recent_messages(recent, limit=16)
     if skus:
         out["last_shortlist_skus"] = skus
         out["last_valid_shortlist_skus"] = skus
@@ -338,6 +434,64 @@ async def chat_query(
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
 
+    uid = str((payload or {}).get("uid") or "demo-user")
+    session_id = str((payload or {}).get("session_id") or "")[:128] or None
+    source_ip = request.client.host if request and request.client else ""
+
+    # Reload confirmed slots at turn start to keep context continuity explicit.
+    try:
+        _prior_ss = Memory(redis).get_structured_state(uid) or {}
+        _confirmed_in = _prior_ss.get("confirmed_slots") if isinstance(_prior_ss.get("confirmed_slots"), dict) else {}
+        if _confirmed_in:
+            payload["confirmed_slots"] = _confirmed_in
+    except Exception:
+        pass
+
+    # Replay protection: reject immediate duplicates from retries/replays.
+    try:
+        replay_nonce = str(
+            (payload or {}).get("nonce")
+            or (payload or {}).get("message_id")
+            or request.headers.get("x-chat-nonce")
+            or request.headers.get("idempotency-key")
+            or ""
+        ).strip()[:128]
+        replay_shape = {
+            "nqe_selection": (payload or {}).get("nqe_selection"),
+            "image_hash": (payload or {}).get("image_hash"),
+            "images": [
+                str((x or {}).get("image_hash") or (x or {}).get("hash") or "")[:64]
+                for x in ((payload or {}).get("images") or [])[:3]
+                if isinstance(x, dict)
+            ],
+            "has_voice": bool((payload or {}).get("voice_transcript")),
+        }
+        replay_material = "|".join(
+            [
+                uid,
+                str(session_id or ""),
+                str(source_ip or ""),
+                str(q or "").strip().lower()[:500],
+                replay_nonce
+                or hashlib.sha256(
+                    json.dumps(replay_shape, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest(),
+            ]
+        )
+        replay_key = hashlib.sha256(replay_material.encode("utf-8")).hexdigest()
+        replay_ttl = int(os.getenv("CHAT_REPLAY_TTL_SECONDS", "20") or 20)
+        if replay_nonce:
+            replay_ttl = max(replay_ttl, 120)
+        if not _chat_replay_mark_once(redis, replay_key=replay_key, ttl_seconds=replay_ttl):
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "chat_replay_detected", "retry_after_seconds": replay_ttl},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     # -----------------------------------------------------------------------
     # Cross-modal security: scan merged text (user query + voice + OCR + labels + QR)
     # -----------------------------------------------------------------------
@@ -431,10 +585,18 @@ async def chat_query(
             "complexity": score_query_complexity(q, context={"has_image": True}),
         }
         try:
-            uid = str((payload or {}).get("uid") or "demo-user")
             _store_chat_message(db, uid=uid, role="user", content=q, trace_id=None)
             _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=None)
-            _persist_chat_structured_state(redis=redis, uid=uid, query=q, products=[], trace_id=None)
+            _persist_chat_structured_state(
+                redis=redis,
+                uid=uid,
+                query=q,
+                products=[],
+                trace_id=None,
+                assistant_message=str(out.get("assistant_message") or ""),
+                recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
+                confirmed_slots=_extract_confirmed_slots(query=q, response=None),
+            )
         except Exception:
             pass
         return out
@@ -456,7 +618,7 @@ async def chat_query(
 
     policy_ok, policy_reason = enforce_model_theft_policy_gate(
         query=q,
-        uid=str((payload or {}).get("uid") or ""),
+        uid=uid,
         source_ip=(request.client.host if request and request.client else None),
         api_key_id=(request.headers.get("x-api-key") if request else None),
     )
@@ -464,7 +626,7 @@ async def chat_query(
         raise HTTPException(status_code=429, detail={"message": "model_theft_policy_gate", "reason": policy_reason})
     allowed_model_use, model_use_reason = enforce_model_theft_rate_limit(
         redis_client=redis,
-        uid=str((payload or {}).get("uid") or ""),
+        uid=uid,
         source_ip=(request.client.host if request and request.client else None),
         api_key_id=(request.headers.get("x-api-key") if request else None),
         query=q,
@@ -477,17 +639,12 @@ async def chat_query(
     # reference them for context continuity (avoids "context rot").
     # -----------------------------------------------------------------------
     try:
-        _uid_msg = str((payload or {}).get("uid") or "demo-user")
+        _uid_msg = uid
         _recent_msgs_raw = (payload or {}).get("recent_messages") or []
         if isinstance(_recent_msgs_raw, list) and _recent_msgs_raw:
             _mem_state = Memory(redis)
             _ss = _mem_state.get_structured_state(_uid_msg) or {}
-            # Keep at most 12 recent messages to cap Redis size
-            _ss["recent_messages"] = [
-                {"role": str(m.get("role", ""))[:10], "content": str(m.get("content", ""))[:500]}
-                for m in _recent_msgs_raw[-12:]
-                if isinstance(m, dict)
-            ]
+            _ss["recent_messages"] = _normalize_recent_messages(_recent_msgs_raw, limit=12)
             _mem_state.set_structured_state(_uid_msg, _ss)
     except Exception:
         pass
@@ -495,7 +652,7 @@ async def chat_query(
     # Call internal recommend endpoint to leverage agentic pipeline
     base = str(request.base_url).rstrip("/")
     url = f"{base}/api/v1/recommend/suggest"
-    params = {"uid": (payload.get("uid") or "demo-user"), "query": q}
+    params = {"uid": uid, "query": q}
     nqe_selection = (payload or {}).get("nqe_selection") or {}
     if isinstance(nqe_selection, dict):
         qid = str(nqe_selection.get("question_id") or "").strip()
@@ -768,8 +925,6 @@ async def chat_query(
         "voice_used": bool(voice_transcript),
     }
     try:
-        uid = str((payload or {}).get("uid") or "demo-user")
-        session_id = str((payload or {}).get("session_id") or "")[:128] or None
         _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
         _store_chat_message(
             db,
@@ -785,6 +940,9 @@ async def chat_query(
             query=q,
             products=products,
             trace_id=decision_trace_id,
+            assistant_message=str(out.get("assistant_message") or ""),
+            recent_messages=(payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else None,
+            confirmed_slots=_extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else None),
         )
     except Exception:
         pass

@@ -4,7 +4,8 @@ import pathlib
 from tests.utils import default_headers
 
 tmp_db = "test_sqlite_orders.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{tmp_db}")
+os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_db}"
+os.environ["DATABASE_URL_RO"] = f"sqlite+pysqlite:///{tmp_db}"
 os.environ.setdefault("FEATURE_FLAGS_PATH", "config/feature_flags.json")
 
 from sqlalchemy import create_engine, text
@@ -46,11 +47,11 @@ def test_order_history_paging():
         for i in range(5):
             order_id = f"order-{i}"
             conn.execute(
-                text("INSERT INTO orders (id, total_cents, currency, status, created_at, updated_at) VALUES (:id, :total, 'USD', 'created', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"),
+                text("INSERT OR REPLACE INTO orders (id, total_cents, currency, status, created_at, updated_at) VALUES (:id, :total, 'USD', 'created', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"),
                 {"id": order_id, "total": 10000 + i * 100},
             )
             conn.execute(
-                text("INSERT INTO order_sessions (id, uid, order_id, created_at) VALUES (:id, :uid, :order_id, CURRENT_TIMESTAMP)"),
+                text("INSERT OR REPLACE INTO order_sessions (id, uid, order_id, created_at) VALUES (:id, :uid, :order_id, CURRENT_TIMESTAMP)"),
                 {"id": f"session-{i}", "uid": "paging-user", "order_id": order_id},
             )
     r = client.get("/api/v1/orders/history", params={"uid": "paging-user", "limit": 2, "offset": 0})

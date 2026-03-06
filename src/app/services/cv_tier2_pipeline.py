@@ -14,6 +14,7 @@ from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.gan_image_detector import detect_fake_image
 from src.app.security.adversarial_image_detector import detect_adversarial
 from src.app.security.steg_detector import detect_steganography
+from src.app.security.observer import analyze_payload
 from src.app.services.cv_vision_ollama import vision_analyze_with_ollama
 from src.app.security.url_guard import ensure_safe_outbound_url
 from src.app.services.decision_log import log_trace_event
@@ -553,16 +554,51 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
     # QR/barcode extraction gate: extract payloads and evaluate URL-like values.
     qr = _extract_qr_payloads(image_bytes)
     qr_urls: List[str] = []
+    qr_payload_values: List[str] = []
     try:
         for item in (qr.get("items") or []):
             v = str((item or {}).get("value") or "")
+            if v.strip():
+                qr_payload_values.append(v[:500])
             if _URL_RE.search(v):
                 qr_urls.append(_URL_RE.search(v).group(0))  # type: ignore[union-attr]
     except Exception:
         qr_urls = []
+        qr_payload_values = []
     if qr_urls:
         evidence_tags.append("qr_url_present")
         record_cv_fraud("robustness_qr_url_present")
+
+    observer_result: Dict[str, Any] = {}
+    observer_prompt_injection = False
+    try:
+        merged_security_text = "\n".join(
+            [str(ocr_text or "")[:6000], *[str(x)[:500] for x in qr_payload_values[:8]]]
+        ).strip()
+        if merged_security_text:
+            observer_result = analyze_payload(
+                {
+                    "query": merged_security_text,
+                    "source": "cv_ocr_qr",
+                    "cv_meta": {
+                        "filename": str(meta.get("filename") or "")[:128],
+                        "qr_count": len(qr_payload_values),
+                    },
+                }
+            ) or {}
+            sigs = observer_result.get("signals") if isinstance(observer_result.get("signals"), dict) else {}
+            sev = str(observer_result.get("severity") or "").strip().lower()
+            observer_prompt_injection = bool(
+                sigs.get("prompt_injection")
+                or sigs.get("jailbreak")
+                or sigs.get("injection")
+                or (sev in {"high", "critical"})
+            )
+            if observer_prompt_injection:
+                evidence_tags.append("prompt_injection_text_suspected")
+    except Exception:
+        observer_result = {}
+        observer_prompt_injection = False
 
     qr_risks = []
     qr_redirect_chains: List[Dict[str, Any]] = []
@@ -697,6 +733,7 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "layout_text_divergence": False,  # reserved for PDF layout diff lane
             "ocr_adversarial_typography": bool(dual_ocr and isinstance(dual_ocr, dict) and float(dual_ocr.get("similarity") or 1.0) < 0.6),
             "prompt_injection_text": "prompt_injection_text_suspected" in evidence_tags,
+            "observer_prompt_injection": bool(observer_prompt_injection),
             "filename_unicode_suspicious": ("filename_nfkc_changed" in evidence_tags) or ("filename_unicode_suspicious" in evidence_tags),
             "qr_url_suspicious": "qr_url_suspicious" in evidence_tags,
             "image_category_mismatch": ("image_category_mismatch_filename" in evidence_tags) or ("image_category_mismatch_expected" in evidence_tags),
@@ -741,7 +778,18 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             reasons=list((verdict or {}).get("reasons") or []),
             threat_correlation=tc,
             signals=sig,
-            evidence={"robustness": {"dual_ocr": dual_ocr, "qr": qr, "qr_risks": qr_risks, "vision": vision}},
+            evidence={
+                "robustness": {
+                    "dual_ocr": dual_ocr,
+                    "qr": qr,
+                    "qr_risks": qr_risks,
+                    "vision": vision,
+                    "observer": {
+                        "severity": observer_result.get("severity"),
+                        "signals": observer_result.get("signals"),
+                    },
+                }
+            },
         )
     except Exception:
         sec = None
@@ -778,6 +826,10 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "qr_url_count": len(qr_urls),
             "qr_risks": qr_risks,
             "qr_redirect_chains": qr_redirect_chains,
+            "security_observer": {
+                "severity": observer_result.get("severity") if isinstance(observer_result, dict) else None,
+                "signals": observer_result.get("signals") if isinstance(observer_result, dict) else {},
+            },
             "ocr_text_entropy": round(_shannon_entropy(ocr_text[:800]), 4),
             "prompt_injection_phrases": injection_phrases,
             "filename": {"value": filename[:200], "nfkc_changed": filename_unicode_nfkc, "unicode_suspicious": filename_unicode_any},

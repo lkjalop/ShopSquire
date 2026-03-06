@@ -994,7 +994,12 @@ async def websocket_stream_summary(websocket: WebSocket, uid: str | None = None,
 
 
 @router.post("/{decision_id}/approve")
-def approve_decision(decision_id: str, approved_by: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
+def approve_decision(
+    decision_id: str,
+    approved_by: str,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER])),
+    db=Depends(get_db),
+) -> Dict:
     with tracer.start_as_current_span("decisions.approve") as span:
         span.set_attribute("decisions.id", decision_id)
         flags = load_feature_flags(get_settings().feature_flags_path)
@@ -1008,10 +1013,14 @@ def approve_decision(decision_id: str, approved_by: str, role: str = Depends(req
             UPDATE decision_logs SET approved_by = :approver, approved_at = CURRENT_TIMESTAMP, execution_status = 'approved', valid_to = CURRENT_TIMESTAMP, system_to = CURRENT_TIMESTAMP WHERE id = :id
             """
             )
-        from src.app.models.db import db_session
-        with db_session() as db:
-            res = db.execute(sql, {"approver": approved_by, "id": decision_id})
+        res = db.execute(sql, {"approver": approved_by, "id": decision_id})
+        try:
             db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         if res.rowcount == 0:
             raise HTTPException(status_code=404, detail="Decision not found")
         # record audit on successful approve
@@ -1044,7 +1053,13 @@ def approve_decision(decision_id: str, approved_by: str, role: str = Depends(req
 
 
 @router.post("/{decision_id}/reject")
-def reject_decision(decision_id: str, rejected_by: str, reason: str | None = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
+def reject_decision(
+    decision_id: str,
+    rejected_by: str,
+    reason: str | None = None,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER])),
+    db=Depends(get_db),
+) -> Dict:
     with tracer.start_as_current_span("decisions.reject") as span:
         span.set_attribute("decisions.id", decision_id)
         flags = load_feature_flags(get_settings().feature_flags_path)
@@ -1056,10 +1071,14 @@ def reject_decision(decision_id: str, rejected_by: str, reason: str | None = Non
             UPDATE decision_logs SET approved_by = :approver, approved_at = CURRENT_TIMESTAMP, execution_status = 'rejected', error_message = :reason, valid_to = CURRENT_TIMESTAMP, system_to = CURRENT_TIMESTAMP WHERE id = :id
             """
             )
-        from src.app.models.db import db_session
-        with db_session() as db:
-            res = db.execute(sql, {"approver": rejected_by, "reason": reason, "id": decision_id})
+        res = db.execute(sql, {"approver": rejected_by, "reason": reason, "id": decision_id})
+        try:
             db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
         if res.rowcount == 0:
             raise HTTPException(status_code=404, detail="Decision not found")
         # record audit on successful reject

@@ -783,6 +783,43 @@ def log_trace_event(
                 except Exception as e:
                     # Table/schema may be missing in lightweight test DBs; don't treat as fatal.
                     logging.info("Skipping decision_trace_events DB insert: %s", str(e))
+                    # Best-effort fallback: direct engine-level insert for SQLite-heavy
+                    # test runs where session-level write may transiently fail.
+                    try:
+                        from src.app.models.db import get_engine
+
+                        eng = get_engine()
+                        with eng.connect() as conn:
+                            conn.execute(
+                                text(
+                                    """
+                                    INSERT OR REPLACE INTO decision_trace_events (
+                                        id, trace_id, event_type, source_type, source_id,
+                                        target_type, target_id, payload, created_at
+                                    ) VALUES (
+                                        :id, :trace_id, :event_type, :source_type, :source_id,
+                                        :target_type, :target_id, :payload, :created_at
+                                    )
+                                    """
+                                ),
+                                {
+                                    "id": event_id,
+                                    "trace_id": trace_id,
+                                    "event_type": event_type,
+                                    "source_type": source_type,
+                                    "source_id": source_id,
+                                    "target_type": target_type,
+                                    "target_id": target_id,
+                                    "payload": json.dumps(safe_payload, ensure_ascii=False),
+                                    "created_at": now_ts,
+                                },
+                            )
+                            try:
+                                conn.commit()
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                     try:
                         record_decision_trace_write_failure("db_insert")
                     except Exception:

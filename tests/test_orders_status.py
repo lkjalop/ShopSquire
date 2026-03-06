@@ -12,7 +12,8 @@ from tests.utils import default_headers
 
 
 tmp_db = "test_sqlite_orders_status.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{tmp_db}")
+os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_db}"
+os.environ["DATABASE_URL_RO"] = f"sqlite+pysqlite:///{tmp_db}"
 os.environ.setdefault("FEATURE_FLAGS_PATH", "config/feature_flags.json")
 
 engine = create_engine(
@@ -43,7 +44,7 @@ def test_order_status_transitions_valid():
     _apply_schema()
     with engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO orders (id, total_cents, currency, status, created_at, updated_at) VALUES ('o1', 1000, 'USD', 'created', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+            text("INSERT OR REPLACE INTO orders (id, total_cents, currency, status, created_at, updated_at) VALUES ('o1', 1000, 'USD', 'created', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
         )
     r1 = client.post("/api/v1/orders/o1/status", json={"status": "paid"})
     assert r1.status_code == 200
@@ -57,7 +58,7 @@ def test_order_status_transitions_invalid():
     _apply_schema()
     with engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO orders (id, total_cents, currency, status, created_at, updated_at) VALUES ('o2', 1000, 'USD', 'created', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+            text("INSERT OR REPLACE INTO orders (id, total_cents, currency, status, created_at, updated_at) VALUES ('o2', 1000, 'USD', 'created', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
         )
     r = client.post("/api/v1/orders/o2/status", json={"status": "delivered"})
     assert r.status_code == 400

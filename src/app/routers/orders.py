@@ -52,21 +52,21 @@ ALLOWED_TRANSITIONS = {
 
 def _get_order_status(order_id: str, db=None) -> str:
     from sqlalchemy import text as _text
-    # Prefer a session created by db_session() for reads so tests that swap
-    # the module engine/session will see rows they inserted directly via the
-    # test engine. Use the injected `db` only as a secondary fallback.
+    # Prefer request/injected session first so handlers read from the app-bound
+    # engine in tests that create multiple app instances.
     row = None
-    try:
-        with db_session() as _db:
-            row = _db.execute(_text("SELECT status FROM orders WHERE id = :id"), {"id": order_id}).fetchone()
-    except Exception:
-        row = None
-
-    if not row and db is not None:
+    if db is not None:
         try:
             row = db.execute(_text("SELECT status FROM orders WHERE id = :id"), {"id": order_id}).fetchone()
         except Exception:
             row = None
+
+    try:
+        if not row:
+            with db_session() as _db:
+                row = _db.execute(_text("SELECT status FROM orders WHERE id = :id"), {"id": order_id}).fetchone()
+    except Exception:
+        pass
 
     # As a last-ditch fallback, try engine-level connect (some tests insert
     # rows directly on an engine instance and may require a connect())

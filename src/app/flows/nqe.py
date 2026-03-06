@@ -46,6 +46,7 @@ class NQEInput(BaseModel):
     user_profile_prefs: Optional[Dict[str, Any]] = None
     detected_games: List[str] = []  # game titles mentioned in query
     detected_software: List[str] = []  # software names mentioned
+    turn_intent: Optional[str] = None  # SEARCH | FILTER | EXPLAIN | COMPARE
 
 
 # ── Game / software detection from query text ──
@@ -137,6 +138,7 @@ class NextQuestionEngine:
     def propose(self, inp: NQEInput) -> List[NextQuestion]:
         questions: List[NextQuestion] = []
         query_text = inp.query or ""
+        turn_intent = str(inp.turn_intent or "").strip().upper()
 
         # ── Inject facts from structured state into answered_fields ──
         if inp.facts:
@@ -187,6 +189,14 @@ class NextQuestionEngine:
                     _answered_keys.add("university_subject")
             inp.missing_fields = [f for f in (inp.missing_fields or [])
                                   if str(f).lower() not in _answered_keys]
+
+        # Explanation turns should not ask budget again.
+        if turn_intent == "EXPLAIN":
+            inp.missing_fields = [
+                f
+                for f in (inp.missing_fields or [])
+                if str(f).lower() not in {"budget", "price", "budget_min", "budget_max"}
+            ]
 
         # ── Convergence detection: stop asking when enough high-signal slots filled ──
         _HIGH_SIGNAL_SLOTS = {
@@ -497,6 +507,31 @@ class NextQuestionEngine:
                 )
             except Exception:
                 pass
+        _embedder = getattr(self.rag, "embedder", None)
+
+        def _embed_text_safe(text: str) -> Dict[str, float]:
+            if not text or not str(text).strip() or _embedder is None:
+                return {}
+            fn = getattr(_embedder, "embed_text", None)
+            if not callable(fn):
+                return {}
+            try:
+                vec = fn(text)
+                return vec if isinstance(vec, dict) else {}
+            except Exception:
+                return {}
+
+        def _cosine_safe(a: Dict[str, float], b: Dict[str, float]) -> float:
+            if not a or not b or _embedder is None:
+                return 0.0
+            fn = getattr(_embedder, "cosine", None)
+            if not callable(fn):
+                return 0.0
+            try:
+                return float(fn(a, b))
+            except Exception:
+                return 0.0
+
         def relevance(tmpl: dict) -> float:
             """Return embedding cosine similarity between user query and template text.
 
@@ -506,8 +541,8 @@ class NextQuestionEngine:
             """
             tmpl_text = str(tmpl.get("text") or tmpl.get("id") or "")
             if tmpl_text and _nqe_query_vec:
-                tmpl_vec = self.rag.embedder.embed_text(tmpl_text)
-                base = float(self.rag.embedder.cosine(_nqe_query_vec, tmpl_vec))
+                tmpl_vec = _embed_text_safe(tmpl_text)
+                base = _cosine_safe(_nqe_query_vec, tmpl_vec)
             else:
                 base = 0.0
             # Add keyword boost (0–6 range) scaled to a small decimal so it only breaks ties
@@ -532,7 +567,7 @@ class NextQuestionEngine:
             inp.product_category or "",
             " ".join(str(m) for m in (inp.missing_fields or [])),
         ]))
-        _nqe_query_vec = self.rag.embedder.embed_text(_nqe_query_parts) if _nqe_query_parts.strip() else {}
+        _nqe_query_vec = _embed_text_safe(_nqe_query_parts)
         prioritized = sorted(raw_templates, key=lambda t: (-relevance(t), t.get("id") or ""))
         # Ensure coverage: include one question per key missing field before capping
         def find_tmpl(ids: List[str]) -> Optional[dict]:
@@ -621,6 +656,8 @@ class NextQuestionEngine:
 
         deduped: Dict[str, NextQuestion] = {}
         for q in questions:
+            if turn_intent == "EXPLAIN" and str(q.id or "").strip().lower() in {"ask_budget", "ask_budget_tier"}:
+                continue
             # Skip questions that were already asked in prior turns
             if q.id in (inp.previously_asked_ids or []):
                 continue

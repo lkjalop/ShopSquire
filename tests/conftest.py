@@ -190,8 +190,14 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
         _SINGLETONS.clear()
 
 
+@pytest.fixture(autouse=True)
+def _restore_feature_flags_file():
+    """Prevent cross-test pollution of config/feature_flags.json.
 
-    flags_path = Path(os.environ.get("FEATURE_FLAGS_PATH", "config/feature_flags.json"))
+    Several tests write minimal payloads (e.g. only DECISION_LOG_WRITES_ENABLED),
+    which can erase required keys for later tests if not restored.
+    """
+    flags_path = Path("config/feature_flags.json")
     existed = flags_path.exists()
     original = flags_path.read_bytes() if existed else None
     yield
