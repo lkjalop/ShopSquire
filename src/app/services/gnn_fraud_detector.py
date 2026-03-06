@@ -113,6 +113,19 @@ def extract_subgraph_features(account_id: str) -> SubgraphFeatures:
     except Exception:
         pass
 
+    # Adapter path for lightweight graph retrieval when Neo4j is disabled.
+    try:
+        from src.app.services.graph_retrieval import get_graph_adapter
+
+        adapter = get_graph_adapter()
+        rel = adapter.related_entities(node_type="account", node_id=account_id, limit=20)
+        if rel:
+            features.max_ring_size = max(features.max_ring_size, len(rel))
+            avg_w = sum(float(r.get("weight") or 0.0) for r in rel) / float(max(1, len(rel)))
+            features.avg_neighbor_degree = max(features.avg_neighbor_degree, avg_w * 10.0)
+    except Exception:
+        pass
+
     return features
 
 

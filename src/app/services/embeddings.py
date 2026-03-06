@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import os
 import logging
 import httpx
 
 _log = logging.getLogger("shopsquire.embeddings")
+try:
+    import faiss  # type: ignore
+    _HAS_FAISS = True
+except Exception:
+    faiss = None
+    _HAS_FAISS = False
 
 
 def _cosine_dense(a: List[float], b: List[float]) -> float:
@@ -19,6 +25,10 @@ def _cosine_dense(a: List[float], b: List[float]) -> float:
     if na < 1e-12 or nb < 1e-12:
         return 0.0
     return float(dot / (na * nb))
+
+
+def cosine_dense(a: List[float], b: List[float]) -> float:
+    return _cosine_dense(a, b)
 
 
 def embed_text_ollama(
@@ -215,4 +225,69 @@ class VectorStoreEmbeddings(SimpleEmbeddings):
         if not self.store:
             return {"ok": False, "reason": "no_store", "results": []}
         return self.store.query(emb, top_k=top_k)
+
+
+def build_dense_text_index(items: List[Dict[str, Any]], *, text_key: str = "text") -> Dict[str, Any]:
+    vectors: List[List[float]] = []
+    kept: List[Dict[str, Any]] = []
+    dim = 0
+    provider = "bow"
+    for it in items or []:
+        text = str((it or {}).get(text_key) or "")
+        vec, p = embed_text_dense(text)
+        if not vec:
+            continue
+        provider = p
+        if dim == 0:
+            dim = len(vec)
+        if len(vec) != dim:
+            continue
+        kept.append(it)
+        vectors.append(vec)
+    idx: Dict[str, Any] = {"items": kept, "vectors": vectors, "provider": provider, "dim": dim, "type": "dense_linear"}
+    if _HAS_FAISS and vectors and dim > 0:
+        try:
+            import numpy as np  # type: ignore
+
+            mat = np.array(vectors, dtype="float32")
+            faiss.normalize_L2(mat)
+            index = faiss.IndexFlatIP(dim)
+            index.add(mat)
+            idx["faiss"] = index
+            idx["type"] = "faiss"
+        except Exception:
+            pass
+    return idx
+
+
+def query_dense_text_index(index: Dict[str, Any], *, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    qvec, _ = embed_text_dense(query or "")
+    if not qvec:
+        return []
+    k = max(1, int(top_k or 5))
+    items = index.get("items") if isinstance(index.get("items"), list) else []
+    vectors = index.get("vectors") if isinstance(index.get("vectors"), list) else []
+    out: List[Dict[str, Any]] = []
+
+    if index.get("type") == "faiss" and index.get("faiss") is not None:
+        try:
+            import numpy as np  # type: ignore
+
+            q = np.array([qvec], dtype="float32")
+            faiss.normalize_L2(q)
+            scores, ids = index["faiss"].search(q, min(k, len(items)))
+            for score, idx in zip(scores[0].tolist(), ids[0].tolist()):
+                if idx < 0 or idx >= len(items):
+                    continue
+                out.append({"item": items[idx], "score": float(score)})
+            return out
+        except Exception:
+            pass
+
+    for i, vec in enumerate(vectors):
+        if i >= len(items):
+            break
+        out.append({"item": items[i], "score": float(_cosine_dense(qvec, vec))})
+    out.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+    return out[:k]
 

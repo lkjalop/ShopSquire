@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set
+from src.app.services.registry import get_tool_metadata
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +192,10 @@ def check_tool_access(agent_name: str, tool_name: str) -> Optional[BoundaryViola
     if not boundary:
         return None  # unknown agent — no boundary defined
     if tool_name not in boundary.allowed_tools:
+        meta = get_tool_metadata(tool_name)
+        scoped_agents = meta.get("agent_types") if isinstance(meta.get("agent_types"), list) else []
+        if scoped_agents and str(agent_name).strip().lower() in [str(x).strip().lower() for x in scoped_agents]:
+            return None
         return BoundaryViolation(
             agent_name=agent_name,
             violation_type="tool_misuse",

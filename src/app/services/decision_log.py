@@ -279,6 +279,41 @@ def _decision_log_columns(db) -> list[str]:
     return cols
 
 
+def close_decision_validity(
+    decision_id: str,
+    *,
+    valid_to: str | None = None,
+    system_to: str | None = None,
+) -> bool:
+    """Close open-ended bitemporal ranges for a decision id."""
+    if not decision_id:
+        return False
+    now_ts = __import__("datetime").datetime.utcnow().isoformat()
+    vt = valid_to or now_ts
+    st = system_to or now_ts
+    try:
+        with db_session() as db:
+            rowcount = db.execute(
+                text(
+                    """
+                    UPDATE decision_logs
+                    SET valid_to = :valid_to, system_to = :system_to
+                    WHERE id = :id
+                      AND (valid_to IS NULL OR valid_to = 'infinity')
+                      AND (system_to IS NULL OR system_to = 'infinity')
+                    """
+                ),
+                {"id": decision_id, "valid_to": vt, "system_to": st},
+            ).rowcount
+            try:
+                db.commit()
+            except Exception:
+                pass
+            return bool(int(rowcount or 0) > 0)
+    except Exception:
+        return False
+
+
 def log_decision(
     agent_name: str,
     input_data: Dict[str, Any],
@@ -293,6 +328,7 @@ def log_decision(
     actor_id: str | None = None,
     actor_role: str | None = None,
     event_type: str | None = None,
+    supersedes_decision_id: str | None = None,
  ) -> str | None:
     """Persist an evidence-based agent decision with context and action.
 
@@ -301,6 +337,11 @@ def log_decision(
     now_ts = __import__("datetime").datetime.utcnow().isoformat()
     dec_id = decision_id or str(uuid.uuid4())
     try:
+        if supersedes_decision_id:
+            try:
+                close_decision_validity(supersedes_decision_id, valid_to=now_ts, system_to=now_ts)
+            except Exception:
+                pass
         with db_session() as db:
             safe_input = redact_for_trace(security_sanitize(input_data or {}))
             safe_context = redact_for_trace(security_sanitize(retrieved_context or {}))

@@ -16,8 +16,14 @@ from sqlalchemy import text
 
 from src.app.deps import redact_for_trace, security_sanitize
 from src.app.models.db import db_session
+from src.app.security.rate_limit import consume_sliding_window_limit
+from src.app.services.policy_gate import PolicyGate
 from src.app.services.playbook_action_adapters import email_action, erp_action, shipping_action, ip_block_action, rate_limit_action
 from src.app.services.decision_log import log_trace_event
+try:
+    from src.app.services.citation_memory import get_agent_trust_score
+except Exception:
+    get_agent_trust_score = None
 
 
 DEFAULT_RISK_ORDER = ["low", "medium", "high", "critical"]
@@ -72,6 +78,80 @@ def get_agent_allowed_playbook_action_types(agent_role: str | None) -> Optional[
     if isinstance(pat, list):
         return [str(t) for t in pat if t]
     return None
+
+
+def get_agent_rate_limits(agent_role: str | None) -> Dict[str, int]:
+    if not agent_role:
+        return {}
+    role_cfg = (_load_agent_policies() or {}).get(str(agent_role))
+    if not isinstance(role_cfg, dict):
+        return {}
+    rl = role_cfg.get("rate_limits") if isinstance(role_cfg.get("rate_limits"), dict) else {}
+    out: Dict[str, int] = {}
+    try:
+        if rl.get("per_minute") is not None:
+            out["per_minute"] = max(0, int(rl.get("per_minute") or 0))
+    except Exception:
+        pass
+    try:
+        if rl.get("burst") is not None:
+            out["burst"] = max(0, int(rl.get("burst") or 0))
+    except Exception:
+        pass
+    return out
+
+
+def get_agent_abac_conditions(agent_role: str | None) -> Dict[str, Any]:
+    if not agent_role:
+        return {}
+    role_cfg = (_load_agent_policies() or {}).get(str(agent_role))
+    if not isinstance(role_cfg, dict):
+        return {}
+    cond = role_cfg.get("abac_conditions")
+    return copy.deepcopy(cond) if isinstance(cond, dict) else {}
+
+
+def _resolve_agent_trust_score(agent_role: str | None, ctx: Dict[str, Any]) -> float:
+    if isinstance(ctx, dict) and ctx.get("agent_trust_score") is not None:
+        try:
+            return float(ctx.get("agent_trust_score"))
+        except Exception:
+            pass
+    if callable(get_agent_trust_score) and agent_role:
+        try:
+            return float(get_agent_trust_score(str(agent_role)))
+        except Exception:
+            return 0.5
+    return 0.5
+
+
+def _check_agent_rate_limit(*, agent_role: str | None, action_type: str) -> tuple[bool, str | None]:
+    if not agent_role:
+        return True, None
+    limits = get_agent_rate_limits(agent_role)
+    per_min = int(limits.get("per_minute") or 0)
+    burst = int(limits.get("burst") or 0)
+    role = str(agent_role).strip().lower()
+    action = str(action_type or "unknown").strip().lower()
+
+    if per_min > 0:
+        allowed_pm = consume_sliding_window_limit(
+            key=f"playbook:agent:{role}:{action}:per_minute",
+            limit=per_min,
+            window_sec=60,
+        )
+        if not allowed_pm:
+            return False, "agent_rate_limit_per_minute_exceeded"
+    if burst > 0:
+        # Burst is treated as a short 10-second envelope.
+        allowed_burst = consume_sliding_window_limit(
+            key=f"playbook:agent:{role}:{action}:burst",
+            limit=burst,
+            window_sec=10,
+        )
+        if not allowed_burst:
+            return False, "agent_rate_limit_burst_exceeded"
+    return True, None
 
 
 def _utc_now() -> str:
@@ -1314,11 +1394,38 @@ def execute_typed_actions(
     # Resolve per-role action allowlist once for the whole execution run.
     caller_role = str(ctx.get("agent_role") or "").strip()
     _allowed_action_types = get_agent_allowed_playbook_action_types(caller_role) if caller_role else None
+    _abac_conditions = get_agent_abac_conditions(caller_role) if caller_role else {}
     max_retries = max(0, int(os.getenv("PLAYBOOK_ACTION_MAX_RETRIES", "2") or 2))
     max_loop_iterations = max(1, min(int(os.getenv("PLAYBOOK_LOOP_MAX_ITERATIONS", "20") or 20), 200))
     max_depth = max(1, min(int(os.getenv("PLAYBOOK_BRANCH_MAX_DEPTH", "6") or 6), 16))
     out = {"executed": [], "failed": [], "skipped": [], "branches": []}
     step_counter = 0
+
+    if caller_role and _abac_conditions:
+        try:
+            now = datetime.now(timezone.utc)
+            pg = PolicyGate(flags={})
+            abac = pg.evaluate_abac(
+                {
+                    "abac_conditions": _abac_conditions,
+                    "source_ip": ctx.get("source_ip") or ctx.get("ip"),
+                    "trust_score": _resolve_agent_trust_score(caller_role, ctx),
+                    "current_hour_utc": now.hour,
+                    "current_minute_utc": now.minute,
+                }
+            )
+            if not bool(abac.get("allow")):
+                out["skipped"].append(
+                    {
+                        "step_index": -1,
+                        "reason": "abac_denied",
+                        "agent_role": caller_role,
+                        "violations": abac.get("violations") or [],
+                    }
+                )
+                return out
+        except Exception:
+            pass
 
     def _next_step_index() -> int:
         nonlocal step_counter
@@ -1390,6 +1497,17 @@ def execute_typed_actions(
                     "agent_role": caller_role,
                     "action_type": action_type,
                 })
+                continue
+            allowed_rate, rate_reason = _check_agent_rate_limit(agent_role=caller_role, action_type=action_type)
+            if not allowed_rate:
+                out["skipped"].append(
+                    {
+                        "step_index": idx,
+                        "reason": rate_reason,
+                        "agent_role": caller_role,
+                        "action_type": action_type,
+                    }
+                )
                 continue
             idempotency_key = f"{run_id}:{idx}:{action_type}"
             if _action_already_done(idempotency_key):

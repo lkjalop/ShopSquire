@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from src.app.services.decision_log import log_trace_event
 from src.app.services.faq_bank import FAQ_BANK
+from src.app.services.semantic_search import semantic_retrieve_text_chunks
 
 
 class PlanInput(BaseModel):
@@ -76,31 +77,75 @@ def _plan(inp: PlanInput) -> PlanOutput:
 
 
 def _retrieve(plan: PlanOutput) -> RetrieveOutput:
-    out: List[RetrievedChunk] = []
+    docs: List[Dict[str, Any]] = []
     for item in FAQ_BANK:
         q = str(item.get("q") or "")
         a = str(item.get("a") or "")
-        tags = " ".join([str(t) for t in (item.get("tags") or [])])
-        corpus = f"{q} {a} {tags}".lower()
-        score = 0.0
-        for pq in plan.queries:
-            tk = _tokenize(pq)
-            if not tk:
+        tags = [str(t) for t in (item.get("tags") or [])]
+        docs.append(
+            {
+                "q": q,
+                "a": a,
+                "tags": tags,
+                "text": f"{q}\n{a}\n{' '.join(tags)}",
+                "context_id": f"faq:{abs(hash(q)) % 100000}",
+            }
+        )
+
+    best: Dict[str, Dict[str, Any]] = {}
+    for pq in plan.queries:
+        ranked = semantic_retrieve_text_chunks(query=pq, chunks=docs, top_k=20, min_score=0.05)
+        for row in ranked:
+            item = row.get("item") if isinstance(row.get("item"), dict) else {}
+            cid = str(item.get("context_id") or "")
+            if not cid:
                 continue
-            overlap = sum(1 for t in tk if t in corpus)
-            score = max(score, float(overlap) / float(max(1, len(tk))))
-        if score <= 0:
-            continue
-        cid = f"faq:{abs(hash(q)) % 100000}"
+            score = float(row.get("score") or 0.0)
+            prev = best.get(cid)
+            if prev is None or score > float(prev.get("score") or 0.0):
+                best[cid] = {"item": item, "score": score}
+
+    out: List[RetrievedChunk] = []
+    # Dense retrieval primary path.
+    for row in best.values():
+        item = row["item"]
         out.append(
             RetrievedChunk(
-                context_id=cid,
+                context_id=str(item.get("context_id")),
                 source="faq_bank",
-                trust_score=0.72,
-                score=round(score, 4),
-                text=f"Q: {q}\nA: {a}",
+                trust_score=0.78,
+                score=round(float(row.get("score") or 0.0), 4),
+                text=f"Q: {item.get('q')}\nA: {item.get('a')}",
             )
         )
+
+    # Deterministic lexical fallback if dense retrieval produced no hits.
+    if not out:
+        for item in FAQ_BANK:
+            q = str(item.get("q") or "")
+            a = str(item.get("a") or "")
+            tags = " ".join([str(t) for t in (item.get("tags") or [])])
+            corpus = f"{q} {a} {tags}".lower()
+            score = 0.0
+            for pq in plan.queries:
+                tk = _tokenize(pq)
+                if not tk:
+                    continue
+                overlap = sum(1 for t in tk if t in corpus)
+                score = max(score, float(overlap) / float(max(1, len(tk))))
+            if score <= 0:
+                continue
+            cid = f"faq:{abs(hash(q)) % 100000}"
+            out.append(
+                RetrievedChunk(
+                    context_id=cid,
+                    source="faq_bank",
+                    trust_score=0.72,
+                    score=round(score, 4),
+                    text=f"Q: {q}\nA: {a}",
+                )
+            )
+
     out.sort(key=lambda x: (x.score, x.trust_score), reverse=True)
     return RetrieveOutput(chunks=out[:20])
 
@@ -236,4 +281,3 @@ def run_agentic_rag_pipeline(
         "context_used_chars": inj.used_chars,
         "verification": ver.model_dump(),
     }
-

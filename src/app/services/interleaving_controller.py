@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable
 from enum import Enum
 import time
+from src.app.services.registry import get_tool_allowlist_for_agent
 
 
 class StopReason(Enum):
@@ -98,7 +99,9 @@ class InterleavingController:
         if allowed_tools_override is not None:
             self.allowed_tools = set(allowed_tools_override)
         else:
-            self.allowed_tools = set(self.TOOL_ALLOWLISTS.get(agent_type, []))
+            static = set(self.TOOL_ALLOWLISTS.get(agent_type, []))
+            dynamic = set(get_tool_allowlist_for_agent(agent_type))
+            self.allowed_tools = static | dynamic
 
         self.state = InterleavingState(tool_budget_remaining=tool_budget)
         self.start_time = None

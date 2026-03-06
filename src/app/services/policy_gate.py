@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 try:
@@ -121,6 +122,62 @@ class PolicyGate:
 
         return {"verdict": verdict, "reason": reason, "mitigations": mitigations, "mitre_tags": mitre_tags, "confidence": confidence}
 
+    def evaluate_abac(self, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        """Evaluate optional ABAC conditions from context.
+
+        Expected context keys:
+          - abac_conditions: {ip_allowlist, time_window, min_trust_score}
+          - source_ip: caller IP string
+          - trust_score: numeric trust score (0..1)
+          - current_hour_utc: optional int hour override (0..23)
+        """
+        ctx = context if isinstance(context, dict) else {}
+        cond = ctx.get("abac_conditions") if isinstance(ctx.get("abac_conditions"), dict) else {}
+        violations: List[str] = []
+
+        ip_allowlist = cond.get("ip_allowlist") if isinstance(cond.get("ip_allowlist"), list) else []
+        source_ip = str(ctx.get("source_ip") or "").strip()
+        if ip_allowlist and source_ip and source_ip not in [str(v).strip() for v in ip_allowlist if v]:
+            violations.append("source_ip_not_allowlisted")
+
+        min_trust_raw = cond.get("min_trust_score")
+        if min_trust_raw is not None:
+            try:
+                min_trust = float(min_trust_raw)
+                trust_score = float(ctx.get("trust_score") if ctx.get("trust_score") is not None else 0.0)
+                if trust_score < min_trust:
+                    violations.append("trust_score_below_minimum")
+            except Exception:
+                violations.append("invalid_min_trust_score")
+
+        # "HH:MM-HH:MM" in UTC, simple and deterministic for policy files.
+        tw = str(cond.get("time_window") or "").strip()
+        if tw and "-" in tw:
+            try:
+                start_s, end_s = [p.strip() for p in tw.split("-", 1)]
+                sh, sm = [int(x) for x in start_s.split(":", 1)]
+                eh, em = [int(x) for x in end_s.split(":", 1)]
+                now_h = int(ctx.get("current_hour_utc")) if ctx.get("current_hour_utc") is not None else datetime.now(timezone.utc).hour
+                now_m = int(ctx.get("current_minute_utc")) if ctx.get("current_minute_utc") is not None else datetime.now(timezone.utc).minute
+                now_total = (now_h * 60) + now_m
+                start_total = (sh * 60) + sm
+                end_total = (eh * 60) + em
+                if start_total <= end_total:
+                    in_window = start_total <= now_total <= end_total
+                else:
+                    # Overnight window, e.g. 22:00-06:00
+                    in_window = now_total >= start_total or now_total <= end_total
+                if not in_window:
+                    violations.append("outside_time_window")
+            except Exception:
+                violations.append("invalid_time_window")
+
+        return {
+            "allow": len(violations) == 0,
+            "reason": "allow" if len(violations) == 0 else "abac_policy_denied",
+            "violations": violations,
+        }
+
     def evaluate(self, artifact: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Evaluate an artifact (text/proposal/response) and return a policy verdict.
 
@@ -196,5 +253,16 @@ class PolicyGate:
                         rule_out["mitigations"] = list(set((rule_out.get("mitigations") or []) + ["security_review"]))
             except Exception:
                 pass
+
+        # Optional ABAC enforcement.
+        try:
+            abac = self.evaluate_abac(context=context)
+            if not bool(abac.get("allow")):
+                rule_out["verdict"] = "block"
+                rule_out["reason"] = str(abac.get("reason") or "abac_policy_denied")
+                rule_out["abac"] = {"violations": abac.get("violations") or []}
+                rule_out["mitigations"] = list(set((rule_out.get("mitigations") or []) + ["human_review"]))
+        except Exception:
+            pass
 
         return rule_out

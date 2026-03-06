@@ -16,37 +16,41 @@ class AgentHandoff:
     async def request_handoff(
         self,
         from_agent: str,
-        to_agent: str,
+        to_agent: str | None,
         reason: str,
         context: dict,
         trace_id: str,
     ) -> Dict:
+        targets = [to_agent] if to_agent else self.bus.resolve_targets((context or {}).get("signal_tags") or [])
+        if not targets:
+            targets = ["broadcast"]
         log_trace_event(
             trace_id=trace_id,
             event_type="handoff_requested",
             source_type="agent",
             source_id=from_agent,
             target_type="agent",
-            target_id=to_agent,
-            payload={"reason": reason, "context_keys": list(context.keys())},
+            target_id=targets[0],
+            payload={"reason": reason, "context_keys": list(context.keys()), "targets": targets},
         )
-        await self.bus.publish(
-            build_agent_message(
-                source_agent=from_agent,
-                target_agent=to_agent,
-                message_type="handoff_request",
-                payload={"reason": reason, "context": context},
-                trace_id=trace_id,
+        for target in targets:
+            await self.bus.publish(
+                build_agent_message(
+                    source_agent=from_agent,
+                    target_agent=None if target == "broadcast" else target,
+                    message_type="handoff_request",
+                    payload={"reason": reason, "context": context, "signal_tags": (context or {}).get("signal_tags") or []},
+                    trace_id=trace_id,
+                )
             )
-        )
-        return {"status": "handoff_requested", "to_agent": to_agent}
+        return {"status": "handoff_requested", "to_agent": to_agent, "targets": targets}
 
 
 def request_handoff_best_effort(
     *,
     bus: AgentBus | None,
     from_agent: str,
-    to_agent: str,
+    to_agent: str | None,
     reason: str,
     context: dict,
     trace_id: str,

@@ -32,6 +32,10 @@ roles:
     rate_limits:
       per_minute: 600
       burst: 100
+    abac_conditions:
+      ip_allowlist: []
+      time_window: "00:00-23:59"
+      min_trust_score: 0.30
 
   email_agent:
     description: "Handles email-specific workflows (classification, quarantine suggestions)."
@@ -57,6 +61,13 @@ roles:
       - headers
     constraints:
       - no_send_external
+    rate_limits:
+      per_minute: 240
+      burst: 40
+    abac_conditions:
+      ip_allowlist: []
+      time_window: "00:00-23:59"
+      min_trust_score: 0.35
 
   supplier_agent:
     description: "Interacts with supplier data (onboarding, updates) via safe APIs."
@@ -75,6 +86,13 @@ roles:
     data_scope:
       - supplier_profile
       - audit_logs
+    rate_limits:
+      per_minute: 180
+      burst: 30
+    abac_conditions:
+      ip_allowlist: []
+      time_window: "00:00-23:59"
+      min_trust_score: 0.30
 
   payments_agent:
     description: "Engages with payment workflows under strict controls."
@@ -98,6 +116,13 @@ roles:
     data_scope:
       - finance_min
       - audit_logs
+    rate_limits:
+      per_minute: 120
+      burst: 20
+    abac_conditions:
+      ip_allowlist: []
+      time_window: "00:00-23:59"
+      min_trust_score: 0.45
 
 severities:
   low:

@@ -4,21 +4,47 @@ Loadable from config files to support modular deployments.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict
+from typing import Any, Callable, Dict, List
 import json
 import os
 
 
 _AGENTS: Dict[str, Callable] = {}
 _TOOLS: Dict[str, Callable] = {}
+_TOOL_META: Dict[str, Dict[str, Any]] = {}
 
 
 def register_agent(name: str, factory: Callable) -> None:
     _AGENTS[name] = factory
 
 
-def register_tool(name: str, impl: Callable) -> None:
-    _TOOLS[name] = impl
+def register_tool(name: str, impl: Callable | None = None, **metadata):
+    """Register a tool implementation and optional metadata.
+
+    Supports decorator style:
+      @register_tool("catalog.search", description="...")
+      def fn(...): ...
+    """
+
+    def _do_register(fn: Callable):
+        _TOOLS[name] = fn
+        meta = _TOOL_META.get(name, {}).copy()
+        meta.update(metadata or {})
+        meta.setdefault("name", name)
+        _TOOL_META[name] = meta
+        return fn
+
+    if impl is None:
+        return _do_register
+    _do_register(impl)
+    return impl
+
+
+def register_tool_metadata(name: str, **metadata) -> None:
+    meta = _TOOL_META.get(name, {}).copy()
+    meta.update(metadata or {})
+    meta.setdefault("name", name)
+    _TOOL_META[name] = meta
 
 
 def get_agent(name: str) -> Callable | None:
@@ -27,6 +53,50 @@ def get_agent(name: str) -> Callable | None:
 
 def get_tool(name: str) -> Callable | None:
     return _TOOLS.get(name)
+
+
+def get_tool_metadata(name: str) -> Dict[str, Any]:
+    return dict(_TOOL_META.get(name) or {})
+
+
+def list_tools() -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    names = sorted(set(list(_TOOL_META.keys()) + list(_TOOLS.keys())))
+    for name in names:
+        meta = dict(_TOOL_META.get(name) or {})
+        meta.setdefault("name", name)
+        meta.setdefault("registered", name in _TOOLS)
+        out.append(meta)
+    return out
+
+
+def get_tool_allowlist_for_agent(agent_type: str | None) -> List[str]:
+    a = str(agent_type or "").strip().lower()
+    if not a:
+        return []
+    out: List[str] = []
+    for tool in list_tools():
+        ats = tool.get("agent_types")
+        if isinstance(ats, list) and a in [str(x).strip().lower() for x in ats]:
+            out.append(str(tool.get("name")))
+    return sorted(list(dict.fromkeys([t for t in out if t])))
+
+
+def ensure_default_tool_metadata() -> None:
+    defaults: Dict[str, Dict[str, Any]] = {
+        "catalog.search": {"description": "Search product catalog by query keywords.", "risk": "low", "agent_types": ["orchestrator", "recommendations"]},
+        "inventory.check": {"description": "Check real-time inventory by SKU.", "risk": "low", "agent_types": ["inventory", "orchestrator"]},
+        "shipping.quote": {"description": "Estimate shipping cost and ETA.", "risk": "medium", "agent_types": ["orchestrator"]},
+        "cv_scan": {"description": "Computer vision fraud/quality scan.", "risk": "medium", "agent_types": ["cv", "orchestrator"]},
+        "fraud_scoring": {"description": "Fraud model scoring.", "risk": "high", "agent_types": ["fraud_scorer", "orchestrator"]},
+        "inventory_check": {"description": "Inventory checks for ranked items.", "risk": "low", "agent_types": ["inventory", "orchestrator"]},
+        "retrieve_context": {"description": "Retrieve contextual evidence.", "risk": "low", "agent_types": ["orchestrator"]},
+        "check_policy": {"description": "Evaluate policy constraints.", "risk": "medium", "agent_types": ["orchestrator"]},
+        "get_recommendations": {"description": "Fetch recommendation candidates.", "risk": "low", "agent_types": ["orchestrator", "recommendations"]},
+    }
+    for name, meta in defaults.items():
+        if name not in _TOOL_META:
+            register_tool_metadata(name, **meta)
 
 
 def load_from_config(path: str = "config/plugins.yml") -> None:
@@ -53,17 +123,31 @@ def load_from_config(path: str = "config/plugins.yml") -> None:
             data = None
     if not isinstance(data, dict):
         return
+    ensure_default_tool_metadata()
     for coll, target in (("agents", _AGENTS), ("tools", _TOOLS)):
         items = data.get(coll) or {}
         if not isinstance(items, dict):
             continue
         for name, ref in items.items():
-            if not isinstance(ref, str) or ":" not in ref:
+            meta: Dict[str, Any] = {}
+            ref_value = ref
+            if isinstance(ref, dict):
+                ref_value = ref.get("ref")
+                meta = {k: v for k, v in ref.items() if k != "ref"}
+            if not isinstance(ref_value, str) or ":" not in ref_value:
+                if coll == "tools" and meta:
+                    register_tool_metadata(name, **meta)
                 continue
-            mod_name, func_name = ref.split(":", 1)
+            mod_name, func_name = ref_value.split(":", 1)
             try:
                 mod = __import__(mod_name, fromlist=[func_name])
                 fn = getattr(mod, func_name)
                 target[name] = fn
+                if coll == "tools":
+                    register_tool_metadata(name, **meta)
             except Exception:
                 continue
+
+
+# Keep metadata available even when no explicit loader has run yet.
+ensure_default_tool_metadata()

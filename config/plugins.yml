@@ -3,5 +3,13 @@ agents:
   RecommendationAgent: "src.app.services.recommendations:create_agent"
 
 tools:
-  catalog.search: "src.app.tools.catalog:search"
-  cv_forensics_check: "src.app.services.image_forensics:run_forensics"
+  catalog.search:
+    ref: "src.app.tools.catalog:search"
+    description: "Search product catalog by query keywords."
+    risk: "low"
+    agent_types: ["orchestrator", "recommendations"]
+  cv_forensics_check:
+    ref: "src.app.services.image_forensics:run_forensics"
+    description: "Run image forensics checks."
+    risk: "high"
+    agent_types: ["cv", "orchestrator"]

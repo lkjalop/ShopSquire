@@ -13,6 +13,7 @@ from src.app.policy.gate import evaluate_policy_gate
 from src.app.repositories.catalog import CatalogRepository
 from src.app.security.agent_events import log_mcp_tool_invocation
 from src.app.services.decision_log import log_trace_event
+from src.app.services.registry import get_tool, get_tool_metadata, load_from_config
 from src.app.routers.approvals import enqueue_approval
 from src.app.services.agent_containment import is_contained
 
@@ -23,6 +24,10 @@ class ToolRunner:
         self.bridge_timeout = float(os.getenv("TOOL_BRIDGE_TIMEOUT", "2.0"))
         self.repo = CatalogRepository()
         self.tracer = get_tracer("tool-runner")
+        try:
+            load_from_config()
+        except Exception:
+            pass
 
     def _bridge_call(self, tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
         with self.tracer.start_as_current_span("tools.bridge_call") as span:
@@ -70,11 +75,24 @@ class ToolRunner:
                 "cost_cents": max(799, int(subtotal * 0.05)),
                 "eta_days": 2,
             }
+        plugin = get_tool(tool)
+        if callable(plugin):
+            try:
+                out = plugin(**params) if isinstance(params, dict) else plugin(params)
+                return out if isinstance(out, dict) else {"result": out}
+            except Exception as exc:
+                return {"error": f"plugin_error:{exc}"}
         return {"error": "unknown_tool"}
 
     def run(self, tool: str, params: Dict[str, Any], source: str = "demo-user", trace_id: str | None = None) -> Dict[str, Any]:
         with self.tracer.start_as_current_span("tools.run") as span:
             span.set_attribute("tools.name", tool)
+            try:
+                tmeta = get_tool_metadata(tool)
+                if tmeta:
+                    span.set_attribute("tools.risk", str(tmeta.get("risk") or "unknown"))
+            except Exception:
+                pass
             start = time.perf_counter()
             status = "ok"
             result: Dict[str, Any] = {}

@@ -1,6 +1,6 @@
 {
   "schema_version": "2.0",
-  "published_at": "2026-03-05T10:29:44.165015+00:00",
+  "published_at": "2026-03-06T02:32:06.766530+00:00",
   "risk_band_order": [
     "low",
     "medium",
@@ -44,7 +44,9 @@
     },
     {
       "id": "PB-SEC-001",
-      "allowed_agent_roles": ["detection_agent"],
+      "allowed_agent_roles": [
+        "detection_agent"
+      ],
       "title": "Prompt Injection Response",
       "domain": "security",
       "priority": 90,
@@ -84,7 +86,9 @@
     },
     {
       "id": "PB-SEC-002",
-      "allowed_agent_roles": ["detection_agent"],
+      "allowed_agent_roles": [
+        "detection_agent"
+      ],
       "title": "Data Exfiltration Response",
       "domain": "security",
       "priority": 95,
@@ -128,7 +132,10 @@
     },
     {
       "id": "PB-FRAUD-001",
-      "allowed_agent_roles": ["detection_agent", "payments_agent"],
+      "allowed_agent_roles": [
+        "detection_agent",
+        "payments_agent"
+      ],
       "title": "Serial Number Mismatch Fraud Investigation",
       "domain": "fraud",
       "priority": 80,
@@ -164,7 +171,9 @@
     },
     {
       "id": "PB-CV-SERIAL-001",
-      "allowed_agent_roles": ["detection_agent"],
+      "allowed_agent_roles": [
+        "detection_agent"
+      ],
       "title": "CV Serial Mismatch Verification",
       "domain": "cv",
       "priority": 75,
@@ -234,12 +243,15 @@
     },
     {
       "id": "PB-PAYMENT-FRAUD",
-      "allowed_agent_roles": ["payments_agent", "detection_agent"],
+      "allowed_agent_roles": [
+        "payments_agent",
+        "detection_agent"
+      ],
       "title": "Payment Fraud Response",
       "domain": "security",
       "priority": 90,
       "enabled": true,
-      "version": "1.0.14",
+      "version": "1.0.15",
       "trigger_logic": "any",
       "entry_conditions": {
         "channel": "payments"
@@ -276,11 +288,14 @@
       "requires_approval_roles": [],
       "severity": "high",
       "updated_by": "owner",
-      "updated_at": "2026-03-05T10:29:44.165015+00:00"
+      "updated_at": "2026-03-06T02:32:06.766530+00:00"
     },
     {
       "id": "PB-EMAIL-001",
-      "allowed_agent_roles": ["email_agent", "detection_agent"],
+      "allowed_agent_roles": [
+        "email_agent",
+        "detection_agent"
+      ],
       "title": "Email Security General Response",
       "domain": "security",
       "priority": 60,
@@ -316,7 +331,10 @@
     },
     {
       "id": "PB-EMAIL-002",
-      "allowed_agent_roles": ["email_agent", "detection_agent"],
+      "allowed_agent_roles": [
+        "email_agent",
+        "detection_agent"
+      ],
       "title": "Reply-To Mismatch / Brand Impersonation Response",
       "domain": "security",
       "priority": 80,
@@ -356,7 +374,10 @@
     },
     {
       "id": "PB-EMAIL-003",
-      "allowed_agent_roles": ["email_agent", "detection_agent"],
+      "allowed_agent_roles": [
+        "email_agent",
+        "detection_agent"
+      ],
       "title": "BEC Kill Chain Response",
       "domain": "security",
       "priority": 85,
@@ -396,7 +417,10 @@
     },
     {
       "id": "PB-EMAIL-004",
-      "allowed_agent_roles": ["email_agent", "detection_agent"],
+      "allowed_agent_roles": [
+        "email_agent",
+        "detection_agent"
+      ],
       "title": "Malicious Attachment Response",
       "domain": "security",
       "priority": 75,
@@ -436,7 +460,10 @@
     },
     {
       "id": "PB-EMAIL-005",
-      "allowed_agent_roles": ["email_agent", "detection_agent"],
+      "allowed_agent_roles": [
+        "email_agent",
+        "detection_agent"
+      ],
       "title": "DMARC Anomaly Response",
       "domain": "security",
       "priority": 70,

@@ -1,0 +1,13 @@
+version: 1
+tag_routes:
+  fraud:
+    - Fraud_Scoring_Agent
+  payment_risk:
+    - Fraud_Scoring_Agent
+    - Security_Observer_Agent
+  inventory_alert:
+    - Inventory_Agent
+  cv_forensics:
+    - CV_Label_Agent
+  security_event:
+    - Security_Observer_Agent

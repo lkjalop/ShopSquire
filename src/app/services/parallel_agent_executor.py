@@ -18,6 +18,10 @@ import os
 
 from src.app.observability.metrics import record_tool_invocation, record_cb_state, record_incident_alert
 from src.app.security.tool_intent_gate import evaluate_tool_intent
+try:
+    from src.app.services.citation_memory import get_agent_trust_score
+except Exception:
+    get_agent_trust_score = None
 
 
 _CB_STATE = {"cv_failures": 0, "cv_open_until": 0.0, "fraud_failures": 0, "fraud_open_until": 0.0}
@@ -332,6 +336,79 @@ def _run_fraud(base_signals: Dict[str, bool], cv_summary: Dict[str, Any], payloa
         return {}
 
 
+def _agent_weight(agent_name: str) -> float:
+    if callable(get_agent_trust_score):
+        try:
+            return max(0.05, min(2.0, float(get_agent_trust_score(agent_name))))
+        except Exception:
+            pass
+    return 1.0
+
+
+def _cv_verdict(cv: Any) -> str:
+    if isinstance(cv, dict) and cv.get("_blocked"):
+        return "review"
+    if isinstance(cv, dict):
+        risk_markers = [
+            cv.get("tampered"),
+            cv.get("counterfeit"),
+            cv.get("suspicious"),
+            (float(cv.get("manipulation_score") or 0.0) >= 0.7),
+        ]
+        if any(bool(x) for x in risk_markers):
+            return "block"
+    return "allow"
+
+
+def _fraud_verdict(fraud: Any) -> str:
+    if isinstance(fraud, dict) and fraud.get("_blocked"):
+        return "review"
+    lvl = str((fraud or {}).get("level") or "").lower() if isinstance(fraud, dict) else ""
+    if lvl in ("high", "critical"):
+        return "block"
+    if lvl in ("medium", "elevated"):
+        return "review"
+    return "allow"
+
+
+def _inventory_verdict(inv: Any) -> str:
+    if not isinstance(inv, list) or not inv:
+        return "allow"
+    for row in inv:
+        if not isinstance(row, dict):
+            continue
+        if row.get("_blocked"):
+            return "review"
+        try:
+            if int(row.get("available_qty") or 0) <= 0:
+                return "review"
+        except Exception:
+            continue
+    return "allow"
+
+
+def _build_swarm_consensus(cv: Any, fraud: Any, inventory: Any) -> Dict[str, Any]:
+    votes = [
+        {"agent": "CV_Label_Agent", "verdict": _cv_verdict(cv), "weight": _agent_weight("CV_Label_Agent")},
+        {"agent": "Fraud_Scoring_Agent", "verdict": _fraud_verdict(fraud), "weight": _agent_weight("Fraud_Scoring_Agent")},
+        {"agent": "Inventory_Agent", "verdict": _inventory_verdict(inventory), "weight": _agent_weight("Inventory_Agent")},
+    ]
+    totals: Dict[str, float] = {"allow": 0.0, "review": 0.0, "block": 0.0}
+    for v in votes:
+        verdict = str(v.get("verdict") or "review")
+        totals[verdict] = totals.get(verdict, 0.0) + float(v.get("weight") or 0.0)
+    severity_rank = {"allow": 0, "review": 1, "block": 2}
+    consensus = sorted(totals.items(), key=lambda kv: (float(kv[1]), severity_rank.get(kv[0], 1)), reverse=True)[0][0]
+    dissent = [v for v in votes if v.get("verdict") != consensus]
+    return {
+        "consensus": consensus,
+        "weighted_votes": totals,
+        "votes": votes,
+        "dissent_log": dissent,
+        "has_dissent": bool(dissent),
+    }
+
+
 def run_parallel_checks(
     payload: Dict[str, Any],
     ranked_results: List[Dict[str, Any]] | None = None,
@@ -366,4 +443,8 @@ def run_parallel_checks(
     except Exception:
         pass
 
+    try:
+        outputs["swarm"] = _build_swarm_consensus(outputs.get("cv"), outputs.get("fraud"), outputs.get("inventory"))
+    except Exception:
+        outputs["swarm"] = {"consensus": "review", "weighted_votes": {}, "votes": [], "dissent_log": [], "has_dissent": False}
     return outputs

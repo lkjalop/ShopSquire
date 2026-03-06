@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.tools.runner import ToolRunner
+from src.app.services.registry import list_tools, load_from_config
 
 
 router = APIRouter(prefix="/api/v1/tools", tags=["tools"])
@@ -22,23 +23,12 @@ class ToolRunRequest(BaseModel):
 
 
 def _registry() -> List[Dict]:
-    return [
-        {
-            "name": "catalog.search",
-            "description": "Search product catalog by query keywords.",
-            "risk": "low",
-        },
-        {
-            "name": "inventory.check",
-            "description": "Check real-time inventory by SKU.",
-            "risk": "low",
-        },
-        {
-            "name": "shipping.quote",
-            "description": "Estimate shipping cost and ETA.",
-            "risk": "medium",
-        },
-    ]
+    try:
+        load_from_config()
+    except Exception:
+        pass
+    out = list_tools()
+    return out
 
 
 @router.get("/registry")

@@ -5,6 +5,7 @@ import os
 
 from src.app.policy.gate import evaluate_policy_gate
 from src.app.security.observer import analyze_payload
+from src.app.services.registry import get_tool_metadata
 
 
 DEFAULT_DENY_INTENTS = {
@@ -60,6 +61,17 @@ def evaluate_tool_intent(
             "reason": "tool_intent_not_allowlisted",
             "action": "security_review",
             "rule_hits": {"tool_intent_not_allowlisted": 1.0},
+            "severity": "high",
+        }
+
+    meta = get_tool_metadata(tname)
+    enforce_registry = str(os.getenv("TOOL_REGISTRY_ENFORCE", "0")).strip().lower() in ("1", "true", "yes", "on")
+    if enforce_registry and not meta:
+        return {
+            "allow": False,
+            "reason": "tool_not_registered",
+            "action": "security_review",
+            "rule_hits": {"tool_not_registered": 1.0},
             "severity": "high",
         }
 
@@ -123,4 +135,3 @@ def evaluate_tool_intent(
         }
 
     return {"allow": True, "reason": "allow", "action": "allow", "rule_hits": {}, "severity": "info"}
-
