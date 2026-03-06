@@ -1,6 +1,7 @@
 import os
 import json
 import pathlib
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -13,9 +14,9 @@ from src.app.services.recommendations import RecommendationService
 from tests.utils import default_headers
 
 
-tmp_db = "test_sqlite_security_indirect.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{tmp_db}")
-os.environ.setdefault("FEATURE_FLAGS_PATH", "config/feature_flags.json")
+tmp_db = f".test_sqlite_security_indirect_{uuid4().hex}.sqlite"
+os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_db}"
+os.environ["FEATURE_FLAGS_PATH"] = "config/feature_flags.json"
 
 engine = create_engine(
     f"sqlite+pysqlite:///{tmp_db}",

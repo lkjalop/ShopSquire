@@ -11,6 +11,18 @@ from src.app.security.guardrails import guardrail_profile_for_user
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
+def _coerce_specs(raw: object) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
 
 def _features_from_specs(specs: dict | None) -> list[str]:
     if not isinstance(specs, dict):
@@ -44,11 +56,7 @@ def _load_products_from_db() -> list[dict]:
             ).fetchall()
         products: list[dict] = []
         for row in rows or []:
-            specs = None
-            try:
-                specs = json.loads(row[5]) if row[5] else None
-            except Exception:
-                specs = None
+            specs = _coerce_specs(row[5])
             feats = _features_from_specs(specs)
             price = int(row[2] / 100) if row[2] is not None else None
             products.append(
@@ -59,7 +67,7 @@ def _load_products_from_db() -> list[dict]:
                     "currency": row[3] or "USD",
                     "image_url": row[4] or "/static/images/placeholder.svg",
                     "features": feats,
-                    "specs": specs or {},
+                    "specs": specs,
                     "stock": row[6],
                 }
             )
@@ -86,11 +94,7 @@ def _load_product_by_sku_from_db(sku: str) -> dict | None:
             ).fetchone()
         if not row:
             return None
-        specs = None
-        try:
-            specs = json.loads(row[5]) if row[5] else None
-        except Exception:
-            specs = None
+        specs = _coerce_specs(row[5])
         feats = _features_from_specs(specs)
         price = int(row[2] / 100) if row[2] is not None else None
         return {
@@ -100,7 +104,7 @@ def _load_product_by_sku_from_db(sku: str) -> dict | None:
             "currency": row[3] or "USD",
             "image_url": row[4] or "/static/images/placeholder.svg",
             "features": feats,
-            "specs": specs or {},
+            "specs": specs,
             "stock": row[6],
         }
     except Exception:
@@ -290,6 +294,7 @@ def product_detail(sku: str) -> HTMLResponse:
     name = p.get("name", f"Product {sku}")
     price = p.get("price")
     feats = p.get("features") or _features_from_specs(p.get("specs") if isinstance(p, dict) else None)
+    specs = _coerce_specs(p.get("specs") if isinstance(p, dict) else None)
 
     def spec_row(label: str, value: str | None) -> str:
         return f"<tr><th style='text-align:left;width:160px'>{label}</th><td>{value or '?'}" + "</td></tr>"
@@ -300,14 +305,23 @@ def product_detail(sku: str) -> HTMLResponse:
                 return f
         return None
 
+    def _spec_value(*keys: str) -> str | None:
+        for k in keys:
+            value = specs.get(k)
+            if value:
+                if isinstance(value, list):
+                    return ", ".join([str(v) for v in value if v])
+                return str(value)
+        return None
+
     spec_rows = "".join(
         [
-            spec_row("CPU", find_feat("cpu")),
-            spec_row("GPU", find_feat("graphics") or find_feat("gpu")),
-            spec_row("RAM", find_feat("ram")),
-            spec_row("Storage", find_feat("storage")),
-            spec_row("Wi-Fi", find_feat("wi-fi")),
-            spec_row("Ports", find_feat("ports")),
+            spec_row("CPU", _spec_value("cpu") or find_feat("cpu")),
+            spec_row("GPU", _spec_value("graphics", "gpu") or find_feat("graphics") or find_feat("gpu")),
+            spec_row("RAM", _spec_value("ram") or (f"{specs.get('ram_gb')}GB" if specs.get("ram_gb") else None) or find_feat("ram")),
+            spec_row("Storage", _spec_value("storage", "ssd") or find_feat("storage")),
+            spec_row("Wi-Fi", _spec_value("wifi") or find_feat("wi-fi")),
+            spec_row("Ports", _spec_value("ports") or find_feat("ports")),
         ]
     ) or "<tr><td>No specs available</td></tr>"
 

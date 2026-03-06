@@ -1,12 +1,13 @@
 import os
 import json
+from uuid import uuid4
 
 from tests.utils import default_headers
 
 # Force SQLite for this test file
-tmp_db = "test_sqlite_bitemporal.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{tmp_db}")
-os.environ.setdefault("FEATURE_FLAGS_PATH", "config/feature_flags.json")
+tmp_db = f".test_sqlite_bitemporal_{uuid4().hex}.sqlite"
+os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_db}"
+os.environ["FEATURE_FLAGS_PATH"] = "config/feature_flags.json"
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker

@@ -1,5 +1,6 @@
 import os
 import pathlib
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -11,9 +12,9 @@ from src.app.main import create_app
 from tests.utils import default_headers
 
 
-tmp_db = "test_sqlite_storefront.sqlite"
-os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{tmp_db}")
-os.environ.setdefault("FEATURE_FLAGS_PATH", "config/feature_flags.json")
+tmp_db = f".test_sqlite_storefront_{uuid4().hex}.sqlite"
+os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{tmp_db}"
+os.environ["FEATURE_FLAGS_PATH"] = "config/feature_flags.json"
 
 engine = create_engine(
     f"sqlite+pysqlite:///{tmp_db}",
@@ -43,7 +44,7 @@ def _seed_product():
     with engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at) "
+                "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active, updated_at) "
                 "VALUES ('p1', 'SKU-UI', 'UI Laptop', 129900, 'USD', :specs, true, CURRENT_TIMESTAMP)"
             ),
             {
@@ -51,7 +52,7 @@ def _seed_product():
             },
         )
         conn.execute(
-            text("INSERT INTO inventory (id, product_id, stock, warehouse, updated_at) VALUES ('inv1','p1', 4, 'default', CURRENT_TIMESTAMP)")
+            text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse, updated_at) VALUES ('inv1','p1', 4, 'default', CURRENT_TIMESTAMP)")
         )
 
 
