@@ -33,7 +33,12 @@ roles:
       per_minute: 600
       burst: 100
     abac_conditions:
-      ip_allowlist: []
+      ip_allowlist:
+        - 127.0.0.1
+        - ::1
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
       time_window: "00:00-23:59"
       min_trust_score: 0.30
 
@@ -65,7 +70,12 @@ roles:
       per_minute: 240
       burst: 40
     abac_conditions:
-      ip_allowlist: []
+      ip_allowlist:
+        - 127.0.0.1
+        - ::1
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
       time_window: "00:00-23:59"
       min_trust_score: 0.35
 
@@ -90,7 +100,12 @@ roles:
       per_minute: 180
       burst: 30
     abac_conditions:
-      ip_allowlist: []
+      ip_allowlist:
+        - 127.0.0.1
+        - ::1
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
       time_window: "00:00-23:59"
       min_trust_score: 0.30
 
@@ -120,7 +135,12 @@ roles:
       per_minute: 120
       burst: 20
     abac_conditions:
-      ip_allowlist: []
+      ip_allowlist:
+        - 127.0.0.1
+        - ::1
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
       time_window: "00:00-23:59"
       min_trust_score: 0.45
 

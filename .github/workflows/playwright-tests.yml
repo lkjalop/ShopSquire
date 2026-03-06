@@ -9,6 +9,8 @@ on:
 jobs:
   playwright:
     runs-on: ubuntu-latest
+    env:
+      DISABLE_PLAYWRIGHT_TESTS: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,8 +34,7 @@ jobs:
           # Ensure tests use sqlite test DB path
           export PLAYWRIGHT_TEST_PORT=8099
           export DATABASE_URL="sqlite:///tests/playwright/smoke.sqlite"
-          pytest -q tests/pw || true
-        continue-on-error: true
+          pytest -q tests/pw
 
       - name: Create runs dir if missing
         run: mkdir -p runs || true

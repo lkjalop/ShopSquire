@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -135,9 +136,51 @@ class PolicyGate:
         cond = ctx.get("abac_conditions") if isinstance(ctx.get("abac_conditions"), dict) else {}
         violations: List[str] = []
 
+        def _normalize_ip(raw: Any) -> str:
+            s = str(raw or "").strip()
+            if not s:
+                return ""
+            if "," in s:
+                s = s.split(",", 1)[0].strip()
+            if s.startswith("[") and "]" in s:
+                s = s[1 : s.index("]")]
+            # IPv4 host:port
+            if s.count(".") == 3 and s.count(":") == 1:
+                host, port = s.rsplit(":", 1)
+                if port.isdigit():
+                    s = host
+            return s
+
+        def _ip_allowed(ip_raw: str, allowlist: List[Any]) -> bool:
+            ip_txt = _normalize_ip(ip_raw)
+            if not ip_txt:
+                return False
+            try:
+                ip_obj = ipaddress.ip_address(ip_txt)
+            except Exception:
+                return False
+            for item in allowlist or []:
+                rule = str(item or "").strip()
+                if not rule:
+                    continue
+                if rule == "*":
+                    return True
+                if "/" in rule:
+                    try:
+                        if ip_obj in ipaddress.ip_network(rule, strict=False):
+                            return True
+                    except Exception:
+                        continue
+                elif "*" in rule:
+                    if ip_txt.startswith(rule.replace("*", "")):
+                        return True
+                elif ip_txt == rule:
+                    return True
+            return False
+
         ip_allowlist = cond.get("ip_allowlist") if isinstance(cond.get("ip_allowlist"), list) else []
-        source_ip = str(ctx.get("source_ip") or "").strip()
-        if ip_allowlist and source_ip and source_ip not in [str(v).strip() for v in ip_allowlist if v]:
+        source_ip = _normalize_ip(ctx.get("source_ip") or "")
+        if ip_allowlist and source_ip and not _ip_allowed(source_ip, ip_allowlist):
             violations.append("source_ip_not_allowlisted")
 
         min_trust_raw = cond.get("min_trust_score")

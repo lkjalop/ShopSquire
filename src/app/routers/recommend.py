@@ -681,6 +681,8 @@ def _infer_missing_fields(
 
 def _has_explicit_constraint_update(parsed: Dict[str, Any] | None, query: str | None) -> bool:
     p = parsed or {}
+    if p.get("budget_delta") is not None:
+        return True
     if p.get("budget_min") is not None or p.get("budget_max") is not None:
         return True
     if p.get("brands") or p.get("specs") or p.get("brand_excludes"):
@@ -1622,6 +1624,9 @@ def _append_gpu_disambiguation_question(existing: list[dict] | None, query: str 
 
 
 def _append_standard_nqe_options(existing: list[dict] | None, query: str | None = None) -> list[dict]:
+    q_low = str(query or "").strip().lower()
+    gaming_like = any(tok in q_low for tok in ("gaming", "esports", "rtx", "render", "video editing", "creative", "3d", "cad", "ml", "ai"))
+    student_like = any(tok in q_low for tok in ("student", "school", "high school", "university", "college", "note taking", "notes"))
     out: list[dict] = []
     for item in (existing or []):
         if not isinstance(item, dict):
@@ -1629,13 +1634,30 @@ def _append_standard_nqe_options(existing: list[dict] | None, query: str | None 
         q = dict(item)
         qid = str(q.get("id") or "").strip().lower()
         if qid == "ask_budget" and not q.get("options"):
-            q["why_hint"] = "Budget keeps recommendations realistic and prevents irrelevant high-end results."
-            q["options"] = [
-                {"id": "budget_under_1000", "label": "Under $1,000", "value": "0-1000"},
-                {"id": "budget_1000_1500", "label": "$1,000-$1,500", "value": "1000-1500"},
-                {"id": "budget_1500_2200", "label": "$1,500-$2,200", "value": "1500-2200"},
-                {"id": "budget_2200_plus", "label": "$2,200+", "value": "2200+"},
-            ]
+            if gaming_like:
+                q["why_hint"] = "Gaming and creative workloads usually need a higher budget for GPU + cooling than note-taking or basic school use."
+                q["options"] = [
+                    {"id": "budget_under_1000", "label": "Under $1,200 (entry gaming; tradeoffs likely)", "value": "0-1200"},
+                    {"id": "budget_1000_1500", "label": "$1,200-$1,800 (balanced gaming value)", "value": "1200-1800"},
+                    {"id": "budget_1500_2200", "label": "$1,800-$2,500 (higher FPS / creator headroom)", "value": "1800-2500"},
+                    {"id": "budget_2200_plus", "label": "$2,500+ (premium/high-end gaming)", "value": "2500+"},
+                ]
+            elif student_like:
+                q["why_hint"] = "For school and note-taking, you can often stay lower budget unless you also need gaming or heavy creative workloads."
+                q["options"] = [
+                    {"id": "budget_under_1000", "label": "Under $1,000 (best value for school basics)", "value": "0-1000"},
+                    {"id": "budget_1000_1500", "label": "$1,000-$1,500 (better battery/build longevity)", "value": "1000-1500"},
+                    {"id": "budget_1500_2200", "label": "$1,500-$2,200 (premium; often optional for note-taking)", "value": "1500-2200"},
+                    {"id": "budget_2200_plus", "label": "$2,200+ (usually overkill for basic study)", "value": "2200+"},
+                ]
+            else:
+                q["why_hint"] = "Budget keeps recommendations realistic and prevents irrelevant high-end results."
+                q["options"] = [
+                    {"id": "budget_under_1000", "label": "Under $1,000", "value": "0-1000"},
+                    {"id": "budget_1000_1500", "label": "$1,000-$1,500", "value": "1000-1500"},
+                    {"id": "budget_1500_2200", "label": "$1,500-$2,200", "value": "1500-2200"},
+                    {"id": "budget_2200_plus", "label": "$2,200+", "value": "2200+"},
+                ]
         elif qid == "ask_use_case" and not q.get("options"):
             q["why_hint"] = "Use-case helps rank for what you care about most (battery, performance, portability, value)."
             q["options"] = [
@@ -3736,8 +3758,38 @@ def suggest(
         asks_specs = any(tok in q_low for tok in ("gb", "tb", "ram", "ssd", "storage", "gpu", "oled", "ips", "windows", "macos", "linux"))
         if not asks_specs and not (parsed.get("specs") or []):
             constraints["specs"] = []
-        asks_budget = any(tok in q_low for tok in ("$", "budget", "under", "below", "above", "between", "price", "cost", "max", "minimum"))
+        asks_budget = any(tok in q_low for tok in ("$", "budget", "under", "below", "above", "between", "price", "cost", "max", "minimum", "widen", "increase", "raise", "reduce", "decrease", "lower"))
         if asks_budget:
+            # Relative budget updates, e.g. "widen budget by 600", should shift
+            # the existing envelope instead of resetting it to an absolute cap.
+            try:
+                delta = parsed.get("budget_delta")
+                if delta is not None and int(delta) != 0:
+                    d = int(delta)
+                    prev_min = constraints.get("budget_min")
+                    prev_max = constraints.get("budget_max")
+                    if prev_min is not None:
+                        constraints["budget_min"] = max(0, int(prev_min) + d)
+                    if prev_max is not None:
+                        constraints["budget_max"] = max(0, int(prev_max) + d)
+                    if prev_min is not None or prev_max is not None:
+                        log_trace_event(
+                            trace_id=trace_id,
+                            event_type="nqe_assumption_applied",
+                            source_type="agent",
+                            source_id="NQE_Agent",
+                            target_type="system",
+                            target_id=None,
+                            payload={
+                                "assumption": "budget_delta_from_followup",
+                                "budget_delta": d,
+                                "budget_min": constraints.get("budget_min"),
+                                "budget_max": constraints.get("budget_max"),
+                                **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["constraints", "memory_prefs"]),
+                            },
+                        )
+            except Exception:
+                pass
             # Reset stale opposite bound when user gives one-sided budget updates
             # like "under $900" or "above $2000".
             if parsed.get("budget_max") is not None and parsed.get("budget_min") is None and any(

@@ -374,6 +374,45 @@ class RecommendationService:
                             budget = int(val)
         return budget_min, budget_max, budget
 
+    def _extract_budget_delta(self, text: str) -> Optional[int]:
+        """Extract relative budget updates like:
+        - "widen budget by 600"
+        - "increase budget by $200-$400"
+        - "reduce budget by 300"
+        Returns signed integer delta (positive/negative) or None.
+        """
+        t = scrub_pii(text or "")
+        if not t:
+            return None
+        t_low = self._normalize_text(t)
+        if "budget" not in t_low and "price range" not in t_low:
+            return None
+
+        dir_up = bool(re.search(r"\b(widen|increase|raise|bump|expand|broaden|extend|loosen)\b", t_low))
+        dir_down = bool(re.search(r"\b(reduce|decrease|lower|tighten|cut|shrink)\b", t_low))
+        if not dir_up and not dir_down:
+            return None
+        direction = 1 if dir_up and not dir_down else -1 if dir_down and not dir_up else 0
+        if direction == 0:
+            return None
+
+        delta_val: Optional[int] = None
+        m_rng = re.search(r"\bby\b\s*\$?([\d\.,kKmM]+)\s*(?:-|to)\s*\$?([\d\.,kKmM]+)", t_low)
+        if m_rng:
+            a = self._parse_number_with_suffix(m_rng.group(1))
+            b = self._parse_number_with_suffix(m_rng.group(2))
+            if a is not None and b is not None:
+                delta_val = int(max(a, b))
+        if delta_val is None:
+            m = re.search(r"\bby\b\s*\$?([\d\.,kKmM]+)", t_low)
+            if m:
+                v = self._parse_number_with_suffix(m.group(1))
+                if v is not None:
+                    delta_val = int(v)
+        if delta_val is None or delta_val <= 0:
+            return None
+        return int(direction * delta_val)
+
     def _extract_specs(self, text: str) -> Dict[str, Any]:
         slots: Dict[str, Any] = {}
         ram_match = re.search(r"(\d+)\s*gb\s*ram", text)
@@ -1037,12 +1076,20 @@ class RecommendationService:
         text = self._normalize_text(query)
         constraints: Dict[str, Any] = {"brands": [], "specs": []}
         budget_min, budget_max, budget = self._extract_price_range(text)
+        budget_delta = self._extract_budget_delta(text)
         spec_slots = self._extract_specs(text)
         condition_slots = self._extract_condition_availability(text)
         brand_includes, brand_excludes = self._extract_brands(text)
 
+        # If user asked for relative budget movement ("increase/widen by X"),
+        # avoid treating that number as an absolute cap.
+        if budget_delta is not None and budget_min is None and budget_max is None:
+            budget = None
+
         if budget is not None and budget_max is None:
             budget_max = budget
+        if budget_delta is not None:
+            constraints["budget_delta"] = int(budget_delta)
         if budget_min is not None:
             constraints["budget_min"] = budget_min
         if budget_max is not None:

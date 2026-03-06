@@ -11,7 +11,9 @@ from src.app.services.swarm_strategy import (
     StrategyGenome,
     build_initial_population,
     evolve_population,
+    persist_generation_snapshot,
     score_strategy,
+    summarize_population,
 )
 from src.app.observability.swarm_metrics import SWARM_TASKS_STARTED, SWARM_TASKS_COMPLETED, SWARM_TASK_DURATION
 
@@ -26,10 +28,14 @@ def run_swarm(self, job_id: str, rounds: int, scenario_ids: List[str] | None = N
     start_ts = time.time()
     ids = scenario_ids or [s["scenario_id"] for s in _ls()]
     all_round_results = []
-    population: List[StrategyGenome] = build_initial_population(size=4)
+    population: List[StrategyGenome] = build_initial_population(size=6)
 
     for rnd in range(1, max(1, int(rounds)) + 1):
-        active_strategy = population[0] if population else StrategyGenome(strategy_id=f"strat_r{rnd}")
+        ordered = sorted(population, key=lambda s: float(s.fitness or 0.0), reverse=True)
+        if not ordered:
+            ordered = [StrategyGenome(strategy_id=f"strat_r{rnd}")]
+        # Exploit top strategy most rounds, explore runner-up every 3rd round.
+        active_strategy = ordered[1] if (len(ordered) > 1 and rnd % 3 == 0) else ordered[0]
         max_workers = max(1, min(len(ids), int(round(6 * float(active_strategy.worker_scale or 1.0)))))
         round_results = []
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -57,10 +63,34 @@ def run_swarm(self, job_id: str, rounds: int, scenario_ids: List[str] | None = N
             pass_rate=(pass_count / float(max(1, run_total))),
             error_rate=(err_count / float(max(1, run_total))),
             avg_elapsed_ms=avg_elapsed,
+            stability=min(1.0, float(active_strategy.fitness or 0.0) if active_strategy.fitness > 0 else 0.0),
         )
+        # Mild fitness decay for inactive genomes to preserve selection pressure.
+        for g in population:
+            if str(g.strategy_id) == str(active_strategy.strategy_id):
+                continue
+            g.fitness = round(float(g.fitness or 0.0) * 0.98, 6)
         all_round_results.append({"round": rnd, "results": round_results})
         all_round_results[-1]["strategy"] = active_strategy.as_dict()
-        population = evolve_population(population, keep_top=2, target_size=4)
+        round_summary = {
+            "round": rnd,
+            "active_strategy_id": str(active_strategy.strategy_id),
+            "pass_rate": round(pass_count / float(max(1, run_total)), 4),
+            "error_rate": round(err_count / float(max(1, run_total)), 4),
+            "avg_elapsed_ms": round(float(avg_elapsed), 3),
+        }
+        try:
+            persist_generation_snapshot(round_id=rnd, population=population, summary=round_summary)
+        except Exception:
+            pass
+        population = evolve_population(
+            population,
+            keep_top=3,
+            target_size=6,
+            elitism=2,
+            tournament_size=3,
+            random_immigrants=1,
+        )
         # update partial progress
         set_job(
             job_id,
@@ -69,6 +99,7 @@ def run_swarm(self, job_id: str, rounds: int, scenario_ids: List[str] | None = N
                 "status": "running",
                 "rounds": all_round_results,
                 "population": [s.as_dict() for s in population],
+                "population_summary": summarize_population(population),
                 "updated_at": time.time(),
             },
         )
@@ -83,6 +114,7 @@ def run_swarm(self, job_id: str, rounds: int, scenario_ids: List[str] | None = N
             "status": "completed",
             "rounds": all_round_results,
             "population": [s.as_dict() for s in population],
+            "population_summary": summarize_population(population),
             "summary": summary,
             "completed_at": time.time(),
         },
