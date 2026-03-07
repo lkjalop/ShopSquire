@@ -7,6 +7,7 @@ services:
       - .env
     environment:
       INTERNAL_MTLS_REQUIRED: "1"
+      CHAT_REPLAY_REQUIRE_NONCE: "1"
     ports:
       - "8080:8080"
     depends_on:
@@ -19,6 +20,9 @@ services:
     security_opt:
       - no-new-privileges:true
       - seccomp=default
+    read_only: true
+    tmpfs:
+      - /tmp:size=256M
 
   db:
     image: postgres:16

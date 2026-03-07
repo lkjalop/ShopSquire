@@ -5,6 +5,7 @@ import logging
 import time
 import base64
 import io
+import shutil
 
 _log = logging.getLogger("shopsquire.cv")
 
@@ -35,6 +36,28 @@ from src.app.services.intake_gate import strict_image_ingest_gate
 
 
 router = APIRouter(prefix="/api/v1/cv", tags=["cv"])
+
+
+def _cv_runtime_readiness() -> Dict[str, Any]:
+    tesseract_ok = bool(shutil.which("tesseract"))
+    zbar_ok = False
+    try:
+        from pyzbar.pyzbar import decode as _decode  # type: ignore
+
+        zbar_ok = bool(_decode)
+    except Exception:
+        zbar_ok = False
+    reasons: List[str] = []
+    if not tesseract_ok:
+        reasons.append("tesseract_binary_missing")
+    if not zbar_ok:
+        reasons.append("zbar_runtime_missing")
+    return {
+        "ready": bool(tesseract_ok and zbar_ok),
+        "tesseract_ok": tesseract_ok,
+        "zbar_ok": zbar_ok,
+        "reasons": reasons,
+    }
 
 
 def _normalize_upload_for_cv(
@@ -97,6 +120,10 @@ async def analyze(
     and an evidence bundle id when persistence succeeds.
     """
     try:
+        runtime = _cv_runtime_readiness()
+        strict_runtime = str(os.getenv("CV_STRICT_RUNTIME_DEPS", "1")).strip().lower() in ("1", "true", "yes", "on")
+        if strict_runtime and not bool(runtime.get("ready")):
+            raise HTTPException(status_code=503, detail={"error": "cv_runtime_not_ready", "runtime": runtime})
         try:
             quota = TenantQuotaGuard(get_redis())
             allowed, qmeta = quota.check_and_consume(req.case_id or "global", "cv_calls", amount=1)
@@ -623,6 +650,7 @@ async def analyze(
                 "severity": security_sev,
                 "signals": {k: v for k, v in (security_details.get("signals") or {}).items() if isinstance(v, bool)} if isinstance(security_details, dict) else {},
             } if security_details else None,
+            "cv_runtime": runtime,
             "ui_actions": {"chat_with_admin": _needs_chat},
             "suggested_routing": "security_review" if _needs_chat else "standard_queue",
         }

@@ -248,18 +248,38 @@ def create_app() -> FastAPI:
 
                 def _vs_index_handler(payload):
                     import logging
-                    from src.app.services.visual_search import build_index, is_available
+                    from src.app.services.visual_search import build_index, is_available, status, try_load_persisted_index
                     if not is_available():
                         return
                     from src.app.models.db import db_session
                     from sqlalchemy import text as sql_text
                     import json as _json
 
+                    try:
+                        if try_load_persisted_index():
+                            st = status()
+                            fresh = not bool(((st.get("freshness") or {}).get("stale")))
+                            if fresh and int(st.get("index_size") or 0) > 0:
+                                logging.getLogger("shopsquire.startup").info(
+                                    "Visual search index loaded from disk (size=%s, age_s=%s)",
+                                    st.get("index_size"),
+                                    (st.get("freshness") or {}).get("age_seconds"),
+                                )
+                                return
+                    except Exception:
+                        pass
+
                     products = []
+                    max_updated_at = None
                     with db_session() as session:
-                        rows = session.execute(sql_text(
-                            "SELECT sku, name, brand, price_cents, specs FROM products LIMIT 50000"
-                        )).fetchall()
+                        try:
+                            rows = session.execute(sql_text(
+                                "SELECT sku, name, brand, price_cents, specs, COALESCE(updated_at, created_at) AS ts FROM products LIMIT 50000"
+                            )).fetchall()
+                        except Exception:
+                            rows = session.execute(sql_text(
+                                "SELECT sku, name, brand, price_cents, specs FROM products LIMIT 50000"
+                            )).fetchall()
                         for r in rows:
                             specs = {}
                             if r[4]:
@@ -267,9 +287,18 @@ def create_app() -> FastAPI:
                                     specs = _json.loads(r[4]) if isinstance(r[4], str) else r[4]
                                 except Exception:
                                     pass
+                            if len(r) > 5 and r[5] is not None:
+                                ts = str(r[5])
+                                if not max_updated_at or ts > max_updated_at:
+                                    max_updated_at = ts
                             products.append({"sku": r[0], "name": r[1], "brand": r[2], "price_cents": r[3], "specs": specs})
                     if products:
-                        n = build_index(products)
+                        n = build_index(
+                            products,
+                            persist=True,
+                            source="startup_refresh",
+                            catalog_max_updated_at=max_updated_at,
+                        )
                         logging.getLogger("shopsquire.startup").info("Visual search index built: %d products", n)
 
                 register_handler("vs_index_build", _vs_index_handler)

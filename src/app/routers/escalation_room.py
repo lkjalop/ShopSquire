@@ -403,6 +403,14 @@ def get_incident(incident_id: str, role: str = Depends(require_role([ROLE_MERCHA
                 ),
                 {"id": incident_id},
             ).fetchone()
+            if not row:
+                row = conn.execute(
+                    sql_text(
+                        "SELECT id, event_id, severity, title, description, status, created_at, created_by, assigned_to, team, sla_status, sla_due_at, runbook_id, runbook_run_id "
+                        "FROM incidents WHERE event_id = :event_id ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"event_id": incident_id},
+                ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="incident_not_found")
         desc_raw = row[4]
@@ -443,7 +451,7 @@ def get_incident(incident_id: str, role: str = Depends(require_role([ROLE_MERCHA
             "reason": reason,
             "case_id": case_id,
             "caseId": case_id,
-            "sla": _apply_sla_if_missing(incident_id),
+            "sla": _apply_sla_if_missing(str(row[0])),
         }
     except HTTPException:
         raise

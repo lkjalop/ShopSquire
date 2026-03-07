@@ -1,6 +1,7 @@
 
 import os
 import json
+import sqlite3
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -45,15 +46,43 @@ def _features_from_specs(specs: dict | None) -> list[str]:
 
 
 def _load_products_from_db() -> list[dict]:
+    def _rows_from_sqlite_env() -> list[tuple]:
+        db_url = str(os.getenv("DATABASE_URL") or "")
+        if not db_url.startswith("sqlite:///"):
+            return []
+        db_path = db_url.replace("sqlite:///", "", 1)
+        if not db_path:
+            return []
+        con = sqlite3.connect(db_path)
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "SELECT p.sku, p.name, p.price_cents, p.currency, p.image_url, p.specs, i.stock "
+                "FROM products p LEFT JOIN inventory i ON p.id = i.product_id"
+            )
+            return list(cur.fetchall() or [])
+        finally:
+            con.close()
+
     try:
         from src.app.models.db import db_session
         with db_session() as db:
-            rows = db.execute(
-                text(
-                    "SELECT p.sku, p.name, p.price_cents, p.currency, p.image_url, p.specs, i.stock "
-                    "FROM products p LEFT JOIN inventory i ON p.id = i.product_id"
-                )
-            ).fetchall()
+            try:
+                rows = db.execute(
+                    text(
+                        "SELECT p.sku, p.name, p.price_cents, p.currency, p.image_url, p.specs, i.stock "
+                        "FROM products p LEFT JOIN inventory i ON p.id = i.product_id"
+                    )
+                ).fetchall()
+            except Exception:
+                rows = db.execute(
+                    text(
+                        "SELECT p.sku, p.name, p.price_cents, p.currency, NULL as image_url, p.specs, i.stock "
+                        "FROM products p LEFT JOIN inventory i ON p.id = i.product_id"
+                    )
+                ).fetchall()
+        if not rows:
+            rows = _rows_from_sqlite_env()
         products: list[dict] = []
         for row in rows or []:
             specs = _coerce_specs(row[5])
@@ -73,7 +102,28 @@ def _load_products_from_db() -> list[dict]:
             )
         return products
     except Exception:
-        return []
+        try:
+            rows = _rows_from_sqlite_env()
+            products: list[dict] = []
+            for row in rows or []:
+                specs = _coerce_specs(row[5])
+                feats = _features_from_specs(specs)
+                price = int(row[2] / 100) if row[2] is not None else None
+                products.append(
+                    {
+                        "sku": row[0],
+                        "name": row[1],
+                        "price": price,
+                        "currency": row[3] or "USD",
+                        "image_url": row[4] or "/static/images/placeholder.svg",
+                        "features": feats,
+                        "specs": specs,
+                        "stock": row[6],
+                    }
+                )
+            return products
+        except Exception:
+            return []
 
 
 def _get_products() -> list[dict]:
@@ -82,16 +132,46 @@ def _get_products() -> list[dict]:
 
 
 def _load_product_by_sku_from_db(sku: str) -> dict | None:
+    def _row_from_sqlite_env(target_sku: str) -> tuple | None:
+        db_url = str(os.getenv("DATABASE_URL") or "")
+        if not db_url.startswith("sqlite:///"):
+            return None
+        db_path = db_url.replace("sqlite:///", "", 1)
+        if not db_path:
+            return None
+        con = sqlite3.connect(db_path)
+        try:
+            cur = con.cursor()
+            cur.execute(
+                "SELECT p.sku, p.name, p.price_cents, p.currency, p.image_url, p.specs, i.stock "
+                "FROM products p LEFT JOIN inventory i ON p.id = i.product_id WHERE p.sku = ? LIMIT 1",
+                (target_sku,),
+            )
+            return cur.fetchone()
+        finally:
+            con.close()
+
     try:
         from src.app.models.db import db_session
         with db_session() as db:
-            row = db.execute(
-                text(
-                    "SELECT p.sku, p.name, p.price_cents, p.currency, p.image_url, p.specs, i.stock "
-                    "FROM products p LEFT JOIN inventory i ON p.id = i.product_id WHERE p.sku = :sku LIMIT 1"
-                ),
-                {"sku": sku},
-            ).fetchone()
+            try:
+                row = db.execute(
+                    text(
+                        "SELECT p.sku, p.name, p.price_cents, p.currency, p.image_url, p.specs, i.stock "
+                        "FROM products p LEFT JOIN inventory i ON p.id = i.product_id WHERE p.sku = :sku LIMIT 1"
+                    ),
+                    {"sku": sku},
+                ).fetchone()
+            except Exception:
+                row = db.execute(
+                    text(
+                        "SELECT p.sku, p.name, p.price_cents, p.currency, NULL as image_url, p.specs, i.stock "
+                        "FROM products p LEFT JOIN inventory i ON p.id = i.product_id WHERE p.sku = :sku LIMIT 1"
+                    ),
+                    {"sku": sku},
+                ).fetchone()
+        if not row:
+            row = _row_from_sqlite_env(sku)
         if not row:
             return None
         specs = _coerce_specs(row[5])
@@ -108,7 +188,25 @@ def _load_product_by_sku_from_db(sku: str) -> dict | None:
             "stock": row[6],
         }
     except Exception:
-        return None
+        try:
+            row = _row_from_sqlite_env(sku)
+            if not row:
+                return None
+            specs = _coerce_specs(row[5])
+            feats = _features_from_specs(specs)
+            price = int(row[2] / 100) if row[2] is not None else None
+            return {
+                "sku": row[0],
+                "name": row[1],
+                "price": price,
+                "currency": row[3] or "USD",
+                "image_url": row[4] or "/static/images/placeholder.svg",
+                "features": feats,
+                "specs": specs,
+                "stock": row[6],
+            }
+        except Exception:
+            return None
 
 
 def _find_product_by_sku(sku: str) -> dict | None:

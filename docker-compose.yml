@@ -12,6 +12,7 @@ services:
       AUTO_MIGRATE: "1"
       DB_MIGRATION_GUARD: "1"
       INTERNAL_MTLS_REQUIRED: "1"
+      CHAT_REPLAY_REQUIRE_NONCE: "1"
     ports:
       - "8080:8080"
     depends_on:

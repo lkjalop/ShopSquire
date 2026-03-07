@@ -13,6 +13,10 @@ try:
 except Exception:
     sanitize_event_payload = None  # type: ignore
     hash_fields = None  # type: ignore
+try:
+    from src.app.security.atlas_map import enrich_security_event
+except Exception:
+    enrich_security_event = None  # type: ignore
 
 
 def _splunk_hec_payload(event: Dict[str, Any], sourcetype: str = "shopsquire:event") -> Dict[str, Any]:
@@ -59,6 +63,13 @@ def telemetry_emit(
         except Exception:
             pass
         # enrich event minimally
+        if enrich_security_event is not None:
+            try:
+                event_for_enrichment = dict(safe_event) if isinstance(safe_event, dict) else {"event": safe_event}
+                if "security" in str(sourcetype or "").lower() or isinstance((event_for_enrichment.get("details") if isinstance(event_for_enrichment, dict) else None), dict):
+                    safe_event = enrich_security_event(event_for_enrichment)
+            except Exception:
+                pass
         payload = {"severity": severity, "payload": safe_event}
 
         # Try OpenTelemetry event (best-effort)

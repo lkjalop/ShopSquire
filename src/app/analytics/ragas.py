@@ -61,19 +61,21 @@ def persist_ragas_eval(db, ragas_payload: Dict[str, Any]) -> None:
     """Persist RAGAS evaluation results — best-effort, silent on missing table."""
     eval_id = ragas_payload.get("eval_id") or str(uuid.uuid4())
     try:
+        metrics = ragas_payload.get("metrics", {}) if isinstance(ragas_payload.get("metrics"), dict) else {}
+        evaluated_at = int(ragas_payload.get("evaluated_at", int(time.time())) or int(time.time()))
         db.execute(
             """
             INSERT INTO ragas_eval_results (eval_id, decision_log_id, faithfulness, answer_relevance, context_precision, context_recall, evaluated_at, evaluator_model)
-            VALUES (:eval_id, :decision_log_id, :faithfulness, :answer_relevance, :context_precision, :context_recall, to_timestamp(:evaluated_at), :evaluator_model)
+            VALUES (:eval_id, :decision_log_id, :faithfulness, :answer_relevance, :context_precision, :context_recall, :evaluated_at, :evaluator_model)
             """,
             {
                 "eval_id": eval_id,
                 "decision_log_id": ragas_payload.get("decision_log_id"),
-                "faithfulness": ragas_payload.get("metrics", {}).get("faithfulness"),
-                "answer_relevance": ragas_payload.get("metrics", {}).get("answer_relevance"),
-                "context_precision": ragas_payload.get("metrics", {}).get("context_precision"),
-                "context_recall": ragas_payload.get("metrics", {}).get("context_recall"),
-                "evaluated_at": ragas_payload.get("evaluated_at", int(time.time())),
+                "faithfulness": metrics.get("faithfulness"),
+                "answer_relevance": metrics.get("answer_relevance"),
+                "context_precision": metrics.get("context_precision"),
+                "context_recall": metrics.get("context_recall"),
+                "evaluated_at": evaluated_at,
                 "evaluator_model": ragas_payload.get("evaluator_model", "unavailable"),
             },
         )

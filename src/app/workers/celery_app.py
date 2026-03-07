@@ -164,6 +164,11 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     forecast_gov_enabled = str(os.getenv("FORECAST_GOVERNANCE_SNAPSHOT_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
     forecast_gov_hour = max(0, min(23, int(float(os.getenv("FORECAST_GOVERNANCE_HOUR_UTC", "3") or 3))))
     forecast_gov_minute = max(0, min(59, int(float(os.getenv("FORECAST_GOVERNANCE_MINUTE_UTC", "10") or 10))))
+    visual_refresh_enabled = str(os.getenv("VISUAL_SEARCH_REFRESH_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    visual_refresh_min = max(15, min(1440, int(float(os.getenv("VISUAL_SEARCH_REFRESH_MINUTES", "120") or 120))))
+    risk_snapshot_enabled = str(os.getenv("RISK_REGISTER_SNAPSHOT_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    risk_snapshot_hour = max(0, min(23, int(float(os.getenv("RISK_REGISTER_SNAPSHOT_HOUR_UTC", "1") or 1))))
+    risk_snapshot_minute = max(0, min(59, int(float(os.getenv("RISK_REGISTER_SNAPSHOT_MINUTE_UTC", "30") or 30))))
     incident_sla_enabled = str(os.getenv("INCIDENT_SLA_CELERY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
     incident_sla_min = max(1, min(60, int(float(os.getenv("INCIDENT_SLA_CELERY_MINUTES", "1") or 1))))
     trace_recovery_enabled = str(os.getenv("TRACE_BROKER_RECOVERY_CELERY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
@@ -186,6 +191,18 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
         beat_schedule["forecast-governance-snapshot"] = {
             "task": "src.app.tasks.model_ops_tasks.snapshot_forecast_governance",
             "schedule": crontab(minute=str(forecast_gov_minute), hour=str(forecast_gov_hour)),
+            "args": (),
+        }
+    if visual_refresh_enabled:
+        beat_schedule["visual-search-index-refresh"] = {
+            "task": "src.app.tasks.model_ops_tasks.refresh_visual_search_index",
+            "schedule": crontab(minute=f"*/{visual_refresh_min}"),
+            "args": (),
+        }
+    if risk_snapshot_enabled:
+        beat_schedule["risk-register-daily-snapshot"] = {
+            "task": "src.app.tasks.model_ops_tasks.snapshot_risk_register_daily",
+            "schedule": crontab(minute=str(risk_snapshot_minute), hour=str(risk_snapshot_hour)),
             "args": (),
         }
     if incident_sla_enabled:
@@ -211,6 +228,8 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.security_poll_tasks.poll_crowdstrike": {"queue": default_q},
             "src.app.tasks.model_ops_tasks.train_recommend_cf_nightly": {"queue": default_q},
             "src.app.tasks.model_ops_tasks.snapshot_forecast_governance": {"queue": default_q},
+            "src.app.tasks.model_ops_tasks.refresh_visual_search_index": {"queue": default_q},
+            "src.app.tasks.model_ops_tasks.snapshot_risk_register_daily": {"queue": default_q},
             "src.app.tasks.incident_ops_tasks.check_incident_sla_breaches": {"queue": default_q},
             "src.app.tasks.incident_ops_tasks.trace_broker_recovery": {"queue": default_q},
         },

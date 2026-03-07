@@ -32,6 +32,7 @@ from src.app.services.geoip import enrich_ip
 from src.app.observability.metrics import record_geo_velocity_anomaly
 from src.app.security.jailbreak_embedding_guard import is_embedding_jailbreak
 from src.app.security.dread_scorer import compute_dread, infer_kill_chain_stage as dread_kill_chain
+from src.app.security.atlas_map import atlas_dimensions
 
 
 def _load_json(path: str) -> Dict:
@@ -918,6 +919,13 @@ def emit_security_event(path: str, payload: Dict[str, Any], event_time: str | No
                     pass
 
             details_blob = {"payload": sanitized, "analysis": details_l}
+            try:
+                atlas_dim = atlas_dimensions(
+                    details_l.get("mitre_atlas") if isinstance(details_l, dict) else []
+                )
+                details_blob["analysis"].update(atlas_dim)
+            except Exception:
+                pass
 
             # Resolve request-scoped session / engine if available
             engine_for_use = None

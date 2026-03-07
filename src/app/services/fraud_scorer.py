@@ -5,6 +5,7 @@ import logging
 import json
 import os
 import re
+import ipaddress
 
 from sqlalchemy import text
 from src.app.models.db import db_session
@@ -58,6 +59,14 @@ def _load_hash_intel(*, env_hashes: str, env_path: str) -> set[str]:
     return out
 
 
+def _is_public_ip(value: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(str(value or "").strip())
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
+    except Exception:
+        return False
+
+
 class FraudScorer:
     WEIGHTS = {
         "image_hash_match_fraud_db": 0.35,
@@ -88,6 +97,7 @@ class FraudScorer:
         "asn_datacenter_session": 0.25,
         "asn_known_proxy_tor": 0.30,
         "mid_session_country_change": 0.35,
+        "geoip_lookup_unavailable": 0.12,
         # Behavioral biometrics
         "biometric_mouse_bot_pattern": 0.30,
         "biometric_typing_bot_pattern": 0.30,
@@ -133,6 +143,7 @@ class FraudScorer:
         "asn_datacenter_session": "network",
         "asn_known_proxy_tor": "network",
         "mid_session_country_change": "geo",
+        "geoip_lookup_unavailable": "network",
         "cv_blur_score_low": "cv",
         "cv_histogram_anomaly": "cv",
         "cv_metadata_stripped": "cv",
@@ -439,6 +450,8 @@ class BehavioralFraudDetector:
                     # ASN: known VPN/proxy/Tor
                     if bool(geo.get("is_vpn")):
                         signals["asn_known_proxy_tor"] = True
+                elif _is_public_ip(source_ip):
+                    signals["geoip_lookup_unavailable"] = True
             # Mid-session country change
             prev_country = str(session_data.get("previous_ip_country") or "").upper()
             curr_country = str(session_data.get("ip_country") or "").upper()
@@ -446,6 +459,9 @@ class BehavioralFraudDetector:
                 signals["mid_session_country_change"] = True
         except (ImportError, RuntimeError, TypeError, ValueError) as exc:
             logger.warning("fraud_scorer.geoip_enrichment_failed: %s", exc)
+            source_ip = str(session_data.get("ip") or session_data.get("source_ip") or "")
+            if _is_public_ip(source_ip):
+                signals["geoip_lookup_unavailable"] = True
 
         # ── Behavioral biometrics (mouse, typing, tap, scroll) ──
         try:

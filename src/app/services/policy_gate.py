@@ -135,6 +135,13 @@ class PolicyGate:
         ctx = context if isinstance(context, dict) else {}
         cond = ctx.get("abac_conditions") if isinstance(ctx.get("abac_conditions"), dict) else {}
         violations: List[str] = []
+        strict_required = str(self.flags.get("ABAC_STRICT_REQUIRED_FIELDS", __import__("os").getenv("ABAC_STRICT_REQUIRED_FIELDS", "0"))).strip().lower() in ("1", "true", "yes", "on")
+        if not cond:
+            return {
+                "allow": True,
+                "reason": "abac_not_configured",
+                "violations": [],
+            }
 
         def _normalize_ip(raw: Any) -> str:
             s = str(raw or "").strip()
@@ -178,16 +185,21 @@ class PolicyGate:
                     return True
             return False
 
-        ip_allowlist = cond.get("ip_allowlist") if isinstance(cond.get("ip_allowlist"), list) else []
+        ip_allowlist = cond.get("ip_allowlist") if isinstance(cond.get("ip_allowlist"), list) else None
         source_ip = _normalize_ip(ctx.get("source_ip") or "")
-        if ip_allowlist:
-            if not source_ip:
-                violations.append("source_ip_missing_for_allowlist")
-            elif not _ip_allowed(source_ip, ip_allowlist):
-                violations.append("source_ip_not_allowlisted")
+        if ip_allowlist is None and strict_required:
+            violations.append("ip_allowlist_missing")
+        elif ip_allowlist is not None and len(ip_allowlist) == 0 and strict_required:
+            violations.append("ip_allowlist_empty")
+        elif ip_allowlist and not source_ip:
+            violations.append("source_ip_missing_for_allowlist")
+        elif ip_allowlist and not _ip_allowed(source_ip, ip_allowlist):
+            violations.append("source_ip_not_allowlisted")
 
         min_trust_raw = cond.get("min_trust_score")
-        if min_trust_raw is not None:
+        if min_trust_raw is None and strict_required:
+            violations.append("min_trust_score_missing")
+        elif min_trust_raw is not None:
             try:
                 min_trust = float(min_trust_raw)
                 trust_score = float(ctx.get("trust_score") if ctx.get("trust_score") is not None else 0.0)
@@ -198,7 +210,9 @@ class PolicyGate:
 
         # "HH:MM-HH:MM" in UTC, simple and deterministic for policy files.
         tw = str(cond.get("time_window") or "").strip()
-        if tw and "-" in tw:
+        if not tw and strict_required:
+            violations.append("time_window_missing")
+        elif "-" in tw:
             try:
                 start_s, end_s = [p.strip() for p in tw.split("-", 1)]
                 sh, sm = [int(x) for x in start_s.split(":", 1)]
@@ -217,6 +231,8 @@ class PolicyGate:
                     violations.append("outside_time_window")
             except Exception:
                 violations.append("invalid_time_window")
+        elif tw and strict_required:
+            violations.append("invalid_time_window")
 
         return {
             "allow": len(violations) == 0,

@@ -431,6 +431,19 @@ def log_decision(
         except Exception:
             logging.exception("PolicyEvaluator.evaluate_and_persist failed")
 
+        # Optional RAGAS evaluation on decision write (production path).
+        try:
+            ragas_enabled = str(os.getenv("RAGAS_EVAL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+            if ragas_enabled:
+                try:
+                    from src.app.services.ragas_eval import evaluate_and_persist as _ragas_eval
+
+                    _ragas_eval(dec_id)
+                except Exception:
+                    logging.exception("ragas_eval.evaluate_and_persist failed")
+        except Exception:
+            pass
+
         # Best-effort emit a telemetry event for the stored decision
         try:
             try:

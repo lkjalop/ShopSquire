@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -78,6 +79,48 @@ def _sample_skus_for_forecast(limit: int = 40) -> List[str]:
     return out
 
 
+def _fetch_visual_products(limit: int = 50000) -> tuple[List[Dict[str, Any]], str | None]:
+    out: List[Dict[str, Any]] = []
+    max_updated_at: str | None = None
+    with db_session() as db:
+        try:
+            rows = db.execute(
+                text(
+                    "SELECT sku, name, brand, price_cents, specs, COALESCE(updated_at, created_at) AS ts "
+                    "FROM products LIMIT :lim"
+                ),
+                {"lim": int(limit)},
+            ).fetchall()
+            has_ts = True
+        except Exception:
+            rows = db.execute(
+                text("SELECT sku, name, brand, price_cents, specs FROM products LIMIT :lim"),
+                {"lim": int(limit)},
+            ).fetchall()
+            has_ts = False
+        for r in rows or []:
+            specs = {}
+            if r[4]:
+                try:
+                    specs = json.loads(r[4]) if isinstance(r[4], str) else r[4]
+                except Exception:
+                    specs = {}
+            if has_ts and len(r) > 5 and r[5] is not None:
+                ts = str(r[5])
+                if not max_updated_at or ts > max_updated_at:
+                    max_updated_at = ts
+            out.append(
+                {
+                    "sku": str(r[0] or ""),
+                    "name": str(r[1] or ""),
+                    "brand": str(r[2] or ""),
+                    "price_cents": int(r[3] or 0),
+                    "specs": specs if isinstance(specs, dict) else {},
+                }
+            )
+    return out, max_updated_at
+
+
 @celery_app.task(bind=True, name="src.app.tasks.model_ops_tasks.train_recommend_cf_nightly")
 def train_recommend_cf_nightly(self) -> Dict[str, Any]:
     lookback_days = 120
@@ -151,3 +194,47 @@ def snapshot_forecast_governance(self) -> Dict[str, Any]:
     }
     _record_governance_run(run_type="forecast_governance_snapshot", status=status, metadata=out)
     return out
+
+
+@celery_app.task(bind=True, name="src.app.tasks.model_ops_tasks.refresh_visual_search_index")
+def refresh_visual_search_index(self) -> Dict[str, Any]:
+    enabled = str(os.getenv("VISUAL_SEARCH_REFRESH_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        out = {"status": "disabled"}
+        _record_governance_run(run_type="visual_search_index_refresh", status="disabled", metadata=out)
+        return out
+    try:
+        from src.app.services.visual_search import build_index, status as vs_status, try_load_persisted_index
+
+        try_load_persisted_index()
+        st = vs_status()
+        fresh = not bool(((st.get("freshness") or {}).get("stale")))
+        if fresh and int(st.get("index_size") or 0) > 0:
+            out = {"status": "skipped_fresh", "index_size": int(st.get("index_size") or 0), "freshness": st.get("freshness")}
+            _record_governance_run(run_type="visual_search_index_refresh", status="skipped", metadata=out)
+            return out
+        products, max_ts = _fetch_visual_products(limit=50000)
+        n = build_index(products, persist=True, source="celery_refresh", catalog_max_updated_at=max_ts)
+        out = {"status": "ok", "indexed": n, "catalog_size": len(products), "catalog_max_updated_at": max_ts, "post_status": vs_status()}
+        _record_governance_run(run_type="visual_search_index_refresh", status="ok", metadata=out)
+        return out
+    except Exception as exc:
+        out = {"status": "failed", "error": str(exc)[:300]}
+        _record_governance_run(run_type="visual_search_index_refresh", status="failed", metadata=out)
+        return out
+
+
+@celery_app.task(bind=True, name="src.app.tasks.model_ops_tasks.snapshot_risk_register_daily")
+def snapshot_risk_register_daily(self) -> Dict[str, Any]:
+    days = max(1, min(365, int(float(os.getenv("RISK_REGISTER_SNAPSHOT_WINDOW_DAYS", "30") or 30))))
+    try:
+        from src.app.routers.admin_grc import _take_snapshot
+
+        rows = _take_snapshot(days=days)
+        out = {"status": "ok", "days": days, "snapshot_count": len(rows)}
+        _record_governance_run(run_type="risk_register_snapshot", status="ok", metadata=out)
+        return out
+    except Exception as exc:
+        out = {"status": "failed", "days": days, "error": str(exc)[:300]}
+        _record_governance_run(run_type="risk_register_snapshot", status="failed", metadata=out)
+        return out

@@ -18,10 +18,7 @@ router = APIRouter(prefix="/api/v1/visual-search", tags=["visual-search"])
 @router.get("/status")
 async def visual_search_status() -> Dict[str, Any]:
     """Health-check: reports whether the CLIP+FAISS stack is loaded."""
-    return {
-        "available": vs.is_available(),
-        "index_size": len(vs._product_map),
-    }
+    return vs.status()
 
 
 @router.post("/query")
@@ -93,5 +90,6 @@ async def visual_search_reindex() -> Dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Catalog query failed: {exc}")
 
-    n = vs.build_index(products)
-    return {"indexed": n, "available": vs.is_available()}
+    n = vs.build_index(products, persist=True, source="api_reindex")
+    st = vs.status()
+    return {"indexed": n, "available": vs.is_available(), "status": st}

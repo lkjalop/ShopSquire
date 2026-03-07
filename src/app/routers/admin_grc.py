@@ -398,22 +398,44 @@ def _take_snapshot(days: int = 30) -> List[Dict[str, Any]]:
     today = datetime.utcnow().strftime("%Y-%m-%d")
     with db_session() as db:
         for domain in rr.get("domains", []):
-            rid = str(uuid.uuid4())
-            db.execute(
+            existing = db.execute(
                 text(
-                    "INSERT INTO risk_register_snapshots "
-                    "(id, domain, risk_score, risk_band, snapshot_date, signals_json, status) "
-                    "VALUES (:id, :domain, :score, :band, :date, :signals, 'open')"
+                    "SELECT id FROM risk_register_snapshots WHERE domain = :domain AND snapshot_date = :date LIMIT 1"
                 ),
-                {
-                    "id": rid,
-                    "domain": domain["domain"],
-                    "score": domain["risk_score"],
-                    "band": domain["risk_band"],
-                    "date": today,
-                    "signals": json.dumps(domain.get("signals", {})),
-                },
-            )
+                {"domain": domain["domain"], "date": today},
+            ).fetchone()
+            if existing:
+                rid = str(existing[0])
+                db.execute(
+                    text(
+                        "UPDATE risk_register_snapshots "
+                        "SET risk_score = :score, risk_band = :band, signals_json = :signals "
+                        "WHERE id = :id"
+                    ),
+                    {
+                        "id": rid,
+                        "score": domain["risk_score"],
+                        "band": domain["risk_band"],
+                        "signals": json.dumps(domain.get("signals", {})),
+                    },
+                )
+            else:
+                rid = str(uuid.uuid4())
+                db.execute(
+                    text(
+                        "INSERT INTO risk_register_snapshots "
+                        "(id, domain, risk_score, risk_band, snapshot_date, signals_json, status) "
+                        "VALUES (:id, :domain, :score, :band, :date, :signals, 'open')"
+                    ),
+                    {
+                        "id": rid,
+                        "domain": domain["domain"],
+                        "score": domain["risk_score"],
+                        "band": domain["risk_band"],
+                        "date": today,
+                        "signals": json.dumps(domain.get("signals", {})),
+                    },
+                )
             rows.append({"id": rid, "domain": domain["domain"], "risk_score": domain["risk_score"], "risk_band": domain["risk_band"]})
         db.commit()
     return rows

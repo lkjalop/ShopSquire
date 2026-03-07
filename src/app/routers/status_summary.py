@@ -19,6 +19,7 @@ router = APIRouter(tags=["status"])
 
 
 @router.get("/status/summary")
+@router.get("/api/v1/status/summary")
 def status_summary(
     _role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:

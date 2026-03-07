@@ -171,6 +171,53 @@ def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
     return {"budget_min": None, "budget_max": None}
 
 
+def _classify_turn_intent(query: str) -> str:
+    q = str(query or "").strip().lower()
+    if not q:
+        return "SEARCH"
+    if (
+        " vs " in q
+        or "compare" in q
+        or "difference" in q
+        or "show both" in q
+        or "which is better" in q
+    ):
+        return "COMPARE"
+    if (
+        q.startswith("why ")
+        or " why " in q
+        or "explain" in q
+        or "reason" in q
+        or "if not why" in q
+        or "overkill" in q
+        or "should i" in q
+    ):
+        return "EXPLAIN"
+    if (
+        "under $" in q
+        or "between $" in q
+        or "budget" in q
+        or "price range" in q
+        or "widen" in q
+        or "increase" in q
+        or "decrease" in q
+        or "only " in q
+        or " with " in q
+        or "without " in q
+    ):
+        return "FILTER"
+    return "SEARCH"
+
+
+def _is_budget_question(item: Dict[str, Any]) -> bool:
+    text = str((item or {}).get("text") or "").lower()
+    qid = str((item or {}).get("id") or "").lower()
+    return any(
+        tok in text or tok in qid
+        for tok in ("budget", "price range", "price", "widen_budget", "budget_range", "increase_match_space")
+    )
+
+
 def _extract_brand_mentions(query: str) -> List[str]:
     q = str(query or "").lower()
     known = ("apple", "macbook", "dell", "lenovo", "asus", "hp", "acer", "msi", "microsoft", "surface", "samsung")
@@ -437,6 +484,7 @@ async def chat_query(
     uid = str((payload or {}).get("uid") or "demo-user")
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
     source_ip = request.client.host if request and request.client else ""
+    turn_intent = _classify_turn_intent(q)
 
     # Reload confirmed slots at turn start to keep context continuity explicit.
     try:
@@ -480,6 +528,9 @@ async def chat_query(
         )
         replay_key = hashlib.sha256(replay_material.encode("utf-8")).hexdigest()
         replay_ttl = int(os.getenv("CHAT_REPLAY_TTL_SECONDS", "20") or 20)
+        require_nonce = str(os.getenv("CHAT_REPLAY_REQUIRE_NONCE", "0")).strip().lower() in ("1", "true", "yes", "on")
+        if require_nonce and not replay_nonce:
+            raise HTTPException(status_code=428, detail={"message": "nonce_required"})
         if replay_nonce:
             replay_ttl = max(replay_ttl, 120)
         if not _chat_replay_mark_once(redis, replay_key=replay_key, ttl_seconds=replay_ttl):
@@ -876,7 +927,9 @@ async def chat_query(
     except Exception:
         pass
     next_questions = data.get("next_questions") or []
-    if not next_questions and not products:
+    if turn_intent == "EXPLAIN":
+        next_questions = [x for x in next_questions if isinstance(x, dict) and not _is_budget_question(x)]
+    if not next_questions and not products and turn_intent != "EXPLAIN":
         # Fallback follow-ups when no candidates are found but backend did not emit NQE prompts.
         next_questions = [
             {"id": "widen_budget", "text": "Can we widen your budget range by $200-$400?", "goal": "increase_match_space"},
@@ -922,6 +975,7 @@ async def chat_query(
         "model_tier": data.get("model_tier"),
         "complexity": complexity_result,
         "intent_routing": intent_routing_result,
+        "turn_intent": turn_intent,
         "voice_used": bool(voice_transcript),
     }
     try:

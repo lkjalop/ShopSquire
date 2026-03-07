@@ -5,6 +5,7 @@ import os
 import threading
 import time
 from typing import Any, Dict
+from src.app.security.atlas_map import enrich_security_event
 
 
 def _bg(target, *args, **kwargs):
@@ -111,6 +112,7 @@ def emit_security_telemetry(event: Dict[str, Any]) -> None:
     try:
         # Ensure JSON-serializable copy
         payload = json.loads(json.dumps(event, ensure_ascii=False))
+        payload = enrich_security_event(payload)
     except Exception:
         payload = {"raw": str(event)}
     emit_to_splunk(payload)
