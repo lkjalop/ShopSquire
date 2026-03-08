@@ -10,6 +10,11 @@ from typing import Optional, Dict, Any, List
 from src.app.schemas.email_security import EmailEvaluateRequest, EmailEvaluateResponse
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
 from src.app.security.email_security import evaluate_email_security
+from src.app.security.prompt_injection_eval import (
+    default_prompt_injection_corpus,
+    run_prompt_injection_eval,
+    write_prompt_injection_report,
+)
 
 _ALLOWED_UPLOAD_EXTENSIONS = {".eml", ".pdf", ".msg"}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -142,6 +147,48 @@ def simulate_attack(
 
     verdict = evaluate_email_security(base, tenant_id=tenant_id)
     return {"status": "ok", "scenario": s, "tenant_id": tenant_id, "result": verdict}
+
+
+@router.get("/prompt-injection/corpus")
+def prompt_injection_corpus(
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    rows = default_prompt_injection_corpus()
+    return {
+        "status": "ok",
+        "cases": rows,
+        "count": len(rows),
+    }
+
+
+@router.post("/prompt-injection/run")
+def run_prompt_injection_corpus(
+    payload: Optional[Dict[str, Any]] = None,
+    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    body = payload or {}
+    tenant_id = str(body.get("tenant_id") or x_tenant_id or "eval-prompt-injection")
+    persist_report = bool(body.get("persist_report", True))
+    report_path = str(body.get("report_path") or "dump/reports/prompt_injection_eval_report.json")
+    report = run_prompt_injection_eval(tenant_id=tenant_id)
+    written_path = None
+    if persist_report:
+        written_path = write_prompt_injection_report(report_path, report)
+    return {
+        "status": "ok",
+        "tenant_id": tenant_id,
+        "report_path": written_path,
+        "summary": report.get("summary") or {},
+        "cases": report.get("cases") or [],
+        "repro_command": (
+            "curl -X POST http://127.0.0.1:8080/api/v1/email_security/prompt-injection/run "
+            "-H \"x-api-key: local-owner-key\" -H \"Content-Type: application/json\" "
+            "-d '{\"persist_report\":true}'"
+        ),
+    }
 
 
 def _parse_eml_to_email_dict(content: bytes) -> Dict[str, Any]:

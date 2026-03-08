@@ -102,6 +102,8 @@ def test_admin_investigation_payload_and_actions():
     assert body.get("score_breakdown", {}).get("band") == "block"
     assert isinstance(body.get("recommended_actions"), list)
     assert isinstance(body.get("explain"), dict)
+    assert isinstance((body.get("explain") or {}).get("why_flagged"), list)
+    assert "why_not_blocked" in (body.get("explain") or {})
     assert isinstance(body.get("timeline_summary"), dict)
     assert body.get("mailbox_compromise", {}).get("compromised") is True
     assert body.get("phishing_page_stage", {}).get("detected") is True

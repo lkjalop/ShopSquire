@@ -2030,6 +2030,15 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
+    # Scheduled URL re-check worker for deferred phishing detonation (T+15m/T+2h).
+    try:
+        from src.app.services.url_recheck_scheduler import start_url_recheck_scheduler, stop_url_recheck_scheduler
+
+        app.add_event_handler("startup", lambda: start_url_recheck_scheduler(app))
+        app.add_event_handler("shutdown", lambda: stop_url_recheck_scheduler(app))
+    except Exception:
+        pass
+
     # mTLS certificate expiry monitoring (alerts before certificate expiration)
     try:
         from src.app.services.mtls_cert_monitor import start_mtls_cert_monitor, stop_mtls_cert_monitor

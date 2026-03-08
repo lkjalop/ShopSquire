@@ -89,3 +89,7 @@ class EmailEvaluateResponse(BaseModel):
     decision_id: Optional[str] = None
     decision_trace_id: Optional[str] = None
     dns_auth: Optional[Dict[str, Any]] = None
+    playbook_run: Optional[Dict[str, Any]] = None
+    semantic_bec_score: Optional[float] = None
+    coverage_limits: Optional[Dict[str, Any]] = None
+    explainability_card: Optional[Dict[str, Any]] = None

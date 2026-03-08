@@ -17,7 +17,13 @@ from src.app.config import load_feature_flags, get_settings
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
 from src.app.services.security_playbooks import get_cv_playbook_by_id
 from src.app.security.email_security import evaluate_email_security
-from src.app.security.siem_adapter import get_handoff_reliability, list_handoff_dlq, requeue_handoff
+from src.app.security.siem_adapter import (
+    get_handoff_dashboard,
+    get_handoff_reliability,
+    list_handoff_dlq,
+    replay_handoff_dlq,
+    requeue_handoff,
+)
 from src.app.services.posthoc_labeling import record_outcome
 from src.app.services.decision_log import log_trace_event
 from src.app.security.threshold_tuning import recompute_thresholds_from_corrections
@@ -25,6 +31,21 @@ from src.app.security.threat_intel_store import list_indicators, upsert_indicato
 from src.app.services.decision_replay import replay_decision
 from src.app.services.ml_decision_gate import score_with_learned_model, gate_decision
 from src.app.services.ml_decision_gate_training import train_gate_from_db, save_gate_artifact
+from src.app.services.url_recheck_scheduler import (
+    get_url_recheck_dashboard,
+    replay_failed_url_rechecks,
+    run_scheduled_url_rechecks_cycle,
+)
+from src.app.security.policy_pack_release import (
+    create_policy_pack_release,
+    get_policy_pack_release,
+    list_policy_pack_releases,
+)
+from src.app.security.adversarial_email_pipeline import (
+    generate_adversarial_corpus,
+    run_external_benchmark_pack,
+    write_benchmark_report,
+)
 
 
 router = APIRouter(prefix="/api/v1/admin/email_security", tags=["admin-email-security"])
@@ -438,6 +459,124 @@ def _gt_to_malicious(gt: str) -> int:
     return 0
 
 
+@router.get("/trust-score/calibration/report")
+def trust_score_calibration_report(
+    tenant_id: Optional[str] = None,
+    hours: int = 24 * 30,
+    bins: int = 10,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    window_expr = f"-{max(1, min(int(hours or 24), 24 * 90))} hours"
+    bucket_n = max(3, min(int(bins or 10), 20))
+
+    rows = []
+    try:
+        with db_session() as db:
+            try:
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT evidence_json, ground_truth
+                        FROM email_security_incidents
+                        WHERE (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                          AND datetime(created_at) >= datetime('now', :window_expr)
+                        ORDER BY created_at DESC
+                        LIMIT 6000
+                        """
+                    ),
+                    {"tenant_id": tenant_id, "window_expr": window_expr},
+                ).fetchall()
+            except Exception:
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT evidence_json, '' AS ground_truth
+                        FROM email_security_incidents
+                        WHERE (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                          AND datetime(created_at) >= datetime('now', :window_expr)
+                        ORDER BY created_at DESC
+                        LIMIT 6000
+                        """
+                    ),
+                    {"tenant_id": tenant_id, "window_expr": window_expr},
+                ).fetchall()
+    except Exception:
+        rows = []
+
+    bins_out: List[Dict[str, Any]] = [
+        {
+            "bin": i,
+            "range": [round(i / float(bucket_n), 3), round((i + 1) / float(bucket_n), 3)],
+            "count": 0,
+            "labeled_count": 0,
+            "avg_score": 0.0,
+            "empirical_malicious_rate": None,
+            "gap": None,
+        }
+        for i in range(bucket_n)
+    ]
+    labeled_total = 0
+    ece = 0.0
+    score_sum = 0.0
+    score_count = 0
+
+    for r in rows or []:
+        ev = _json_load(r[0], {})
+        if not isinstance(ev, dict):
+            continue
+        trust_case = ev.get("trust_case")
+        if not isinstance(trust_case, dict):
+            continue
+        score = trust_case.get("calibrated_score")
+        if score is None:
+            score = trust_case.get("score")
+        try:
+            s = max(0.0, min(1.0, float(score)))
+        except Exception:
+            continue
+        idx = min(bucket_n - 1, int(s * bucket_n))
+        b = bins_out[idx]
+        b["count"] = int(b["count"]) + 1
+        b["avg_score"] = float(b["avg_score"]) + s
+        score_sum += s
+        score_count += 1
+
+        gt = str(r[1] or "").strip().lower()
+        if gt:
+            y = _gt_to_malicious(gt)
+            b["_label_sum"] = float(b.get("_label_sum") or 0.0) + float(y)
+            b["labeled_count"] = int(b["labeled_count"]) + 1
+            labeled_total += 1
+
+    for b in bins_out:
+        c = int(b["count"])
+        if c > 0:
+            b["avg_score"] = round(float(b["avg_score"]) / float(c), 4)
+        else:
+            b["avg_score"] = None
+        lc = int(b["labeled_count"])
+        if lc > 0:
+            rate = float(b.get("_label_sum") or 0.0) / float(lc)
+            b["empirical_malicious_rate"] = round(rate, 4)
+            if b["avg_score"] is not None:
+                gap = abs(float(b["avg_score"]) - rate)
+                b["gap"] = round(gap, 4)
+                ece += gap * (float(lc) / float(max(1, labeled_total)))
+        b.pop("_label_sum", None)
+
+    return {
+        "tenant_id": tenant_id,
+        "window_hours": int(hours or 24),
+        "bins": bucket_n,
+        "samples": int(score_count),
+        "labeled_samples": int(labeled_total),
+        "mean_calibrated_trust_score": round(float(score_sum) / float(max(1, score_count)), 4) if score_count else 0.0,
+        "ece": round(float(ece), 4) if labeled_total else None,
+        "reliability_curve": bins_out,
+    }
+
+
 @router.get("/suppliers")
 def list_suppliers(
     tenant_id: Optional[str] = None,
@@ -838,6 +977,76 @@ def connector_reliability(
     return get_handoff_reliability(hours=hours)
 
 
+@router.get("/connectors/lab-profile")
+def connector_lab_profile(
+    profile: str = "wazuh",
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    p = str(profile or "wazuh").strip().lower()
+    if p not in {"wazuh", "securityonion", "thehive"}:
+        raise HTTPException(status_code=400, detail="unsupported_profile")
+
+    # Universal approach: ShopSquire emits to one webhook URL; broker/soar fans out to target stack.
+    base = {
+        "profile": p,
+        "mode": "open_source_lab",
+        "universal_path": "SIEM_WEBHOOK_URL -> webhook broker/SOAR -> analyst queue",
+        "required_env": {
+            "SIEM_WEBHOOK_URL": "http://localhost:8088/shopsquire/events",
+        },
+        "recommended_handoff_env": {
+            "SECURITY_HANDOFF_MAX_ATTEMPTS": "3",
+            "SECURITY_HANDOFF_BACKOFF_BASE_SECONDS": "0.2",
+            "SECURITY_HANDOFF_BACKOFF_MAX_SECONDS": "3.0",
+            "SECURITY_HANDOFF_TIMEOUT_SECONDS": "4.0",
+        },
+        "validation_steps": [
+            "POST /api/v1/email_security/simulate?scenario=prompt_injection",
+            "GET /api/v1/admin/email_security/connectors/reliability?hours=24",
+            "GET /api/v1/admin/email_security/connectors/dlq?limit=20",
+            "POST /api/v1/admin/email_security/connectors/dlq/replay {\"limit\":20,\"dry_run\":false}",
+        ],
+        "analyst_push_fields": [
+            "tenant_id",
+            "decision_id",
+            "trace_id",
+            "severity",
+            "route",
+            "escalation",
+            "reasons",
+            "tags",
+            "ioc",
+            "ticket_id",
+        ],
+    }
+    if p == "wazuh":
+        base["target_notes"] = [
+            "Use a small webhook broker to convert ShopSquire JSON into Wazuh custom integration format.",
+            "Forward high-severity security_review events into analyst triage index/rule.",
+        ]
+    elif p == "securityonion":
+        base["target_notes"] = [
+            "Use broker/SOAR to forward normalized events into Security Onion ingest path.",
+            "Map severity/route to SOC alert priority and case queue routing.",
+        ]
+    else:
+        base["target_notes"] = [
+            "Push into TheHive alert intake endpoint via broker with dedupe on decision_id.",
+            "Create alert tags from route/reasons/mitre tags for analyst playbook assignment.",
+        ]
+    return base
+
+
+@router.get("/connectors/dashboard")
+def connector_dashboard(
+    hours: int = 24,
+    dlq_limit: int = 20,
+    target: Optional[str] = None,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    return get_handoff_dashboard(hours=hours, dlq_limit=dlq_limit, target=target)
+
+
 @router.get("/connectors/dlq")
 def connector_dlq(
     limit: int = 100,
@@ -846,6 +1055,17 @@ def connector_dlq(
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     return list_handoff_dlq(limit=limit, offset=offset, target=target)
+
+
+@router.post("/connectors/dlq/replay")
+def connector_dlq_replay(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    limit = int(payload.get("limit") or 50)
+    target = str(payload.get("target") or "").strip() or None
+    dry_run = bool(payload.get("dry_run", False))
+    return replay_handoff_dlq(limit=limit, target=target, dry_run=dry_run)
 
 
 @router.post("/connectors/dlq/{item_id}/requeue")
@@ -857,6 +1077,36 @@ def connector_dlq_requeue(
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail="not_found")
     return out
+
+
+@router.get("/url-recheck/dashboard")
+def url_recheck_dashboard(
+    hours: int = 24,
+    limit: int = 20,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    return get_url_recheck_dashboard(hours=hours, limit=limit)
+
+
+@router.post("/url-recheck/run-cycle")
+def url_recheck_run_cycle(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    max_jobs = int(payload.get("max_jobs") or 50)
+    now_epoch = payload.get("now_epoch")
+    now_val = int(now_epoch) if now_epoch is not None else None
+    return run_scheduled_url_rechecks_cycle(max_jobs=max_jobs, now_epoch=now_val)
+
+
+@router.post("/url-recheck/replay-failed")
+def url_recheck_replay_failed(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    limit = int(payload.get("limit") or 50)
+    dry_run = bool(payload.get("dry_run", False))
+    return replay_failed_url_rechecks(limit=limit, dry_run=dry_run)
 
 
 @router.post("/feedback/bulk_label")
@@ -1657,6 +1907,74 @@ def ops_readiness(
     }
 
 
+@router.post("/policy-pack/release")
+def policy_pack_release(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    changelog = payload.get("changelog")
+    rows = [str(x) for x in (changelog or []) if str(x or "").strip()] if isinstance(changelog, list) else []
+    signer = str(payload.get("signer") or role or "system")
+    rel = create_policy_pack_release(changelog=rows, signer=signer)
+    return {"ok": True, "release": rel}
+
+
+@router.get("/policy-pack/releases")
+def policy_pack_releases(
+    limit: int = 20,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    return list_policy_pack_releases(limit=limit)
+
+
+@router.get("/policy-pack/releases/{version}")
+def policy_pack_release_get(
+    version: str,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    rel = get_policy_pack_release(version)
+    if not rel.get("found"):
+        raise HTTPException(status_code=404, detail="not_found")
+    return rel
+
+
+@router.post("/adversarial/generate")
+def adversarial_generate(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    n = int(payload.get("n") or 20)
+    seed = int(payload.get("seed") or 7)
+    rows = generate_adversarial_corpus(n=n, seed=seed)
+    return {"status": "ok", "count": len(rows), "seed": seed, "rows": rows}
+
+
+@router.post("/benchmarks/external/run")
+def run_external_benchmark(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    _ = role
+    tenant_id = str(payload.get("tenant_id") or "benchmark-pack")
+    persist_report = bool(payload.get("persist_report", True))
+    report_path = str(payload.get("report_path") or "dump/reports/external_benchmark_pack_v1.json")
+    n = int(payload.get("n") or 24)
+    seed = int(payload.get("seed") or 11)
+    corpus = generate_adversarial_corpus(n=n, seed=seed)
+    report = run_external_benchmark_pack(tenant_id=tenant_id, corpus=corpus)
+    written = write_benchmark_report(report_path, report) if persist_report else None
+    return {
+        "status": "ok",
+        "tenant_id": tenant_id,
+        "report_path": written,
+        "summary": report.get("summary") or {},
+        "table": report.get("rows") or [],
+    }
+
+
 @router.get("/investigations/{incident_id}")
 def get_investigation(
     incident_id: str,
@@ -1674,6 +1992,7 @@ def get_investigation(
     mailbox_compromise = (evidence or {}).get("mailbox_compromise") if isinstance(evidence, dict) else {}
     phishing_page_stage = (evidence or {}).get("phishing_page_stage") if isinstance(evidence, dict) else {}
     bec_kill_chain = (evidence or {}).get("bec_kill_chain") if isinstance(evidence, dict) else {}
+    explainability_card = (evidence or {}).get("explainability_card") if isinstance(evidence, dict) else {}
     timeline: List[Dict[str, Any]] = []
     if trace_id:
         try:
@@ -1762,6 +2081,9 @@ def get_investigation(
         "phishing_page_stage": phishing_page_stage or {},
         "bec_kill_chain": bec_kill_chain or {},
         "top_signal_contributions": list((score_breakdown or {}).get("contributions") or [])[:10],
+        "explainability_card": explainability_card or {},
+        "why_flagged": list((explainability_card or {}).get("why_flagged") or (incident.get("reasons") or []))[:10],
+        "why_not_blocked": str((explainability_card or {}).get("why_not_blocked") or ""),
     }
     type_counts: Dict[str, int] = {}
     for ev in timeline:

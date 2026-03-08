@@ -25,8 +25,12 @@ from src.app.security.email_attachment_parser import hydrate_attachments_from_by
 from src.app.security.email_header_forensics import analyze_email_headers
 from src.app.security.mailbox_compromise import analyze_mailbox_compromise
 from src.app.security.phishing_page_detector import analyze_phishing_targets
+from src.app.security.yara_email_scan import scan_email_yara
+from src.app.security.semantic_bec_scorer import score_semantic_bec
+from src.app.security.thread_conversation_graph import analyze_thread_conversation_graph
 from src.app.security.bec_kill_chain import infer_bec_kill_chain
 from src.app.security.bimi_verifier import verify_bimi_provider_backed
+from src.app.security.ransomware_detector import analyze_ransomware_artifacts, coverage_limits as ransomware_coverage_limits
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
 from src.app.security.email_dns_verify import run_dns_auth_checks
@@ -343,6 +347,79 @@ def _sandbox_ioc_stage(enrichment: Dict[str, Any], detonation: Dict[str, Any], i
     }
 
 
+def _build_explainability_card(
+    *,
+    verdict: Dict[str, Any],
+    extracted: Dict[str, Any],
+    artifact_intel: Dict[str, Any] | None,
+    ioc_quality: Dict[str, Any] | None,
+    semantic_bec: Dict[str, Any] | None,
+    yara_scan: Dict[str, Any] | None,
+    ransomware_artifact: Dict[str, Any] | None,
+    dmarc_fail: bool,
+) -> Dict[str, Any]:
+    v = verdict if isinstance(verdict, dict) else {}
+    reasons = [str(x) for x in (v.get("reasons") or []) if str(x or "").strip()]
+    route = str(v.get("route") or "auto_resolve")
+    action = str(v.get("verdict_action") or "allow")
+    severity = str(v.get("severity") or "info")
+    inds = [i for i in (v.get("indicators") or []) if isinstance(i, dict)]
+    top_types = [str((i or {}).get("type") or "") for i in inds if str((i or {}).get("type") or "").strip()][:12]
+
+    contributions = []
+    try:
+        score = ((artifact_intel or {}).get("signal_scores") if isinstance(artifact_intel, dict) else {}) or {}
+        contrib = list(score.get("contributions") or [])
+        for c in contrib[:10]:
+            if isinstance(c, dict):
+                contributions.append(
+                    {
+                        "feature": str(c.get("type") or c.get("feature") or "unknown"),
+                        "weight": float(c.get("weight") or c.get("score") or 0.0),
+                        "source": "artifact_intel",
+                    }
+                )
+    except Exception:
+        contributions = []
+    if not contributions:
+        for t in top_types[:10]:
+            contributions.append({"feature": t, "weight": 1.0, "source": "indicator"})
+
+    why_flagged = reasons[:8] if reasons else ["no_high_risk_reasons"]
+    if route == "security_review":
+        why_not_blocked = "Not applicable: routed to security review due to fail-closed/high-confidence controls."
+    elif route == "human_review":
+        why_not_blocked = "Not fully blocked because controls indicate risk but do not meet hard-block/fail-closed threshold."
+    else:
+        why_not_blocked = "Not blocked because hard-fail controls were not triggered and policy/trust gates allowed resolution."
+
+    card = {
+        "decision": {
+            "severity": severity,
+            "route": route,
+            "verdict_action": action,
+            "escalation": str(v.get("escalation") or "none"),
+        },
+        "why_flagged": why_flagged,
+        "why_not_blocked": why_not_blocked,
+        "top_contributing_features": contributions[:10],
+        "controls_evaluated": {
+            "hard_security_triggered": bool((v.get("evidence_snapshot") or {}).get("hard_security_triggered")),
+            "oob_verification_required": bool((v.get("evidence_snapshot") or {}).get("oob_verification_required")),
+            "dmarc_fail": bool(dmarc_fail),
+            "ioc_resolution": str((ioc_quality or {}).get("resolution") or "review"),
+            "semantic_bec_score": float((semantic_bec or {}).get("score") or 0.0),
+            "yara_match_count": int((yara_scan or {}).get("match_count") or 0),
+            "ransomware_signal_count": int((ransomware_artifact or {}).get("signal_count") or 0),
+        },
+    }
+    card["analyst_summary"] = (
+        f"Flagged due to {', '.join(why_flagged[:3])}. "
+        f"Final route is {route} with action {action}."
+    )
+    return card
+
+
 def _persist_incident(
     *,
     tenant_id: str | None,
@@ -360,7 +437,7 @@ def _persist_incident(
     ticket_created: bool,
     ticket_rate_limited: bool,
     ticket_deduped: bool,
-) -> None:
+) -> str | None:
     import json
     import uuid
     from sqlalchemy import text
@@ -463,7 +540,7 @@ def _persist_incident(
                 except Exception:
                     cols = []
                 if not cols:
-                    return
+                    return None
                 colset = set(str(c) for c in cols)
                 full_cols = {
                     "id", "tenant_id", "provider", "supplier_key_hash", "conversation_id_hash", "message_id_hash", "ticket_id",
@@ -476,11 +553,12 @@ def _persist_incident(
                 elif minimal_cols.issubset(colset):
                     db.execute(insert_min_stmt, payload)
                 else:
-                    return
+                    return None
                 db.commit()
         except Exception:
             # Best-effort persistence (schema may be absent in SQLite-only envs).
-            return
+            return None
+    return inc_id
 
 
 def _parse_dmarc_xml(xml_bytes: bytes) -> Dict[str, Any]:
@@ -734,6 +812,80 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         ocr_sanitization_meta = {"gate": "ocr_qr_sanitization", "blocked_qr_url_count": 0, "error": "ocr_sanitize_failed"}
 
     extracted = extract_indicators(email, tenant_id=tenant_id)
+    yara_scan: Dict[str, Any] = {"engine": "disabled", "rules_loaded": 0, "match_count": 0, "matches": []}
+    try:
+        yara_scan = scan_email_yara(email, extracted)
+        y_matches = list(yara_scan.get("matches") or [])
+        existing_types = {str((i or {}).get("type") or "") for i in (extracted.get("indicators") or [])}
+        for m in y_matches:
+            indicator_type = str(m.get("indicator_type") or "").strip()
+            if indicator_type and indicator_type not in existing_types:
+                extracted["indicators"] = list(extracted.get("indicators") or []) + [
+                    {
+                        "type": indicator_type,
+                        "value": True,
+                        "reason": f"YARA rule matched: {m.get('rule_id')}:{m.get('rule_name')}",
+                    }
+                ]
+                existing_types.add(indicator_type)
+        extracted.setdefault("meta", {})["yara"] = {
+            "engine": yara_scan.get("engine"),
+            "rules_loaded": int(yara_scan.get("rules_loaded") or 0),
+            "match_count": int(yara_scan.get("match_count") or 0),
+        }
+    except Exception:
+        pass
+    semantic_bec: Dict[str, Any] = {
+        "enabled": False,
+        "score": 0.0,
+        "detected": False,
+        "review_threshold": 0.72,
+        "security_threshold": 0.82,
+        "provider": "none",
+        "intent_scores": {},
+        "matched_intent": None,
+        "matched_seed": None,
+    }
+    try:
+        semantic_bec = score_semantic_bec(email)
+        if bool(semantic_bec.get("detected")):
+            extracted["indicators"] = list(extracted.get("indicators") or []) + [
+                {
+                    "type": "semantic_bec_signal",
+                    "value": float(semantic_bec.get("score") or 0.0),
+                    "reason": f"Semantic BEC score {float(semantic_bec.get('score') or 0.0):.3f}",
+                }
+            ]
+        extracted.setdefault("meta", {})["semantic_bec"] = semantic_bec
+    except Exception:
+        pass
+    thread_graph: Dict[str, Any] = {
+        "thread_key": None,
+        "sender_domain": None,
+        "previous_sender_domain": None,
+        "gap_hours": 0.0,
+        "silence_threshold_hours": 168,
+        "reentry_after_silence": False,
+        "sender_domain_drift": False,
+        "indicator_count": 0,
+        "indicators": [],
+        "message_count_before": 0,
+        "distinct_sender_domains": [],
+    }
+    try:
+        thread_graph = analyze_thread_conversation_graph(email, tenant_id=tenant_id)
+        tg_inds = list(thread_graph.get("indicators") or [])
+        if tg_inds:
+            extracted["indicators"] = list(extracted.get("indicators") or []) + tg_inds
+        extracted.setdefault("meta", {})["thread_graph"] = {
+            "thread_key": thread_graph.get("thread_key"),
+            "reentry_after_silence": bool(thread_graph.get("reentry_after_silence")),
+            "sender_domain_drift": bool(thread_graph.get("sender_domain_drift")),
+            "gap_hours": float(thread_graph.get("gap_hours") or 0.0),
+            "silence_threshold_hours": int(thread_graph.get("silence_threshold_hours") or 0),
+        }
+    except Exception:
+        pass
 
     # Inject DNS discrepancy indicators discovered above.
     try:
@@ -822,6 +974,30 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 pass
     except Exception:
         artifact_intel = {}
+    ransomware_artifact = {
+        "mode": "artifact_only_pre_execution",
+        "signal_count": 0,
+        "signals": {},
+        "indicators": [],
+        "coverage_limits": ransomware_coverage_limits(),
+    }
+    try:
+        ransomware_artifact = analyze_ransomware_artifacts(email)
+        r_inds = list((ransomware_artifact or {}).get("indicators") or [])
+        if r_inds:
+            extracted["indicators"] = list(extracted.get("indicators") or []) + r_inds
+        extracted.setdefault("meta", {})["ransomware_artifact"] = {
+            "mode": str((ransomware_artifact or {}).get("mode") or "artifact_only_pre_execution"),
+            "signal_count": int((ransomware_artifact or {}).get("signal_count") or 0),
+        }
+    except Exception:
+        ransomware_artifact = {
+            "mode": "artifact_only_pre_execution",
+            "signal_count": 0,
+            "signals": {},
+            "indicators": [],
+            "coverage_limits": ransomware_coverage_limits(),
+        }
     mailbox_compromise = {}
     try:
         mailbox_compromise = analyze_mailbox_compromise(email)
@@ -918,6 +1094,16 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             extracted["indicators"] = list(extracted.get("indicators") or []) + [
                 {"type": "bimi_provider_verification_failed", "value": True, "reason": "BIMI verification failed across provider/DNS/logo checks"}
             ]
+        visual = (bimi.get("visual_similarity") if isinstance(bimi, dict) else {}) or {}
+        if bool(visual.get("spoof_suspected")):
+            extracted["indicators"] = list(extracted.get("indicators") or []) + [
+                {
+                    "type": "bimi_visual_brand_mismatch",
+                    "value": float(visual.get("brand_spoof_score") or 0.0),
+                    "reason": "BIMI visual brand similarity indicates possible lookalike spoofing",
+                }
+            ]
+            extracted.setdefault("meta", {})["bimi_visual_similarity"] = visual
     except Exception:
         pass
 
@@ -928,6 +1114,112 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     dmarc_result = str(email.get("dmarc_result") or "").lower()
     dmarc_policy = str(email.get("dmarc_policy") or "").lower()
     v = compute_verdict(email, extracted, dmarc_fail=dmarc_fail)
+    try:
+        y_matches = list((yara_scan or {}).get("matches") or [])
+        y_mitre = []
+        high_conf = False
+        for m in y_matches:
+            if float(m.get("confidence") or 0.0) >= 0.85:
+                high_conf = True
+            corr = m.get("correlation") if isinstance(m.get("correlation"), dict) else {}
+            y_mitre.extend([str(x) for x in (corr.get("mitre_attack") or []) if str(x)])
+        if y_matches:
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["yara_rule_match_detected"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + [f"yara:{str(m.get('rule_id') or '').strip().lower()}" for m in y_matches if str(m.get("rule_id") or "").strip()]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + [f"mitre:{m}" for m in y_mitre if m]))
+            if high_conf:
+                v["severity"] = "error"
+                v["route"] = "security_review"
+                v["verdict_action"] = "security_review"
+                v["escalation"] = "security_middleware"
+                v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["yara_high_confidence_match"]))
+            elif v.get("route") == "auto_resolve":
+                v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+                v["route"] = "human_review"
+                v["verdict_action"] = "quarantine"
+                v["escalation"] = "human_review"
+                v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["yara_review_gate"]))
+    except Exception:
+        pass
+    try:
+        sem_score = float((semantic_bec or {}).get("score") or 0.0)
+        sem_review = float((semantic_bec or {}).get("review_threshold") or 0.72)
+        sem_security = float((semantic_bec or {}).get("security_threshold") or 0.82)
+        if sem_score >= sem_security:
+            v["severity"] = "error"
+            v["route"] = "security_review"
+            v["verdict_action"] = "security_review"
+            v["escalation"] = "security_middleware"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["semantic_bec_security_threshold"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["semantic_bec", "semantic_bec:high"]))
+        elif sem_score >= sem_review and v.get("route") == "auto_resolve":
+            v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+            v["route"] = "human_review"
+            v["verdict_action"] = "quarantine"
+            v["escalation"] = "human_review"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["semantic_bec_review_threshold"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["semantic_bec", "semantic_bec:review"]))
+        v["semantic_bec_score"] = round(sem_score, 4)
+    except Exception:
+        pass
+    try:
+        r_types = {str((i or {}).get("type") or "") for i in (v.get("indicators") or [])}
+        strong = {
+            "ransomware_shadow_copy_deletion_command",
+            "ransomware_office_to_script_chain_indicator",
+        }
+        weak = {
+            "ransomware_attachment_entropy_hint",
+            "ransomware_canary_targeting_pattern",
+        }
+        if r_types & strong:
+            v["severity"] = "error"
+            v["route"] = "security_review"
+            v["verdict_action"] = "security_review"
+            v["escalation"] = "security_middleware"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["ransomware_artifact_strong_signal"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["ransomware_artifact", "ransomware_artifact:strong"]))
+        elif (r_types & weak) and v.get("route") == "auto_resolve":
+            v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+            v["route"] = "human_review"
+            v["verdict_action"] = "quarantine"
+            v["escalation"] = "human_review"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["ransomware_artifact_review_signal"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["ransomware_artifact", "ransomware_artifact:review"]))
+    except Exception:
+        pass
+    try:
+        reentry = bool(thread_graph.get("reentry_after_silence"))
+        drift = bool(thread_graph.get("sender_domain_drift"))
+        if reentry and drift:
+            v["severity"] = "error"
+            v["route"] = "security_review"
+            v["verdict_action"] = "security_review"
+            v["escalation"] = "security_middleware"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["thread_reentry_sender_drift_combo"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["thread_graph", "thread_graph:drift", "thread_graph:reentry"]))
+        elif (reentry or drift) and v.get("route") == "auto_resolve":
+            v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+            v["route"] = "human_review"
+            v["verdict_action"] = "quarantine"
+            v["escalation"] = "human_review"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["thread_graph_review"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["thread_graph"]))
+    except Exception:
+        pass
+    try:
+        bimi_visual = ((extracted.get("meta") or {}).get("bimi_visual_similarity") if isinstance(extracted, dict) else {}) or {}
+        spoof_score = float(bimi_visual.get("brand_spoof_score") or 0.0)
+        if bool(bimi_visual.get("spoof_suspected")) and spoof_score >= 0.75:
+            if v.get("route") == "auto_resolve":
+                v["severity"] = "warning" if v.get("severity") == "info" else v.get("severity")
+                v["route"] = "human_review"
+                v["verdict_action"] = "quarantine"
+                v["escalation"] = "human_review"
+            v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["bimi_visual_brand_similarity_spoof"]))
+            v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["bimi_visual_similarity", "brand_spoof"]))
+    except Exception:
+        pass
     try:
         h_risk = float((header_forensics or {}).get("risk_score") or 0.0)
     except Exception:
@@ -1046,6 +1338,18 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["evidence_snapshot"]["ioc_quality"] = ioc_quality
         v["evidence_snapshot"]["header_forensics"] = header_forensics or {}
         v["evidence_snapshot"]["mailbox_compromise"] = mailbox_compromise or {}
+        v["evidence_snapshot"]["yara"] = {
+            "engine": (yara_scan or {}).get("engine"),
+            "rules_loaded": int((yara_scan or {}).get("rules_loaded") or 0),
+            "match_count": int((yara_scan or {}).get("match_count") or 0),
+            "matches": list((yara_scan or {}).get("matches") or []),
+        }
+        v["evidence_snapshot"]["semantic_bec"] = semantic_bec
+        v["evidence_snapshot"]["thread_graph"] = thread_graph
+        v["evidence_snapshot"]["ransomware_artifact"] = ransomware_artifact
+        v["evidence_snapshot"]["coverage_limits"] = (ransomware_artifact or {}).get("coverage_limits") or ransomware_coverage_limits()
+        v["evidence_snapshot"]["bimi_verification"] = ((extracted.get("meta") or {}).get("bimi_verification") if isinstance(extracted, dict) else {}) or {}
+        v["evidence_snapshot"]["bimi_visual_similarity"] = ((extracted.get("meta") or {}).get("bimi_visual_similarity") if isinstance(extracted, dict) else {}) or {}
         try:
             v["evidence_snapshot"]["artifact_intel"] = {
                 "parsed_fields": (artifact_intel.get("parsed_fields") if isinstance(artifact_intel, dict) else {}) or {},
@@ -1243,6 +1547,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         )
         trust_case = {
             "score": float(trust_case_dec.trust_score),
+            "raw_score": float(trust_case_dec.raw_trust_score),
+            "calibrated_score": float(trust_case_dec.calibrated_trust_score),
+            "calibration_source": str(trust_case_dec.calibration_source),
             "level": trust_case_dec.trust_level,
             "progressive_access": trust_case_dec.progressive_access,
             "forced_reauth": bool(trust_case_dec.forced_reauth),
@@ -1350,6 +1657,22 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             v["evidence_snapshot"]["bec_kill_chain"] = bec_kill_chain
     except Exception:
         pass
+    try:
+        explainability_card = _build_explainability_card(
+            verdict=v,
+            extracted=extracted,
+            artifact_intel=artifact_intel if isinstance(artifact_intel, dict) else {},
+            ioc_quality=ioc_quality if isinstance(ioc_quality, dict) else {},
+            semantic_bec=semantic_bec if isinstance(semantic_bec, dict) else {},
+            yara_scan=yara_scan if isinstance(yara_scan, dict) else {},
+            ransomware_artifact=ransomware_artifact if isinstance(ransomware_artifact, dict) else {},
+            dmarc_fail=bool(dmarc_fail),
+        )
+        v["explainability_card"] = explainability_card
+        if isinstance(v.get("evidence_snapshot"), dict):
+            v["evidence_snapshot"]["explainability_card"] = explainability_card
+    except Exception:
+        pass
     # Metrics: verdict
     try:
         from src.app.observability.metrics import record_email_security_verdict
@@ -1392,7 +1715,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         "access_policy": access_policy,
         "threat_correlation": threat,
         "mailbox_compromise": mailbox_compromise,
+        "ransomware_artifact": ransomware_artifact,
         "bec_kill_chain": bec_kill_chain,
+        "explainability_card": v.get("explainability_card"),
     }
     try:
         telemetry_emit(evt, severity=v["severity"], sourcetype="shopsquire:security")
@@ -1471,6 +1796,30 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "email_c2_beaconing": any(str((i or {}).get("type") or "") == "c2_beacon_pattern" for i in (v.get("indicators") or [])),
                 "unicode_confusable": any(str((i or {}).get("type") or "") in ("confusable_homoglyph_domain", "vendor_homoglyph_impersonation") for i in (v.get("indicators") or [])),
                 "thread_hijack": bool(email.get("prior_reply_chain_id")) and bool(email.get("reply_chain_id")) and str(email.get("prior_reply_chain_id")) != str(email.get("reply_chain_id")),
+                "thread_reentry_after_silence": bool(((v.get("evidence_snapshot") or {}).get("thread_graph") or {}).get("reentry_after_silence")),
+                "thread_sender_domain_drift": bool(((v.get("evidence_snapshot") or {}).get("thread_graph") or {}).get("sender_domain_drift")),
+                "semantic_bec_high_risk": float(((v.get("evidence_snapshot") or {}).get("semantic_bec") or {}).get("score") or 0.0) >= float(((v.get("evidence_snapshot") or {}).get("semantic_bec") or {}).get("security_threshold") or 0.82),
+                "yara_match": int(((v.get("evidence_snapshot") or {}).get("yara") or {}).get("match_count") or 0) > 0,
+                "yara_high_confidence": any(
+                    float((m or {}).get("confidence") or 0.0) >= 0.85
+                    for m in (((v.get("evidence_snapshot") or {}).get("yara") or {}).get("matches") or [])
+                ),
+                "ransomware_shadow_copy_command": any(
+                    str((i or {}).get("type") or "") == "ransomware_shadow_copy_deletion_command"
+                    for i in (v.get("indicators") or [])
+                ),
+                "ransomware_office_script_chain": any(
+                    str((i or {}).get("type") or "") == "ransomware_office_to_script_chain_indicator"
+                    for i in (v.get("indicators") or [])
+                ),
+                "ransomware_entropy_hint": any(
+                    str((i or {}).get("type") or "") == "ransomware_attachment_entropy_hint"
+                    for i in (v.get("indicators") or [])
+                ),
+                "ransomware_canary_targeting": any(
+                    str((i or {}).get("type") or "") == "ransomware_canary_targeting_pattern"
+                    for i in (v.get("indicators") or [])
+                ),
             }
         except Exception as exc:
             _record_runtime_error(runtime_errors, stage="security_signal_map", exc=(exc if isinstance(exc, Exception) else RuntimeError(str(exc))))
@@ -1489,11 +1838,21 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 "attachment_ingest_gate": (v.get("evidence_snapshot") or {}).get("attachment_ingest_gate"),
                 "ocr_qr_sanitization": (v.get("evidence_snapshot") or {}).get("ocr_qr_sanitization"),
                 "trust_case": trust_case,
+                "semantic_bec": (v.get("evidence_snapshot") or {}).get("semantic_bec"),
+                "yara": (v.get("evidence_snapshot") or {}).get("yara"),
+                "thread_graph": (v.get("evidence_snapshot") or {}).get("thread_graph"),
+                "ransomware_artifact": (v.get("evidence_snapshot") or {}).get("ransomware_artifact"),
+                "coverage_limits": (v.get("evidence_snapshot") or {}).get("coverage_limits"),
             },
         )
     except Exception as exc:
         _record_runtime_error(runtime_errors, stage="security_framework_correlation", exc=(exc if isinstance(exc, Exception) else RuntimeError(str(exc))))
         security_analysis = None
+    try:
+        if isinstance(v.get("evidence_snapshot"), dict):
+            v["evidence_snapshot"]["security_analysis"] = security_analysis or {}
+    except Exception:
+        pass
 
     try:
         decision_id = log_decision(
@@ -1728,7 +2087,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         supplier_key = (meta or {}).get("from_domain") or (meta or {}).get("reply_to_domain")
     except Exception:
         supplier_key = None
-    _persist_incident(
+    incident_id = _persist_incident(
         tenant_id=tenant_id,
         provider=str(email.get("provider") or "") or None,
         message_id=str(email.get("message_id") or "") or None,
@@ -1753,6 +2112,21 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         ticket_rate_limited=ticket_rate_limited,
         ticket_deduped=ticket_deduped,
     )
+    try:
+        urls_for_recheck = [str(x.get("value") or "") for x in (v.get("iocs") or []) if str(x.get("type") or "") == "url" and x.get("value")]
+        if incident_id and urls_for_recheck:
+            from src.app.services.url_recheck_scheduler import schedule_url_rechecks
+
+            recheck_plan = schedule_url_rechecks(
+                incident_id=str(incident_id),
+                tenant_id=tenant_id,
+                decision_id=decision_id,
+                urls=urls_for_recheck,
+            )
+            if isinstance(v.get("evidence_snapshot"), dict):
+                v["evidence_snapshot"]["url_recheck"] = recheck_plan
+    except Exception:
+        pass
     try:
         update_sender_trust(email, extracted, v, tenant_id)
     except Exception:
@@ -1812,5 +2186,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             }
         except Exception:
             pass
+    try:
+        v["coverage_limits"] = (ransomware_artifact or {}).get("coverage_limits") or ransomware_coverage_limits()
+    except Exception:
+        v["coverage_limits"] = ransomware_coverage_limits()
 
     return v

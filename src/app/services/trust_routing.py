@@ -93,6 +93,9 @@ class TrustRoutingDecision:
 @dataclass
 class SecurityTrustDecision:
     trust_score: float
+    raw_trust_score: float
+    calibrated_trust_score: float
+    calibration_source: str
     trust_level: str
     progressive_access: str
     forced_reauth: bool
@@ -151,7 +154,19 @@ def fuse_security_trust_score(
         score -= 0.18
         factors["spoof_flood_penalty"] = 0.18
 
-    score = _clamp01(score)
+    raw_score = _clamp01(score)
+    calibrated_score = raw_score
+    calibration_source = "raw"
+    try:
+        from src.app.services.confidence_calibration import calibrate_confidence
+
+        calibrated_score = _clamp01(calibrate_confidence(raw_score, agent_type="email_trust_score"))
+        calibration_source = "confidence_calibration"
+    except Exception:
+        calibrated_score = raw_score
+        calibration_source = "raw"
+
+    score = calibrated_score
     forced_reauth = bool(
         ingest_blocked
         or bool(det.get("malicious"))
@@ -178,6 +193,9 @@ def fuse_security_trust_score(
     reasons = sorted(set(reasons))
     return SecurityTrustDecision(
         trust_score=round(float(score), 4),
+        raw_trust_score=round(float(raw_score), 4),
+        calibrated_trust_score=round(float(calibrated_score), 4),
+        calibration_source=calibration_source,
         trust_level=level,
         progressive_access=progressive_access,
         forced_reauth=forced_reauth,
