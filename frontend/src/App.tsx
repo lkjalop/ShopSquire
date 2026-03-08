@@ -52,6 +52,19 @@ type PendingImageContext = {
   ocrText: string;
   imageHash?: string | null;
 };
+type PanelTier = {
+  title?: string;
+  items?: Product[];
+  explanation?: string;
+};
+type RightPanelContract = {
+  mode?: 'shopping' | 'support';
+  show_tiers?: boolean;
+  budget_status?: string;
+  summary?: string;
+  lower_tier?: PanelTier;
+  higher_tier?: PanelTier;
+};
 
 type BackendStatus = {
   ok: boolean;
@@ -79,6 +92,44 @@ type ProductWhyExplanation = {
   disqualifiers?: string[];
   alternatives_not_selected?: any[];
 };
+
+type DeviceLane = 'windows' | 'macbook' | 'tablet_chromebook';
+
+function laneForProduct(p: Product): DeviceLane {
+  const name = String(p.name || '').toLowerCase();
+  const features = (p.features || []).join(' ').toLowerCase();
+  const text = `${name} ${features}`;
+  if (/macbook|apple m[0-9]|mac os|macos/.test(text)) return 'macbook';
+  if (/chromebook|chrome os|tablet|ipad|2-in-1|2 in 1|detachable/.test(text)) return 'tablet_chromebook';
+  return 'windows';
+}
+
+function laneTitle(lane: DeviceLane): string {
+  if (lane === 'macbook') return 'MacBook Options';
+  if (lane === 'tablet_chromebook') return 'Tablet / Chromebook Options';
+  return 'Windows Laptop Options';
+}
+
+function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string): string {
+  if (!items.length) {
+    if (lane === 'tablet_chromebook') return 'No strong tablet/chromebook inventory match yet. Consider widening budget or screen-size range.';
+    return 'No close matches in this lane right now. Try adjusting budget or use-case filters.';
+  }
+  const minPrice = Math.min(...items.map((p) => Number(p.price || 0)));
+  const maxPrice = Math.max(...items.map((p) => Number(p.price || 0)));
+  const budgetHint = String(budgetStatus || '').toLowerCase().includes('low')
+    ? 'Budget is tight, so value-focused picks are prioritized.'
+    : String(budgetStatus || '').toLowerCase().includes('high')
+      ? 'Budget allows performance-oriented options.'
+      : 'Recommendations balance value and use-case fit.';
+  if (lane === 'windows') {
+    return `${budgetHint} Windows picks range from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()} and are ranked for practicality and compatibility.`;
+  }
+  if (lane === 'macbook') {
+    return `${budgetHint} MacBook picks prioritize battery life and reliability, from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()}.`;
+  }
+  return `${budgetHint} Tablet/Chromebook alternatives are shown when budget or lightweight study workflows make them a better fit ($${minPrice.toLocaleString()}-$${maxPrice.toLocaleString()}).`;
+}
 
 
 function useProducts() {
@@ -228,6 +279,7 @@ export default function App() {
   };
   const [inputValue, setInputValue] = useState('');
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
+  const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
@@ -256,6 +308,7 @@ export default function App() {
   const [cart, setCart] = useState<any | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [showAdminDash, setShowAdminDash] = useState(false);
+  const [expandedLane, setExpandedLane] = useState<DeviceLane | null>(null);
   const [authUser, setAuthUser] = useState<{ email: string; name: string } | null>(() => {
     const t = localStorage.getItem('access_token');
     const e = localStorage.getItem('auth_email');
@@ -269,6 +322,27 @@ export default function App() {
   // Multimodal: attached images queued for Send
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachedThumbs, setAttachedThumbs] = useState<string[]>([]);
+
+  const laneBuckets = useMemo(() => {
+    const out: Record<DeviceLane, Product[]> = {
+      windows: [],
+      macbook: [],
+      tablet_chromebook: [],
+    };
+    for (const p of displayProducts || []) {
+      out[laneForProduct(p)].push(p);
+    }
+    return out;
+  }, [displayProducts]);
+
+  const expandedLaneProducts = useMemo(
+    () => (expandedLane ? (laneBuckets[expandedLane] || []) : []),
+    [expandedLane, laneBuckets],
+  );
+
+  useEffect(() => {
+    setExpandedLane(null);
+  }, [rightPanelMode, displayProducts]);
 
   // Dual STT (browser + Whisper)
   const stt = useDualSTT();
@@ -351,9 +425,28 @@ export default function App() {
       const j = await addCartItem(uid, sku, 1);
       setCart(j);
       setRightPanelMode('cart');
+      // Proactive post-add message in the chat
+      const addedProduct = products.find((p) => p.sku === sku);
+      const productName = addedProduct?.name || sku;
+      setChatOpen(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant' as const,
+          content: `Nice choice! **${productName}** has been added to your cart. Want to see compatible accessories, or are you ready to checkout?`,
+          timestamp: new Date(),
+        },
+      ]);
     } catch {
       // ignore for MVP
     }
+  };
+
+  /** Open the chat and immediately send a query (used by filter buttons). */
+  const openChatWithQuery = (query: string) => {
+    setChatOpen(true);
+    // Small delay so the panel finishes mounting before we fire the request
+    setTimeout(() => handleSend({ queryOverride: query }), 80);
   };
 
   const removeFromCart = async (sku: string) => {
@@ -396,6 +489,15 @@ export default function App() {
   };
 
   const hasRightPanel = rightPanelMode !== 'none';
+  const latestAssistantQuestions = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m?.role === 'assistant' && Array.isArray(m.nextQuestions) && m.nextQuestions.length > 0) {
+        return m.nextQuestions.slice(0, 4);
+      }
+    }
+    return [] as NonNullable<ChatMessage['nextQuestions']>;
+  }, [messages]);
 
   const normalizeNextQuestions = (items: any[]): { id: string; text: string; goal?: string; why_hint?: string; options?: { id: string; label: string; value?: string }[] }[] => {
     if (!Array.isArray(items)) return [];
@@ -829,6 +931,8 @@ export default function App() {
         const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
         const complexity = data.complexity || null;
         const backendApplied = data.nqe_selection_applied || null;
+        const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
+        setRightPanelContract(panelContract);
         // Update NQE history with backend-confirmed applied constraints
         if (backendApplied && Object.keys(backendApplied).length > 0 && nqeHistory.length > 0) {
           setNqeHistory(prev => {
@@ -857,7 +961,8 @@ export default function App() {
         } else if (prods.length > 0) {
           const visibleProducts = prods.slice(0, 12);
           setDisplayProducts(visibleProducts);
-          setRightPanelMode(mode === 'none' ? 'grid' : mode);
+          if (panelContract?.mode === 'support') setRightPanelMode('faq');
+          else setRightPanelMode(mode === 'none' ? 'grid' : mode);
           const whySummary = summarizeWhy(prods);
           const hasAssistantBody = typeof respAssistant === 'string' && respAssistant.trim().length > 0;
           const baseLine = hasAssistantBody
@@ -875,7 +980,8 @@ export default function App() {
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
-          setRightPanelMode(mode);
+          if (panelContract?.mode === 'support') setRightPanelMode('faq');
+          else setRightPanelMode(mode);
           const nqePrompt = formatNextQuestions(nextQuestions);
           const assistantMsg: ChatMessage = {
             role: 'assistant',
@@ -891,6 +997,7 @@ export default function App() {
     } catch (e: any) {
       setTraceId(null);
       setRightPanelMode('none');
+      setRightPanelContract(null);
       const errMsg = (e && (e.message || String(e))) ? (e.message || String(e)) : 'unknown_error';
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -1020,10 +1127,10 @@ export default function App() {
         <div className={styles.categoryBar}>
           <span className={styles.categoryTitle}>Laptops</span>
           <div className={styles.filters}>
-            <button className={styles.filterBtn}>Price</button>
-            <button className={styles.filterBtn}>RAM</button>
-            <button className={styles.filterBtn}>Brand</button>
-            <button className={styles.filterBtn}>GPU</button>
+            <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me the best value laptops sorted by price')}>Price</button>
+            <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me laptops with 16GB RAM or more')}>RAM</button>
+            <button className={styles.filterBtn} onClick={() => openChatWithQuery('What laptop brands do you carry?')}>Brand</button>
+            <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me laptops with a dedicated GPU or RTX graphics card')}>GPU</button>
           </div>
         </div>
         <ProductGrid products={products} onAdd={addToCart} viewMode="grid" />
@@ -1200,6 +1307,20 @@ export default function App() {
                   </button>
                   <button className={styles.sendBtn} onClick={handleSend} disabled={isThinking || imageRoutingInFlight}><SendIcon /></button>
                 </div>
+                {latestAssistantQuestions.length > 0 && (
+                  <div className={styles.quickChipsRow}>
+                    {latestAssistantQuestions.map((nq) => (
+                      <button
+                        key={`footer-${nq.id}`}
+                        type="button"
+                        className={styles.quickChip}
+                        onClick={() => handleQuickAction(nq.text)}
+                      >
+                        {nq.text}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1212,6 +1333,8 @@ export default function App() {
                       ? 'Comparison'
                       : rightPanelMode === 'list'
                         ? 'Detailed Specs'
+                        : rightPanelContract?.mode === 'support'
+                          ? 'Support Next Steps'
                         : rightPanelMode === 'cv'
                           ? 'CV Triage'
                           : rightPanelMode === 'cart'
@@ -1242,6 +1365,133 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode) && displayProducts.length > 0 && (
+                    <div className={styles.deviceLanePanel}>
+                      {(['windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
+                        const items = laneBuckets[lane] || [];
+                        if (!items.length) return null;
+                        return (
+                          <section key={`lane-${lane}`} className={styles.deviceLaneBlock}>
+                            <div className={styles.deviceLaneHeader}>
+                              <div className={styles.deviceLaneTitle}>{laneTitle(lane)}</div>
+                              <button
+                                className={styles.deviceLaneExpand}
+                                onClick={() => setExpandedLane(lane)}
+                                type="button"
+                              >
+                                Expand
+                              </button>
+                            </div>
+                            <div className={styles.deviceLaneCarousel}>
+                              {items.slice(0, 3).map((p) => (
+                                <article key={`lane-card-${lane}-${p.sku}`} className={styles.deviceLaneCard}>
+                                  {p.image_url ? (
+                                    <img src={p.image_url} alt={p.name} className={styles.deviceLaneImg} />
+                                  ) : (
+                                    <div className={styles.deviceLaneImgPlaceholder}>No image</div>
+                                  )}
+                                  <div className={styles.deviceLaneName}>{p.name}</div>
+                                  <div className={styles.deviceLanePrice}>${Number(p.price || 0).toLocaleString()}</div>
+                                  <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                </article>
+                              ))}
+                            </div>
+                            <div className={styles.deviceLaneSummary}>
+                              {laneSummary(lane, items, rightPanelContract?.budget_status)}
+                            </div>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {expandedLane && (
+                    <div className={styles.expandedLanePanel}>
+                      <div className={styles.expandedLaneHeader}>
+                        <div className={styles.expandedLaneTitle}>
+                          More {laneTitle(expandedLane)} ({expandedLaneProducts.length})
+                        </div>
+                        <button className={styles.iconBtn} onClick={() => setExpandedLane(null)}>Close</button>
+                      </div>
+                      <ProductGrid
+                        products={expandedLaneProducts}
+                        onAdd={addToCart}
+                        onWhy={handleWhyProduct}
+                        viewMode="detailed"
+                      />
+                    </div>
+                  )}
+
+                  {rightPanelContract?.mode === 'shopping' && rightPanelContract?.show_tiers && (
+                    <div className={styles.tierPanel}>
+                      <div className={styles.tierBlock}>
+                        <div className={styles.tierTitle}>{rightPanelContract.lower_tier?.title || 'Budget-fit options'}</div>
+                        <div className={styles.tierCarousel}>
+                          {(rightPanelContract.lower_tier?.items || []).slice(0, 4).map((p) => (
+                            <article key={`low-${p.sku}`} className={styles.tierCard}>
+                              <div className={styles.tierName}>{p.name}</div>
+                              <div className={styles.tierPrice}>${Number(p.price || 0).toLocaleString()}</div>
+                              <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                            </article>
+                          ))}
+                        </div>
+                        <div className={styles.tierExplain}>{rightPanelContract.lower_tier?.explanation}</div>
+                      </div>
+                      <div className={styles.tierBlock}>
+                        <div className={styles.tierTitle}>{rightPanelContract.higher_tier?.title || 'Performance-fit options'}</div>
+                        <div className={styles.tierCarousel}>
+                          {(rightPanelContract.higher_tier?.items || []).slice(0, 4).map((p) => (
+                            <article key={`high-${p.sku}`} className={styles.tierCard}>
+                              <div className={styles.tierName}>{p.name}</div>
+                              <div className={styles.tierPrice}>${Number(p.price || 0).toLocaleString()}</div>
+                              <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                            </article>
+                          ))}
+                        </div>
+                        <div className={styles.tierExplain}>{rightPanelContract.higher_tier?.explanation}</div>
+                      </div>
+                    </div>
+                  )}
+                  {rightPanelContract?.mode === 'support' && (
+                    <div className={styles.supportPanel}>
+                      <div className={styles.supportSummary}>{rightPanelContract.summary || 'Support workflow is active.'}</div>
+                      {Array.isArray((rightPanelContract as any).support_cards) && (rightPanelContract as any).support_cards.length > 0 && (
+                        <div className={styles.supportCards}>
+                          {(rightPanelContract as any).support_cards.map((c: any) => (
+                            <article key={String(c?.id || c?.title || Math.random())} className={styles.supportCard}>
+                              <div className={styles.supportCardTitle}>{String(c?.title || 'Support card')}</div>
+                              <div className={styles.supportCardStatus}>Status: {String(c?.status || 'unknown')}</div>
+                              <div className={styles.supportCardMessage}>{String(c?.message || '')}</div>
+                              {c?.order_ref && <div className={styles.supportCardStatus}>Order ref: {String(c.order_ref)}</div>}
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                      {Array.isArray((rightPanelContract as any).faq_playbooks) && (rightPanelContract as any).faq_playbooks.length > 0 && (
+                        <div className={styles.supportFaq}>
+                          <div className={styles.tierTitle}>FAQ Playbooks</div>
+                          {(rightPanelContract as any).faq_playbooks.map((pb: any) => (
+                            <div key={String(pb?.id || pb?.title || Math.random())} className={styles.supportFaqItem}>
+                              <div className={styles.supportFaqTitle}>{String(pb?.title || 'Playbook')}</div>
+                              <ul>
+                                {Array.isArray(pb?.steps) ? pb.steps.slice(0, 4).map((s: any, i: number) => <li key={`${pb?.id || 'pb'}-${i}`}>{String(s)}</li>) : null}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {Array.isArray((rightPanelContract as any).parallel_agents) && (rightPanelContract as any).parallel_agents.length > 0 && (
+                        <div className={styles.supportAgents}>
+                          <div className={styles.tierTitle}>Parallel agents</div>
+                          <div className={styles.tagRow}>
+                            {(rightPanelContract as any).parallel_agents.map((a: any) => (
+                              <span key={String(a)} className={styles.quickChip}>{String(a)}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (

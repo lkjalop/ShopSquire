@@ -1,0 +1,12 @@
+{
+  "tablet": {
+    "templates": [
+      {"id": "ask_budget_tier", "intent": "recommend", "product_category": "tablet", "text": "What's your budget for a tablet?", "goal": "clarify_details"},
+      {"id": "ask_platform", "intent": "recommend", "product_category": "tablet", "text": "Do you prefer iPad (iPadOS), Android, or Windows tablets?", "goal": "clarify_details"},
+      {"id": "ask_use_case", "intent": "recommend", "product_category": "tablet", "text": "What will you mainly use it for — note-taking, drawing, media, or general browsing?", "goal": "clarify_details"},
+      {"id": "ask_brand_pref", "intent": "recommend", "product_category": "tablet", "text": "Any brand preferences (Apple, Samsung, Lenovo, Microsoft)?", "goal": "clarify_details"},
+      {"id": "ask_screen_size", "intent": "recommend", "product_category": "tablet", "text": "Do you prefer a compact size (8–10\") or a larger display (11–13\")?", "goal": "clarify_details"},
+      {"id": "ask_stylus", "intent": "recommend", "product_category": "tablet", "text": "Do you need stylus/pen support for drawing or handwriting?", "goal": "clarify_details"}
+    ]
+  }
+}

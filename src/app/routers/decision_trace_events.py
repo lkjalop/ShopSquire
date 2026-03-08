@@ -551,6 +551,19 @@ def get_decision_timeline(trace_id: str, request: Request):
 
             tags = extract_tags(payload)
 
+            created_at = r[8]
+            if not created_at:
+                try:
+                    created_at = datetime.utcnow().isoformat() + "Z"
+                except Exception:
+                    created_at = None
+            if isinstance(payload, dict) and evt_type in ("input", "query_received"):
+                if not payload.get("query"):
+                    for candidate_key in ("input_query", "text", "message", "user_query"):
+                        if payload.get(candidate_key):
+                            payload["query"] = payload.get(candidate_key)
+                            break
+
             events.append({
                 "id": r[0],
                 "seq": r[1],
@@ -560,7 +573,8 @@ def get_decision_timeline(trace_id: str, request: Request):
                 "target_type": r[5],
                 "target_id": r[6],
                 "payload": payload,
-                "created_at": r[8],
+                "created_at": created_at,
+                "timestamp": created_at,
                 "tags": tags,
                 "latency_ms": lat,
             })

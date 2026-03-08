@@ -38,6 +38,20 @@ from src.app.services.intake_gate import strict_image_ingest_gate
 router = APIRouter(prefix="/api/v1/cv", tags=["cv"])
 
 
+def _is_diagnostic_qr_payload(payload: str, *, context_text: str = "") -> bool:
+    raw = str(payload or "").strip().lower()
+    ctx = str(context_text or "").strip().lower()
+    if not raw:
+        return False
+    ms_diag = (
+        "microsoft.com/fwlink" in raw
+        or "windows.com/stopcode" in raw
+        or "aka.ms/" in raw
+    )
+    bsod_ctx = any(tok in ctx for tok in ("blue screen", "bsod", "stop code", "windows crash"))
+    return bool(ms_diag and bsod_ctx)
+
+
 def _cv_runtime_readiness() -> Dict[str, Any]:
     tesseract_ok = bool(shutil.which("tesseract"))
     zbar_ok = False
@@ -163,6 +177,7 @@ async def analyze(
         image_consistency: Optional[Dict[str, Any]] = None
         qr_decode_hits: List[Dict[str, Any]] = []
         qr_prompt_injection = False
+        diagnostic_qr_count = 0
         tier2_result: Dict[str, Any] = {}
         tier2_evidence_tags: List[str] = []
         tier2_security: Dict[str, Any] = {}
@@ -289,13 +304,27 @@ async def analyze(
                 qr_decode_hits = qr.codes or []
                 qr_decode_reasons = getattr(qr, "reasons", []) or []
                 for c in qr_decode_hits:
-                    if _detect_ocr_prompt_injection(str(c.get("data") or "")):
+                    _qr_payload = str(c.get("data") or "")
+                    if _is_diagnostic_qr_payload(
+                        _qr_payload,
+                        context_text=" ".join(
+                            [
+                                str(req.description or ""),
+                                str(req.issue_type or ""),
+                                str(extracted_text or ""),
+                            ]
+                        ),
+                    ):
+                        diagnostic_qr_count += 1
+                        continue
+                    if _detect_ocr_prompt_injection(_qr_payload):
                         qr_prompt_injection = True
                         break
             except Exception as _exc:
                 _log.warning("QR/barcode decode failed: %s", _exc, exc_info=True)
                 qr_decode_hits = []
                 qr_prompt_injection = False
+                diagnostic_qr_count = 0
 
             # Fold QR findings into image-consistency UX so the buyer is prompted to reupload
             # unedited photos without codes/overlays (mirrors support_complaints behavior).
@@ -307,6 +336,17 @@ async def analyze(
                         allow_hosts = {"127.0.0.1", "localhost"}
                         for c in qr_decode_hits:
                             data = str(c.get("data") or "").strip()
+                            if _is_diagnostic_qr_payload(
+                                data,
+                                context_text=" ".join(
+                                    [
+                                        str(req.description or ""),
+                                        str(req.issue_type or ""),
+                                        str(extracted_text or ""),
+                                    ]
+                                ),
+                            ):
+                                continue
                             if data.lower().startswith(("http://", "https://")):
                                 host = (urlparse(data).hostname or "").lower()
                                 if host and host not in allow_hosts:
@@ -315,7 +355,11 @@ async def analyze(
                     except Exception:
                         qr_external_url = False
 
-                if isinstance(image_consistency, dict) and isinstance(image_consistency.get("images"), list) and qr_decode_hits:
+                suspicious_qr = bool(
+                    (len(qr_decode_hits or []) - int(diagnostic_qr_count or 0)) > 0
+                    and (qr_external_url or qr_prompt_injection)
+                )
+                if isinstance(image_consistency, dict) and isinstance(image_consistency.get("images"), list) and suspicious_qr:
                     images_out = image_consistency.get("images") or []
                     qr_files = set()
                     try:
@@ -525,9 +569,10 @@ async def analyze(
                 for k, v in security_details.items():
                     if isinstance(v, bool):
                         sec_signals[str(k)] = v
+            suspicious_qr_detected = bool((len(qr_decode_hits or []) - int(diagnostic_qr_count or 0)) > 0)
             if qr_prompt_injection:
                 sec_signals["qr_prompt_injection"] = True
-            if qr_decode_hits:
+            if suspicious_qr_detected:
                 sec_signals["qr_code_detected"] = True
             if "qr_url_present" in tier2_evidence_tags:
                 sec_signals["qr_url_present"] = True
@@ -560,7 +605,11 @@ async def analyze(
                 "route": route,
                 "threshold_version": os.getenv("SECURITY_THRESHOLD_VERSION", "security-v1"),
                 "ocr_text": (extracted_text or "")[:2000],
-                "entities": {"labels": (labels or [])[:20], "qr_code_count": len(qr_decode_hits or [])},
+                "entities": {
+                    "labels": (labels or [])[:20],
+                    "qr_code_count": max(0, len(qr_decode_hits or []) - int(diagnostic_qr_count or 0)),
+                    "diagnostic_qr_count": int(diagnostic_qr_count or 0),
+                },
             }
             if tier2_evidence_tags:
                 payload["evidence_tags"] = tier2_evidence_tags[:24]
@@ -645,6 +694,10 @@ async def analyze(
             "image_consistency": image_consistency,
             "qr_codes": qr_decode_hits[:10],
             "qr_prompt_injection": qr_prompt_injection,
+            "qr_classification": {
+                "diagnostic_qr_count": int(diagnostic_qr_count or 0),
+                "suspicious_qr_count": max(0, len(qr_decode_hits or []) - int(diagnostic_qr_count or 0)),
+            },
             "security_matrix": {
                 "details": security_details,
                 "severity": security_sev,

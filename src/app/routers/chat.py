@@ -59,7 +59,7 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
     data = response if isinstance(response, dict) else {}
     applied = data.get("nqe_selection_applied") if isinstance(data.get("nqe_selection_applied"), dict) else {}
     used = data.get("constraints_used") if isinstance(data.get("constraints_used"), dict) else {}
-    for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition"):
+    for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition", "buyer_persona", "issue_type"):
         v = applied.get(key)
         if v is None:
             v = used.get(key)
@@ -71,6 +71,10 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
             vv = used.get(key)
         if isinstance(vv, list) and vv:
             out[key] = vv[:12]
+    if isinstance(data.get("product_identity"), dict):
+        ident = data.get("product_identity") or {}
+        if ident.get("constraints"):
+            out["image_identity"] = ident.get("constraints")
     return out
 
 
@@ -175,6 +179,24 @@ def _classify_turn_intent(query: str) -> str:
     q = str(query or "").strip().lower()
     if not q:
         return "SEARCH"
+    if any(
+        tok in q
+        for tok in (
+            "warranty",
+            "return",
+            "refund",
+            "broken",
+            "damaged",
+            "crack",
+            "repair",
+            "replacement",
+            "blue screen",
+            "bsod",
+            "stop code",
+            "support",
+        )
+    ):
+        return "SUPPORT_CLAIM"
     if (
         " vs " in q
         or "compare" in q
@@ -216,6 +238,66 @@ def _is_budget_question(item: Dict[str, Any]) -> bool:
         tok in text or tok in qid
         for tok in ("budget", "price range", "price", "widen_budget", "budget_range", "increase_match_space")
     )
+
+
+def _build_right_panel_contract(
+    *,
+    products: List[Dict[str, Any]],
+    turn_intent: str,
+    budget_viability: Dict[str, Any] | None,
+    use_case_analysis: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
+        return {
+            "mode": "support",
+            "show_tiers": False,
+            "summary": "Support mode active: troubleshooting, warranty, and escalation guidance.",
+        }
+
+    items: List[Dict[str, Any]] = [p for p in (products or []) if isinstance(p, dict)]
+    if not items:
+        return {"mode": "shopping", "show_tiers": False}
+
+    prices = []
+    for p in items:
+        try:
+            prices.append(float(p.get("price") or 0.0))
+        except Exception:
+            continue
+    prices = [x for x in prices if x > 0]
+    prices.sort()
+    median_price = prices[len(prices) // 2] if prices else 0.0
+
+    lower = []
+    higher = []
+    for p in items:
+        try:
+            px = float(p.get("price") or 0.0)
+        except Exception:
+            px = 0.0
+        if px <= median_price:
+            lower.append(p)
+        else:
+            higher.append(p)
+    lower = lower[:4]
+    higher = higher[:4]
+    status = str((budget_viability or {}).get("status") or "unknown").lower()
+    show_tiers = status in {"low", "high"} or bool(use_case_analysis and len(items) >= 4)
+    return {
+        "mode": "shopping",
+        "show_tiers": bool(show_tiers),
+        "budget_status": status,
+        "lower_tier": {
+            "title": "Budget-fit options",
+            "items": lower or items[:4],
+            "explanation": "Prioritizes value, battery life, and practical everyday performance.",
+        },
+        "higher_tier": {
+            "title": "Performance-fit options",
+            "items": higher or items[:4],
+            "explanation": "Prioritizes higher CPU/GPU headroom for heavier workloads.",
+        },
+    }
 
 
 def _extract_brand_mentions(query: str) -> List[str]:
@@ -924,12 +1006,41 @@ async def chat_query(
                     ),
                 },
             )
+            if image_cv_signals_in:
+                sec_signals = {
+                    "qr_code_detected": bool(image_cv_signals_in.get("qr_code_detected")),
+                    "qr_prompt_injection": bool(image_cv_signals_in.get("qr_prompt_injection")),
+                    "qr_external_url_detected": bool(image_cv_signals_in.get("qr_external_url_detected")),
+                    "ocr_prompt_injection": bool(image_cv_signals_in.get("ocr_prompt_injection")),
+                    "manipulation_detected": bool(image_cv_signals_in.get("manipulation_detected")),
+                    "damage_detected": bool(image_cv_signals_in.get("damage_detected")),
+                }
+                sec_sev = "info"
+                if sec_signals["qr_prompt_injection"] or sec_signals["qr_external_url_detected"]:
+                    sec_sev = "high"
+                elif sec_signals["qr_code_detected"] or sec_signals["ocr_prompt_injection"] or sec_signals["manipulation_detected"]:
+                    sec_sev = "warn"
+                log_trace_event(
+                    trace_id=decision_trace_id,
+                    event_type="security_scan",
+                    source_type="agent",
+                    source_id="Security_Observer_Agent",
+                    target_type="chat",
+                    target_id=None,
+                    payload={
+                        "severity": sec_sev,
+                        "route": "review" if sec_sev in ("high", "warn") else "allow",
+                        "details": {"signals": sec_signals},
+                        "signals": sec_signals,
+                        "summary": "Image-sidecar security signal normalization",
+                    },
+                )
     except Exception:
         pass
     next_questions = data.get("next_questions") or []
-    if turn_intent == "EXPLAIN":
+    if turn_intent in ("EXPLAIN", "SUPPORT_CLAIM"):
         next_questions = [x for x in next_questions if isinstance(x, dict) and not _is_budget_question(x)]
-    if not next_questions and not products and turn_intent != "EXPLAIN":
+    if not next_questions and not products and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
         # Fallback follow-ups when no candidates are found but backend did not emit NQE prompts.
         next_questions = [
             {"id": "widen_budget", "text": "Can we widen your budget range by $200-$400?", "goal": "increase_match_space"},
@@ -961,6 +1072,10 @@ async def chat_query(
     except Exception:
         pass
 
+    budget_viability = data.get("budget_viability") if isinstance(data.get("budget_viability"), dict) else {"status": "unknown"}
+    use_case_analysis = data.get("use_case_analysis") if isinstance(data.get("use_case_analysis"), dict) else None
+    panel_intent = "SUPPORT_CLAIM" if bool(image_cv_signals_in.get("damage_detected")) else turn_intent
+    _backend_right_panel = data.get("right_panel") if isinstance(data.get("right_panel"), dict) else None
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -977,6 +1092,15 @@ async def chat_query(
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,
         "voice_used": bool(voice_transcript),
+        "budget_viability": budget_viability,
+        "use_case_analysis": use_case_analysis,
+        "buyer_persona": data.get("buyer_persona"),
+        "right_panel": _backend_right_panel or _build_right_panel_contract(
+            products=products,
+            turn_intent=panel_intent,
+            budget_viability=budget_viability,
+            use_case_analysis=use_case_analysis,
+        ),
     }
     try:
         _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)

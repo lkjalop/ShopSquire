@@ -625,6 +625,26 @@ def collect_security_matrix(
 
 @router.websocket("/{incident_id}/room/ws")
 async def ws_room(incident_id: str, websocket: WebSocket):
+    # Authenticate before accepting the WebSocket connection.
+    # Token can be provided via query param (?token=...) or cookie.
+    from src.app.security.auth import get_role_from_key, get_role_from_bearer
+
+    token = websocket.query_params.get("token")
+    role = get_role_from_key(token)
+    if not role:
+        cookie_key = websocket.cookies.get("shopsquire_api_key")
+        role = get_role_from_key(cookie_key)
+    if not role:
+        bearer = websocket.cookies.get("shopsquire_access")
+        if bearer:
+            role = get_role_from_bearer(f"Bearer {bearer}")
+    if not role:
+        await websocket.close(code=4001, reason="authentication_required")
+        return
+    if role not in (ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER):
+        await websocket.close(code=4003, reason="insufficient_role")
+        return
+
     await websocket.accept()
     q: asyncio.Queue = asyncio.Queue()
     _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)

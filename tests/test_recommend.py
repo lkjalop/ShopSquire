@@ -55,9 +55,7 @@ def test_recommend_blocks_invalid_sku_output():
         assert body.get("approval_id")
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
-
-
-def test_recommend_rollout_not_eligible_rules_only():
+        _write_flags({"TEST_FORCE_BAD_SKU": False})
     orig_retrieve = RecommendationService.retrieve_candidates
     try:
         RecommendationService.retrieve_candidates = lambda self, query, limit=10: [

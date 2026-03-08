@@ -60,6 +60,9 @@ function VerdictBadge({ type }: { type: string }) {
     query_received: '#2196F3',
     intent_analysis: '#9C27B0',
     agent_step: '#FF9800',
+    shopper_intent: '#7C3AED',
+    cart_abandonment_detected: '#FF6B35',
+    commerce_outcome: '#059669',
   };
   const color = colorMap[type] || '#6b7280';
   return <span className={styles.verdict} style={{ background: color }}>{type.replace(/_/g, ' ')}</span>;
@@ -70,6 +73,7 @@ function formatTime(ts: string | undefined): string {
   if (!ts) return '--:--:--';
   try {
     const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return '--:--:--';
     return d.toLocaleTimeString('en-US', { hour12: false });
   } catch {
     return ts.slice(11, 19) || '--:--:--';
@@ -169,7 +173,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'audit' | 'raw'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'audit' | 'raw'>('events');
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -685,6 +689,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
             <div className={styles.tabs}>
               <button className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => setActiveTab('events')}>Events</button>
               <button className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => setActiveTab('summary')}>Summary</button>
+              <button className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => setActiveTab('intent')}>Intent</button>
               <button className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => setActiveTab('multimodal')}>Multimodal</button>
               <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
               <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
@@ -769,7 +774,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                                   {evt.payload && typeof evt.payload === 'object' ? (
                                     <table className={styles.detailTable}>
                                       <tbody>
-                                        {Object.entries(evt.payload).map(([key, val]) => (
+                                        {Object.entries(evt.payload)
+                                          .filter(([key]) => !String(key || '').startsWith('_'))
+                                          .map(([key, val]) => (
                                           <tr key={key}>
                                             <td className={styles.detailKey}>{humanizeKey(key)}</td>
                                             <td className={styles.detailVal}>{renderValue(val)}</td>
@@ -974,6 +981,154 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                     <button className={styles.copyBtn} onClick={submitPosthoc}>Record Outcome</button>
                     {posthocStatus && <span className={styles.copyStatus}>{posthocStatus}</span>}
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'intent' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const intentEvt = events.find(e => e.event_type === 'shopper_intent');
+                    const abandonEvts = events.filter(e => e.event_type === 'cart_abandonment_detected');
+                    const outcomeEvts = events.filter(e => e.event_type === 'commerce_outcome');
+                    const si = intentEvt?.payload?.shopper_intent || intentEvt?.payload || null;
+                    // Also look for shopper_intent inside constraints payloads
+                    const constraintsSi = !si
+                      ? (events.find(e => e.payload?.constraints?.shopper_intent)?.payload?.constraints?.shopper_intent || null)
+                      : null;
+                    const intent = si || constraintsSi;
+                    const hasAny = intent || abandonEvts.length > 0 || outcomeEvts.length > 0;
+                    if (!hasAny) return (
+                      <div className={styles.empty}>
+                        No shopper intent signals recorded for this trace. Intent data is captured after a user query contains urgency, persona, or budget cues.
+                      </div>
+                    );
+                    const urgencyColor = (u: string) => {
+                      const level = String(u || '').toLowerCase();
+                      if (level === 'high' || level === 'urgent') return '#dc2626';
+                      if (level === 'medium' || level === 'normal') return '#d97706';
+                      return '#059669'; // low
+                    };
+                    const personaColor = '#7C3AED';
+                    return (
+                      <>
+                        {intent && (
+                          <>
+                            <div className={styles.sectionTitle}>Shopper Intent Profile</div>
+                            <div className={styles.intentBadgeRow}>
+                              {intent.persona && (
+                                <span className={styles.intentBadge} style={{ background: personaColor }}>
+                                  Persona: {intent.persona}
+                                </span>
+                              )}
+                              {intent.urgency && (
+                                <span className={styles.intentBadge} style={{ background: urgencyColor(intent.urgency) }}>
+                                  Urgency: {intent.urgency}
+                                </span>
+                              )}
+                              {intent.bundle_receptivity !== undefined && (
+                                <span className={styles.intentBadge} style={{ background: intent.bundle_receptivity ? '#0891b2' : '#6b7280' }}>
+                                  Bundle: {intent.bundle_receptivity ? 'Receptive' : 'Not receptive'}
+                                </span>
+                              )}
+                              {intent.budget_tier && (
+                                <span className={styles.intentBadge} style={{ background: '#0369a1' }}>
+                                  Budget: {intent.budget_tier}
+                                </span>
+                              )}
+                              {intent.price_sensitivity && (
+                                <span className={styles.intentBadge} style={{ background: '#92400e' }}>
+                                  Price sensitivity: {intent.price_sensitivity}
+                                </span>
+                              )}
+                            </div>
+                            {Array.isArray(intent.priority_factors) && intent.priority_factors.length > 0 && (
+                              <>
+                                <div className={styles.sectionTitle}>Priority Factors</div>
+                                <div className={styles.pillRow}>
+                                  {intent.priority_factors.map((f: string, i: number) => (
+                                    <span key={i} className={styles.pill}>{f}</span>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                            {Array.isArray(intent.accessory_affinities) && intent.accessory_affinities.length > 0 && (
+                              <>
+                                <div className={styles.sectionTitle}>Accessory Affinities</div>
+                                <div className={styles.pillRow}>
+                                  {intent.accessory_affinities.map((a: string, i: number) => (
+                                    <span key={i} className={styles.pill} style={{ background: '#e0f2fe', color: '#0369a1' }}>{a}</span>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                            {intentEvt && (
+                              <>
+                                <div className={styles.sectionTitle}>Bitemporal Metadata</div>
+                                <div className={styles.kvRow}><span>Valid From</span><span className={styles.mono}>{intentEvt.payload?.valid_from || intentEvt.timestamp || '—'}</span></div>
+                                <div className={styles.kvRow}><span>System From</span><span className={styles.mono}>{intentEvt.payload?.system_from || intentEvt.created_at || '—'}</span></div>
+                                <div className={styles.kvRow}><span>Recorded At</span><span className={styles.mono}>{formatTime(intentEvt.timestamp || intentEvt.created_at)}</span></div>
+                              </>
+                            )}
+                          </>
+                        )}
+
+                        {abandonEvts.length > 0 && (
+                          <>
+                            <div className={styles.sectionTitle}>Cart Abandonment Signals</div>
+                            <table className={styles.smallTable}>
+                              <thead>
+                                <tr><th>Session</th><th>Idle (s)</th><th>Cart Value</th><th>Persona</th><th>Action</th><th>Confidence</th></tr>
+                              </thead>
+                              <tbody>
+                                {abandonEvts.map((e, i) => {
+                                  const p = e.payload || {};
+                                  return (
+                                    <tr key={e.id || `ab-${i}`}>
+                                      <td className={styles.mono}>{p.session_id || '—'}</td>
+                                      <td>{p.idle_seconds ?? '—'}</td>
+                                      <td>{p.cart_value_cents != null ? `$${(p.cart_value_cents / 100).toFixed(2)}` : '—'}</td>
+                                      <td>
+                                        {p.inferred_persona ? (
+                                          <span className={styles.intentBadge} style={{ background: personaColor, fontSize: 11 }}>{p.inferred_persona}</span>
+                                        ) : '—'}
+                                      </td>
+                                      <td>{p.suggested_action || '—'}</td>
+                                      <td>{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '—'}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+
+                        {outcomeEvts.length > 0 && (
+                          <>
+                            <div className={styles.sectionTitle}>Commerce Outcomes</div>
+                            <table className={styles.smallTable}>
+                              <thead>
+                                <tr><th>Type</th><th>Upsell Clicked</th><th>Bundle Purchased</th><th>AOV Delta</th><th>Time</th></tr>
+                              </thead>
+                              <tbody>
+                                {outcomeEvts.map((e, i) => {
+                                  const p = e.payload || {};
+                                  return (
+                                    <tr key={e.id || `oc-${i}`}>
+                                      <td><VerdictBadge type="commerce_outcome" /></td>
+                                      <td>{p.upsell_clicked != null ? (p.upsell_clicked ? '✓' : '—') : '—'}</td>
+                                      <td>{p.bundle_purchased != null ? (p.bundle_purchased ? '✓' : '—') : '—'}</td>
+                                      <td>{p.aov_delta != null ? (p.aov_delta >= 0 ? `+$${p.aov_delta.toFixed(2)}` : `-$${Math.abs(p.aov_delta).toFixed(2)}`) : '—'}</td>
+                                      <td className={styles.time}>{formatTime(e.timestamp || e.created_at)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 

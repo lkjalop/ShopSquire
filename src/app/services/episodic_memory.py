@@ -51,6 +51,13 @@ class UserProfile:
     typical_use_cases: List[str] = field(default_factory=list)
     purchase_history_summary: List[str] = field(default_factory=list)
     last_session_summary: Optional[str] = None
+    # ── Persona & affinity learning ──
+    inferred_persona: Optional[str] = None                       # gamer / office / creator / student
+    accessory_acceptances: Dict[str, int] = field(default_factory=dict)   # slug → accept count
+    accessory_rejections: Dict[str, int] = field(default_factory=dict)    # slug → skip count
+    upsell_acceptance_rate: Optional[float] = None               # rolling 0-1
+    price_sensitivity: Optional[str] = None                      # low / medium / high
+    session_count: int = 0
     updated_at: float = 0.0
 
     def __post_init__(self):
@@ -205,6 +212,98 @@ class EpisodicMemory:
 
         if session_summary:
             profile.last_session_summary = session_summary[:500]
+
+        self.save_user_profile(profile)
+        return profile
+
+    # ── Intent-driven profile update ──
+
+    def update_profile_from_intent(
+        self,
+        user_id: str,
+        intent_result: Any,
+        session_summary: str = "",
+    ) -> "UserProfile":
+        """Merge a ShopperIntentResult into the long-term user profile.
+
+        Call this after each recommend call so returning users get
+        pre-seeded intent on their next visit.
+        ``intent_result`` is a ShopperIntentResult (or any object with
+        the same attributes).
+        """
+        profile = self.get_user_profile(user_id) or UserProfile(user_id=user_id)
+
+        # Persona: adopt the most recent non-unknown persona
+        persona = getattr(intent_result, "persona", None)
+        if persona and persona != "unknown":
+            profile.inferred_persona = persona
+
+        # Budget tier
+        bt = getattr(intent_result, "budget_tier", None)
+        if bt and bt != "unknown":
+            profile.budget_tier = bt
+
+        # Price sensitivity
+        ps = getattr(intent_result, "price_sensitivity", None)
+        if ps:
+            profile.price_sensitivity = ps
+
+        # Brands
+        for b in (getattr(intent_result, "brands_positive", None) or []):
+            if b not in profile.preferred_brands:
+                profile.preferred_brands.append(b)
+        for b in (getattr(intent_result, "brands_negative", None) or []):
+            if b not in profile.avoided_brands:
+                profile.avoided_brands.append(b)
+
+        # Use cases
+        uc = getattr(intent_result, "use_case_key", None)
+        if uc and uc not in profile.typical_use_cases:
+            profile.typical_use_cases.append(uc)
+
+        if session_summary:
+            profile.last_session_summary = session_summary[:500]
+
+        profile.session_count += 1
+        self.save_user_profile(profile)
+        return profile
+
+    # ── Outcome-driven profile refinement ──
+
+    def refine_profile_from_outcome(
+        self,
+        user_id: str,
+        outcome: Dict[str, Any],
+    ) -> "UserProfile":
+        """Update the profile with commerce-outcome signals.
+
+        ``outcome`` should contain keys from record_commerce_outcome:
+        upsell_clicked, bundle_purchased, accessory_slug (which accessory),
+        etc.  Over time this builds a learned preference model.
+        """
+        profile = self.get_user_profile(user_id) or UserProfile(user_id=user_id)
+
+        slug = str(outcome.get("accessory_slug") or "").strip()
+        if slug:
+            if outcome.get("upsell_clicked") or outcome.get("bundle_purchased"):
+                profile.accessory_acceptances[slug] = profile.accessory_acceptances.get(slug, 0) + 1
+            else:
+                profile.accessory_rejections[slug] = profile.accessory_rejections.get(slug, 0) + 1
+
+        # Rolling upsell acceptance rate
+        total_acc = sum(profile.accessory_acceptances.values())
+        total_rej = sum(profile.accessory_rejections.values())
+        total = total_acc + total_rej
+        if total > 0:
+            profile.upsell_acceptance_rate = round(total_acc / total, 3)
+
+        # Track purchases
+        purchased_sku = str(outcome.get("purchased_sku") or "").strip()
+        if purchased_sku and purchased_sku not in profile.purchase_history_summary:
+            profile.purchase_history_summary.append(purchased_sku)
+            # Cap history length
+            if len(profile.purchase_history_summary) > 100:
+                profile.purchase_history_summary = profile.purchase_history_summary[-100:]
 
         self.save_user_profile(profile)
         return profile

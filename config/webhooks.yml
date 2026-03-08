@@ -1,5 +1,12 @@
 webhooks:
   decision_events: []
+  # Retargeting webhook delivery — add provider endpoint URLs to receive
+  # cart-abandonment signals for email/SMS/push re-engagement campaigns.
+  # Example:
+  #   retargeting_events:
+  #     - https://hooks.yourprovider.com/retarget
+  #     - https://api.klaviyo.com/api/events/
+  retargeting_events: []
 
 # Example (uncomment or add your own URLs):
 # webhooks:

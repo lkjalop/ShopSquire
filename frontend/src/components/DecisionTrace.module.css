@@ -624,6 +624,55 @@
   overflow: auto;
 }
 
+/* ── Intent tab ──────────────────────────────────────── */
+.intentBadgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.intentBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.pillRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #f1f5f9;
+  color: #1e3a5f;
+  border: 1px solid #cbd5e1;
+}
+
+
+  margin: 0;
+  padding: 12px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: 'SF Mono', Monaco, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 100%;
+  overflow: auto;
+}
+
 /* Mobile */
 @media (max-width: 600px) {
   .overlay {

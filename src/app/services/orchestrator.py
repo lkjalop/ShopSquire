@@ -2,7 +2,7 @@ import base64
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List
 import asyncio
 import logging
 
@@ -256,6 +256,7 @@ class Orchestrator:
         risk_adj: float,
         intent_confidence: float,
         multi_turn: bool,
+        event_signals: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         q = str(query or "").lower()
         complexity_hits = 0
@@ -300,6 +301,23 @@ class Orchestrator:
             agent_weights["Fraud_Scoring_Agent"] = 0.12
         if any(d in ("insider_threat", "email_deliverability") for d in _rr_high_domains):
             agent_weights["Security_Observer_Agent"] = 0.30  # +50% more security scrutiny
+        # ── Event-signal-driven weight boosts ──
+        _ev = event_signals or {}
+        if _ev.get("cart_abandonment_detected"):
+            # Retargeting / merchandising: boost ranking + NLP + candidate retrieval
+            agent_weights["Product_Ranking_Agent"] = max(agent_weights.get("Product_Ranking_Agent", 0.20), 0.28)
+            agent_weights["NLP_Search_Agent"] = max(agent_weights.get("NLP_Search_Agent", 0.20), 0.24)
+            agent_weights["Candidate_Retrieval_Agent"] = max(agent_weights.get("Candidate_Retrieval_Agent", 0.16), 0.20)
+            factor += 0.10
+        if _ev.get("coupon_abuse_signals"):
+            # Fraud defence: boost security + fraud scoring
+            agent_weights["Security_Observer_Agent"] = max(agent_weights.get("Security_Observer_Agent", 0.20), 0.30)
+            agent_weights["Fraud_Scoring_Agent"] = max(agent_weights.get("Fraud_Scoring_Agent", 0.06), 0.16)
+            factor += 0.15
+        if _ev.get("high_value_session"):
+            # VIP-tier: bump overall budget and ranking agent
+            agent_weights["Product_Ranking_Agent"] = max(agent_weights.get("Product_Ranking_Agent", 0.20), 0.26)
+            factor += 0.10
         per_agent: Dict[str, int] = {}
         remaining = global_budget
         keys = list(agent_weights.keys())
@@ -2351,6 +2369,21 @@ class Orchestrator:
             import traceback, sys
             traceback.print_exc(file=sys.stderr)
             return not policy.get("approval_required", False)
+
+        # RAGAS evaluation — runs if the optional ragas package is installed
+        try:
+            if self.flags.get("RAGAS_EVAL_ENABLED", False):
+                ragas_result = evaluate_decision_stub(proposal, rc)
+                if ragas_result and ragas_result.get("evaluator_model") != "unavailable":
+                    with db_session() as db_ragas:
+                        persist_ragas_stub(db_ragas, ragas_result)
+                        try:
+                            db_ragas.commit()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
         # Return whether execution should proceed; simulate_only means no external
         # effects, but we still persist the decision for audit/observability.
         return not policy.get("approval_required", False) and not simulate_only
@@ -2604,6 +2637,15 @@ class Orchestrator:
                 }
                 tier_decision = self.tier_router.route(query=query, context=router_ctx, intent_result=intent_result, security_analysis=sec)
                 try:
+                    # Build event signals from payload and security context
+                    _event_signals: Dict[str, Any] = {}
+                    if payload.get("cart_abandonment_detected"):
+                        _event_signals["cart_abandonment_detected"] = True
+                    if isinstance(sec, dict) and sec.get("coupon_abuse_signals"):
+                        _event_signals["coupon_abuse_signals"] = True
+                    _cart_cents = int(payload.get("cart_total_cents") or 0)
+                    if _cart_cents >= 150000:  # ≥$1500 → high-value session
+                        _event_signals["high_value_session"] = True
                     adaptive_budget = self._compute_adaptive_agent_budgets(
                         query=query,
                         tier=int(getattr(tier_decision, "tier", 1) or 1),
@@ -2611,6 +2653,7 @@ class Orchestrator:
                         risk_adj=float((sec or {}).get("risk_adj") or 0.0) if isinstance(sec, dict) else 0.0,
                         intent_confidence=float((intent_result or {}).get("confidence") or 1.0),
                         multi_turn=bool(router_ctx.get("multi_turn")),
+                        event_signals=_event_signals or None,
                     )
                     try:
                         tier_decision.tool_budget = int(adaptive_budget.get("global_tool_budget") or tier_decision.tool_budget)

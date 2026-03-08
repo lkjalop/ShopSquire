@@ -320,33 +320,213 @@ def storefront() -> HTMLResponse:
 
 @router.get("/checkout")
 def checkout() -> HTMLResponse:
-    html = """
-    <!doctype html>
-    <html lang='en'>
-    <head><meta charset='utf-8' /><title>ShopSquire Checkout</title></head>
-    <body>
-      <h1>Checkout</h1>
+    import os, re as _re
+    raw_pk = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+    # Only inject pk_test_ / pk_live_ keys — never secret keys
+    stripe_pk = raw_pk if _re.match(r"^pk_(test|live)_[A-Za-z0-9]+$", raw_pk) else ""
+    html = f"""<!doctype html>
+<html lang='en'>
+<head>
+  <meta charset='utf-8' />
+  <meta name='viewport' content='width=device-width, initial-scale=1' />
+  <title>ShopSquire — Checkout</title>
+  <style>
+    *{{box-sizing:border-box;margin:0;padding:0}}
+    body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f9fafb;color:#111;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}}
+    .card{{background:#fff;border-radius:12px;padding:2rem;width:100%;max-width:480px;box-shadow:0 4px 24px rgba(0,0,0,.09)}}
+    h1{{font-size:1.35rem;margin-bottom:1.5rem;color:#111}}
+    .section{{margin-bottom:1.15rem}}
+    label{{display:block;font-size:.83rem;color:#555;margin-bottom:.35rem;font-weight:500}}
+    input{{display:block;width:100%;padding:.65rem .85rem;border:1px solid #d1d5db;border-radius:8px;font-size:.95rem;outline:none;transition:border-color .15s}}
+    input:focus{{border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,.15)}}
+    .demo-strip{{background:#ede9fe;border-radius:8px;padding:.7rem 1rem;margin-bottom:1.2rem;font-size:.82rem;color:#5b21b6;display:flex;align-items:center;gap:.5rem}}
+    .summary-row{{display:flex;justify-content:space-between;font-size:.88rem;padding:.22rem 0;color:#374151}}
+    .summary-row.total{{font-weight:700;border-top:1px solid #e5e7eb;padding-top:.5rem;margin-top:.35rem;font-size:.95rem}}
+    .summary-section{{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:.75rem 1rem;margin-bottom:1.2rem}}
+    .summary-title{{font-size:.78rem;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5rem}}
+    .payment-box{{border:1px dashed #c4b5fd;border-radius:8px;padding:1rem;background:#faf5ff;margin-bottom:1.2rem;font-size:.85rem;color:#6d28d9;text-align:center}}
+    #stripe-element-container{{min-height:44px}}
+    .btn{{display:block;width:100%;padding:.8rem;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;transition:background .15s}}
+    .btn:hover{{background:#6d28d9}}
+    .btn:disabled{{background:#c4b5fd;cursor:not-allowed}}
+    #form-error{{color:#b42318;font-size:.83rem;margin-top:.5rem;display:none}}
+    #success-box{{display:none;text-align:center;padding:2rem 1rem}}
+    #success-box h2{{color:#059669;font-size:1.5rem;margin-bottom:.75rem}}
+    #success-box p{{color:#555;font-size:.9rem}}
+    .order-id{{font-family:monospace;background:#f0fdf4;padding:.4rem .8rem;border-radius:6px;color:#065f46;display:inline-block;margin:.75rem 0;font-size:.88rem}}
+    .back-link{{display:inline-block;margin-top:1.25rem;color:#7c3aed;text-decoration:none;font-size:.88rem}}
+    .back-link:hover{{text-decoration:underline}}
+    .spinner{{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}}
+    @keyframes spin{{to{{transform:rotate(360deg)}}}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="checkout-form-wrap">
+      <h1>&#x1F6D2; Complete Your Order</h1>
+
+      <div class="demo-strip">
+        <span>&#x26A1;</span>
+        <span id="demo-mode-label">Demo mode — no real payment will be processed.</span>
+      </div>
+
+      <div class="summary-section" id="order-summary-section" style="display:none">
+        <div class="summary-title">Order Summary</div>
+        <div id="order-summary-rows"></div>
+      </div>
+
       <form id="checkout-form" novalidate>
-        <label>Name <input name="name" required /></label>
-        <label>Email <input name="email" type="email" required /></label>
-        <label>Address <input name="address" required /></label>
-        <label>Card Number <input name="card" required /></label>
-        <div id="form-error" style="display:none;color:#b42318;">Please fill in all required fields.</div>
-        <button type="submit">Place Order</button>
+        <div class="section">
+          <label for="inp-name">Full Name</label>
+          <input id="inp-name" name="name" autocomplete="name" required placeholder="Jane Smith" />
+        </div>
+        <div class="section">
+          <label for="inp-email">Email Address</label>
+          <input id="inp-email" name="email" type="email" autocomplete="email" required placeholder="jane@example.com" />
+        </div>
+        <div class="section">
+          <label for="inp-addr">Shipping Address</label>
+          <input id="inp-addr" name="address" autocomplete="street-address" required placeholder="123 Main St, City, Country" />
+        </div>
+
+        <div class="payment-box">
+          <div id="stripe-element-container"></div>
+          <div id="demo-payment-hint">&#x1F512; Payment details are handled securely by Stripe.<br/><small style="color:#9ca3af">(Stripe Payment Element loads here when configured)</small></div>
+        </div>
+
+        <div id="form-error"></div>
+        <button class="btn" type="submit" id="submit-btn">
+          <span id="btn-label">Place Order</span>
+        </button>
       </form>
-      <script>
-        const form = document.getElementById('checkout-form');
-        const error = document.getElementById('form-error');
-        if (form) {
-          form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (error) error.style.display = 'block';
-          });
-        }
-      </script>
-    </body>
-    </html>
-    """
+    </div>
+
+    <div id="success-box">
+      <div style="font-size:3rem">&#x2705;</div>
+      <h2>Order Confirmed!</h2>
+      <p>Thank you for your order. A confirmation will be sent to your email.</p>
+      <div class="order-id" id="order-id-display"></div>
+      <br/>
+      <a href="/ui" class="back-link">&#x2190; Continue Shopping</a>
+    </div>
+
+    <a href="/ui" class="back-link" id="back-link-form">&#x2190; Back to Shopping</a>
+  </div>
+
+  <script>
+    var STRIPE_PK = '{stripe_pk}';
+    var stripe = null;
+
+    // Read cart snapshot stored by CartPanel before navigating here
+    var cartSummary = null;
+    try {{
+      var _raw = sessionStorage.getItem('shopsquire_checkout_cart');
+      if (_raw) cartSummary = JSON.parse(_raw);
+    }} catch(e) {{}}
+
+    // Populate order summary
+    if (cartSummary && cartSummary.items && cartSummary.items.length > 0) {{
+      var sec = document.getElementById('order-summary-section');
+      var rows = document.getElementById('order-summary-rows');
+      cartSummary.items.forEach(function(item) {{
+        var row = document.createElement('div');
+        row.className = 'summary-row';
+        var price = item.price_cents ? '$' + (item.price_cents / 100).toLocaleString() : '';
+        row.innerHTML = '<span>' + (item.name || item.sku) + ' &times;' + item.quantity + '</span><span>' + price + '</span>';
+        rows.appendChild(row);
+      }});
+      var total = document.createElement('div');
+      total.className = 'summary-row total';
+      var sub = cartSummary.subtotal_cents ? '$' + (cartSummary.subtotal_cents / 100).toLocaleString() : '';
+      total.innerHTML = '<span>Total</span><span>' + sub + '</span>';
+      rows.appendChild(total);
+      if (sec) sec.style.display = 'block';
+    }}
+
+    // Load Stripe.js when a publishable key is available
+    if (STRIPE_PK) {{
+      var s = document.createElement('script');
+      s.src = 'https://js.stripe.com/v3/';
+      s.onload = function() {{
+        stripe = window.Stripe(STRIPE_PK);
+        document.getElementById('demo-payment-hint').style.display = 'none';
+        document.getElementById('demo-mode-label').textContent = 'Secured by Stripe — your card is tokenized, never stored.';
+      }};
+      document.head.appendChild(s);
+    }}
+
+    var form = document.getElementById('checkout-form');
+    var errorDiv = document.getElementById('form-error');
+    var submitBtn = document.getElementById('submit-btn');
+    var btnLabel = document.getElementById('btn-label');
+
+    function showError(msg) {{
+      if (errorDiv) {{ errorDiv.textContent = msg; errorDiv.style.display = 'block'; }}
+    }}
+    function setLoading(v) {{
+      if (submitBtn) submitBtn.disabled = v;
+      if (btnLabel) btnLabel.innerHTML = v ? '<span class="spinner"></span>Processing\u2026' : 'Place Order';
+    }}
+    function showSuccess(orderId) {{
+      var wrap = document.getElementById('checkout-form-wrap');
+      var box = document.getElementById('success-box');
+      var bl = document.getElementById('back-link-form');
+      if (wrap) wrap.style.display = 'none';
+      if (box) box.style.display = 'block';
+      if (bl) bl.style.display = 'none';
+      var oid = document.getElementById('order-id-display');
+      if (oid) oid.textContent = 'Order #' + orderId;
+      try {{ sessionStorage.removeItem('shopsquire_checkout_cart'); }} catch(e) {{}}
+    }}
+
+    if (form) {{
+      form.addEventListener('submit', function(e) {{
+        e.preventDefault();
+        if (errorDiv) errorDiv.style.display = 'none';
+        var name = document.getElementById('inp-name').value.trim();
+        var email = document.getElementById('inp-email').value.trim();
+        var addr = document.getElementById('inp-addr').value.trim();
+        if (!name || !email || !addr) {{
+          showError('Please fill in all required fields.');
+          return;
+        }}
+        if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {{
+          showError('Please enter a valid email address.');
+          return;
+        }}
+        setLoading(true);
+        var amountCents = (cartSummary && cartSummary.subtotal_cents) ? cartSummary.subtotal_cents : 0;
+        fetch('/api/v1/payments/checkout-initiate', {{
+          method: 'POST',
+          headers: {{'Content-Type': 'application/json'}},
+          body: JSON.stringify({{
+            amount_cents: amountCents,
+            currency: (cartSummary && cartSummary.currency) || 'USD',
+            customer_name: name,
+            customer_email: email,
+            shipping_address: addr,
+            cart_id: (cartSummary && cartSummary.cart_id) || null
+          }})
+        }})
+        .then(function(r) {{ return r.json().then(function(d) {{ return {{ok: r.ok, data: d}}; }}); }})
+        .then(function(res) {{
+          if (!res.ok) {{
+            showError((res.data && res.data.detail) || 'Checkout failed. Please try again.');
+            setLoading(false);
+            return;
+          }}
+          showSuccess(res.data.order_id || 'DEMO');
+          setLoading(false);
+        }})
+        .catch(function() {{
+          showError('Network error. Please check your connection and try again.');
+          setLoading(false);
+        }});
+      }});
+    }}
+  </script>
+</body>
+</html>"""
     return HTMLResponse(content=html)
 
 

@@ -54,6 +54,7 @@ from src.app.services.i18n import localize_recommend_payload
 from src.app.services.billing import record_meter_event
 from src.app.services.fraud_scorer import FraudScorer
 from src.app.services.use_case_advisor import get_use_case_min_price_floor
+from src.app.services.recommendations import classify_budget_tier, classify_warranty_candidate
 from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints_from_request
 from src.app.security.model_theft import (
     enforce_model_theft_rate_limit,
@@ -331,6 +332,32 @@ _SUPPORTED_PRODUCT_TERMS = {
     "adapter",
     "keyboard",
     "mouse",
+    # Multi-category support
+    "phone",
+    "smartphone",
+    "tablet",
+    "ipad",
+    "tv",
+    "television",
+    "sofa",
+    "couch",
+    "bed",
+    "mattress",
+    "desk",
+    "chair",
+    "shirt",
+    "jacket",
+    "dress",
+    "shoes",
+    "kitchen",
+    "mixer",
+    "blender",
+    "toaster",
+    "microwave",
+    "fridge",
+    "refrigerator",
+    "dishwasher",
+    "oven",
 }
 _UNSUPPORTED_PRODUCT_TERMS = {
     "kitchen",
@@ -659,6 +686,8 @@ def _classify_turn_intent(
     q = str(query or "").strip().lower()
     if followup_explain:
         return "EXPLAIN"
+    if re.search(r"\b(warranty|return|refund|broken|damaged|repair|replacement|support|bsod|blue screen|stop code)\b", q):
+        return "SUPPORT_CLAIM"
     if re.search(r"\b(compare|vs|versus|difference|which one|better)\b", q):
         return "COMPARE"
     n_intent = str(((nlp or {}).get("intent") or "")).strip().lower()
@@ -671,14 +700,14 @@ def _classify_turn_intent(
 
 def _suppress_missing_fields_for_turn_intent(missing_fields: list[str] | None, *, turn_intent: str) -> list[str]:
     fields = [str(x or "").strip().lower() for x in (missing_fields or []) if str(x or "").strip()]
-    if str(turn_intent or "").upper() == "EXPLAIN":
+    if str(turn_intent or "").upper() in {"EXPLAIN", "SUPPORT_CLAIM"}:
         fields = [f for f in fields if f not in {"budget", "price", "budget_min", "budget_max"}]
     return fields
 
 
 def _suppress_nqe_questions_for_turn_intent(questions: list[dict] | None, *, turn_intent: str) -> list[dict]:
     out = [q for q in (questions or []) if isinstance(q, dict)]
-    if str(turn_intent or "").upper() == "EXPLAIN":
+    if str(turn_intent or "").upper() in {"EXPLAIN", "SUPPORT_CLAIM"}:
         block_ids = {"ask_budget", "ask_budget_tier"}
         out = [q for q in out if str((q or {}).get("id") or "").strip().lower() not in block_ids]
     return out
@@ -1254,6 +1283,219 @@ def _assess_budget_fitness(
             ),
         }
     return {"status": "ok", "floor": floor}
+
+
+def _build_minimum_recommended_tiers(
+    results: list[dict] | None,
+    *,
+    budget_min: float | None,
+    budget_max: float | None,
+    use_case: str | None,
+    query: str | None = None,
+) -> dict[str, Any]:
+    rows = [r for r in (results or []) if isinstance(r, dict)]
+    if not rows:
+        return {"minimum": [], "recommended": [], "show_split": False}
+
+    priced: list[tuple[dict, float]] = []
+    for r in rows:
+        try:
+            p = float(r.get("price") or (float(r.get("price_cents") or 0.0) / 100.0))
+        except Exception:
+            p = 0.0
+        priced.append((r, p))
+    priced_valid = [x for x in priced if x[1] > 0]
+    prices = sorted([p for _, p in priced_valid])
+    median = prices[len(prices) // 2] if prices else 0.0
+
+    def _spec_strength(r: dict) -> float:
+        specs = r.get("specs") if isinstance(r.get("specs"), dict) else {}
+        score = 0.0
+        try:
+            ram = float(specs.get("ram_gb") or 0)
+            if ram >= 32:
+                score += 2.0
+            elif ram >= 16:
+                score += 1.2
+            elif ram >= 8:
+                score += 0.6
+        except Exception:
+            pass
+        gpu = str(specs.get("gpu") or "").lower()
+        if any(tok in gpu for tok in ("rtx", "radeon", "geforce", "arc")):
+            score += 1.5
+        cpu = str(specs.get("cpu") or "").lower()
+        if any(tok in cpu for tok in ("i7", "i9", "ryzen 7", "ryzen 9", "ultra 7", "ultra 9")):
+            score += 1.0
+        try:
+            s = float(r.get("score_norm") or 0.0) / 100.0
+            score += max(0.0, min(1.0, s))
+        except Exception:
+            pass
+        return score
+
+    minimum: list[dict] = []
+    recommended: list[dict] = []
+    for r, px in priced:
+        within_budget = True
+        if budget_min is not None and px > 0:
+            within_budget = within_budget and (px >= float(budget_min))
+        if budget_max is not None and px > 0:
+            within_budget = within_budget and (px <= float(budget_max))
+        rec_like = (_spec_strength(r) >= 2.2) or (px > 0 and px >= median)
+        if within_budget and not rec_like:
+            minimum.append(r)
+        elif rec_like:
+            recommended.append(r)
+        else:
+            minimum.append(r)
+
+    if not minimum:
+        minimum = [r for r, _ in priced][:3]
+    if not recommended:
+        recommended = [r for r, _ in sorted(priced, key=lambda x: _spec_strength(x[0]), reverse=True)][:3]
+
+    minimum = minimum[:3]
+    recommended = recommended[:3]
+    q = str(query or "").lower()
+    explicit_split = any(tok in q for tok in ("minimum", "recommended", "min specs", "recommended specs"))
+    show_split = (bool(use_case) or explicit_split) and (len(minimum) > 0 and len(recommended) > 0)
+    return {
+        "minimum": minimum,
+        "recommended": recommended,
+        "show_split": show_split,
+        "minimum_explanation": "Meets practical baseline with better value and battery/cost balance.",
+        "recommended_explanation": "Adds performance headroom for heavier tasks and longer-term use.",
+    }
+
+
+def _parse_explicit_spec_blocks(query: str | None) -> dict[str, Any]:
+    q = str(query or "")
+    low = q.lower()
+    out: dict[str, Any] = {"minimum": {}, "recommended": {}, "has_explicit_blocks": False}
+    if not q.strip():
+        return out
+
+    def _extract_block(marker: str, fallback_end: str | None = None) -> str:
+        i = low.find(marker)
+        if i < 0:
+            return ""
+        start = i + len(marker)
+        end = len(q)
+        if fallback_end:
+            j = low.find(fallback_end, start)
+            if j >= 0:
+                end = j
+        return q[start:end].strip(" :.-")
+
+    min_block = _extract_block("minimum", "recommended")
+    rec_block = _extract_block("recommended", None)
+    if not min_block and not rec_block:
+        min_match = re.search(r"\b(min(?:imum)? specs?)\b", low)
+        rec_match = re.search(r"\b(recommended specs?)\b", low)
+        if min_match:
+            start = min_match.end()
+            end = rec_match.start() if rec_match else len(q)
+            min_block = q[start:end].strip(" :.-")
+        if rec_match:
+            rec_block = q[rec_match.end() :].strip(" :.-")
+
+    def _parse_specs(block: str) -> dict[str, Any]:
+        b = str(block or "")
+        bl = b.lower()
+        parsed: dict[str, Any] = {}
+        m_ram = re.search(r"(\d+)\s*gb\s*(?:ram|memory)?", bl)
+        if m_ram:
+            parsed["ram_gb_min"] = int(m_ram.group(1))
+        m_storage_tb = re.search(r"(\d+)\s*tb\s*(?:ssd|nvme|storage|drive)?", bl)
+        if m_storage_tb:
+            parsed["storage_gb_min"] = int(m_storage_tb.group(1)) * 1024
+        else:
+            m_storage_gb = re.search(r"(\d+)\s*gb\s*(?:ssd|nvme|storage|drive)", bl)
+            if m_storage_gb:
+                parsed["storage_gb_min"] = int(m_storage_gb.group(1))
+        if any(tok in bl for tok in ("rtx", "geforce", "radeon", "arc", "dedicated gpu", "discrete gpu")):
+            parsed["gpu_class"] = "discrete"
+            parsed["gpu_needed"] = True
+        if any(tok in bl for tok in ("i7", "i9", "ryzen 7", "ryzen 9", "ultra 7", "ultra 9", "m3 pro", "m3 max")):
+            parsed["cpu_tier"] = "performance"
+        elif any(tok in bl for tok in ("i5", "ryzen 5", "ultra 5", "m2", "m3")):
+            parsed["cpu_tier"] = "midrange"
+        return parsed
+
+    min_specs = _parse_specs(min_block)
+    rec_specs = _parse_specs(rec_block)
+    out["minimum"] = min_specs
+    out["recommended"] = rec_specs
+    out["has_explicit_blocks"] = bool(min_specs or rec_specs)
+    return out
+
+
+def _infer_account_warranty_status(uid: str | None) -> dict[str, Any]:
+    user = str(uid or "").strip()
+    if not user:
+        return {"status": "unknown", "message": "Sign in to check coverage status."}
+    try:
+        from src.app.models.db import db_session
+
+        with db_session() as db:
+            latest_order = None
+            try:
+                latest_order = db.execute(
+                    text(
+                        "SELECT id, status, created_at FROM orders "
+                        "WHERE customer_id = :uid ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"uid": user},
+                ).fetchone()
+            except Exception:
+                latest_order = None
+            session_link = None
+            try:
+                session_link = db.execute(
+                    text(
+                        "SELECT order_id, created_at FROM order_sessions "
+                        "WHERE uid = :uid ORDER BY created_at DESC LIMIT 1"
+                    ),
+                    {"uid": user},
+                ).fetchone()
+            except Exception:
+                session_link = None
+            has_warranty_like = False
+            try:
+                rows = db.execute(
+                    text(
+                        "SELECT line_items FROM draft_orders "
+                        "WHERE customer_id = :uid ORDER BY updated_at DESC LIMIT 3"
+                    ),
+                    {"uid": user},
+                ).fetchall()
+                for r in rows or []:
+                    raw = str((r[0] if isinstance(r, (list, tuple)) else r.get("line_items")) or "")
+                    if any(tok in raw.lower() for tok in ("warranty", "care+", "accidental damage", "protection plan")):
+                        has_warranty_like = True
+                        break
+            except Exception:
+                has_warranty_like = False
+
+            if has_warranty_like:
+                return {
+                    "status": "likely_extended",
+                    "message": "Protection-plan signals were found in your recent basket/order data.",
+                    "order_ref": str((latest_order[0] if latest_order else (session_link[0] if session_link else "")) or ""),
+                }
+            if latest_order or session_link:
+                return {
+                    "status": "needs_verification",
+                    "message": "Order history found. Verify receipt/order details to confirm exact coverage terms.",
+                    "order_ref": str((latest_order[0] if latest_order else (session_link[0] if session_link else "")) or ""),
+                }
+            return {
+                "status": "not_found",
+                "message": "No linked order history found for this account. Upload receipt/order reference to continue.",
+            }
+    except Exception:
+        return {"status": "unknown", "message": "Coverage lookup unavailable right now; proceed with receipt verification."}
 
 
 def _question_slot_from_id(question_id: str | None) -> str:
@@ -2166,13 +2408,67 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
     spec_note = ""
     if specs:
         spec_note = f" Matching specs: {', '.join(specs)}."
+
+    # ── Persona-aware humanization ────────────────────────────────────────────
+    shopper_intent = constraints.get("shopper_intent") if isinstance(constraints.get("shopper_intent"), dict) else {}
+    persona = (
+        str(shopper_intent.get("persona") or "").strip().lower()
+        or str(constraints.get("buyer_persona") or "").strip().lower()
+        or str(constraints.get("inferred_persona") or "").strip().lower()
+    )
+    urgency = str(shopper_intent.get("urgency") or "").strip().lower()
+    bundle_receptivity = str(shopper_intent.get("bundle_receptivity") or "").strip().lower()
+    use_case = str(constraints.get("use_case") or "").strip().lower()
+
+    # Persona-specific opening phrase
+    opening = ""
+    if persona == "gamer" or use_case in ("gaming", "gaming_casual", "gaming_competitive", "gaming_aaa_heavy", "gaming_light"):
+        opening = "Great news for your gaming setup — "
+    elif persona == "student" or "student" in use_case or "university" in use_case:
+        opening = "Here are some great student-friendly options — "
+    elif persona == "corporate" or use_case.startswith("office_"):
+        opening = "For your work and productivity needs, "
+    elif persona == "creative" or use_case in ("content_creator", "content_creation"):
+        opening = "For your creative workflow, "
+    elif persona == "traveler" or "travel" in use_case:
+        opening = "Keeping it lightweight and portable for you — "
+    elif persona == "job_hunter":
+        opening = "To make a great first impression — "
+    elif use_case in ("ai_ml_workstation", "data_science_student", "engineering_student", "architecture_student"):
+        opening = "For your technical workload, "
+    elif use_case in ("medical_student", "law_student"):
+        opening = "For your studies, "
+
+    # Urgency note
+    urgency_note = ""
+    if urgency in ("high", "immediate", "urgent"):
+        urgency_note = " All of these are in stock and ready for quick dispatch."
+    elif urgency == "medium":
+        urgency_note = " All of these are currently in stock."
+
+    # Closing — bundle-aware vs standard
+    if bundle_receptivity in ("high", "yes", "true"):
+        closing = " Want to see the full list, compare them, or check compatible bundles?"
+    else:
+        closing = " Want a detailed list or comparison?"
+
+    # Core count message (pluralised, comma-formatted budget)
+    n = len(results)
+    plural = "s" if n != 1 else ""
     if budget_min is not None and budget_max is not None:
-        return f"Found {len(results)} matches between ${budget_min} and ${budget_max}.{spec_note}{why_note} Want a detailed list or comparison?"
-    if budget_max is not None:
-        return f"Found {len(results)} options under ${budget_max}.{spec_note}{why_note} Want a detailed list or comparison?"
-    if budget_min is not None:
-        return f"Found {len(results)} options above ${budget_min}.{spec_note}{why_note} Want a detailed list or comparison?"
-    return f"Found {len(results)} options.{spec_note}{why_note} Want a detailed list or comparison?"
+        core = f"found {n} match{plural} between ${int(budget_min):,} and ${int(budget_max):,}"
+    elif budget_max is not None:
+        core = f"found {n} option{plural} under ${int(budget_max):,}"
+    elif budget_min is not None:
+        core = f"found {n} option{plural} above ${int(budget_min):,}"
+    else:
+        core = f"found {n} option{plural} that match your criteria"
+
+    if opening:
+        msg = f"{opening}I've {core}.{spec_note}{why_note}{urgency_note}{closing}"
+    else:
+        msg = f"I've {core}.{spec_note}{why_note}{urgency_note}{closing}"
+    return msg
 
 def _humanize_positive_factor_tokens(items: list[Any]) -> list[str]:
     """Convert internal scoring tags into short user-facing phrases.
@@ -3583,6 +3879,18 @@ def suggest(
         constraints.get("budget_max"),
     )
     constraints["budget_fitness"] = _budget_fitness
+    # ── Budget tier classification + warranty upsell ──
+    try:
+        _bmax_raw = constraints.get("budget_max")
+        _bmax_int = int(float(_bmax_raw)) if _bmax_raw is not None else None
+        _btier, _btier_tags = classify_budget_tier(_bmax_int)
+        constraints["budget_tier"] = _btier
+        constraints["budget_tier_tags"] = _btier_tags
+        constraints["warranty_candidate"] = classify_warranty_candidate(
+            _bmax_int, constraints.get("use_case"),
+        )
+    except Exception:
+        pass
     # Persist core constraint memory early so follow-up turns can reuse budget/use-case
     # even when later non-critical blocks fail.
     try:
@@ -3706,6 +4014,56 @@ def suggest(
             mem.set_kv(uid, _pkv)
             kv = _pkv
             structured_state = _pst
+    except Exception:
+        pass
+    # ── ShopperIntent extraction: feed accumulated slots into persona/priority context ──
+    _shopper_intent = None
+    try:
+        from types import SimpleNamespace as _SN
+        from src.app.services.use_case_advisor import extract_shopper_intent as _extract_intent
+
+        _intent_pq = _SN(
+            intent=constraints.get("intent"),
+            intent_confidence=float(nlp.get("intent_confidence", 0.5) if isinstance(nlp, dict) else 0.5),
+            budget_min=constraints.get("budget_min"),
+            budget_max=constraints.get("budget_max"),
+            brands_positive=list(constraints.get("brands") or []),
+            brands_negative=list(constraints.get("brand_excludes") or []),
+            use_case_hints=[constraints["use_case"]] if constraints.get("use_case") else [],
+            raw_query=query or "",
+        )
+        _session_slots_for_intent = {
+            "intent": constraints.get("intent"),
+            "intent_confidence": float(nlp.get("intent_confidence", 0.5) if isinstance(nlp, dict) else 0.5),
+            "budget_min": constraints.get("budget_min"),
+            "budget_max": constraints.get("budget_max"),
+            "use_case": constraints.get("use_case"),
+            "use_case_hints": list(constraints.get("use_case_tags") or []),
+            "brands_positive": list(constraints.get("brands") or []),
+            "brands_negative": list(constraints.get("brand_excludes") or []),
+        }
+        _intent_profile = None
+        try:
+            _intent_profile = _profile  # from episodic-memory block above
+        except NameError:
+            pass
+        _shopper_intent = _extract_intent(
+            _intent_pq,
+            session_slots=_session_slots_for_intent,
+            user_profile=_intent_profile,
+        )
+        # Inject persona/priority context into constraints for downstream rerank
+        if _shopper_intent.persona != "unknown":
+            constraints["inferred_persona"] = _shopper_intent.persona
+        if _shopper_intent.priority_factors:
+            constraints["priority_factors"] = _shopper_intent.priority_factors
+        if _shopper_intent.accessory_affinities:
+            constraints["accessory_affinities"] = _shopper_intent.accessory_affinities
+        if _shopper_intent.urgency:
+            constraints["urgency"] = _shopper_intent.urgency
+        if _shopper_intent.bundle_receptivity:
+            constraints["bundle_receptivity"] = _shopper_intent.bundle_receptivity
+        constraints["shopper_intent"] = _shopper_intent.to_dict()
     except Exception:
         pass
     try:
@@ -4616,6 +4974,23 @@ def suggest(
             sentiment=str(nlp.get("sentiment") or "neutral"),
         )
         next_questions = _dedupe_next_questions_for_render(next_questions)
+        if (
+            str(turn_intent or "").upper() in {"SEARCH", "FILTER"}
+            and not followup_explain
+            and len(next_questions or []) == 0
+        ):
+            next_questions = [
+                {
+                    "id": "ask_use_case",
+                    "text": "What will you primarily use it for (notes, office, coding, gaming, video editing, AI)?",
+                    "goal": "clarify_use_case",
+                    "options": [
+                        {"id": "uc_notes", "label": "Notes / Office"},
+                        {"id": "uc_coding", "label": "Coding / Engineering"},
+                        {"id": "uc_gaming", "label": "Gaming / Creative"},
+                    ],
+                }
+            ]
         # Emit a decision trace event so SSE/WebSocket consumers see the clarifying questions
         try:
             if next_questions:
@@ -5770,6 +6145,13 @@ def suggest(
             },
             session_summary=_session_context_summary,
         )
+        # ── Intent-driven profile update ──
+        if _shopper_intent is not None:
+            _ep_mem.update_profile_from_intent(
+                uid,
+                _shopper_intent,
+                session_summary=_session_context_summary,
+            )
     except Exception:
         pass
 
@@ -6443,6 +6825,30 @@ def suggest(
             persona_confidence=constraints.get("buyer_persona_confidence"),
         )
         payload["next_questions"] = _dedupe_next_questions_for_render(payload.get("next_questions"))
+    if (
+        str(turn_intent or "").upper() in {"SEARCH", "FILTER"}
+        and not followup_explain
+        and not isinstance(payload.get("next_questions"), list)
+    ):
+        payload["next_questions"] = []
+    if (
+        str(turn_intent or "").upper() in {"SEARCH", "FILTER"}
+        and not followup_explain
+        and isinstance(payload.get("next_questions"), list)
+        and len(payload.get("next_questions") or []) == 0
+    ):
+        payload["next_questions"] = [
+            {
+                "id": "ask_use_case",
+                "text": "What will you primarily use it for (notes, office, coding, gaming, video editing, AI)?",
+                "goal": "clarify_use_case",
+                "options": [
+                    {"id": "uc_notes", "label": "Notes / Office"},
+                    {"id": "uc_coding", "label": "Coding / Engineering"},
+                    {"id": "uc_gaming", "label": "Gaming / Creative"},
+                ],
+            }
+        ]
     if memory_confidence < 0.4 and followup_contract.get("memory_carry_forward_required"):
         payload["next_questions"] = [
             {
@@ -6503,6 +6909,35 @@ def suggest(
                 payload["next_questions"] = [_viability_q] + list(_nq)
     except Exception:
         pass
+    try:
+        _spec_blocks = _parse_explicit_spec_blocks(query)
+        payload["explicit_spec_blocks"] = _spec_blocks
+        _tiers = _build_minimum_recommended_tiers(
+            results if isinstance(results, list) else [],
+            budget_min=constraints.get("budget_min"),
+            budget_max=constraints.get("budget_max"),
+            use_case=constraints.get("use_case"),
+            query=query,
+        )
+        if bool(_spec_blocks.get("has_explicit_blocks")):
+            _tiers["show_split"] = True
+            if _spec_blocks.get("minimum"):
+                _tiers["minimum_explanation"] = (
+                    "Aligned to your minimum spec block. These are closest budget-fit matches to the baseline."
+                )
+            if _spec_blocks.get("recommended"):
+                _tiers["recommended_explanation"] = (
+                    "Aligned to your recommended spec block. These prioritize stronger long-term headroom."
+                )
+        payload["recommendation_tiers"] = {
+            "minimum": _tiers.get("minimum", []),
+            "recommended": _tiers.get("recommended", []),
+            "show_split": bool(_tiers.get("show_split")),
+            "minimum_explanation": _tiers.get("minimum_explanation"),
+            "recommended_explanation": _tiers.get("recommended_explanation"),
+        }
+    except Exception:
+        payload["recommendation_tiers"] = {"minimum": [], "recommended": [], "show_split": False}
     assistant_message = None
     llm_summary_job_id = None
     llm_summary_requested = bool(nlp.get("llm_fallback") or explanation_request)
@@ -6671,6 +7106,75 @@ def suggest(
             "source": _id_source,
             "confidence": _id_result.get("confidence"),
         }
+    try:
+        if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
+            _issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
+            _warranty = _infer_account_warranty_status(uid)
+            payload["right_panel"] = {
+                "mode": "support",
+                "show_tiers": False,
+                "summary": f"Support flow active for {(_issue or 'device issue').replace('_', ' ')}.",
+                "support_cards": [
+                    {
+                        "id": "warranty_status",
+                        "title": "Warranty/Coverage",
+                        "status": _warranty.get("status") or "unknown",
+                        "message": _warranty.get("message") or "Sign in and provide order details to verify coverage.",
+                        "order_ref": _warranty.get("order_ref"),
+                    },
+                    {
+                        "id": "repair_return",
+                        "title": "Repair / Return Path",
+                        "status": "review",
+                        "message": "Upload clear device and receipt photos to determine repair, return, or in-store diagnostics.",
+                    },
+                    {
+                        "id": "escalation",
+                        "title": "Escalation",
+                        "status": "available",
+                        "message": "Escalate to human support if automated checks remain inconclusive.",
+                    },
+                ],
+                "faq_playbooks": [
+                    {
+                        "id": "faq_bsod",
+                        "title": "Blue Screen quick checks",
+                        "steps": ["Boot safe mode", "Rollback latest drivers", "Collect Event Viewer logs"],
+                    },
+                    {
+                        "id": "faq_cracked_screen",
+                        "title": "Physical damage claims",
+                        "steps": ["Capture damage close-up", "Capture serial/label", "Attach receipt or order reference"],
+                    },
+                ],
+                "parallel_agents": [
+                    "CV_Triage_Agent",
+                    "OCR_QR_Agent",
+                    "Device_Match_Agent",
+                    "Warranty_Agent",
+                    "Support_Playbook_Agent",
+                    "Security_Observer_Agent",
+                ],
+            }
+        else:
+            _rt = payload.get("recommendation_tiers") if isinstance(payload.get("recommendation_tiers"), dict) else {}
+            payload["right_panel"] = {
+                "mode": "shopping",
+                "show_tiers": bool(_rt.get("show_split")),
+                "budget_status": str((payload.get("budget_viability") or {}).get("status") or "unknown"),
+                "lower_tier": {
+                    "title": "Minimum / budget-fit",
+                    "items": (_rt.get("minimum") or [])[:4],
+                    "explanation": _rt.get("minimum_explanation"),
+                },
+                "higher_tier": {
+                    "title": "Recommended / performance-fit",
+                    "items": (_rt.get("recommended") or [])[:4],
+                    "explanation": _rt.get("recommended_explanation"),
+                },
+            }
+    except Exception:
+        pass
     if not results:
         try:
             fallback_alternatives = []

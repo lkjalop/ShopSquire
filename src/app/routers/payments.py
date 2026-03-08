@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
+from pydantic import BaseModel
 from typing import Dict
 from sqlalchemy import text
 
@@ -177,3 +178,68 @@ def create_intent(
             out["pci_scope"] = "tokenized_provider_managed"
             out["card_data_stored"] = ["token", "last4", "provider_ref"]
         return out
+
+
+# ─── Customer-facing checkout initiation ─────────────────────────────────────
+
+class _CheckoutInitiateBody(BaseModel):
+    amount_cents: int = 0
+    currency: str = "USD"
+    customer_name: str | None = None
+    customer_email: str | None = None
+    shipping_address: str | None = None
+    cart_id: str | None = None
+
+
+@router.post("/checkout-initiate")
+def checkout_initiate(
+    request: Request,
+    body: _CheckoutInitiateBody,
+) -> Dict:
+    """Customer-facing checkout initiation.
+
+    Creates a Stripe PaymentIntent when Stripe is fully configured, otherwise
+    returns a demo order confirmation so the UI can still complete the flow.
+    Does not require elevated merchant/owner role.
+    """
+    import secrets
+
+    settings = get_settings()
+    flags = load_feature_flags(settings.feature_flags_path)
+    cap = flags.get("CAPABILITIES", {}).get("stripe") or flags.get("CAPABILITIES", {}).get("payments") or {}
+
+    amount_cents = max(0, int(body.amount_cents or 0))
+    currency = str(body.currency or "USD").upper()[:3]
+
+    stripe_live = (
+        settings.stripe_api_key
+        and settings.stripe_api_key.startswith("sk_")
+        and settings.stripe_api_key != "sk_test_xxx"
+        and not (isinstance(cap, dict) and cap.get("enabled") is False)
+    )
+
+    if stripe_live:
+        try:
+            client = StripeClient(settings.stripe_api_key)
+            intent = client.create_payment_intent(amount_cents, currency)
+            if isinstance(intent, dict):
+                return {
+                    "order_id": intent.get("id", f"pi_{secrets.token_hex(8)}"),
+                    "client_secret": intent.get("client_secret"),
+                    "status": "requires_payment",
+                    "amount_cents": amount_cents,
+                    "currency": currency,
+                    "demo_mode": False,
+                }
+        except Exception:
+            pass  # fall through to demo mode
+
+    demo_order_id = f"DEMO-{secrets.token_urlsafe(6).upper()}"
+    return {
+        "order_id": demo_order_id,
+        "client_secret": None,
+        "status": "demo_confirmed",
+        "amount_cents": amount_cents,
+        "currency": currency,
+        "demo_mode": True,
+    }

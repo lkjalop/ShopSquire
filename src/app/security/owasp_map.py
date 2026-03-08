@@ -10,6 +10,11 @@ OWASP_LLM_MAP = {
     "qr_url_present": "LLM01:PromptInjection",
     "qr_url_suspicious": "LLM01:PromptInjection",
     "prompt_injection_text": "LLM01:PromptInjection",
+    "cross_modal_mismatch": "LLM02:InsecureOutputHandling",
+    "ocr_yolo_label_conflict": "LLM02:InsecureOutputHandling",
+    "vision_yolo_conflict": "LLM02:InsecureOutputHandling",
+    "product_identity_low_confidence": "LLM02:InsecureOutputHandling",
+    "multimodal_attack_surface_high": "LLM01:PromptInjection",
     "pii": "LLM06:SensitiveInformationDisclosure",
     "pci": "LLM06:SensitiveInformationDisclosure",
     "api_key": "LLM06:SensitiveInformationDisclosure",
@@ -47,6 +52,11 @@ MITRE_ATLAS_MAP = {
     "gan_image_detected": "AML.T0043",
     "steg_payload_detected": "AML.T0043",
     "manipulation_detected": "AML.T0043",
+    "cross_modal_mismatch": "AML.T0043",
+    "ocr_yolo_label_conflict": "AML.T0015",
+    "vision_yolo_conflict": "AML.T0015",
+    "product_identity_low_confidence": "AML.T0043",
+    "multimodal_attack_surface_high": "AML.T0051",
     "supply_chain": "AML.T0010",               # ML Supply Chain Compromise
     "vector_db_poisoning": "AML.T0019",         # Publish Poisoned Datasets
     "data_exfiltration": "AML.T0025",           # Exfiltration via ML Inference API

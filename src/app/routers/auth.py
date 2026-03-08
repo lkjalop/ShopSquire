@@ -7,6 +7,8 @@ import time
 import base64
 import hmac
 import json
+
+import jwt as pyjwt
 from datetime import datetime, timedelta
 from typing import Dict
 from urllib.parse import urlencode
@@ -278,50 +280,23 @@ def _jwt_default_role() -> str:
     return str(os.getenv("LOCAL_AUTH_DEFAULT_ROLE", "merchant") or "merchant")
 
 
-def _b64url_encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
-
-
-def _b64url_decode(data: str) -> bytes:
-    pad = "=" * ((4 - len(data) % 4) % 4)
-    return base64.urlsafe_b64decode((data + pad).encode("ascii"))
-
-
 def _jwt_encode_hs256(claims: Dict[str, object], secret: str) -> str:
-    header = {"alg": "HS256", "typ": "JWT"}
-    h = _b64url_encode(json.dumps(header, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-    p = _b64url_encode(json.dumps(claims, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-    sig = hmac.new(secret.encode("utf-8"), f"{h}.{p}".encode("utf-8"), hashlib.sha256).digest()
-    s = _b64url_encode(sig)
-    return f"{h}.{p}.{s}"
+    """Encode JWT claims using PyJWT (HS256)."""
+    return pyjwt.encode(dict(claims), secret, algorithm="HS256")
 
 
 def _jwt_decode_hs256(token: str, secret: str, *, issuer: str, audience: str) -> Dict | None:
+    """Decode and validate a JWT using PyJWT (HS256 only)."""
     try:
-        parts = str(token or "").split(".")
-        if len(parts) != 3:
-            return None
-        h, p, s = parts
-        calc = _b64url_encode(hmac.new(secret.encode("utf-8"), f"{h}.{p}".encode("utf-8"), hashlib.sha256).digest())
-        if not hmac.compare_digest(calc, s):
-            return None
-        claims = json.loads(_b64url_decode(p).decode("utf-8"))
-        now = int(time.time())
-        exp = int(claims.get("exp") or 0)
-        iat = int(claims.get("iat") or 0)
-        if exp <= now or iat > now + 5:
-            return None
-        if str(claims.get("iss") or "") != str(issuer or ""):
-            return None
-        aud = claims.get("aud")
-        if isinstance(aud, list):
-            if audience not in [str(x) for x in aud]:
-                return None
-        else:
-            if str(aud or "") != str(audience or ""):
-                return None
-        return claims
-    except Exception:
+        return pyjwt.decode(
+            str(token or ""),
+            secret,
+            algorithms=["HS256"],
+            issuer=issuer,
+            audience=audience,
+            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+        )
+    except (pyjwt.InvalidTokenError, pyjwt.ExpiredSignatureError, Exception):
         return None
 
 
@@ -634,6 +609,28 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
         token = _issue_token(user_id)
         jwt_pair = _issue_jwt_pair(user_id=str(user_id), email=email, role=_jwt_default_role())
         _set_session_cookie(response, str(token.get("token") or ""), request)
+        # Set JWT access + refresh tokens as httpOnly cookies (XSS-safe)
+        _secure = _is_https_request(request)
+        if jwt_pair.get("access_token"):
+            response.set_cookie(
+                key="shopsquire_access",
+                value=str(jwt_pair["access_token"]),
+                httponly=True,
+                secure=_secure,
+                samesite="lax",
+                max_age=int(jwt_pair.get("access_expires_in", 900)),
+                path="/",
+            )
+        if jwt_pair.get("refresh_token"):
+            response.set_cookie(
+                key="shopsquire_refresh",
+                value=str(jwt_pair["refresh_token"]),
+                httponly=True,
+                secure=_secure,
+                samesite="lax",
+                max_age=int(jwt_pair.get("refresh_expires_in", 86400)),
+                path="/api/v1/auth",
+            )
         try:
             log_iam_event("login_success", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), True, {"user_id": user_id})
             reason = check_impossible_travel(email, request.client.host if request.client else "unknown")

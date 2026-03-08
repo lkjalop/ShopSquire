@@ -13,6 +13,7 @@ _CATEGORY_BANK_FILES = [
     "nqe_templates_furniture.json",
     "nqe_templates_tv.json",
     "nqe_templates_phone.json",
+    "nqe_templates_tablet.json",
 ]
 
 

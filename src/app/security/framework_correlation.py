@@ -99,7 +99,13 @@ def _stride_from_signals(signals: Dict[str, Any], tags: List[str]) -> List[str]:
         out.append("Spoofing")
 
     # Tampering: document/image manipulation, layout/text divergence.
-    if bool(s.get("manipulation_detected")) or bool(s.get("layout_text_divergence")):
+    if (
+        bool(s.get("manipulation_detected"))
+        or bool(s.get("layout_text_divergence"))
+        or bool(s.get("cross_modal_mismatch"))
+        or bool(s.get("ocr_yolo_label_conflict"))
+        or bool(s.get("vision_yolo_conflict"))
+    ):
         out.append("Tampering")
 
     # Repudiation: covert channels / missing audit linkage.
@@ -143,6 +149,8 @@ def _pasta(signals: Dict[str, Any], severity: str | None, *, dread: Dict[str, An
         if bool(signals.get("jailbreak")) or bool(signals.get("prompt_injection")) or bool(signals.get("agentic_tool_abuse")):
             current = "Stage4"
         if bool(signals.get("data_exfiltration")) or bool(signals.get("pci")) or bool(signals.get("pii")):
+            current = "Stage5"
+        if bool(signals.get("cross_modal_mismatch")) or bool(signals.get("multimodal_attack_surface_high")):
             current = "Stage5"
         if str(severity or "").lower() in ("high", "critical", "error"):
             current = "Stage6"
@@ -304,8 +312,17 @@ def _d3fend_suggestions(signals: Dict[str, Any], tags: List[str]) -> List[Dict[s
         _add("Dependency Provenance & Integrity Verification", "Supply-chain/training-poisoning signals observed", priority="high")
         _add("SBOM-Based Vulnerability Monitoring", "Continuously correlate dependencies to known CVEs", priority="medium")
 
-    if bool(s.get("manipulation_detected")) or bool(s.get("layout_text_divergence")):
+    if (
+        bool(s.get("manipulation_detected"))
+        or bool(s.get("layout_text_divergence"))
+        or bool(s.get("cross_modal_mismatch"))
+        or bool(s.get("ocr_yolo_label_conflict"))
+        or bool(s.get("vision_yolo_conflict"))
+    ):
         _add("Content Integrity Analysis", "Document/image tampering indicators detected", priority="medium")
+    if bool(s.get("cross_modal_mismatch")) or bool(s.get("ocr_yolo_label_conflict")) or bool(s.get("vision_yolo_conflict")):
+        _add("Multi-Model Consensus Gate", "Cross-modal identity conflict detected (YOLO/OCR/Vision mismatch)", priority="high")
+        _add("Human-in-the-Loop Verification", "Escalate uncertain product identity before automated decisions", priority="high")
 
     # Stable dedupe by (control, priority).
     deduped: List[Dict[str, Any]] = []
@@ -359,6 +376,12 @@ def _scenario_catalog() -> Dict[str, Dict[str, Any]]:
             "cvss": {"score": 6.8, "severity": "medium", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:M/I:M/A:N"},
             "stride": ["Tampering"],
         },
+        "cv_multimodal_conflict": {
+            "title": "Multimodal Product Identity Conflict",
+            "dread_avg": 6.9,
+            "cvss": {"score": 7.3, "severity": "high", "vector": "AV:N/AC:L/PR:N/UI:R/S:U/C:M/I:H/A:N"},
+            "stride": ["Tampering", "Spoofing"],
+        },
     }
 
 
@@ -379,6 +402,8 @@ def _pick_scenarios(*, channel: str, signals: Dict[str, Any], tags: List[str]) -
             out.append("cv_qr_injection")
         if bool(signals.get("ocr_adversarial_typography")):
             out.append("cv_ocr_adversarial")
+        if bool(signals.get("cross_modal_mismatch")) or bool(signals.get("ocr_yolo_label_conflict")) or bool(signals.get("vision_yolo_conflict")):
+            out.append("cv_multimodal_conflict")
     # stable dedupe
     seen = set()
     return [x for x in out if x and (x not in seen and not seen.add(x))]

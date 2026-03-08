@@ -98,6 +98,8 @@ class FraudScorer:
         "asn_known_proxy_tor": 0.30,
         "mid_session_country_change": 0.35,
         "geoip_lookup_unavailable": 0.12,
+        "gnn_ring_risk_medium": 0.22,
+        "gnn_ring_risk_high": 0.38,
         # Behavioral biometrics
         "biometric_mouse_bot_pattern": 0.30,
         "biometric_typing_bot_pattern": 0.30,
@@ -144,6 +146,8 @@ class FraudScorer:
         "asn_known_proxy_tor": "network",
         "mid_session_country_change": "geo",
         "geoip_lookup_unavailable": "network",
+        "gnn_ring_risk_medium": "graph",
+        "gnn_ring_risk_high": "graph",
         "cv_blur_score_low": "cv",
         "cv_histogram_anomaly": "cv",
         "cv_metadata_stripped": "cv",
@@ -213,8 +217,11 @@ class FraudScorer:
     def calculate_score(self, signals: Dict[str, bool]) -> float:
         score = 0.0
         max_possible = 0.0
+        all_weights: Dict[str, float] = {}
+        all_weights.update(self.WEIGHTS)
+        all_weights.update(self.CV_WEIGHTS)
         for k, v in signals.items():
-            w = self.WEIGHTS.get(k, 0.1)
+            w = all_weights.get(k, 0.1)
             max_possible += w
             if v:
                 score += w
@@ -405,6 +412,35 @@ class BehavioralFraudDetector:
             session_data["neo4j_account_device_ip_ring"] = ring
         except Exception:
             pass
+
+        # Graph/GNN risk scorer: optional but first-class when enabled.
+        try:
+            gnn_enabled = str(os.getenv("FRAUD_GNN_ENABLED", "1")).lower() in ("1", "true", "yes")
+        except Exception:
+            gnn_enabled = False
+        if gnn_enabled:
+            try:
+                from src.app.services.gnn_fraud_detector import predict_fraud_risk
+
+                account_id = str(session_data.get("account_id") or "").strip()
+                if account_id:
+                    gnn = predict_fraud_risk(account_id)
+                    gnn_score = float(getattr(gnn, "gnn_score", 0.0) or 0.0)
+                    gnn_high_min = float(os.getenv("FRAUD_GNN_HIGH_RISK_MIN", "0.72") or 0.72)
+                    gnn_med_min = float(os.getenv("FRAUD_GNN_MEDIUM_RISK_MIN", "0.55") or 0.55)
+                    if gnn_score >= gnn_high_min:
+                        signals["gnn_ring_risk_high"] = True
+                    elif gnn_score >= gnn_med_min:
+                        signals["gnn_ring_risk_medium"] = True
+                    if bool(getattr(gnn, "ring_detected", False)):
+                        signals["account_device_ip_ring_hit"] = True
+                        signals["shipping_address_clustered"] = True
+                    session_data["gnn_risk_score"] = round(gnn_score, 4)
+                    session_data["gnn_method"] = str(getattr(gnn, "method", "heuristic"))
+                    session_data["gnn_ring_detected"] = bool(getattr(gnn, "ring_detected", False))
+                    session_data["gnn_explanation"] = str(getattr(gnn, "explanation", ""))[:400]
+            except Exception:
+                pass
 
         # ── JA3/JA4 TLS fingerprint signals ──
         try:

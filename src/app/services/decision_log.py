@@ -942,3 +942,69 @@ def log_trace_event(
         except Exception:
             pass
         return
+
+
+# ── Commerce outcome feedback ─────────────────────────────────────────────
+
+def record_commerce_outcome(
+    decision_id: str,
+    *,
+    upsell_clicked: Optional[bool] = None,
+    bundle_purchased: Optional[bool] = None,
+    coupon_redeemed: Optional[bool] = None,
+    fraud_review_triggered: Optional[bool] = None,
+    aov_delta_cents: Optional[int] = None,
+    conversion: Optional[bool] = None,
+    abandonment: Optional[bool] = None,
+    coupon_risk_score: Optional[float] = None,
+    abuse_signals: Optional[Dict[str, Any]] = None,
+    intervention_type: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> str | None:
+    """Write a commerce-outcome record that supersedes (closes) the original decision.
+
+    Creates a new decision_log entry of event_type ``commerce_outcome`` linked
+    to the original via ``supersedes_decision_id``, and closes the original's
+    bitemporal validity window.  Returns the new outcome decision_id or None
+    on failure.
+    """
+    if not decision_id:
+        return None
+
+    outcome_payload: Dict[str, Any] = {}
+    if upsell_clicked is not None:
+        outcome_payload["upsell_clicked"] = upsell_clicked
+    if bundle_purchased is not None:
+        outcome_payload["bundle_purchased"] = bundle_purchased
+    if coupon_redeemed is not None:
+        outcome_payload["coupon_redeemed"] = coupon_redeemed
+    if fraud_review_triggered is not None:
+        outcome_payload["fraud_review_triggered"] = fraud_review_triggered
+    if aov_delta_cents is not None:
+        outcome_payload["aov_delta_cents"] = int(aov_delta_cents)
+    if conversion is not None:
+        outcome_payload["conversion"] = conversion
+    if abandonment is not None:
+        outcome_payload["abandonment"] = abandonment
+    if coupon_risk_score is not None:
+        outcome_payload["coupon_risk_score"] = round(float(coupon_risk_score), 4)
+    if abuse_signals is not None:
+        outcome_payload["abuse_signals"] = abuse_signals
+    if intervention_type is not None:
+        outcome_payload["intervention_type"] = str(intervention_type)
+    if extra and isinstance(extra, dict):
+        outcome_payload.update(extra)
+
+    try:
+        return log_decision(
+            agent_name="commerce_outcome_writer",
+            input_data={"original_decision_id": decision_id},
+            retrieved_context={"outcome": outcome_payload},
+            proposed_action={"decision_mode": "outcome_feedback", "action": "record_outcome", **outcome_payload},
+            event_type="commerce_outcome",
+            execution_status="completed",
+            supersedes_decision_id=decision_id,
+        )
+    except Exception:
+        logging.exception("record_commerce_outcome failed for decision_id=%s", decision_id)
+        return None

@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
 
-type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence';
+type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence' | 'persona';
 
 interface MetricCard {
   label: string;
@@ -44,6 +44,7 @@ const TAB_CONFIG: { id: TabId; label: string }[] = [
   { id: 'fraud', label: 'Fraud / Security' },
   { id: 'supply_chain', label: 'Supply Chain Health' },
   { id: 'intelligence', label: 'Agent Intelligence' },
+  { id: 'persona', label: 'Persona Intelligence' },
 ];
 
 function MetricCardComponent({ card }: { card: MetricCard }) {
@@ -267,6 +268,108 @@ function SupplyChainTab() {
   );
 }
 
+function PersonaIntelligenceTab() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(7);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(apiUrl(`/api/v1/admin/bi/persona-success?days=${days}`))
+      .then(r => safeJson(r))
+      .then(j => setData(j))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [days]);
+
+  const cardStyle: React.CSSProperties = {
+    border: '1px solid rgba(148,163,184,0.18)',
+    borderRadius: 12,
+    background: 'rgba(15,23,42,0.45)',
+    padding: 14,
+    marginBottom: 12,
+  };
+
+  if (loading) return <div style={{ padding: 16 }}>Loading persona intelligence...</div>;
+
+  const personas: any[] = data?.personas ?? [];
+  const totals = data?.totals ?? {};
+  const windowInfo = data?.window ?? {};
+
+  return (
+    <div>
+      <h3 style={{ margin: '0 0 8px', fontSize: 16, fontWeight: 600 }}>Persona Intelligence</h3>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, fontSize: 13, color: '#94a3b8' }}>
+        <span>Window:</span>
+        {[7, 14, 30].map(d => (
+          <button key={d} onClick={() => setDays(d)} style={{
+            padding: '4px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12,
+            background: days === d ? 'rgba(249,115,22,0.18)' : 'rgba(15,23,42,0.85)',
+            color: '#e5e7eb',
+            border: `1px solid ${days === d ? 'rgba(249,115,22,0.65)' : 'rgba(148,163,184,0.2)'}`,
+          }}>{d}d</button>
+        ))}
+        {windowInfo.start && <span style={{ fontSize: 11 }}>{windowInfo.start} → {windowInfo.end}</span>}
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        <MetricCardComponent card={{ label: 'Decision Traces', value: totals.traces ?? 0, trend: 'flat' }} />
+        <MetricCardComponent card={{ label: 'Reformulated Queries', value: totals.reformulated ?? 0, trend: 'flat' }} />
+        <MetricCardComponent card={{ label: 'Reupload Required', value: totals.reupload_required ?? 0, trend: 'flat' }} />
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Shopper Persona Distribution</div>
+        {personas.length === 0 ? (
+          <div style={{ color: '#94a3b8', fontSize: 13 }}>
+            No persona data yet — persona signals are captured once shoppers submit queries with intent cues.
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: '#94a3b8', borderBottom: '1px solid rgba(148,163,184,0.2)' }}>
+                <th style={{ textAlign: 'left', padding: '4px 8px' }}>Persona</th>
+                <th style={{ textAlign: 'right', padding: '4px 8px' }}>Sessions</th>
+                <th style={{ textAlign: 'right', padding: '4px 8px' }}>Avg Confidence</th>
+                <th style={{ textAlign: 'right', padding: '4px 8px' }}>Reformulated</th>
+                <th style={{ padding: '4px 8px' }}>Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {personas.map((p: any, i: number) => {
+                const share = totals.traces > 0 ? Math.round((p.count / totals.traces) * 100) : 0;
+                const barColor = ['#7C3AED', '#0891b2', '#059669', '#d97706', '#dc2626'][i % 5];
+                return (
+                  <tr key={p.persona || i} style={{ borderBottom: '1px solid rgba(148,163,184,0.1)' }}>
+                    <td style={{ padding: '6px 8px', fontWeight: 600 }}>{p.persona || 'unknown'}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{p.count ?? 0}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{p.avg_confidence != null ? `${Math.round(p.avg_confidence * 100)}%` : '—'}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{p.reformulated ?? 0}</td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ flex: 1, background: 'rgba(148,163,184,0.15)', borderRadius: 4, height: 8 }}>
+                          <div style={{ width: `${share}%`, background: barColor, borderRadius: 4, height: 8, transition: 'width 0.4s' }} />
+                        </div>
+                        <span style={{ minWidth: 28, textAlign: 'right', fontSize: 11 }}>{share}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div style={{ ...cardStyle, fontSize: 13, color: '#94a3b8' }}>
+        <div style={{ fontWeight: 600, color: '#e5e7eb', marginBottom: 6 }}>Trace Navigation</div>
+        Open any recommendation trace and switch to the <strong style={{ color: '#7C3AED' }}>Intent</strong> tab to see the full shopper
+        intent profile (persona, urgency, bundle receptivity, priority factors) captured bitemporally for that decision.
+      </div>
+    </div>
+  );
+}
+
 function IntelligenceTab() {
   const [profileId, setProfileId] = useState('');
   const [profile, setProfile] = useState<UserProfileData | null>(null);
@@ -390,6 +493,7 @@ export default function AdminDashboard() {
       case 'fraud': return <FraudSecurityTab />;
       case 'supply_chain': return <SupplyChainTab />;
       case 'intelligence': return <IntelligenceTab />;
+      case 'persona': return <PersonaIntelligenceTab />;
     }
   };
 

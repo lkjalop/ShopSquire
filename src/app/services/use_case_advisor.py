@@ -392,3 +392,158 @@ def assess_touch_screen_suitability(
         "gaps": gaps,
         "strengths": strengths,
     }
+
+
+# ── Shopper intent result ──────────────────────────────────────────────────
+
+from dataclasses import dataclass, field as dc_field
+
+
+@dataclass
+class ShopperIntentResult:
+    """Canonical structured output from the intent-extraction layer.
+
+    Consumed by downstream agents (merchandising, risk, UX orchestration)
+    so they share a typed contract instead of untyped dicts.
+    """
+    persona: str = "unknown"          # e.g. gamer, office, creator, student
+    primary_intent: str = "recommend" # from NLP search agent intent
+    secondary_needs: List[str] = dc_field(default_factory=list)  # e.g. ["thermal_comfort", "portability"]
+    budget_min: Optional[int] = None
+    budget_max: Optional[int] = None
+    budget_tier: str = "unknown"      # from classify_budget_tier
+    price_sensitivity: str = "medium" # low / medium / high
+    urgency: str = "normal"           # low / normal / high
+    bundle_receptivity: str = "medium"  # low / medium / high
+    brands_positive: List[str] = dc_field(default_factory=list)
+    brands_negative: List[str] = dc_field(default_factory=list)
+    use_case_key: Optional[str] = None
+    accessory_affinities: List[str] = dc_field(default_factory=list)
+    priority_factors: List[str] = dc_field(default_factory=list)
+    confidence: float = 0.5
+    warranty_tag: str = "warranty_candidate_neutral"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "persona": self.persona,
+            "primary_intent": self.primary_intent,
+            "secondary_needs": self.secondary_needs,
+            "budget_min": self.budget_min,
+            "budget_max": self.budget_max,
+            "budget_tier": self.budget_tier,
+            "price_sensitivity": self.price_sensitivity,
+            "urgency": self.urgency,
+            "bundle_receptivity": self.bundle_receptivity,
+            "brands_positive": self.brands_positive,
+            "brands_negative": self.brands_negative,
+            "use_case_key": self.use_case_key,
+            "accessory_affinities": self.accessory_affinities,
+            "priority_factors": self.priority_factors,
+            "confidence": self.confidence,
+            "warranty_tag": self.warranty_tag,
+        }
+
+
+# ── Persona inference map ──
+_USE_CASE_TO_PERSONA: Dict[str, str] = {
+    "gaming_competitive": "gamer",
+    "gaming_aaa_heavy": "gamer",
+    "gaming_casual": "gamer",
+    "content_creator": "creator",
+    "content_creation": "creator",
+    "office_general": "office",
+    "office_executive": "office",
+    "office_finance": "office",
+    "business_professional": "office",
+    "university_general": "student",
+    "note_taking_student": "student",
+    "medical_student": "student",
+    "law_student": "student",
+    "engineering_student": "student",
+    "data_science_student": "student",
+    "programming": "developer",
+    "ai_ml_workstation": "developer",
+    "design": "creator",
+}
+
+
+def extract_shopper_intent(
+    parsed_query: Any,
+    *,
+    session_slots: Optional[Dict[str, Any]] = None,
+    user_profile: Optional[Any] = None,
+) -> ShopperIntentResult:
+    """Build a ShopperIntentResult from a ParsedQuery + optional session/profile context.
+
+    ``parsed_query`` should be a ``nlp_search_agent.ParsedQuery`` (or any object
+    with the same attributes).  Gracefully degrades if fields are missing.
+    """
+    from src.app.services.recommendations import classify_budget_tier, classify_warranty_candidate
+
+    pq = parsed_query
+    slots = session_slots or {}
+    result = ShopperIntentResult()
+
+    # --- intent & confidence ---
+    result.primary_intent = getattr(pq, "intent", None) or slots.get("intent", "recommend")
+    result.confidence = float(getattr(pq, "intent_confidence", None) or slots.get("intent_confidence", 0.5))
+
+    # --- budget ---
+    result.budget_min = getattr(pq, "budget_min", None) or slots.get("budget_min")
+    result.budget_max = getattr(pq, "budget_max", None) or slots.get("budget_max")
+    tier, tier_tags = classify_budget_tier(result.budget_max)
+    result.budget_tier = tier
+
+    # --- price sensitivity heuristic ---
+    if result.budget_max is not None:
+        if result.budget_max <= 600:
+            result.price_sensitivity = "high"
+        elif result.budget_max <= 1200:
+            result.price_sensitivity = "medium"
+        else:
+            result.price_sensitivity = "low"
+
+    # --- brands ---
+    result.brands_positive = list(getattr(pq, "brands_positive", None) or slots.get("brands_positive", []))
+    result.brands_negative = list(getattr(pq, "brands_negative", None) or slots.get("brands_negative", []))
+
+    # --- use-case & persona ---
+    uc_hints = list(getattr(pq, "use_case_hints", None) or slots.get("use_case_hints", []))
+    uc_key = slots.get("use_case") or (uc_hints[0] if uc_hints else None)
+    result.use_case_key = uc_key
+    result.persona = _USE_CASE_TO_PERSONA.get(uc_key or "", "unknown")
+
+    # user profile fallback
+    if result.persona == "unknown" and user_profile is not None:
+        typical = getattr(user_profile, "typical_use_cases", None) or []
+        for tc in typical:
+            p = _USE_CASE_TO_PERSONA.get(tc, "")
+            if p:
+                result.persona = p
+                result.use_case_key = result.use_case_key or tc
+                break
+
+    # --- accessory affinities & priority factors ---
+    result.accessory_affinities = get_accessory_affinities(result.use_case_key)
+    result.priority_factors = get_use_case_priority_factors(result.use_case_key)
+
+    # --- secondary needs from priority factors ---
+    result.secondary_needs = result.priority_factors[:3]
+
+    # --- warranty tag ---
+    result.warranty_tag = classify_warranty_candidate(result.budget_max, result.use_case_key)
+
+    # --- bundle receptivity heuristic ---
+    if result.primary_intent in ("recommend", "bundle_recommendation"):
+        result.bundle_receptivity = "high"
+    elif result.price_sensitivity == "high":
+        result.bundle_receptivity = "low"
+
+    # --- urgency from keywords (simple heuristic) ---
+    raw = str(getattr(pq, "raw_query", "") or "").lower()
+    if any(w in raw for w in ("no rush", "whenever", "browsing", "just looking")):
+        result.urgency = "low"
+    elif any(w in raw for w in ("urgent", "asap", "rush", "today", "need now", "immediately")):
+        result.urgency = "high"
+
+    return result

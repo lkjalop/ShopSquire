@@ -28,6 +28,34 @@ from src.app.services.recommendation_als import load_precomputed_cf_scores
 from src.app.services.recommendation_bandit import choose_recommendation_arm
 
 
+# ── Seasonal context auto-injection ──────────────────────────────────────────
+_FEATURE_FLAGS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "feature_flags.json")
+
+
+def get_active_seasonal_boosts() -> Tuple[Optional[Dict[str, float]], Optional[str]]:
+    """Read the SEASONAL_CONTEXT block from feature_flags.json.
+
+    Returns ``(boosts_dict, season_name)`` if a season is active, else ``(None, None)``.
+    Pure config read — no DB or network I/O.
+    """
+    try:
+        path = os.path.normpath(_FEATURE_FLAGS_PATH)
+        if not os.path.isfile(path):
+            return None, None
+        with open(path, "r", encoding="utf-8") as f:
+            flags = json.load(f)
+        sc = flags.get("SEASONAL_CONTEXT") or {}
+        active = sc.get("active_season")
+        if not active:
+            return None, None
+        boosts = (sc.get("boosts") or {}).get(active)
+        if not boosts or not isinstance(boosts, dict):
+            return None, None
+        return boosts, str(active)
+    except Exception:
+        return None, None
+
+
 PROMPT_CONTROL = {
     "system": (
         "You are a product recommendation reranker. "
@@ -1512,6 +1540,20 @@ class RecommendationService:
         intent = constraints.get("intent") or "recommend"
         use_case = constraints.get("use_case") or ""
         use_case_tags = constraints.get("use_case_tags") or []
+
+        # ── Seasonal auto-inject: read active season from flags, resolve
+        #    use-case priority factors, store on constraints for downstream use.
+        if "seasonal_boosts" not in constraints:
+            try:
+                seasonal_boosts, season_name = get_active_seasonal_boosts()
+                if seasonal_boosts:
+                    from src.app.services.use_case_advisor import get_use_case_priority_factors
+                    pf = get_use_case_priority_factors(use_case) if use_case else []
+                    constraints["seasonal_boosts"] = seasonal_boosts
+                    constraints["seasonal_season"] = season_name
+                    constraints["use_case_priority_factors"] = pf
+            except Exception:
+                pass
         uid_hash = str(constraints.get("uid_hash") or "").strip() or None
         candidate_skus = [str((c or {}).get("sku") or "").strip() for c in candidates if str((c or {}).get("sku") or "").strip()]
         cf_scores = self._collaborative_filter_scores(uid_hash, candidate_skus)

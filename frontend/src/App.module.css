@@ -607,6 +607,292 @@ body {
   background: var(--surface-2);
 }
 
+.deviceLanePanel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.deviceLaneBlock {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.deviceLaneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.deviceLaneTitle {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.deviceLaneExpand {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.deviceLaneCarousel {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.deviceLaneCard {
+  min-width: 170px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface-2);
+}
+
+.deviceLaneImg {
+  width: 100%;
+  height: 92px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid var(--border);
+}
+
+.deviceLaneImgPlaceholder {
+  width: 100%;
+  height: 92px;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+  background: #fff;
+}
+
+.deviceLaneName {
+  margin-top: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  min-height: 30px;
+}
+
+.deviceLanePrice {
+  margin-top: 5px;
+  color: var(--accent-dark);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.deviceLaneAdd {
+  margin-top: 7px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.deviceLaneSummary {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.expandedLanePanel {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.expandedLaneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.expandedLaneTitle {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tierPanel {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.tierBlock {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+}
+
+.tierTitle {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.tierCarousel {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.tierCard {
+  min-width: 180px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface-2);
+}
+
+.tierName {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  min-height: 34px;
+}
+
+.tierPrice {
+  color: var(--accent-dark);
+  font-weight: 700;
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.tierAdd {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tierExplain {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.quickChipsRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.quickChip {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.supportPanel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.supportSummary {
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.supportCards {
+  display: grid;
+  gap: 8px;
+}
+
+.supportCard {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.supportCardTitle {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.supportCardStatus {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.supportCardMessage {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.supportFaq {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.supportFaqItem {
+  padding-top: 6px;
+}
+
+.supportFaqTitle {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.supportFaqItem ul {
+  margin: 6px 0 0 16px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.supportAgents {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.tagRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .readinessPanel {
   border-bottom: 1px solid var(--border);
   padding: 10px 16px;

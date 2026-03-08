@@ -94,14 +94,22 @@ export default function CartPanel({
 
   const items = cart?.items || [];
   const goToCheckout = () => {
+    // Persist cart snapshot so the checkout page can show an order summary
+    try {
+      sessionStorage.setItem('shopsquire_checkout_cart', JSON.stringify(cart));
+    } catch {
+      // sessionStorage unavailable — continue anyway
+    }
     window.location.href = '/ui/checkout';
   };
 
   return (
     <div className={styles.wrap}>
       <div className={styles.headerBlock}>
-        <div className={styles.sectionTitle}>Cart</div>
-        <div className={styles.muted}>UID: {uid || 'demo-user'}</div>
+        <div className={styles.sectionTitle}>Your Cart</div>
+        {items.length > 0 && (
+          <div className={styles.muted}>{items.length} item{items.length !== 1 ? 's' : ''}</div>
+        )}
       </div>
 
       {items.length === 0 ? (

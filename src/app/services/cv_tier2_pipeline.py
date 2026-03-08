@@ -220,6 +220,219 @@ def _shannon_entropy(s: str) -> float:
     return float(ent)
 
 
+def _normalize_product_family(raw: str) -> str:
+    v = str(raw or "").strip().lower()
+    if not v:
+        return ""
+    if any(tok in v for tok in ("laptop", "notebook", "macbook", "ultrabook", "chromebook", "computer")):
+        return "laptop"
+    if any(tok in v for tok in ("phone", "iphone", "android", "mobile", "smartphone")):
+        return "phone"
+    if any(tok in v for tok in ("document", "invoice", "receipt", "label", "bill", "statement", "form")):
+        return "document"
+    if any(tok in v for tok in ("fruit", "apple", "banana", "orange", "pear")):
+        return "fruit"
+    return "other"
+
+
+def _yolo_family_guess(det_summary: Dict[str, Any], detections: List[Dict[str, Any]]) -> tuple[str, float]:
+    try:
+        family_conf: Dict[str, float] = {}
+        family_n: Dict[str, int] = {}
+        labels = list(det_summary.get("labels") or [])
+        mapped = list(det_summary.get("mapped") or [])
+        for idx, det in enumerate(detections or []):
+            raw_label = str(det.get("label") or (labels[idx] if idx < len(labels) else "")).strip()
+            mapped_label = str(mapped[idx] if idx < len(mapped) else "")
+            family = _normalize_product_family(raw_label) or _normalize_product_family(mapped_label)
+            if not family:
+                continue
+            conf = float(det.get("confidence") or 0.0)
+            family_conf[family] = float(family_conf.get(family, 0.0) + conf)
+            family_n[family] = int(family_n.get(family, 0) + 1)
+        if not family_conf:
+            return "", 0.0
+        best_family = sorted(family_conf.items(), key=lambda x: x[1], reverse=True)[0][0]
+        avg_conf = float(family_conf.get(best_family, 0.0)) / float(max(1, family_n.get(best_family, 1)))
+        return best_family, float(max(0.0, min(1.0, avg_conf)))
+    except Exception:
+        return "", 0.0
+
+
+def _ocr_family_guess(ocr_text: str, ocr_conf: float) -> tuple[str, float]:
+    text = str(ocr_text or "").lower()
+    if not text.strip():
+        return "", 0.0
+    hints = {
+        "laptop": ("laptop", "macbook", "intel", "ryzen", "ram", "ssd", "gpu", "keyboard"),
+        "phone": ("iphone", "android", "sim", "phone", "mobile", "carrier"),
+        "document": ("invoice", "receipt", "subtotal", "tax", "bill to", "ship to", "tracking"),
+        "fruit": ("banana", "orange", "pear", "mango"),
+    }
+    best_family = ""
+    best_hits = 0
+    for fam, toks in hints.items():
+        hits = sum(1 for t in toks if t in text)
+        if hits > best_hits:
+            best_hits = hits
+            best_family = fam
+    if best_hits <= 0:
+        return "", 0.0
+    conf = min(0.95, max(0.15, float(ocr_conf) * (0.55 + min(0.45, 0.1 * best_hits))))
+    return best_family, float(conf)
+
+
+def _quality_family_guess(quality: Dict[str, Any]) -> tuple[str, float]:
+    try:
+        scores = quality.get("scores") if isinstance(quality.get("scores"), dict) else {}
+        best_family = ""
+        best_score = 0.0
+        for raw_k, raw_v in scores.items():
+            fam = _normalize_product_family(str(raw_k))
+            if not fam:
+                continue
+            s = float(raw_v or 0.0)
+            if s > best_score:
+                best_family = fam
+                best_score = s
+        if not best_family:
+            return "", 0.0
+        return best_family, float(max(0.0, min(1.0, best_score)))
+    except Exception:
+        return "", 0.0
+
+
+def _vision_family_guess(vision: Dict[str, Any] | None) -> tuple[str, float]:
+    try:
+        if not isinstance(vision, dict) or not bool(vision.get("ok")) or not isinstance(vision.get("result"), dict):
+            return "", 0.0
+        result = vision.get("result") or {}
+        fam = _normalize_product_family(str(result.get("product_type") or ""))
+        if not fam or fam in ("other",):
+            return "", 0.0
+        conf = 0.74
+        if fam == "unknown":
+            conf = 0.35
+        if bool(result.get("prompt_injection_suspected")):
+            conf = max(0.4, conf - 0.12)
+        return fam, float(conf)
+    except Exception:
+        return "", 0.0
+
+
+def _multimodal_decision_tree(
+    *,
+    det_summary: Dict[str, Any],
+    detections: List[Dict[str, Any]],
+    ocr_text: str,
+    ocr_conf: float,
+    quality: Dict[str, Any],
+    vision: Dict[str, Any] | None,
+    dual_ocr: Dict[str, Any] | None,
+    qr_risks: List[Dict[str, Any]],
+    evidence_tags: List[str],
+) -> Dict[str, Any]:
+    yolo_family, yolo_conf = _yolo_family_guess(det_summary, detections)
+    ocr_family, ocr_fam_conf = _ocr_family_guess(ocr_text, ocr_conf)
+    quality_family, quality_conf = _quality_family_guess(quality)
+    vision_family, vision_conf = _vision_family_guess(vision)
+
+    weights = {
+        "yolo": 0.42,
+        "ocr": 0.24,
+        "vision": 0.24,
+        "quality": 0.10,
+    }
+    votes: Dict[str, float] = {}
+
+    def _vote(family: str, conf: float, w: float) -> None:
+        if not family:
+            return
+        votes[family] = float(votes.get(family, 0.0) + max(0.0, min(1.0, conf)) * w)
+
+    _vote(yolo_family, yolo_conf, weights["yolo"])
+    _vote(ocr_family, ocr_fam_conf, weights["ocr"])
+    _vote(vision_family, vision_conf, weights["vision"])
+    _vote(quality_family, quality_conf, weights["quality"])
+
+    selected_family = "unknown"
+    fused_conf = 0.0
+    agreement_ratio = 0.0
+    available = [(yolo_family, yolo_conf), (ocr_family, ocr_fam_conf), (vision_family, vision_conf), (quality_family, quality_conf)]
+    used = [(fam, conf) for fam, conf in available if fam]
+    if votes:
+        selected_family = sorted(votes.items(), key=lambda x: x[1], reverse=True)[0][0]
+        total_weight = 0.0
+        if yolo_family:
+            total_weight += weights["yolo"]
+        if ocr_family:
+            total_weight += weights["ocr"]
+        if vision_family:
+            total_weight += weights["vision"]
+        if quality_family:
+            total_weight += weights["quality"]
+        agreed = sum(1 for fam, conf in used if fam == selected_family and conf >= 0.45)
+        agreement_ratio = float(agreed) / float(max(1, len(used)))
+        fused_conf = float((votes.get(selected_family, 0.0) / float(max(1e-9, total_weight))) * (0.7 + 0.3 * agreement_ratio))
+        fused_conf = float(max(0.0, min(1.0, fused_conf)))
+
+    mismatch_conf_min = float(os.getenv("CV_MM_MISMATCH_CONF_MIN", "0.62") or 0.62)
+    low_conf_min = float(os.getenv("CV_MM_LOW_CONFIDENCE_MIN", "0.56") or 0.56)
+    ocr_yolo_conflict = bool(yolo_family and ocr_family and yolo_family != ocr_family and min(yolo_conf, ocr_fam_conf) >= mismatch_conf_min)
+    vision_yolo_conflict = bool(yolo_family and vision_family and yolo_family != vision_family and min(yolo_conf, vision_conf) >= mismatch_conf_min)
+    cross_modal_mismatch = bool(ocr_yolo_conflict or vision_yolo_conflict or (len(used) >= 3 and agreement_ratio < 0.34 and fused_conf < 0.72))
+
+    max_qr_risk = 0.0
+    try:
+        max_qr_risk = max((float(r.get("risk") or 0.0) for r in (qr_risks or [])), default=0.0)
+    except Exception:
+        max_qr_risk = 0.0
+    attack_surface_high = bool(
+        max_qr_risk >= 0.85
+        or (cross_modal_mismatch and any(t in evidence_tags for t in ("prompt_injection_text_suspected", "qr_url_suspicious", "steganography_suspected", "adversarial_perturbation_suspected", "manipulation_detected")))
+    )
+    product_identity_low_confidence = bool(selected_family in ("", "unknown", "other") or fused_conf < low_conf_min)
+    requires_review = bool(product_identity_low_confidence or cross_modal_mismatch or attack_surface_high)
+    action = "block" if attack_surface_high else ("challenge" if requires_review else "allow")
+
+    reasons: List[str] = []
+    if ocr_yolo_conflict:
+        reasons.append("ocr_yolo_conflict")
+    if vision_yolo_conflict:
+        reasons.append("vision_yolo_conflict")
+    if product_identity_low_confidence:
+        reasons.append("product_identity_low_confidence")
+    if cross_modal_mismatch:
+        reasons.append("cross_modal_mismatch")
+    if attack_surface_high:
+        reasons.append("attack_surface_high")
+    if not reasons:
+        reasons.append("cross_modal_consensus")
+
+    return {
+        "decision": action,
+        "product_family": selected_family,
+        "confidence": round(float(fused_conf), 4),
+        "agreement_ratio": round(float(agreement_ratio), 4),
+        "sources": {
+            "yolo": {"family": yolo_family or "unknown", "confidence": round(float(yolo_conf), 4)},
+            "ocr": {"family": ocr_family or "unknown", "confidence": round(float(ocr_fam_conf), 4)},
+            "vision": {"family": vision_family or "unknown", "confidence": round(float(vision_conf), 4)},
+            "quality": {"family": quality_family or "unknown", "confidence": round(float(quality_conf), 4)},
+            "dual_ocr_similarity": round(float((dual_ocr or {}).get("similarity") or 0.0), 4),
+            "max_qr_risk": round(float(max_qr_risk), 4),
+        },
+        "signals": {
+            "product_identity_low_confidence": product_identity_low_confidence,
+            "ocr_yolo_label_conflict": ocr_yolo_conflict,
+            "vision_yolo_conflict": vision_yolo_conflict,
+            "cross_modal_mismatch": cross_modal_mismatch,
+            "multimodal_attack_surface_high": attack_surface_high,
+        },
+        "reasons": reasons[:8],
+    }
+
+
 def _extract_qr_payloads(image_bytes: bytes) -> Dict[str, Any]:
     # Best-effort QR/barcode extraction.
     # Use shared decoder pipeline so we get both pyzbar and OpenCV fallbacks.
@@ -690,6 +903,25 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         except Exception:
             pass
 
+    multimodal = _multimodal_decision_tree(
+        det_summary=det_summary if isinstance(det_summary, dict) else {},
+        detections=detections if isinstance(detections, list) else [],
+        ocr_text=str(ocr_text or ""),
+        ocr_conf=float(ocr_conf or 0.0),
+        quality=quality if isinstance(quality, dict) else {},
+        vision=vision if isinstance(vision, dict) else None,
+        dual_ocr=dual_ocr if isinstance(dual_ocr, dict) else None,
+        qr_risks=qr_risks if isinstance(qr_risks, list) else [],
+        evidence_tags=evidence_tags if isinstance(evidence_tags, list) else [],
+    )
+    mm_signals = multimodal.get("signals") if isinstance(multimodal.get("signals"), dict) else {}
+    if bool(mm_signals.get("product_identity_low_confidence")) and "product_identity_low_confidence" not in evidence_tags:
+        evidence_tags.append("product_identity_low_confidence")
+    if bool(mm_signals.get("cross_modal_mismatch")) and "product_identity_cross_modal_mismatch" not in evidence_tags:
+        evidence_tags.append("product_identity_cross_modal_mismatch")
+    if bool(mm_signals.get("multimodal_attack_surface_high")) and "multimodal_attack_surface_high" not in evidence_tags:
+        evidence_tags.append("multimodal_attack_surface_high")
+
     # Compute ELA mask area ratio for verdict policy
     ela_area_ratio = 0.0
     try:
@@ -741,6 +973,11 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "adversarial_perturbation_suspected": "adversarial_perturbation_suspected" in evidence_tags,
             "steganography_suspected": "steganography_suspected" in evidence_tags,
             "ai_generated_image_suspected": bool(diffusion_generated) or ("diffusion_generated_suspected" in evidence_tags),
+            "product_identity_low_confidence": bool(mm_signals.get("product_identity_low_confidence")),
+            "ocr_yolo_label_conflict": bool(mm_signals.get("ocr_yolo_label_conflict")),
+            "vision_yolo_conflict": bool(mm_signals.get("vision_yolo_conflict")),
+            "cross_modal_mismatch": bool(mm_signals.get("cross_modal_mismatch")),
+            "multimodal_attack_surface_high": bool(mm_signals.get("multimodal_attack_surface_high")),
         }
     except Exception:
         sig = {}
@@ -752,12 +989,20 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             mitre_attack.append("AML.T0015")  # evasion/obfuscation via visual manipulation
         if sig.get("qr_url_present") or sig.get("prompt_injection_text") or sig.get("qr_url_suspicious"):
             mitre_attack.append("AML.T0043")  # adversarial data / prompt injection via indirection
+        if sig.get("cross_modal_mismatch") or sig.get("ocr_yolo_label_conflict") or sig.get("vision_yolo_conflict"):
+            mitre_attack.append("AML.T0015")
+        if sig.get("multimodal_attack_surface_high"):
+            mitre_attack.append("AML.T0043")
 
         # For OWASP mapping, expose canonical signal names the map understands.
         try:
             if sig.get("qr_url_present") or sig.get("prompt_injection_text") or sig.get("qr_url_suspicious"):
                 sig.setdefault("prompt_injection", True)
             if sig.get("manipulation_detected"):
+                sig.setdefault("supply_chain", True)
+            if sig.get("cross_modal_mismatch") or sig.get("vision_yolo_conflict") or sig.get("ocr_yolo_label_conflict"):
+                sig.setdefault("adversarial_detected", True)
+            if sig.get("multimodal_attack_surface_high"):
                 sig.setdefault("supply_chain", True)
         except Exception:
             pass
@@ -815,6 +1060,11 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "adversarial_perturbation_suspected": "adversarial_perturbation_suspected" in evidence_tags,
             "steganography_suspected": "steganography_suspected" in evidence_tags,
             "ai_generated_image_suspected": bool(diffusion_generated) or ("diffusion_generated_suspected" in evidence_tags),
+            "product_identity_low_confidence": bool(mm_signals.get("product_identity_low_confidence")),
+            "cross_modal_mismatch": bool(mm_signals.get("cross_modal_mismatch")),
+            "ocr_yolo_label_conflict": bool(mm_signals.get("ocr_yolo_label_conflict")),
+            "vision_yolo_conflict": bool(mm_signals.get("vision_yolo_conflict")),
+            "multimodal_attack_surface_high": bool(mm_signals.get("multimodal_attack_surface_high")),
         },
         "evidence_tags": evidence_tags,
         "clarifiers": clarifiers,
@@ -834,6 +1084,7 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             "prompt_injection_phrases": injection_phrases,
             "filename": {"value": filename[:200], "nfkc_changed": filename_unicode_nfkc, "unicode_suspicious": filename_unicode_any},
             "vision": vision,
+            "multimodal_decision": multimodal,
             "gan": gan,
             "adversarial": adversarial,
             "steganography": steganography,

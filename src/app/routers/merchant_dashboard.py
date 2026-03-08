@@ -488,43 +488,90 @@ def merchant_email_lab(request: Request):
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Email Security Triage Lab</title>
         <style>
-          :root { --bg:#0b1220; --fg:#e5e7eb; --muted:#94a3b8; --card:#0f172a; --accent:#f97316; }
-          body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; background: var(--bg); color: var(--fg); }
-          header { padding: 12px 14px; display:flex; justify-content:space-between; align-items:center; background: linear-gradient(90deg, #0b1220, #101a33); border-bottom: 1px solid rgba(148,163,184,0.2); }
-          .brand { font-weight: 700; letter-spacing: 0.2px; }
-          .sub { color: var(--muted); font-size: 12px; }
-          .wrap { display:grid; grid-template-columns: 320px 1fr 380px; gap:10px; height: calc(100vh - 60px); }
-          .col { border-right: 1px solid rgba(148,163,184,0.15); }
-          .pane { padding: 10px 12px; }
-          .card { border:1px solid rgba(148,163,184,0.18); border-radius: 12px; background: rgba(15,23,42,0.45); }
-          .card h4 { margin: 0; padding: 10px 12px; border-bottom:1px solid rgba(148,163,184,0.14); font-size: 13px; color: #cbd5e1; }
-          .card .body { padding: 10px 12px; }
-          input, textarea, select { width: 100%; padding:8px 10px; border-radius:10px; border:1px solid rgba(148,163,184,0.25); background:#0b1220; color:#e5e7eb; }
-          textarea { min-height: 180px; resize: vertical; }
-          .row { display:flex; gap:10px; align-items:center; }
-          .btn { padding:8px 10px; border-radius:10px; border:1px solid rgba(148,163,184,0.25); background:#111827; color:#e5e7eb; cursor:pointer; }
-          .btn:hover { border-color: rgba(249,115,22,0.6); }
-          .pill { display:inline-flex; align-items:center; gap:8px; padding: 6px 10px; border:1px solid rgba(148,163,184,0.18); border-radius: 999px; background: rgba(2,6,23,0.35); font-size: 12px; color:#cbd5e1; }
-          .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-          .list { display:flex; flex-direction:column; gap:8px; max-height: 240px; overflow:auto; }
-          .item { display:flex; justify-content:space-between; gap: 10px; padding: 8px 10px; border:1px solid rgba(148,163,184,0.16); border-radius: 12px; cursor:pointer; background: rgba(2,6,23,0.2); }
-          .item:hover { border-color: rgba(249,115,22,0.55); }
-          .small { font-size: 11px; color: #94a3b8; }
-          .trace { height: calc(100vh - 180px); overflow:auto; padding: 8px 10px; border:1px solid rgba(148,163,184,0.18); border-radius: 12px; background: rgba(2,6,23,0.2); }
-          .ev { margin-bottom:8px; padding:8px 10px; border-left: 3px solid rgba(249,115,22,0.45); background: rgba(15,23,42,0.55); border-radius: 8px; }
-          .ev .meta { font-size: 11px; color:#9ca3af; margin-bottom:4px; }
+          /* ── ShopSquire Enterprise Theme ── off-white / warm-slate palette ── */
+          :root {
+            --bg:       #f5f6f8;    /* warm off-white page background */
+            --surface:  #ffffff;    /* card white */
+            --surface2: #f0f2f5;    /* alternating surface */
+            --border:   #dde1e8;    /* subtle divider */
+            --fg:       #1a1f2e;    /* near-black text */
+            --fg2:      #4a5568;    /* secondary text */
+            --muted:    #8a95a8;    /* muted / hints */
+            --accent:   #2c5fe6;    /* primary action blue */
+            --accent2:  #e8501a;    /* warning / escalate orange */
+            --success:  #0f8a5e;    /* success green */
+            --header-bg:#1e2d4d;    /* deep navy header — single dark element */
+            --header-fg:#eef1f7;
+            --radius:   10px;
+          }
+          *, *::before, *::after { box-sizing: border-box; }
+          body { margin:0; font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif; background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.5; }
+          /* Header */
+          header { padding: 0 18px; height: 52px; display:flex; justify-content:space-between; align-items:center; background: var(--header-bg); box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+          .brand { font-weight: 700; font-size: 14px; color: var(--header-fg); letter-spacing: 0.2px; }
+          .sub { color: rgba(238,241,247,0.6); font-size: 11px; margin-top: 2px; }
+          /* Layout */
+          .wrap { display:grid; grid-template-columns: 310px 1fr 390px; gap:0; height: calc(100vh - 52px); overflow: hidden; }
+          .col { border-right: 1px solid var(--border); overflow-y: auto; }
+          .pane { padding: 12px 14px; }
+          /* Cards */
+          .card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 10px; }
+          .card h4 { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.5px; background: var(--surface2); border-radius: var(--radius) var(--radius) 0 0; }
+          .card .body { padding: 12px 14px; }
+          /* Form controls */
+          input, textarea, select { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 12px; outline: none; transition: border-color 0.15s; }
+          input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(44,95,230,0.12); }
+          textarea { min-height: 160px; resize: vertical; }
+          input[type=file] { border-style: dashed; padding: 10px; cursor: pointer; }
+          /* Labels */
+          .field-label { font-size: 11px; font-weight: 600; color: var(--fg2); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+          /* Rows */
+          .row { display:flex; gap:8px; align-items:center; }
+          /* Buttons */
+          .btn { padding: 7px 13px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; transition: all 0.15s; }
+          .btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+          .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+          .btn-primary:hover { background: #1e4ac8; border-color: #1e4ac8; }
+          .btn-danger { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+          .btn-danger:hover { background: #c43c10; border-color: #c43c10; }
+          /* Pills / badges */
+          .pill { display:inline-flex; align-items:center; gap:4px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface2); font-size: 11px; color: var(--fg2); font-weight: 500; }
+          /* Inbox items */
+          .list { display:flex; flex-direction:column; gap:6px; max-height: 220px; overflow:auto; }
+          .item { display:flex; flex-direction:column; gap:4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor:pointer; background: var(--surface); transition: all 0.12s; }
+          .item:hover { border-color: var(--accent); background: rgba(44,95,230,0.04); }
+          .item .item-from { font-weight: 600; font-size: 12px; color: var(--fg); }
+          .item .item-sub { font-size: 11px; color: var(--fg2); }
+          .item .item-preview { font-size: 11px; color: var(--muted); }
+          /* Verdict badge */
+          #verdict { display: inline-block; font-weight: 700; font-size: 13px; }
+          /* Small / muted */
+          .small { font-size: 11px; color: var(--muted); }
+          .mono { font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace; font-size: 11px; }
+          /* Trace / SSE stream */
+          .trace { overflow:auto; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #f8f9fb; }
+          .ev { margin-bottom: 6px; padding: 7px 10px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 6px 6px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+          .ev .meta { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+          /* Severity verdict bar states */
+          .sev-error   { background: #fff1f0; border-left: 4px solid #ef4444; color: #b91c1c; }
+          .sev-warning { background: #fffbeb; border-left: 4px solid #f59e0b; color: #92400e; }
+          .sev-info    { background: #eff6ff; border-left: 4px solid #3b82f6; color: #1d4ed8; }
+          /* Scrollbar */
+          ::-webkit-scrollbar { width: 5px; height: 5px; }
+          ::-webkit-scrollbar-track { background: transparent; }
+          ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         </style>
       </head>
       <body>
         <header>
           <div>
-            <div class="brand">ShopSquire | Email Security Triage Lab</div>
-            <div class="sub">Compose + Attachments → Analyze → Decision Trace</div>
+            <div class="brand">ShopSquire &nbsp;·&nbsp; Email Security Triage Lab</div>
+            <div class="sub">Compose · Attach · Analyze · Decision Trace · Escalate</div>
           </div>
           <div class="row">
-            <span class="pill">API: <span id="api_health">checking…</span></span>
-            <button class="btn" onclick="window.open('/merchant/dashboard','_blank')">Merchant BI</button>
-            <button class="btn" onclick="window.open('/merchant/incident-room','_blank')">Escalations</button>
+            <span class="pill" style="background:rgba(238,241,247,0.1);color:#eef1f7;border-color:rgba(238,241,247,0.2);">API <span id="api_health" style="font-weight:700;">checking…</span></span>
+            <button class="btn btn-primary" style="font-size:12px;" onclick="window.open('/merchant/dashboard','_blank')">Merchant BI</button>
+            <button class="btn" style="background:rgba(238,241,247,0.1);color:#eef1f7;border-color:rgba(238,241,247,0.2);font-size:12px;" onclick="window.open('/merchant/incident-room','_blank')">Escalations</button>
           </div>
         </header>
         <div class="wrap">
@@ -544,36 +591,111 @@ def merchant_email_lab(request: Request):
             <div class="card">
               <h4>Viewer / Composer</h4>
               <div class="body">
-                <div class="row"><div style="min-width:60px">To</div><input id="to" placeholder="accounts@supplier.com" /></div>
-                <div class="row" style="margin-top:8px"><div style="min-width:60px">Subject</div><input id="subject" placeholder="Supplier remittance update" /></div>
-                <div style="margin-top:8px">Body</div>
+                <div class="row"><div class="field-label" style="min-width:60px">To</div><input id="to" placeholder="accounts@supplier.com" /></div>
+                <div class="row" style="margin-top:8px"><div class="field-label" style="min-width:60px">Subject</div><input id="subject" placeholder="Supplier remittance update" /></div>
+                <div style="margin-top:10px" class="field-label">Body</div>
                 <textarea id="body" placeholder="Type email body…"></textarea>
-                <div style="margin-top:8px">Attachments</div>
+                <div style="margin-top:10px" class="field-label">Attachments</div>
                 <input type="file" id="files" multiple />
-                <div id="att_list" class="small" style="margin-top:6px"></div>
-                <div class="row" style="margin-top:10px">
-                  <button class="btn" aria-label="Analyze email and populate security matrix" onclick="analyze()">Analyze</button>
-                  <button class="btn" aria-label="Analyze email and escalate to incident room" onclick="submitEscalate()">Submit & Escalate</button>
-                  <button class="btn" aria-label="Load email lab demo assets" onclick="loadDemoAssets()">Load Demo Assets</button>
-                  <button class="btn" aria-label="Simulate agent events in decision trace" onclick="simulateAgents()">Simulate Agents</button>
-                  <span class="small" id="status"></span>
+                <div id="att_list" class="small mono" style="margin-top:6px; white-space:pre-wrap;"></div>
+                <div class="row" style="margin-top:12px; flex-wrap:wrap; gap:6px;">
+                  <button class="btn btn-primary" aria-label="Analyze email and populate security matrix" onclick="analyze()">&#128269; Analyze</button>
+                  <button class="btn btn-danger" aria-label="Analyze email and escalate to incident room" onclick="submitEscalate()">&#9888; Escalate</button>
+                  <button class="btn" aria-label="Load email lab demo assets" onclick="loadDemoAssets()">&#128196; Demo</button>
+                  <button class="btn" aria-label="Simulate agent events in decision trace" onclick="simulateAgents()">&#129302; Agents</button>
+                  <span class="small" id="status" style="flex:1; padding-left:4px;"></span>
                 </div>
-                <div style="margin-top:10px">
-                  <div class="pill">Verdict: <span id="verdict">n/a</span></div>
-                  <div class="small" id="reasons"></div>
-                  <div class="small" id="extract"></div>
+                <div style="margin-top:12px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface2);">
+                  <div class="field-label" style="margin-bottom:6px;">Last Verdict</div>
+                  <div><span id="verdict" class="pill">n/a</span></div>
+                  <div class="small" id="reasons" style="margin-top:6px; line-height:1.6;"></div>
+                  <div class="small mono" id="extract" style="margin-top:4px;"></div>
                 </div>
               </div>
             </div>
           </div>
-          <div class="pane col">
-            <div class="card">
+          <div class="pane col" style="overflow-y:auto; max-height:calc(100vh - 60px);">
+            <!-- Security Overview Panel (populated after Analyze) -->
+            <div class="card" id="sec_overview" style="display:none;">
+              <h4>Security Overview</h4>
+              <div class="body">
+                <div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:8px;" id="sec_badges"></div>
+                <div id="sec_verdict_bar" style="padding:8px 10px; border-radius:8px; margin-bottom:8px; font-weight:600;"></div>
+                <div class="small" id="sec_reasons_list"></div>
+              </div>
+            </div>
+            <!-- BEC Kill Chain -->
+            <div class="card" style="margin-top:10px; display:none;" id="bec_card">
+              <h4>BEC Kill Chain</h4>
+              <div class="body">
+                <div id="bec_stage" style="font-weight:700; color:#f97316; font-size:15px;"></div>
+                <div id="bec_flow" class="small" style="margin-top:6px;"></div>
+                <div class="row" style="margin-top:6px; gap:6px; flex-wrap:wrap;" id="bec_badges"></div>
+              </div>
+            </div>
+            <!-- Trust Case & Access Policy -->
+            <div class="card" style="margin-top:10px; display:none;" id="trust_card">
+              <h4>Trust Case & Access Policy</h4>
+              <div class="body">
+                <div class="row" style="gap:10px; flex-wrap:wrap;">
+                  <div><div class="small">Trust Score</div><div id="trust_score" style="font-size:22px; font-weight:700;">-</div></div>
+                  <div><div class="small">Level</div><div id="trust_level" style="font-size:14px; font-weight:600;">-</div></div>
+                  <div><div class="small">Access</div><div id="trust_access" style="font-size:14px; font-weight:600;">-</div></div>
+                </div>
+                <div class="small" style="margin-top:6px;" id="trust_actions"></div>
+                <div class="small" style="margin-top:4px; color:#94a3b8;" id="trust_reasons"></div>
+              </div>
+            </div>
+            <!-- Threat Correlation (MITRE/DREAD/CVSS/KEV/PASTA) -->
+            <div class="card" style="margin-top:10px; display:none;" id="threat_card">
+              <h4>Threat Correlation</h4>
+              <div class="body">
+                <div class="row" style="gap:6px; flex-wrap:wrap;" id="threat_badges"></div>
+                <div style="margin-top:8px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                  <div><div class="small">DREAD avg</div><div id="dread_avg" style="font-weight:700;">-</div></div>
+                  <div><div class="small">CVSS</div><div id="cvss_score" style="font-weight:700;">-</div></div>
+                  <div><div class="small">Kill Chain</div><div id="kc_stage" style="font-weight:700;">-</div></div>
+                  <div><div class="small">PASTA Stage</div><div id="pasta_stage" style="font-weight:700;">-</div></div>
+                </div>
+                <div class="small" style="margin-top:6px;" id="kev_list"></div>
+              </div>
+            </div>
+            <!-- Sandbox / Detonation / IOC -->
+            <div class="card" style="margin-top:10px; display:none;" id="sandbox_card">
+              <h4>Sandbox & IOC Enrichment</h4>
+              <div class="body">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                  <div><div class="small">Detonation</div><div id="det_result" style="font-weight:700;">-</div></div>
+                  <div><div class="small">IOC Malicious</div><div id="ioc_hits" style="font-weight:700;">0</div></div>
+                  <div><div class="small">IOC Resolution</div><div id="ioc_resolution" style="font-weight:600;">-</div></div>
+                  <div><div class="small">Enrichment Latency</div><div id="enrich_latency" class="small">-</div></div>
+                </div>
+                <div class="small" style="margin-top:6px;" id="sandbox_findings"></div>
+              </div>
+            </div>
+            <!-- Attachment Forensics -->
+            <div class="card" style="margin-top:10px; display:none;" id="attach_card">
+              <h4>Attachment Forensics</h4>
+              <div class="body">
+                <div id="attach_forensics" class="small mono" style="max-height:130px; overflow:auto;"></div>
+              </div>
+            </div>
+            <!-- QR / OCR Findings -->
+            <div class="card" style="margin-top:10px; display:none;" id="qr_card">
+              <h4>QR / OCR Findings</h4>
+              <div class="body">
+                <div id="qr_findings" class="small"></div>
+              </div>
+            </div>
+            <!-- Decision Trace (SSE stream) -->
+            <div class="card" style="margin-top:10px;">
               <h4>Decision Trace & Security Matrix</h4>
               <div class="body">
                 <div class="small">Trace ID: <span class="mono" id="trace_id">n/a</span></div>
-                <div class="trace" id="trace"></div>
+                <div class="trace" id="trace" style="max-height:280px;"></div>
               </div>
             </div>
+            <!-- Related Incident -->
             <div class="card" style="margin-top:10px;">
               <h4>Related Incident</h4>
               <div class="body">
@@ -622,7 +744,7 @@ def merchant_email_lab(request: Request):
           }
           ping();
           function newEmailPreset(){ document.getElementById('to').value='accounts@ingramfаke.com.au'; document.getElementById('subject').value='Updated Payment Details'; document.getElementById('body').value='We are changing our payment procedures in the next couple of weeks. Disregard any previous remittance instructions.'; }
-          function renderInbox(){ const list = document.getElementById('inbox'); list.innerHTML=''; for(const p of presets){ const d=document.createElement('div'); d.className='item'; d.innerHTML=`<div><div>${p.label}</div><div class='small'>${p.subject}</div></div><div class='small'>${p.body.slice(0,60)}…</div>`; d.onclick=()=>{ document.getElementById('subject').value=p.subject; document.getElementById('body').value=p.body; }; list.appendChild(d);} }
+          function renderInbox(){ const list = document.getElementById('inbox'); list.innerHTML=''; for(const p of presets){ const d=document.createElement('div'); d.className='item'; d.innerHTML=`<div class='item-from'>${p.label}</div><div class='item-sub'>${p.subject}</div><div class='item-preview'>${p.body.slice(0,72)}…</div>`; d.onclick=()=>{ document.getElementById('subject').value=p.subject; document.getElementById('body').value=p.body; }; list.appendChild(d);} }
           renderInbox();
           document.getElementById('files').addEventListener('change', async (ev)=>{ const out=[]; for(const f of ev.target.files){ const b64 = await toB64(f); const sha = await sha256(f); out.push(`${f.name} · ${sha}`); } document.getElementById('att_list').textContent = out.join('\n'); });
           function toB64(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
@@ -669,20 +791,130 @@ def merchant_email_lab(request: Request):
               box.scrollTop = box.scrollHeight;
             }catch(e){}
           }
+          /* ── Render structured security panels from evaluate response ── */
+          function renderSecurityPanels(j){
+            try{
+              const ev = j.evidence_snapshot || {};
+              /* ── Security Overview ── */
+              const ov = document.getElementById('sec_overview'); ov.style.display='block';
+              const badges = document.getElementById('sec_badges');
+              const sevColor = {'error':'#ef4444','warning':'#f97316','info':'#3b82f6','critical':'#dc2626'}[j.severity] || '#64748b';
+              badges.innerHTML = `<span class='pill' style='background:${sevColor};color:#fff;'>${(j.severity||'info').toUpperCase()}</span>`
+                + `<span class='pill'>${j.verdict_action||'unknown'}</span>`
+                + `<span class='pill'>Route: ${j.route||'-'}</span>`
+                + (j.risk_band ? `<span class='pill'>Risk: ${j.risk_band}</span>` : '')
+                + (j.escalation ? `<span class='pill'>Escalation: ${j.escalation}</span>` : '');
+              const vBar = document.getElementById('sec_verdict_bar');
+              vBar.style.background = sevColor + '22'; vBar.style.color = sevColor; vBar.style.borderLeft = `4px solid ${sevColor}`;
+              vBar.textContent = `${j.verdict_action||'unknown'} / ${j.severity||'info'}`;
+              document.getElementById('sec_reasons_list').innerHTML = (j.reasons||[]).map(r=>`<div style='margin:2px 0;'>• ${r}</div>`).join('');
+
+              /* ── BEC Kill Chain ── */
+              const bec = ev.bec_kill_chain || j.bec_kill_chain || {};
+              if(bec.stage || j.bec_kill_chain_stage){
+                const bc = document.getElementById('bec_card'); bc.style.display='block';
+                document.getElementById('bec_stage').textContent = `Stage: ${bec.stage || j.bec_kill_chain_stage || '-'}`;
+                const flow = bec.attack_flow || bec.flow || [];
+                document.getElementById('bec_flow').innerHTML = Array.isArray(flow) ? flow.map(s=>`<span class='pill'>${s}</span>`).join(' → ') : '';
+                const bbadges = document.getElementById('bec_badges');
+                bbadges.innerHTML = (bec.confidence!=null ? `<span class='pill'>Conf: ${(bec.confidence*100).toFixed(0)}%</span>` : '')
+                  + (bec.signal_count!=null ? `<span class='pill'>Signals: ${bec.signal_count}</span>` : '')
+                  + (bec.techniques ? `<span class='pill'>Techniques: ${JSON.stringify(bec.techniques).slice(0,80)}</span>` : '');
+              }
+
+              /* ── Trust Case ── */
+              const tc = ev.trust_case || j.trust_case || {};
+              if(tc.score!=null || tc.level){
+                const td = document.getElementById('trust_card'); td.style.display='block';
+                const scoreEl = document.getElementById('trust_score');
+                const sc = tc.score!=null ? parseFloat(tc.score) : null;
+                scoreEl.textContent = sc!=null ? sc.toFixed(2) : '-';
+                scoreEl.style.color = sc!=null && sc<0.3 ? '#ef4444' : sc<0.6 ? '#f97316' : '#22c55e';
+                document.getElementById('trust_level').textContent = tc.level || '-';
+                document.getElementById('trust_access').textContent = tc.progressive_access || '-';
+                const acts = tc.actions || [];
+                document.getElementById('trust_actions').innerHTML = acts.map(a=>`<span class='pill'>${a}</span>`).join(' ');
+                const reasons = tc.reasons || [];
+                document.getElementById('trust_reasons').textContent = reasons.join(', ');
+              }
+
+              /* ── Threat Correlation (MITRE / DREAD / CVSS / KEV / PASTA) ── */
+              const thr = ev.threat_correlation || j.threat_correlation || {};
+              if(thr.mitre_attack || thr.dread || thr.cvss || thr.kev || thr.kill_chain_stage){
+                const tc2 = document.getElementById('threat_card'); tc2.style.display='block';
+                const mitre = Array.isArray(thr.mitre_attack) ? thr.mitre_attack : [];
+                const kev = Array.isArray(thr.kev) ? thr.kev : [];
+                document.getElementById('threat_badges').innerHTML = mitre.map(m=>`<span class='pill' style='background:#4338ca22;color:#4338ca;'>MITRE ${m}</span>`).join('')
+                  + kev.map(k=>`<span class='pill' style='background:#dc262622;color:#dc2626;'>KEV ${k}</span>`).join('');
+                const dread = thr.dread || {};
+                document.getElementById('dread_avg').textContent = dread.avg!=null ? dread.avg : (thr.dread_avg!=null ? thr.dread_avg : '-');
+                const cvss = thr.cvss || {};
+                document.getElementById('cvss_score').textContent = cvss.score!=null ? `${cvss.score} (${cvss.severity||''})` : '-';
+                document.getElementById('kc_stage').textContent = thr.kill_chain_stage || '-';
+                document.getElementById('pasta_stage').textContent = thr.pasta_stage || (ev.pasta_stage) || '-';
+                document.getElementById('kev_list').textContent = kev.length ? `KEV: ${kev.join(', ')}` : '';
+              }
+
+              /* ── Sandbox / Detonation / IOC ── */
+              const det = ev.detonation || j.detonation || {};
+              const iocQ = ev.ioc_quality || {};
+              const iocC = ev.ioc_counts || {};
+              const sandIoc = ev.sandbox_ioc_stage || '';
+              if(det.provider || det.malicious!=null || iocQ.resolution || iocC.url!=null || sandIoc){
+                const sc2 = document.getElementById('sandbox_card'); sc2.style.display='block';
+                document.getElementById('det_result').textContent = det.malicious!=null ? (det.malicious ? 'MALICIOUS' : 'clean') : (sandIoc || '-');
+                document.getElementById('det_result').style.color = det.malicious ? '#ef4444' : '#22c55e';
+                document.getElementById('ioc_hits').textContent = (iocC.url||0) + (iocC.domain||0) + (iocC.hash||0);
+                document.getElementById('ioc_resolution').textContent = iocQ.resolution || '-';
+                document.getElementById('enrich_latency').textContent = j.latency ? `${(j.latency*1000).toFixed(0)}ms` : '-';
+                const findings = det.findings || det.ioc_list || [];
+                document.getElementById('sandbox_findings').innerHTML = Array.isArray(findings) ? findings.slice(0,6).map(f=>`<div>• ${typeof f==='string'?f:JSON.stringify(f)}</div>`).join('') : '';
+              }
+
+              /* ── Attachment Forensics ── */
+              const artIntel = ev.artifact_intel || {};
+              const attGate = ev.attachment_ingest_gate || {};
+              if(Object.keys(artIntel).length || Object.keys(attGate).length){
+                const ac = document.getElementById('attach_card'); ac.style.display='block';
+                const lines = [];
+                if(attGate.signal_score!=null) lines.push(`Signal Score: ${attGate.signal_score}`);
+                if(attGate.band) lines.push(`Band: ${attGate.band}`);
+                if(artIntel.signals) lines.push(`Signals: ${JSON.stringify(artIntel.signals).slice(0,200)}`);
+                if(artIntel.intel_sources) lines.push(`Sources: ${JSON.stringify(artIntel.intel_sources).slice(0,150)}`);
+                document.getElementById('attach_forensics').innerHTML = lines.map(l=>`<div>${l}</div>`).join('');
+              }
+
+              /* ── QR / OCR ── */
+              const qr = ev.ocr_qr_sanitization || {};
+              if(qr.qr_count!=null || qr.ocr_tokens || qr.urls_found){
+                const qc = document.getElementById('qr_card'); qc.style.display='block';
+                const parts = [];
+                if(qr.qr_count!=null) parts.push(`QR codes: ${qr.qr_count}`);
+                if(qr.malicious_qr!=null) parts.push(`Malicious: ${qr.malicious_qr}`);
+                if(qr.benign_qr!=null) parts.push(`Benign: ${qr.benign_qr}`);
+                if(qr.urls_found) parts.push(`URLs: ${JSON.stringify(qr.urls_found).slice(0,200)}`);
+                if(qr.ocr_tokens) parts.push(`OCR tokens: ${qr.ocr_tokens}`);
+                document.getElementById('qr_findings').innerHTML = parts.map(p=>`<div>• ${p}</div>`).join('');
+              }
+            }catch(e){ pushTraceNotice('render_panels_error', { error: String(e) }); }
+          }
+
           async function analyze(){ document.getElementById('status').textContent='Analyzing…'; const to = document.getElementById('to').value.trim(); const subj = document.getElementById('subject').value.trim(); const body = document.getElementById('body').value.trim(); const atts = await collectAllAttachments(); const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
-              // First try merchant key; on authz/authn failure retry with owner/developer key for local demo.
               let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(payload) });
               if (r.status === 401 || r.status === 403) {
                 r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }, body: JSON.stringify(payload) });
               }
               const j = await r.json().catch(()=>null); if(!r.ok || !j){ const err=(j && (j.detail||j.error) ? (j.detail||j.error) : 'no details'); document.getElementById('status').textContent='Analyze failed ('+r.status+'): '+err; pushTraceNotice('analyze_failed', { status: r.status, error: err, endpoint: '/api/v1/email_security/evaluate' }); return; }
-              document.getElementById('verdict').textContent = (j.verdict_action || 'unknown') + ' / ' + (j.severity || 'info');
-              document.getElementById('reasons').textContent = (j.reasons||[]).slice(0,6).join(', ');
-              const ex = []; try { const ev = j.evidence_snapshot||{}; const ioc = ev.ioc_counts||{}; ex.push(`IOC: url=${ioc.url||0} domain=${ioc.domain||0} hash=${ioc.hash||0}`); if(ev.sender_trust && ev.sender_trust.sender_trust_score!=null){ ex.push(`Trust=${ev.sender_trust.sender_trust_score}`); } } catch(e) {}
+              const sevCls = {'error':'sev-error','warning':'sev-warning'}.hasOwnProperty(j.severity||'') ? 'sev-'+j.severity : 'sev-info';
+              document.getElementById('verdict').textContent = (j.verdict_action || 'unknown').toUpperCase() + ' · ' + (j.severity || 'info').toUpperCase();
+              document.getElementById('verdict').className = 'pill ' + sevCls;
+              document.getElementById('reasons').textContent = (j.reasons||[]).slice(0,6).join(' · ');
+              const ex = []; try { const ev = j.evidence_snapshot||{}; const ioc = ev.ioc_counts||{}; ex.push(`IOC: url=${ioc.url||0} domain=${ioc.domain||0} hash=${ioc.hash||0}`); if(ev.sender_trust && ev.sender_trust.sender_trust_score!=null){ ex.push(`Trust=${parseFloat(ev.sender_trust.sender_trust_score).toFixed(2)}`); } } catch(e) {}
               document.getElementById('extract').textContent = ex.join(' | ');
+              renderSecurityPanels(j);
               const tid = j.decision_trace_id || j.decision_id || payload.message_id; if (tid) { attachTrace(tid); }
-              document.getElementById('status').textContent='Done';
+              document.getElementById('status').textContent='✓ Analysis complete';
             } catch(e) { document.getElementById('status').textContent='Analyze error'; pushTraceNotice('analyze_error', { endpoint: '/api/v1/email_security/evaluate', error: String(e && e.message ? e.message : e) }); }
           }
           async function submitEscalate(){
@@ -702,6 +934,7 @@ def merchant_email_lab(request: Request):
               document.getElementById('verdict').textContent = (j.verdict_action || 'unknown') + ' / ' + (j.severity || 'info');
               document.getElementById('reasons').textContent = (j.reasons||[]).slice(0,6).join(', ');
               const tid = j.decision_trace_id || j.decision_id || payload.message_id; if (tid) { attachTrace(tid); }
+              renderSecurityPanels(j);
               // Now escalate: create an incident via the public escalation endpoint
               try {
                 const escPayload = { case_id: j.decision_trace_id || j.decision_id || payload.message_id, trace_id: j.decision_trace_id, reason: 'email_lab_manual_escalation', context: { subject: subj, verdict: j.verdict_action, severity: j.severity, reasons: (j.reasons||[]).slice(0,6) } };

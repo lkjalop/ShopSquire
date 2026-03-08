@@ -36,6 +36,7 @@ export default function LoginModal({ onClose, onLogin }: Props) {
       }
       if (j?.access_token) localStorage.setItem('access_token', j.access_token);
       if (j?.refresh_token) localStorage.setItem('refresh_token', j.refresh_token);
+      // Role persisted for UI rendering only — server-side role enforcement via httpOnly cookie JWT
       const role = j?.role || 'buyer';
       localStorage.setItem('role', role);
       if (j?.user_id) localStorage.setItem('uid', String(j.user_id));

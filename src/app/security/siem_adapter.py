@@ -200,6 +200,63 @@ def build_normalized_security_event(
     }
 
 
+def map_security_event_for_splunk(event: Dict[str, Any]) -> Dict[str, Any]:
+    verdict = event.get("verdict") if isinstance(event.get("verdict"), dict) else {}
+    return {
+        "time": int(time.time()),
+        "sourcetype": "shopsquire:security_handoff",
+        "source": "email_evaluate",
+        "event": {
+            "schema_version": str(event.get("schema_version") or "shopsquire.security.v1"),
+            "event_time": int(event.get("event_time") or 0),
+            "tenant_id": str(event.get("tenant_id") or "default"),
+            "decision_id": event.get("decision_id"),
+            "trace_id": event.get("trace_id"),
+            "message_id_hash": ((event.get("entity") or {}).get("message_id_hash") if isinstance(event.get("entity"), dict) else None),
+            "severity": str(verdict.get("severity") or "info"),
+            "verdict_action": str(verdict.get("action") or "allow"),
+            "route": str(verdict.get("route") or "auto_resolve"),
+            "escalation": str(verdict.get("escalation") or "none"),
+            "risk_band": verdict.get("risk_band"),
+            "reasons": list(event.get("reasons") or []),
+            "tags": list(event.get("tags") or []),
+            "ioc": dict(event.get("ioc") or {}),
+            "playbook_id": event.get("playbook_id"),
+            "ticket_id": event.get("ticket_id"),
+            "evidence": dict(event.get("evidence") or {}),
+            "contract_version": "splunk.v1",
+        },
+    }
+
+
+def map_security_event_for_sentinel(event: Dict[str, Any]) -> Dict[str, Any]:
+    verdict = event.get("verdict") if isinstance(event.get("verdict"), dict) else {}
+    entity = event.get("entity") if isinstance(event.get("entity"), dict) else {}
+    return {
+        "TimeGenerated": _utc_now_iso(),
+        "TenantId_s": str(event.get("tenant_id") or "default"),
+        "EventVendor_s": "ShopSquire",
+        "EventProduct_s": "EmailSecurity",
+        "EventSchemaVersion_s": str(event.get("schema_version") or "shopsquire.security.v1"),
+        "EventTime_t": int(event.get("event_time") or 0),
+        "DecisionId_s": str(event.get("decision_id") or ""),
+        "TraceId_s": str(event.get("trace_id") or ""),
+        "MessageIdHash_s": str(entity.get("message_id_hash") or ""),
+        "Severity_s": str(verdict.get("severity") or "info"),
+        "VerdictAction_s": str(verdict.get("action") or "allow"),
+        "Route_s": str(verdict.get("route") or "auto_resolve"),
+        "Escalation_s": str(verdict.get("escalation") or "none"),
+        "RiskBand_s": str(verdict.get("risk_band") or ""),
+        "Reasons_s": json.dumps(list(event.get("reasons") or []), ensure_ascii=False),
+        "Tags_s": json.dumps(list(event.get("tags") or []), ensure_ascii=False),
+        "Ioc_s": json.dumps(dict(event.get("ioc") or {}), ensure_ascii=False),
+        "PlaybookId_s": str(event.get("playbook_id") or ""),
+        "TicketId_s": str(event.get("ticket_id") or ""),
+        "Evidence_s": json.dumps(dict(event.get("evidence") or {}), ensure_ascii=False),
+        "ContractVersion_s": "sentinel.v1",
+    }
+
+
 def emit_security_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
     """Emit normalized security event to SIEM/security middleware connectors.
 
@@ -338,7 +395,7 @@ def emit_security_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
     splunk_token = os.getenv("SPLUNK_HEC_TOKEN")
     if splunk_url and splunk_token:
         configured_targets += 1
-        body = {"time": int(time.time()), "sourcetype": "shopsquire:security_handoff", "event": event}
+        body = map_security_event_for_splunk(event)
         _dispatch_target(
             "splunk_hec",
             splunk_url,
@@ -361,7 +418,8 @@ def emit_security_handoff(event: Dict[str, Any]) -> Dict[str, Any]:
     sentinel_url = os.getenv("SENTINEL_INGEST_URL")
     if sentinel_url:
         configured_targets += 1
-        _dispatch_target("sentinel", sentinel_url, {"Content-Type": "application/json"}, event, persist_payload=event)
+        sentinel_payload = map_security_event_for_sentinel(event)
+        _dispatch_target("sentinel", sentinel_url, {"Content-Type": "application/json"}, sentinel_payload, persist_payload=event)
 
     # CrowdStrike/CSPM handoff webhooks (optional)
     cs_url = os.getenv("CROWDSTRIKE_INGEST_URL")
@@ -559,3 +617,76 @@ def requeue_handoff(item_id: str) -> Dict[str, Any]:
         # Best-effort: if this target still fails it remains in DLQ from emit path.
         pass
     return {"ok": True, "id": item_id, "result": handoff_result}
+
+
+def replay_handoff_dlq(*, limit: int = 50, target: str | None = None, dry_run: bool = False) -> Dict[str, Any]:
+    limit = max(1, min(int(limit or 50), 500))
+    listed = list_handoff_dlq(limit=limit, offset=0, target=target)
+    items = list(listed.get("items") or [])
+    preview_ids = [str((i or {}).get("id") or "") for i in items if str((i or {}).get("id") or "").strip()]
+    if dry_run:
+        return {
+            "dry_run": True,
+            "requested_limit": limit,
+            "target": target,
+            "picked": len(preview_ids),
+            "item_ids": preview_ids,
+            "replayed": 0,
+            "failed": 0,
+            "results": [],
+        }
+
+    results: List[Dict[str, Any]] = []
+    replayed = 0
+    failed = 0
+    for item_id in preview_ids:
+        out = requeue_handoff(item_id)
+        ok = bool(out.get("ok"))
+        if ok:
+            replayed += 1
+        else:
+            failed += 1
+        results.append({"id": item_id, "ok": ok, "result": out.get("result"), "detail": out.get("detail")})
+    return {
+        "dry_run": False,
+        "requested_limit": limit,
+        "target": target,
+        "picked": len(preview_ids),
+        "item_ids": preview_ids,
+        "replayed": replayed,
+        "failed": failed,
+        "results": results,
+    }
+
+
+def get_handoff_dashboard(*, hours: int = 24, dlq_limit: int = 20, target: str | None = None) -> Dict[str, Any]:
+    reliability = get_handoff_reliability(hours=hours)
+    dlq = list_handoff_dlq(limit=dlq_limit, offset=0, target=target)
+    items = list(dlq.get("items") or [])
+    totals = reliability.get("totals") if isinstance(reliability.get("totals"), dict) else {}
+    attempts = int(totals.get("attempts") or 0)
+    sent = int(totals.get("sent") or 0)
+    dlq_n = int(totals.get("dlq") or 0)
+    retrying = int(totals.get("retrying") or 0)
+    skipped = int(totals.get("skipped") or 0)
+    success_rate = float(sent / attempts) if attempts > 0 else 0.0
+    return {
+        "window_hours": int(reliability.get("window_hours") or hours),
+        "target_filter": target,
+        "summary": {
+            "attempts": attempts,
+            "sent": sent,
+            "dlq": dlq_n,
+            "retrying": retrying,
+            "skipped": skipped,
+            "success_rate": round(success_rate, 4),
+            "has_failures": bool(dlq_n > 0 or retrying > 0),
+        },
+        "reliability": reliability,
+        "dlq": {
+            "limit": int(dlq.get("limit") or dlq_limit),
+            "offset": int(dlq.get("offset") or 0),
+            "count": len(items),
+            "items": items,
+        },
+    }

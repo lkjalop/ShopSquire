@@ -59,6 +59,11 @@ _CV_SIGNAL_MITRE: Dict[str, str] = {
     "qr_prompt_injection": "AML.T0051",
     "ocr_prompt_injection": "AML.T0051",
     "adversarial_detected": "AML.T0043",
+    "cross_modal_mismatch": "AML.T0043",
+    "ocr_yolo_label_conflict": "AML.T0015",
+    "vision_yolo_conflict": "AML.T0015",
+    "product_identity_low_confidence": "AML.T0043",
+    "multimodal_attack_surface_high": "AML.T0051",
     "steg_suspicious": "T1027",
     "qr_code_detected": "T1566",
     "qr_external_url_detected": "T1566.002",
@@ -68,6 +73,11 @@ _CV_SIGNAL_OWASP: Dict[str, str] = {
     "qr_prompt_injection": "LLM01:PromptInjection",
     "ocr_prompt_injection": "LLM01:PromptInjection",
     "adversarial_detected": "LLM02:InsecureOutputHandling",
+    "cross_modal_mismatch": "LLM02:InsecureOutputHandling",
+    "ocr_yolo_label_conflict": "LLM02:InsecureOutputHandling",
+    "vision_yolo_conflict": "LLM02:InsecureOutputHandling",
+    "product_identity_low_confidence": "LLM02:InsecureOutputHandling",
+    "multimodal_attack_surface_high": "LLM01:PromptInjection",
 }
 
 # ── Kill-chain stage inference ──
@@ -95,6 +105,11 @@ _SIGNAL_KILL_CHAIN: Dict[str, str] = {
     "training_poisoning": "Installation",
     "supply_chain": "Installation",
     "embedding_weakness": "Exploitation",
+    "cross_modal_mismatch": "Exploitation",
+    "ocr_yolo_label_conflict": "Delivery",
+    "vision_yolo_conflict": "Delivery",
+    "product_identity_low_confidence": "Reconnaissance",
+    "multimodal_attack_surface_high": "Installation",
     "email_c2_beaconing": "CommandAndControl",
     "data_exfiltration": "ActionsOnObjectives",
     "pci": "ActionsOnObjectives",
@@ -261,6 +276,19 @@ def compute_dread(
         bump = 1.0
         exploit_base = _clamp(exploit_base + bump)
         evidence.append(_evidence_item("adversarial_detected", "exploitability", bump, cv=True))
+    if cv.get("cross_modal_mismatch") or cv.get("ocr_yolo_label_conflict") or cv.get("vision_yolo_conflict"):
+        bump = 1.2
+        exploit_base = _clamp(exploit_base + bump)
+        if cv.get("cross_modal_mismatch"):
+            evidence.append(_evidence_item("cross_modal_mismatch", "exploitability", bump, cv=True))
+        if cv.get("ocr_yolo_label_conflict"):
+            evidence.append(_evidence_item("ocr_yolo_label_conflict", "exploitability", bump, cv=True))
+        if cv.get("vision_yolo_conflict"):
+            evidence.append(_evidence_item("vision_yolo_conflict", "exploitability", bump, cv=True))
+    if cv.get("multimodal_attack_surface_high"):
+        bump = 1.6
+        exploit_base = _clamp(exploit_base + bump)
+        evidence.append(_evidence_item("multimodal_attack_surface_high", "exploitability", bump, cv=True))
     exploitability = _clamp(exploit_base)
 
     # ── Affected Users ──
@@ -286,6 +314,10 @@ def compute_dread(
         bump = 1.5
         affected_base = _clamp(affected_base + bump)
         evidence.append(_evidence_item("model_dos", "affected_users", bump))
+    if cv.get("multimodal_attack_surface_high"):
+        bump = 1.3
+        affected_base = _clamp(affected_base + bump)
+        evidence.append(_evidence_item("multimodal_attack_surface_high", "affected_users", bump, cv=True))
     affected_users = _clamp(affected_base)
 
     # ── Discoverability ──
@@ -306,6 +338,10 @@ def compute_dread(
         bump = 1.0
         discover_base = _clamp(discover_base + bump)
         evidence.append(_evidence_item("qr_code_detected", "discoverability", bump, cv=True))
+    if cv.get("product_identity_low_confidence"):
+        bump = 0.8
+        discover_base = _clamp(discover_base + bump)
+        evidence.append(_evidence_item("product_identity_low_confidence", "discoverability", bump, cv=True))
     discoverability = _clamp(discover_base)
 
     # ── Kill-chain stage inference ──
