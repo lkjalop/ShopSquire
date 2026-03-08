@@ -108,6 +108,7 @@ class TestBowBaseline:
 # Section 2 — Ollama semantic embeddings (skipped when offline)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 @pytest.mark.skipif(not _OLLAMA_AVAILABLE, reason=f"Ollama not reachable at {os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}")
 class TestOllamaSemanticEmbeddings:
     """Validates Ollama nomic-embed-text delivers real semantic similarity."""

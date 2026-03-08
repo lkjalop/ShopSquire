@@ -58,12 +58,13 @@ def test_dmarc_ingest_and_summary():
     app = create_app()
     client = TestClient(app)
     files = {"file": ("r.xml", SAMPLE_DMARC, "application/xml")}
-    r = client.post("/api/v1/security/dmarc/ingest", files=files)
+    _hdrs = {"x-api-key": "local-owner-key"}
+    r = client.post("/api/v1/security/dmarc/ingest", files=files, headers=_hdrs)
     assert r.status_code == 200
     body = r.json()
     assert body.get("reports", 0) >= 1
 
-    r2 = client.get("/api/v1/admin/dmarc/summary")
+    r2 = client.get("/api/v1/admin/dmarc/summary", headers=_hdrs)
     assert r2.status_code == 200
     s = r2.json()
     assert "summary" in s

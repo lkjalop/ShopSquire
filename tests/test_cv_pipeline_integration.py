@@ -18,6 +18,8 @@ import time
 
 import pytest
 
+pytestmark = pytest.mark.slow
+
 _DUMP = os.path.join(os.path.dirname(__file__), "..", "dump")
 _OWNER_KEY = os.getenv("OWNER_API_KEY", "local-owner-key")
 _AUTH = {"x-api-key": _OWNER_KEY}

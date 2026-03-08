@@ -32,7 +32,13 @@ def test_admin_trust_score_calibration_report():
     app = create_app()
     client = TestClient(app)
 
-    with db_session() as db:
+    # Use the engine that the app (and its routes) will use, so INSERT and
+    # the API GET query share the same DB connection.
+    from src.app.models.db import get_engine
+    from sqlalchemy.orm import Session as _SASession
+    engine = get_engine()
+
+    with _SASession(engine) as db:
         db.execute(
             text(
                 """
@@ -50,6 +56,13 @@ def test_admin_trust_score_calibration_report():
         )
         try:
             db.execute(text("ALTER TABLE email_security_incidents ADD COLUMN ground_truth TEXT"))
+        except Exception:
+            pass
+        # Purge stale calibration rows from prior runs to ensure a clean baseline.
+        try:
+            db.execute(
+                text("DELETE FROM email_security_incidents WHERE tenant_id = 'tenant-cal'")
+            )
         except Exception:
             pass
         rows = [

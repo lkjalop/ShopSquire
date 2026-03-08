@@ -249,6 +249,7 @@ def _ollama_describe_image(image_bytes: bytes, prompt: str = "Describe this imag
         return f"error: {exc}"
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not _LLAVA_AVAILABLE, reason="Ollama llava not available")
 class TestDiffusionLlavaIntegration:
     """Use llava vision model to describe test images and confirm spectral detector output."""

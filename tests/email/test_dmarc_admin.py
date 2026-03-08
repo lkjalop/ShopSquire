@@ -57,17 +57,20 @@ def _sample_dmarc_xml():
 """
 
 
+_OWNER_HEADERS = {"x-api-key": "local-owner-key"}
+
+
 def test_dmarc_ingest_and_summary_xml():
     c = _client()
     xml = _sample_dmarc_xml()
     files = {"file": ("dmarc.xml", xml, "application/xml")}
-    r = c.post("/api/v1/security/dmarc/ingest", files=files)
+    r = c.post("/api/v1/security/dmarc/ingest", files=files, headers=_OWNER_HEADERS)
     assert r.status_code == 200
     data = r.json()
     assert int(data.get("reports") or 0) >= 1
     assert int(data.get("records") or 0) >= 1
 
-    s = c.get("/api/v1/security/dmarc/summary", params={"days": 30})
+    s = c.get("/api/v1/security/dmarc/summary", params={"days": 30}, headers=_OWNER_HEADERS)
     assert s.status_code == 200
     summary = s.json()
     ips = summary.get("top_ips") or []
@@ -84,6 +87,6 @@ def test_dmarc_ingest_zip_and_summary():
         zf.writestr("report1.xml", _sample_dmarc_xml())
     buf.seek(0)
     files = {"file": ("reports.zip", buf.read(), "application/zip")}
-    r = c.post("/api/v1/security/dmarc/ingest", files=files)
+    r = c.post("/api/v1/security/dmarc/ingest", files=files, headers=_OWNER_HEADERS)
     assert r.status_code == 200
     assert int(r.json().get("reports") or 0) >= 1

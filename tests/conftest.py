@@ -308,3 +308,29 @@ def _rss_guard():
             )
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Skip @pytest.mark.slow tests unless --run-slow is given
+# ---------------------------------------------------------------------------
+# CV pipeline / large-image-inference tests take 60–120 s due to YOLOv8
+# model loading.  They are marked ``@pytest.mark.slow`` and skipped by
+# default.  Pass ``--run-slow`` on the CLI to include them.
+# ---------------------------------------------------------------------------
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Include @pytest.mark.slow tests (skipped by default).",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
+    if config.getoption("--run-slow", default=False):
+        return  # run everything
+    skip_slow = pytest.mark.skip(reason="slow test — pass --run-slow to enable")
+    for item in items:
+        if item.get_closest_marker("slow"):
+            item.add_marker(skip_slow)

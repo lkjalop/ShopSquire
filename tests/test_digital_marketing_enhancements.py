@@ -222,7 +222,13 @@ class TestRecordCommerceOutcome:
 
     @patch("src.app.services.decision_log.log_decision", side_effect=Exception("DB down"))
     def test_graceful_failure(self, mock_log):
-        result = record_commerce_outcome("dec-003", conversion=False)
+        import logging
+        # Suppress any logging noise from prior tests that may have set the log level
+        logging.disable(logging.CRITICAL)
+        try:
+            result = record_commerce_outcome("dec-003", conversion=False)
+        finally:
+            logging.disable(logging.NOTSET)
         assert result is None
 
 

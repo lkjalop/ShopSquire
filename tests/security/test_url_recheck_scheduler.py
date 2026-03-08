@@ -4,14 +4,18 @@ from sqlalchemy import text
 
 
 def test_url_recheck_scheduler_escalates_incident(monkeypatch):
-    from src.app.models.db import db_session
+    from src.app.models.db import get_engine
     from src.app.services import url_recheck_scheduler as urs
+    from sqlalchemy.orm import Session as _SASession
 
     incident_id = "esi-url-recheck-1"
     decision_id = "dec-url-recheck-1"
     tenant_id = "tenant-url-recheck"
 
-    with db_session() as db:
+    # Use the module-level engine directly (same as db_session) to avoid
+    # singleton mismatch in full-suite runs.
+    engine = get_engine()
+    with _SASession(engine) as db:
         db.execute(
             text(
                 """
@@ -20,6 +24,7 @@ def test_url_recheck_scheduler_escalates_incident(monkeypatch):
                   tenant_id TEXT,
                   severity TEXT,
                   risk_band TEXT,
+                  tags_json TEXT,
                   reasons_json TEXT,
                   evidence_json TEXT,
                   created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -27,6 +32,15 @@ def test_url_recheck_scheduler_escalates_incident(monkeypatch):
                 """
             )
         )
+        # Purge any stale URL-recheck jobs and incident rows left by prior runs
+        # so the INSERT + schedule assertions are always against a clean slate.
+        try:
+            db.execute(
+                text("DELETE FROM email_security_url_recheck_jobs WHERE incident_id = :id"),
+                {"id": incident_id},
+            )
+        except Exception:
+            pass
         db.execute(
             text(
                 """
@@ -69,7 +83,7 @@ def test_url_recheck_scheduler_escalates_incident(monkeypatch):
     assert int(out.get("processed") or 0) == 2
     assert int(out.get("escalated") or 0) >= 1
 
-    with db_session() as db:
+    with _SASession(engine) as db:
         row = db.execute(
             text("SELECT severity, risk_band, reasons_json, evidence_json FROM email_security_incidents WHERE id = :id"),
             {"id": incident_id},
