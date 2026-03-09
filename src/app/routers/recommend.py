@@ -56,6 +56,7 @@ from src.app.services.fraud_scorer import FraudScorer
 from src.app.services.use_case_advisor import get_use_case_min_price_floor
 from src.app.services.recommendations import classify_budget_tier, classify_warranty_candidate
 from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints_from_request
+from src.app.services.copywriting import maybe_apply_copywriting
 from src.app.security.model_theft import (
     enforce_model_theft_rate_limit,
     enforce_model_theft_policy_gate,
@@ -2701,6 +2702,8 @@ def suggest(
     image_hash: Optional[str] = None,
     image_intent: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
+    copywriting_enabled: Optional[bool] = None,
+    copywriting_profile: Optional[str] = None,
     response: Response = None,
     redis=Depends(get_redis),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
@@ -5265,61 +5268,144 @@ def suggest(
                     except Exception:
                         pass
                 else:
-                    cb_record(redis, "recommend", True, degradation_cfg)
+                    # Deterministic auto-jump: if widened band still has 0 results,
+                    # jump to the nearest viable inventory window above user max.
+                    jump_alt = []
+                    jump_meta = {}
                     try:
-                        _requested_qty = constraints.get("quantity") or 1
-                        log_trace_event(
-                            trace_id=trace_id,
-                            event_type="inventory_check",
-                            source_type="agent",
-                            source_id="Inventory_Agent",
-                            target_type="system",
-                            target_id=None,
-                            payload={
-                                "evaluations": [],
-                                "requested_qty": _requested_qty,
-                                "status": "skipped_no_candidates",
-                                "reason": "no_candidates_after_price_filter",
-                            },
+                        current_span = None
+                        if budget_min_val is not None and budget_max_val is not None:
+                            current_span = max(200, int(float(budget_max_val) - float(budget_min_val)))
+                        jump_span = max(400, int(current_span or 400))
+                        baseline_min = (
+                            float(budget_max_val)
+                            if budget_max_val is not None
+                            else (float(budget_min_val) if budget_min_val is not None else 0.0)
                         )
+                        row_floor = db.execute(
+                            text(
+                                """
+                                SELECT MIN(p.price_cents) AS min_price_cents
+                                FROM products p
+                                WHERE p.active = 1
+                                  AND p.price_cents >= :baseline_c
+                                """
+                            ),
+                            {"baseline_c": int(max(0.0, baseline_min) * 100)},
+                        ).mappings().first()
+                        floor_c = int((row_floor or {}).get("min_price_cents") or 0)
+                        if floor_c > 0:
+                            jump_min = int(floor_c / 100)
+                            jump_max = int(jump_min + jump_span)
+                            rows_jump = db.execute(
+                                text(
+                                    """
+                                    SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
+                                           COALESCE(SUM(i.stock), 0) as stock
+                                    FROM products p
+                                    LEFT JOIN inventory i ON i.product_id = p.id
+                                    WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                                    GROUP BY p.id
+                                    ORDER BY p.price_cents ASC
+                                    LIMIT 24
+                                    """
+                                ),
+                                {"min_c": int(jump_min * 100), "max_c": int(jump_max * 100)},
+                            ).mappings().all()
+                            for rj in rows_jump or []:
+                                jump_alt.append({
+                                    "id": rj.get("id"),
+                                    "sku": rj.get("sku"),
+                                    "name": rj.get("name"),
+                                    "price_cents": rj.get("price_cents"),
+                                    "currency": rj.get("currency"),
+                                    "image_url": rj.get("image_url"),
+                                    "stock": rj.get("stock"),
+                                    "specs": rj.get("specs") or {},
+                                })
+                            if jump_alt:
+                                jump_meta = {
+                                    "budget_min": jump_min,
+                                    "budget_max": jump_max,
+                                    "candidates_before": retrieved_count,
+                                    "candidates_after": len(jump_alt),
+                                    "fallback": "db_price_range",
+                                }
                     except Exception:
-                        pass
-                    if budget_min_val is not None and budget_max_val is not None:
-                        message = f"No products found between ${budget_min_val} and ${budget_max_val}."
-                    elif budget_max_val is not None:
-                        message = f"No products found under ${budget_max_val}."
-                    elif budget_min_val is not None:
-                        message = f"No products found above ${budget_min_val}."
+                        jump_alt = []
+                        jump_meta = {}
+                    if jump_alt:
+                        candidates = jump_alt
+                        filter_price_applied = True
+                        filter_meta_price = jump_meta
+                        try:
+                            log_trace_event(
+                                trace_id=trace_id,
+                                event_type="agent_process",
+                                source_type="agent",
+                                source_id="Price_Filter_Agent",
+                                target_type="system",
+                                target_id=None,
+                                payload=filter_meta_price,
+                            )
+                        except Exception:
+                            pass
                     else:
-                        message = "No products found in your price range."
-                    payload = {
-                        "results": [],
-                        "proposal": {"decision_mode": "rules", "ranked_skus": []},
-                        "constraints_used": constraints,
-                        "policy_version": flags.get("POLICY_VERSION", "v1"),
-                        "message": message,
-                        "degraded": use_rules,
-                        "eligible": not simulate,
-                        "view_mode": view_hint.get("view_mode"),
-                        "view_reason": view_hint.get("view_reason"),
-                        "agent_chain": [
-                            {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
-                            {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
-                            {"agent": "Price_Filter_Agent", "candidates": 0, "constraints": filter_meta_price},
-                            {"agent": "Inventory_Agent", "candidates_evaluated": 0, "status": "skipped_no_candidates"},
-                        ],
-                        "llm_model": llm_model,
-                        "model_tier": model_tier,
-                        "complexity_signals": complexity_signals,
-                    }
-                    _log_early_decision(
-                        status="no_results",
-                        proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
-                        agent_chain=payload.get("agent_chain") or [],
-                        retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
-                    )
-                    payload = _ensure_trace_response(payload, trace_id, flags)
-                    return _with_trace(payload, trace_id)
+                        cb_record(redis, "recommend", True, degradation_cfg)
+                        try:
+                            _requested_qty = constraints.get("quantity") or 1
+                            log_trace_event(
+                                trace_id=trace_id,
+                                event_type="inventory_check",
+                                source_type="agent",
+                                source_id="Inventory_Agent",
+                                target_type="system",
+                                target_id=None,
+                                payload={
+                                    "evaluations": [],
+                                    "requested_qty": _requested_qty,
+                                    "status": "skipped_no_candidates",
+                                    "reason": "no_candidates_after_price_filter",
+                                },
+                            )
+                        except Exception:
+                            pass
+                        if budget_min_val is not None and budget_max_val is not None:
+                            message = f"No products found between ${budget_min_val} and ${budget_max_val}."
+                        elif budget_max_val is not None:
+                            message = f"No products found under ${budget_max_val}."
+                        elif budget_min_val is not None:
+                            message = f"No products found above ${budget_min_val}."
+                        else:
+                            message = "No products found in your price range."
+                        payload = {
+                            "results": [],
+                            "proposal": {"decision_mode": "rules", "ranked_skus": []},
+                            "constraints_used": constraints,
+                            "policy_version": flags.get("POLICY_VERSION", "v1"),
+                            "message": message,
+                            "degraded": use_rules,
+                            "eligible": not simulate,
+                            "view_mode": view_hint.get("view_mode"),
+                            "view_reason": view_hint.get("view_reason"),
+                            "agent_chain": [
+                                {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
+                                {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
+                                {"agent": "Price_Filter_Agent", "candidates": 0, "constraints": filter_meta_price},
+                                {"agent": "Inventory_Agent", "candidates_evaluated": 0, "status": "skipped_no_candidates"},
+                            ],
+                            "llm_model": llm_model,
+                            "model_tier": model_tier,
+                            "complexity_signals": complexity_signals,
+                        }
+                        _log_early_decision(
+                            status="no_results",
+                            proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
+                            agent_chain=payload.get("agent_chain") or [],
+                            retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
+                        )
+                        payload = _ensure_trace_response(payload, trace_id, flags)
+                        return _with_trace(payload, trace_id)
         # Enforce spec filtering if requested
         specs = constraints.get("specs") or []
         if specs and not shortlist_lock_active:
@@ -5509,7 +5595,7 @@ def suggest(
                             "proposal": {"decision_mode": "rules", "ranked_skus": []},
                             "constraints_used": constraints,
                             "policy_version": flags.get("POLICY_VERSION", "v1"),
-                            "message": f"No products found matching specs: {', '.join(specs)}.",
+                            "message": "No products found in the current filters. Try widening budget slightly, broadening brand choices, or relaxing one requirement.",
                             "degraded": use_rules,
                             "eligible": not simulate,
                             "view_mode": view_hint.get("view_mode"),
@@ -5541,7 +5627,7 @@ def suggest(
                     "proposal": {"decision_mode": "rules", "ranked_skus": []},
                     "constraints_used": constraints,
                     "policy_version": flags.get("POLICY_VERSION", "v1"),
-                    "message": f"No products found matching specs: {', '.join(specs)}.",
+                    "message": "No products found in the current filters. Try widening budget slightly, broadening brand choices, or relaxing one requirement.",
                     "degraded": use_rules,
                     "eligible": not simulate,
                     "view_mode": view_hint.get("view_mode"),
@@ -7211,6 +7297,38 @@ def suggest(
                 )
             except Exception:
                 pass
+        # Apply copywriting agent for human-like tone + CTA
+        try:
+            copy_out = maybe_apply_copywriting(
+                assistant_message=assistant_message,
+                turn_intent=turn_intent,
+                surface="storefront",
+                requested_enabled=bool(copywriting_enabled),
+                profile_id=copywriting_profile or None,
+                brand_name=None,
+            )
+            assistant_message = copy_out.get("assistant_message") or assistant_message
+            copy_meta = copy_out.get("meta") if isinstance(copy_out.get("meta"), dict) else {}
+            if trace_id and (copy_meta.get("applied") or copywriting_enabled):
+                log_trace_event(
+                    trace_id=trace_id,
+                    event_type="copywriting",
+                    source_type="agent",
+                    source_id="Copywriting_Agent",
+                    target_type="recommend",
+                    target_id=None,
+                    payload={
+                        "applied": bool(copy_meta.get("applied")),
+                        "mode": copy_meta.get("mode"),
+                        "profile_id": copy_meta.get("profile_id"),
+                        "tone": copy_meta.get("tone"),
+                        "surface": copy_meta.get("surface"),
+                        "latency_ms": copy_meta.get("latency_ms"),
+                        "reason": copy_meta.get("reason"),
+                    },
+                )
+        except Exception:
+            pass
         payload["assistant_message"] = assistant_message
     turn_type = _classify_turn_type(
         results_count=len(results or []),

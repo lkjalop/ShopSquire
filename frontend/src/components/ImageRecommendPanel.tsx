@@ -146,6 +146,8 @@ async function fetchSuggest(query: string, ctx: ImageAnalysisContext | null, bud
     params.set('image_cv_signals', JSON.stringify(ctx.cv_signals || {}));
   }
   if (budgetMax) params.set('budget_max', String(budgetMax));
+  params.set('copywriting_enabled', 'true');
+  params.set('copywriting_profile', 'balanced');
 
   const resp = await fetch(apiUrl(`/api/v1/recommend/suggest?${params.toString()}`), {
     credentials: 'include',
