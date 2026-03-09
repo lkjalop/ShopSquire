@@ -1,0 +1,169 @@
+.panel {
+  padding: 12px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+.imageAnalysis {
+  background: #f0f4ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.imageAnalysis h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #374151;
+}
+.analysisMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.metaTag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.metaTagOk {
+  background: #d1fae5;
+  color: #065f46;
+}
+.metaTagWarn {
+  background: #fef3c7;
+  color: #92400e;
+}
+.metaTagDanger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.securityNote {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+}
+.anchorGroup {
+  margin-bottom: 16px;
+}
+.anchorHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1f2937;
+}
+.anchorIcon {
+  font-size: 16px;
+}
+.card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: #fff;
+  transition: box-shadow 0.15s;
+}
+.card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.cardImg {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #f3f4f6;
+  flex-shrink: 0;
+}
+.cardBody {
+  flex: 1;
+  min-width: 0;
+}
+.cardName {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cardMeta {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+.cardPrice {
+  font-size: 13px;
+  font-weight: 700;
+  color: #059669;
+  white-space: nowrap;
+}
+.cardRating {
+  font-size: 11px;
+  color: #d97706;
+}
+.summary {
+  background: #f9fafb;
+  border-left: 3px solid #6366f1;
+  padding: 8px 12px;
+  margin-top: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+  border-radius: 0 6px 6px 0;
+}
+.loading {
+  text-align: center;
+  padding: 24px 12px;
+  color: #6b7280;
+  font-size: 13px;
+}
+.spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e5e7eb;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-bottom: 8px;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.empty {
+  text-align: center;
+  padding: 20px 12px;
+  color: #9ca3af;
+  font-size: 13px;
+}
+.escalationBanner {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #991b1b;
+}
+.trustBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+.trustGreen { background: #d1fae5; color: #065f46; }
+.trustYellow { background: #fef3c7; color: #92400e; }
+.trustOrange { background: #ffedd5; color: #9a3412; }
+.trustRed { background: #fee2e2; color: #991b1b; }

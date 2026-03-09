@@ -3,6 +3,7 @@ import { apiUrl, safeJson, cvAnalyze, cvIssueNonce, cvUpload } from '../lib/api'
 import CVResultsPanel, { CVResult } from './CVResultsPanel';
 import { fileToBase64, buildSanitizedImages } from '../utils/imageProcessing';
 import CameraButton from './CameraButton';
+import ImageRecommendPanel, { ImageAnalysisContext } from './ImageRecommendPanel';
 
 type FAQItem = {
   id: string;
@@ -84,6 +85,8 @@ export default function RightPanelExtras({
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CVSubmitResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [imageRecommendCtx, setImageRecommendCtx] = useState<ImageAnalysisContext | null>(null);
+  const [sessionSuspiciousCount, setSessionSuspiciousCount] = useState(0);
   const role = (localStorage.getItem('role') || '').toLowerCase();
   const isAdmin = role === 'admin' || role === 'merchant_admin' || role === 'security_admin';
   const showAdvancedCvControls = isAdmin && (
@@ -95,7 +98,16 @@ export default function RightPanelExtras({
     if (mode === 'faq') {
       fetch('/ui/faq_kb.json')
         .then(r => r.json())
-        .then(setFaq)
+        .then((data) => {
+          const rows = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.items)
+              ? data.items
+              : Array.isArray(data?.faq)
+                ? data.faq
+                : [];
+          setFaq(rows as FAQItem[]);
+        })
         .catch(() => setFaq([]));
     }
   }, [mode]);
@@ -328,6 +340,20 @@ export default function RightPanelExtras({
       };
       onTraceId?.(resolvedTraceId);
       setResult(cvRes);
+      // Extract image recommend context from CV analyze response for the recommendation panel
+      const irc = (resp as any)?.image_recommend_context;
+      if (irc && typeof irc === 'object') {
+        setImageRecommendCtx({
+          labels: Array.isArray(irc.labels) ? irc.labels : [],
+          ocr_text: typeof irc.ocr_text === 'string' ? irc.ocr_text : '',
+          cv_signals: irc.cv_signals || {},
+        });
+        // Track suspicious uploads for progressive escalation
+        const sigs = irc.cv_signals || {};
+        if (sigs.qr_code_detected || sigs.qr_prompt_injection || sigs.manipulation_detected) {
+          setSessionSuspiciousCount(prev => prev + 1);
+        }
+      }
       onResult?.({
         decision_id: cvRes.decision_id,
         case_id: cvRes.case_id,
@@ -486,22 +512,25 @@ export default function RightPanelExtras({
   };
 
   if (mode === 'faq') {
+    const faqItems = Array.isArray(faq) ? faq : [];
     return (
       <div style={{ padding: 12 }}>
         <h3 style={{ margin: '8px 0' }}>FAQ & Troubleshooting</h3>
-        {faq.length === 0 && <div>Loading FAQs...</div>}
-        {faq.map(item => (
+        {faqItems.length === 0 && <div>Loading FAQs...</div>}
+        {faqItems.map(item => (
           <div key={item.id} style={{ marginBottom: 12, borderBottom: '1px solid #eee', paddingBottom: 12 }}>
             <div style={{ fontWeight: 600 }}>{item.title}</div>
             <div style={{ color: '#555', margin: '4px 0 8px' }}>{item.description}</div>
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Steps:</div>
               <ul style={{ paddingLeft: 18 }}>
-                {item.troubleshooting_steps.map((s, i) => <li key={i} style={{ fontSize: 13 }}>{s}</li>)}
+                {(Array.isArray(item.troubleshooting_steps) ? item.troubleshooting_steps : []).map((s, i) => (
+                  <li key={i} style={{ fontSize: 13 }}>{s}</li>
+                ))}
               </ul>
             </div>
             <div style={{ fontSize: 12, marginTop: 4 }}>
-              Evidence: {item.evidence_requirements.join(', ')}
+              Evidence: {(Array.isArray(item.evidence_requirements) ? item.evidence_requirements : []).join(', ')}
             </div>
           </div>
         ))}
@@ -511,20 +540,26 @@ export default function RightPanelExtras({
 
   if (mode === 'visual_search') {
     return (
-      <div style={{ padding: 12 }}>
-        <h3 style={{ margin: '8px 0' }}>Visual Search Results</h3>
-        <p style={{ color: '#666', fontSize: 13, margin: '8px 0' }}>Products matching your uploaded image appear here.</p>
-        <div style={{ color: '#999', fontSize: 12 }}>Upload an image and type "find similar" to populate results.</div>
+      <div style={{ padding: 0 }}>
+        <ImageRecommendPanel
+          imageContext={imageRecommendCtx}
+          userQuery={description || 'show me similar laptops'}
+          traceId={result?.trace_id || null}
+          sessionSuspiciousCount={sessionSuspiciousCount}
+        />
       </div>
     );
   }
 
   if (mode === 'image_context') {
     return (
-      <div style={{ padding: 12 }}>
-        <h3 style={{ margin: '8px 0' }}>Image Context</h3>
-        <p style={{ color: '#666', fontSize: 13, margin: '8px 0' }}>Extracted labels, OCR text, and image analysis details from your uploaded photo.</p>
-        <div style={{ color: '#999', fontSize: 12 }}>Attach an image and send a message to see context here.</div>
+      <div style={{ padding: 0 }}>
+        <ImageRecommendPanel
+          imageContext={imageRecommendCtx}
+          userQuery={description || 'show me laptops'}
+          traceId={result?.trace_id || null}
+          sessionSuspiciousCount={sessionSuspiciousCount}
+        />
       </div>
     );
   }
