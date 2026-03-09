@@ -1790,16 +1790,18 @@ def _apply_intent_specific_question_bank(
 
 def _candidate_looks_like_laptop(candidate: Dict[str, Any] | None) -> bool:
     c = candidate or {}
-    try:
-        text_blob = f"{c.get('name') or ''} {json.dumps(c.get('specs') or {}, ensure_ascii=False)}".lower()
-    except Exception:
-        text_blob = str(c).lower()
+    # Use only the product name for negative checks (specs legitimately contain terms like "display")
+    name = str(c.get("name") or "").lower()
     negative_terms = (
-        "monitor", "display", "headphone", "headset", "earbud", "speaker",
-        "keyboard", "mouse", "dock", "docking station", "webcam", "microphone", "sleeve",
+        "monitor", "headphone", "headset", "earbud", "speaker",
+        "keyboard", "mouse", "docking station", "webcam", "microphone", "sleeve",
     )
-    if any(t in text_blob for t in negative_terms):
+    if any(t in name for t in negative_terms):
         return False
+    try:
+        text_blob = f"{name} {json.dumps(c.get('specs') or {}, ensure_ascii=False)}".lower()
+    except Exception:
+        text_blob = name
     positive_terms = (
         "laptop", "notebook", "ultrabook", "macbook", "chromebook", "thinkpad",
         "ideapad", "legion", "yoga", "vivobook", "zenbook", "gram", "xps",
@@ -5413,19 +5415,52 @@ def suggest(
                 import json as _json
 
                 def _match_spec(cand: Dict[str, Any], spec_list: list[str] | None = None) -> bool:
+                    import re as _re
                     try:
+                        cand_specs = cand.get("specs") or {}
+                        if isinstance(cand_specs, str):
+                            try:
+                                cand_specs = _json.loads(cand_specs)
+                            except Exception:
+                                cand_specs = {}
                         text = _json.dumps(cand).lower()
                     except Exception:
+                        cand_specs = {}
                         text = str(cand).lower()
+
+                    def _extract_numeric(v) -> float | None:
+                        try:
+                            m = _re.search(r"[\d]+(?:\.\d+)?", str(v))
+                            return float(m.group()) if m else None
+                        except Exception:
+                            return None
+
                     for s in (spec_list or specs):
                         token = str(s).lower().strip()
                         if not token:
                             continue
                         if ":" in token:
-                            # allow key:val style (e.g., ram:16gb)
-                            _, val = token.split(":", 1)
-                            if val.strip() not in text:
-                                return False
+                            key, val = token.split(":", 1)
+                            key = key.strip()
+                            val = val.strip()
+                            # Numeric min/max constraints: compare against spec value
+                            if key.endswith("_min") or key.endswith("_max"):
+                                base_key = key[:-4]  # strip _min or _max
+                                spec_val = cand_specs.get(base_key) or cand_specs.get(key)
+                                threshold = _extract_numeric(val)
+                                actual = _extract_numeric(spec_val) if spec_val is not None else None
+                                if threshold is None:
+                                    continue  # can't compare, skip constraint
+                                if actual is None:
+                                    continue  # product missing this spec, don't exclude
+                                if key.endswith("_min") and actual < threshold:
+                                    return False
+                                if key.endswith("_max") and actual > threshold:
+                                    return False
+                            else:
+                                # Exact/substring match for non-numeric constraints
+                                if val not in text:
+                                    return False
                         else:
                             if token not in text:
                                 return False

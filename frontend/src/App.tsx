@@ -1588,7 +1588,7 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(tid)} />
                   ) : rightPanelMode === 'image_context' ? (
                     <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} />
                   ) : rightPanelMode === 'cv' ? (

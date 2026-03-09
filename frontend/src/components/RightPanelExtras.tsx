@@ -569,6 +569,7 @@ export default function RightPanelExtras({
           userQuery={userQuery || description || 'show me laptops'}
           traceId={result?.trace_id || null}
           sessionSuspiciousCount={sessionSuspiciousCount}
+          onTraceId={onTraceId}
         />
       </div>
     );

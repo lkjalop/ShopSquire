@@ -47,6 +47,8 @@ export interface Props {
   sessionSuspiciousCount?: number;
   /** Callback when user picks a clarifying-question button */
   onClarify?: (question: string) => void;
+  /** Callback to propagate the first seen trace_id to the parent */
+  onTraceId?: (traceId: string | null) => void;
 }
 
 /* ---------- constants ---------- */
@@ -105,6 +107,32 @@ function detectUseCase(query: string): string | null {
   return null;
 }
 
+/** Default budget ceiling (AUD cents * 100 → display dollars) for a given use-case. */
+const USE_CASE_BUDGET: Record<string, number> = {
+  university: 1200,
+  coding: 1500,
+  gaming: 2000,
+  content_creation: 1800,
+  office: 900,
+};
+
+/** Derive a short pros note from product specs + price. */
+function buildProsNote(p: ProductCard, userQuery: string): string {
+  const pros: string[] = [];
+  const q = userQuery.toLowerCase();
+  const specs = p.specs_summary || '';
+  if (/\b16\s*gb/i.test(specs)) pros.push('16 GB RAM');
+  else if (/\b8\s*gb/i.test(specs)) pros.push('8 GB RAM');
+  if (/1\s*tb/i.test(specs)) pros.push('1 TB storage');
+  else if (/512/i.test(specs)) pros.push('512 GB SSD');
+  if (/oled/i.test(p.name)) pros.push('OLED display');
+  if (/touch/i.test(p.name)) pros.push('Touchscreen');
+  if (/rtx|gtx|radeon/i.test(specs)) pros.push('Discrete GPU');
+  if (/universit|student/i.test(q) && p.price < 1000) pros.push('Student-budget friendly');
+  if (/gaming/i.test(q) && /rtx/i.test(specs)) pros.push('Gaming-ready GPU');
+  return pros.slice(0, 3).join(' · ');
+}
+
 /** Clarifying questions based on detected use-case */
 const CLARIFYING_QUESTIONS: Record<string, { prompt: string; options: string[] }> = {
   university: {
@@ -138,7 +166,11 @@ function parseProducts(data: any): ProductCard[] {
   }));
 }
 
-async function fetchSuggest(query: string, ctx: ImageAnalysisContext | null, budgetMax?: number): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[] }> {
+async function fetchSuggest(
+  query: string,
+  ctx: ImageAnalysisContext | null,
+  budgetMax?: number,
+): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[]; traceId: string | null }> {
   const params = new URLSearchParams({ uid: DEFAULT_UID, query: query || 'show me laptops' });
   if (ctx) {
     params.set('image_labels', (ctx.labels || []).join(','));
@@ -159,11 +191,12 @@ async function fetchSuggest(query: string, ctx: ImageAnalysisContext | null, bud
     products: parseProducts(data),
     summary: data.assistant_message || '',
     nextQuestions: Array.isArray(data.next_questions) ? data.next_questions : [],
+    traceId: data.decision_trace_id || data.trace_id || data.decision_id || null,
   };
 }
 
 /* ---------- component ---------- */
-export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify }: Props) {
+export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId }: Props) {
   const [groups, setGroups] = useState<ImageGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -178,6 +211,10 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     setGlobalRedBlock(false);
 
     const built: ImageGroup[] = [];
+    let firstTraceId: string | null = null;
+    // Auto-budget: derive a sensible ceiling from the detected use-case when none explicit
+    const useCase = detectUseCase(userQuery);
+    const autoBudget = useCase ? USE_CASE_BUDGET[useCase] ?? 1200 : undefined;
 
     // One group per image
     for (let i = 0; i < imageContexts.length; i++) {
@@ -201,15 +238,18 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
 
       try {
         const imageQuery = `${userQuery} ${brand}`.trim();
-        const result = await fetchSuggest(imageQuery, ctx);
+        const result = await fetchSuggest(imageQuery, ctx, autoBudget);
+        if (!firstTraceId && result.traceId) { firstTraceId = result.traceId; onTraceId?.(result.traceId); }
+        const products = result.products.slice(0, 3);
         built.push({
           source: ctx.source_name || `Image ${i + 1}: ${brand}`,
           icon: '\uD83D\uDCF8',
           trustLevel: trust,
           friendlyBrand: brand,
           securityNote: note,
-          products: result.products.slice(0, 3),
+          products,
           summary: result.summary || `Top ${brand} picks matching your image.`,
+          widenState: products.length === 0 ? { budgetMin: 0, budgetMax: autoBudget ?? 1200, noResults: true } : undefined,
         });
       } catch {
         built.push({
@@ -220,6 +260,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           securityNote: note,
           products: [],
           summary: `Could not load ${brand} recommendations.`,
+          widenState: { budgetMin: 0, budgetMax: autoBudget ?? 1200, noResults: true },
         });
       }
     }
@@ -227,30 +268,19 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     // Query-intent group (if query adds context beyond image brands)
     if (userQuery) {
       try {
-        const result = await fetchSuggest(userQuery, null);
-        if (result.products.length > 0) {
-          built.push({
-            source: `From your query`,
-            icon: '\uD83D\uDD0D',
-            trustLevel: 'green',
-            friendlyBrand: '',
-            securityNote: '',
-            products: result.products.slice(0, 3),
-            summary: result.summary || `Products matching "${userQuery}".`,
-          });
-        } else {
-          // No results — budget widen scenario
-          built.push({
-            source: `From your query`,
-            icon: '\uD83D\uDD0D',
-            trustLevel: 'green',
-            friendlyBrand: '',
-            securityNote: '',
-            products: [],
-            summary: result.summary || 'No products found in your budget range.',
-            widenState: { budgetMin: 0, budgetMax: 0, noResults: true },
-          });
-        }
+        const result = await fetchSuggest(userQuery, null, autoBudget);
+        if (!firstTraceId && result.traceId) { firstTraceId = result.traceId; onTraceId?.(result.traceId); }
+        const products = result.products.slice(0, 3);
+        built.push({
+          source: `From your query`,
+          icon: '\uD83D\uDD0D',
+          trustLevel: 'green',
+          friendlyBrand: '',
+          securityNote: '',
+          products,
+          summary: result.summary || (products.length > 0 ? `Products matching "${userQuery}".` : 'No products found in your budget range.'),
+          widenState: products.length === 0 ? { budgetMin: 0, budgetMax: autoBudget ?? 1200, noResults: true } : undefined,
+        });
       } catch {
         /* query fetch failed — still show image groups */
       }
@@ -262,7 +292,6 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     }
 
     // Clarifying questions
-    const useCase = detectUseCase(userQuery);
     if (useCase && CLARIFYING_QUESTIONS[useCase]) {
       setClarifyQuestions(CLARIFYING_QUESTIONS[useCase]);
     } else if (!useCase && imageContexts.length > 0) {
@@ -387,7 +416,8 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
                     <div className={styles.cardBody}>
                       <div className={styles.cardName}>{p.name}</div>
                       <div className={styles.cardMeta}>{p.specs_summary || '\u2014'}</div>
-                      {p.use_case_fit && <div className={styles.cardFit}>{p.use_case_fit}</div>}
+                      {(() => { const pros = buildProsNote(p, userQuery); return pros ? <div className={styles.cardFit}>\u2713 {pros}</div> : null; })()}
+                      {p.use_case_fit && p.use_case_fit !== buildProsNote(p, userQuery) && <div className={styles.cardFit}>{p.use_case_fit}</div>}
                     </div>
                     <div className={styles.cardPrice}>{formatPrice(p.price)}</div>
                   </div>
