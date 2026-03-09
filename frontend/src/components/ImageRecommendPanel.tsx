@@ -149,9 +149,8 @@ const CLARIFYING_QUESTIONS: Record<string, { prompt: string; options: string[] }
   },
 };
 
-function formatPrice(cents_or_dollars: number): string {
-  const val = cents_or_dollars > 200 ? cents_or_dollars / 100 : cents_or_dollars;
-  return `$${val.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+function formatPrice(dollars: number): string {
+  return `$${dollars.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
 function parseProducts(data: any): ProductCard[] {
