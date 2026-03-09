@@ -63,6 +63,8 @@ function VerdictBadge({ type }: { type: string }) {
     shopper_intent: '#7C3AED',
     cart_abandonment_detected: '#FF6B35',
     commerce_outcome: '#059669',
+    copywriting: '#0EA5E9',
+    copy_policy_gate: '#F97316',
   };
   const color = colorMap[type] || '#6b7280';
   return <span className={styles.verdict} style={{ background: color }}>{type.replace(/_/g, ' ')}</span>;
@@ -90,6 +92,13 @@ function getSummary(evt: TraceEvent): string {
   if (evt.event_type === 'upsell_promotion_selected') {
     const promoted = Array.isArray(evt.payload?.promoted) ? evt.payload.promoted.length : 0;
     return `Upsell promotions selected (${promoted})`;
+  }
+  if (evt.event_type === 'copywriting') {
+    const applied = evt.payload?.applied;
+    const tone = evt.payload?.tone || 'balanced';
+    const profile = evt.payload?.profile_id || '';
+    if (applied === false) return `Copywriting skipped (${evt.payload?.reason || 'disabled'})`;
+    return `Copywriting applied — tone: ${tone}${profile ? ` / ${profile}` : ''}`;
   }
   if (evt.payload?.summary) return evt.payload.summary;
   if (evt.payload?.action) return evt.payload.action;
