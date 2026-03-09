@@ -536,8 +536,8 @@ async def analyze(
                 pass
         except Exception as _exc:
             _log.warning("security observer scan failed: %s", _exc, exc_info=True)
-            security_details = {}
-            security_sev = None
+            security_details = {"severity": "info", "signals": {}}
+            security_sev = "info"
 
         started = time.time()
         triage = BasicCVTriage()
@@ -782,7 +782,7 @@ async def analyze(
                 retrieved_context = {
                     "cv_analysis": analysis,
                     "evidence_id": evidence_id,
-                    "security_analysis": security_details if isinstance(security_details, dict) and security_details else {},
+                    "security_analysis": security_details if isinstance(security_details, dict) and security_details else {"severity": "info", "signals": {}},
                     "agent_chain": [
                         {"agent": "CV_Tier2_Agent", "status": "completed" if tier2_result else "skipped"},
                         {"agent": "Security_Observer_Agent", "status": "completed" if security_details else "skipped"},
@@ -885,10 +885,10 @@ async def analyze(
                 "suspicious_qr_count": max(0, len(qr_decode_hits or []) - int(diagnostic_qr_count or 0)),
             },
             "security_matrix": {
-                "details": security_details,
-                "severity": security_sev,
+                "details": security_details if isinstance(security_details, dict) and security_details else {"severity": "info", "signals": {}},
+                "severity": security_sev or "info",
                 "signals": {k: v for k, v in (security_details.get("signals") or {}).items() if isinstance(v, bool)} if isinstance(security_details, dict) else {},
-            } if security_details else None,
+            },
             "cv_runtime": runtime,
             "ui_actions": {"chat_with_admin": _needs_chat},
             "suggested_routing": "security_review" if _needs_chat else "standard_queue",

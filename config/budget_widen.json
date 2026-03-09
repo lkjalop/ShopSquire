@@ -1,0 +1,59 @@
+{
+  "budget_widen": {
+    "steps": [200, 400],
+    "max_widen_total": 800,
+    "strategy": "from_upper_bound",
+    "fallback": "show_nearest_3",
+    "nearest_gap_warning_threshold": 500
+  },
+  "use_case_profiles": {
+    "university_notes": {
+      "label": "Note-taking & lectures",
+      "ram_gb_min": 8,
+      "ram_gb_max": 16,
+      "gpu": "integrated",
+      "priority": ["battery_life", "weight", "price"],
+      "budget_hint": [500, 1000]
+    },
+    "university_coding": {
+      "label": "Coding & development",
+      "ram_gb_min": 16,
+      "ram_gb_max": 32,
+      "gpu": "integrated_or_discrete",
+      "priority": ["ram", "cpu", "display_size"],
+      "budget_hint": [800, 1500]
+    },
+    "content_creation": {
+      "label": "Content creation & design",
+      "ram_gb_min": 16,
+      "ram_gb_max": 64,
+      "gpu": "discrete",
+      "priority": ["gpu", "display_color_accuracy", "ram"],
+      "budget_hint": [1200, 2500]
+    },
+    "gaming": {
+      "label": "Gaming",
+      "ram_gb_min": 16,
+      "ram_gb_max": 32,
+      "gpu": "discrete_high",
+      "priority": ["gpu", "display_refresh", "cooling"],
+      "budget_hint": [900, 2000]
+    },
+    "office_admin": {
+      "label": "Office & admin work",
+      "ram_gb_min": 8,
+      "ram_gb_max": 16,
+      "gpu": "integrated",
+      "priority": ["webcam", "battery_life", "price", "weight"],
+      "budget_hint": [400, 900]
+    },
+    "general": {
+      "label": "General everyday use",
+      "ram_gb_min": 8,
+      "ram_gb_max": 16,
+      "gpu": "integrated",
+      "priority": ["price", "battery_life", "weight"],
+      "budget_hint": [400, 1000]
+    }
+  }
+}

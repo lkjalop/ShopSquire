@@ -46,8 +46,18 @@
   color: #6b7280;
   font-style: italic;
 }
+.securityNoteBenign {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #059669;
+  font-style: italic;
+}
 .anchorGroup {
   margin-bottom: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fafbfc;
 }
 .anchorHeader {
   display: flex;
@@ -61,6 +71,11 @@
 .anchorIcon {
   font-size: 16px;
 }
+.cardRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .card {
   display: flex;
   align-items: center;
@@ -68,7 +83,6 @@
   padding: 8px 10px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  margin-bottom: 6px;
   background: #fff;
   transition: box-shadow 0.15s;
 }
@@ -106,9 +120,10 @@
   color: #059669;
   white-space: nowrap;
 }
-.cardRating {
-  font-size: 11px;
-  color: #d97706;
+.cardFit {
+  font-size: 10px;
+  color: #6366f1;
+  margin-top: 2px;
 }
 .summary {
   background: #f9fafb;
@@ -167,3 +182,83 @@
 .trustYellow { background: #fef3c7; color: #92400e; }
 .trustOrange { background: #ffedd5; color: #9a3412; }
 .trustRed { background: #fee2e2; color: #991b1b; }
+
+/* Budget widen */
+.widenBox {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  text-align: center;
+}
+.widenText {
+  font-size: 12px;
+  color: #1e40af;
+  margin-bottom: 8px;
+}
+.widenButtons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.widenBtn {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.widenBtn:hover { background: #2563eb; }
+.widenBtnAlt {
+  background: #fff;
+  color: #3b82f6;
+  border: 1px solid #3b82f6;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.widenBtnAlt:hover { background: #eff6ff; }
+
+/* Clarifying questions */
+.clarifySection {
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 12px;
+}
+.clarifyPrompt {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4338ca;
+  margin-bottom: 8px;
+}
+.clarifyOptions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.clarifyBtn {
+  background: #fff;
+  color: #4338ca;
+  border: 1px solid #c4b5fd;
+  border-radius: 16px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.clarifyBtn:hover {
+  background: #ede9fe;
+  border-color: #7c3aed;
+}

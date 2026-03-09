@@ -57,6 +57,15 @@ type PanelTier = {
   items?: Product[];
   explanation?: string;
 };
+type AnchorSection = {
+  anchor_id?: string;
+  title?: string;
+  source_image_hash?: string;
+  anchor_hint?: { brand?: string; use_case?: string; ocr_excerpt?: string };
+  top_products?: Product[];
+  summary?: string;
+  match_basis?: string[];
+};
 type RightPanelContract = {
   mode?: 'shopping' | 'support';
   show_tiers?: boolean;
@@ -64,6 +73,7 @@ type RightPanelContract = {
   summary?: string;
   lower_tier?: PanelTier;
   higher_tier?: PanelTier;
+  anchor_sections?: AnchorSection[];
 };
 
 type BackendStatus = {
@@ -95,6 +105,19 @@ type ProductWhyExplanation = {
 
 type DeviceLane = 'windows' | 'macbook' | 'tablet_chromebook';
 
+function productPrice(p: any): number {
+  const direct = Number(p?.price);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const cents = Number(p?.price_cents);
+  if (Number.isFinite(cents) && cents > 0) return cents / 100;
+  return 0;
+}
+
+function isShoppingIntentQuery(query: string): boolean {
+  const q = String(query || '').toLowerCase();
+  return /laptop|computer|price|under|below|above|budget|cheap|affordable|\$|show|find|search|gaming|macbook|dell|hp|asus|lenovo|msi|university|student|study/.test(q);
+}
+
 function laneForProduct(p: Product): DeviceLane {
   const name = String(p.name || '').toLowerCase();
   const features = (p.features || []).join(' ').toLowerCase();
@@ -115,8 +138,9 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string):
     if (lane === 'tablet_chromebook') return 'No strong tablet/chromebook inventory match yet. Consider widening budget or screen-size range.';
     return 'No close matches in this lane right now. Try adjusting budget or use-case filters.';
   }
-  const minPrice = Math.min(...items.map((p) => Number(p.price || 0)));
-  const maxPrice = Math.max(...items.map((p) => Number(p.price || 0)));
+  const prices = items.map((p) => productPrice(p)).filter((v) => v > 0);
+  const minPrice = prices.length ? Math.min(...prices) : 0;
+  const maxPrice = prices.length ? Math.max(...prices) : 0;
   const budgetHint = String(budgetStatus || '').toLowerCase().includes('low')
     ? 'Budget is tight, so value-focused picks are prioritized.'
     : String(budgetStatus || '').toLowerCase().includes('high')
@@ -222,6 +246,7 @@ function detectPII(text: string): PIIMatch {
 
 function detectPanelMode(query: string): RightPanelMode {
   const q = query.toLowerCase();
+  const shoppingIntent = isShoppingIntentQuery(q);
   // Compare triggers
   if (/compare|vs|versus|difference|which is better|pros.?cons|side.?by.?side|head.?to.?head/.test(q)) return 'compare';
   // Detailed/specs triggers
@@ -229,9 +254,9 @@ function detectPanelMode(query: string): RightPanelMode {
   // CV/return triggers (when images attached - handled separately)
   if (/return|complaint|damaged|broken|defective|refund|issue|problem/.test(q)) return 'cv';
   // FAQ triggers
-  if (/faq|help|how do i|what is|shipping|warranty|policy|support/.test(q)) return 'faq';
+  if (/faq|how do i|what is|shipping|warranty|policy|support/.test(q) && !shoppingIntent) return 'faq';
   // Product search (default when products mentioned)
-  if (/laptop|computer|price|under|below|above|budget|cheap|affordable|\$|show|find|search|gaming|macbook|dell|hp|asus|lenovo|msi/.test(q)) return 'grid';
+  if (shoppingIntent) return 'grid';
   return 'none';
 }
 
@@ -297,6 +322,7 @@ export default function App() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [cvPrefillImages, setCvPrefillImages] = useState<File[]>([]);
   const [cvAutoIssueType, setCvAutoIssueType] = useState<string | undefined>(undefined);
+  const [imageTriageContexts, setImageTriageContexts] = useState<any[]>([]);
   const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
   const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
   const [lastCvSecurityNoteKey, setLastCvSecurityNoteKey] = useState<string | null>(null);
@@ -688,6 +714,7 @@ export default function App() {
     setIsThinking(true);
 
     const mode = detectPanelMode(q);
+    const shoppingIntent = isShoppingIntentQuery(q);
     const complaintIntent = isComplaintIntent(q);
     const hasImages = currentAttachedFiles.length > 0;
     const hasPendingImage = Boolean(pendingImageContext) || cvPrefillImages.length > 0 || hasImages;
@@ -754,6 +781,22 @@ export default function App() {
           setIsThinking(false);
           return;
         }
+
+        // Shopping intent with images (no damage): switch to visual_search panel
+        if (!anyDamage && imageTriageResults.length > 0 && !complaintIntent && !explicitComplaintIntent) {
+          const triageCtxs = imageTriageResults.map((t: any, idx: number) => ({
+            labels: Array.isArray(t?.labels) ? t.labels : [],
+            ocr_text: typeof t?.extracted_text === 'string' ? t.extracted_text : '',
+            cv_signals: {
+              qr_code_detected: Boolean(t?.security?.qr_code_detected),
+              qr_prompt_injection: Boolean(t?.security?.qr_prompt_injection),
+              manipulation_detected: Boolean(t?.security?.manipulation_detected),
+            },
+            source_name: currentAttachedFiles[idx]?.name || `Image ${idx + 1}`,
+          }));
+          setImageTriageContexts(triageCtxs);
+          setRightPanelMode('visual_search');
+        }
       }
 
       const routeToComplaint = (mode === 'cv' || complaintIntent || explicitComplaintIntent) && !explicitVisualIntent && !requestImageContext && !hasImages;
@@ -816,6 +859,16 @@ export default function App() {
       } else {
         // Build multimodal chat payload
         const chatPayload: any = { uid, query: q };
+        const copyProfileId = String(localStorage.getItem('shopsquire_copy_profile_id') || (import.meta as any).env?.VITE_COPY_PROFILE_ID || '').trim();
+        const copyBrandName = String(localStorage.getItem('shopsquire_brand_name') || (import.meta as any).env?.VITE_BRAND_NAME || '').trim();
+        const copyEnabled =
+          String(localStorage.getItem('shopsquire_copywriting_enabled') || (import.meta as any).env?.VITE_COPYWRITING_ENABLED || '0')
+            .trim()
+            .toLowerCase() === '1' || String(localStorage.getItem('shopsquire_copywriting_enabled') || '').trim().toLowerCase() === 'true';
+        if (copyEnabled) chatPayload.copywriting_enabled = true;
+        if (copyProfileId) chatPayload.copy_profile_id = copyProfileId;
+        if (copyBrandName) chatPayload.brand_name = copyBrandName;
+        chatPayload.copy_surface = 'storefront';
         if (opts?.nqeSelection) {
           chatPayload.nqe_selection = opts.nqeSelection;
         }
@@ -858,11 +911,19 @@ export default function App() {
           'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
         };
         const tryStreamChat = async (): Promise<any | null> => {
-          const resp = await fetch(apiUrl('/api/v1/chat/stream'), {
-            method: 'POST',
-            headers: apiHeaders,
-            body: JSON.stringify(chatPayload),
-          });
+          const ctl = new AbortController();
+          const t = setTimeout(() => ctl.abort(), 3500);
+          let resp: Response;
+          try {
+            resp = await fetch(apiUrl('/api/v1/chat/stream'), {
+              method: 'POST',
+              headers: apiHeaders,
+              body: JSON.stringify(chatPayload),
+              signal: ctl.signal,
+            });
+          } finally {
+            clearTimeout(t);
+          }
           if (!resp.ok || !resp.body) return null;
           const reader = resp.body.getReader();
           const decoder = new TextDecoder();
@@ -981,7 +1042,7 @@ export default function App() {
           setMessages(prev => [...prev, assistantMsg]);
         } else {
           if (panelContract?.mode === 'support') setRightPanelMode('faq');
-          else setRightPanelMode(mode);
+          else setRightPanelMode(shoppingIntent ? 'grid' : mode);
           const nqePrompt = formatNextQuestions(nextQuestions);
           const assistantMsg: ChatMessage = {
             role: 'assistant',
@@ -1365,6 +1426,26 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {Array.isArray(rightPanelContract?.anchor_sections) && rightPanelContract!.anchor_sections!.length > 0 && (
+                    <div className={styles.tierPanel}>
+                      {(rightPanelContract!.anchor_sections || []).map((section, idx) => (
+                        <div key={String(section?.anchor_id || idx)} className={styles.tierBlock}>
+                          <div className={styles.tierTitle}>{section?.title || `Image ${idx + 1}`}</div>
+                          <div className={styles.tierCarousel}>
+                            {(section?.top_products || []).slice(0, 3).map((p) => (
+                              <article key={`anchor-${idx}-${p.sku}`} className={styles.tierCard}>
+                                <div className={styles.tierName}>{p.name}</div>
+                                <div className={styles.tierPrice}>${productPrice(p).toLocaleString()}</div>
+                                <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                              </article>
+                            ))}
+                          </div>
+                          {section?.summary && <div className={styles.tierExplain}>{section.summary}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode) && displayProducts.length > 0 && (
                     <div className={styles.deviceLanePanel}>
                       {(['windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
@@ -1391,7 +1472,7 @@ export default function App() {
                                     <div className={styles.deviceLaneImgPlaceholder}>No image</div>
                                   )}
                                   <div className={styles.deviceLaneName}>{p.name}</div>
-                                  <div className={styles.deviceLanePrice}>${Number(p.price || 0).toLocaleString()}</div>
+                                  <div className={styles.deviceLanePrice}>${productPrice(p).toLocaleString()}</div>
                                   <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
                                 </article>
                               ))}
@@ -1430,7 +1511,7 @@ export default function App() {
                           {(rightPanelContract.lower_tier?.items || []).slice(0, 4).map((p) => (
                             <article key={`low-${p.sku}`} className={styles.tierCard}>
                               <div className={styles.tierName}>{p.name}</div>
-                              <div className={styles.tierPrice}>${Number(p.price || 0).toLocaleString()}</div>
+                              <div className={styles.tierPrice}>${productPrice(p).toLocaleString()}</div>
                               <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
                             </article>
                           ))}
@@ -1443,7 +1524,7 @@ export default function App() {
                           {(rightPanelContract.higher_tier?.items || []).slice(0, 4).map((p) => (
                             <article key={`high-${p.sku}`} className={styles.tierCard}>
                               <div className={styles.tierName}>{p.name}</div>
-                              <div className={styles.tierPrice}>${Number(p.price || 0).toLocaleString()}</div>
+                              <div className={styles.tierPrice}>${productPrice(p).toLocaleString()}</div>
                               <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
                             </article>
                           ))}
@@ -1495,9 +1576,9 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} />
                   ) : rightPanelMode === 'image_context' ? (
-                    <RightPanelExtras mode="image_context" />
+                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"

@@ -3,7 +3,7 @@ import { apiUrl, safeJson, cvAnalyze, cvIssueNonce, cvUpload } from '../lib/api'
 import CVResultsPanel, { CVResult } from './CVResultsPanel';
 import { fileToBase64, buildSanitizedImages } from '../utils/imageProcessing';
 import CameraButton from './CameraButton';
-import ImageRecommendPanel, { ImageAnalysisContext } from './ImageRecommendPanel';
+import ImageRecommendPanel, { ImageAnalysisContext, Props as ImageRecommendProps } from './ImageRecommendPanel';
 
 type FAQItem = {
   id: string;
@@ -61,6 +61,7 @@ export default function RightPanelExtras({
   initialImages,
   onResult,
   autoIssueType,
+  initialImageContexts,
 }: {
   mode: 'faq' | 'cv' | 'visual_search' | 'image_context';
   onEscalate?: (payload: any) => void;
@@ -70,6 +71,8 @@ export default function RightPanelExtras({
   /** When set, automatically switches the CV issueType dropdown to this value.
    *  Useful for NLP-driven intent routing (e.g. `"warranty"` when user asks about a warranty claim). */
   autoIssueType?: string;
+  /** Pre-populated image analysis contexts from App.tsx image triage (for visual_search mode). */
+  initialImageContexts?: ImageAnalysisContext[];
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
@@ -85,7 +88,7 @@ export default function RightPanelExtras({
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CVSubmitResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [imageRecommendCtx, setImageRecommendCtx] = useState<ImageAnalysisContext | null>(null);
+  const [imageRecommendCtxs, setImageRecommendCtxs] = useState<ImageAnalysisContext[]>([]);
   const [sessionSuspiciousCount, setSessionSuspiciousCount] = useState(0);
   const role = (localStorage.getItem('role') || '').toLowerCase();
   const isAdmin = role === 'admin' || role === 'merchant_admin' || role === 'security_admin';
@@ -143,6 +146,22 @@ export default function RightPanelExtras({
       setIssueType(autoIssueType);
     }
   }, [autoIssueType, mode]);
+
+  // Seed image contexts from App.tsx triage data (for visual_search/image_context modes)
+  useEffect(() => {
+    if (initialImageContexts && initialImageContexts.length > 0) {
+      setImageRecommendCtxs(initialImageContexts);
+      // Count suspicious for escalation
+      let suspicious = 0;
+      for (const ctx of initialImageContexts) {
+        const sigs = ctx.cv_signals || {};
+        if (sigs.qr_code_detected || sigs.qr_prompt_injection || sigs.manipulation_detected) {
+          suspicious++;
+        }
+      }
+      if (suspicious > 0) setSessionSuspiciousCount(suspicious);
+    }
+  }, [initialImageContexts]);
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
@@ -343,11 +362,12 @@ export default function RightPanelExtras({
       // Extract image recommend context from CV analyze response for the recommendation panel
       const irc = (resp as any)?.image_recommend_context;
       if (irc && typeof irc === 'object') {
-        setImageRecommendCtx({
+        const newCtx: ImageAnalysisContext = {
           labels: Array.isArray(irc.labels) ? irc.labels : [],
           ocr_text: typeof irc.ocr_text === 'string' ? irc.ocr_text : '',
           cv_signals: irc.cv_signals || {},
-        });
+        };
+        setImageRecommendCtxs(prev => [...prev, newCtx]);
         // Track suspicious uploads for progressive escalation
         const sigs = irc.cv_signals || {};
         if (sigs.qr_code_detected || sigs.qr_prompt_injection || sigs.manipulation_detected) {
@@ -538,24 +558,11 @@ export default function RightPanelExtras({
     );
   }
 
-  if (mode === 'visual_search') {
+  if (mode === 'visual_search' || mode === 'image_context') {
     return (
       <div style={{ padding: 0 }}>
         <ImageRecommendPanel
-          imageContext={imageRecommendCtx}
-          userQuery={description || 'show me similar laptops'}
-          traceId={result?.trace_id || null}
-          sessionSuspiciousCount={sessionSuspiciousCount}
-        />
-      </div>
-    );
-  }
-
-  if (mode === 'image_context') {
-    return (
-      <div style={{ padding: 0 }}>
-        <ImageRecommendPanel
-          imageContext={imageRecommendCtx}
+          imageContexts={imageRecommendCtxs}
           userQuery={description || 'show me laptops'}
           traceId={result?.trace_id || null}
           sessionSuspiciousCount={sessionSuspiciousCount}
