@@ -323,6 +323,7 @@ export default function App() {
   const [cvPrefillImages, setCvPrefillImages] = useState<File[]>([]);
   const [cvAutoIssueType, setCvAutoIssueType] = useState<string | undefined>(undefined);
   const [imageTriageContexts, setImageTriageContexts] = useState<any[]>([]);
+  const [visualSearchQuery, setVisualSearchQuery] = useState('');
   const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
   const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
   const [lastCvSecurityNoteKey, setLastCvSecurityNoteKey] = useState<string | null>(null);
@@ -788,14 +789,25 @@ export default function App() {
             labels: Array.isArray(t?.labels) ? t.labels : [],
             ocr_text: typeof t?.extracted_text === 'string' ? t.extracted_text : '',
             cv_signals: {
-              qr_code_detected: Boolean(t?.security?.qr_code_detected),
-              qr_prompt_injection: Boolean(t?.security?.qr_prompt_injection),
-              manipulation_detected: Boolean(t?.security?.manipulation_detected),
+              qr_code_detected: Boolean(t?.security?.signals?.qr_code_detected),
+              qr_prompt_injection: Boolean(t?.security?.signals?.qr_prompt_injection),
+              manipulation_detected: Boolean(t?.security?.signals?.manipulation_detected),
             },
             source_name: currentAttachedFiles[idx]?.name || `Image ${idx + 1}`,
           }));
           setImageTriageContexts(triageCtxs);
           setRightPanelMode('visual_search');
+          setVisualSearchQuery(q);
+
+          // Give the user a feedback message and short-circuit — the right panel handles recs
+          const imageNames = currentAttachedFiles.map(f => f.name).join(', ');
+          setMessages(prev => [...prev, {
+            role: 'assistant' as const,
+            content: `I've analysed your images (${imageNames}). Check the **Visual Search** panel on the right for per-image product recommendations.`,
+            timestamp: new Date(),
+          }]);
+          setIsThinking(false);
+          return;
         }
       }
 
@@ -1576,9 +1588,9 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} />
                   ) : rightPanelMode === 'image_context' ? (
-                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} />
+                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"

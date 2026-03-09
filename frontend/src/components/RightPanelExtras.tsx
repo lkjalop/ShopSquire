@@ -62,6 +62,7 @@ export default function RightPanelExtras({
   onResult,
   autoIssueType,
   initialImageContexts,
+  userQuery,
 }: {
   mode: 'faq' | 'cv' | 'visual_search' | 'image_context';
   onEscalate?: (payload: any) => void;
@@ -73,6 +74,8 @@ export default function RightPanelExtras({
   autoIssueType?: string;
   /** Pre-populated image analysis contexts from App.tsx image triage (for visual_search mode). */
   initialImageContexts?: ImageAnalysisContext[];
+  /** User's original query text (passed through for visual_search mode). */
+  userQuery?: string;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
@@ -563,7 +566,7 @@ export default function RightPanelExtras({
       <div style={{ padding: 0 }}>
         <ImageRecommendPanel
           imageContexts={imageRecommendCtxs}
-          userQuery={description || 'show me laptops'}
+          userQuery={userQuery || description || 'show me laptops'}
           traceId={result?.trace_id || null}
           sessionSuspiciousCount={sessionSuspiciousCount}
         />

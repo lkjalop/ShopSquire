@@ -289,3 +289,74 @@ class TestMultiImageContextShape:
         # Signals don't leak across images
         assert contexts[0]["cv_signals"]["qr_prompt_injection"] is True
         assert contexts[1]["cv_signals"]["qr_prompt_injection"] is False
+
+
+# ---------------------------------------------------------------------------
+# 7. Triage response → context mapping (security.signals path fix)
+# ---------------------------------------------------------------------------
+class TestTriageResponseMapping:
+    """Verify that the frontend mapping from triage response to ImageAnalysisContext
+    correctly reads security signals from the nested security.signals path."""
+
+    @staticmethod
+    def _map_triage_to_context(t: dict, filename: str = "image.png") -> dict:
+        """Mirror of the App.tsx triage → context mapping logic."""
+        return {
+            "labels": t.get("labels", []) if isinstance(t.get("labels"), list) else [],
+            "ocr_text": t.get("extracted_text", "") if isinstance(t.get("extracted_text"), str) else "",
+            "cv_signals": {
+                "qr_code_detected": bool((t.get("security") or {}).get("signals", {}).get("qr_code_detected")),
+                "qr_prompt_injection": bool((t.get("security") or {}).get("signals", {}).get("qr_prompt_injection")),
+                "manipulation_detected": bool((t.get("security") or {}).get("signals", {}).get("manipulation_detected")),
+            },
+            "source_name": filename,
+        }
+
+    def test_clean_image_signals_all_false(self):
+        """Benign triage response → all signals should be False."""
+        triage = {
+            "labels": ["laptop", "lenovo_logo"],
+            "extracted_text": "Lenovo IdeaPad",
+            "security": {"clean": True, "signals": {}, "reupload_needed": False},
+        }
+        ctx = self._map_triage_to_context(triage, "lenovo.webp")
+        assert ctx["cv_signals"]["qr_code_detected"] is False
+        assert ctx["cv_signals"]["qr_prompt_injection"] is False
+        assert ctx["cv_signals"]["manipulation_detected"] is False
+        assert ctx["source_name"] == "lenovo.webp"
+
+    def test_malicious_image_signals_detected(self):
+        """Triage response with QR + prompt injection → signals should be True."""
+        triage = {
+            "labels": ["laptop", "apple_logo", "keyboard", "qr_code"],
+            "extracted_text": "MacBook Pro 14",
+            "security": {
+                "clean": False,
+                "signals": {"qr_code_detected": True, "qr_prompt_injection": True},
+                "reupload_needed": True,
+            },
+        }
+        ctx = self._map_triage_to_context(triage, "macbook-QR.png")
+        assert ctx["cv_signals"]["qr_code_detected"] is True
+        assert ctx["cv_signals"]["qr_prompt_injection"] is True
+        assert ctx["cv_signals"]["manipulation_detected"] is False
+
+    def test_wrong_path_returns_false(self):
+        """Bug check: signals at security.qr_code_detected (wrong path) must NOT work."""
+        triage = {
+            "labels": ["laptop"],
+            "extracted_text": "",
+            "security": {
+                "clean": False,
+                "qr_code_detected": True,  # WRONG path — not under .signals
+                "signals": {},  # correct path is empty
+            },
+        }
+        ctx = self._map_triage_to_context(triage, "test.png")
+        # Should be False because signals are at wrong path
+        assert ctx["cv_signals"]["qr_code_detected"] is False
+
+    def test_missing_security_key(self):
+        ctx = self._map_triage_to_context({"labels": ["phone"]}, "phone.jpg")
+        assert ctx["cv_signals"]["qr_code_detected"] is False
+        assert ctx["labels"] == ["phone"]
