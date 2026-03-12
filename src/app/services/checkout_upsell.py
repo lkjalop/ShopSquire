@@ -60,10 +60,14 @@ def _infer_intent_family(query: str | None, persona: str | None, use_case: str |
 
 def _family_complement_weight(cart_family: str, candidate_family: str) -> float:
     # Keep relevance deterministic and transparent: same-family gets highest weight.
+    # Peripheral/accessory families complement LAP strongly — a shopper who already
+    # has a laptop needs a mouse, headset or bag, not another laptop.
     matrix: dict[str, dict[str, float]] = {
-        "LAP": {"LAP": 1.0, "HMW": 0.35, "FSH": 0.05},
+        "LAP": {"LAP": 1.0, "PERIPH": 0.95, "ACC": 0.90, "MON": 0.90, "HEAD": 0.85, "COOL": 0.80, "BAG": 0.75, "HMW": 0.35, "FSH": 0.05},
         "FSH": {"FSH": 1.0, "HMW": 0.25, "LAP": 0.10},
         "HMW": {"HMW": 1.0, "FSH": 0.30, "LAP": 0.20},
+        "PERIPH": {"PERIPH": 0.80, "LAP": 0.60, "ACC": 0.70, "HEAD": 0.65, "MON": 0.55, "HMW": 0.20, "FSH": 0.05},
+        "MON": {"MON": 0.80, "LAP": 0.65, "PERIPH": 0.70, "ACC": 0.60, "HMW": 0.20, "FSH": 0.05},
     }
     row = matrix.get(str(cart_family or "UNK").upper(), {})
     if not row:
@@ -670,16 +674,28 @@ def recommend_checkout_upsell(
                 if t
             }
             if cat_tags & affinity_set:
-                affinity_boost = 0.30
+                # Raise affinity_boost to 1.0 so accessories can compete with
+                # same-family laptop re-recommendations in the total score.
+                affinity_boost = 1.0
         cart_family_fit = 0.0
         if cart_families:
             cart_family_fit = max(_family_complement_weight(cf, cand_family) for cf in cart_families)
-        query_intent_fit = 1.0 if intent_family and cand_family == intent_family else 0.0
+        # Suppress query_intent_fit when cart already owns the inferred primary family:
+        # a student who has a laptop in the cart wants accessories, not another laptop.
+        if intent_family and cand_family == intent_family:
+            query_intent_fit = 0.0 if cand_family in cart_families else 1.0
+        else:
+            query_intent_fit = 0.0
         persona_fit = 0.0
         persona_key = str(persona or "").strip().lower()
         if persona_key:
             if persona_key in {"student", "gamer", "office", "corporate", "engineer", "creator"}:
-                persona_fit = 1.0 if cand_family == "LAP" else 0.0
+                if "LAP" in cart_families:
+                    # Cart already has a laptop; persona_fit should now reward
+                    # use-case accessories (mouse, headset, bag, etc.) instead.
+                    persona_fit = 1.0 if affinity_boost > 0 else 0.0
+                else:
+                    persona_fit = 1.0 if cand_family == "LAP" else 0.0
             elif persona_key in {"fashion", "apparel"}:
                 persona_fit = 1.0 if cand_family == "FSH" else 0.0
             elif persona_key in {"home", "homeowner"}:

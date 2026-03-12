@@ -50,7 +50,7 @@ def test_decision_logs_include_retrieved_context_and_policy(monkeypatch, tmp_pat
         extend_existing=True,
     )
     # create tables including decision_logs from ORM Base
-    ORMBase.metadata.create_all(engine)
+    ORMBase.metadata.create_all(engine, checkfirst=True)
 
     # Insert product and draft order
     with SessionLocal() as s:

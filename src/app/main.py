@@ -241,6 +241,15 @@ def create_app() -> FastAPI:
             await start_stream_consumer()
         except Exception:
             pass
+        # Pre-warm the CLIP model so first visual-search query is not slow.
+        # This runs unconditionally (faiss is not required) in a background thread
+        # so the event loop stays unblocked during model loading.
+        try:
+            import asyncio as _asyncio_startup
+            from src.app.services.visual_search import _load_clip as _vs_load_clip
+            _asyncio_startup.get_event_loop().run_in_executor(None, _vs_load_clip)
+        except Exception:
+            pass
         # Build visual search index in background on startup
         try:
             if str(os.getenv("VISUAL_SEARCH_INDEX_ON_START", "1")).lower() in ("1", "true", "yes"):

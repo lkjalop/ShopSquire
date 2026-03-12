@@ -42,7 +42,7 @@ def test_approve_and_reject_decision(monkeypatch, tmp_path):
           Column("execution_status", SA_Text),
           Column("error_message", SA_Text),
           extend_existing=True)
-    ORMBase.metadata.create_all(engine)
+    ORMBase.metadata.create_all(engine, checkfirst=True)
 
     # insert a decision row
     with engine.connect() as conn:

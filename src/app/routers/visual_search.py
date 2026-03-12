@@ -44,7 +44,9 @@ async def visual_search_query(
     if not image_bytes and not query_text:
         raise HTTPException(status_code=422, detail="Provide either an image or query_text")
 
-    results = vs.search(
+    import asyncio
+    results = await asyncio.to_thread(
+        vs.search,
         image_bytes=image_bytes,
         query_text=query_text,
         k=k,
