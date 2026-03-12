@@ -6,6 +6,7 @@ type RoomEvent = {
   id?: string;
   user?: string;
   role?: string;
+  event_type?: string;
   message?: string;
   time?: string;
 };
@@ -23,11 +24,13 @@ export default function EscalationRoom({
   buyerToken,
   staffToken,
   onClose,
+  onResolve,
 }: {
   incidentId: string;
   buyerToken?: string | null;
   staffToken?: string | null;
   onClose: () => void;
+  onResolve?: (incidentId: string) => void;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const OWNER_API_KEY = ((import.meta as any).env?.VITE_OWNER_API_KEY as string | undefined) || API_KEY;
@@ -38,7 +41,13 @@ export default function EscalationRoom({
   const [sendError, setSendError] = useState<string | null>(null);
   const [incidentSummary, setIncidentSummary] = useState<any>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [summaryCollapsed, setSummaryCollapsed] = useState(true);
+  const [remoteTyping, setRemoteTyping] = useState(false);
+  const [resolved, setResolved] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const typingTimerRef = useRef<number | null>(null);
+  const typingSentAtRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -104,6 +113,43 @@ export default function EscalationRoom({
 
   useEffect(() => {
     let mounted = true;
+    const fetchStatus = async () => {
+      try {
+        if (buyerToken || staffToken) {
+          const token = buyerToken || staffToken || '';
+          const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/summary/public`), window.location.href);
+          u.searchParams.set('token', token);
+          const r = await fetch(u.toString(), { credentials: 'include' });
+          const j = await safeJson(r);
+          if (!r.ok) throw new Error(parseError(r.status, j, 'summary_status_failed'));
+          const st = String(j?.status || '').toLowerCase();
+          if (mounted) setResolved(st === 'resolved' || st === 'closed');
+          return;
+        }
+        const headers: Record<string, string> = {};
+        if (OWNER_API_KEY) headers['x-api-key'] = OWNER_API_KEY;
+        const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}`), {
+          credentials: 'include',
+          headers,
+        });
+        const j = await safeJson(r);
+        if (!r.ok) throw new Error(parseError(r.status, j, 'summary_status_failed'));
+        const st = String(j?.status || '').toLowerCase();
+        if (mounted) setResolved(st === 'resolved' || st === 'closed');
+      } catch {
+        // best effort
+      }
+    };
+    fetchStatus();
+    const timer = window.setInterval(fetchStatus, 7000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [OWNER_API_KEY, incidentId, buyerToken, staffToken]);
+
+  useEffect(() => {
+    let mounted = true;
     let ws: WebSocket | null = null;
     let es: EventSource | null = null;
     setConnectionError(null);
@@ -112,7 +158,17 @@ export default function EscalationRoom({
     const appendIncoming = (raw: any) => {
       const incoming = Array.isArray(raw) ? raw : (Array.isArray(raw?.events) ? raw.events : [raw]);
       if (!mounted || !Array.isArray(incoming)) return;
-      setEvents((prev) => [...prev, ...incoming]);
+      const typingEvents = incoming.filter((e: any) => String(e?.event_type || '').toLowerCase() === 'typing');
+      if (typingEvents.length > 0) {
+        setRemoteTyping(true);
+        if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = window.setTimeout(() => setRemoteTyping(false), 2400);
+      }
+      const messageEvents = incoming.filter((e: any) => String(e?.event_type || 'message').toLowerCase() !== 'typing');
+      if (messageEvents.length > 0) {
+        setRemoteTyping(false);
+        setEvents((prev) => [...prev, ...messageEvents]);
+      }
     };
 
     const connectWS = () => {
@@ -216,7 +272,66 @@ export default function EscalationRoom({
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' });
-  }, [events]);
+  }, [events, remoteTyping]);
+
+  useEffect(() => () => {
+    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+  }, []);
+
+  const sendTypingSignal = async () => {
+    const now = Date.now();
+    if (now - typingSentAtRef.current < 800) return;
+    typingSentAtRef.current = now;
+    try {
+      const token = buyerToken || staffToken || null;
+      if (token) {
+        const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/message`), window.location.href);
+        u.searchParams.set('token', token);
+        await fetch(u.toString(), {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event_type: 'typing', role: staffToken ? 'staff' : 'buyer' }),
+        });
+        return;
+      }
+      await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/message`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : {}),
+        },
+        body: JSON.stringify({ event_type: 'typing', role: 'staff' }),
+      });
+    } catch {
+      // best effort
+    }
+  };
+
+  const resolveCase = async () => {
+    if (resolving || resolved) return;
+    setResolving(true);
+    setSendError(null);
+    try {
+      const r = await fetch(
+        apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/status?status=resolved`),
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : undefined,
+        },
+      );
+      const j = await safeJson(r);
+      if (!r.ok) throw new Error(parseError(r.status, j, 'resolve_failed'));
+      setResolved(true);
+      onResolve?.(incidentId);
+    } catch (e: any) {
+      setSendError(`Resolve failed: ${e?.message || 'unknown_error'}.`);
+    } finally {
+      setResolving(false);
+    }
+  };
 
   const sendMessage = async () => {
     const msg = input.trim();
@@ -232,7 +347,7 @@ export default function EscalationRoom({
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg }),
+          body: JSON.stringify({ message: msg, role: staffToken ? 'staff' : 'buyer' }),
         });
         const j = await safeJson(r);
         if (!r.ok) throw new Error(parseError(r.status, j, 'send_failed'));
@@ -244,7 +359,7 @@ export default function EscalationRoom({
             'Content-Type': 'application/json',
             ...(OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : {}),
           },
-          body: JSON.stringify({ message: msg }),
+          body: JSON.stringify({ message: msg, role: 'staff' }),
         });
         const j = await safeJson(r);
         if (!r.ok) throw new Error(parseError(r.status, j, 'send_failed'));
@@ -252,6 +367,20 @@ export default function EscalationRoom({
     } catch (e: any) {
       setSendError(`Send failed: ${e?.message || 'unknown_error'}.`);
     }
+  };
+
+  const roleLabel = (e: RoomEvent): string => {
+    const role = String(e.role || '').toLowerCase();
+    if (buyerToken && !staffToken) {
+      if (role === 'buyer') return '[You]';
+      if (role === 'staff' || role === 'merchant' || role === 'owner' || role === 'developer') return '[Support]';
+      if (role === 'assistant' || role === 'system') return '[System]';
+      return '[Support]';
+    }
+    if (role === 'staff' || role === 'merchant' || role === 'owner' || role === 'developer') return '[You]';
+    if (role === 'buyer') return '[Buyer]';
+    if (role === 'assistant' || role === 'system') return '[System]';
+    return '[Support]';
   };
 
   return (
@@ -270,12 +399,28 @@ export default function EscalationRoom({
               Open admin console
             </a>
             <span style={{ fontSize: 12, opacity: 0.8, marginRight: 8 }}>{mode}</span>
+            {!buyerToken && (
+              <button className={styles.resolveBtn} onClick={resolveCase} disabled={resolved || resolving}>
+                {resolved ? 'Resolved' : (resolving ? 'Resolving...' : 'Mark resolved')}
+              </button>
+            )}
             <button className={styles.closeBtn} onClick={onClose}>Close</button>
           </div>
         </div>
+        {resolved && (
+          <div className={styles.resolvedBanner}>
+            Case resolved. This incident is closed for active triage.
+          </div>
+        )}
         <div className={styles.contentLayout}>
           <aside className={styles.summaryPanel}>
-            <div className={styles.summaryTitle}>Escalation Summary</div>
+            <button className={styles.summaryToggle} onClick={() => setSummaryCollapsed((v) => !v)}>
+              <span className={styles.summaryTitle}>Escalation Summary</span>
+              <span>{summaryCollapsed ? 'Expand' : 'Collapse'}</span>
+            </button>
+            {summaryCollapsed && <div className={styles.summaryHint}>Collapsed</div>}
+            {!summaryCollapsed && (
+              <>
             {!incidentSummary && !summaryError && (
               <div className={styles.summaryValue}>Loading incident context...</div>
             )}
@@ -291,15 +436,23 @@ export default function EscalationRoom({
                 <div className={styles.summaryItem}><span className={styles.summaryKey}>Created</span><span className={styles.summaryValue}>{incidentSummary.createdAt || 'n/a'}</span></div>
               </>
             )}
+              </>
+            )}
           </aside>
           <div ref={bodyRef} className={styles.body}>
             {events.length === 0 && <div style={{ color: '#6b7280' }}>No messages yet.</div>}
             {events.map((e, i) => (
               <div key={e.id || i} className={styles.msg}>
-                <div><strong>{e.user || e.role || 'system'}</strong>: {e.message || ''}</div>
+                <div><strong>{roleLabel(e)}</strong> {e.message || ''}</div>
                 <div className={styles.meta}>{e.time || ''}</div>
               </div>
             ))}
+            {remoteTyping && (
+              <div className={styles.typingRow}>
+                <span className={styles.typingLabel}>{buyerToken && !staffToken ? '[Support]' : '[Buyer]'} typing</span>
+                <span className={styles.typingDots}><i>.</i><i>.</i><i>.</i></span>
+              </div>
+            )}
           </div>
         </div>
         {connectionError && <div style={{ padding: '0 12px 10px', color: '#9f2d1b', fontSize: 12 }}>{connectionError}</div>}
@@ -309,7 +462,10 @@ export default function EscalationRoom({
             className={styles.input}
             placeholder="Type a message..."
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              if (e.target.value.trim()) void sendTypingSignal();
+            }}
             onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           />
           <button className={styles.sendBtn} onClick={sendMessage}>Send</button>

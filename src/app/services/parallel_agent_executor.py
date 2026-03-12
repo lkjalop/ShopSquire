@@ -142,7 +142,7 @@ def _run_cv(payload: Dict[str, Any], retries: int | None = None, timeout_ms: int
             images = payload.get("images") or payload.get("image_b64s") or payload.get("image_data")
             if images:
                 img = images[0] if isinstance(images, list) else images
-                labels, text = _asyncio.run(ManagedCVProvider().get_labels_and_text(img))
+                labels, text, *_ = _asyncio.run(ManagedCVProvider().get_labels_and_text(img))
                 res = _asyncio.run(BasicCVTriage().analyze(labels, text)) or {}
                 # Record latency as a trace event and metrics
                 try:

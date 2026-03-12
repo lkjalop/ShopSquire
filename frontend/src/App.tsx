@@ -71,6 +71,10 @@ type RightPanelContract = {
   show_tiers?: boolean;
   budget_status?: string;
   summary?: string;
+  image_untrusted?: boolean;
+  image_degraded_mode?: boolean;
+  security_route?: string;
+  security_summary?: string;
   lower_tier?: PanelTier;
   higher_tier?: PanelTier;
   anchor_sections?: AnchorSection[];
@@ -260,6 +264,11 @@ function detectPanelMode(query: string): RightPanelMode {
   return 'none';
 }
 
+function isCartUpsellIntentQuery(query: string): boolean {
+  const q = query.toLowerCase();
+  return /add[\s-]?on|accessor(y|ies)|what else should i buy|what else should i get|compatible|bundle|extra \$?\d+|spend .* extra|upsell/i.test(q);
+}
+
 function detectCVIssueType(query: string): string {
   const q = query.toLowerCase();
   if (/warranty|under warranty|warranty claim|warranty repair|warranty coverage/.test(q)) return 'warranty';
@@ -304,8 +313,10 @@ export default function App() {
   };
   const [inputValue, setInputValue] = useState('');
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>('none');
+  const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
+  const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>({ ok: false, latencyMs: null, checkedAt: null, error: null });
@@ -323,6 +334,7 @@ export default function App() {
   const [cvPrefillImages, setCvPrefillImages] = useState<File[]>([]);
   const [cvAutoIssueType, setCvAutoIssueType] = useState<string | undefined>(undefined);
   const [imageTriageContexts, setImageTriageContexts] = useState<any[]>([]);
+  const [imageTriageRaw, setImageTriageRaw] = useState<any[]>([]);
   const [visualSearchQuery, setVisualSearchQuery] = useState('');
   const [pendingImageContext, setPendingImageContext] = useState<PendingImageContext | null>(null);
   const [imageRoutingInFlight, setImageRoutingInFlight] = useState(false);
@@ -332,6 +344,22 @@ export default function App() {
   const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = (localStorage.getItem('uid') || 'demo-user');
+
+  const switchRightPanelMode = useCallback((nextMode: RightPanelMode) => {
+    setRightPanelMode((prevMode) => {
+      if (prevMode !== nextMode) {
+        setRightPanelPrevMode(prevMode);
+      }
+      return nextMode;
+    });
+  }, []);
+
+  const handleRightPanelBack = useCallback(() => {
+    if (!rightPanelPrevMode || rightPanelPrevMode === rightPanelMode) return;
+    const current = rightPanelMode;
+    setRightPanelMode(rightPanelPrevMode);
+    setRightPanelPrevMode(current);
+  }, [rightPanelMode, rightPanelPrevMode]);
   const [cart, setCart] = useState<any | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [showAdminDash, setShowAdminDash] = useState(false);
@@ -350,17 +378,29 @@ export default function App() {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachedThumbs, setAttachedThumbs] = useState<string[]>([]);
 
+  const filteredDisplayProducts = useMemo(() => {
+    if (tierFilter === 'all') return displayProducts;
+    const tierItems = tierFilter === 'lower'
+      ? (rightPanelContract?.lower_tier?.items || [])
+      : (rightPanelContract?.higher_tier?.items || []);
+    if (!Array.isArray(tierItems) || tierItems.length === 0) return displayProducts;
+    const bySku = new Map((displayProducts || []).map((p) => [String(p.sku), p] as const));
+    return tierItems
+      .map((p) => bySku.get(String((p as any)?.sku)) || (p as Product))
+      .filter(Boolean);
+  }, [tierFilter, rightPanelContract, displayProducts]);
+
   const laneBuckets = useMemo(() => {
     const out: Record<DeviceLane, Product[]> = {
       windows: [],
       macbook: [],
       tablet_chromebook: [],
     };
-    for (const p of displayProducts || []) {
+    for (const p of filteredDisplayProducts || []) {
       out[laneForProduct(p)].push(p);
     }
     return out;
-  }, [displayProducts]);
+  }, [filteredDisplayProducts]);
 
   const expandedLaneProducts = useMemo(
     () => (expandedLane ? (laneBuckets[expandedLane] || []) : []),
@@ -369,7 +409,11 @@ export default function App() {
 
   useEffect(() => {
     setExpandedLane(null);
-  }, [rightPanelMode, displayProducts]);
+  }, [rightPanelMode, filteredDisplayProducts]);
+
+  useEffect(() => {
+    setTierFilter('all');
+  }, [displayProducts]);
 
   // Dual STT (browser + Whisper)
   const stt = useDualSTT();
@@ -451,7 +495,7 @@ export default function App() {
     try {
       const j = await addCartItem(uid, sku, 1);
       setCart(j);
-      setRightPanelMode('cart');
+      switchRightPanelMode('cart');
       // Proactive post-add message in the chat
       const addedProduct = products.find((p) => p.sku === sku);
       const productName = addedProduct?.name || sku;
@@ -686,6 +730,9 @@ export default function App() {
   const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string } }) => {
     const q = String(opts?.queryOverride ?? inputValue).trim();
     if (!q) return;
+    try {
+      localStorage.setItem('shopsquire_last_user_query', q);
+    } catch {}
 
     // PII Detection - warn user and don't send sensitive data
     const pii = detectPII(q);
@@ -716,6 +763,7 @@ export default function App() {
 
     const mode = detectPanelMode(q);
     const shoppingIntent = isShoppingIntentQuery(q);
+    const cartUpsellIntent = isCartUpsellIntentQuery(q) && ((cart?.items || []).length > 0);
     const complaintIntent = isComplaintIntent(q);
     const hasImages = currentAttachedFiles.length > 0;
     const hasPendingImage = Boolean(pendingImageContext) || cvPrefillImages.length > 0 || hasImages;
@@ -725,7 +773,7 @@ export default function App() {
 
     if (hasPendingImage && explicitComplaintIntent && !hasImages) {
       setPendingImageContext(null);
-      setRightPanelMode('cv');
+      switchRightPanelMode('cv');
       setCvAutoIssueType(detectCVIssueType(q));
       setMessages(prev => [...prev, {
         role: 'assistant',
@@ -758,7 +806,12 @@ export default function App() {
               body: fd,
               headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
             });
-            return r.ok ? await safeJson(r) : null;
+            if (!r.ok) return null;
+            const data = await safeJson(r);
+            if (!data) return null;
+            // Attach filename so the Security Matrix can label each triage block
+            data._filename = file.name;
+            return data;
           });
           imageTriageResults = (await Promise.all(triagePromises)).filter(Boolean);
         } finally {
@@ -772,7 +825,7 @@ export default function App() {
         });
         if (anyDamage && (explicitComplaintIntent || complaintIntent)) {
           setCvPrefillImages(currentAttachedFiles);
-          setRightPanelMode('cv');
+          switchRightPanelMode('cv');
           setCvAutoIssueType(detectCVIssueType(q));
           setMessages(prev => [...prev, {
             role: 'assistant',
@@ -786,17 +839,29 @@ export default function App() {
         // Shopping intent with images (no damage): switch to visual_search panel
         if (!anyDamage && imageTriageResults.length > 0 && !complaintIntent && !explicitComplaintIntent) {
           const triageCtxs = imageTriageResults.map((t: any, idx: number) => ({
+            ...(t || {}),
             labels: Array.isArray(t?.labels) ? t.labels : [],
-            ocr_text: typeof t?.extracted_text === 'string' ? t.extracted_text : '',
+            ocr_text:
+              (typeof t?.security?.extracted_text === 'string' ? t.security.extracted_text : '')
+              || (typeof t?.extracted_text === 'string' ? t.extracted_text : ''),
             cv_signals: {
+              ...(typeof t?.security?.signals === 'object' && t.security.signals ? t.security.signals : {}),
               qr_code_detected: Boolean(t?.security?.signals?.qr_code_detected),
               qr_prompt_injection: Boolean(t?.security?.signals?.qr_prompt_injection),
               manipulation_detected: Boolean(t?.security?.signals?.manipulation_detected),
+              qr_external_url_detected: Boolean(
+                t?.security?.signals?.qr_external_url_detected || t?.security?.signals?.qr_external_url
+              ),
+              qr_redirect_probe:
+                (typeof t?.security?.qr_redirect_probe === 'object' && t.security.qr_redirect_probe)
+                ? t.security.qr_redirect_probe
+                : {},
             },
             source_name: currentAttachedFiles[idx]?.name || `Image ${idx + 1}`,
           }));
           setImageTriageContexts(triageCtxs);
-          setRightPanelMode('visual_search');
+          setImageTriageRaw(imageTriageResults);
+          switchRightPanelMode('visual_search');
           setVisualSearchQuery(q);
 
           // Give the user a feedback message and short-circuit — the right panel handles recs
@@ -850,7 +915,7 @@ export default function App() {
         setTraceId(data.decision_trace_id || data.trace_id || proposal.trace_id || null);
         if (prods.length > 0) {
           setDisplayProducts(prods);
-          setRightPanelMode('cv');
+          switchRightPanelMode('cv');
           setCvAutoIssueType(detectCVIssueType(q));
           const assistantMsg: ChatMessage = {
             role: 'assistant',
@@ -859,7 +924,7 @@ export default function App() {
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
-          setRightPanelMode('cv');
+          switchRightPanelMode('cv');
           setCvAutoIssueType(detectCVIssueType(q));
           const assistantMsg: ChatMessage = {
             role: 'assistant',
@@ -1004,8 +1069,20 @@ export default function App() {
         const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
         const complexity = data.complexity || null;
         const backendApplied = data.nqe_selection_applied || null;
+        const budgetViability = (data.budget_viability && typeof data.budget_viability === 'object') ? data.budget_viability : null;
+        const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
+        try {
+          const persona = String(data.buyer_persona || data.buyer_persona_candidate || '').trim();
+          if (persona) localStorage.setItem('shopsquire_last_persona', persona);
+          const useCase = String(
+            (data.constraints_used && typeof data.constraints_used === 'object' ? (data.constraints_used as any).use_case : '') ||
+            data.detected_use_case ||
+            ''
+          ).trim();
+          if (useCase) localStorage.setItem('shopsquire_last_use_case', useCase);
+        } catch {}
         // Update NQE history with backend-confirmed applied constraints
         if (backendApplied && Object.keys(backendApplied).length > 0 && nqeHistory.length > 0) {
           setNqeHistory(prev => {
@@ -1034,18 +1111,20 @@ export default function App() {
         } else if (prods.length > 0) {
           const visibleProducts = prods.slice(0, 12);
           setDisplayProducts(visibleProducts);
-          if (panelContract?.mode === 'support') setRightPanelMode('faq');
-          else setRightPanelMode(mode === 'none' ? 'grid' : mode);
+          if (panelContract?.mode === 'support') switchRightPanelMode('faq');
+          else if (cartUpsellIntent) switchRightPanelMode('cart');
+          else switchRightPanelMode(mode === 'none' ? 'grid' : mode);
           const whySummary = summarizeWhy(prods);
           const hasAssistantBody = typeof respAssistant === 'string' && respAssistant.trim().length > 0;
           const baseLine = hasAssistantBody
             ? respAssistant.trim()
             : `I found ${prods.length} ${mode === 'compare' ? 'products to compare' : 'matching products'} and I’m showing the top ${visibleProducts.length}.`;
           const includeWhy = whySummary && !/top picks:/i.test(baseLine);
+          const budgetNote = budgetAdvice && !baseLine.includes('budget') ? `\n\n⚠️ Budget note: ${budgetAdvice}` : '';
 
           const assistantMsg: ChatMessage = {
             role: 'assistant',
-            content: `${baseLine}${includeWhy ? `\n\n${whySummary}` : ''}`,
+            content: `${baseLine}${includeWhy ? `\n\n${whySummary}` : ''}${budgetNote}`,
             timestamp: new Date(),
             complexity,
             nextQuestions: normalizedNextQuestions,
@@ -1053,12 +1132,15 @@ export default function App() {
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
-          if (panelContract?.mode === 'support') setRightPanelMode('faq');
-          else setRightPanelMode(shoppingIntent ? 'grid' : mode);
+          if (panelContract?.mode === 'support') switchRightPanelMode('faq');
+          else if (cartUpsellIntent) switchRightPanelMode('cart');
+          else switchRightPanelMode(shoppingIntent ? 'grid' : mode);
           const nqePrompt = formatNextQuestions(nextQuestions);
+          const noProdsBase = respAssistant || 'I could not find products matching that query.';
+          const budgetNote = budgetAdvice ? `\n\n⚠️ Budget note: ${budgetAdvice}` : '';
           const assistantMsg: ChatMessage = {
             role: 'assistant',
-            content: (respAssistant || 'I could not find products matching that query.') + nqePrompt,
+            content: noProdsBase + nqePrompt + budgetNote,
             timestamp: new Date(),
             complexity,
             nextQuestions: normalizedNextQuestions,
@@ -1069,7 +1151,7 @@ export default function App() {
       }
     } catch (e: any) {
       setTraceId(null);
-      setRightPanelMode('none');
+      switchRightPanelMode('none');
       setRightPanelContract(null);
       const errMsg = (e && (e.message || String(e))) ? (e.message || String(e)) : 'unknown_error';
       setMessages(prev => [...prev, {
@@ -1153,10 +1235,14 @@ export default function App() {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }, []);
 
+  const backgroundInertProps = chatOpen
+    ? ({ inert: '', 'aria-hidden': true } as any)
+    : {};
+
   return (
     <div className={styles.page}>
       {/* Homepage Header */}
-      <header className={styles.header}>
+      <header className={styles.header} {...backgroundInertProps}>
         <div className={styles.headerInner}>
           <div className={styles.logo}>Shop<span>Squire</span></div>
           <div className={styles.searchBox}>
@@ -1171,7 +1257,7 @@ export default function App() {
             <button className={styles.searchBtn} onClick={handleHeaderSearch}>Search</button>
           </div>
           <div className={styles.headerActions}>
-            <button className={styles.headerBtn} onClick={() => { refreshCart(); setRightPanelMode('cart'); }}>
+            <button className={styles.headerBtn} onClick={() => { refreshCart(); switchRightPanelMode('cart'); }}>
               Cart ({(cart?.items || []).length || 0})
             </button>
             {authUser ? (
@@ -1196,7 +1282,7 @@ export default function App() {
       </header>
 
       {/* Homepage Product Grid */}
-      <main className={styles.main}>
+      <main className={styles.main} {...backgroundInertProps}>
         <div className={styles.categoryBar}>
           <span className={styles.categoryTitle}>Laptops</span>
           <div className={styles.filters}>
@@ -1249,7 +1335,7 @@ export default function App() {
                     <GearIcon />
                   </button>
                   <button className={styles.iconBtn} title="Pop-out"><DetachIcon /></button>
-                  <button className={styles.iconBtn} onClick={() => { setChatOpen(false); setRightPanelMode('none'); }} title="Close"><CloseIcon /></button>
+                  <button className={styles.iconBtn} onClick={() => { setChatOpen(false); switchRightPanelMode('none'); }} title="Close"><CloseIcon /></button>
                 </div>
               </div>
 
@@ -1401,23 +1487,30 @@ export default function App() {
             {hasRightPanel && (
               <div className={styles.rightPanel}>
                 <div className={styles.rightHeader}>
-                  <span>
-                    {rightPanelMode === 'compare'
-                      ? 'Comparison'
-                      : rightPanelMode === 'list'
-                        ? 'Detailed Specs'
-                        : rightPanelContract?.mode === 'support'
-                          ? 'Support Next Steps'
-                        : rightPanelMode === 'cv'
-                          ? 'CV Triage'
+                  <div className={styles.rightHeaderTitleRow}>
+                    {rightPanelPrevMode && rightPanelPrevMode !== rightPanelMode && (
+                      <button className={styles.panelBackBtn} onClick={handleRightPanelBack} type="button" title="Back to previous panel">
+                        ← Back
+                      </button>
+                    )}
+                    <span>
+                      {rightPanelMode === 'compare'
+                        ? 'Comparison'
+                        : rightPanelMode === 'list'
+                          ? 'Detailed Specs'
+                          : rightPanelContract?.mode === 'support'
+                            ? 'Support Next Steps'
+                          : rightPanelMode === 'cv'
+                            ? 'CV Triage'
                           : rightPanelMode === 'cart'
                             ? 'Cart & Upsell'
                             : rightPanelMode === 'visual_search'
                               ? 'Visual Search'
                               : rightPanelMode === 'image_context'
                                 ? 'Image Context'
-                                : `Found ${displayProducts.length} products`}
-                  </span>
+                                : `Found ${filteredDisplayProducts.length} products`}
+                    </span>
+                  </div>
                   <div className={styles.viewToggle}>
                     <button className={viewMode === 'grid' ? styles.active : ''} onClick={() => setViewMode('grid')}><GridIcon /></button>
                     <button className={viewMode === 'list' ? styles.active : ''} onClick={() => setViewMode('list')}><ListIcon /></button>
@@ -1438,6 +1531,16 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {rightPanelContract?.image_untrusted && (
+                    <div className={styles.tierBlock}>
+                      <div className={styles.tierTitle}>
+                        Image Security: {rightPanelContract?.security_route || 'degraded'}
+                      </div>
+                      <div className={styles.tierExplain}>
+                        {rightPanelContract?.security_summary || 'Image was flagged. Recommendations are running in text-only fallback mode.'}
+                      </div>
+                    </div>
+                  )}
                   {Array.isArray(rightPanelContract?.anchor_sections) && rightPanelContract!.anchor_sections!.length > 0 && (
                     <div className={styles.tierPanel}>
                       {(rightPanelContract!.anchor_sections || []).map((section, idx) => (
@@ -1458,7 +1561,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode) && displayProducts.length > 0 && (
+                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode) && filteredDisplayProducts.length > 0 && (
                     <div className={styles.deviceLanePanel}>
                       {(['windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
                         const items = laneBuckets[lane] || [];
@@ -1518,30 +1621,38 @@ export default function App() {
                   {rightPanelContract?.mode === 'shopping' && rightPanelContract?.show_tiers && (
                     <div className={styles.tierPanel}>
                       <div className={styles.tierBlock}>
-                        <div className={styles.tierTitle}>{rightPanelContract.lower_tier?.title || 'Budget-fit options'}</div>
-                        <div className={styles.tierCarousel}>
-                          {(rightPanelContract.lower_tier?.items || []).slice(0, 4).map((p) => (
-                            <article key={`low-${p.sku}`} className={styles.tierCard}>
-                              <div className={styles.tierName}>{p.name}</div>
-                              <div className={styles.tierPrice}>${productPrice(p).toLocaleString()}</div>
-                              <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
-                            </article>
-                          ))}
+                        <div className={styles.tierLabel}>
+                          {rightPanelContract.budget_status === 'low'
+                            ? 'Budget is tight - showing best value options first'
+                            : 'Showing budget-fit + performance-fit options'}
                         </div>
-                        <div className={styles.tierExplain}>{rightPanelContract.lower_tier?.explanation}</div>
-                      </div>
-                      <div className={styles.tierBlock}>
-                        <div className={styles.tierTitle}>{rightPanelContract.higher_tier?.title || 'Performance-fit options'}</div>
-                        <div className={styles.tierCarousel}>
-                          {(rightPanelContract.higher_tier?.items || []).slice(0, 4).map((p) => (
-                            <article key={`high-${p.sku}`} className={styles.tierCard}>
-                              <div className={styles.tierName}>{p.name}</div>
-                              <div className={styles.tierPrice}>${productPrice(p).toLocaleString()}</div>
-                              <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
-                            </article>
-                          ))}
+                        <div className={styles.tierPills}>
+                          <button
+                            onClick={() => setTierFilter('lower')}
+                            className={tierFilter === 'lower' ? styles.tierPillActive : styles.tierPill}
+                          >
+                            Budget fit ({rightPanelContract.lower_tier?.items?.length ?? 0})
+                          </button>
+                          <button
+                            onClick={() => setTierFilter('higher')}
+                            className={tierFilter === 'higher' ? styles.tierPillActive : styles.tierPill}
+                          >
+                            Performance fit ({rightPanelContract.higher_tier?.items?.length ?? 0})
+                          </button>
+                          <button
+                            onClick={() => setTierFilter('all')}
+                            className={tierFilter === 'all' ? styles.tierPillActive : styles.tierPill}
+                          >
+                            All results
+                          </button>
                         </div>
-                        <div className={styles.tierExplain}>{rightPanelContract.higher_tier?.explanation}</div>
+                        {tierFilter !== 'all' && (
+                          <div className={styles.tierExplanation}>
+                            {tierFilter === 'lower'
+                              ? rightPanelContract.lower_tier?.explanation
+                              : rightPanelContract.higher_tier?.explanation}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1588,9 +1699,9 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(tid)} />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(tid)} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'image_context' ? (
-                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} />
+                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(tid)} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"
@@ -1617,21 +1728,21 @@ export default function App() {
                         maybeAppendCvSecurityNote(cvRes);
                       }}
                     />
-                  ) : rightPanelMode === 'compare' && displayProducts.length > 0 ? (
+                  ) : rightPanelMode === 'compare' && filteredDisplayProducts.length > 0 ? (
                     <div className={styles.compareTable}>
                       <table>
                         <thead>
                           <tr>
                             <th>Feature</th>
-                            {displayProducts.slice(0, 3).map(p => <th key={p.sku}>{p.name.split(' ').slice(0, 3).join(' ')}</th>)}
+                            {filteredDisplayProducts.slice(0, 3).map(p => <th key={p.sku}>{p.name.split(' ').slice(0, 3).join(' ')}</th>)}
                           </tr>
                         </thead>
                         <tbody>
-                          <tr><td>Price</td>{displayProducts.slice(0, 3).map(p => <td key={p.sku}>${p.price.toLocaleString()}</td>)}</tr>
+                          <tr><td>Price</td>{filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>${p.price.toLocaleString()}</td>)}</tr>
                           {['Display', 'Processor', 'RAM', 'Storage', 'Graphics'].map((feat, i) => (
                             <tr key={feat}>
                               <td>{feat}</td>
-                              {displayProducts.slice(0, 3).map(p => <td key={p.sku}>{(p.features || [])[i + 1]?.replace(/^[^:]+:\s*/, '') || '-'}</td>)}
+                              {filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>{(p.features || [])[i + 1]?.replace(/^[^:]+:\s*/, '') || '-'}</td>)}
                             </tr>
                           ))}
                         </tbody>
@@ -1650,7 +1761,7 @@ export default function App() {
                       />
                     ) : (
                       <ProductGrid
-                        products={displayProducts}
+                        products={filteredDisplayProducts}
                         onAdd={addToCart}
                         onWhy={handleWhyProduct}
                         viewMode={viewMode === 'list' || rightPanelMode === 'list' ? 'detailed' : 'grid'}
@@ -1684,7 +1795,7 @@ export default function App() {
       )}
 
       {/* Decision Trace Modal */}
-      {traceOpen && <DecisionTrace traceId={traceId} onClose={() => setTraceOpen(false)} />}
+      {traceOpen && <DecisionTrace traceId={traceId} onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} />}
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (

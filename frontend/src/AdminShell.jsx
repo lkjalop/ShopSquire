@@ -113,7 +113,12 @@ export default function AdminShell() {
         </div>
       </div>
       {roomOpen && incidentId && (
-        <EscalationRoom incidentId={incidentId} staffToken={staffToken} onClose={() => setRoomOpen(false)} />
+        <EscalationRoom
+          incidentId={incidentId}
+          staffToken={staffToken}
+          onClose={() => setRoomOpen(false)}
+          onResolve={() => { fetchIncidents(); fetchStatusSummary(); }}
+        />
       )}
     </div>
   );

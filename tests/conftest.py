@@ -52,6 +52,30 @@ def _get_or_create_app_for_url() -> object:
 
 def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     """Install the per-URL singleton factory before any test module is imported."""
+    # ── Prevent Ollama from hanging collection-time create_app() calls ───────
+    # Module-level `app = create_app()` in ~32 test files runs at collection
+    # time, before pytest_sessionstart.  Without this, ManagedCVProvider will
+    # block up to 20 s × 6 model candidates = 120 s every time /cv/analyze is
+    # hit in TestCVAnalyzeWithRealImages (and similar) when Ollama is offline.
+    os.environ.setdefault("CV_VISION_TIMEOUT_SEC", "1")
+    os.environ.setdefault("CV_DAMAGE_YOLO_MODEL", "")
+    os.environ.setdefault("CV_DETECTOR_MODEL", "")
+    # Tesseract calls pytesseract.image_to_string() without a timeout by default,
+    # which can hang indefinitely when tesseract.exe is not on PATH or unresponsive.
+    # In tests without a real tesseract binary, set a short timeout (3 s) so the
+    # OCR fallback path triggers quickly instead of hanging the test suite.
+    os.environ.setdefault("CV_OCR_TIMEOUT_SEC", "3")
+    # Disable the OCR provider in tests that don't explicitly need it.
+    # Tests that require OCR set monkeypatch.setenv("CV_OCR_PROVIDER", "embedded")
+    # which overrides this default.  With "disabled", _tesseract_text() returns
+    # immediately from Stage A (empty), skipping the expensive Stage B
+    # multi-contrast deep OCR pass that can add 5-30 s per image.
+    os.environ.setdefault("CV_OCR_PROVIDER", "disabled")
+    # Bound the total wall-clock time for the three parallel cv/analyze tasks
+    # (tier2, consistency, QR decode) so tests never hang indefinitely when
+    # YOLO/Ollama/tesseract are unavailable in the test environment.
+    os.environ.setdefault("CV_ANALYZE_TIMEOUT_SEC", "8")
+
     # ── Cap xdist worker count to 2 ─────────────────────────────────────────
     # Running ``pytest -n auto`` on this machine can spike memory to >20 GB
     # (N workers × ~1 GB app singleton + YOLOv8 models per worker).  Cap at 2
@@ -133,6 +157,12 @@ def pytest_sessionstart(session):
     # yolo_object_detector / yolo_damage_classifier fixtures below.
     os.environ.setdefault("CV_DAMAGE_YOLO_MODEL", "")
     os.environ.setdefault("CV_DETECTOR_MODEL", "")
+
+    # Prevent Ollama vision calls from hanging the test suite.
+    # With no Ollama server, urllib.request.urlopen tries N model candidates
+    # at CV_VISION_TIMEOUT_SEC each (default 20s × up to 6 = 120 s hang per call).
+    # Setting 1 s means the graceful fallback path is taken in <6 s.
+    os.environ.setdefault("CV_VISION_TIMEOUT_SEC", "1")
 
     # Align the module-level engine with the session DATABASE_URL.
     # During collection some test modules call create_app() before

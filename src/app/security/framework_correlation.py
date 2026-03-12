@@ -8,6 +8,32 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.app.security.owasp_map import map_signals_to_owasp
 
+_SIGNAL_TO_ATLAS: Dict[str, str] = {
+    "prompt_injection": "AML.T0051",
+    "ocr_prompt_injection": "AML.T0051",
+    "qr_prompt_injection": "AML.T0051",
+    "payment_social_engineering": "AML.T0051",
+    "crypto_payment_uri": "AML.T0051",
+    "encoded_payload_detected": "AML.T0051",
+    "homoglyph_injection": "AML.T0051",
+    "exif_text_injection": "AML.T0051",
+    "qr_external_url_detected": "AML.T0048",
+    "qr_external_url": "AML.T0048",
+    "qr_payload_vcard": "AML.T0048",
+    "qr_payload_wifi": "AML.T0048",
+    "qr_multi_mismatch": "AML.T0048",
+    "qr_label_destination_mismatch": "AML.T0048",
+    "polyglot_suspected": "AML.T0048",
+    "cross_image_split_injection": "AML.T0051",
+    "agentic_tool_injection": "AML.T0051",
+    "agentic_tool_abuse": "AML.T0040",
+}
+
+_SIGNAL_TO_ATTACK: Dict[str, str] = {
+    "pci_card_exposed": "T1005",
+    "ransomware_indicator": "T1486",
+}
+
 
 def _sha256_file(path: str) -> Optional[str]:
     try:
@@ -95,7 +121,7 @@ def _stride_from_signals(signals: Dict[str, Any], tags: List[str]) -> List[str]:
         out.append("Spoofing")
     if bool(s.get("dmarc_fail")) or bool(s.get("auth_alignment_failed")):
         out.append("Spoofing")
-    if bool(s.get("homoglyph")) or bool(s.get("unicode_confusable")):
+    if bool(s.get("homoglyph")) or bool(s.get("unicode_confusable")) or bool(s.get("homoglyph_injection")):
         out.append("Spoofing")
 
     # Tampering: document/image manipulation, layout/text divergence.
@@ -107,13 +133,20 @@ def _stride_from_signals(signals: Dict[str, Any], tags: List[str]) -> List[str]:
         or bool(s.get("vision_yolo_conflict"))
     ):
         out.append("Tampering")
+    if bool(s.get("qr_code_detected")) or bool(s.get("qr_external_url_detected")) or bool(s.get("qr_external_url")):
+        out.append("Tampering")
 
     # Repudiation: covert channels / missing audit linkage.
     if bool(s.get("email_c2_beaconing")) or bool(s.get("thread_hijack")):
         out.append("Repudiation")
 
     # Information disclosure: exfil / secrets / PII.
-    if bool(s.get("data_exfiltration")) or bool(s.get("pii")) or bool(s.get("api_key")):
+    if (
+        bool(s.get("data_exfiltration"))
+        or bool(s.get("pii"))
+        or bool(s.get("api_key"))
+        or bool(s.get("pci_card_exposed"))
+    ):
         out.append("InformationDisclosure")
 
     # Denial of service: burst, lock contention, rate anomalies.
@@ -121,7 +154,15 @@ def _stride_from_signals(signals: Dict[str, Any], tags: List[str]) -> List[str]:
         out.append("DenialOfService")
 
     # Elevation of privilege: tool abuse / bypass attempts.
-    if bool(s.get("agentic_tool_abuse")) or bool(s.get("prompt_injection")) or bool(s.get("dangerous_tool_intent")):
+    if (
+        bool(s.get("agentic_tool_abuse"))
+        or bool(s.get("agentic_tool_injection"))
+        or bool(s.get("cross_image_split_injection"))
+        or bool(s.get("prompt_injection"))
+        or bool(s.get("dangerous_tool_intent"))
+        or bool(s.get("qr_prompt_injection"))
+        or bool(s.get("ocr_prompt_injection"))
+    ):
         out.append("ElevationOfPrivilege")
 
     # stable dedupe
@@ -142,16 +183,25 @@ def _pasta(signals: Dict[str, Any], severity: str | None, *, dread: Dict[str, An
     ]
     current = "Stage1"
     try:
-        if any(bool(v) for v in (signals or {}).values()):
-            current = "Stage2"
+        active_count = sum(1 for v in (signals or {}).values() if bool(v))
+        if active_count >= 1:
+            current = "Stage3"
+        if active_count >= 2:
+            current = "Stage4"
+        if active_count >= 3:
+            current = "Stage5"
         if bool(signals.get("supply_chain")) or bool(signals.get("training_poisoning")):
             current = "Stage3"
         if bool(signals.get("jailbreak")) or bool(signals.get("prompt_injection")) or bool(signals.get("agentic_tool_abuse")):
             current = "Stage4"
-        if bool(signals.get("data_exfiltration")) or bool(signals.get("pci")) or bool(signals.get("pii")):
+        if bool(signals.get("cross_image_split_injection")) or bool(signals.get("agentic_tool_injection")):
+            current = "Stage4"
+        if bool(signals.get("data_exfiltration")) or bool(signals.get("pci")) or bool(signals.get("pii")) or bool(signals.get("pci_card_exposed")):
             current = "Stage5"
         if bool(signals.get("cross_modal_mismatch")) or bool(signals.get("multimodal_attack_surface_high")):
             current = "Stage5"
+        if bool(signals.get("ransomware_indicator")):
+            current = "Stage6"
         if str(severity or "").lower() in ("high", "critical", "error"):
             current = "Stage6"
         # DREAD-driven PASTA floor: weighted DREAD >= 7.5 at advanced kill-chain stage → min Stage6
@@ -162,6 +212,8 @@ def _pasta(signals: Dict[str, Any], severity: str | None, *, dread: Dict[str, An
                 _sn = int(current.replace("Stage", "") or "1")
                 if _sn < 6:
                     current = "Stage6"
+            if _dw_avg >= 8.5:
+                current = "Stage7"
     except Exception:
         pass
     workflow: List[Dict[str, Any]] = []
@@ -468,6 +520,15 @@ def correlate_security_analysis(
 
     mitre_in = threat.get("mitre_attack") if isinstance(threat.get("mitre_attack"), list) else []
     atlas, attack = _split_mitre([str(x) for x in mitre_in])
+    for k, v in signals_l.items():
+        if not bool(v):
+            continue
+        atlas_id = _SIGNAL_TO_ATLAS.get(str(k))
+        attack_id = _SIGNAL_TO_ATTACK.get(str(k))
+        if atlas_id and atlas_id not in atlas:
+            atlas.append(atlas_id)
+        if attack_id and attack_id not in attack:
+            attack.append(attack_id)
     owasp_llm = map_signals_to_owasp({k: bool(v) for k, v in signals_l.items()})
     stride = _stride_from_signals(signals_l, tags_l)
     cvss = threat.get("cvss") if isinstance(threat.get("cvss"), dict) else None

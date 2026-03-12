@@ -43,6 +43,11 @@ CANONICAL_TRACE_EVENTS = {
     "upsell_promotion_selected",
     "shortlist_memory_lock",
     "turn_envelope_diff",
+    "intent_decomposed",
+    "template_selected",
+    "answer_coverage_scored",
+    "copywriting",
+    "copy_policy_gate",
 }
 
 

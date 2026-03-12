@@ -1161,7 +1161,7 @@ class Orchestrator:
                 from src.app.services.cv_triage_basic import BasicCVTriage
                 import asyncio as _asyncio
                 t_agent_start = time.time()
-                labels, text = _asyncio.run(ManagedCVProvider().get_labels_and_text(images[0]))
+                labels, text, *_ = _asyncio.run(ManagedCVProvider().get_labels_and_text(images[0]))
                 cv_analysis = _asyncio.run(BasicCVTriage().analyze(labels, text))
                 log_trace_event(
                     trace_id=trace_id,

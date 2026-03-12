@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 import logging
+import re
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -10,6 +12,51 @@ class BarcodeDecodeResult:
     ok: bool
     codes: List[Dict[str, Any]]
     reasons: List[str]
+
+
+_URL_PAT = re.compile(r"(?i)^https?://")
+_CRYPTO_PAT = re.compile(r"(?i)^(bitcoin|ethereum|monero|litecoin):")
+_WIFI_PAT = re.compile(r"(?i)^WIFI:")
+_VCARD_PAT = re.compile(r"(?i)^BEGIN:VCARD")
+_EMAIL_PAT = re.compile(r"(?i)^mailto:")
+_TEL_PAT = re.compile(r"(?i)^tel:")
+
+
+def _classify_qr_payload(payload: str | None) -> Dict[str, Any]:
+    raw = str(payload or "").strip()
+    lower = raw.lower()
+    out: Dict[str, Any] = {
+        "payload_type": "other",
+        "is_external_url": False,
+        "host": None,
+    }
+    if not raw:
+        return out
+    if _URL_PAT.match(raw):
+        out["payload_type"] = "url"
+        try:
+            host = (urlparse(raw).hostname or "").lower()
+        except Exception:
+            host = ""
+        out["host"] = host or None
+        out["is_external_url"] = bool(host and host not in {"127.0.0.1", "localhost"})
+        return out
+    if _CRYPTO_PAT.match(raw):
+        out["payload_type"] = "crypto_uri"
+        return out
+    if _WIFI_PAT.match(raw):
+        out["payload_type"] = "wifi_credentials"
+        return out
+    if _VCARD_PAT.match(raw):
+        out["payload_type"] = "vcard"
+        return out
+    if _EMAIL_PAT.match(raw):
+        out["payload_type"] = "email_uri"
+        return out
+    if _TEL_PAT.match(raw):
+        out["payload_type"] = "tel_uri"
+        return out
+    return out
 
 
 def _try_decode_pyzbar(image_bytes: bytes) -> List[Dict[str, Any]]:
@@ -30,6 +77,12 @@ def _try_decode_pyzbar(image_bytes: bytes) -> List[Dict[str, Any]]:
                     {
                         "type": getattr(d, "type", None),
                         "data": (getattr(d, "data", b"") or b"").decode("utf-8", errors="ignore"),
+                        "bbox": {
+                            "left": int(getattr(getattr(d, "rect", None), "left", 0) or 0),
+                            "top": int(getattr(getattr(d, "rect", None), "top", 0) or 0),
+                            "width": int(getattr(getattr(d, "rect", None), "width", 0) or 0),
+                            "height": int(getattr(getattr(d, "rect", None), "height", 0) or 0),
+                        },
                     }
                 )
             except Exception:
@@ -51,19 +104,46 @@ def _try_decode_opencv(image_bytes: bytes) -> List[Dict[str, Any]]:
         def _decode_once(detector: Any, frame: Any) -> List[Dict[str, Any]]:
             out_local: List[Dict[str, Any]] = []
             try:
-                ok, decoded_info, _points, _ = detector.detectAndDecodeMulti(frame)  # type: ignore
+                ok, decoded_info, points, _ = detector.detectAndDecodeMulti(frame)  # type: ignore
                 if ok and decoded_info:
-                    for s in decoded_info:
+                    for i, s in enumerate(decoded_info):
                         if s:
-                            out_local.append({"type": "QR_CODE", "data": str(s)})
+                            bbox = None
+                            try:
+                                if points is not None and len(points) > i:
+                                    p = points[i]
+                                    xs = [float(v[0]) for v in p]
+                                    ys = [float(v[1]) for v in p]
+                                    bbox = {
+                                        "left": int(min(xs)),
+                                        "top": int(min(ys)),
+                                        "width": int(max(xs) - min(xs)),
+                                        "height": int(max(ys) - min(ys)),
+                                    }
+                            except Exception:
+                                bbox = None
+                            out_local.append({"type": "QR_CODE", "data": str(s), "bbox": bbox})
             except Exception:
                 pass
             if out_local:
                 return out_local
             try:
-                data, _pts, _ = detector.detectAndDecode(frame)
+                data, pts, _ = detector.detectAndDecode(frame)
                 if data:
-                    out_local.append({"type": "QR_CODE", "data": str(data)})
+                    bbox = None
+                    try:
+                        if pts is not None:
+                            xs = [float(v[0]) for v in pts]
+                            ys = [float(v[1]) for v in pts]
+                            bbox = {
+                                "left": int(min(xs)),
+                                "top": int(min(ys)),
+                                "width": int(max(xs) - min(xs)),
+                                "height": int(max(ys) - min(ys)),
+                            }
+                    except Exception:
+                        bbox = None
+                    out_local.append({"type": "QR_CODE", "data": str(data), "bbox": bbox})
             except Exception:
                 pass
             return out_local
@@ -111,7 +191,13 @@ def _try_decode_opencv(image_bytes: bytes) -> List[Dict[str, Any]]:
                 if not d or d in seen_data:
                     continue
                 seen_data.add(d)
-                out.append({"type": "QR_CODE", "data": d})
+                out.append(
+                    {
+                        "type": "QR_CODE",
+                        "data": d,
+                        "bbox": item.get("bbox") if isinstance(item, dict) else None,
+                    }
+                )
             if out:
                 return out
         return out
@@ -129,6 +215,7 @@ def decode_barcodes(images: List[Tuple[str, bytes]]) -> BarcodeDecodeResult:
         if pyz:
             for c in pyz:
                 c["filename"] = fname
+                c.update(_classify_qr_payload(str(c.get("data") or "")))
                 codes.append(c)
             reasons_set.add("pyzbar_decoded")
             continue
@@ -140,6 +227,7 @@ def decode_barcodes(images: List[Tuple[str, bytes]]) -> BarcodeDecodeResult:
         if op:
             for c in op:
                 c["filename"] = fname
+                c.update(_classify_qr_payload(str(c.get("data") or "")))
                 codes.append(c)
             reasons_set.add("opencv_decoded")
         else:
@@ -156,4 +244,19 @@ def decode_barcodes(images: List[Tuple[str, bytes]]) -> BarcodeDecodeResult:
         # keep a generic no_codes reason if no decoder succeeded
         if "no_codes" not in reasons:
             reasons.append("no_codes")
+
+    # P6: multi-QR mismatch signal support (payload type/domain diversity in one image)
+    by_file: Dict[str, List[Dict[str, Any]]] = {}
+    for c in codes:
+        by_file.setdefault(str(c.get("filename") or ""), []).append(c)
+    for fn, rows in by_file.items():
+        if len(rows) < 2:
+            continue
+        payload_types = {str(r.get("payload_type") or "other") for r in rows}
+        hosts = {str(r.get("host") or "").lower() for r in rows if r.get("host")}
+        if len(payload_types) > 1:
+            reasons.append(f"multi_qr_payload_type_mismatch:{fn}")
+        if len(hosts) > 1:
+            reasons.append(f"multi_qr_domain_mismatch:{fn}")
+
     return BarcodeDecodeResult(ok=ok, codes=codes, reasons=reasons)

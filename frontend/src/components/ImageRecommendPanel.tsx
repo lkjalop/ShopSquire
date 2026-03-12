@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
 import styles from './ImageRecommendPanel.module.css';
 
@@ -10,6 +10,8 @@ export interface ImageAnalysisContext {
     qr_code_detected?: boolean;
     qr_prompt_injection?: boolean;
     manipulation_detected?: boolean;
+    qr_external_url_detected?: boolean;
+    [key: string]: any;
   };
   /** Optional filename or source identifier shown in the group header */
   source_name?: string;
@@ -35,6 +37,8 @@ interface ImageGroup {
   summary: string;
   /** Budget widen state */
   widenState?: { budgetMin: number; budgetMax: number; noResults: boolean; nearestPrice?: number };
+  /** Preserve image context per group so widen/nearest stay image-aware. */
+  context?: ImageAnalysisContext | null;
 }
 
 type TrustLevel = 'green' | 'yellow' | 'orange' | 'red';
@@ -49,16 +53,20 @@ export interface Props {
   onClarify?: (question: string) => void;
   /** Callback to propagate the first seen trace_id to the parent */
   onTraceId?: (traceId: string | null) => void;
+  /** Add-to-cart callback from App */
+  onAdd?: (sku: string) => void;
 }
 
 /* ---------- constants ---------- */
 const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
 const WIDEN_STEPS = [200, 400];
+const RECOMMEND_TIMEOUT_MS = 7000;
 
 /* ---------- helpers ---------- */
 function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], sessionSuspicious: number): TrustLevel {
   if (sessionSuspicious >= 3 || signals.qr_prompt_injection) return 'red';
+  if (signals.qr_external_url_detected) return 'orange';
   if (sessionSuspicious >= 2 || signals.manipulation_detected) return 'orange';
   if (signals.qr_code_detected) return 'yellow';
   return 'green';
@@ -79,8 +87,13 @@ const TRUST_NOTES: Record<TrustLevel, string> = {
 };
 
 /** Convert raw CV labels to a friendly brand / product name for the buyer. */
-function friendlyBrand(labels: string[], ocrText: string): string {
-  const all = [...labels.map(l => l.toLowerCase()), ocrText.toLowerCase()];
+function friendlyBrand(labels: string[], ocrText: string, sourceName?: string, userQuery?: string): string {
+  const all = [
+    ...labels.map(l => l.toLowerCase()),
+    ocrText.toLowerCase(),
+    String(sourceName || '').toLowerCase(),
+    String(userQuery || '').toLowerCase(),
+  ];
   const joined = all.join(' ');
   if (/macbook|apple.*mac/i.test(joined)) return 'MacBook';
   if (/mac|apple/i.test(joined)) return 'Apple';
@@ -150,7 +163,56 @@ const CLARIFYING_QUESTIONS: Record<string, { prompt: string; options: string[] }
 };
 
 function formatPrice(dollars: number): string {
+  if (!(dollars > 0)) return 'Price on request';
   return `$${dollars.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function stripBudgetHints(query: string): string {
+  return String(query || '')
+    .replace(/\$\s*\d{3,5}\s*(?:to|-)\s*\$?\s*\d{3,5}/gi, ' ')
+    .replace(/\bbetween\s+\$?\d{3,5}\s+and\s+\$?\d{3,5}\b/gi, ' ')
+    .replace(/\bunder\s+\$?\d{2,5}\b/gi, ' ')
+    .replace(/\bover\s+\$?\d{2,5}\b/gi, ' ')
+    .replace(/\bbudget\s+\$?\d{2,5}\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractBudgetMax(query: string, fallbackMax?: number): number | undefined {
+  const q = String(query || '');
+  const range = q.match(/\b(\d{3,5})\s*(?:to|-)\s*(\d{3,5})\b/i);
+  if (range) {
+    const a = Number(range[1]);
+    const b = Number(range[2]);
+    if (Number.isFinite(a) && Number.isFinite(b)) return Math.max(a, b);
+  }
+  const under = q.match(/\bunder\s+\$?\s*(\d{2,5})\b/i);
+  if (under) {
+    const v = Number(under[1]);
+    if (Number.isFinite(v)) return v;
+  }
+  return fallbackMax;
+}
+
+function sanitizeSummary(summary: string, productCount: number, fallback: string): string {
+  const msg = String(summary || '').trim();
+  if (productCount <= 0) return 'No products found in your budget range.';
+  if (!msg) return fallback;
+  return msg;
+}
+
+function isAppleLikeBrand(label: string): boolean {
+  const v = String(label || '').toLowerCase();
+  return v.includes('macbook') || v.includes('apple');
+}
+
+function isWindowsLikeBrand(label: string): boolean {
+  const v = String(label || '').toLowerCase();
+  return ['lenovo', 'dell', 'hp', 'asus', 'acer', 'msi', 'samsung', 'microsoft', 'surface', 'windows'].some((b) => v.includes(b));
+}
+
+function assistantClaimsProducts(text: string | null | undefined): boolean {
+  return /top picks|i['’]ve found \d+|found \d+ (?:matches|products|options)/i.test(String(text || ''));
 }
 
 function parseProducts(data: any): ProductCard[] {
@@ -177,33 +239,89 @@ async function fetchSuggest(
     params.set('image_cv_signals', JSON.stringify(ctx.cv_signals || {}));
   }
   if (budgetMax) params.set('budget_max', String(budgetMax));
-  params.set('copywriting_enabled', 'true');
-  params.set('copywriting_profile', 'balanced');
+  // Keep visual-search latency low; ranking relevance matters more than style polish here.
+  params.set('copywriting_enabled', 'false');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RECOMMEND_TIMEOUT_MS);
 
-  const resp = await fetch(apiUrl(`/api/v1/recommend/suggest?${params.toString()}`), {
-    credentials: 'include',
-    headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
-  });
-  const data = await safeJson(resp);
-  if (!resp.ok || !data) throw new Error(data?.detail || `recommend_failed (${resp.status})`);
-  return {
-    products: parseProducts(data),
-    summary: data.assistant_message || '',
-    nextQuestions: Array.isArray(data.next_questions) ? data.next_questions : [],
-    traceId: data.decision_trace_id || data.trace_id || data.decision_id || null,
-  };
+  try {
+    const resp = await fetch(apiUrl(`/api/v1/recommend/suggest?${params.toString()}`), {
+      credentials: 'include',
+      headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
+      signal: controller.signal,
+    });
+    const data = await safeJson(resp);
+    if (!resp.ok || !data) throw new Error(data?.detail || `recommend_failed (${resp.status})`);
+    return {
+      products: parseProducts(data),
+      summary: data.assistant_message || '',
+      nextQuestions: Array.isArray(data.next_questions) ? data.next_questions : [],
+      traceId: data.decision_trace_id || data.trace_id || data.decision_id || null,
+    };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`recommend_timeout_${RECOMMEND_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /* ---------- component ---------- */
-export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId }: Props) {
+export default function ImageRecommendPanel({ imageContexts, userQuery, traceId, sessionSuspiciousCount = 0, onClarify, onTraceId, onAdd }: Props) {
   const [groups, setGroups] = useState<ImageGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clarifyQuestions, setClarifyQuestions] = useState<{ prompt: string; options: string[] } | null>(null);
   const [globalRedBlock, setGlobalRedBlock] = useState(false);
+  const buildSeqRef = useRef(0);
+  const lastBuildKeyRef = useRef('');
+
+  const runBrandFallbackChain = useCallback(async (
+    baseQuery: string,
+    brandLabel: string,
+    ctx: ImageAnalysisContext | null,
+    budgetMax?: number,
+  ) => {
+    const cleanBase = stripBudgetHints(baseQuery);
+    const apple = isAppleLikeBrand(brandLabel);
+    const windows = isWindowsLikeBrand(brandLabel);
+    if (!apple && !windows) return null;
+    const profile = apple ? 'apple macbook' : 'windows laptop';
+
+    const baseMax = Number.isFinite(Number(budgetMax)) ? Number(budgetMax) : 1200;
+    const raisedMax = baseMax + 400;
+    const r2 = await fetchSuggest(`${cleanBase} ${profile} show nearest in-stock options above budget`.trim(), ctx, raisedMax);
+    if ((r2.products || []).length > 0) {
+      return {
+        ...r2,
+        summary: r2.summary || (
+          apple
+            ? `No in-budget MacBook found. Showing nearest MacBook options up to $${raisedMax.toLocaleString()}.`
+            : `No in-budget Windows option found. Showing nearest Windows options up to $${raisedMax.toLocaleString()}.`
+        ),
+      };
+    }
+
+    return fetchSuggest(`${cleanBase} show nearest in-stock alternatives`.trim(), ctx, raisedMax);
+  }, []);
 
   const buildGroups = useCallback(async () => {
     if (imageContexts.length === 0 && !userQuery) return;
+    const buildKey = JSON.stringify({
+      q: String(userQuery || ''),
+      s: sessionSuspiciousCount,
+      imgs: imageContexts.map((ctx) => ({
+        src: ctx.source_name || '',
+        labels: ctx.labels || [],
+        ocr: String(ctx.ocr_text || '').slice(0, 160),
+        signals: ctx.cv_signals || {},
+      })),
+    });
+    if (buildKey === lastBuildKeyRef.current) return;
+    lastBuildKeyRef.current = buildKey;
+    const buildSeq = ++buildSeqRef.current;
     setLoading(true);
     setError(null);
     setGroups([]);
@@ -214,62 +332,102 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     // Auto-budget: derive a sensible ceiling from the detected use-case when none explicit
     const useCase = detectUseCase(userQuery);
     const autoBudget = useCase ? USE_CASE_BUDGET[useCase] ?? 1200 : undefined;
+    const parsedBudgetMax = extractBudgetMax(userQuery, autoBudget);
 
-    // One group per image
-    for (let i = 0; i < imageContexts.length; i++) {
-      const ctx = imageContexts[i];
-      const trust = computeTrustLevel(ctx.cv_signals || {}, sessionSuspiciousCount);
-      const brand = friendlyBrand(ctx.labels, ctx.ocr_text);
-      const note = TRUST_NOTES[trust];
+    // One group per image (parallelized so one slow image does not block the others)
+    const perImage = await Promise.all(
+      imageContexts.map(async (ctx, i) => {
+        const trust = computeTrustLevel(ctx.cv_signals || {}, sessionSuspiciousCount);
+        const brand = friendlyBrand(ctx.labels, ctx.ocr_text, ctx.source_name, userQuery);
+        const note = TRUST_NOTES[trust];
 
-      if (trust === 'red') {
-        built.push({
-          source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-          icon: '\uD83D\uDCF8',
-          trustLevel: trust,
-          friendlyBrand: brand,
-          securityNote: note,
-          products: [],
-          summary: '',
-        });
-        continue;
-      }
+        if (trust === 'red') {
+          return {
+            group: {
+              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
+              icon: '\uD83D\uDCF8',
+              trustLevel: trust,
+              friendlyBrand: brand,
+              securityNote: note,
+              products: [],
+              summary: '',
+              context: ctx,
+            } as ImageGroup,
+            traceId: null as string | null,
+          };
+        }
 
-      try {
-        const imageQuery = `${userQuery} ${brand}`.trim();
-        const result = await fetchSuggest(imageQuery, ctx, autoBudget);
-        if (!firstTraceId && result.traceId) { firstTraceId = result.traceId; onTraceId?.(result.traceId); }
-        const products = result.products.slice(0, 3);
-        built.push({
-          source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-          icon: '\uD83D\uDCF8',
-          trustLevel: trust,
-          friendlyBrand: brand,
-          securityNote: note,
-          products,
-          summary: result.summary || `Top ${brand} picks matching your image.`,
-          widenState: products.length === 0 ? { budgetMin: 0, budgetMax: autoBudget ?? 1200, noResults: true } : undefined,
-        });
-      } catch {
-        built.push({
-          source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-          icon: '\uD83D\uDCF8',
-          trustLevel: trust,
-          friendlyBrand: brand,
-          securityNote: note,
-          products: [],
-          summary: `Could not load ${brand} recommendations.`,
-          widenState: { budgetMin: 0, budgetMax: autoBudget ?? 1200, noResults: true },
-        });
-      }
+        try {
+          const imageQuery = `${stripBudgetHints(userQuery)} ${brand}`.trim();
+          const result = await fetchSuggest(imageQuery, ctx, parsedBudgetMax);
+          let pickedTraceId: string | null = result.traceId || null;
+          let products = result.products.slice(0, 3);
+          let safeSummary = sanitizeSummary(result.summary, products.length, `Top ${brand} picks matching your image.`);
+          if (products.length === 0) {
+            const chain = await runBrandFallbackChain(userQuery, brand, ctx, parsedBudgetMax);
+            if (chain) {
+              pickedTraceId = pickedTraceId || chain.traceId || null;
+              products = (chain.products || []).slice(0, 3);
+              safeSummary = sanitizeSummary(chain.summary, products.length, `Top ${brand} picks matching your image.`);
+            }
+          }
+          if (products.length === 0 && assistantClaimsProducts(safeSummary)) {
+            safeSummary = 'No products found in your budget range.';
+          }
+          return {
+            group: {
+              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
+              icon: '\uD83D\uDCF8',
+              trustLevel: trust,
+              friendlyBrand: brand,
+              securityNote: note,
+              products,
+              summary: safeSummary,
+              widenState: products.length === 0 ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
+              context: ctx,
+            } as ImageGroup,
+            traceId: pickedTraceId,
+          };
+        } catch (e: any) {
+          const timeoutMsg = String(e?.message || '').includes('recommend_timeout_')
+            ? `Timed out loading ${brand} recommendations.`
+            : `Could not load ${brand} recommendations.`;
+          return {
+            group: {
+              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
+              icon: '\uD83D\uDCF8',
+              trustLevel: trust,
+              friendlyBrand: brand,
+              securityNote: note,
+              products: [],
+              summary: timeoutMsg,
+              widenState: { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true },
+              context: ctx,
+            } as ImageGroup,
+            traceId: null as string | null,
+          };
+        }
+      }),
+    );
+    for (const item of perImage) {
+      built.push(item.group);
+      if (!firstTraceId && item.traceId) firstTraceId = item.traceId;
     }
 
     // Query-intent group (if query adds context beyond image brands)
-    if (userQuery) {
+    if (userQuery && imageContexts.length === 0) {
       try {
-        const result = await fetchSuggest(userQuery, null, autoBudget);
+        const result = await fetchSuggest(stripBudgetHints(userQuery), null, parsedBudgetMax);
         if (!firstTraceId && result.traceId) { firstTraceId = result.traceId; onTraceId?.(result.traceId); }
-        const products = result.products.slice(0, 3);
+        let products = result.products.slice(0, 3);
+        let safeSummary = sanitizeSummary(
+          result.summary,
+          products.length,
+          products.length > 0 ? `Products matching "${userQuery}".` : 'No products found in your budget range.',
+        );
+        if (products.length === 0 && assistantClaimsProducts(safeSummary)) {
+          safeSummary = 'No products found in your budget range.';
+        }
         built.push({
           source: `From your query`,
           icon: '\uD83D\uDD0D',
@@ -277,13 +435,17 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           friendlyBrand: '',
           securityNote: '',
           products,
-          summary: result.summary || (products.length > 0 ? `Products matching "${userQuery}".` : 'No products found in your budget range.'),
-          widenState: products.length === 0 ? { budgetMin: 0, budgetMax: autoBudget ?? 1200, noResults: true } : undefined,
+          summary: safeSummary,
+          widenState: products.length === 0 ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
+          context: null,
         });
       } catch {
         /* query fetch failed — still show image groups */
       }
     }
+
+    if (buildSeq !== buildSeqRef.current) return;
+    if (firstTraceId) onTraceId?.(firstTraceId);
 
     // Check if ALL groups are red
     if (built.length > 0 && built.every(g => g.trustLevel === 'red')) {
@@ -299,44 +461,52 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
 
     setGroups(built);
     setLoading(false);
-  }, [imageContexts, userQuery, sessionSuspiciousCount]);
+  }, [imageContexts, userQuery, sessionSuspiciousCount, onTraceId, runBrandFallbackChain]);
 
   const handleWiden = useCallback(async (groupIdx: number, widenAmount: number) => {
     const group = groups[groupIdx];
     if (!group?.widenState) return;
     const newMax = (group.widenState.budgetMax || 1500) + widenAmount;
     try {
-      const result = await fetchSuggest(userQuery, null, newMax);
+      const widenedQuery = `${stripBudgetHints(userQuery)} ${group.friendlyBrand || ''}`.trim();
+      const result = await fetchSuggest(widenedQuery, group.context || null, newMax);
       setGroups(prev => {
         const updated = [...prev];
+        const nextProducts = result.products.slice(0, 3);
         updated[groupIdx] = {
           ...updated[groupIdx],
-          products: result.products.slice(0, 3),
-          summary: result.summary || `Expanded budget to $${newMax.toLocaleString()}.`,
-          widenState: result.products.length > 0
+          products: nextProducts,
+          summary: sanitizeSummary(result.summary, nextProducts.length, `Expanded budget to $${newMax.toLocaleString()}.`),
+          widenState: nextProducts.length > 0
             ? undefined
             : { ...updated[groupIdx].widenState!, budgetMax: newMax, noResults: true },
         };
         return updated;
       });
+      if (result.traceId) onTraceId?.(result.traceId);
     } catch { /* ignore */ }
-  }, [groups, userQuery]);
+  }, [groups, userQuery, onTraceId]);
 
   const handleShowNearest = useCallback(async (groupIdx: number) => {
+    const group = groups[groupIdx];
+    if (!group) return;
     try {
-      const result = await fetchSuggest(`${userQuery} any price`, null);
+      const nearestQuery = `${stripBudgetHints(userQuery)} ${group.friendlyBrand || ''} show nearest in-stock options`.trim();
+      const result = await fetchSuggest(nearestQuery, group.context || null);
       setGroups(prev => {
         const updated = [...prev];
+        const nextProducts = result.products.slice(0, 3);
         updated[groupIdx] = {
           ...updated[groupIdx],
-          products: result.products.slice(0, 3),
-          summary: result.summary || 'Showing nearest available products at any price.',
-          widenState: undefined,
+          products: nextProducts,
+          summary: sanitizeSummary(result.summary, nextProducts.length, 'Showing nearest available products at any price.'),
+          widenState: nextProducts.length > 0 ? undefined : { budgetMin: 0, budgetMax: 0, noResults: true },
         };
         return updated;
       });
+      if (result.traceId) onTraceId?.(result.traceId);
     } catch { /* ignore */ }
-  }, [userQuery]);
+  }, [groups, userQuery, onTraceId]);
 
   useEffect(() => {
     if (imageContexts.length > 0 || userQuery) {
@@ -413,12 +583,23 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
                       onError={(e) => { (e.target as HTMLImageElement).src = '/static/images/placeholder.svg'; }}
                     />
                     <div className={styles.cardBody}>
-                      <div className={styles.cardName}>{p.name}</div>
+                      <a className={styles.cardNameLink} href={`/ui/product/${encodeURIComponent(p.sku || '')}`} title={p.name}>
+                        <div className={styles.cardName}>{p.name}</div>
+                      </a>
                       <div className={styles.cardMeta}>{p.specs_summary || '\u2014'}</div>
                       {(() => { const pros = buildProsNote(p, userQuery); return pros ? <div className={styles.cardFit}>\u2713 {pros}</div> : null; })()}
                       {p.use_case_fit && p.use_case_fit !== buildProsNote(p, userQuery) && <div className={styles.cardFit}>{p.use_case_fit}</div>}
+                      {p.sku && <a className={styles.cardLink} href={`/ui/product/${encodeURIComponent(p.sku)}`}>View details</a>}
                     </div>
                     <div className={styles.cardPrice}>{formatPrice(p.price)}</div>
+                    <button
+                      className={styles.addBtn}
+                      onClick={() => p.sku && onAdd?.(p.sku)}
+                      disabled={!p.sku}
+                      type="button"
+                    >
+                      Add to cart
+                    </button>
                   </div>
                 ))}
               </div>

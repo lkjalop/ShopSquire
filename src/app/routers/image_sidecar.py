@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import os
 import uuid
 from typing import Any, Dict, List
 
@@ -161,11 +162,14 @@ async def _extract_image_features(blob: bytes, filename: str) -> Dict[str, Any]:
     try:
         provider = ManagedCVProvider()
         provider_name = str(getattr(provider, "provider", "unknown") or "unknown")
-        labels, extracted_text = await provider.get_labels_and_text(blob)
+        labels, extracted_text, *_ = await provider.get_labels_and_text(blob)
     except Exception:
         labels, extracted_text = [], ""
-    if not labels and filename:
-        labels = [filename]
+    # P3: Always append sanitized filename as a weak hint
+    if filename:
+        fname_hint = os.path.splitext(str(filename).lower())[0].replace("-", " ").replace("_", " ")
+        if fname_hint and fname_hint not in " ".join(labels).lower():
+            labels = (labels or []) + [fname_hint]
 
     triager = BasicCVTriage()
     triage_result = triager.analyze(labels, extracted_text or "")

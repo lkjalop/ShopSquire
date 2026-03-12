@@ -140,7 +140,7 @@ def cv_job(payload: Dict[str, Any]) -> Dict[str, Any]:
         images = payload.get("images") or payload.get("image_b64s") or payload.get("image_data")
         if images:
             img = images[0] if isinstance(images, list) else images
-            labels, text = asyncio.run(ManagedCVProvider().get_labels_and_text(img))
+            labels, text, *_ = asyncio.run(ManagedCVProvider().get_labels_and_text(img))
             res = asyncio.run(BasicCVTriage().analyze(labels, text)) or {}
             return {"cv": res, "labels": labels, "text": text}
     except Exception:

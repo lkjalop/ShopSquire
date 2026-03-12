@@ -1,0 +1,2 @@
+{"incident_id": "ef26b61b-d499-4fb0-941b-034b989fb342", "role": "assistant", "message": "Thanks. A support specialist has been notified and will review your case.\n\nEscalation context:\nCase: contract-case\nTrace: contract-trace\n\nYou can add any extra details here.", "meta": {"source": "system", "case_id": "contract-case", "trace_id": "contract-trace", "trace_context": {}}, "ts": 1773025886185}
+{"incident_id": "ef26b61b-d499-4fb0-941b-034b989fb342", "role": "buyer", "message": "contract_test_message", "meta": {"actor": "buyer", "channel": "public"}, "ts": 1773025886257}

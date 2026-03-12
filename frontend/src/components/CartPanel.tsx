@@ -49,6 +49,12 @@ export default function CartPanel({
         u.searchParams.set('uid', uid || 'demo-user');
         u.searchParams.set('cart_skus', cartSkus.join(','));
         u.searchParams.set('limit', '4');
+        const lastQuery = String(localStorage.getItem('shopsquire_last_user_query') || '').trim();
+        const lastPersona = String(localStorage.getItem('shopsquire_last_persona') || '').trim();
+        const lastUseCase = String(localStorage.getItem('shopsquire_last_use_case') || '').trim();
+        if (lastQuery) u.searchParams.set('query', lastQuery);
+        if (lastPersona) u.searchParams.set('persona', lastPersona);
+        if (lastUseCase) u.searchParams.set('use_case', lastUseCase);
         const r = await fetch(u.toString(), {
           credentials: 'include',
           headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
@@ -173,7 +179,7 @@ export default function CartPanel({
                       <div className={styles.pillRow}>
                         {p.why_codes.slice(0, 2).map((w, idx) => (
                           <span key={`code-${idx}`} className={styles.pill}>
-                            {w.label} ({Math.round((w.confidence || 0) * 100)}%)
+                            {w.label || w.code || 'reason'} ({Math.round((w.confidence || 0) * 100)}%)
                           </span>
                         ))}
                       </div>

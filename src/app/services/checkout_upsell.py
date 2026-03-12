@@ -31,6 +31,96 @@ class UpsellCandidate:
     model_source: str
 
 
+_SKU_FAMILY_PAT = re.compile(r"^SYN-([A-Z]+)-", re.IGNORECASE)
+
+
+def _sku_family(sku: str | None) -> str:
+    s = str(sku or "").strip().upper()
+    m = _SKU_FAMILY_PAT.match(s)
+    if m:
+        return str(m.group(1) or "").upper()
+    return "UNK"
+
+
+def _infer_intent_family(query: str | None, persona: str | None, use_case: str | None) -> str | None:
+    q = str(query or "").strip().lower()
+    p = str(persona or "").strip().lower()
+    u = str(use_case or "").strip().lower()
+    text = " ".join([q, p, u]).strip()
+    if not text:
+        return None
+    if any(t in text for t in ("laptop", "macbook", "notebook", "gaming", "student", "university", "office pc", "windows")):
+        return "LAP"
+    if any(t in text for t in ("shirt", "dress", "fashion", "sneaker", "hoodie", "clothes", "apparel")):
+        return "FSH"
+    if any(t in text for t in ("kitchen", "home", "bedroom", "lamp", "basket", "decor", "furniture")):
+        return "HMW"
+    return None
+
+
+def _family_complement_weight(cart_family: str, candidate_family: str) -> float:
+    # Keep relevance deterministic and transparent: same-family gets highest weight.
+    matrix: dict[str, dict[str, float]] = {
+        "LAP": {"LAP": 1.0, "HMW": 0.35, "FSH": 0.05},
+        "FSH": {"FSH": 1.0, "HMW": 0.25, "LAP": 0.10},
+        "HMW": {"HMW": 1.0, "FSH": 0.30, "LAP": 0.20},
+    }
+    row = matrix.get(str(cart_family or "UNK").upper(), {})
+    if not row:
+        return 0.0
+    return float(row.get(str(candidate_family or "UNK").upper(), 0.0))
+
+
+def _user_family_history(db, uid: str | None, lookback_days: int = 180) -> dict[str, float]:
+    """
+    Lightweight transaction-history affinity derived from historical carts/orders.
+    Returns normalized family weights (0..1).
+    """
+    user = str(uid or "").strip()
+    if not user:
+        return {}
+    rows = []
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT line_items
+                FROM draft_orders
+                WHERE customer_id = :uid
+                  AND datetime(created_at) >= datetime('now', :window_expr)
+                ORDER BY created_at DESC
+                LIMIT 150
+                """
+            ),
+            {"uid": user, "window_expr": f"-{max(1, int(lookback_days))} days"},
+        ).fetchall()
+    except Exception:
+        rows = []
+    fam_counts: dict[str, float] = {}
+    for r in rows or []:
+        raw = r[0] if isinstance(r, (list, tuple)) else None
+        if raw is None and hasattr(r, "_mapping"):
+            raw = r._mapping.get("line_items")
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except Exception:
+            data = []
+        if not isinstance(data, list):
+            continue
+        for it in data:
+            if not isinstance(it, dict):
+                continue
+            fam = _sku_family(it.get("sku"))
+            qty = max(1, int(it.get("quantity") or 1))
+            fam_counts[fam] = fam_counts.get(fam, 0.0) + float(qty)
+    if not fam_counts:
+        return {}
+    mx = max(float(v) for v in fam_counts.values())
+    if mx <= 0:
+        return {}
+    return {k: round(float(v) / mx, 4) for k, v in fam_counts.items()}
+
+
 def ensure_recommend_interactions_table(db) -> None:
     try:
         db.execute(
@@ -137,7 +227,7 @@ def _product_catalog(db) -> list[dict]:
                 )
             ).fetchall()
         except Exception:
-            return []
+            rows = []
     out = []
     for r in rows or []:
         sku = r[0] if isinstance(r, (list, tuple)) else None
@@ -156,7 +246,39 @@ def _product_catalog(db) -> list[dict]:
                 "specs": _safe_json(specs),
             }
         )
-    return out
+    if out:
+        return out
+    # Fallback to the same source used by /ui/products.json so checkout upsell
+    # does not go empty when request-bound DB sessions point at sparse catalogs.
+    try:
+        from src.app.routers.ui_storefront import _get_products as _ui_get_products
+        ui_products = _ui_get_products() or []
+        mapped: list[dict] = []
+        for p in ui_products:
+            if not isinstance(p, dict):
+                continue
+            sku = str(p.get("sku") or "").strip()
+            if not sku:
+                continue
+            price = p.get("price")
+            try:
+                price_cents = int(float(price) * 100) if price is not None else int(p.get("price_cents") or 0)
+            except Exception:
+                price_cents = int(p.get("price_cents") or 0)
+            mapped.append(
+                {
+                    "sku": sku,
+                    "name": str(p.get("name") or sku),
+                    "price_cents": int(price_cents or 0),
+                    "stock": int(p.get("stock") or 0),
+                    "specs": _safe_json(p.get("specs")),
+                }
+            )
+        if mapped:
+            return mapped
+    except Exception:
+        pass
+    return []
 
 
 def _interaction_stats(db, lookback_days: int = 30) -> dict[str, dict[str, int]]:
@@ -298,6 +420,10 @@ _UPSELL_REASON_LABELS: dict[str, str] = {
     "margin_guardrail": "Healthy margin within policy guardrails",
     "low_return_risk": "Historically low return risk",
     "inventory_pressure": "Inventory pressure favors this add-on",
+    "cart_family_fit": "Fits your current cart category",
+    "query_intent_fit": "Matches your latest shopping intent",
+    "persona_fit": "Aligned with your shopper persona",
+    "history_affinity": "Aligned with your transaction history",
 }
 
 _UPSELL_REASON_BASE_WEIGHTS: dict[str, float] = {
@@ -306,6 +432,10 @@ _UPSELL_REASON_BASE_WEIGHTS: dict[str, float] = {
     "margin_guardrail": 0.16,
     "low_return_risk": 0.12,
     "inventory_pressure": 0.10,
+    "cart_family_fit": 0.24,
+    "query_intent_fit": 0.20,
+    "persona_fit": 0.16,
+    "history_affinity": 0.14,
 }
 
 
@@ -354,6 +484,10 @@ def _build_reason_code_breakdown(
     margin_guardrail: float,
     low_return_risk: float,
     stock_confidence: float,
+    cart_family_fit: float = 0.0,
+    query_intent_fit: float = 0.0,
+    persona_fit: float = 0.0,
+    history_affinity: float = 0.0,
 ) -> list[dict[str, Any]]:
     signal_strength = {
         "bundle_affinity": _bounded01(co_purchase / 3.0),
@@ -361,6 +495,10 @@ def _build_reason_code_breakdown(
         "margin_guardrail": _bounded01(margin_guardrail),
         "low_return_risk": _bounded01(low_return_risk),
         "inventory_pressure": _bounded01(1.0 - stock_confidence),
+        "cart_family_fit": _bounded01(cart_family_fit),
+        "query_intent_fit": _bounded01(query_intent_fit),
+        "persona_fit": _bounded01(persona_fit),
+        "history_affinity": _bounded01(history_affinity),
     }
     breakdown = []
     for code, base_weight in _UPSELL_REASON_BASE_WEIGHTS.items():
@@ -445,6 +583,8 @@ def recommend_checkout_upsell(
     limit: int = 3,
     uid_hash: str | None = None,
     use_case: str | None = None,
+    query: str | None = None,
+    persona: str | None = None,
 ) -> list[dict]:
     clean_cart = [str(s).strip() for s in (cart_skus or []) if str(s).strip()]
     cart_set = set(clean_cart)
@@ -469,6 +609,9 @@ def recommend_checkout_upsell(
     recent_sales, prior_sales = _sales_window_counts(order_lines, recent_cutoff_orders=80)
     interactions = _interaction_stats(db, lookback_days=30)
     lifecycle = _lifecycle_profile(db, uid_hash)
+    user_history = _user_family_history(db, uid_hash, lookback_days=180)
+    cart_families = {_sku_family(s) for s in cart_set if s}
+    intent_family = _infer_intent_family(query=query, persona=persona, use_case=use_case)
 
     cart_price = sum(int((by_sku.get(s) or {}).get("price_cents") or 0) for s in cart_set)
     feature_rows: list[dict[str, Any]] = []
@@ -486,6 +629,7 @@ def recommend_checkout_upsell(
         if cart_price > 0 and cart_price <= 1200 and price > int(cart_price * 1.9):
             continue
         name = str(p.get("name") or sku)
+        cand_family = _sku_family(sku)
         co = float(copurchase.get(sku, 0.0))
         recent = int(recent_sales.get(sku, 0))
         prior = int(prior_sales.get(sku, 0))
@@ -527,7 +671,33 @@ def recommend_checkout_upsell(
             }
             if cat_tags & affinity_set:
                 affinity_boost = 0.30
-        score = co * 2.2 + trend * 0.9 + intent * 0.35 + affordability * 0.8 + stock_conf * 0.6 + lifecycle_boost + affinity_boost
+        cart_family_fit = 0.0
+        if cart_families:
+            cart_family_fit = max(_family_complement_weight(cf, cand_family) for cf in cart_families)
+        query_intent_fit = 1.0 if intent_family and cand_family == intent_family else 0.0
+        persona_fit = 0.0
+        persona_key = str(persona or "").strip().lower()
+        if persona_key:
+            if persona_key in {"student", "gamer", "office", "corporate", "engineer", "creator"}:
+                persona_fit = 1.0 if cand_family == "LAP" else 0.0
+            elif persona_key in {"fashion", "apparel"}:
+                persona_fit = 1.0 if cand_family == "FSH" else 0.0
+            elif persona_key in {"home", "homeowner"}:
+                persona_fit = 1.0 if cand_family == "HMW" else 0.0
+        history_affinity = float(user_history.get(cand_family, 0.0))
+        score = (
+            co * 2.2
+            + trend * 0.9
+            + intent * 0.35
+            + affordability * 0.8
+            + stock_conf * 0.6
+            + lifecycle_boost
+            + affinity_boost
+            + cart_family_fit * 2.4
+            + query_intent_fit * 1.8
+            + persona_fit * 1.4
+            + history_affinity * 1.1
+        )
         factors = {
             "co_purchase": round(co, 4),
             "trend": round(trend, 4),
@@ -539,6 +709,10 @@ def recommend_checkout_upsell(
             "margin_guardrail": round(margin_guardrail, 4),
             "low_return_risk": round(low_return_risk, 4),
             "inventory_pressure": round(inventory_pressure, 4),
+            "cart_family_fit": round(cart_family_fit, 4),
+            "query_intent_fit": round(query_intent_fit, 4),
+            "persona_fit": round(persona_fit, 4),
+            "history_affinity": round(history_affinity, 4),
         }
         poisoned, poison_reason = _looks_poisoned(name, sku, factors, ints, recent)
         if poisoned:
@@ -578,6 +752,18 @@ def recommend_checkout_upsell(
         if affinity_boost > 0.0:
             tags.append("use_case_affinity")
             reasons.append("Matches recommended accessories for your use-case")
+        if cart_family_fit >= 0.8:
+            tags.append("cart_family_fit")
+            reasons.append("Matches your current cart category")
+        if query_intent_fit >= 0.8:
+            tags.append("query_intent_fit")
+            reasons.append("Matches your latest query intent")
+        if persona_fit >= 0.8:
+            tags.append("persona_fit")
+            reasons.append("Aligned with your current buyer persona")
+        if history_affinity >= 0.5:
+            tags.append("history_affinity")
+            reasons.append("Aligned with your recent transaction history")
         if lifecycle.get("segment") == "new_user" and affordability >= 0.5:
             tags.append("lifecycle_new_user_fit")
             reasons.append("Priced for first-time buyer conversion")
@@ -599,6 +785,10 @@ def recommend_checkout_upsell(
             margin_guardrail=margin_guardrail,
             low_return_risk=low_return_risk,
             stock_confidence=stock_conf,
+            cart_family_fit=cart_family_fit,
+            query_intent_fit=query_intent_fit,
+            persona_fit=persona_fit,
+            history_affinity=history_affinity,
         )
         confidence = round(sum(float(x.get("confidence") or 0.0) for x in reason_codes[:3]) / 3.0, 4)
 
@@ -641,6 +831,72 @@ def recommend_checkout_upsell(
         )
 
     ranked = sorted(rescored, key=lambda c: c.score, reverse=True)[: max(1, int(limit))]
+    if not ranked:
+        # Deterministic catalog fallback: keep checkout UX actionable even when
+        # interaction/affinity signals are sparse.
+        fallback_rows: list[dict[str, Any]] = []
+        # Multi-pass price guard:
+        # 1) Prefer true add-on band (<=45% cart value)
+        # 2) If empty, widen to <=100%
+        # 3) If still empty, widen to <=130% to avoid dead-end UX
+        if cart_price > 0:
+            price_caps = [int(max(25_00, int(cart_price * 0.45))), int(max(30_00, int(cart_price * 1.0))), int(max(35_00, int(cart_price * 1.3)))]
+        else:
+            price_caps = [60_00, 90_00]
+        max_price = price_caps[0]
+        for p in products:
+            sku = str(p.get("sku") or "").strip()
+            if not sku or sku in cart_set:
+                continue
+            stock = int(p.get("stock") or 0)
+            if stock <= 0:
+                continue
+            price = int(p.get("price_cents") or 0)
+            if price <= 0 or price > max_price:
+                continue
+            fallback_rows.append(p)
+        if not fallback_rows:
+            for max_price in price_caps[1:]:
+                widened: list[dict[str, Any]] = []
+                for p in products:
+                    sku = str(p.get("sku") or "").strip()
+                    if not sku or sku in cart_set:
+                        continue
+                    stock = int(p.get("stock") or 0)
+                    if stock <= 0:
+                        continue
+                    price = int(p.get("price_cents") or 0)
+                    if price <= 0 or price > max_price:
+                        continue
+                    widened.append(p)
+                if widened:
+                    fallback_rows = widened
+                    break
+        fallback_rows = sorted(
+            fallback_rows,
+            key=lambda x: (
+                abs(int(x.get("price_cents") or 0) - int(max(20_00, cart_price * 0.25 if cart_price > 0 else 40_00))),
+                -int(x.get("stock") or 0),
+            ),
+        )[: max(1, int(limit))]
+        if fallback_rows:
+            return [
+                {
+                    "sku": str(p.get("sku") or ""),
+                    "name": str(p.get("name") or p.get("sku") or ""),
+                    "price_cents": int(p.get("price_cents") or 0),
+                    "stock": int(p.get("stock") or 0),
+                    "score": 0.1,
+                    "tags": ["fallback_catalog_complement"],
+                    "reasons": ["Popular low-cost complement from in-stock catalog"],
+                    "factors": {"fallback": True, "price_guard_max_cents": int(max_price)},
+                    "reason_codes": [{"code": "fallback_catalog_complement", "confidence": 0.62}],
+                    "reason_confidence": 0.62,
+                    "model_source": "deterministic_fallback",
+                    "lifecycle_segment": lifecycle.get("segment"),
+                }
+                for p in fallback_rows
+            ]
     return [
         {
             "sku": c.sku,

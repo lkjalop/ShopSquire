@@ -50,6 +50,7 @@ export type CVSubmitResult = {
   playbook_preview?: any;
   image_consistency?: ImageConsistencyResult;
   order_validation?: { provided?: boolean; exists?: boolean | null; triggered_security?: boolean } | null;
+  warranty_eligibility?: { eligible?: boolean | null; expires?: string; gap_days?: number; advice?: string; reason?: string } | null;
   user_prompt?: string | null;
   ui_actions?: UIActions;
 };
@@ -58,6 +59,8 @@ export default function RightPanelExtras({
   mode,
   onEscalate,
   onTraceId,
+  onClarify,
+  onAdd,
   initialImages,
   onResult,
   autoIssueType,
@@ -67,6 +70,10 @@ export default function RightPanelExtras({
   mode: 'faq' | 'cv' | 'visual_search' | 'image_context';
   onEscalate?: (payload: any) => void;
   onTraceId?: (traceId: string | null) => void;
+  /** Called when user clicks a clarify suggestion chip — sends the question back to the chat. */
+  onClarify?: (question: string) => void;
+  /** Add-to-cart callback for visual search product cards. */
+  onAdd?: (sku: string) => void;
   initialImages?: File[];
   onResult?: (result: CVResult | null) => void;
   /** When set, automatically switches the CV issueType dropdown to this value.
@@ -291,6 +298,7 @@ export default function RightPanelExtras({
         playbook_preview: j.playbook_preview,
         image_consistency: j.image_consistency,
         order_validation: j.order_validation,
+        warranty_eligibility: j.warranty_eligibility || null,
         user_prompt: j.user_prompt,
         ui_actions: j.ui_actions,
       });
@@ -305,9 +313,24 @@ export default function RightPanelExtras({
         playbook_preview: j.playbook_preview,
         image_consistency: j.image_consistency,
         order_validation: j.order_validation,
+        warranty_eligibility: j.warranty_eligibility || null,
         user_prompt: j.user_prompt,
         ui_actions: j.ui_actions,
       });
+      // Extract image recommend context from complaint submit response (same as analyzeSafely)
+      const irc = j.image_recommend_context;
+      if (irc && typeof irc === 'object') {
+        const newCtx: ImageAnalysisContext = {
+          labels: Array.isArray(irc.labels) ? irc.labels : [],
+          ocr_text: typeof irc.ocr_text === 'string' ? irc.ocr_text : '',
+          cv_signals: irc.cv_signals || {},
+        };
+        setImageRecommendCtxs(prev => [...prev, newCtx]);
+        const sigs = irc.cv_signals || {};
+        if (sigs.qr_code_detected || sigs.qr_prompt_injection || sigs.manipulation_detected) {
+          setSessionSuspiciousCount(prev => prev + 1);
+        }
+      }
     } catch (e: any) {
       setError(e?.message || 'Submit failed');
     } finally {
@@ -357,6 +380,7 @@ export default function RightPanelExtras({
           prompt: null,
         },
         order_validation: null,
+        warranty_eligibility: (resp as any)?.warranty_eligibility || null,
         user_prompt: ic?.prompt || null,
         ui_actions: (resp as any)?.ui_actions || { chat_with_admin: false },
       };
@@ -388,6 +412,7 @@ export default function RightPanelExtras({
         playbook_preview: cvRes.playbook_preview,
         image_consistency: cvRes.image_consistency,
         order_validation: cvRes.order_validation,
+        warranty_eligibility: cvRes.warranty_eligibility,
         user_prompt: cvRes.user_prompt,
         ui_actions: cvRes.ui_actions,
         qr_prompt_injection: (resp as any)?.qr_prompt_injection,
@@ -510,6 +535,7 @@ export default function RightPanelExtras({
         playbook_preview: undefined,
         image_consistency: undefined,
         order_validation: null,
+        warranty_eligibility: (up as any)?.warranty_eligibility || null,
         user_prompt: null,
         ui_actions: { chat_with_admin: needsReview },
       });
@@ -524,6 +550,7 @@ export default function RightPanelExtras({
         playbook_preview: undefined,
         image_consistency: undefined,
         order_validation: null,
+        warranty_eligibility: (up as any)?.warranty_eligibility || null,
         user_prompt: null,
         ui_actions: { chat_with_admin: needsReview },
       });
@@ -570,6 +597,8 @@ export default function RightPanelExtras({
           traceId={result?.trace_id || null}
           sessionSuspiciousCount={sessionSuspiciousCount}
           onTraceId={onTraceId}
+          onClarify={onClarify}
+          onAdd={onAdd}
         />
       </div>
     );
@@ -684,9 +713,11 @@ export default function RightPanelExtras({
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <button type="button" aria-label="Submit complaint upload for CV triage" onClick={submitCV} disabled={submitting}>{submitting ? 'Submitting...' : 'Submit (upload)'}</button>
-        <button type="button" aria-label="Upload complaint images with nonce" onClick={uploadWithNonce} disabled={submitting}>{submitting ? 'Uploading...' : 'Upload (nonce)'}</button>
-        <button type="button" aria-label="Analyze complaint without upload" onClick={analyzeSafely} disabled={submitting}>{submitting ? 'Analyzing...' : 'Analyze (no upload)'}</button>
+        <button type="button" aria-label="Submit complaint and upload photos" onClick={submitCV} disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Complaint'}</button>
+        <button type="button" aria-label="Analyze photos for damage and product signals" onClick={analyzeSafely} disabled={submitting}>{submitting ? 'Analyzing...' : 'Analyze Photos'}</button>
+        {showAdvancedCvControls && (
+          <button type="button" aria-label="Upload complaint images with nonce" onClick={uploadWithNonce} disabled={submitting}>{submitting ? 'Uploading...' : 'Upload (nonce)'}</button>
+        )}
         {result && (
           <>
             <button type="button" aria-label="Agree with triage decision" onClick={agree}>Agree</button>
@@ -701,6 +732,23 @@ export default function RightPanelExtras({
           <div><strong>Verdict:</strong> {result.suggested_routing || '-'}</div>
           <div><strong>Decision:</strong> {result.decision_id || '-'}</div>
           <div><strong>Case:</strong> {result.case_id || '-'}</div>
+          {result.warranty_eligibility && (
+            <div style={{
+              marginTop: 8,
+              background: result.warranty_eligibility.eligible ? '#ecfdf5' : '#fef2f2',
+              border: `1px solid ${result.warranty_eligibility.eligible ? '#86efac' : '#fca5a5'}`,
+              borderRadius: 8,
+              padding: '8px 10px',
+            }}>
+              <strong>{result.warranty_eligibility.eligible ? 'Warranty valid' : 'Warranty expired'}</strong>
+              <div style={{ fontSize: 12, marginTop: 4 }}>{result.warranty_eligibility.advice || 'Warranty lookup unavailable.'}</div>
+              {result.warranty_eligibility.eligible === false && (
+                <div style={{ marginTop: 6, fontSize: 12 }}>
+                  Options: <a href="#">Request repair quote</a> · <a href="#">Find service centre</a> · <a href="#">View trade-in value</a>
+                </div>
+              )}
+            </div>
+          )}
           {result.user_prompt && (
             <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 8, padding: '8px 10px' }}>
               <strong>Verify photos:</strong> {result.user_prompt}

@@ -1,5 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchIncidents, getIncident, issueIncidentStaffToken, updateIncidentStatus, fetchIncidentAlertSummary, type IncidentAlertSummary } from '../api';
+import {
+  fetchDecisionTraceQuery,
+  fetchIncidentAlertSummary,
+  fetchIncidentEvidence,
+  fetchIncidents,
+  getIncident,
+  issueIncidentStaffToken,
+  updateIncidentStatus,
+  type IncidentAlertSummary,
+} from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer'; initialIncidentId?: string | null };
 
@@ -31,6 +40,8 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
   const [selected, setSelected] = useState<any | null>(null);
   const [prefillApplied, setPrefillApplied] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<any | null>(null);
+  const [selectedEvidence, setSelectedEvidence] = useState<any[]>([]);
+  const [selectedTrace, setSelectedTrace] = useState<any | null>(null);
   const [staffToken, setStaffToken] = useState<string | null>(null);
   const [chat, setChat] = useState<ChatRec[]>([]);
   const [chatErr, setChatErr] = useState<string | null>(null);
@@ -143,9 +154,30 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
     if (!selected?.id) return;
     let cancelled = false;
     setSelectedDetail(null);
+    setSelectedEvidence([]);
+    setSelectedTrace(null);
     getIncident(selected.id)
       .then((d) => {
-        if (!cancelled) setSelectedDetail(d);
+        if (cancelled) return;
+        setSelectedDetail(d);
+        const detail: any = d as any;
+        const traceId = String(detail?.trace_id || detail?.traceId || detail?.description?.trace_id || detail?.description?.context?.trace_id || '').trim();
+        fetchIncidentEvidence(selected.id)
+          .then((res) => {
+            if (!cancelled) setSelectedEvidence(Array.isArray(res?.items) ? res.items : []);
+          })
+          .catch(() => {
+            if (!cancelled) setSelectedEvidence([]);
+          });
+        if (traceId) {
+          fetchDecisionTraceQuery(traceId)
+            .then((tr) => {
+              if (!cancelled) setSelectedTrace(tr);
+            })
+            .catch(() => {
+              if (!cancelled) setSelectedTrace(null);
+            });
+        }
       })
       .catch(() => {})
       .finally(() => {});
@@ -314,10 +346,55 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
                 <div className="page-sub">Severity: <strong>{selected.severity || '-'}</strong></div>
                 <div className="page-sub">Status: <strong>{selected.status || '-'}</strong></div>
                 <div className="page-sub">Created: <strong>{selected.created_at || '-'}</strong></div>
+                <div className="page-sub">Trace: <strong>{selectedDetail?.trace_id || selectedDetail?.traceId || selectedDetail?.description?.trace_id || selectedDetail?.description?.context?.trace_id || '-'}</strong></div>
+                <div className="page-sub">Case: <strong>{selectedDetail?.case_id || selectedDetail?.caseId || selectedDetail?.description?.case_id || selectedDetail?.description?.context?.case_id || '-'}</strong></div>
                 <div className="page-sub" style={{ marginTop: 10, fontWeight: 600 }}>Description (redacted)</div>
                 <pre className="panel" style={{ maxHeight: 240, overflow: 'auto' }}>{safeJson(selectedDetail?.description || selected.description || {})}</pre>
+                <div className="page-sub" style={{ marginTop: 10, fontWeight: 600 }}>Decision Trace / Bitemporal</div>
+                <pre className="panel" style={{ maxHeight: 200, overflow: 'auto' }}>
+                  {safeJson({
+                    decision_id: selectedTrace?.decision_id || null,
+                    timestamp: selectedTrace?.timestamp || null,
+                    bitemporal: selectedTrace?.bitemporal || null,
+                  })}
+                </pre>
+                <div className="page-sub" style={{ marginTop: 10, fontWeight: 600 }}>Security Matrix Snapshot</div>
+                <pre className="panel" style={{ maxHeight: 200, overflow: 'auto' }}>
+                  {safeJson(
+                    ((selectedTrace?.events || []).find((e: any) => String(e?.event_type || '').toLowerCase() === 'security_scan') as any)?.payload || {
+                      note: 'No security_scan event available for this trace yet.',
+                    },
+                  )}
+                </pre>
+                <div className="page-sub" style={{ marginTop: 10, fontWeight: 600 }}>Warranty / Return / Repair Context</div>
+                <pre className="panel" style={{ maxHeight: 180, overflow: 'auto' }}>
+                  {safeJson({
+                    issue_type: selectedDetail?.description?.context?.issue_type || selectedDetail?.description?.context?.intent || null,
+                    reason: selectedDetail?.reason || selectedDetail?.description?.reason || null,
+                    context: selectedDetail?.description?.context || null,
+                  })}
+                </pre>
+                <div className="page-sub" style={{ marginTop: 10, fontWeight: 600 }}>Uploaded / Reuploaded Evidence</div>
+                {!selectedEvidence.length && <div className="page-sub">No incident evidence attachments found.</div>}
+                {!!selectedEvidence.length && (
+                  <div className="list" style={{ marginTop: 8 }}>
+                    {selectedEvidence.slice(0, 8).map((it) => (
+                      <div key={String(it.id)} className="list-item" style={{ alignItems: 'flex-start' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {it.filename || 'attachment'}
+                          </div>
+                          <div className="page-sub">{it.content_type || '-'}</div>
+                          <div className="page-sub">{it.created_at || '-'}</div>
+                          {it.notes ? <div className="page-sub">{it.notes}</div> : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <a className="btn ghost" href={`/api/v1/admin/incidents/${encodeURIComponent(selected.id)}`} target="_blank" rel="noreferrer">Incident JSON</a>
+                  <a className="btn ghost" href={`/api/v1/admin/incidents/${encodeURIComponent(selected.id)}/evidence`} target="_blank" rel="noreferrer">Evidence JSON</a>
                   <a className="btn ghost" href={`/api/v1/admin/security/events?limit=50&offset=0`} target="_blank" rel="noreferrer">Security events</a>
                 </div>
               </div>

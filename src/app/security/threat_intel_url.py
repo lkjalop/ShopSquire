@@ -16,6 +16,8 @@ import json
 import os
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -30,6 +32,10 @@ _GSB_API_KEY = os.getenv("GOOGLE_SAFE_BROWSING_KEY", "")
 
 _CACHE_TTL_SEC = int(os.getenv("THREAT_INTEL_CACHE_TTL", "3600"))
 _API_TIMEOUT_SEC = float(os.getenv("THREAT_INTEL_TIMEOUT", "5.0"))
+_ASYNC_WORKERS = max(1, int(os.getenv("THREAT_INTEL_ASYNC_WORKERS", "2") or 2))
+_INTEL_EXECUTOR = ThreadPoolExecutor(max_workers=_ASYNC_WORKERS)
+_INTEL_INFLIGHT: set[str] = set()
+_INTEL_INFLIGHT_LOCK = Lock()
 
 
 def _ensure_tables() -> None:
@@ -94,6 +100,15 @@ def _get_cached(url: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def get_cached_url_threat_intel(url: str) -> Optional[Dict[str, Any]]:
+    """Public helper for callers that need low-latency cache-first behavior."""
+    u = str(url or "").strip()
+    if not u:
+        return None
+    _ensure_tables()
+    return _get_cached(u)
+
+
 def _store_cache(url: str, source: str, result: Dict[str, Any]) -> None:
     h = _url_hash(url)
     now = int(time.time())
@@ -119,6 +134,46 @@ def _store_cache(url: str, source: str, result: Dict[str, Any]) -> None:
             db.commit()
     except Exception:
         pass
+
+
+def enqueue_url_threat_intel(url: str) -> Dict[str, Any]:
+    """Queue async URL intel lookup so request path can stay low-latency.
+
+    Returns queue status; no network calls are performed inline except cache lookup.
+    """
+    u = str(url or "").strip()
+    if not u:
+        return {"queued": False, "reason": "empty_url"}
+    try:
+        ensure_safe_outbound_url(u)
+    except Exception as exc:
+        return {"queued": False, "reason": f"unsafe_url:{str(exc)[:120]}"}
+    _ensure_tables()
+    cached = _get_cached(u)
+    if cached:
+        return {"queued": False, "cache_hit": True, "malicious": bool(cached.get("malicious"))}
+    h = _url_hash(u)
+    with _INTEL_INFLIGHT_LOCK:
+        if h in _INTEL_INFLIGHT:
+            return {"queued": False, "inflight": True}
+        _INTEL_INFLIGHT.add(h)
+
+    def _job(target: str, key: str) -> None:
+        try:
+            check_url_threat_intel(target, use_cache=True)
+        except Exception:
+            pass
+        finally:
+            with _INTEL_INFLIGHT_LOCK:
+                _INTEL_INFLIGHT.discard(key)
+
+    try:
+        _INTEL_EXECUTOR.submit(_job, u, h)
+        return {"queued": True}
+    except Exception as exc:
+        with _INTEL_INFLIGHT_LOCK:
+            _INTEL_INFLIGHT.discard(h)
+        return {"queued": False, "reason": f"submit_failed:{str(exc)[:120]}"}
 
 
 def _log_event(url: str, source: str, malicious: bool, detail: Dict[str, Any]) -> None:

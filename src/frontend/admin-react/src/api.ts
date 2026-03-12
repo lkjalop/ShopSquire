@@ -779,6 +779,10 @@ export async function getIncident(id: string): Promise<IncidentRow> {
   return http(`/api/v1/admin/incidents/${encodeURIComponent(id)}`);
 }
 
+export async function fetchIncidentEvidence(id: string): Promise<{ incident_id: string; items: any[] }> {
+  return http(`/api/v1/admin/incidents/${encodeURIComponent(id)}/evidence`);
+}
+
 // DB readiness and Timescale helpers
 export async function fetchDbReadiness(): Promise<{ engine: string; dialect: string; connected: boolean; migrations_ok: boolean; timescale_ready: boolean; error?: string | null }> {
   return http(`/api/v1/admin/db/readiness`);

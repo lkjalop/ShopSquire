@@ -278,7 +278,7 @@ async def analyze(
                 if sanitized_images and str(sanitized_images[0].get("status") or "") == "sanitized":
                     from src.app.services.cv_provider import ManagedCVProvider
 
-                    labels, extracted_text = await ManagedCVProvider().get_labels_and_text(
+                    labels, extracted_text, *_ = await ManagedCVProvider().get_labels_and_text(
                         sanitized_images[0].get("bytes") or b""
                     )
             except Exception as _cv_exc:
@@ -370,13 +370,26 @@ async def analyze(
                     _log.warning("QR/barcode decode failed: %s", _exc, exc_info=True)
                 return _qr_hits, _qr_reasons, _qr_injection, _diag_count
 
-            # Run all three in parallel
-            _tier2_task = _run_tier2_task()
-            _consistency_task = _run_consistency_task()
-            _qr_task = _run_qr_task()
-            tier2_result, image_consistency, (_qr_hits, _qr_reasons, _qr_inj, _diag_cnt) = await _asyncio.gather(
-                _tier2_task, _consistency_task, _qr_task,
+            # Run all three in parallel, bounded by a wall-clock timeout so the
+            # endpoint never hangs indefinitely (e.g. when Ollama / OCR / YOLO is
+            # unavailable in test environments).
+            _cv_analyze_timeout = float(
+                (os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "60").strip() or "60"
             )
+            try:
+                tier2_result, image_consistency, (_qr_hits, _qr_reasons, _qr_inj, _diag_cnt) = await _asyncio.wait_for(
+                    _asyncio.gather(
+                        _run_tier2_task(), _run_consistency_task(), _run_qr_task(),
+                    ),
+                    timeout=_cv_analyze_timeout,
+                )
+            except _asyncio.TimeoutError:
+                _log.warning(
+                    "cv.analyze parallel tasks timed out after %.1fs (case_id=%s)",
+                    _cv_analyze_timeout, req.case_id,
+                )
+                tier2_result, image_consistency = {}, None
+                _qr_hits, _qr_reasons, _qr_inj, _diag_cnt = [], [], False, 0
             tier2_evidence_tags = list((tier2_result or {}).get("evidence_tags") or [])
             tier2_security = ((tier2_result or {}).get("security_analysis") or {}) if isinstance((tier2_result or {}).get("security_analysis"), dict) else {}
             qr_decode_hits = _qr_hits

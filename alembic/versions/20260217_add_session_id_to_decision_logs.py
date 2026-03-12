@@ -15,7 +15,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "20260217_session_id"
-down_revision = "20260216_merge_heads_product_embeddings_and_timescale"
+down_revision = "20260216_merge_heads"
 branch_labels = None
 depends_on = None
 

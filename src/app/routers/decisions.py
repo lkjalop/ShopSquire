@@ -1637,14 +1637,19 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
 
         input_data = _json(row.get("input_data")) or {}
         retrieved_context = _json(row.get("retrieved_context")) or {}
-        proposed_action = row.get("proposed_action")
+        proposed_action = _json(row.get("proposed_action")) or {}
 
         # Build canonical payload from available columns
         out = {
             "decision_id": row.get("id"),
             "timestamp": str(row.get("valid_from")),
             "input_query": input_data.get("query") if isinstance(input_data, dict) else None,
-            "intent_analysis": input_data.get("intent") if isinstance(input_data, dict) else {},
+            "intent_analysis": (
+                (input_data.get("intent") if isinstance(input_data, dict) else None)
+                or (retrieved_context.get("intent_analysis") if isinstance(retrieved_context, dict) else None)
+                or (proposed_action.get("intent_analysis") if isinstance(proposed_action, dict) else None)
+                or {}
+            ),
             "agent_chain": retrieved_context.get("agent_chain") if isinstance(retrieved_context, dict) else [],
             "rag_context": {
                 "products_retrieved": (retrieved_context.get("products_count") if isinstance(retrieved_context, dict) else None),
@@ -1740,6 +1745,53 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                 "latency_ms": None,
                 "intent_summary": None,
             }
+        # Attach product-level recommendation evidence when available.
+        try:
+            products_summary = None
+            right_panel_contract = None
+            if isinstance(proposed_action, dict):
+                if isinstance(proposed_action.get("products_summary"), list):
+                    products_summary = proposed_action.get("products_summary")
+                if isinstance(proposed_action.get("right_panel_contract"), dict):
+                    right_panel_contract = proposed_action.get("right_panel_contract")
+                if products_summary is None and isinstance(proposed_action.get("results"), list):
+                    products_summary = [
+                        {
+                            "sku": str(p.get("sku") or ""),
+                            "name": str(p.get("name") or ""),
+                            "score_norm": p.get("score_norm"),
+                            "reasons": (p.get("reasons") or (p.get("factors") or {}).get("positive") or [])[:3],
+                            "reason_codes": (p.get("reason_codes") or [])[:3],
+                            "price": (
+                                (float(p.get("price_cents")) / 100.0)
+                                if isinstance(p.get("price_cents"), (int, float))
+                                else p.get("price")
+                            ),
+                        }
+                        for p in (proposed_action.get("results") or [])[:8]
+                        if isinstance(p, dict)
+                    ]
+                if right_panel_contract is None and isinstance(proposed_action.get("right_panel"), dict):
+                    right_panel_contract = proposed_action.get("right_panel")
+            events = _fetch_trace_events(str(trace_id))
+            for evt in reversed(events or []):
+                payload = evt.get("payload") if isinstance(evt, dict) else None
+                if not isinstance(payload, dict):
+                    continue
+                if products_summary is None and isinstance(payload.get("products_summary"), list):
+                    products_summary = payload.get("products_summary")
+                if products_summary is None and isinstance(payload.get("promoted"), list):
+                    products_summary = payload.get("promoted")
+                if right_panel_contract is None and isinstance(payload.get("right_panel_contract"), dict):
+                    right_panel_contract = payload.get("right_panel_contract")
+                if products_summary is not None and right_panel_contract is not None:
+                    break
+            if products_summary is not None:
+                out["products"] = products_summary
+            if right_panel_contract is not None:
+                out["right_panel"] = right_panel_contract
+        except Exception:
+            pass
         return out
 
 

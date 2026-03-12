@@ -76,3 +76,33 @@ def test_chat_query_persists_messages_and_history_reads(monkeypatch):
     roles = [str((x or {}).get("role") or "") for x in items]
     assert "user" in roles
     assert "assistant" in roles
+
+
+def test_chat_query_applies_copywriting_when_requested(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeAsyncClient)
+    app = create_app()
+    client = TestClient(app)
+    headers = {"x-api-key": "local-merchant-key"}
+
+    resp = client.post(
+        "/api/v1/chat/query",
+        json={
+            "uid": "u-chat-copy-1",
+            "query": "show me laptops under 1000",
+            "copywriting_enabled": True,
+            "copy_profile_id": "premium",
+            "brand_name": "Acme",
+            "copy_surface": "storefront",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assistant = str(body.get("assistant_message") or "")
+    assert "Acme:" in assistant
+    copy_meta = body.get("copywriting") or {}
+    assert bool(copy_meta.get("applied")) is True
+    assert copy_meta.get("profile_id") == "premium"
+    assert copy_meta.get("cpu_cost") == "low"

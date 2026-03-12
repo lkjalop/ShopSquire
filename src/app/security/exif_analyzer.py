@@ -45,6 +45,12 @@ _EDITOR_SIGNATURES = [
     "faceapp",
 ]
 
+_EXIF_TEXT_FIELDS = ("UserComment", "ImageDescription", "XPComment", "XPSubject", "XPTitle")
+_EXIF_INJECTION_PAT = re.compile(
+    r"(?i)(ignore\s+previous|override|system\s*prompt|developer\s*mode|"
+    r"payid|venmo|cashapp|zelle|bitcoin:|ethereum:|encrypted|ransom|decrypt|wallet)"
+)
+
 
 @dataclass
 class EXIFAnalysisResult:
@@ -71,6 +77,8 @@ class EXIFAnalysisResult:
     thumbnail_mismatch: bool = False
     exif_stripped: bool = False
     suspicious_flags: List[str] = field(default_factory=list)
+    exif_text_fields: Dict[str, str] = field(default_factory=dict)
+    exif_text_signals: List[str] = field(default_factory=list)
     fraud_score: float = 0.0
     explanations: List[str] = field(default_factory=list)
     raw_tags: Dict[str, Any] = field(default_factory=dict)
@@ -174,6 +182,19 @@ def analyze_exif(image_bytes: bytes, *, claim_datetime: str | None = None) -> EX
     result.software = str(tags.get("Software") or "").strip() or None
     result.orientation = tags.get("Orientation")
 
+    # P18: scan EXIF text channels often used for hidden instructions.
+    for key in _EXIF_TEXT_FIELDS:
+        val = str(tags.get(key) or "").strip()
+        if not val:
+            continue
+        result.exif_text_fields[key] = val[:300]
+        if _EXIF_INJECTION_PAT.search(val):
+            if "exif_text_injection" not in result.suspicious_flags:
+                result.suspicious_flags.append("exif_text_injection")
+            result.exif_text_signals.append(f"{key}:pattern")
+    if result.exif_text_signals:
+        result.explanations.append("EXIF text fields contain instruction/payment/ransom-like content")
+
     # DateTime fields
     result.datetime_original = str(tags.get("DateTimeOriginal") or "").strip() or None
     result.datetime_digitized = str(tags.get("DateTimeDigitized") or "").strip() or None
@@ -255,6 +276,8 @@ def analyze_exif(image_bytes: bytes, *, claim_datetime: str | None = None) -> EX
     if not result.camera_make and not result.camera_model:
         score += 0.10
         result.suspicious_flags.append("no_camera_info")
+    if result.exif_text_signals:
+        score += 0.25
     if result.gps_present:
         # GPS present is actually a positive signal (harder to fake)
         score -= 0.05

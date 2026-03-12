@@ -9,6 +9,7 @@ import hashlib
 import os
 from threading import RLock
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
@@ -23,6 +24,11 @@ from src.app.services.search_events import log_search_event
 from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
 from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.decision_log import log_trace_event
+from src.app.services.copywriting import maybe_apply_copywriting
+from src.app.services.answer_quality import apply_answer_quality
+from src.app.security.dread_scorer import compute_dread
+from src.app.security.framework_correlation import correlate_security_analysis
+from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
@@ -240,12 +246,247 @@ def _is_budget_question(item: Dict[str, Any]) -> bool:
     )
 
 
+def _budget_range_from_slots(slots: Dict[str, Any] | None, query: str) -> Dict[str, int | None]:
+    out = _extract_budget_bounds(query)
+    s = slots if isinstance(slots, dict) else {}
+    if out.get("budget_min") is None and s.get("budget_min") is not None:
+        try:
+            out["budget_min"] = int(float(s.get("budget_min")))
+        except Exception:
+            pass
+    if out.get("budget_max") is None and s.get("budget_max") is not None:
+        try:
+            out["budget_max"] = int(float(s.get("budget_max")))
+        except Exception:
+            pass
+    return out
+
+
+def _compute_widened_budget(bounds: Dict[str, int | None], widen_delta: int) -> Dict[str, int]:
+    bmin = bounds.get("budget_min")
+    bmax = bounds.get("budget_max")
+    delta = max(100, int(widen_delta or 200))
+    if bmax is not None and bmin is not None:
+        lo = int(bmax)
+        hi = int(bmax + delta)
+        return {"budget_min": min(lo, hi), "budget_max": max(lo, hi)}
+    if bmax is not None:
+        lo = int(bmax)
+        hi = int(bmax + delta)
+        return {"budget_min": min(lo, hi), "budget_max": max(lo, hi)}
+    if bmin is not None:
+        lo = int(bmin + delta)
+        hi = int(bmin + (delta * 2))
+        return {"budget_min": min(lo, hi), "budget_max": max(lo, hi)}
+    # No prior budget: deterministic bootstrap window.
+    return {"budget_min": 800, "budget_max": 1200}
+
+
+def _brand_hint_from_text(text: str) -> str | None:
+    t = str(text or "").lower()
+    aliases = [
+        ("apple", ("apple", "macbook", "mac")),
+        ("lenovo", ("lenovo", "legion", "thinkpad", "yoga")),
+        ("dell", ("dell", "xps", "inspiron", "latitude", "alienware")),
+        ("hp", ("hp", "pavilion", "omen", "spectre", "envy", "elitebook")),
+        ("asus", ("asus", "rog", "zenbook", "vivobook", "tuf")),
+        ("msi", ("msi", "katana", "stealth", "raider")),
+        ("acer", ("acer", "nitro", "predator", "swift")),
+        ("microsoft", ("microsoft", "surface")),
+    ]
+    for canonical, toks in aliases:
+        if any(tok in t for tok in toks):
+            return canonical
+    return None
+
+
+def _image_anchor_hint(image_obj: Dict[str, Any], idx: int) -> Dict[str, Any]:
+    labels = image_obj.get("labels") if isinstance(image_obj.get("labels"), list) else []
+    ocr_text = str(image_obj.get("ocr_text") or "")
+    joined = " ".join([str(x) for x in labels[:20]]) + " " + ocr_text
+    brand = _brand_hint_from_text(joined)
+    low = joined.lower()
+    use_case_hint = "general"
+    if any(tok in low for tok in ("esports", "gaming", "rtx", "geforce", "fps", "legion", "rog", "tuf")):
+        use_case_hint = "gaming"
+    elif any(tok in low for tok in ("office", "business", "work", "excel", "powerpoint")):
+        use_case_hint = "office"
+    elif any(tok in low for tok in ("creator", "premiere", "davinci", "render", "editing")):
+        use_case_hint = "content_creator"
+    elif any(tok in low for tok in ("student", "school", "college", "university", "study")):
+        use_case_hint = "student"
+    return {
+        "anchor_id": str(image_obj.get("image_hash") or f"img_{idx+1}"),
+        "title": f"Image {idx+1}",
+        "brand_hint": brand,
+        "use_case_hint": use_case_hint,
+        "ocr_excerpt": ocr_text[:120] if ocr_text else "",
+        "image_hash": str(image_obj.get("image_hash") or ""),
+    }
+
+
+def _persona_rank_weights(use_case_key: str | None, buyer_persona: str | None) -> Dict[str, float]:
+    key = str(use_case_key or buyer_persona or "").lower()
+    # Keep this deterministic and lightweight: no model call, just profile weights.
+    if key in {"gaming", "gamer"}:
+        return {"budget_fit": 0.30, "brand_match": 0.10, "performance": 0.50, "portability": 0.10}
+    if key in {"ai_ml_workstation", "data_science_student", "engineering_student", "ai", "data_science"}:
+        return {"budget_fit": 0.25, "brand_match": 0.10, "performance": 0.55, "portability": 0.10}
+    if key in {"office_general", "office", "business", "corporate"}:
+        return {"budget_fit": 0.35, "brand_match": 0.10, "performance": 0.20, "portability": 0.35}
+    if key in {"content_creator", "content_creation", "creator", "design_student"}:
+        return {"budget_fit": 0.25, "brand_match": 0.10, "performance": 0.45, "portability": 0.20}
+    # students/high-school/general defaults
+    return {"budget_fit": 0.45, "brand_match": 0.15, "performance": 0.20, "portability": 0.20}
+
+
+def _performance_signal(product: Dict[str, Any]) -> float:
+    text = (
+        str(product.get("name") or "")
+        + " "
+        + " ".join([str(x) for x in (product.get("features") or [])])
+    ).lower()
+    score = 0.0
+    if any(t in text for t in ("rtx", "geforce", "radeon", "gpu", "vram")):
+        score += 1.0
+    if any(t in text for t in ("i7", "i9", "ryzen 7", "ryzen 9", "ultra 7", "ultra 9")):
+        score += 0.6
+    if any(t in text for t in ("32gb", "24gb", "16gb ram")):
+        score += 0.5
+    return min(score, 2.0) / 2.0
+
+
+def _portability_signal(product: Dict[str, Any]) -> float:
+    text = (
+        str(product.get("name") or "")
+        + " "
+        + " ".join([str(x) for x in (product.get("features") or [])])
+    ).lower()
+    score = 0.0
+    if any(t in text for t in ('13"', '14"', "13.", "14.", "thin", "light")):
+        score += 0.7
+    if "macbook air" in text:
+        score += 0.5
+    return min(score, 1.0)
+
+
+def _budget_fit_signal(price: float, budget: Dict[str, int | None]) -> float:
+    bmin = budget.get("budget_min")
+    bmax = budget.get("budget_max")
+    if price <= 0:
+        return 0.0
+    if bmin is not None and bmax is not None and bmin <= price <= bmax:
+        return 1.0
+    if bmax is not None and price <= bmax:
+        return 0.8
+    if bmax is not None and price > bmax:
+        over = max(1.0, float(price - bmax))
+        return max(0.0, 1.0 - (over / max(float(bmax), 1.0)))
+    if bmin is not None and price >= bmin:
+        return 0.8
+    return 0.5
+
+
+def _score_anchor_candidate(
+    product: Dict[str, Any],
+    *,
+    anchor: Dict[str, Any],
+    budget: Dict[str, int | None],
+    weights: Dict[str, float],
+) -> float:
+    try:
+        price = float(product.get("price") or 0.0)
+    except Exception:
+        price = 0.0
+    name = str(product.get("name") or "").lower()
+    brand = str(anchor.get("brand_hint") or "").lower()
+    brand_match = 1.0 if (brand and brand in name) else 0.0
+    budget_fit = _budget_fit_signal(price, budget)
+    perf = _performance_signal(product)
+    portable = _portability_signal(product)
+    return (
+        (weights.get("budget_fit", 0.0) * budget_fit)
+        + (weights.get("brand_match", 0.0) * brand_match)
+        + (weights.get("performance", 0.0) * perf)
+        + (weights.get("portability", 0.0) * portable)
+    )
+
+
+def _build_anchor_sections(
+    *,
+    images: List[Dict[str, Any]] | None,
+    products: List[Dict[str, Any]],
+    query: str,
+    budget: Dict[str, int | None],
+    use_case_key: str | None,
+    buyer_persona: str | None,
+) -> List[Dict[str, Any]]:
+    imgs = [x for x in (images or []) if isinstance(x, dict)]
+    if not imgs:
+        return []
+    sections: List[Dict[str, Any]] = []
+    weights = _persona_rank_weights(use_case_key, buyer_persona)
+    for idx, img in enumerate(imgs):
+        anchor = _image_anchor_hint(img, idx)
+        scored: List[tuple[float, Dict[str, Any]]] = []
+        for p in products:
+            if not isinstance(p, dict):
+                continue
+            scored.append((_score_anchor_candidate(p, anchor=anchor, budget=budget, weights=weights), p))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = [row[1] for row in scored[:3]]
+        brand_hint = str(anchor.get("brand_hint") or "").lower()
+        if brand_hint:
+            def _is_apple_row(row: Dict[str, Any]) -> bool:
+                txt = f"{str(row.get('name') or '')} {str(row.get('sku') or '')}".lower()
+                return ("apple" in txt) or ("macbook" in txt) or txt.startswith("mb")
+
+            if brand_hint == "apple":
+                apple_rows = [row[1] for row in scored if _is_apple_row(row[1])]
+                if apple_rows:
+                    top = apple_rows[:3]
+            elif brand_hint in {"lenovo", "dell", "hp", "asus", "acer", "msi", "microsoft", "samsung"}:
+                windows_rows = [row[1] for row in scored if not _is_apple_row(row[1])]
+                if windows_rows:
+                    top = windows_rows[:3]
+        if not top:
+            continue
+        bmin = budget.get("budget_min")
+        bmax = budget.get("budget_max")
+        budget_phrase = (
+            f"${bmin:,}-${bmax:,}" if bmin is not None and bmax is not None
+            else (f"under ${bmax:,}" if bmax is not None else (f"over ${bmin:,}" if bmin is not None else "your budget"))
+        )
+        uc = str(use_case_key or buyer_persona or anchor.get("use_case_hint") or "general").replace("_", " ")
+        summary = (
+            f"Best 3 matches for this image in {budget_phrase}. "
+            f"Prioritized for {uc} based on brand/form-factor hint and price fit."
+        )
+        sections.append(
+            {
+                "anchor_id": anchor.get("anchor_id"),
+                "title": f"{anchor.get('title')} {'(' + str(anchor.get('brand_hint')) + ')' if anchor.get('brand_hint') else ''}".strip(),
+                "source_image_hash": anchor.get("image_hash"),
+                "anchor_hint": {
+                    "brand": anchor.get("brand_hint"),
+                    "use_case": anchor.get("use_case_hint"),
+                    "ocr_excerpt": anchor.get("ocr_excerpt"),
+                },
+                "top_products": top,
+                "summary": summary,
+                "match_basis": ["budget_fit", "query_intent", "image_brand_hint", "persona_profile"],
+            }
+        )
+    return sections
+
+
 def _build_right_panel_contract(
     *,
     products: List[Dict[str, Any]],
     turn_intent: str,
     budget_viability: Dict[str, Any] | None,
     use_case_analysis: Dict[str, Any] | None,
+    anchor_sections: List[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
         return {
@@ -286,6 +527,7 @@ def _build_right_panel_contract(
     return {
         "mode": "shopping",
         "show_tiers": bool(show_tiers),
+        "anchor_sections": anchor_sections or [],
         "budget_status": status,
         "lower_tier": {
             "title": "Budget-fit options",
@@ -316,6 +558,8 @@ def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any
     img = image_obj if isinstance(image_obj, dict) else {}
     sec = img.get("security") if isinstance(img.get("security"), dict) else {}
     sec_signals = {}
+    if isinstance(img.get("cv_signals"), dict):
+        sec_signals.update(img.get("cv_signals") or {})
     if isinstance(sec.get("signals"), dict):
         sec_signals.update(sec.get("signals") or {})
     if isinstance(sec.get("cv_signals"), dict):
@@ -324,6 +568,26 @@ def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any
         for k, v in sec.items():
             if isinstance(v, bool):
                 sec_signals[k] = v
+    # Accept direct top-level signals from triage payloads too.
+    for k in (
+        "qr_code_detected",
+        "qr_prompt_injection",
+        "qr_external_url_detected",
+        "ocr_prompt_injection",
+        "manipulation_detected",
+        "damage_detected",
+        "steg_suspicious",
+        "encoded_payload_detected",
+        "polyglot_suspected",
+        "payment_social_engineering",
+        "pci_card_exposed",
+        "crypto_payment_uri",
+        "ransomware_indicator",
+        "homoglyph_injection",
+        "invisible_text_suspected",
+    ):
+        if isinstance(img.get(k), bool):
+            sec_signals[k] = bool(img.get(k))
     reasons = []
     if isinstance(img.get("reasons"), list):
         reasons.extend(str(x) for x in (img.get("reasons") or []))
@@ -355,13 +619,133 @@ def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any
         or sec_signals.get("duplicate_image_detected")
         or ("manipulation_detected" in reasons)
     )
+    ocr_txt = str(img.get("ocr_text") or "")
+    qr_data = img.get("qr_data")
+    qr_data_present = bool((isinstance(qr_data, str) and qr_data.strip()) or (isinstance(qr_data, list) and len(qr_data) > 0))
+    ocr_url_like = bool(re.search(r"(https?://|www\.|payid|wallet|crypto|btc|eth|scan\s+to\s+pay)", ocr_txt.lower()))
     return {
-        "qr_code_detected": qr_detected,
+        "qr_code_detected": bool(qr_detected or qr_data_present),
         "qr_prompt_injection": qr_injection,
         "qr_external_url_detected": qr_external,
-        "ocr_prompt_injection": bool(sec_signals.get("ocr_prompt_injection")),
+        "ocr_prompt_injection": bool(sec_signals.get("ocr_prompt_injection") or ocr_url_like),
         "manipulation_detected": manipulation,
         "adversarial_score": float(sec_signals.get("adversarial_score") or 0.0),
+        "steg_suspicious": bool(sec_signals.get("steg_suspicious")),
+        "qr_payloads": sec_signals.get("qr_payloads") if isinstance(sec_signals.get("qr_payloads"), list) else [],
+        "qr_payload_types": sec_signals.get("qr_payload_types") if isinstance(sec_signals.get("qr_payload_types"), list) else [],
+        "qr_redirect_probe": sec_signals.get("qr_redirect_probe") if isinstance(sec_signals.get("qr_redirect_probe"), dict) else {},
+    }
+
+
+def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]:
+    s = sig if isinstance(sig, dict) else {}
+    qr_detected = bool(s.get("qr_code_detected"))
+    qr_external = bool(s.get("qr_external_url_detected"))
+    qr_injection = bool(s.get("qr_prompt_injection"))
+    ocr_injection = bool(s.get("ocr_prompt_injection"))
+    manipulation = bool(s.get("manipulation_detected"))
+    steg = bool(s.get("steg_suspicious"))
+    adversarial = float(s.get("adversarial_score") or 0.0)
+    encoded = bool(s.get("encoded_payload_detected"))
+    polyglot = bool(s.get("polyglot_suspected"))
+
+    hard_lock = bool(
+        qr_injection
+        or (qr_external and (manipulation or steg or adversarial >= 0.75))
+        or polyglot
+    )
+    needs_review = bool(
+        hard_lock
+        or qr_external
+        or ocr_injection
+        or steg
+        or adversarial >= 0.5
+        or encoded
+    )
+    degraded = bool(
+        qr_detected
+        or qr_external
+        or qr_injection
+        or ocr_injection
+        or manipulation
+        or steg
+        or adversarial >= 0.35
+        or encoded
+    )
+    if hard_lock:
+        route = "lockdown"
+        severity = "high"
+        message = (
+            "Image content looks unsafe (malicious QR/injection risk). "
+            "Chat is temporarily locked for image-driven actions while we escalate to human review."
+        )
+    elif needs_review:
+        route = "escalate"
+        severity = "high"
+        message = (
+            "Image was flagged. I will continue with text-only recommendations and escalate security review in parallel."
+        )
+    elif degraded:
+        route = "visual_sanitized"
+        severity = "warn"
+        message = (
+            "Image looks untrusted. Continuing in text-only mode; reupload a clean product-only photo for precise visual matching."
+        )
+    else:
+        route = "allow"
+        severity = "info"
+        message = ""
+    return {
+        "route": route,
+        "severity": severity,
+        "image_untrusted": bool(degraded),
+        "image_degraded_mode": bool(degraded and not hard_lock),
+        "needs_human_review": bool(needs_review),
+        "chat_lockdown": bool(hard_lock),
+        "warning_message": message,
+    }
+
+
+def _derive_qr_details(sig: Dict[str, Any] | None, posture: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    p = posture if isinstance(posture, dict) else {}
+    route = str(p.get("route") or "allow")
+    return derive_qr_legitimacy_details(sig, policy_route=route)
+
+
+def _image_trust_channels(posture: Dict[str, Any] | None) -> Dict[str, bool]:
+    route = str((posture or {}).get("route") or "allow")
+    if route == "allow":
+        return {"visual_embedding_trusted": True, "ocr_trusted": True, "qr_trusted": True}
+    if route == "visual_sanitized":
+        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
+    if route == "escalate":
+        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
+    return {"visual_embedding_trusted": False, "ocr_trusted": False, "qr_trusted": False}
+
+
+def _frameworks_for_image_security(*, signals: Dict[str, Any], severity: str) -> Dict[str, Any]:
+    norm = {str(k): bool(v) for k, v in (signals or {}).items()}
+    dread = compute_dread(signals={}, cv_signals=norm, severity=severity or "warn")
+    corr = correlate_security_analysis(
+        channel="image",
+        severity=severity,
+        tags=[],
+        reasons=[],
+        threat_correlation={"mitre_attack": [], "dread": dread},
+        signals=norm,
+        evidence={},
+    )
+    return {
+        "mitre_atlas": corr.get("mitre_atlas") or [],
+        "mitre_attack": corr.get("mitre_attack") or [],
+        "owasp_llm_top10": corr.get("owasp_llm_top10") or [],
+        "stride_categories": corr.get("stride_categories") or [],
+        "pasta": corr.get("pasta") or {},
+        "pasta_stage": corr.get("pasta_stage"),
+        "dread": dread,
+        "cvss": corr.get("cvss") or {},
+        "compliance": corr.get("compliance") or {},
+        "lev": corr.get("lev") or {},
     }
 
 
@@ -554,11 +938,23 @@ async def chat_query(
             )
             merged["ocr_prompt_injection"] = bool(merged.get("ocr_prompt_injection") or sig.get("ocr_prompt_injection"))
             merged["manipulation_detected"] = bool(merged.get("manipulation_detected") or sig.get("manipulation_detected"))
+            merged["steg_suspicious"] = bool(merged.get("steg_suspicious") or sig.get("steg_suspicious"))
             merged["adversarial_score"] = max(
                 float(merged.get("adversarial_score") or 0.0),
                 float(sig.get("adversarial_score") or 0.0),
             )
+            qp_old = merged.get("qr_payloads") if isinstance(merged.get("qr_payloads"), list) else []
+            qp_new = sig.get("qr_payloads") if isinstance(sig.get("qr_payloads"), list) else []
+            if qp_new:
+                merged["qr_payloads"] = (qp_old + qp_new)[:12]
+            qpt_old = merged.get("qr_payload_types") if isinstance(merged.get("qr_payload_types"), list) else []
+            qpt_new = sig.get("qr_payload_types") if isinstance(sig.get("qr_payload_types"), list) else []
+            if qpt_new:
+                merged["qr_payload_types"] = list(dict.fromkeys([str(x) for x in (qpt_old + qpt_new) if str(x).strip()]))[:12]
+            if not merged.get("qr_redirect_probe") and isinstance(sig.get("qr_redirect_probe"), dict):
+                merged["qr_redirect_probe"] = sig.get("qr_redirect_probe")
         image_cv_signals_in = merged
+    image_security_posture = _derive_image_security_posture(image_cv_signals_in)
 
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
@@ -567,6 +963,13 @@ async def chat_query(
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
     source_ip = request.client.host if request and request.client else ""
     turn_intent = _classify_turn_intent(q)
+    copywriting_requested = bool((payload or {}).get("copywriting_enabled") is True)
+    copy_profile_id = str((payload or {}).get("copy_profile_id") or "").strip() or None
+    copy_surface = str((payload or {}).get("copy_surface") or "storefront").strip() or "storefront"
+    brand_name = str((payload or {}).get("brand_name") or "").strip() or None
+    copy_profile_inline = (payload or {}).get("copy_profile")
+    if not isinstance(copy_profile_inline, dict):
+        copy_profile_inline = None
 
     # Reload confirmed slots at turn start to keep context continuity explicit.
     try:
@@ -782,11 +1185,103 @@ async def chat_query(
     except Exception:
         pass
 
+    if bool(image_security_posture.get("chat_lockdown")):
+        decision_trace_id = str(uuid.uuid4())
+        _sec_signals = {str(k): bool(v) for k, v in (image_cv_signals_in or {}).items() if isinstance(v, bool)}
+        _qr = _derive_qr_details(image_cv_signals_in, image_security_posture)
+        _trust = _image_trust_channels(image_security_posture)
+        _fw = _frameworks_for_image_security(signals=_sec_signals, severity=str(image_security_posture.get("severity") or "high"))
+        security_payload = {
+            "severity": str(image_security_posture.get("severity") or "high"),
+            "route": "lockdown",
+            "policy_route": "lockdown",
+            "signals": _sec_signals,
+            "qr": _qr,
+            "image_trust_channels": _trust,
+            "qr_payload_types": image_cv_signals_in.get("qr_payload_types") if isinstance(image_cv_signals_in.get("qr_payload_types"), list) else [],
+            "qr_payloads": (image_cv_signals_in.get("qr_payloads") or [])[:6] if isinstance(image_cv_signals_in.get("qr_payloads"), list) else [],
+            "qr_redirect_probe": image_cv_signals_in.get("qr_redirect_probe") if isinstance(image_cv_signals_in.get("qr_redirect_probe"), dict) else {},
+            "frameworks": _fw,
+            "mitre_atlas": _fw.get("mitre_atlas") or [],
+            "mitre_attack": _fw.get("mitre_attack") or [],
+            "owasp_llm_top10": _fw.get("owasp_llm_top10") or [],
+            "stride_categories": _fw.get("stride_categories") or [],
+            "pasta": _fw.get("pasta") or {},
+            "pasta_stage": _fw.get("pasta_stage"),
+            "dread": _fw.get("dread") or {},
+            "cvss": _fw.get("cvss") or {},
+            "compliance": _fw.get("compliance") or {},
+            "summary": "Chat lockdown due to malicious image security posture.",
+        }
+        try:
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="security_scan",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="chat",
+                target_id=None,
+                payload=security_payload,
+            )
+        except Exception:
+            pass
+        out = {
+            "products": [],
+            "view_mode": "cards",
+            "confidence": None,
+            "decision_trace_id": decision_trace_id,
+            "trace_id": decision_trace_id,
+            "assistant_message": str(image_security_posture.get("warning_message") or "Chat locked for safety review."),
+            "next_questions": [
+                {"id": "continue_text_only", "text": "Continue without image (text-only recommendations)", "goal": "text_only_mode"},
+                {"id": "reupload_clean", "text": "Reupload clean product-only image", "goal": "clean_reupload"},
+                {"id": "human_escalation", "text": "Open human support now", "goal": "human_escalation"},
+            ],
+            "blocked": True,
+            "image_untrusted": True,
+            "image_degraded_mode": False,
+            "chat_lockdown": True,
+            "needs_human_review": True,
+            "right_panel": {
+                "mode": "shopping",
+                "show_tiers": False,
+                "image_untrusted": True,
+                "image_degraded_mode": False,
+                "security_route": "lockdown",
+                "security_summary": str(image_security_posture.get("warning_message") or ""),
+            },
+        }
+        try:
+            _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
+            _store_chat_message(db, uid=uid, role="assistant", content=str(out.get("assistant_message") or ""), trace_id=decision_trace_id, session_id=session_id)
+        except Exception:
+            pass
+        return out
+
     # Call internal recommend endpoint to leverage agentic pipeline
     base = str(request.base_url).rstrip("/")
     url = f"{base}/api/v1/recommend/suggest"
     params = {"uid": uid, "query": q}
     nqe_selection = (payload or {}).get("nqe_selection") or {}
+    confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
+    if isinstance(nqe_selection, dict):
+        try:
+            oval = str(nqe_selection.get("option_value") or "").strip().lower()
+            if oval.startswith("expand_budget:+"):
+                delta = int(oval.split(":+", 1)[1])
+                base_budget = _budget_range_from_slots(confirmed_slots, q)
+                widened = _compute_widened_budget(base_budget, delta)
+                q = (
+                    f"{q}. budget between ${int(widened['budget_min'])} and ${int(widened['budget_max'])} "
+                    "(widened deterministically from prior budget)"
+                )
+                params["query"] = q
+                params["budget_min"] = int(widened["budget_min"])
+                params["budget_max"] = int(widened["budget_max"])
+                params["budget_widen_mode"] = "deterministic_ladder"
+                params["budget_widen_delta"] = int(delta)
+        except Exception:
+            pass
     if isinstance(nqe_selection, dict):
         qid = str(nqe_selection.get("question_id") or "").strip()
         oid = str(nqe_selection.get("option_id") or "").strip()
@@ -800,19 +1295,23 @@ async def chat_query(
             if oval:
                 params["nqe_option_value"] = oval[:120]
     try:
+        security_risky_image = bool(image_security_posture.get("image_untrusted"))
         labels_list: List[str] = []
-        if isinstance(image_labels_in, list):
-            labels_list = [str(x).strip() for x in image_labels_in if str(x).strip()]
-        elif isinstance(image_labels_in, str):
-            labels_list = [s.strip() for s in image_labels_in.split(",") if s.strip()]
-        if labels_list:
-            params["image_labels"] = ",".join(labels_list[:12])
-        if isinstance(image_ocr_text_in, str) and image_ocr_text_in.strip():
-            params["image_ocr_text"] = image_ocr_text_in.strip()[:500]
-        if isinstance(image_hash_in, str) and image_hash_in.strip():
-            params["image_hash"] = image_hash_in.strip()[:128]
-        if isinstance(image_intent_in, str) and image_intent_in.strip():
-            params["image_intent"] = image_intent_in.strip()[:32]
+        if not security_risky_image:
+            if isinstance(image_labels_in, list):
+                labels_list = [str(x).strip() for x in image_labels_in if str(x).strip()]
+            elif isinstance(image_labels_in, str):
+                labels_list = [s.strip() for s in image_labels_in.split(",") if s.strip()]
+            if labels_list:
+                params["image_labels"] = ",".join(labels_list[:12])
+            if isinstance(image_ocr_text_in, str) and image_ocr_text_in.strip():
+                params["image_ocr_text"] = image_ocr_text_in.strip()[:500]
+            if isinstance(image_hash_in, str) and image_hash_in.strip():
+                params["image_hash"] = image_hash_in.strip()[:128]
+            if isinstance(image_intent_in, str) and image_intent_in.strip():
+                params["image_intent"] = image_intent_in.strip()[:32]
+        else:
+            params["image_security_mode"] = "text_only_fallback"
         if image_cv_signals_in:
             params["image_cv_signals"] = json.dumps(image_cv_signals_in, separators=(",", ":"))[:1000]
     except Exception:
@@ -858,6 +1357,11 @@ async def chat_query(
                     "model_tier": blocked.get("model_tier") or blocked.get("tier"),
                     "blocked": True,
                     "blocked_detail": blocked,
+                    "image_untrusted": bool(image_security_posture.get("image_untrusted")),
+                    "image_degraded_mode": bool(image_security_posture.get("image_degraded_mode")),
+                    "chat_lockdown": bool(image_security_posture.get("chat_lockdown")),
+                    "needs_human_review": bool(image_security_posture.get("needs_human_review")),
+                    "security_route": str(image_security_posture.get("route") or "review"),
                 }
                 try:
                     uid = str((payload or {}).get("uid") or "demo-user")
@@ -948,6 +1452,12 @@ async def chat_query(
 
     decision_trace_id = data.get("decision_trace_id") or data.get("decision_id") or data.get("trace_id")
     assistant_message = data.get("assistant_message") or data.get("message")
+    if bool(image_security_posture.get("image_untrusted")):
+        warning = str(
+            image_security_posture.get("warning_message")
+            or "Image security warning detected. Continuing with text-only recommendations."
+        )
+        assistant_message = f"{warning}\n\n{assistant_message}" if assistant_message else warning
 
     # Emit new trace events for the Multimodal / Complexity / Memory tabs
     try:
@@ -1006,35 +1516,54 @@ async def chat_query(
                     ),
                 },
             )
-            if image_cv_signals_in:
-                sec_signals = {
-                    "qr_code_detected": bool(image_cv_signals_in.get("qr_code_detected")),
-                    "qr_prompt_injection": bool(image_cv_signals_in.get("qr_prompt_injection")),
-                    "qr_external_url_detected": bool(image_cv_signals_in.get("qr_external_url_detected")),
-                    "ocr_prompt_injection": bool(image_cv_signals_in.get("ocr_prompt_injection")),
-                    "manipulation_detected": bool(image_cv_signals_in.get("manipulation_detected")),
-                    "damage_detected": bool(image_cv_signals_in.get("damage_detected")),
-                }
-                sec_sev = "info"
-                if sec_signals["qr_prompt_injection"] or sec_signals["qr_external_url_detected"]:
-                    sec_sev = "high"
-                elif sec_signals["qr_code_detected"] or sec_signals["ocr_prompt_injection"] or sec_signals["manipulation_detected"]:
-                    sec_sev = "warn"
-                log_trace_event(
-                    trace_id=decision_trace_id,
-                    event_type="security_scan",
-                    source_type="agent",
-                    source_id="Security_Observer_Agent",
-                    target_type="chat",
-                    target_id=None,
-                    payload={
-                        "severity": sec_sev,
-                        "route": "review" if sec_sev in ("high", "warn") else "allow",
-                        "details": {"signals": sec_signals},
+            sec_signals = {
+                "qr_code_detected": bool(image_cv_signals_in.get("qr_code_detected")),
+                "qr_prompt_injection": bool(image_cv_signals_in.get("qr_prompt_injection")),
+                "qr_external_url_detected": bool(image_cv_signals_in.get("qr_external_url_detected")),
+                "ocr_prompt_injection": bool(image_cv_signals_in.get("ocr_prompt_injection")),
+                "manipulation_detected": bool(image_cv_signals_in.get("manipulation_detected")),
+                "damage_detected": bool(image_cv_signals_in.get("damage_detected")),
+                "steg_suspicious": bool(image_cv_signals_in.get("steg_suspicious")),
+            }
+            sec_sev = str(image_security_posture.get("severity") or "info")
+            qr_details = _derive_qr_details(image_cv_signals_in, image_security_posture)
+            trust_channels = _image_trust_channels(image_security_posture)
+            frameworks = _frameworks_for_image_security(signals=sec_signals, severity=sec_sev)
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="security_scan",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="chat",
+                target_id=None,
+                payload={
+                    "severity": sec_sev,
+                    "route": str(image_security_posture.get("route") or ("review" if sec_sev in ("high", "warn") else "allow")),
+                    "policy_route": str(image_security_posture.get("route") or ("review" if sec_sev in ("high", "warn") else "allow")),
+                    "qr": qr_details,
+                    "image_trust_channels": trust_channels,
+                    "frameworks": frameworks,
+                    "mitre_atlas": frameworks.get("mitre_atlas") or [],
+                    "mitre_attack": frameworks.get("mitre_attack") or [],
+                    "owasp_llm_top10": frameworks.get("owasp_llm_top10") or [],
+                    "stride_categories": frameworks.get("stride_categories") or [],
+                    "pasta": frameworks.get("pasta") or {},
+                    "pasta_stage": frameworks.get("pasta_stage"),
+                    "dread": frameworks.get("dread") or {},
+                    "cvss": frameworks.get("cvss") or {},
+                    "compliance": frameworks.get("compliance") or {},
+                    "details": {
                         "signals": sec_signals,
-                        "summary": "Image-sidecar security signal normalization",
+                        "qr_payload_types": image_cv_signals_in.get("qr_payload_types") if isinstance(image_cv_signals_in.get("qr_payload_types"), list) else [],
+                        "qr_payloads": (image_cv_signals_in.get("qr_payloads") or [])[:6] if isinstance(image_cv_signals_in.get("qr_payloads"), list) else [],
+                        "qr_redirect_probe": image_cv_signals_in.get("qr_redirect_probe") if isinstance(image_cv_signals_in.get("qr_redirect_probe"), dict) else {},
+                        "qr": qr_details,
+                        "image_trust_channels": trust_channels,
                     },
-                )
+                    "signals": sec_signals,
+                    "summary": "Image-sidecar security signal normalization with QR payload evidence",
+                },
+            )
     except Exception:
         pass
     next_questions = data.get("next_questions") or []
@@ -1043,13 +1572,116 @@ async def chat_query(
     if not next_questions and not products and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
         # Fallback follow-ups when no candidates are found but backend did not emit NQE prompts.
         next_questions = [
-            {"id": "widen_budget", "text": "Can we widen your budget range by $200-$400?", "goal": "increase_match_space"},
+            {
+                "id": "widen_budget",
+                "text": "Can we widen your budget upward from your current range?",
+                "goal": "increase_match_space",
+                "options": [
+                    {"id": "widen_small", "label": "Widen a little (+$200)", "value": "expand_budget:+200"},
+                    {"id": "widen_medium", "label": "Widen more (+$400)", "value": "expand_budget:+400"},
+                ],
+            },
             {"id": "relax_brand", "text": "Are you open to brands beyond Apple/Windows-first picks?", "goal": "increase_match_space"},
             {"id": "priority_tradeoff", "text": "Prioritize gaming FPS or rendering/export speed first?", "goal": "resolve_tradeoff"},
         ]
     if not assistant_message and not products and next_questions:
         prompts = [f"- {q.get('text')}" for q in next_questions if isinstance(q, dict) and q.get("text")]
         assistant_message = "I could not find a confident in-catalog match yet. Try one of these refinements:\n" + "\n".join(prompts)
+
+    aq_out = apply_answer_quality(
+        query=q,
+        assistant_message=assistant_message,
+        turn_intent=turn_intent,
+        products=products,
+        image_cv_signals=image_cv_signals_in if isinstance(image_cv_signals_in, dict) else {},
+        has_image=has_image,
+        buyer_persona=data.get("buyer_persona"),
+        brand_name=None,
+    )
+    assistant_message = aq_out.get("assistant_message")
+    aq_intent = aq_out.get("intent_decomposed") if isinstance(aq_out.get("intent_decomposed"), dict) else {}
+    aq_template = aq_out.get("template_selected") if isinstance(aq_out.get("template_selected"), dict) else {}
+    aq_coverage = aq_out.get("answer_coverage_scored") if isinstance(aq_out.get("answer_coverage_scored"), dict) else {}
+    try:
+        if decision_trace_id:
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="intent_decomposed",
+                source_type="agent",
+                source_id="Copywriting_Agent",
+                target_type="chat",
+                target_id=None,
+                payload=aq_intent,
+            )
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="template_selected",
+                source_type="agent",
+                source_id="Copywriting_Agent",
+                target_type="chat",
+                target_id=None,
+                payload=aq_template,
+            )
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="answer_coverage_scored",
+                source_type="agent",
+                source_id="Copywriting_Agent",
+                target_type="chat",
+                target_id=None,
+                payload=aq_coverage,
+            )
+    except Exception:
+        pass
+
+    copy_out = maybe_apply_copywriting(
+        assistant_message=assistant_message,
+        turn_intent=turn_intent,
+        surface=copy_surface,
+        requested_enabled=copywriting_requested,
+        profile_id=copy_profile_id,
+        inline_profile=copy_profile_inline,
+        brand_name=brand_name,
+    )
+    assistant_message = copy_out.get("assistant_message")
+    copy_meta = copy_out.get("meta") if isinstance(copy_out.get("meta"), dict) else {}
+    try:
+        if decision_trace_id and (bool(copy_meta.get("applied")) or bool(copywriting_requested)):
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="copywriting",
+                source_type="agent",
+                source_id="Copywriting_Agent",
+                target_type="chat",
+                target_id=None,
+                payload={
+                    "applied": bool(copy_meta.get("applied")),
+                    "mode": copy_meta.get("mode"),
+                    "profile_id": copy_meta.get("profile_id"),
+                    "tone": copy_meta.get("tone"),
+                    "surface": copy_meta.get("surface"),
+                    "cpu_cost": copy_meta.get("cpu_cost"),
+                    "latency_ms": copy_meta.get("latency_ms"),
+                    "reason": copy_meta.get("reason"),
+                },
+            )
+        if decision_trace_id and bool(copy_meta.get("policy_gate_triggered")):
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="copy_policy_gate",
+                source_type="agent",
+                source_id="Copywriting_Agent",
+                target_type="chat",
+                target_id=None,
+                payload={
+                    "action": "sanitize_claims",
+                    "triggered": True,
+                    "profile_id": copy_meta.get("profile_id"),
+                },
+            )
+    except Exception:
+        pass
+
     confidence = None
     try:
         # Use top normalized score as confidence proxy if present
@@ -1074,8 +1706,80 @@ async def chat_query(
 
     budget_viability = data.get("budget_viability") if isinstance(data.get("budget_viability"), dict) else {"status": "unknown"}
     use_case_analysis = data.get("use_case_analysis") if isinstance(data.get("use_case_analysis"), dict) else None
+    constraints_used = data.get("constraints_used") if isinstance(data.get("constraints_used"), dict) else {}
+    use_case_key = (
+        (use_case_analysis.get("use_case_key") if isinstance(use_case_analysis, dict) else None)
+        or constraints_used.get("use_case")
+    )
+    effective_budget = _budget_range_from_slots(
+        _extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else {}),
+        q,
+    )
+    anchor_sections = _build_anchor_sections(
+        images=images_array if isinstance(images_array, list) else [],
+        products=products,
+        query=q,
+        budget=effective_budget,
+        use_case_key=str(use_case_key) if use_case_key else None,
+        buyer_persona=str(data.get("buyer_persona") or "") or None,
+    )
     panel_intent = "SUPPORT_CLAIM" if bool(image_cv_signals_in.get("damage_detected")) else turn_intent
     _backend_right_panel = data.get("right_panel") if isinstance(data.get("right_panel"), dict) else None
+    if isinstance(_backend_right_panel, dict) and anchor_sections:
+        _backend_right_panel = dict(_backend_right_panel)
+        _backend_right_panel["anchor_sections"] = anchor_sections
+    _right_panel_contract = _backend_right_panel or _build_right_panel_contract(
+        products=products,
+        turn_intent=panel_intent,
+        budget_viability=budget_viability,
+        use_case_analysis=use_case_analysis,
+        anchor_sections=anchor_sections,
+    )
+    try:
+        if isinstance(_right_panel_contract, dict):
+            _right_panel_contract["image_untrusted"] = bool(image_security_posture.get("image_untrusted"))
+            _right_panel_contract["image_degraded_mode"] = bool(image_security_posture.get("image_degraded_mode"))
+            _right_panel_contract["security_route"] = str(image_security_posture.get("route") or "allow")
+            if image_security_posture.get("warning_message"):
+                _right_panel_contract["security_summary"] = str(image_security_posture.get("warning_message"))
+    except Exception:
+        pass
+    try:
+        if decision_trace_id:
+            log_trace_event(
+                trace_id=decision_trace_id,
+                event_type="right_panel_anchor_sections",
+                source_type="agent",
+                source_id="Candidate_Retrieval_Agent",
+                target_type="ui",
+                target_id="right_panel",
+                payload={
+                    "count": len(anchor_sections),
+                    "anchors": [
+                        {
+                            "anchor_id": str(s.get("anchor_id")),
+                            "brand": ((s.get("anchor_hint") or {}).get("brand") if isinstance(s.get("anchor_hint"), dict) else None),
+                            "top_skus": [str((p or {}).get("sku") or "") for p in (s.get("top_products") or [])[:3]],
+                        }
+                        for s in anchor_sections[:6]
+                    ],
+                    "products_summary": [
+                        {
+                            "sku": p.get("sku"),
+                            "name": p.get("name"),
+                            "score_norm": p.get("score_norm"),
+                            "reasons": (p.get("why") or [])[:3],
+                            "reason_codes": (p.get("reason_codes") or [])[:3],
+                            "price": p.get("price"),
+                        }
+                        for p in (products or [])[:8]
+                        if isinstance(p, dict)
+                    ],
+                    "right_panel_contract": _right_panel_contract,
+                },
+            )
+    except Exception:
+        pass
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -1095,12 +1799,13 @@ async def chat_query(
         "budget_viability": budget_viability,
         "use_case_analysis": use_case_analysis,
         "buyer_persona": data.get("buyer_persona"),
-        "right_panel": _backend_right_panel or _build_right_panel_contract(
-            products=products,
-            turn_intent=panel_intent,
-            budget_viability=budget_viability,
-            use_case_analysis=use_case_analysis,
-        ),
+        "right_panel": _right_panel_contract,
+        "copywriting": copy_meta,
+        "image_untrusted": bool(image_security_posture.get("image_untrusted")),
+        "image_degraded_mode": bool(image_security_posture.get("image_degraded_mode")),
+        "chat_lockdown": bool(image_security_posture.get("chat_lockdown")),
+        "needs_human_review": bool(image_security_posture.get("needs_human_review")),
+        "security_route": str(image_security_posture.get("route") or "allow"),
     }
     try:
         _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)

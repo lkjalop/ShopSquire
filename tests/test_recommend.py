@@ -231,6 +231,48 @@ def test_checkout_upsell_returns_trace_and_reasoned_promotions():
         assert (body.get("results")[0] or {}).get("model_source")
 
 
+def test_checkout_upsell_is_available_without_api_key():
+    anon_client = TestClient(app)
+    r = anon_client.get("/api/v1/recommend/checkout_upsell", params={"uid": "u-anon", "cart_skus": "CARTSKU", "limit": 2})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("decision_trace_id")
+    assert isinstance(body.get("results"), list)
+
+
+def test_price_filter_nearest_viable_band_can_fall_back_below_requested_window():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-nearest-below-1','LOW-NEAR-1','Gaming Candidate Near Below',189900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-nearest-below-1','p-nearest-below-1',7,'default')"))
+            db.commit()
+        r = client.get("/api/v1/recommend/suggest", params={"uid": "u-nearest", "query": "gaming laptop 2200 to 2900"})
+        assert r.status_code == 200
+        body = r.json()
+        assert isinstance(body.get("results"), list)
+        assert len(body.get("results") or []) > 0
+        assert isinstance(body.get("price_filter"), dict)
+        assert body.get("price_filter", {}).get("fallback") in ("db_nearest_viable_band", "db_price_range", "db_price_range_brand")
+        ev = client.get(f"/api/v1/trace/{body.get('trace_id')}/events")
+        assert ev.status_code == 200
+        events = ev.json().get("events") or []
+        price_events = [e for e in events if str((e or {}).get("source_id") or "") == "Price_Filter_Agent"]
+        assert price_events
+        payload = (price_events[-1] or {}).get("payload") or {}
+        assert payload.get("fallback") in ("db_nearest_viable_band", "db_price_range", "db_price_range_brand")
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
 def test_nqe_feedback_emits_user_answer_bound_event():
     trace_id = "trace-nqe-feedback-test"
     r = client.post(
@@ -272,6 +314,54 @@ def test_image_text_fusion_can_infer_brand_from_labels(monkeypatch):
         brands = [str(b).lower() for b in (constraints.get("brands") or [])]
         assert "apple" in brands
         assert isinstance(body.get("assistant_message") or "", str)
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_image_hint_apple_uses_nearest_above_budget_before_generic_alternatives(monkeypatch):
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-apple-near-1','MBP14-NEAR','MacBook Pro 14',159900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-generic-low-1','GEN-LOW-1','Lenovo IdeaPad Budget',89900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-apple-near-1','p-apple-near-1',5,'default')"))
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-generic-low-1','p-generic-low-1',5,'default')"))
+            db.commit()
+
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": "u-apple-nearest",
+                "query": "please help me choose for university budget 700 to 1100",
+                "budget_min": 700,
+                "budget_max": 1100,
+                "image_labels": "macbook,laptop,apple",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        results = body.get("results") or []
+        assert results, body
+        names = [str((x or {}).get("name") or "").lower() for x in results[:3]]
+        # We should prioritize Apple nearest-above-budget matches before in-budget generic alternatives.
+        assert any(("macbook" in n or "apple" in n) for n in names), names
+        top_price = int(((results[0] or {}).get("price_cents") or 0) / 100)
+        assert top_price >= 1100
     finally:
         RecommendationService.retrieve_candidates = orig_retrieve
 

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from typing import Any, Dict, List, Optional
 import json
+import os
 import uuid
 import hashlib
 import inspect
@@ -13,6 +14,7 @@ from src.app.services.cv_provider import ManagedCVProvider
 from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.intake_gate import strict_image_ingest_gate
 from src.app.services.image_intake import sanitize_image
+from src.app.routers.support_complaints import _normalize_ocr_and_detect, _probe_redirect_chain
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 
@@ -110,16 +112,22 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
 
     labels = []
     extracted_text = ""
+    product_identity = None
     provider_name = "none"
     try:
         provider = ManagedCVProvider()
         provider_name = provider.provider
-        labels, extracted_text = await provider.get_labels_and_text(content)
+        labels, extracted_text, product_identity = await provider.get_labels_and_text(
+            content, mode="visual_search",
+        )
     except Exception:
-        labels, extracted_text = [], ""
+        labels, extracted_text, product_identity = [], "", None
 
-    if not labels and name:
-        labels = [name]
+    # P3: Always append sanitized filename as a weak hint (not just when labels empty)
+    if name:
+        fname_hint = os.path.splitext(str(name).lower())[0].replace("-", " ").replace("_", " ")
+        if fname_hint and fname_hint not in " ".join(labels).lower():
+            labels = (labels or []) + [fname_hint]
 
     triager = BasicCVTriage()
     triage_result = triager.analyze(labels, extracted_text or "")
@@ -143,6 +151,11 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
         "ingest_gate": gate,
     }
 
+    # P4: Always surface product identity — decoupled from security flags.
+    # Even security-flagged images carry brand/model info useful for recommendations.
+    if product_identity:
+        resp["product_identity"] = product_identity
+
     # Run image intent router for smart routing guidance
     try:
         intent_result = classify_image_intent(
@@ -158,7 +171,23 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
     # Security scan: QR/barcode + adversarial detection (best-effort)
     security_clean = True
     security_signals: Dict[str, Any] = {}
+
+    # P5: Cross-validate filename brand vs vision model brand (spoofing detection)
+    try:
+        from src.app.services.filename_brand_validator import validate_filename_vs_labels
+        brand_validation = validate_filename_vs_labels(
+            filename=str(name or ""),
+            vision_labels=labels,
+            product_identity=product_identity,
+        )
+        if brand_validation.get("mismatch"):
+            security_signals["filename_brand_mismatch"] = True
+            resp["brand_validation"] = brand_validation
+    except Exception:
+        pass
+
     qr_product_data: Dict[str, Any] = {}
+    qr_redirect_probe: Dict[str, Any] = {"enabled": False, "checked": False, "chain": []}
     try:
         from src.app.rules.barcode_decode import decode_barcodes
         qr = decode_barcodes([(str(name or "image.jpg"), content)])
@@ -166,6 +195,21 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
         if qr_codes:
             security_signals["qr_code_detected"] = True
             security_clean = False
+            # Surface decoded QR payloads (first 5, truncated to 300 chars each)
+            security_signals["qr_payloads"] = [
+                {
+                    "data": str(c.get("data") or "")[:300],
+                    "type": str(c.get("type") or "QR_CODE"),
+                    "payload_type": str(c.get("payload_type") or "other"),
+                }
+                for c in qr_codes[:5]
+                if str(c.get("data") or "").strip()
+            ]
+            security_signals["qr_payload_types"] = list({
+                str(c.get("payload_type") or "").strip()
+                for c in qr_codes
+                if str(c.get("payload_type") or "").strip()
+            })
             # Check for prompt injection in QR data
             try:
                 from src.app.routers.support_complaints import _detect_ocr_prompt_injection
@@ -184,6 +228,11 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
                         host = (urlparse(data).hostname or "").lower()
                         if host and host not in ("127.0.0.1", "localhost"):
                             security_signals["qr_external_url"] = True
+                            security_signals["qr_external_url_detected"] = True
+                            try:
+                                qr_redirect_probe = await _probe_redirect_chain(data, timeout_s=1.25, max_hops=3)
+                            except Exception:
+                                qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
                             break
             except Exception:
                 pass
@@ -258,10 +307,54 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
     except Exception:
         pass
 
+    # OCR normalization + detector pass (PayID/PCI/crypto/ransom/encoded/unicode).
+    try:
+        ocr_det = _normalize_ocr_and_detect(extracted_text)
+        stage_a_text = str(extracted_text or "").strip()
+        deep_trigger = bool(
+            (not stage_a_text)
+            or (len(stage_a_text) < 12 and bool(security_signals.get("qr_code_detected")))
+        )
+        if deep_trigger:
+            # Risk-triggered deep OCR for low-evidence or overlay-heavy images.
+            from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
+            deep = run_risk_triggered_multicontrast_ocr(content, ocr_provider=None, enabled=True)
+            deep_text = str(deep.get("best_text") or "").strip()
+            if deep_text:
+                extracted_text = deep_text[:500]
+                ocr_det = _normalize_ocr_and_detect(extracted_text)
+            if bool(deep.get("invisible_text_suspected")):
+                security_signals["invisible_text_suspected"] = True
+                security_clean = False
+
+        if bool(ocr_det.get("payment_social_engineering")):
+            security_signals["payment_social_engineering"] = True
+            security_clean = False
+        if bool(ocr_det.get("pci_card_exposed")):
+            security_signals["pci_card_exposed"] = True
+            security_clean = False
+        if bool(ocr_det.get("crypto_payment_uri")):
+            security_signals["crypto_payment_uri"] = True
+            security_clean = False
+        if bool(ocr_det.get("ransomware_indicator")):
+            security_signals["ransomware_indicator"] = True
+            security_clean = False
+        if bool(ocr_det.get("encoded_payload_detected")):
+            security_signals["encoded_payload_detected"] = True
+            security_clean = False
+        if bool(ocr_det.get("homoglyph_injection")):
+            security_signals["homoglyph_injection"] = True
+            security_clean = False
+    except Exception:
+        pass
+
     resp["security"] = {
         "clean": security_clean,
         "signals": security_signals,
         "reupload_needed": not security_clean,
+        # Surface the OCR/extracted text here so the UI Security Matrix can show it
+        "extracted_text": (extracted_text or "")[:500],
+        "qr_redirect_probe": qr_redirect_probe,
     }
     # Attach productive QR data (manufacturer URLs, model hints) for downstream identity extraction
     if qr_product_data:

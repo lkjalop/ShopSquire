@@ -3,9 +3,32 @@ from __future__ import annotations
 import os
 import json
 import base64
-from typing import Tuple, List
+from typing import Dict, Optional, Tuple, List
 import logging
 from src.app.security.url_guard import ensure_safe_outbound_url
+
+# ── Vision prompt templates (mode-selectable) ──
+_TRIAGE_PROMPT = (
+    "You are an e-commerce vision assistant. Analyze the provided image and "
+    "return a compact JSON object with keys 'labels' (array of lowercase keywords) "
+    "and 'text' (any visible serial/receipt text snippets). Use laptop-related labels like "
+    "screen, crack, hinge, keyboard, charger when relevant. "
+    'Example: {"labels":["screen","crack"],"text":"SN-ABC123"}.'
+)
+
+_PRODUCT_IDENTITY_PROMPT = (
+    "You are a product identification assistant for an e-commerce platform. "
+    "Analyze the provided image and return a compact JSON object with keys: "
+    "'brand' (brand name, e.g. Apple, MSI, Lenovo, Dell, HP, Asus, Acer, Samsung, Microsoft, Razer — use null if unknown), "
+    "'model' (model name or series if visible, e.g. MacBook Pro 16, MSI GT76, ThinkPad X1 Carbon — use null if unknown), "
+    "'category' (e.g. laptop, gaming_laptop, ultrabook, tablet, phone, desktop — use null if unknown), "
+    "'labels' (array of 3-8 lowercase product descriptor keywords, e.g. [\"gaming\", \"rgb_keyboard\", \"large_screen\"]), "
+    "'text' (any visible model numbers, serial numbers, or spec text). "
+    "If you cannot determine a field, use null. "
+    'Example: {"brand":"MSI","model":"GT76","category":"gaming_laptop",'
+    '"labels":["gaming","rgb_keyboard","dragon_logo"],"text":"GT76 10SF"}.'
+)
+from src.app.services.cv_ocr import extract_text as extract_text_stage_a
 
 
 class ManagedCVProvider:
@@ -18,7 +41,22 @@ class ManagedCVProvider:
         self.provider = os.getenv("CV_PROVIDER", "none").lower()
         self.model = os.getenv("CV_MODEL", "llava")
 
-    async def get_labels_and_text(self, image_bytes: bytes) -> Tuple[List[str], str]:
+    async def get_labels_and_text(
+        self,
+        image_bytes: bytes,
+        mode: str = "triage",
+    ) -> Tuple[List[str], str, Optional[Dict]]:
+        """Return (labels, text, product_identity).
+
+        *mode* selects the vision prompt:
+        - ``"triage"``        — damage/component labels (default, backwards-compat)
+        - ``"visual_search"`` — product brand/model/category extraction
+
+        *product_identity* is a dict with ``brand``, ``model``, ``category``
+        keys when ``mode="visual_search"`` and the provider returns them,
+        otherwise ``None``.
+        """
+        product_identity: Optional[Dict] = None
         if self.provider == "google":
             try:
                 from google.cloud import vision  # type: ignore
@@ -35,12 +73,12 @@ class ManagedCVProvider:
                 )
                 labels = [l.description.lower() for l in response.label_annotations or []]
                 text = response.text_annotations[0].description if response.text_annotations else ""
-                return labels, text
+                return labels, text, None
             except Exception:
                 pass
         if self.provider == "ollama":
             try:
-                return self._ollama_labels_and_text(image_bytes)
+                return self._ollama_labels_and_text(image_bytes, mode=mode)
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.
                 logging.getLogger(__name__).exception("cv_provider.ollama_failed")
@@ -48,13 +86,13 @@ class ManagedCVProvider:
         try:
             text = self._tesseract_text(image_bytes)
             if text:
-                return [], text
+                return [], text, None
         except Exception:
             logging.getLogger(__name__).exception("cv_provider.tesseract_failed")
         # Fallback: no provider
-        return [], ""
+        return [], "", None
 
-    def _ollama_labels_and_text(self, image_bytes: bytes) -> Tuple[List[str], str]:
+    def _ollama_labels_and_text(self, image_bytes: bytes, *, mode: str = "triage") -> Tuple[List[str], str, Optional[Dict]]:
         """Call Ollama REST API with a vision model to get labels + OCR-like text.
 
         Expects Ollama running locally on 127.0.0.1:11434.
@@ -63,12 +101,7 @@ class ManagedCVProvider:
         import urllib.error
 
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
-        prompt = (
-            "You are an e-commerce vision assistant. Analyze the provided image and "
-            "return a compact JSON object with keys 'labels' (array of lowercase keywords) "
-            "and 'text' (any visible serial/receipt text snippets). Use laptop-related labels like "
-            "screen, crack, hinge, keyboard, charger when relevant. Example: {\"labels\":[\"screen\",\"crack\"],\"text\":\"SN-ABC123\"}."
-        )
+        prompt = _PRODUCT_IDENTITY_PROMPT if mode == "visual_search" else _TRIAGE_PROMPT
         payload = json.dumps({
             "model": self.model,
             "prompt": prompt,
@@ -126,9 +159,10 @@ class ManagedCVProvider:
                 continue
         else:
             logging.getLogger(__name__).warning("cv_provider.ollama_unreachable url=%s err=%s", url, last_err)
-            return [], ""
+            return [], "", None
 
         # Try to parse JSON from the model's response
+        product_identity: Optional[Dict] = None
         try:
             cleaned = (output or "").strip()
             # Remove common Markdown code fences produced by vision models.
@@ -152,7 +186,23 @@ class ManagedCVProvider:
                 obj = json.loads(candidate)
                 labels = [str(x).lower() for x in (obj.get("labels", []) or [])]
                 text = str(obj.get("text", "") or "")
-                return labels, text
+                # Extract product identity fields when in visual_search mode
+                if mode == "visual_search":
+                    _brand = obj.get("brand")
+                    _model = obj.get("model")
+                    _category = obj.get("category")
+                    if any(v for v in (_brand, _model, _category)):
+                        product_identity = {
+                            "brand": str(_brand).strip() if _brand else None,
+                            "model": str(_model).strip() if _model else None,
+                            "category": str(_category).strip().lower() if _category else None,
+                        }
+                        # Also inject brand/model into labels for downstream compat
+                        if _brand and str(_brand).lower() not in " ".join(labels):
+                            labels.append(str(_brand).lower())
+                        if _model and str(_model).lower() not in " ".join(labels):
+                            labels.append(str(_model).lower())
+                return labels, text, product_identity
         except Exception:
             logging.getLogger(__name__).exception("cv_provider.ollama_parse_failed output=%s", output)
             pass
@@ -160,18 +210,52 @@ class ManagedCVProvider:
         tokens = [t.strip().lower() for t in output.replace("\n", " ").split(" ") if t.strip()]
         hints = {"screen", "crack", "hinge", "keyboard", "charger", "battery", "adapter"}
         labels = [t for t in tokens if t in hints][:10]
-        return labels, ""
+        return labels, "", None
+
+    def _stage_b_threshold(self) -> float:
+        try:
+            return max(0.0, min(1.0, float(os.getenv("CV_STAGE_B_OCR_CONFIDENCE_MIN", "0.45") or 0.45)))
+        except Exception:
+            return 0.45
+
+    def _needs_stage_b(self, text: str, confidence: float) -> bool:
+        txt = str(text or "").strip()
+        if not txt:
+            return True
+        if float(confidence or 0.0) < self._stage_b_threshold():
+            return True
+        # Very short text from noisy screenshots usually means we missed overlay data.
+        return len(txt) < 12
 
     def _tesseract_text(self, image_bytes: bytes) -> str:
         try:
-            from PIL import Image
-            import pytesseract
+            _ocr_provider = (os.getenv("CV_OCR_PROVIDER") or "tesseract")
+            out = extract_text_stage_a(
+                image_bytes,
+                provider=_ocr_provider,
+                fallback=(os.getenv("CV_OCR_FALLBACK") or None),
+            )
+            stage_a_text = " ".join(str(out.get("text") or "").split())[:2000]
+            stage_a_conf = float(out.get("confidence") or 0.0)
+            # Skip Stage B when OCR is intentionally disabled — it would also return
+            # empty text, so the deep multi-contrast pass adds no value and only wastes time.
+            if _ocr_provider in ("disabled", "none", "off"):
+                return stage_a_text
+            if not self._needs_stage_b(stage_a_text, stage_a_conf):
+                return stage_a_text
 
-            img = Image.open(__import__("io").BytesIO(image_bytes)).convert("RGB")
-            # Keep it conservative: tesseract can be noisy; strip and cap.
-            txt = pytesseract.image_to_string(img) or ""
-            txt = " ".join(txt.split())
-            return txt[:2000]
+            # Stage B: triggered fallback (multi-contrast + bottom-band ROI passes).
+            from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
+
+            deep = run_risk_triggered_multicontrast_ocr(
+                image_bytes,
+                ocr_provider=_ocr_provider,
+                enabled=True,
+            )
+            stage_b_text = " ".join(str(deep.get("best_text") or "").split())[:2000]
+            if len(stage_b_text) > len(stage_a_text):
+                return stage_b_text
+            return stage_a_text
         except Exception:
             logging.getLogger(__name__).exception("tesseract OCR failed")
             return ""

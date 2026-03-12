@@ -109,16 +109,48 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.cardNameLink {
+  text-decoration: none;
+}
+.cardNameLink:hover .cardName {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
 .cardMeta {
   font-size: 11px;
   color: #6b7280;
   margin-top: 2px;
+}
+.cardLink {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: #1d4ed8;
+  text-decoration: none;
+}
+.cardLink:hover {
+  text-decoration: underline;
 }
 .cardPrice {
   font-size: 13px;
   font-weight: 700;
   color: #059669;
   white-space: nowrap;
+}
+.addBtn {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #ea580c;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.addBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .cardFit {
   font-size: 10px;

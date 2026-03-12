@@ -181,3 +181,201 @@ def run_pipeline(
         "pack_version": getattr(pack, "version", None),
         "caps": {"max_images": max_images, "max_image_bytes": max_bytes, "normalize_max_dim": max_dim},
     }
+
+
+def _ocr_variants_for_region(
+    img_region: Any,
+    gray_region: Any,
+    prefix: str,
+    *,
+    clahe_obj: Any = None,
+) -> List[Tuple[str, Any]]:
+    """Build a list of (name, image) contrast variants for a single image region."""
+    from PIL import Image, ImageOps, ImageEnhance  # type: ignore
+    variants: List[Tuple[str, Any]] = [
+        (f"{prefix}_base", img_region),
+        (f"{prefix}_gray", gray_region),
+        (f"{prefix}_inverted", ImageOps.invert(gray_region)),
+    ]
+    try:
+        variants.append((f"{prefix}_high_contrast", ImageEnhance.Contrast(gray_region).enhance(2.4)))
+    except Exception:
+        pass
+    if clahe_obj is not None:
+        try:
+            import numpy as np  # type: ignore
+            import cv2  # type: ignore
+            arr = np.array(gray_region)
+            arr_clahe = clahe_obj.apply(arr)
+            arr_adapt = cv2.adaptiveThreshold(
+                arr_clahe, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 25, 5,
+            )
+            variants.append((f"{prefix}_clahe", Image.fromarray(arr_clahe)))  # type: ignore[name-defined]
+            variants.append((f"{prefix}_adaptive", Image.fromarray(arr_adapt)))  # type: ignore[name-defined]
+        except Exception:
+            pass
+    return variants
+
+
+def run_risk_triggered_multicontrast_ocr(
+    image_bytes: bytes,
+    *,
+    ocr_provider: str | None = None,
+    enabled: bool = True,
+) -> Dict[str, Any]:
+    """Deep OCR path for suspicious images only.
+
+    Caller is expected to gate this behind Stage-1 risk signals.
+    Scans these zones to detect adversarial low-contrast text anywhere in the image:
+
+    Zone 0  — full image (base + grayscale + inverted + high-contrast + CLAHE)
+    Zone 1  — bottom band  (lower 38% — existing)
+    Zone 2  — right-side band  (right 38% — NEW: detects text near trackpad)
+    Zone 3  — top band  (upper 20%)
+    Zone 4  — quadrant grid  (TL, TR, BL, BR — 4 cells)
+    Zone 5  — sliding-window  (3×2 grid with 20% overlap — full coverage)
+    """
+    if not enabled or not image_bytes:
+        return {"best_text": "", "best_confidence": 0.0, "runs": [], "triggered": False}
+    try:
+        from PIL import Image, ImageOps, ImageEnhance  # type: ignore
+        from io import BytesIO
+    except Exception:
+        return {"best_text": "", "best_confidence": 0.0, "runs": [], "triggered": True, "error": "pil_unavailable"}
+
+    ocr = OCRPipeline(provider=ocr_provider)
+    runs: List[Dict[str, Any]] = []
+    best_text = ""
+    best_conf = 0.0
+    base_text = ""
+    base_conf = 0.0
+
+    try:
+        img = Image.open(BytesIO(image_bytes)).convert("RGB")
+        gray = ImageOps.grayscale(img)
+        w, h = img.size
+
+        # ── Prepare CLAHE once (requires cv2; degrades gracefully without it) ──
+        clahe_obj = None
+        try:
+            import cv2  # type: ignore
+            import numpy as np  # type: ignore
+            clahe_obj = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        except Exception:
+            pass
+
+        all_variants: List[Tuple[str, Any]] = []
+
+        # ── Zone 0: full image ──
+        all_variants += _ocr_variants_for_region(img, gray, "full", clahe_obj=clahe_obj)
+
+        # ── Zone 1: bottom band (lower 38%) ──
+        try:
+            band_top = int(max(0, h * 0.62))
+            bb = img.crop((0, band_top, w, h))
+            all_variants += _ocr_variants_for_region(
+                bb, ImageOps.grayscale(bb), "bottom_band", clahe_obj=clahe_obj
+            )
+        except Exception:
+            pass
+
+        # ── Zone 2: right-side band (right 38%) ── NEW
+        # Catches adversarial low-contrast text overlaid near trackpad / right margin.
+        try:
+            band_left = int(max(0, w * 0.62))
+            rb = img.crop((band_left, 0, w, h))
+            all_variants += _ocr_variants_for_region(
+                rb, ImageOps.grayscale(rb), "right_band", clahe_obj=clahe_obj
+            )
+        except Exception:
+            pass
+
+        # ── Zone 3: top band (upper 20%) ──
+        try:
+            band_bot = int(min(h, h * 0.20))
+            tb = img.crop((0, 0, w, band_bot))
+            all_variants += _ocr_variants_for_region(
+                tb, ImageOps.grayscale(tb), "top_band", clahe_obj=clahe_obj
+            )
+        except Exception:
+            pass
+
+        # ── Zone 4: quadrant grid (TL / TR / BL / BR) ──
+        try:
+            mw, mh = w // 2, h // 2
+            for q_name, box in (
+                ("quad_tl", (0, 0, mw, mh)),
+                ("quad_tr", (mw, 0, w, mh)),
+                ("quad_bl", (0, mh, mw, h)),
+                ("quad_br", (mw, mh, w, h)),
+            ):
+                qr = img.crop(box)
+                all_variants += _ocr_variants_for_region(
+                    qr, ImageOps.grayscale(qr), q_name, clahe_obj=clahe_obj
+                )
+        except Exception:
+            pass
+
+        # ── Zone 5: sliding-window 3×2 grid with 20% overlap ──
+        # 3 columns × 2 rows = 6 tiles, each overlapping 20% with neighbours.
+        # Ensures no text is missed at tile borders.
+        try:
+            cols, rows = 3, 2
+            step_x = w // cols
+            step_y = h // rows
+            overlap_x = int(step_x * 0.20)
+            overlap_y = int(step_y * 0.20)
+            for row in range(rows):
+                for col in range(cols):
+                    x0 = max(0, col * step_x - overlap_x)
+                    y0 = max(0, row * step_y - overlap_y)
+                    x1 = min(w, (col + 1) * step_x + overlap_x)
+                    y1 = min(h, (row + 1) * step_y + overlap_y)
+                    tile = img.crop((x0, y0, x1, y1))
+                    tile_name = f"win_r{row}c{col}"
+                    # Only grayscale + CLAHE for sliding-window tiles (perf budget)
+                    tile_gray = ImageOps.grayscale(tile)
+                    all_variants.append((tile_name, tile_gray))
+                    if clahe_obj is not None:
+                        try:
+                            arr_t = np.array(tile_gray)
+                            arr_t_clahe = clahe_obj.apply(arr_t)
+                            all_variants.append((f"{tile_name}_clahe", Image.fromarray(arr_t_clahe)))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # ── Run OCR on every variant ──
+        for v_name, im in all_variants:
+            try:
+                buf = BytesIO()
+                im.save(buf, format="PNG")
+                out = ocr.run(buf.getvalue())
+                text = str(out.get("text") or "")
+                conf = float(out.get("confidence") or 0.0)
+                runs.append({"pass": v_name, "text": text, "confidence": conf})
+                if v_name == "full_base":
+                    base_text = text
+                    base_conf = conf
+                if conf > best_conf or len(text) > len(best_text):
+                    best_text, best_conf = text, conf
+            except Exception:
+                pass
+
+    except Exception:
+        return {"best_text": "", "best_confidence": 0.0, "runs": runs, "triggered": True, "error": "deep_ocr_failed"}
+
+    invisible_text_suspected = bool(
+        (len(base_text.strip()) < 6 and len(best_text.strip()) >= 16)
+        or (base_conf < 0.2 and best_conf >= 0.5 and len(best_text.strip()) >= 10)
+    )
+    return {
+        "best_text": best_text,
+        "best_confidence": best_conf,
+        "runs": runs,
+        "triggered": True,
+        "invisible_text_suspected": invisible_text_suspected,
+    }

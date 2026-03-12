@@ -236,22 +236,32 @@ def _log_path(incident_id: str) -> Path:
     return p
 
 
-def _append_chat(incident_id: str, role: str, message: str, meta: Dict | None = None) -> None:
+def _append_chat(
+    incident_id: str,
+    role: str,
+    message: str,
+    meta: Dict | None = None,
+    *,
+    event_type: str = "message",
+    persist: bool = True,
+) -> None:
     import time as _time
     rec = {
         "incident_id": incident_id,
         "role": role,
         "message": message,
+        "event_type": event_type,
         "meta": meta or {},
         # Use wall clock; avoid relying on an active asyncio loop in sync endpoints.
         "ts": int(_time.time() * 1000),
     }
-    try:
-        p = _log_path(incident_id)
-        with p.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except Exception:
-        logging.getLogger(__name__).exception("failed to append chat to disk for %s", incident_id)
+    if persist:
+        try:
+            p = _log_path(incident_id)
+            with p.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception:
+            logging.getLogger(__name__).exception("failed to append chat to disk for %s", incident_id)
 
     # Publish to subscribers
     try:
@@ -712,15 +722,40 @@ async def sse_room(incident_id: str):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+class IncidentRoomMessageRequest(BaseModel):
+    message: str | None = None
+    role: str | None = None
+    event_type: str | None = None
+
+
 @router.post("/{incident_id}/room/message")
-def send_message(incident_id: str, message: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    if not (message or "").strip():
+def send_message(
+    incident_id: str,
+    body: IncidentRoomMessageRequest | None = None,
+    message: str | None = Query(default=None),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    event_type = str((body.event_type if body else None) or "").strip().lower() or "message"
+    actor_role = str((body.role if body else None) or "").strip().lower()
+    actor = "staff" if actor_role == "staff" else role
+    msg = str((body.message if body else None) or message or "")
+    if event_type == "typing":
+        _append_chat(
+            incident_id,
+            actor,
+            "",
+            meta={"actor": actor, "typing": True, "channel": "admin"},
+            event_type="typing",
+            persist=False,
+        )
+        return {"sent": True, "role": actor}
+    if not msg.strip():
         raise HTTPException(status_code=400, detail="message_required")
     try:
-        _append_chat(incident_id, role, message, meta={"actor": role})
+        _append_chat(incident_id, actor, msg.strip(), meta={"actor": actor, "channel": "admin"})
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
-    return {"sent": True}
+    return {"sent": True, "role": actor}
 
 
 @router.post("/{incident_id}/room/token")
@@ -1208,6 +1243,19 @@ def _seed_incident_chat_context(
         ctx_trace = trace_ctx.get("trace_id") or trace_id
         ctx_sev = trace_ctx.get("severity")
         ctx_findings = trace_ctx.get("findings") if isinstance(trace_ctx.get("findings"), list) else []
+        ctx_issue_type = (
+            trace_ctx.get("issue_type")
+            or ((context or {}).get("issue_type") if isinstance(context, dict) else None)
+        )
+        _damage = (
+            trace_ctx.get("damage_types")
+            or ((context or {}).get("damage_types") if isinstance(context, dict) else None)
+        )
+        ctx_damage_types = _damage if isinstance(_damage, list) else ([str(_damage)] if _damage else [])
+        ctx_warranty_candidate = (
+            trace_ctx.get("warranty_candidate")
+            or ((context or {}).get("warranty_candidate") if isinstance(context, dict) else None)
+        )
         summary_bits = []
         if ctx_case:
             summary_bits.append(f"Case: {ctx_case}")
@@ -1217,6 +1265,12 @@ def _seed_incident_chat_context(
             summary_bits.append(f"Severity: {ctx_sev}")
         if ctx_findings:
             summary_bits.append(f"Findings: {', '.join([str(x) for x in ctx_findings[:6]])}")
+        if ctx_issue_type:
+            summary_bits.append(f"Issue Type: {str(ctx_issue_type)}")
+        if ctx_damage_types:
+            summary_bits.append(f"Damage Types: {', '.join([str(x) for x in ctx_damage_types[:6]])}")
+        if ctx_warranty_candidate is not None:
+            summary_bits.append(f"Warranty Candidate: {str(ctx_warranty_candidate)}")
         seed_msg = "Thanks. A support specialist has been notified and will review your case."
         if summary_bits:
             seed_msg = seed_msg + "\n\nEscalation context:\n" + "\n".join(summary_bits)
@@ -1380,7 +1434,9 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
 
 
 class PublicChatMessage(BaseModel):
-    message: str
+    message: str | None = None
+    role: str | None = None
+    event_type: str | None = None
 
 
 @public_router.get("/{incident_id}/room/stream")
@@ -1432,12 +1488,53 @@ def public_send_message(
     token: str | None = Query(default=None),
     x_incident_token: str | None = Header(default=None, alias="x-incident-token"),
 ) -> Dict:
-    role = _require_public_token(incident_id, token or x_incident_token)
+    token_role = _require_public_token(incident_id, token or x_incident_token)
+    requested_role = str(getattr(body, "role", "") or "").strip().lower()
+    role = "staff" if requested_role == "staff" and token_role in (ROLE_MERCHANT, "staff") else token_role
+    event_type = str(getattr(body, "event_type", "") or "").strip().lower() or "message"
     msg = str(getattr(body, "message", "") or "")
-    if not msg.strip():
+    if event_type != "typing" and not msg.strip():
         raise HTTPException(status_code=400, detail="message_required")
     try:
+        if event_type == "typing":
+            _append_chat(
+                incident_id,
+                role,
+                "",
+                meta={"actor": role, "typing": True, "channel": "public"},
+                event_type="typing",
+                persist=False,
+            )
+            return {"sent": True, "role": role}
         _append_chat(incident_id, role, msg.strip(), meta={"actor": role, "channel": "public"})
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=500, detail="append_failed")
     return {"sent": True, "role": role}
+
+
+@public_router.get("/{incident_id}/summary/public")
+def public_incident_summary(
+    incident_id: str,
+    token: str | None = Query(default=None),
+    x_incident_token: str | None = Header(default=None, alias="x-incident-token"),
+) -> Dict:
+    _require_public_token(incident_id, token or x_incident_token)
+    eng = get_engine()
+    with eng.begin() as conn:
+        row = conn.execute(
+            sql_text(
+                "SELECT title, severity, created_at, status FROM incidents WHERE id = :id LIMIT 1"
+            ),
+            {"id": incident_id},
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="incident_not_found")
+    return {
+        "incident_id": incident_id,
+        "title": row[0] or "Escalated incident",
+        "severity": row[1] or "unknown",
+        "created_at": str(row[2] or ""),
+        "status": row[3] or "unknown",
+    }

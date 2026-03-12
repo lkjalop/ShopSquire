@@ -5,6 +5,13 @@ import os
 import re
 import json
 import ast
+import base64
+import binascii
+import logging
+import unicodedata
+import asyncio
+import hashlib
+import time
 
 from fastapi import APIRouter, Depends, UploadFile, File, Request, Form, HTTPException
 from pydantic import BaseModel
@@ -36,9 +43,20 @@ from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints
 from src.app.services.geoip import enrich_ip
 from src.app.policy.gate import evaluate_policy_gate
 from src.app.feature_flags import get_flags
+from src.app.security.exif_analyzer import analyze_exif
+from src.app.security.file_validator import validate_image_blob
+from src.app.security.image_threat_signals import (
+    detect_cross_image_split_injection as _detect_cross_image_split_injection_shared,
+    detect_ocr_encoded_payload as _detect_ocr_encoded_payload_shared,
+    detect_ocr_prompt_injection as _detect_ocr_prompt_injection_shared,
+    detect_qr_label_destination_mismatch as _detect_qr_label_destination_mismatch_shared,
+    normalize_ocr_and_detect as _normalize_ocr_and_detect_shared,
+    sanitize_unicode_injection as _sanitize_unicode_injection_shared,
+)
 
 
 router = APIRouter(prefix="/api/v1/support/complaints", tags=["support"])
+_QR_REDIRECT_TASKS: Dict[str, asyncio.Task] = {}
 
 
 def _get_support_thresholds() -> Dict[str, Any]:
@@ -254,11 +272,232 @@ _OCR_PROMPT_INJECTION_PAT = re.compile(
     r"show\s+secret|tool\s*:|function\s*call|execute\s+shell)"
 )
 
+_OCR_PAYMENT_SE_PAT = re.compile(
+    r"(?i)\b(pay[\W_]*(?:id|1d|ld)|bsb|iban|swift|venmo|cashapp|zelle|wallet|transfer|send\s+money)\b"
+)
+_OCR_CRYPTO_URI_PAT = re.compile(r"(?i)\b(bitcoin:|ethereum:|monero:|litecoin:)\b")
+_OCR_RANSOM_PAT = re.compile(
+    r"(?i)\b(encrypted|ransom|decrypt|pay\s+within|restore\s+files|btc\s+wallet|files\s+locked)\b"
+)
+_OCR_PCI_PAT = re.compile(r"\b(?:\d[ -]*?){13,19}\b")
+_OCR_B64_PAT = re.compile(r"\b(?:[A-Za-z0-9+/]{24,}={0,2})\b")
+_OCR_HEX_PAT = re.compile(r"\b(?:0x)?[0-9a-fA-F]{24,}\b")
+_OCR_AGENTIC_PAT = re.compile(
+    r"(?is)(\"tool\"\s*:|\"function\"\s*:|\"name\"\s*:|tool_call|function_call|"
+    r"add_to_cart|remove_from_cart|checkout|place_order|cancel_order|refund_order|"
+    r"execute_shell|run_command|curl\s+https?://|wget\s+https?://)"
+)
+_OCR_SPLIT_INJECTION_COMPOSITE_PAT = re.compile(
+    r"(?is)(ignore\s+previous.*instructions|system\s*prompt|developer\s*mode|"
+    r"tool\s*:|function\s*call|add_to_cart|checkout|place_order)"
+)
+_OCR_LABEL_HINT_PAT = re.compile(
+    r"(?i)\b(warranty|official|support|repair|return|invoice|receipt|university|student|gaming|office)\b"
+)
+
 
 def _detect_ocr_prompt_injection(text: str | None) -> bool:
-    if not text:
+    return _detect_ocr_prompt_injection_shared(text)
+
+
+def _luhn_ok(num: str) -> bool:
+    digits = [int(c) for c in re.sub(r"\D", "", num)]
+    if len(digits) < 13 or len(digits) > 19:
         return False
-    return bool(_OCR_PROMPT_INJECTION_PAT.search(text))
+    checksum = 0
+    parity = len(digits) % 2
+    for i, d in enumerate(digits):
+        if i % 2 == parity:
+            d *= 2
+            if d > 9:
+                d -= 9
+        checksum += d
+    return checksum % 10 == 0
+
+
+def _sanitize_unicode_injection(text: str | None) -> str:
+    """Normalize OCR text and strip invisible/control characters."""
+    return _sanitize_unicode_injection_shared(text)
+
+
+def _detect_ocr_encoded_payload(text: str | None) -> Dict[str, Any]:
+    return _detect_ocr_encoded_payload_shared(text)
+
+
+def _normalize_ocr_and_detect(text: str | None) -> Dict[str, Any]:
+    return _normalize_ocr_and_detect_shared(text)
+
+
+def _detect_cross_image_split_injection(texts: List[str]) -> bool:
+    return _detect_cross_image_split_injection_shared(texts)
+
+
+def _detect_qr_label_destination_mismatch(
+    qr_codes: List[Dict[str, Any]] | None,
+    *,
+    image_consistency: Dict[str, Any] | None = None,
+) -> bool:
+    return _detect_qr_label_destination_mismatch_shared(qr_codes, image_consistency=image_consistency)
+
+
+def _qr_redirect_probe_cache_ttl_sec() -> int:
+    try:
+        return max(60, int(os.getenv("QR_REDIRECT_CACHE_TTL_SEC", "1800") or 1800))
+    except Exception:
+        return 1800
+
+
+def _qr_redirect_cache_get(url: str) -> Dict[str, Any] | None:
+    u = str(url or "").strip()
+    if not u:
+        return None
+    key = hashlib.sha256(u.encode("utf-8")).hexdigest()
+    now = int(time.time())
+    try:
+        from sqlalchemy import text as _text
+        from src.app.models.db import db_session
+
+        with db_session() as _db:
+            _db.execute(
+                _text(
+                    """
+                    CREATE TABLE IF NOT EXISTS qr_redirect_cache (
+                      url_hash TEXT PRIMARY KEY,
+                      url_prefix TEXT,
+                      result_json TEXT NOT NULL,
+                      updated_at INTEGER NOT NULL,
+                      expires_at INTEGER NOT NULL
+                    )
+                    """
+                )
+            )
+            row = _db.execute(
+                _text("SELECT result_json FROM qr_redirect_cache WHERE url_hash = :h AND expires_at > :now"),
+                {"h": key, "now": now},
+            ).fetchone()
+        if row and row[0]:
+            return json.loads(row[0])
+    except Exception:
+        return None
+    return None
+
+
+def _qr_redirect_cache_set(url: str, result: Dict[str, Any]) -> None:
+    u = str(url or "").strip()
+    if not u:
+        return
+    key = hashlib.sha256(u.encode("utf-8")).hexdigest()
+    now = int(time.time())
+    ttl = _qr_redirect_probe_cache_ttl_sec()
+    try:
+        from sqlalchemy import text as _text
+        from src.app.models.db import db_session
+
+        with db_session() as _db:
+            _db.execute(
+                _text(
+                    """
+                    CREATE TABLE IF NOT EXISTS qr_redirect_cache (
+                      url_hash TEXT PRIMARY KEY,
+                      url_prefix TEXT,
+                      result_json TEXT NOT NULL,
+                      updated_at INTEGER NOT NULL,
+                      expires_at INTEGER NOT NULL
+                    )
+                    """
+                )
+            )
+            _db.execute(
+                _text(
+                    """
+                    INSERT OR REPLACE INTO qr_redirect_cache
+                    (url_hash, url_prefix, result_json, updated_at, expires_at)
+                    VALUES (:h, :p, :r, :u, :e)
+                    """
+                ),
+                {
+                    "h": key,
+                    "p": u[:180],
+                    "r": json.dumps(result),
+                    "u": now,
+                    "e": now + ttl,
+                },
+            )
+            _db.commit()
+    except Exception:
+        pass
+
+
+async def _probe_redirect_chain_now(url: str, *, timeout_s: float = 1.5, max_hops: int = 3) -> Dict[str, Any]:
+    try:
+        import httpx  # type: ignore
+    except Exception:
+        return {"enabled": True, "checked": False, "error": "httpx_unavailable", "chain": []}
+
+    chain: List[str] = []
+    current = str(url or "").strip()
+    if not current:
+        return {"enabled": True, "checked": False, "chain": []}
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout_s) as client:
+            for _ in range(max(1, int(max_hops))):
+                chain.append(current)
+                try:
+                    resp = await asyncio.wait_for(client.head(current), timeout=timeout_s)
+                except Exception:
+                    break
+                loc = str(resp.headers.get("location") or "").strip()
+                if not loc or not (300 <= int(resp.status_code) < 400):
+                    break
+                current = loc
+        out = {
+            "enabled": True,
+            "checked": True,
+            "chain": chain[: max(1, int(max_hops) + 1)],
+            "final_url": chain[-1] if chain else current,
+            "hops": max(0, len(chain) - 1),
+        }
+        _qr_redirect_cache_set(url, out)
+        return out
+    except Exception:
+        return {"enabled": True, "checked": False, "chain": chain, "error": "redirect_probe_failed"}
+
+
+async def _probe_redirect_chain(url: str, *, timeout_s: float = 1.5, max_hops: int = 3) -> Dict[str, Any]:
+    """Sandboxed redirect probe with cache + async queue for low request latency."""
+    enabled = str(os.getenv("QR_REDIRECT_PROBE_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    mode = str(os.getenv("QR_REDIRECT_PROBE_MODE", "async")).strip().lower()
+    if not enabled:
+        return {"enabled": False, "checked": False, "chain": []}
+    u = str(url or "").strip()
+    if not u:
+        return {"enabled": True, "checked": False, "chain": []}
+    cached = _qr_redirect_cache_get(u)
+    if isinstance(cached, dict):
+        out = dict(cached)
+        out["cache_hit"] = True
+        return out
+    if mode in {"off", "disabled", "none"}:
+        return {"enabled": True, "checked": False, "chain": [], "pending": False, "cache_hit": False}
+    if mode in {"sync", "blocking"}:
+        out = await _probe_redirect_chain_now(u, timeout_s=timeout_s, max_hops=max_hops)
+        out["cache_hit"] = False
+        return out
+
+    # Async mode: queue background probe and return immediately.
+    task_key = hashlib.sha256(u.encode("utf-8")).hexdigest()
+    t = _QR_REDIRECT_TASKS.get(task_key)
+    if not t or t.done():
+        _QR_REDIRECT_TASKS[task_key] = asyncio.create_task(
+            _probe_redirect_chain_now(u, timeout_s=timeout_s, max_hops=max_hops)
+        )
+    return {
+        "enabled": True,
+        "checked": False,
+        "pending": True,
+        "chain": [u][:1],
+        "cache_hit": False,
+    }
 
 
 def _minimize_ocr_text_for_logs(text: str | None, *, max_chars: int = 180) -> str:
@@ -337,6 +576,41 @@ def _order_exists(db, order_id: str | None) -> bool | None:
         return bool(row)
     except Exception:
         return None
+
+
+def _check_warranty_eligibility(db, order_id: str | None, issue_type: str | None) -> dict:
+    _ = issue_type
+    if not order_id:
+        return {"eligible": None, "reason": "no_order_id"}
+    try:
+        from sqlalchemy import text as _text
+        from datetime import date, timedelta
+
+        row = db.execute(
+            _text("SELECT purchase_date, warranty_months FROM orders WHERE id = :id LIMIT 1"),
+            {"id": order_id},
+        ).fetchone()
+        if not row:
+            return {"eligible": None, "reason": "order_not_found"}
+        purchase = date.fromisoformat(str(row[0])) if row[0] else None
+        months = int(row[1] or 12)
+        if not purchase:
+            return {"eligible": None, "reason": "no_purchase_date"}
+        expiry = purchase + timedelta(days=months * 30)
+        today = date.today()
+        gap = int((expiry - today).days)
+        return {
+            "eligible": gap >= 0,
+            "expires": expiry.isoformat(),
+            "gap_days": gap,
+            "advice": (
+                f"Warranty valid until {expiry.isoformat()} ({gap} days remaining)."
+                if gap >= 0
+                else f"Warranty expired {abs(gap)} days ago ({expiry.isoformat()})."
+            ),
+        }
+    except Exception:
+        return {"eligible": None, "reason": "lookup_error"}
 
 
 def _count_prior_consistency_mismatches(db, order_id: str | None, *, limit: int = 300) -> int:
@@ -455,18 +729,20 @@ async def _evaluate_uploaded_images_consistency(
     ocr_prompt_injection = False
 
     # Keep detector/model usage best-effort so uploads never fail due to CV deps.
+    # If both model env-vars are explicitly set to empty string, skip detector entirely
+    # (prevents test hangs from YOLO loads when models are intentionally disabled).
     detector = None
-    try:
-        from src.app.services.cv_object_detector import CVObjectDetector
+    _detector_model_env = (
+        (os.getenv("CV_DETECTOR_MODEL") or "").strip()
+        or (os.getenv("CV_DAMAGE_YOLO_MODEL") or "").strip()
+    )
+    if _detector_model_env:  # Only load detector when a model is explicitly configured
+        try:
+            from src.app.services.cv_object_detector import CVObjectDetector
 
-        detector_model = (
-            (os.getenv("CV_DETECTOR_MODEL") or "").strip()
-            or (os.getenv("CV_DAMAGE_YOLO_MODEL") or "").strip()
-            or "yolov8s.pt"
-        )
-        detector = CVObjectDetector(model_path=detector_model)
-    except Exception:
-        detector = None
+            detector = CVObjectDetector(model_path=_detector_model_env)
+        except Exception:
+            detector = None
 
     provider = None
     try:
@@ -491,7 +767,7 @@ async def _evaluate_uploaded_images_consistency(
             b = s.get("bytes") or b""
             if provider is not None:
                 try:
-                    labels, ocr_text = await provider.get_labels_and_text(b)
+                    labels, ocr_text, *_ = await provider.get_labels_and_text(b)
                     labels = [str(x).lower() for x in (labels or [])][:10]
                 except Exception:
                     labels, ocr_text = [], ""
@@ -557,6 +833,7 @@ async def _evaluate_uploaded_images_consistency(
                 "status": status,
                 "reasons": list(dict.fromkeys(reasons))[:4],
                 "detected": mapped,
+                "ocr_text": _minimize_ocr_text_for_logs(ocr_text, max_chars=240),
             }
         )
 
@@ -628,6 +905,9 @@ def _evaluate_cv_rules(
     fraud_level: str | None,
     trust: Dict[str, Any] | None,
     order_id: str | None,
+    qr_codes: List[Dict[str, Any]] | None = None,
+    exif_flags: Dict[str, Any] | None = None,
+    file_validation: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     support_thr = _get_support_thresholds()
     # Prefer calibrated confidence when available for gating
@@ -639,6 +919,7 @@ def _evaluate_cv_rules(
     text = _norm(description)
     rules_triggered: List[Dict[str, Any]] = []
     signals: Dict[str, Any] = {}
+    ocr_det = _normalize_ocr_and_detect(extracted_text)
 
     def add(rule_id: str, reason: str):
         rule = next((r for r in CV_SECURITY_RULES if r["id"] == rule_id), None)
@@ -684,9 +965,53 @@ def _evaluate_cv_rules(
     if _detect_ocr_prompt_injection(extracted_text):
         add("CV41", "ocr_prompt_injection")
         signals["ocr_prompt_injection"] = True
+    if bool(ocr_det.get("payment_social_engineering")):
+        add("CV16", "payment_social_engineering")
+        signals["payment_social_engineering"] = True
+    if bool(ocr_det.get("pci_card_exposed")):
+        add("CV10", "pci_card_exposed")
+        signals["pci_card_exposed"] = True
+    if bool(ocr_det.get("crypto_payment_uri")):
+        add("CV17", "crypto_payment_uri")
+        signals["crypto_payment_uri"] = True
+    if bool(ocr_det.get("ransomware_indicator")):
+        add("CV18", "ransomware_indicator")
+        signals["ransomware_indicator"] = True
+    if bool(ocr_det.get("encoded_payload_detected")):
+        add("CV41", "encoded_payload_detected")
+        signals["encoded_payload_detected"] = True
+    if bool(ocr_det.get("agentic_tool_injection")):
+        add("CV41", "agentic_tool_injection")
+        signals["agentic_tool_injection"] = True
+        signals["agentic_tool_abuse"] = True
+    if bool(ocr_det.get("homoglyph_injection")):
+        signals["homoglyph_injection"] = True
+        signals["unicode_obfuscation"] = True
+    if qr_codes:
+        payload_types = {str(c.get("payload_type") or "") for c in (qr_codes or [])}
+        if "vcard" in payload_types:
+            signals["qr_payload_vcard"] = True
+        if "wifi_credentials" in payload_types:
+            signals["qr_payload_wifi"] = True
+        if len(payload_types - {""}) > 1:
+            signals["qr_multi_mismatch"] = True
+    if bool(exif_flags and exif_flags.get("exif_text_injection")):
+        signals["exif_text_injection"] = True
+    if bool(file_validation and file_validation.get("polyglot_suspected")):
+        signals["polyglot_suspected"] = True
+    if bool(file_validation and file_validation.get("invisible_text_suspected")):
+        signals["steg_suspicious"] = True
     if trust and trust.get("returns_last_30_days", 0) >= int(support_thr["excessive_returns_last_30_days_min"]):
         add("CV31", "excessive_returns_rate")
-    return {"rules": rules_triggered, "signals": signals}
+    return {
+        "rules": rules_triggered,
+        "signals": signals,
+        "ocr_normalized": {
+            "text": str(ocr_det.get("normalized_text") or "")[:1200],
+            "encoded_payload_kind": ocr_det.get("encoded_payload_kind"),
+            "pci_match_count": int(ocr_det.get("pci_match_count") or 0),
+        },
+    }
 
 
 def _build_evidence_tags(
@@ -713,6 +1038,26 @@ def _build_evidence_tags(
             tags.append("serial_mismatch")
     if rule_signals.get("ocr_prompt_injection"):
         tags.append("ocr_prompt_injection")
+    if rule_signals.get("payment_social_engineering"):
+        tags.append("payment_social_engineering")
+    if rule_signals.get("pci_card_exposed"):
+        tags.append("pci_card_exposed")
+    if rule_signals.get("crypto_payment_uri"):
+        tags.append("crypto_payment_uri")
+    if rule_signals.get("ransomware_indicator"):
+        tags.append("ransomware_indicator")
+    if rule_signals.get("qr_payload_vcard"):
+        tags.append("qr_payload_vcard")
+    if rule_signals.get("qr_payload_wifi"):
+        tags.append("qr_payload_wifi")
+    if rule_signals.get("qr_multi_mismatch"):
+        tags.append("qr_multi_mismatch")
+    if rule_signals.get("qr_label_destination_mismatch"):
+        tags.append("qr_label_destination_mismatch")
+    if rule_signals.get("cross_image_split_injection"):
+        tags.append("cross_image_split_injection")
+    if rule_signals.get("agentic_tool_injection") or rule_signals.get("agentic_tool_abuse"):
+        tags.append("agentic_tool_abuse")
     if rule_signals.get("image_consistency_mismatch"):
         tags.append("image_consistency_mismatch")
     if rule_signals.get("repeat_image_consistency_mismatch"):
@@ -1224,6 +1569,36 @@ async def submit_complaint(
     except Exception:
         sanitize_ms = None
 
+    # Stage-1 (fast path): file structure and EXIF text checks.
+    file_validation_flags: Dict[str, Any] = {"polyglot_suspected": False, "results": []}
+    exif_flags: Dict[str, Any] = {"exif_text_injection": False, "results": []}
+    try:
+        for s in (sanitized or [])[:8]:
+            blob = s.get("bytes") or b""
+            fv = validate_image_blob(blob)
+            file_validation_flags["results"].append(
+                {
+                    "filename": s.get("filename"),
+                    "ok": bool(fv.ok),
+                    "file_type": fv.file_type,
+                    "suspicious": list(fv.suspicious or []),
+                }
+            )
+            if "polyglot_signature_detected" in (fv.suspicious or []) or "trailing_payload_after_eof" in (fv.suspicious or []):
+                file_validation_flags["polyglot_suspected"] = True
+            ex = analyze_exif(blob)
+            exif_flags["results"].append(
+                {
+                    "filename": s.get("filename"),
+                    "suspicious_flags": list(ex.suspicious_flags or []),
+                    "exif_text_signals": list(ex.exif_text_signals or []),
+                }
+            )
+            if "exif_text_injection" in (ex.suspicious_flags or []):
+                exif_flags["exif_text_injection"] = True
+    except Exception:
+        pass
+
     # Managed CV analysis (first image) if configured
     labels: list[str] = []
     extracted_text = ""
@@ -1232,8 +1607,40 @@ async def submit_complaint(
         if sanitized:
             import time as _t
             _t0 = _t.perf_counter()
-            labels, extracted_text = await ManagedCVProvider().get_labels_and_text(sanitized[0].get("bytes") or b"")
+            labels, extracted_text, *_ = await ManagedCVProvider().get_labels_and_text(sanitized[0].get("bytes") or b"")
             cv_dt_ms = int((_t.perf_counter() - _t0) * 1000)
+    except Exception:
+        pass
+
+    # Stage-2 (deep path): only run heavier multi-contrast OCR when Stage-1 hints risk.
+    try:
+        stage1_ocr = _normalize_ocr_and_detect(extracted_text)
+        # Stage-B OCR should also run when Stage-A text is empty/very weak.
+        _stage1_txt = str(extracted_text or "").strip()
+        deep_trigger = bool(
+            (not _stage1_txt)
+            or (len(_stage1_txt) < 12)
+            or stage1_ocr.get("encoded_payload_detected")
+            or stage1_ocr.get("homoglyph_injection")
+            or stage1_ocr.get("payment_social_engineering")
+            or exif_flags.get("exif_text_injection")
+            or file_validation_flags.get("polyglot_suspected")
+        )
+        if deep_trigger and sanitized:
+            from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
+
+            deep = run_risk_triggered_multicontrast_ocr(
+                sanitized[0].get("bytes") or b"",
+                ocr_provider=os.getenv("CV_OCR_PROVIDER"),
+                enabled=True,
+            )
+            deep_text = str(deep.get("best_text") or "").strip()
+            if len(deep_text) > len(str(extracted_text or "").strip()):
+                extracted_text = deep_text
+            if bool(deep.get("invisible_text_suspected")):
+                stage1_ocr["invisible_text_suspected"] = True
+        if bool(stage1_ocr.get("invisible_text_suspected")):
+            file_validation_flags["invisible_text_suspected"] = True
     except Exception:
         pass
 
@@ -1249,6 +1656,9 @@ async def submit_complaint(
     qr_decode_hits: List[Dict[str, Any]] = []
     qr_prompt_injection = False
     qr_external_url = False
+    qr_payload_types: set[str] = set()
+    qr_multi_mismatch = False
+    qr_redirect_probe: Dict[str, Any] = {"enabled": False, "checked": False, "chain": []}
     try:
         from src.app.rules.barcode_decode import decode_barcodes
 
@@ -1278,6 +1688,14 @@ async def submit_complaint(
             if _detect_ocr_prompt_injection(str(c.get("data") or "")):
                 qr_prompt_injection = True
                 break
+        try:
+            qr_payload_types = {str(c.get("payload_type") or "").strip() for c in qr_decode_hits if c}
+            qr_payload_types.discard("")
+            if len(qr_payload_types) > 1:
+                qr_multi_mismatch = True
+        except Exception:
+            qr_payload_types = set()
+            qr_multi_mismatch = False
         # External URL indirection (common for indirect prompt injection / phishing).
         try:
             from urllib.parse import urlparse
@@ -1288,6 +1706,10 @@ async def submit_complaint(
                     host = (urlparse(data).hostname or "").lower()
                     if host and host not in allow_hosts:
                         qr_external_url = True
+                        try:
+                            qr_redirect_probe = await _probe_redirect_chain(data, timeout_s=1.25, max_hops=3)
+                        except Exception:
+                            qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
                         break
         except Exception:
             qr_external_url = False
@@ -1295,6 +1717,9 @@ async def submit_complaint(
         qr_decode_hits = []
         qr_prompt_injection = False
         qr_external_url = False
+        qr_payload_types = set()
+        qr_multi_mismatch = False
+        qr_redirect_probe = {"enabled": False, "checked": False, "chain": []}
 
     # Fold QR findings into image-consistency UX (soft verification) so the user is prompted
     # to reupload unedited images without codes/overlays.
@@ -1395,6 +1820,7 @@ async def submit_complaint(
         customer_tier = None
 
     order_exists = _order_exists(db, order_id)
+    warranty_eligibility = _check_warranty_eligibility(db, order_id, issue_type)
     prior_mismatch_count = _count_prior_consistency_mismatches(db, order_id)
     repeat_mismatch = bool(image_consistency.get("mismatch_count", 0) > 0 and prior_mismatch_count >= 1)
     image_consistency["prior_mismatch_count"] = int(prior_mismatch_count)
@@ -1619,7 +2045,15 @@ async def submit_complaint(
         fraud_level=fraud_level,
         trust=trust if isinstance(trust, dict) else {},
         order_id=order_id,
+        qr_codes=qr_decode_hits,
+        exif_flags=exif_flags,
+        file_validation=file_validation_flags,
     )
+    if warranty_eligibility.get("eligible") is False:
+        if not any(r.get("id") == "CV12" for r in (rule_eval.get("rules") or [])):
+            rule_eval["rules"].append({"id": "CV12", "name": "warranty_lapsed", "severity": "medium", "reason": "warranty_lapsed"})
+        rule_eval["signals"]["warranty_lapsed"] = True
+        rule_eval["signals"]["warranty_expiry"] = warranty_eligibility.get("expires")
     if image_consistency.get("mismatch_count", 0) > 0:
         sev = "high" if repeat_mismatch else "medium"
         rid = "CV43" if repeat_mismatch else "CV42"
@@ -1637,6 +2071,33 @@ async def submit_complaint(
         rule_eval["signals"]["qr_external_url_detected"] = True
     if qr_prompt_injection:
         rule_eval["signals"]["qr_prompt_injection"] = True
+    if "vcard" in qr_payload_types:
+        rule_eval["signals"]["qr_payload_vcard"] = True
+    if "wifi_credentials" in qr_payload_types:
+        rule_eval["signals"]["qr_payload_wifi"] = True
+    if qr_multi_mismatch:
+        rule_eval["signals"]["qr_multi_mismatch"] = True
+    if _detect_qr_label_destination_mismatch(qr_decode_hits, image_consistency=image_consistency):
+        rule_eval["signals"]["qr_label_destination_mismatch"] = True
+    try:
+        split_texts = [
+            str(im.get("ocr_text") or "")
+            for im in (image_consistency.get("images") or [])
+            if isinstance(im, dict)
+        ]
+        if _detect_cross_image_split_injection(split_texts):
+            rule_eval["signals"]["cross_image_split_injection"] = True
+            rule_eval["signals"]["agentic_tool_abuse"] = True
+            rule_eval["rules"].append(
+                {
+                    "id": "CV41",
+                    "name": "cross_image_split_injection",
+                    "severity": "high",
+                    "reason": "split_prompt_across_images",
+                }
+            )
+    except Exception:
+        pass
     if order_id and order_exists is False:
         # Severity is finalized after risk quantification thresholding.
         rule_eval["signals"]["order_id_not_found"] = True
@@ -1658,7 +2119,11 @@ async def submit_complaint(
             "image_consistency": image_consistency,
             "order_exists": order_exists,
             "qr_codes": qr_decode_hits,
+            "qr_payload_types": sorted(list(qr_payload_types)),
+            "qr_redirect_probe": qr_redirect_probe,
             "supplier_signals": supplier_signals,
+            "exif_flags": exif_flags,
+            "file_validation": file_validation_flags,
             "cv_rules": rule_eval.get("rules"),
             # Merge CV rule signals with fraud/forensics signals so the observer can map them
             # into MITRE/OWASP and raise severity when appropriate.
@@ -2227,6 +2692,12 @@ async def submit_complaint(
         "geoip_trace": geoip_trace,
         "image_consistency": image_consistency,
         "order_validation": order_validation,
+        "warranty_eligibility": warranty_eligibility,
+        "ocr_normalized": rule_eval.get("ocr_normalized"),
+        "file_validation": file_validation_flags,
+        "exif_flags": exif_flags,
+        "qr_payload_types": sorted(list(qr_payload_types)),
+        "qr_redirect_probe": qr_redirect_probe,
         "user_prompt": image_consistency.get("prompt"),
         "ui_actions": {"chat_with_admin": bool(recommended_route == "security_review" or needs_human)},
         "agent_chain": agent_chain,
@@ -2325,13 +2796,13 @@ async def submit_complaint_guest(
     extracted_text = ""
     try:
         if rec.get("bytes"):
-            _labels_rec, extracted_text = await ManagedCVProvider().get_labels_and_text(rec["bytes"])
+            _labels_rec, extracted_text, *_ = await ManagedCVProvider().get_labels_and_text(rec["bytes"])
     except Exception:
         pass
     # Damage image labels (first)
     try:
         if dmg_sanitized:
-            labels, _ = await ManagedCVProvider().get_labels_and_text(dmg_sanitized[0].get("bytes") or b"")
+            labels, _, *_extra = await ManagedCVProvider().get_labels_and_text(dmg_sanitized[0].get("bytes") or b"")
     except Exception:
         pass
     # Tiered CV analysis (Tier0-3) on first damage image (best-effort)
@@ -3015,7 +3486,7 @@ async def add_images(case_id: str, images: list[UploadFile] = File(...), db=Depe
         if sanitized:
             import time as _t
             _t0 = _t.perf_counter()
-            labels, extracted_text = await ManagedCVProvider().get_labels_and_text(sanitized[0].get("bytes") or b"")
+            labels, extracted_text, *_ = await ManagedCVProvider().get_labels_and_text(sanitized[0].get("bytes") or b"")
             cv_dt_ms = int((_t.perf_counter() - _t0) * 1000)
     except Exception:
         pass

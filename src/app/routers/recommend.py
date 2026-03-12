@@ -57,6 +57,7 @@ from src.app.services.use_case_advisor import get_use_case_min_price_floor
 from src.app.services.recommendations import classify_budget_tier, classify_warranty_candidate
 from src.app.security.tls_fingerprint_middleware import extract_tls_fingerprints_from_request
 from src.app.services.copywriting import maybe_apply_copywriting
+from src.app.security.image_threat_signals import normalize_ocr_and_detect as _normalize_ocr_and_detect_shared
 from src.app.security.model_theft import (
     enforce_model_theft_rate_limit,
     enforce_model_theft_policy_gate,
@@ -65,6 +66,9 @@ from src.app.security.model_theft import (
     detect_systematic_probing,
     perturb_confidence_score,
 )
+from src.app.security.dread_scorer import compute_dread
+from src.app.security.framework_correlation import correlate_security_analysis
+from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 import httpx
 from types import SimpleNamespace
 import logging
@@ -102,6 +106,71 @@ def _block_response(payload: Dict, code: int = 403):
     raise HTTPException(status_code=code, detail=payload)
 
 
+def _derive_qr_details_from_signals(sig: Dict[str, Any] | None, *, policy_route: str) -> Dict[str, Any]:
+    return derive_qr_legitimacy_details(sig, policy_route=policy_route)
+
+
+def _derive_trust_channels(policy_route: str) -> Dict[str, bool]:
+    route = str(policy_route or "allow")
+    if route == "allow":
+        return {"visual_embedding_trusted": True, "ocr_trusted": True, "qr_trusted": True}
+    if route in ("visual_sanitized", "escalate"):
+        return {"visual_embedding_trusted": True, "ocr_trusted": False, "qr_trusted": False}
+    return {"visual_embedding_trusted": False, "ocr_trusted": False, "qr_trusted": False}
+
+
+_ASSISTANT_MESSAGE_PRODUCT_CLAIM_PAT = re.compile(
+    r"(?i)\b(top picks?|found\s+\d+\s+(?:match|matches|product|products|option|options)|based on your criteria)\b"
+)
+
+
+def _augment_image_cv_signals_from_ocr(ocr_text: str | None) -> Dict[str, Any]:
+    out = _normalize_ocr_and_detect_shared(ocr_text)
+    if not str(out.get("normalized_text") or "").strip():
+        return {}
+    return {
+        "payment_social_engineering": bool(out.get("payment_social_engineering")),
+        "crypto_payment_uri": bool(out.get("crypto_payment_uri")),
+        "ransomware_indicator": bool(out.get("ransomware_indicator")),
+        "pci_card_exposed": bool(out.get("pci_card_exposed")),
+        "agentic_tool_injection": bool(out.get("agentic_tool_injection")),
+        "encoded_payload_detected": bool(out.get("encoded_payload_detected")),
+    }
+
+
+def _assistant_message_claims_products(text: str | None) -> bool:
+    msg = str(text or "").strip()
+    if not msg:
+        return False
+    return bool(_ASSISTANT_MESSAGE_PRODUCT_CLAIM_PAT.search(msg))
+
+
+def _frameworks_for_security(*, signals: Dict[str, Any], severity: str) -> Dict[str, Any]:
+    norm = {str(k): bool(v) for k, v in (signals or {}).items()}
+    dread = compute_dread(signals={}, cv_signals=norm, severity=severity or "warn")
+    corr = correlate_security_analysis(
+        channel="image",
+        severity=severity,
+        tags=[],
+        reasons=[],
+        threat_correlation={"mitre_attack": [], "dread": dread},
+        signals=norm,
+        evidence={},
+    )
+    return {
+        "mitre_atlas": corr.get("mitre_atlas") or [],
+        "mitre_attack": corr.get("mitre_attack") or [],
+        "owasp_llm_top10": corr.get("owasp_llm_top10") or [],
+        "stride_categories": corr.get("stride_categories") or [],
+        "pasta": corr.get("pasta") or {},
+        "pasta_stage": corr.get("pasta_stage"),
+        "dread": dread,
+        "cvss": corr.get("cvss") or {},
+        "compliance": corr.get("compliance") or {},
+        "lev": corr.get("lev") or {},
+    }
+
+
 def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
     try:
         payload = security_sanitize(payload or {})
@@ -125,6 +194,75 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
         payload["decision_trace_id"] = trace_id
     if "decision_id" not in payload:
         payload["decision_id"] = trace_id
+    # Ensure recommendation trace persistence is emitted for all return branches,
+    # including early returns that bypass the main "recommendation_result" block.
+    try:
+        already_persisted = bool(payload.get("_trace_recommendation_persisted"))
+        if not already_persisted:
+            products_src = []
+            if isinstance(payload.get("results"), list):
+                products_src = payload.get("results") or []
+            elif isinstance(payload.get("products"), list):
+                products_src = payload.get("products") or []
+            elif isinstance((payload.get("proposal") or {}).get("results"), list):
+                products_src = (payload.get("proposal") or {}).get("results") or []
+
+            products_summary: List[Dict[str, Any]] = []
+            for p in products_src[:8]:
+                if not isinstance(p, dict):
+                    continue
+                products_summary.append(
+                    {
+                        "sku": str(p.get("sku") or ""),
+                        "name": str(p.get("name") or ""),
+                        "score_norm": (
+                            float(p.get("score_norm"))
+                            if isinstance(p.get("score_norm"), (int, float))
+                            else p.get("score_norm")
+                        ),
+                        "reasons": [
+                            str(x)
+                            for x in (
+                                (p.get("reasons") or (p.get("factors") or {}).get("positive") or [])[:3]
+                            )
+                        ],
+                        "reason_codes": (p.get("reason_codes") or [])[:3],
+                        "price": (
+                            float(p.get("price"))
+                            if isinstance(p.get("price"), (int, float))
+                            else p.get("price")
+                        ),
+                    }
+                )
+
+            right_panel_src = payload.get("right_panel")
+            if not isinstance(right_panel_src, dict):
+                right_panel_src = {}
+            try:
+                right_panel_contract = json.loads(
+                    json.dumps(right_panel_src, ensure_ascii=False, default=str)
+                )
+            except Exception:
+                right_panel_contract = {"mode": str((right_panel_src or {}).get("mode") or "")}
+            if "anchor_sections" not in right_panel_contract:
+                right_panel_contract["anchor_sections"] = []
+
+            # Emit once per return payload.
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="recommendation_result",
+                source_type="agent",
+                source_id="Trace_Persistence_Agent",
+                target_type="ui",
+                target_id="right_panel",
+                payload={
+                    "products_summary": products_summary,
+                    "right_panel_contract": right_panel_contract,
+                },
+            )
+            payload["_trace_recommendation_persisted"] = True
+    except Exception:
+        pass
     return payload
 
 
@@ -2791,6 +2929,7 @@ def suggest(
     image_cv_signals_parsed: Dict[str, Any] = {}
     incoming_image_payload = bool(image_labels or image_ocr_text or image_hash or image_intent or image_cv_signals)
     image_reupload_reasons: list[str] = []
+    image_gate_warning: str | None = None
     try:
         if image_labels:
             labels = [s.strip() for s in str(image_labels).split(",") if str(s).strip()]
@@ -2834,6 +2973,10 @@ def suggest(
                     "ocr_prompt_injection": bool(parsed_cv.get("ocr_prompt_injection")),
                     "manipulation_detected": manipulation,
                     "adversarial_score": adversarial,
+                    "steg_suspicious": bool(parsed_cv.get("steg_suspicious")),
+                    "qr_payload_types": parsed_cv.get("qr_payload_types") if isinstance(parsed_cv.get("qr_payload_types"), list) else [],
+                    "qr_payloads": parsed_cv.get("qr_payloads") if isinstance(parsed_cv.get("qr_payloads"), list) else [],
+                    "qr_redirect_probe": parsed_cv.get("qr_redirect_probe") if isinstance(parsed_cv.get("qr_redirect_probe"), dict) else {},
                 }
                 if qr_detected:
                     image_reupload_reasons.append("qr_code_detected")
@@ -2845,6 +2988,12 @@ def suggest(
                     image_reupload_reasons.append("manipulation_detected")
                 if adversarial >= 0.35:
                     image_reupload_reasons.append("adversarial_score_high")
+        if image_context.get("ocr"):
+            ocr_aug = _augment_image_cv_signals_from_ocr(image_context.get("ocr"))
+            for _k, _v in ocr_aug.items():
+                if _v:
+                    image_cv_signals_parsed[_k] = True
+                    image_reupload_reasons.append(_k)
     except Exception:
         image_context = {"labels": [], "ocr": "", "hash": None, "intent": None}
         image_cv_signals_parsed = {}
@@ -3302,6 +3451,40 @@ def suggest(
         qr_external = bool(cv_signals.get("qr_external_url_detected") or cv_signals.get("qr_external_url"))
         qr_injection = bool(cv_signals.get("qr_prompt_injection"))
         manipulation = bool(cv_signals.get("manipulation_detected"))
+        steg = bool(cv_signals.get("steg_suspicious"))
+        adversarial_score = float(cv_signals.get("adversarial_score") or 0.0)
+        ocr_prompt = bool(cv_signals.get("ocr_prompt_injection"))
+        payment_se = bool(cv_signals.get("payment_social_engineering"))
+        pci_exposed = bool(cv_signals.get("pci_card_exposed"))
+        crypto_uri = bool(cv_signals.get("crypto_payment_uri"))
+        ransomware = bool(cv_signals.get("ransomware_indicator"))
+        if qr_injection or ocr_prompt or ransomware or (qr_external and (manipulation or steg or adversarial_score >= 0.75)):
+            policy_route = "lockdown"
+            sev = "high"
+        elif qr_external or steg or adversarial_score >= 0.5 or payment_se or pci_exposed or crypto_uri:
+            policy_route = "escalate"
+            sev = "high"
+        elif qr_detected or manipulation or adversarial_score >= 0.35:
+            policy_route = "visual_sanitized"
+            sev = "warn"
+        else:
+            policy_route = "allow"
+            sev = "info"
+        sec_signals = {
+            "qr_code_detected": qr_detected,
+            "qr_external_url_detected": qr_external,
+            "qr_prompt_injection": qr_injection,
+            "manipulation_detected": manipulation,
+            "steg_suspicious": steg,
+            "ocr_prompt_injection": ocr_prompt,
+            "payment_social_engineering": payment_se,
+            "pci_card_exposed": pci_exposed,
+            "crypto_payment_uri": crypto_uri,
+            "ransomware_indicator": ransomware,
+        }
+        qr_details = _derive_qr_details_from_signals(cv_signals, policy_route=policy_route)
+        trust_channels = _derive_trust_channels(policy_route)
+        frameworks = _frameworks_for_security(signals=sec_signals, severity=sev)
         log_trace_event(
             trace_id=trace_id,
             event_type="security_scan",
@@ -3315,8 +3498,27 @@ def suggest(
                 "qr_detected": qr_detected,
                 "qr_external_url_detected": qr_external,
                 "qr_prompt_injection": qr_injection,
-                "adversarial_score": float(cv_signals.get("adversarial_score") or 0.0),
+                "adversarial_score": adversarial_score,
                 "reupload_needed": bool(qr_detected or qr_external or qr_injection or manipulation),
+                "severity": sev,
+                "route": policy_route,
+                "policy_route": policy_route,
+                "signals": sec_signals,
+                "qr": qr_details,
+                "image_trust_channels": trust_channels,
+                "frameworks": frameworks,
+                "mitre_atlas": frameworks.get("mitre_atlas") or [],
+                "mitre_attack": frameworks.get("mitre_attack") or [],
+                "owasp_llm_top10": frameworks.get("owasp_llm_top10") or [],
+                "stride_categories": frameworks.get("stride_categories") or [],
+                "pasta": frameworks.get("pasta") or {},
+                "pasta_stage": frameworks.get("pasta_stage"),
+                "dread": frameworks.get("dread") or {},
+                "cvss": frameworks.get("cvss") or {},
+                "compliance": frameworks.get("compliance") or {},
+                "qr_payload_types": cv_signals.get("qr_payload_types") if isinstance(cv_signals.get("qr_payload_types"), list) else [],
+                "qr_payloads": (cv_signals.get("qr_payloads") or [])[:6] if isinstance(cv_signals.get("qr_payloads"), list) else [],
+                "qr_redirect_probe": cv_signals.get("qr_redirect_probe") if isinstance(cv_signals.get("qr_redirect_probe"), dict) else {},
             },
         )
     except Exception:
@@ -4337,17 +4539,39 @@ def suggest(
     except Exception:
         pass
     image_brand_mismatch_note = None
+    strict_image_brand_hint = None
+    _budget_mismatch_question: Dict[str, Any] | None = None
+    _BRAND_LABEL_PATTERNS = {
+        "apple":     ["macbook", "imac", "mac mini", "mac pro", "apple"],
+        "lenovo":    ["thinkpad", "ideapad", "legion", "yoga", "lenovo"],
+        "dell":      ["xps", "inspiron", "alienware", "latitude", "dell"],
+        "hp":        ["spectre", "envy", "omen", "elitebook", "probook", "hp laptop", "hp"],
+        "asus":      ["rog", "zenbook", "vivobook", "asus"],
+        "acer":      ["predator", "aspire", "swift", "nitro", "acer"],
+        "msi":       ["msi", "dragon logo", "stealth", "raider", "titan", "creator"],
+        "razer":     ["razer", "blade"],
+        "microsoft": ["surface", "surface pro", "surface laptop"],
+        "samsung":   ["galaxy book", "samsung"],
+        "gigabyte":  ["aorus", "gigabyte"],
+        "toshiba":   ["dynabook", "toshiba"],
+    }
     try:
         img_labels_low = [str(x).lower() for x in (image_context.get("labels") or [])]
+        # Also consider product_identity from CV pipeline if available
+        _pi = image_context.get("product_identity") or {}
+        if _pi.get("brand"):
+            img_labels_low = img_labels_low + [str(_pi["brand"]).lower()]
         inferred_brand = None
-        if any("macbook" in t for t in img_labels_low):
-            inferred_brand = "apple"
-        elif any("thinkpad" in t for t in img_labels_low):
-            inferred_brand = "lenovo"
-        elif any("xps" in t for t in img_labels_low):
-            inferred_brand = "dell"
+        for _brand, _patterns in _BRAND_LABEL_PATTERNS.items():
+            if any(any(pat in t for pat in _patterns) for t in img_labels_low):
+                inferred_brand = _brand
+                break
         if inferred_brand and not (constraints.get("brands") or []):
             constraints["brands"] = [inferred_brand]
+            if str(inferred_brand).lower() == "apple":
+                strict_image_brand_hint = "apple"
+            elif str(inferred_brand).lower() in {"lenovo", "dell", "hp", "asus", "acer", "msi", "microsoft", "samsung", "razer", "gigabyte", "toshiba"}:
+                strict_image_brand_hint = "windows"
             log_trace_event(
                 trace_id=trace_id,
                 event_type="nqe_assumption_applied",
@@ -4367,6 +4591,65 @@ def suggest(
                 "Your image suggests a MacBook-style device, but the budget is below typical current MacBook pricing. "
                 "Showing best compatible alternatives in your range."
             )
+            strict_image_brand_hint = "apple"
+
+        # Budget-mismatch check for all image-inferred brands.
+        # Each brand has a realistic price floor (USD). When the stated budget is below
+        # the floor we surface a clarifying question so the user can confirm intent
+        # rather than silently returning mismatched results.
+        _BRAND_PRICE_FLOORS = {
+            "apple":     1200,   # MacBook Air starts ~$1099, Pro from $1599
+            "msi":       900,    # MSI gaming laptops rarely below $900
+            "razer":     1200,   # Razer Blade thin/stealth starts ~$1200
+            "gigabyte":  1000,   # Aorus gaming laptops
+            "lenovo":    500,    # ThinkPad/Legion range is wide
+            "dell":      500,
+            "hp":        400,
+            "asus":      400,
+            "acer":      350,
+            "microsoft": 900,    # Surface Pro/Laptop
+            "samsung":   800,    # Galaxy Book Pro
+        }
+        _budget_mismatch_question: Dict[str, Any] | None = None
+        if (
+            inferred_brand
+            and constraints.get("budget_max") is not None
+        ):
+            _floor = _BRAND_PRICE_FLOORS.get(str(inferred_brand).lower())
+            _budget_val = float(constraints.get("budget_max") or 0)
+            if _floor and _budget_val > 0 and _budget_val < _floor:
+                _brand_display = str(inferred_brand).capitalize()
+                if not image_brand_mismatch_note:
+                    image_brand_mismatch_note = (
+                        f"Your image suggests a {_brand_display} device, but your budget of "
+                        f"${int(_budget_val)} is below typical {_brand_display} pricing (from ~${_floor}). "
+                        f"Showing the closest alternatives within your budget."
+                    )
+                _budget_mismatch_question = {
+                    "id": "ask_image_budget_mismatch",
+                    "text": (
+                        f"Your image looks like a {_brand_display} — are you looking for that specific brand "
+                        f"(we can stretch the budget), a similar-spec alternative within ${int(_budget_val)}, "
+                        f"or a device for university/work use at this price?"
+                    ),
+                    "options": [
+                        {"id": "mismatch_want_brand", "label": f"Yes, I want {_brand_display} — what's the minimum price?"},
+                        {"id": "mismatch_want_alternative", "label": f"Show me best alternatives under ${int(_budget_val)}"},
+                        {"id": "mismatch_want_usecase", "label": "I need it for university / work — suggest the right spec"},
+                    ],
+                    "priority": 0,
+                    "source": "image_budget_mismatch",
+                }
+    except Exception:
+        pass
+    # Stash the budget-mismatch question so it can be injected into next_questions later
+    # (after the NQE engine runs) — set above in the brand-inference try/except block.
+    try:
+        _brands_norm = [str(b).lower() for b in (constraints.get("brands") or []) if str(b).strip()]
+        if "apple" in _brands_norm and any(tok in str(query_effective or "").lower() for tok in ("macbook", "mac book", "apple")):
+            strict_image_brand_hint = "apple"
+        elif any(b in _brands_norm for b in ("lenovo", "dell", "hp", "asus", "acer", "msi", "microsoft", "samsung")) or "windows" in str(query_effective or "").lower():
+            strict_image_brand_hint = strict_image_brand_hint or "windows"
     except Exception:
         pass
     try:
@@ -4550,6 +4833,10 @@ def suggest(
         image_reupload_reasons.append("identity_confidence_low")
     if incoming_image_payload and image_reupload_reasons:
         image_reupload_reasons = list(dict.fromkeys([str(r) for r in image_reupload_reasons if str(r)]))
+        _hard_lock_reasons = {"qr_prompt_injection"}
+        _hard_lock = any(r in _hard_lock_reasons for r in image_reupload_reasons) or bool(
+            ("adversarial_score_high" in image_reupload_reasons) and ("manipulation_detected" in image_reupload_reasons)
+        )
         try:
             log_trace_event(
                 trace_id=trace_id,
@@ -4560,6 +4847,7 @@ def suggest(
                 target_id=uid,
                 payload={
                     "reasons": image_reupload_reasons,
+                    "hard_lock": bool(_hard_lock),
                     "image_identity_confidence": round(float(image_identity_confidence), 4),
                     "cv_signals": image_cv_signals_parsed,
                     **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["image_context", "cv_signals"]),
@@ -4567,55 +4855,59 @@ def suggest(
             )
         except Exception:
             pass
-        payload = {
-            "status": "reupload_required",
-            "results": [],
-            "proposal": {"decision_mode": "policy_gate", "ranked_skus": []},
-            "constraints_used": constraints,
-            "followup_contract": followup_contract,
-            "intent_execution_plan": intent_execution_plan,
-            "policy_version": flags.get("POLICY_VERSION", "v1"),
-            "assistant_message": (
-                "I need a clearer, unedited image before I continue. "
-                "Please reupload a clean product photo with no QR codes, links, or text overlays."
-            ),
-            "next_questions": [
-                {
-                    "id": "reupload_clean_image",
-                    "text": "Please reupload a clear photo of the product only (no QR code, sticker, or text overlay).",
-                    "goal": "reupload",
-                    "options": [
-                        {"id": "reupload_now", "label": "Reupload now"},
-                        {"id": "continue_without_image", "label": "Continue without image"},
-                    ],
-                }
-            ],
-            "question_plan": {
-                "mode": "clarify",
-                "missing_fields": ["image_quality"],
+        if _hard_lock:
+            payload = {
+                "status": "reupload_required",
+                "results": [],
+                "proposal": {"decision_mode": "policy_gate", "ranked_skus": []},
+                "constraints_used": constraints,
+                "followup_contract": followup_contract,
+                "intent_execution_plan": intent_execution_plan,
+                "policy_version": flags.get("POLICY_VERSION", "v1"),
+                "assistant_message": (
+                    "I need a clearer, unedited image before I continue. "
+                    "Please reupload a clean product photo with no QR codes, links, or text overlays."
+                ),
+                "next_questions": [
+                    {
+                        "id": "reupload_clean_image",
+                        "text": "Please reupload a clear photo of the product only (no QR code, sticker, or text overlay).",
+                        "goal": "reupload",
+                        "options": [
+                            {"id": "reupload_now", "label": "Reupload now"},
+                            {"id": "continue_without_image", "label": "Continue without image"},
+                        ],
+                    }
+                ],
+                "question_plan": {
+                    "mode": "clarify",
+                    "missing_fields": ["image_quality"],
+                    "confidence_band": "low",
+                    "ambiguity_reason": "weak_image_signals",
+                },
                 "confidence_band": "low",
                 "ambiguity_reason": "weak_image_signals",
-            },
-            "confidence_band": "low",
-            "ambiguity_reason": "weak_image_signals",
-            "needs_disambiguation": True,
-            "llm_model": llm_model,
-            "model_tier": model_tier,
-            "complexity_signals": complexity_signals,
-            "security": _build_security_payload(analysis.get("details") or {}, analysis.get("severity", "warn")),
-            "image_reupload_reasons": image_reupload_reasons,
-            "trace_tags": strategy_corr.get("tags") or [],
-            "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
-            "agent_chain": [
-                {"agent": "Image_Security_Gate_Agent", "confidence": 0.93, "duration_ms": None},
-                {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
-            ],
-            "turn_type": turn_type,
-            "referents": referents,
-            "memory_confidence": round(float(memory_confidence), 4),
-        }
-        payload = _ensure_trace_response(payload, trace_id, flags)
-        return _with_trace(payload, trace_id)
+                "needs_disambiguation": True,
+                "llm_model": llm_model,
+                "model_tier": model_tier,
+                "complexity_signals": complexity_signals,
+                "security": _build_security_payload(analysis.get("details") or {}, analysis.get("severity", "warn")),
+                "image_reupload_reasons": image_reupload_reasons,
+                "trace_tags": strategy_corr.get("tags") or [],
+                "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+                "agent_chain": [
+                    {"agent": "Image_Security_Gate_Agent", "confidence": 0.93, "duration_ms": None},
+                    {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
+                ],
+                "turn_type": turn_type,
+                "referents": referents,
+                "memory_confidence": round(float(memory_confidence), 4),
+            }
+            payload = _ensure_trace_response(payload, trace_id, flags)
+            return _with_trace(payload, trace_id)
+        image_gate_warning = (
+            "Image had risky overlays/QR content. Continuing with visual-sanitized ranking from trusted channels."
+        )
     # Emit model selection early so tiering is visible even on early returns.
     try:
         log_trace_event(
@@ -4961,6 +5253,16 @@ def suggest(
                 {"id": "ask_brand", "text": "Any brand preference? (Apple, Dell, Lenovo, ASUS, etc.)", "goal": "narrow_results"},
             ]
         # Clarify-or-assume protocol: ask at most 1-2 clarifying questions per turn.
+        # Inject image-budget mismatch question at top priority when applicable —
+        # it is more urgent than generic NQE questions and should appear first.
+        try:
+            if _budget_mismatch_question and not any(
+                str((q or {}).get("id") or "") == "ask_image_budget_mismatch"
+                for q in (next_questions or [])
+            ):
+                next_questions = [_budget_mismatch_question] + (next_questions or [])
+        except Exception:
+            pass
         next_questions = (next_questions or [])[:2]
         if gpu_followup_question_needed:
             next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
@@ -5085,14 +5387,14 @@ def suggest(
     filter_meta_spec: Dict[str, Any] = {}
     retrieved_count = 0
     try:
-        logging.info("recommend.suggest: starting candidate retrieval; query=%s", query)
+        logging.info(f"recommend.suggest: starting candidate retrieval; query={query}")
         with tracer.start_as_current_span("recommend.retrieve_candidates"):
             _t0 = time.perf_counter()
             limit = 50 if (constraints.get("budget_min") is not None or constraints.get("budget_max") is not None) else 10
             candidates = service.retrieve_candidates(query_effective, limit=limit)
             retrieve_ms = int((time.perf_counter() - _t0) * 1000)
         retrieved_count = len(candidates or [])
-        logging.info("recommend.suggest: retrieved %d candidates (ms=%s)", retrieved_count, retrieve_ms)
+        logging.info(f"recommend.suggest: retrieved {retrieved_count} candidates (ms={retrieve_ms})")
         if _is_laptop_focused_query(query_effective, constraints):
             before_family = len(candidates or [])
             narrowed = [c for c in (candidates or []) if _candidate_looks_like_laptop(c)]
@@ -5219,14 +5521,18 @@ def suggest(
                 try:
                     min_c = int(budget_min_val * 100) if budget_min_val is not None else 0
                     max_c = int(budget_max_val * 100) if budget_max_val is not None else 10_000_000
+                    _brand_only_mode = str(strict_image_brand_hint or "").lower() == "apple"
+                    _brand_where = ""
+                    if _brand_only_mode:
+                        _brand_where = " AND (LOWER(p.name) LIKE '%apple%' OR LOWER(p.name) LIKE '%macbook%' OR LOWER(p.sku) LIKE 'mb%') "
                     rows = db.execute(
                         text(
-                            """
+                            f"""
                             SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
                                    COALESCE(SUM(i.stock), 0) as stock
                             FROM products p
                             LEFT JOIN inventory i ON i.product_id = p.id
-                            WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                            WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c {_brand_where}
                             GROUP BY p.id
                             ORDER BY p.price_cents ASC
                             LIMIT 24
@@ -5255,7 +5561,7 @@ def suggest(
                         "budget_max": budget_max_val,
                         "candidates_before": retrieved_count,
                         "candidates_after": len(candidates),
-                        "fallback": "db_price_range",
+                        "fallback": "db_price_range_brand" if str(strict_image_brand_hint or "").lower() in {"apple", "windows"} else "db_price_range",
                     }
                     try:
                         log_trace_event(
@@ -5270,76 +5576,115 @@ def suggest(
                     except Exception:
                         pass
                 else:
-                    # Deterministic auto-jump: if widened band still has 0 results,
-                    # jump to the nearest viable inventory window above user max.
-                    jump_alt = []
-                    jump_meta = {}
+                    # Brand-priority fallback for image-hinted MacBook/Apple flows:
+                    # no in-budget Apple -> nearest above-budget Apple band first.
+                    brand_jump_alt = []
+                    brand_jump_meta = {}
                     try:
-                        current_span = None
-                        if budget_min_val is not None and budget_max_val is not None:
-                            current_span = max(200, int(float(budget_max_val) - float(budget_min_val)))
-                        jump_span = max(400, int(current_span or 400))
-                        baseline_min = (
-                            float(budget_max_val)
-                            if budget_max_val is not None
-                            else (float(budget_min_val) if budget_min_val is not None else 0.0)
-                        )
-                        row_floor = db.execute(
-                            text(
-                                """
-                                SELECT MIN(p.price_cents) AS min_price_cents
-                                FROM products p
-                                WHERE p.active = 1
-                                  AND p.price_cents >= :baseline_c
-                                """
-                            ),
-                            {"baseline_c": int(max(0.0, baseline_min) * 100)},
-                        ).mappings().first()
-                        floor_c = int((row_floor or {}).get("min_price_cents") or 0)
-                        if floor_c > 0:
-                            jump_min = int(floor_c / 100)
-                            jump_max = int(jump_min + jump_span)
-                            rows_jump = db.execute(
+                        brand_hint = str(strict_image_brand_hint or "").lower()
+                        if brand_hint in {"apple", "windows"}:
+                            min_c = int(budget_min_val * 100) if budget_min_val is not None else 0
+                            max_c = int(budget_max_val * 100) if budget_max_val is not None else 10_000_000
+                            if brand_hint == "apple":
+                                brand_pred = "(LOWER(p.name) LIKE '%apple%' OR LOWER(p.name) LIKE '%macbook%' OR LOWER(p.sku) LIKE 'mb%')"
+                            else:
+                                # Windows-first nearest band excludes Apple/MacBook.
+                                brand_pred = "(LOWER(p.name) NOT LIKE '%apple%' AND LOWER(p.name) NOT LIKE '%macbook%' AND LOWER(p.sku) NOT LIKE 'mb%')"
+                            # Exact in-budget brand-family matches first.
+                            rows_brand = db.execute(
                                 text(
-                                    """
+                                    f"""
                                     SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
                                            COALESCE(SUM(i.stock), 0) as stock
                                     FROM products p
                                     LEFT JOIN inventory i ON i.product_id = p.id
                                     WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                                      AND {brand_pred}
                                     GROUP BY p.id
                                     ORDER BY p.price_cents ASC
                                     LIMIT 24
                                     """
                                 ),
-                                {"min_c": int(jump_min * 100), "max_c": int(jump_max * 100)},
+                                {"min_c": min_c, "max_c": max_c},
                             ).mappings().all()
-                            for rj in rows_jump or []:
-                                jump_alt.append({
-                                    "id": rj.get("id"),
-                                    "sku": rj.get("sku"),
-                                    "name": rj.get("name"),
-                                    "price_cents": rj.get("price_cents"),
-                                    "currency": rj.get("currency"),
-                                    "image_url": rj.get("image_url"),
-                                    "stock": rj.get("stock"),
-                                    "specs": rj.get("specs") or {},
+                            for rb in rows_brand or []:
+                                brand_jump_alt.append({
+                                    "id": rb.get("id"),
+                                    "sku": rb.get("sku"),
+                                    "name": rb.get("name"),
+                                    "price_cents": rb.get("price_cents"),
+                                    "currency": rb.get("currency"),
+                                    "image_url": rb.get("image_url"),
+                                    "stock": rb.get("stock"),
+                                    "specs": rb.get("specs") or {},
                                 })
-                            if jump_alt:
-                                jump_meta = {
-                                    "budget_min": jump_min,
-                                    "budget_max": jump_max,
-                                    "candidates_before": retrieved_count,
-                                    "candidates_after": len(jump_alt),
-                                    "fallback": "db_price_range",
-                                }
+                            if not brand_jump_alt:
+                                # Nearest above-budget brand-family window.
+                                span_c = max(40_000, (max_c - min_c) if max_c > min_c else 40_000)
+                                floor_row = db.execute(
+                                    text(
+                                        f"""
+                                        SELECT MIN(p.price_cents) AS min_price_cents
+                                        FROM products p
+                                        WHERE p.active = 1
+                                          AND p.price_cents >= :baseline_c
+                                          AND {brand_pred}
+                                        """
+                                    ),
+                                    {"baseline_c": max_c},
+                                ).mappings().first()
+                                floor_c = int((floor_row or {}).get("min_price_cents") or 0)
+                                if floor_c > 0:
+                                    rows_brand_jump = db.execute(
+                                        text(
+                                            f"""
+                                            SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
+                                                   COALESCE(SUM(i.stock), 0) as stock
+                                            FROM products p
+                                            LEFT JOIN inventory i ON i.product_id = p.id
+                                            WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                                              AND {brand_pred}
+                                            GROUP BY p.id
+                                            ORDER BY p.price_cents ASC
+                                            LIMIT 24
+                                            """
+                                        ),
+                                        {"min_c": floor_c, "max_c": floor_c + span_c},
+                                    ).mappings().all()
+                                    for rj in rows_brand_jump or []:
+                                        brand_jump_alt.append({
+                                            "id": rj.get("id"),
+                                            "sku": rj.get("sku"),
+                                            "name": rj.get("name"),
+                                            "price_cents": rj.get("price_cents"),
+                                            "currency": rj.get("currency"),
+                                            "image_url": rj.get("image_url"),
+                                            "stock": rj.get("stock"),
+                                            "specs": rj.get("specs") or {},
+                                        })
+                                    if brand_jump_alt:
+                                        brand_jump_meta = {
+                                            "budget_min": int(floor_c / 100),
+                                            "budget_max": int((floor_c + span_c) / 100),
+                                            "candidates_before": retrieved_count,
+                                            "candidates_after": len(brand_jump_alt),
+                                            "fallback": "apple_nearest_above_budget" if brand_hint == "apple" else "windows_nearest_above_budget",
+                                            "brand_hint": brand_hint,
+                                        }
                     except Exception:
-                        jump_alt = []
-                        jump_meta = {}
-                    if jump_alt:
-                        candidates = jump_alt
+                        brand_jump_alt = []
+                        brand_jump_meta = {}
+                    if brand_jump_alt:
+                        candidates = brand_jump_alt
                         filter_price_applied = True
-                        filter_meta_price = jump_meta
+                        filter_meta_price = brand_jump_meta or {
+                            "budget_min": budget_min_val,
+                            "budget_max": budget_max_val,
+                            "candidates_before": retrieved_count,
+                            "candidates_after": len(candidates),
+                            "fallback": "db_price_range_brand",
+                            "brand_hint": str(strict_image_brand_hint or "").lower(),
+                        }
                         try:
                             log_trace_event(
                                 trace_id=trace_id,
@@ -5353,61 +5698,150 @@ def suggest(
                         except Exception:
                             pass
                     else:
-                        cb_record(redis, "recommend", True, degradation_cfg)
+                        # Deterministic auto-jump: if widened band still has 0 results,
+                        # jump to the nearest viable inventory window (above or below).
+                        jump_alt = []
+                        jump_meta = {}
                         try:
-                            _requested_qty = constraints.get("quantity") or 1
-                            log_trace_event(
-                                trace_id=trace_id,
-                                event_type="inventory_check",
-                                source_type="agent",
-                                source_id="Inventory_Agent",
-                                target_type="system",
-                                target_id=None,
-                                payload={
-                                    "evaluations": [],
-                                    "requested_qty": _requested_qty,
-                                    "status": "skipped_no_candidates",
-                                    "reason": "no_candidates_after_price_filter",
-                                },
+                            current_span = None
+                            if budget_min_val is not None and budget_max_val is not None:
+                                current_span = max(200, int(float(budget_max_val) - float(budget_min_val)))
+                            jump_span = max(400, int(current_span or 400))
+                            baseline_min = (
+                                float(budget_max_val)
+                                if budget_max_val is not None
+                                else (float(budget_min_val) if budget_min_val is not None else 0.0)
                             )
+                            baseline_c = int(max(0.0, baseline_min) * 100)
+                            row_nearest = db.execute(
+                                text(
+                                    """
+                                    SELECT p.price_cents AS nearest_price_cents
+                                    FROM products p
+                                    WHERE p.active = 1
+                                    ORDER BY ABS(p.price_cents - :baseline_c) ASC, p.price_cents ASC
+                                    LIMIT 1
+                                    """
+                                ),
+                                {"baseline_c": baseline_c},
+                            ).mappings().first()
+                            nearest_c = int((row_nearest or {}).get("nearest_price_cents") or 0)
+                            if nearest_c > 0:
+                                nearest_direction = "above" if nearest_c >= baseline_c else "below"
+                                jump_min = int(nearest_c / 100)
+                                jump_max = int(jump_min + jump_span)
+                                rows_jump = db.execute(
+                                    text(
+                                        """
+                                        SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
+                                               COALESCE(SUM(i.stock), 0) as stock
+                                        FROM products p
+                                        LEFT JOIN inventory i ON i.product_id = p.id
+                                        WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                                        GROUP BY p.id
+                                        ORDER BY p.price_cents ASC
+                                        LIMIT 24
+                                        """
+                                    ),
+                                    {"min_c": int(jump_min * 100), "max_c": int(jump_max * 100)},
+                                ).mappings().all()
+                                for rj in rows_jump or []:
+                                    jump_alt.append({
+                                        "id": rj.get("id"),
+                                        "sku": rj.get("sku"),
+                                        "name": rj.get("name"),
+                                        "price_cents": rj.get("price_cents"),
+                                        "currency": rj.get("currency"),
+                                        "image_url": rj.get("image_url"),
+                                        "stock": rj.get("stock"),
+                                        "specs": rj.get("specs") or {},
+                                    })
+                                if jump_alt:
+                                    jump_meta = {
+                                        "budget_min": jump_min,
+                                        "budget_max": jump_max,
+                                        "candidates_before": retrieved_count,
+                                        "candidates_after": len(jump_alt),
+                                        "fallback": "db_nearest_viable_band",
+                                        "nearest_price": round(float(nearest_c) / 100.0, 2),
+                                        "nearest_direction": nearest_direction,
+                                    }
                         except Exception:
-                            pass
-                        if budget_min_val is not None and budget_max_val is not None:
-                            message = f"No products found between ${budget_min_val} and ${budget_max_val}."
-                        elif budget_max_val is not None:
-                            message = f"No products found under ${budget_max_val}."
-                        elif budget_min_val is not None:
-                            message = f"No products found above ${budget_min_val}."
+                            jump_alt = []
+                            jump_meta = {}
+                        if jump_alt:
+                            candidates = jump_alt
+                            filter_price_applied = True
+                            filter_meta_price = jump_meta
+                            try:
+                                log_trace_event(
+                                    trace_id=trace_id,
+                                    event_type="agent_process",
+                                    source_type="agent",
+                                    source_id="Price_Filter_Agent",
+                                    target_type="system",
+                                    target_id=None,
+                                    payload=filter_meta_price,
+                                )
+                            except Exception:
+                                pass
                         else:
-                            message = "No products found in your price range."
-                        payload = {
-                            "results": [],
-                            "proposal": {"decision_mode": "rules", "ranked_skus": []},
-                            "constraints_used": constraints,
-                            "policy_version": flags.get("POLICY_VERSION", "v1"),
-                            "message": message,
-                            "degraded": use_rules,
-                            "eligible": not simulate,
-                            "view_mode": view_hint.get("view_mode"),
-                            "view_reason": view_hint.get("view_reason"),
-                            "agent_chain": [
-                                {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
-                                {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
-                                {"agent": "Price_Filter_Agent", "candidates": 0, "constraints": filter_meta_price},
-                                {"agent": "Inventory_Agent", "candidates_evaluated": 0, "status": "skipped_no_candidates"},
-                            ],
-                            "llm_model": llm_model,
-                            "model_tier": model_tier,
-                            "complexity_signals": complexity_signals,
-                        }
-                        _log_early_decision(
-                            status="no_results",
-                            proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
-                            agent_chain=payload.get("agent_chain") or [],
-                            retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
-                        )
-                        payload = _ensure_trace_response(payload, trace_id, flags)
-                        return _with_trace(payload, trace_id)
+                            cb_record(redis, "recommend", True, degradation_cfg)
+                            try:
+                                _requested_qty = constraints.get("quantity") or 1
+                                log_trace_event(
+                                    trace_id=trace_id,
+                                    event_type="inventory_check",
+                                    source_type="agent",
+                                    source_id="Inventory_Agent",
+                                    target_type="system",
+                                    target_id=None,
+                                    payload={
+                                        "evaluations": [],
+                                        "requested_qty": _requested_qty,
+                                        "status": "skipped_no_candidates",
+                                        "reason": "no_candidates_after_price_filter",
+                                    },
+                                )
+                            except Exception:
+                                pass
+                            if budget_min_val is not None and budget_max_val is not None:
+                                message = f"No products found between ${budget_min_val} and ${budget_max_val}."
+                            elif budget_max_val is not None:
+                                message = f"No products found under ${budget_max_val}."
+                            elif budget_min_val is not None:
+                                message = f"No products found above ${budget_min_val}."
+                            else:
+                                message = "No products found in your price range."
+                            payload = {
+                                "results": [],
+                                "proposal": {"decision_mode": "rules", "ranked_skus": []},
+                                "constraints_used": constraints,
+                                "price_filter": filter_meta_price or {},
+                                "policy_version": flags.get("POLICY_VERSION", "v1"),
+                                "message": message,
+                                "degraded": use_rules,
+                                "eligible": not simulate,
+                                "view_mode": view_hint.get("view_mode"),
+                                "view_reason": view_hint.get("view_reason"),
+                                "agent_chain": [
+                                    {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
+                                    {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
+                                    {"agent": "Price_Filter_Agent", "candidates": 0, "constraints": filter_meta_price},
+                                    {"agent": "Inventory_Agent", "candidates_evaluated": 0, "status": "skipped_no_candidates"},
+                                ],
+                                "llm_model": llm_model,
+                                "model_tier": model_tier,
+                                "complexity_signals": complexity_signals,
+                            }
+                            _log_early_decision(
+                                status="no_results",
+                                proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
+                                agent_chain=payload.get("agent_chain") or [],
+                                retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
+                            )
+                            payload = _ensure_trace_response(payload, trace_id, flags)
+                            return _with_trace(payload, trace_id)
         # Enforce spec filtering if requested
         specs = constraints.get("specs") or []
         if specs and not shortlist_lock_active:
@@ -6399,10 +6833,50 @@ def suggest(
         pass
 
     out_sev = output_analysis.get("severity", "info")
+    out_details = output_analysis.get("details") or {}
+    out_signals = out_details.get("signals") if isinstance(out_details.get("signals"), dict) else {}
+    _image_degraded_candidate = bool(incoming_image_payload and image_reupload_reasons)
+    _hard_output_abuse = any(
+        bool(out_signals.get(k))
+        for k in (
+            "prompt_injection",
+            "agentic_tool_abuse",
+            "data_exfiltration",
+            "unexpected_code_exec",
+            "rogue_agent",
+            "training_poisoning",
+            "model_dos",
+        )
+    )
+    _allow_visual_sanitized = bool(
+        _image_degraded_candidate
+        and out_sev in ("high", "critical")
+        and not _hard_output_abuse
+    )
+    if _allow_visual_sanitized:
+        out_sev = "warn"
+        try:
+            policy_notes.append("security_output_degraded_to_visual_sanitized_for_image_ocr")
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="security_route_override",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="system",
+                target_id=None,
+                payload={
+                    "original_severity": output_analysis.get("severity", "info"),
+                    "effective_severity": out_sev,
+                    "route": "visual_sanitized",
+                    "reason": "image_ocr_only_risk_without_hard_abuse_signal",
+                    "signals": {k: bool(v) for k, v in out_signals.items() if isinstance(v, bool)},
+                },
+            )
+        except Exception:
+            pass
     if out_sev in ("high", "critical"):
         approval_id = enqueue_approval("recommend", {"uid": uid, "query": query, "proposal": proposal}, reason="security_output")
         record_incident_alert("security", "p1")
-        out_details = output_analysis.get("details") or {}
         payload = {
             "status": "blocked",
             "message": "Response blocked due to safety checks. A human will review it.",
@@ -6496,6 +6970,29 @@ def suggest(
             results = results[:_display_limit]
     except Exception:
         pass
+    # Contract consistency guard: if the display limiter produced zero visible
+    # items while scored candidates exist, keep top actionable cards.
+    if not results and scored:
+        try:
+            fallback_rows: List[Dict[str, Any]] = []
+            for item in (scored or [])[:3]:
+                c = item.get("candidate") if isinstance(item, dict) else None
+                if not isinstance(c, dict):
+                    continue
+                score_val = float(item.get("score") or 0.0) if isinstance(item, dict) else 0.0
+                fallback_rows.append(
+                    {
+                        **c,
+                        "confidence": item.get("confidence") if isinstance(item, dict) else None,
+                        "factors": item.get("factors") if isinstance(item, dict) else {},
+                        "score": score_val,
+                        "score_norm": _normalize_score(score_val),
+                    }
+                )
+            if fallback_rows:
+                results = fallback_rows
+        except Exception:
+            pass
     # Persist search event for BI/funnel tracking
     try:
         log_search_event(
@@ -6571,6 +7068,8 @@ def suggest(
     }.get(tier, "neutral")
     payload = _with_trace({
         "results": results,
+        "products": results,
+        "price_filter": filter_meta_price or {},
         "price_buckets": _build_price_buckets(results=results, constraints=constraints, cap=4),
         "proposal": proposal,
         "constraints_used": constraints,
@@ -6866,6 +7365,16 @@ def suggest(
             next_questions = (next_questions or [])[:2]
             if gpu_followup_question_needed:
                 next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
+            # Inject image-budget mismatch question at top priority when applicable.
+            try:
+                if _budget_mismatch_question and not any(
+                    str((q or {}).get("id") or "") == "ask_image_budget_mismatch"
+                    for q in (next_questions or [])
+                ):
+                    next_questions = [_budget_mismatch_question] + (next_questions or [])
+                    next_questions = next_questions[:2]
+            except Exception:
+                pass
             next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
             next_questions = _append_standard_nqe_options(next_questions, query_effective)
             next_questions = _apply_nqe_confidence_gating(
@@ -7108,6 +7617,8 @@ def suggest(
     note, unmatched = _emit_inventory_brand_notice(results=results, constraints=constraints, decision_id=decision_id, trace_id=trace_id)
     if note:
         assistant_message = (assistant_message or "") + note
+    if image_gate_warning:
+        assistant_message = f"{assistant_message} {image_gate_warning}" if assistant_message else image_gate_warning
     # Comparative synthesis for "which is better" queries
     try:
         needs_synthesis = any(
@@ -7228,6 +7739,22 @@ def suggest(
             "confidence": _id_result.get("confidence"),
         }
     try:
+        _image_untrusted = bool(image_reupload_reasons)
+        _security_route = "visual_sanitized" if _image_untrusted else "allow"
+        _trust_channels = _derive_trust_channels(_security_route)
+        _qr_details = _derive_qr_details_from_signals(image_cv_signals_parsed, policy_route=_security_route)
+        _security_summary = (
+            "Image flagged; using text-only fallback until a clean product photo is uploaded."
+            if _image_untrusted
+            else None
+        )
+        payload["image_reupload_reasons"] = list(image_reupload_reasons or [])
+        if isinstance(payload.get("security"), dict):
+            payload["security"]["policy_route"] = _security_route
+            payload["security"]["route"] = _security_route
+            payload["security"]["image_untrusted"] = _image_untrusted
+            payload["security"]["image_trust_channels"] = _trust_channels
+            payload["security"]["qr"] = _qr_details
         if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
             _issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
             _warranty = _infer_account_warranty_status(uid)
@@ -7235,6 +7762,10 @@ def suggest(
                 "mode": "support",
                 "show_tiers": False,
                 "summary": f"Support flow active for {(_issue or 'device issue').replace('_', ' ')}.",
+                "image_untrusted": _image_untrusted,
+                "image_degraded_mode": _image_untrusted,
+                "security_route": _security_route,
+                "security_summary": _security_summary,
                 "support_cards": [
                     {
                         "id": "warranty_status",
@@ -7283,6 +7814,10 @@ def suggest(
                 "mode": "shopping",
                 "show_tiers": bool(_rt.get("show_split")),
                 "budget_status": str((payload.get("budget_viability") or {}).get("status") or "unknown"),
+                "image_untrusted": _image_untrusted,
+                "image_degraded_mode": _image_untrusted,
+                "security_route": _security_route,
+                "security_summary": _security_summary,
                 "lower_tier": {
                     "title": "Minimum / budget-fit",
                     "items": (_rt.get("minimum") or [])[:4],
@@ -7294,6 +7829,35 @@ def suggest(
                     "explanation": _rt.get("recommended_explanation"),
                 },
             }
+        _trace_for_ui_event = decision_id or trace_id
+        if _trace_for_ui_event:
+            try:
+                _safe_right_panel = json.loads(json.dumps(payload.get("right_panel"), ensure_ascii=False, default=str))
+            except Exception:
+                _safe_right_panel = {"mode": str((payload.get("right_panel") or {}).get("mode") or "")}
+            log_trace_event(
+                trace_id=_trace_for_ui_event,
+                event_type="recommendation_result",
+                source_type="agent",
+                source_id="Product_Ranking_Agent",
+                target_type="ui",
+                target_id="right_panel",
+                payload={
+                    "products_summary": [
+                        {
+                            "sku": str(p.get("sku") or ""),
+                            "name": str(p.get("name") or ""),
+                            "score_norm": float(p.get("score_norm")) if isinstance(p.get("score_norm"), (int, float)) else p.get("score_norm"),
+                            "reasons": [str(x) for x in ((p.get("reasons") or (p.get("factors") or {}).get("positive") or [])[:3])],
+                            "reason_codes": (p.get("reason_codes") or [])[:3],
+                            "price": float(p.get("price")) if isinstance(p.get("price"), (int, float)) else p.get("price"),
+                        }
+                        for p in (results or [])[:8]
+                        if isinstance(p, dict)
+                    ],
+                    "right_panel_contract": _safe_right_panel,
+                },
+            )
     except Exception:
         pass
     if not results:
@@ -7364,6 +7928,23 @@ def suggest(
                 )
         except Exception:
             pass
+        if not results:
+            _msg_low = str(assistant_message or "").lower()
+            _explicit_no_results = any(
+                tok in _msg_low
+                for tok in (
+                    "no products found",
+                    "no exact in-catalog match",
+                    "couldn't find in-stock products",
+                    "i could not find a confident",
+                    "no confident in-catalog match",
+                )
+            )
+            if _assistant_message_claims_products(assistant_message) or not _explicit_no_results:
+                assistant_message = (
+                    "I couldn't find in-stock products in that exact window yet. "
+                    "Use widen/search-nearest to see the closest viable options."
+                )
         payload["assistant_message"] = assistant_message
     turn_type = _classify_turn_type(
         results_count=len(results or []),
@@ -7758,8 +8339,10 @@ def checkout_upsell(
     uid: str,
     cart_skus: str,
     limit: int = 3,
+    query: str | None = None,
+    persona: str | None = None,
+    use_case: str | None = None,
     db=Depends(get_db),
-    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     skus = [s.strip() for s in str(cart_skus or "").split(",") if s.strip()]
     if not skus:
@@ -7771,6 +8354,9 @@ def checkout_upsell(
             cart_skus=skus,
             limit=max(1, min(int(limit or 3), 8)),
             uid_hash=uid,
+            query=query,
+            persona=persona,
+            use_case=use_case,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"checkout_upsell_failed: {exc}")
@@ -7782,10 +8368,14 @@ def checkout_upsell(
         promoted = [
             {
                 "sku": r.get("sku"),
+                "name": r.get("name"),
+                "price_cents": r.get("price_cents"),
+                "price": (float(r.get("price_cents")) / 100.0) if isinstance(r.get("price_cents"), (int, float)) else r.get("price"),
                 "reasons": (r.get("reasons") or [])[:3],
                 "reason_codes": (r.get("reason_codes") or [])[:5],
                 "reason_confidence": r.get("reason_confidence"),
                 "score": r.get("score"),
+                "score_norm": r.get("score_norm"),
                 "model_source": r.get("model_source"),
             }
             for r in (recs or [])
@@ -7793,7 +8383,7 @@ def checkout_upsell(
         ]
         log_decision(
             agent_name="Checkout_Upsell_Agent",
-            input_data={"uid_hash": hash_uid(uid), "cart_skus": skus, "limit": limit},
+            input_data={"uid_hash": hash_uid(uid), "cart_skus": skus, "limit": limit, "query": query, "persona": persona, "use_case": use_case},
             retrieved_context={"upsell_candidates": promoted, "surface": "checkout_upsell"},
             proposed_action={"results": promoted, "decision_mode": "rules_plus_model", "surface": "checkout_upsell"},
             policy_version=policy_version,
@@ -7812,7 +8402,15 @@ def checkout_upsell(
             payload={
                 "surface": "checkout_upsell",
                 "cart_skus": skus,
+                "query": query,
+                "persona": persona,
+                "use_case": use_case,
                 "promoted": promoted,
+                "products_summary": promoted,
+                "right_panel_contract": {
+                    "mode": "cart_upsell",
+                    "summary": "Checkout upsell suggestions selected for current cart.",
+                },
                 **_trace_meta_payload(policy_version=policy_version, context_ids=["cart_skus", "upsell_factors"]),
             },
         )

@@ -33,6 +33,8 @@ type Trace = {
     latency_ms?: number | null;
     intent_summary?: string | null;
   };
+  products?: any[];
+  right_panel?: { anchor_sections?: any[] } | null;
 };
 
 // Icons
@@ -98,7 +100,7 @@ function getSummary(evt: TraceEvent): string {
     const tone = evt.payload?.tone || 'balanced';
     const profile = evt.payload?.profile_id || '';
     if (applied === false) return `Copywriting skipped (${evt.payload?.reason || 'disabled'})`;
-    return `Copywriting applied — tone: ${tone}${profile ? ` / ${profile}` : ''}`;
+    return `Copywriting applied ? tone: ${tone}${profile ? ` / ${profile}` : ''}`;
   }
   if (evt.payload?.summary) return evt.payload.summary;
   if (evt.payload?.action) return evt.payload.action;
@@ -161,7 +163,7 @@ function eventMatches(evt: TraceEvent, expected: string | string[]): boolean {
   return aliases.some((x) => want.has(x));
 }
 
-export default function DecisionTrace({ traceId, onClose }: { traceId: string | null; onClose: () => void }) {
+export default function DecisionTrace({ traceId, onClose, imageTriage }: { traceId: string | null; onClose: () => void; imageTriage?: any[] }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const LOCAL_KEY = (() => {
     try {
@@ -182,7 +184,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'audit' | 'raw'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'audit' | 'raw'>('events');
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -234,6 +236,14 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   // Detach to new window
   const handleDetach = () => {
@@ -316,6 +326,19 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     let es: EventSource | null = null;
     let ws: WebSocket | null = null;
 
+    const fetchTraceViaQuery = async () => {
+      const qr = await fetch(apiUrl(`/api/v1/decisions/${traceId}/query?include_events=true`), {
+        signal: ctl.signal,
+        credentials: 'include',
+        headers: authHeaders,
+      });
+      if (!qr.ok) throw new Error(`trace_query_${qr.status}`);
+      const qd = await safeJson(qr);
+      if (!mounted || !qd) return;
+      setTrace(qd as any);
+      if (Array.isArray((qd as any).events)) setEvents((qd as any).events);
+    };
+
     const fetchTrace = async () => {
       setUpdating(true);
       try {
@@ -324,10 +347,21 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
           credentials: 'include',
           headers: authHeaders,
         });
+        if (!r.ok) {
+          if (r.status === 404) {
+            await fetchTraceViaQuery();
+            return;
+          }
+          throw new Error(`trace_${r.status}`);
+        }
         const d = await safeJson(r);
         if (mounted) setTrace(d);
       } catch {
-        if (mounted) setTrace(null);
+        try {
+          await fetchTraceViaQuery();
+        } catch {
+          if (mounted) setTrace(null);
+        }
       } finally {
         if (mounted) setUpdating(false);
       }
@@ -366,9 +400,15 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
         if (r.ok) {
           const j = await safeJson(r);
           if (mounted && Array.isArray(j.events)) setEvents(j.events);
+          return;
         }
+        await fetchTraceViaQuery();
       } catch {
-        // Fallback: generate events from trace
+        try {
+          await fetchTraceViaQuery();
+        } catch {
+          // Fallback: keep synthetic events from trace
+        }
       }
     };
 
@@ -504,6 +544,39 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
 
   const ms = trace?.model_selection || {};
 
+  // Prefer recommendation records emitted through normalized envelopes
+  // (e.g. feedback_loop with _original_event_type=recommendation_result).
+  const recommendationEventPayload = (() => {
+    const candidates = (allDisplayEvents || [])
+      .map((evt) => {
+        const payload = evt?.payload || {};
+        const original = String(payload?._original_event_type || payload?.original_event_type || '').toLowerCase().trim();
+        const isRec = original === 'recommendation_result' || eventMatches(evt, 'recommendation_result');
+        if (!isRec) return null;
+        const rightPanel = (payload?.right_panel_contract && typeof payload.right_panel_contract === 'object')
+          ? payload.right_panel_contract
+          : ((payload?.right_panel && typeof payload.right_panel === 'object') ? payload.right_panel : {});
+        const anchors = Array.isArray((rightPanel as any)?.anchor_sections) ? (rightPanel as any).anchor_sections : [];
+        const products = Array.isArray(payload?.products_summary) ? payload.products_summary : [];
+        const score = (original === 'recommendation_result' ? 100 : 0) + (anchors.length > 0 ? 10 : 0) + (products.length > 0 ? 5 : 0);
+        return { payload, score };
+      })
+      .filter(Boolean) as Array<{ payload: any; score: number }>;
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].payload || null;
+  })();
+  const whyAnchorSections: any[] = Array.isArray(trace?.right_panel?.anchor_sections) && trace!.right_panel!.anchor_sections!.length > 0
+    ? (trace!.right_panel!.anchor_sections || [])
+    : (Array.isArray((recommendationEventPayload as any)?.right_panel_contract?.anchor_sections)
+      ? ((recommendationEventPayload as any)?.right_panel_contract?.anchor_sections || [])
+      : []);
+  const whyProducts: any[] = Array.isArray(trace?.products) && trace!.products!.length > 0
+    ? (trace!.products || [])
+    : (Array.isArray((recommendationEventPayload as any)?.products_summary)
+      ? ((recommendationEventPayload as any)?.products_summary || [])
+      : []);
+
   const normalizeSecurityPayload = (value: any) => {
     if (!value || typeof value !== 'object') return null;
     const raw: any = value;
@@ -523,6 +596,25 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     if (raw.dread_avg != null && merged.dread_avg == null) merged.dread_avg = raw.dread_avg;
     if (raw.cvss_score != null && merged.cvss_score == null) merged.cvss_score = raw.cvss_score;
     if (Array.isArray(raw.evidence_tags) && !Array.isArray(merged.evidence_tags)) merged.evidence_tags = raw.evidence_tags;
+    if (raw.policy_route != null && merged.policy_route == null) merged.policy_route = raw.policy_route;
+    if (raw.route != null && merged.route == null) merged.route = raw.route;
+    if (raw.signals && typeof raw.signals === 'object' && (!merged.signals || typeof merged.signals !== 'object')) merged.signals = raw.signals;
+    if (raw.qr && typeof raw.qr === 'object' && (!merged.qr || typeof merged.qr !== 'object')) merged.qr = raw.qr;
+    if (raw.image_trust_channels && typeof raw.image_trust_channels === 'object' && (!merged.image_trust_channels || typeof merged.image_trust_channels !== 'object')) merged.image_trust_channels = raw.image_trust_channels;
+    if (raw.frameworks && typeof raw.frameworks === 'object' && (!merged.frameworks || typeof merged.frameworks !== 'object')) merged.frameworks = raw.frameworks;
+    if (Array.isArray(raw.mitre_atlas) && !Array.isArray(merged.mitre_atlas)) merged.mitre_atlas = raw.mitre_atlas;
+    if (Array.isArray(raw.mitre_attack) && !Array.isArray(merged.mitre_attack)) merged.mitre_attack = raw.mitre_attack;
+    if (Array.isArray(raw.owasp_llm_top10) && !Array.isArray(merged.owasp_llm_top10)) merged.owasp_llm_top10 = raw.owasp_llm_top10;
+    if (Array.isArray(raw.stride_categories) && !Array.isArray(merged.stride_categories)) merged.stride_categories = raw.stride_categories;
+    if (raw.pasta && typeof raw.pasta === 'object' && (!merged.pasta || typeof merged.pasta !== 'object')) merged.pasta = raw.pasta;
+    if (raw.pasta_stage != null && merged.pasta_stage == null) merged.pasta_stage = raw.pasta_stage;
+    if (raw.dread && typeof raw.dread === 'object' && (!merged.dread || typeof merged.dread !== 'object')) merged.dread = raw.dread;
+    if (raw.cvss && typeof raw.cvss === 'object' && (!merged.cvss || typeof merged.cvss !== 'object')) merged.cvss = raw.cvss;
+    if (raw.compliance && typeof raw.compliance === 'object' && (!merged.compliance || typeof merged.compliance !== 'object')) merged.compliance = raw.compliance;
+    if (Array.isArray(raw.owasp_llm_top10) && !Array.isArray(merged.owasp_llm)) merged.owasp_llm = raw.owasp_llm_top10;
+    if (Array.isArray(raw.stride_categories) && !Array.isArray(merged.stride)) merged.stride = raw.stride_categories;
+    if (Array.isArray(raw.mitre_atlas) && !Array.isArray(merged.mitre)) merged.mitre = raw.mitre_atlas;
+    if (Array.isArray(raw.owasp_agentic_top10) && !Array.isArray(merged.owasp_agentic)) merged.owasp_agentic = raw.owasp_agentic_top10;
     return Object.keys(merged).length > 0 ? merged : null;
   };
 
@@ -585,9 +677,21 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     [...(events || [])].reverse().find((e) => String(e.event_type || '').toLowerCase() === 'upsell_promotion_selected')
     || null;
   const upsellPromoted = Array.isArray(upsellEvent?.payload?.promoted) ? upsellEvent?.payload?.promoted : [];
+  const owaspLlmTags = (security?.owasp_llm && Array.isArray(security.owasp_llm))
+    ? security.owasp_llm
+    : (Array.isArray(security?.owasp_llm_top10) ? security.owasp_llm_top10 : (security?.owasp || []));
+  const owaspAgenticTags = (security?.owasp_agentic && Array.isArray(security.owasp_agentic))
+    ? security.owasp_agentic
+    : (Array.isArray((security as any)?.owasp_agentic_top10) ? (security as any).owasp_agentic_top10 : []);
+  const strideTags = (security?.stride && Array.isArray(security.stride))
+    ? security.stride
+    : (Array.isArray(security?.stride_categories) ? security.stride_categories : []);
+  const mitreIds = (security?.mitre && Array.isArray(security.mitre))
+    ? security.mitre
+    : (Array.isArray((security as any)?.mitre_atlas) ? (security as any).mitre_atlas : []);
   const mitreDetails = (security?.mitre_details && security.mitre_details.length > 0)
     ? security.mitre_details
-    : (security?.mitre || []).map((id: string) => ({
+    : (mitreIds || []).map((id: string) => ({
         id,
         name: null,
         weight: null,
@@ -597,6 +701,54 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
       }));
   const pasta = security?.pasta || {};
   const stages = Array.isArray(pasta?.stages) ? pasta.stages : [];
+  const qrInfo = (security?.qr && typeof security.qr === 'object')
+    ? security.qr
+    : ((security?.details?.qr && typeof security.details.qr === 'object') ? security.details.qr : {});
+  const trustChannels = (security?.image_trust_channels && typeof security.image_trust_channels === 'object')
+    ? security.image_trust_channels
+    : ((security?.details?.image_trust_channels && typeof security.details.image_trust_channels === 'object')
+      ? security.details.image_trust_channels
+      : {});
+  const dreadWeighted = Number(security?.dread?.weighted_avg ?? security?.dread_weighted_avg ?? NaN);
+  const riskAdjusted = Number(security?.risk_adj ?? NaN);
+  const compositeRisk = Number.isFinite(riskAdjusted)
+    ? Math.max(0, Math.min(100, riskAdjusted <= 10 ? riskAdjusted * 10 : riskAdjusted))
+    : (Number.isFinite(dreadWeighted) ? Math.max(0, Math.min(100, dreadWeighted * 10)) : null);
+  const triageItems: any[] = (() => {
+    if (Array.isArray(imageTriage) && imageTriage.length > 0) return imageTriage;
+    const sec: any = security || {};
+    if (Array.isArray(sec.image_triage) && sec.image_triage.length > 0) return sec.image_triage;
+    if (Array.isArray(sec.images) && sec.images.length > 0) return sec.images;
+    if ((sec.extracted_text || sec.ocr_text || (sec.signals && Object.keys(sec.signals || {}).length > 0)) && sec) return [sec];
+    return [];
+  })();
+
+  /** Build a plain-English heuristic narrative from a single triage result. */
+  function buildTriageNarrative(t: any): string {
+    const sigs = t?.security?.signals || t?.signals || {};
+    const filename = t?._filename || 'image';
+    const parts: string[] = [];
+
+    if (sigs.qr_code_detected) {
+      const payloads: any[] = sigs.qr_payloads || [];
+      if (payloads.length > 0) {
+        parts.push(`QR code detected in ${filename}. Decoded payload: "${payloads.map((p: any) => p.data).join('" / "')}".`);
+      } else {
+        parts.push(`QR code detected in ${filename} but payload could not be fully decoded.`);
+      }
+    }
+    if (sigs.qr_prompt_injection) parts.push('Prompt-injection pattern found in QR data ? request blocked.');
+    if (sigs.qr_external_url) parts.push('QR code contains an external URL; flagged for review.');
+    if (sigs.adversarial_detected) parts.push('Adversarial perturbation signature found; image may be crafted to mislead the classifier.');
+    if (sigs.ai_generated_suspected) parts.push('High diffusion-model score ? image may be AI-generated.');
+    if (sigs.steg_suspicious) parts.push(`Steganography anomaly detected (score: ${sigs.steg_score ?? '?'}); metadata may be hiding a payload.`);
+
+    const ocrText = (t?.security?.extracted_text || t?.security?.ocr_text || t?.extracted_text || t?.ocr_text || '').trim();
+    if (ocrText) parts.push(`OCR/extracted text: "${ocrText.slice(0, 200)}${ocrText.length > 200 ? '?' : ''}"`);
+
+    if (parts.length === 0) parts.push(`No threats detected in ${filename}. Image appears benign.`);
+    return parts.join(' ');
+  }
 
   const buildSecurityReport = () => ({
     decision_id: trace?.decision_id,
@@ -604,6 +756,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     query: trace?.input_query,
     model_selection: trace?.model_selection,
     security,
+    image_triage: triageItems,
   });
 
   const copySecurityReport = async () => {
@@ -698,6 +851,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
             <div className={styles.tabs}>
               <button className={activeTab === 'events' ? styles.activeTab : ''} onClick={() => setActiveTab('events')}>Events</button>
               <button className={activeTab === 'summary' ? styles.activeTab : ''} onClick={() => setActiveTab('summary')}>Summary</button>
+              <button className={activeTab === 'why' ? styles.activeTab : ''} onClick={() => setActiveTab('why')}>Why Recommended</button>
               <button className={activeTab === 'intent' ? styles.activeTab : ''} onClick={() => setActiveTab('intent')}>Intent</button>
               <button className={activeTab === 'multimodal' ? styles.activeTab : ''} onClick={() => setActiveTab('multimodal')}>Multimodal</button>
               <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
@@ -773,11 +927,11 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                                     <div className={styles.detailLabel}>Type</div>
                                     <div className={styles.detailValue}>{humanizeKey(displayEventType(evt))}</div>
                                     <div className={styles.detailLabel}>Source</div>
-                                    <div className={styles.detailValue}>{evt.source_id || '—'}</div>
+                                    <div className={styles.detailValue}>{evt.source_id || '?'}</div>
                                     <div className={styles.detailLabel}>Timestamp</div>
-                                    <div className={styles.detailValue}>{evt.timestamp || evt.created_at || '—'}</div>
+                                    <div className={styles.detailValue}>{evt.timestamp || evt.created_at || '?'}</div>
                                     <div className={styles.detailLabel}>Latency</div>
-                                    <div className={styles.detailValue}>{evt.latency_ms != null ? `${evt.latency_ms}ms` : '—'}</div>
+                                    <div className={styles.detailValue}>{evt.latency_ms != null ? `${evt.latency_ms}ms` : '?'}</div>
                                   </div>
                                   <div className={styles.detailHeader}>Payload</div>
                                   {evt.payload && typeof evt.payload === 'object' ? (
@@ -841,9 +995,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                   )}
                   {explain && typeof explain.summary === 'object' && (
                     <div className={styles.explainBullets}>
-                      <div className={styles.kvRow}><span>Reasoning</span><span>{explain.summary.reasoning || '—'}</span></div>
-                      <div className={styles.kvRow}><span>Risks</span><span>{explain.summary.risks ? JSON.stringify(explain.summary.risks) : '—'}</span></div>
-                      <div className={styles.kvRow}><span>Next Steps</span><span>{explain.summary.next_steps ? JSON.stringify(explain.summary.next_steps) : '—'}</span></div>
+                      <div className={styles.kvRow}><span>Reasoning</span><span>{explain.summary.reasoning || '?'}</span></div>
+                      <div className={styles.kvRow}><span>Risks</span><span>{explain.summary.risks ? JSON.stringify(explain.summary.risks) : '?'}</span></div>
+                      <div className={styles.kvRow}><span>Next Steps</span><span>{explain.summary.next_steps ? JSON.stringify(explain.summary.next_steps) : '?'}</span></div>
                     </div>
                   )}
 
@@ -853,9 +1007,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                     <div className={styles.muted}>No contract NLP analysis recorded.</div>
                   ) : (
                     <>
-                      <div className={styles.kvRow}><span>Mode</span><span>{contractPayload.mode || '—'}</span></div>
-                      <div className={styles.kvRow}><span>Score</span><span>{contractPayload.score ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>Risks</span><span>{Array.isArray(contractPayload.risks) && contractPayload.risks.length ? contractPayload.risks.join(', ') : '—'}</span></div>
+                      <div className={styles.kvRow}><span>Mode</span><span>{contractPayload.mode || '?'}</span></div>
+                      <div className={styles.kvRow}><span>Score</span><span>{contractPayload.score ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Risks</span><span>{Array.isArray(contractPayload.risks) && contractPayload.risks.length ? contractPayload.risks.join(', ') : '?'}</span></div>
                       {contractPayload.summary && (
                         <div className={styles.kvRow}><span>Summary</span><span>{contractPayload.summary}</span></div>
                       )}
@@ -868,12 +1022,12 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                     <div className={styles.muted}>No quality gate evaluation recorded.</div>
                   ) : (
                     <>
-                      <div className={styles.kvRow}><span>Decision</span><span>{qualityPayload.decision || '—'}</span></div>
-                      <div className={styles.kvRow}><span>Reasons</span><span>{Array.isArray(qualityPayload.reasons) && qualityPayload.reasons.length ? qualityPayload.reasons.join(', ') : '—'}</span></div>
-                      <div className={styles.kvRow}><span>Risk‑Adjusted Score</span><span>{qualityPayload.metrics?.risk_adjusted_score ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>Precision Target</span><span>{qualityPayload.metrics?.precision_target ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>Recall Target</span><span>{qualityPayload.metrics?.recall_target ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>Thresholds</span><span>{qualityPayload.thresholds ? JSON.stringify(qualityPayload.thresholds) : '—'}</span></div>
+                      <div className={styles.kvRow}><span>Decision</span><span>{qualityPayload.decision || '?'}</span></div>
+                      <div className={styles.kvRow}><span>Reasons</span><span>{Array.isArray(qualityPayload.reasons) && qualityPayload.reasons.length ? qualityPayload.reasons.join(', ') : '?'}</span></div>
+                      <div className={styles.kvRow}><span>Risk?Adjusted Score</span><span>{qualityPayload.metrics?.risk_adjusted_score ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Precision Target</span><span>{qualityPayload.metrics?.precision_target ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Recall Target</span><span>{qualityPayload.metrics?.recall_target ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Thresholds</span><span>{qualityPayload.thresholds ? JSON.stringify(qualityPayload.thresholds) : '?'}</span></div>
                     </>
                   )}
 
@@ -894,10 +1048,10 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                       <tbody>
                         {replay.tools_invoked.map((t: any, i: number) => (
                           <tr key={`${t.tool || 'tool'}-${i}`}>
-                            <td>{t.tool || '—'}</td>
-                            <td>{t.source || '—'}</td>
-                            <td>{t.destination || '—'}</td>
-                            <td>{t.time || '—'}</td>
+                            <td>{t.tool || '?'}</td>
+                            <td>{t.source || '?'}</td>
+                            <td>{t.destination || '?'}</td>
+                            <td>{t.time || '?'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -915,9 +1069,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                   {trace.recommendation && (
                     <>
                       <div className={styles.sectionTitle}>Recommendation</div>
-                      <div className={styles.kvRow}><span>Product</span><span>{trace.recommendation.product_id || '—'}</span></div>
-                      <div className={styles.kvRow}><span>Score</span><span>{trace.recommendation.score ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>Reasoning</span><span>{trace.recommendation.reasoning || '—'}</span></div>
+                      <div className={styles.kvRow}><span>Product</span><span>{trace.recommendation.product_id || '?'}</span></div>
+                      <div className={styles.kvRow}><span>Score</span><span>{trace.recommendation.score ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Reasoning</span><span>{trace.recommendation.reasoning || '?'}</span></div>
                     </>
                   )}
                   <div className={styles.sectionTitle}>Turn Envelope Diff</div>
@@ -925,7 +1079,7 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                     <div className={styles.muted}>No envelope diff recorded for this turn.</div>
                   ) : (
                     <>
-                      <div className={styles.kvRow}><span>Reason</span><span>{envelopeDiff.reason || '—'}</span></div>
+                      <div className={styles.kvRow}><span>Reason</span><span>{envelopeDiff.reason || '?'}</span></div>
                       <div className={styles.kvRow}><span>Expanded</span><span>{String(Boolean(envelopeDiff.expanded))}</span></div>
                       <div className={styles.kvRow}><span>Narrowed</span><span>{String(Boolean(envelopeDiff.narrowed))}</span></div>
                       <div className={styles.kvRow}><span>Changed Fields</span><span>{Array.isArray(envelopeDiff.changed_fields) && envelopeDiff.changed_fields.length ? envelopeDiff.changed_fields.join(', ') : 'none'}</span></div>
@@ -948,24 +1102,24 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                       <tbody>
                         {upsellPromoted.map((p: any, idx: number) => (
                           <tr key={`${p?.sku || 'sku'}-${idx}`}>
-                            <td>{p?.sku || '—'}</td>
+                            <td>{p?.sku || '?'}</td>
                             <td>
                               {typeof p?.reason_confidence === 'number'
                                 ? `${Math.round((p.reason_confidence || 0) * 100)}%`
-                                : '—'}
+                                : '?'}
                             </td>
                             <td>{p?.model_source || 'rules'}</td>
                             <td>
                               {Array.isArray(p?.reason_codes) && p.reason_codes.length
                                 ? p.reason_codes.slice(0, 3).map((r: any) => `${r.code}(${Math.round((r.confidence || 0) * 100)}%)`).join(', ')
-                                : (Array.isArray(p?.reasons) ? p.reasons.join(', ') : '—')}
+                                : (Array.isArray(p?.reasons) ? p.reasons.join(', ') : '?')}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   )}
-                  <div className={styles.sectionTitle}>Post‑hoc Outcome</div>
+                  <div className={styles.sectionTitle}>Post?hoc Outcome</div>
                   <div className={styles.posthocRow}>
                     <select value={posthocType} onChange={(e) => setPosthocType(e.target.value)}>
                       <option value="fraud_confirmed">Fraud Confirmed</option>
@@ -993,13 +1147,89 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                 </div>
               )}
 
+              {activeTab === 'why' && (
+                <div className={styles.summaryPane}>
+                  {Array.isArray(whyAnchorSections) && whyAnchorSections.length > 0 ? (
+                    (whyAnchorSections || []).map((sec: any, idx: number) => (
+                      <div key={`anchor-${idx}`} className={styles.anchorBlock}>
+                        <div className={styles.sectionTitle}>{sec?.title || `Image ${idx + 1}`}</div>
+                        <div className={styles.kvRow}>
+                          <span>Match basis</span>
+                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' Ãƒâ€šÃ‚Â· ') : '?'}</span>
+                        </div>
+                        {sec?.summary && <div className={styles.whyNarrative}>{sec.summary}</div>}
+                        {Array.isArray(sec?.top_products) && sec.top_products.slice(0, 3).map((p: any, pIdx: number) => (
+                          <div key={`p-${idx}-${p?.sku || pIdx}`} className={styles.productReasonRow}>
+                            <div className={styles.rowLeft}>
+                              <strong>{p?.name || p?.sku || 'Product'}</strong>
+                            </div>
+                            <div className={styles.rowRight}>
+                              <span className={styles.scoreChip}>score {p?.score_norm ?? '?'}</span>
+                            </div>
+                            {Array.isArray(p?.reasons) && p.reasons.length > 0 && (
+                              <div className={styles.pillRow}>
+                                {p.reasons.slice(0, 3).map((r: string, i: number) => (
+                                  <span key={`${p?.sku || pIdx}-r-${i}`} className={styles.pill}>{r}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ))
+                  ) : (
+                    <div className={styles.muted}>No anchor-section reasoning recorded for this trace.</div>
+                  )}
+
+                  <div className={styles.sectionTitle}>All Ranked Products</div>
+                  {Array.isArray(whyProducts) && whyProducts.length > 0 ? (
+                    whyProducts.slice(0, 8).map((p: any, i: number) => (
+                      <div key={`rp-${p?.sku || i}`} className={styles.productReasonRow}>
+                        <div className={styles.rowLeft}>
+                          <strong>{p?.name || p?.sku || 'Product'}</strong>
+                          <span className={styles.sku}>{p?.sku || ''}</span>
+                        </div>
+                        <div className={styles.rowRight}>
+                          <span className={styles.scoreChip}>{p?.score_norm ?? '?'}</span>
+                        </div>
+                        {Array.isArray(p?.reason_codes) && p.reason_codes.length > 0 ? (
+                          <div className={styles.pillRow}>
+                            {p.reason_codes.slice(0, 3).map((rc: any, rcIdx: number) => (
+                              <span key={`${p?.sku || i}-rc-${rcIdx}`} className={styles.pill}>
+                                {String(rc?.code || 'reason')} ({Math.round((Number(rc?.confidence) || 0) * 100)}%)
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          Array.isArray(p?.reasons) && p.reasons.length > 0 && (
+                            <div className={styles.pillRow}>
+                              {p.reasons.slice(0, 3).map((r: string, rIdx: number) => (
+                                <span key={`${p?.sku || i}-r2-${rIdx}`} className={styles.pill}>{r}</span>
+                              ))}
+                            </div>
+                          )
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <div className={styles.muted}>No ranked product reasons recorded for this trace.</div>
+                  )}
+                </div>
+              )}
+
               {activeTab === 'intent' && (
                 <div className={styles.summaryPane}>
                   {(() => {
-                    const intentEvt = events.find(e => e.event_type === 'shopper_intent');
+                    const intentEvt = events.find(e =>
+                      eventMatches(e, ['shopper_intent', 'intent_analysis', 'nlp_intent', 'image_intent_routing'])
+                    );
                     const abandonEvts = events.filter(e => e.event_type === 'cart_abandonment_detected');
                     const outcomeEvts = events.filter(e => e.event_type === 'commerce_outcome');
-                    const si = intentEvt?.payload?.shopper_intent || intentEvt?.payload || null;
+                    const si = intentEvt?.payload?.shopper_intent
+                      || intentEvt?.payload?.intent_profile
+                      || intentEvt?.payload?.intent
+                      || intentEvt?.payload
+                      || null;
                     // Also look for shopper_intent inside constraints payloads
                     const constraintsSi = !si
                       ? (events.find(e => e.payload?.constraints?.shopper_intent)?.payload?.constraints?.shopper_intent || null)
@@ -1073,8 +1303,8 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                             {intentEvt && (
                               <>
                                 <div className={styles.sectionTitle}>Bitemporal Metadata</div>
-                                <div className={styles.kvRow}><span>Valid From</span><span className={styles.mono}>{intentEvt.payload?.valid_from || intentEvt.timestamp || '—'}</span></div>
-                                <div className={styles.kvRow}><span>System From</span><span className={styles.mono}>{intentEvt.payload?.system_from || intentEvt.created_at || '—'}</span></div>
+                                <div className={styles.kvRow}><span>Valid From</span><span className={styles.mono}>{intentEvt.payload?.valid_from || intentEvt.timestamp || '?'}</span></div>
+                                <div className={styles.kvRow}><span>System From</span><span className={styles.mono}>{intentEvt.payload?.system_from || intentEvt.created_at || '?'}</span></div>
                                 <div className={styles.kvRow}><span>Recorded At</span><span className={styles.mono}>{formatTime(intentEvt.timestamp || intentEvt.created_at)}</span></div>
                               </>
                             )}
@@ -1093,16 +1323,16 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                                   const p = e.payload || {};
                                   return (
                                     <tr key={e.id || `ab-${i}`}>
-                                      <td className={styles.mono}>{p.session_id || '—'}</td>
-                                      <td>{p.idle_seconds ?? '—'}</td>
-                                      <td>{p.cart_value_cents != null ? `$${(p.cart_value_cents / 100).toFixed(2)}` : '—'}</td>
+                                      <td className={styles.mono}>{p.session_id || '?'}</td>
+                                      <td>{p.idle_seconds ?? '?'}</td>
+                                      <td>{p.cart_value_cents != null ? `$${(p.cart_value_cents / 100).toFixed(2)}` : '?'}</td>
                                       <td>
                                         {p.inferred_persona ? (
                                           <span className={styles.intentBadge} style={{ background: personaColor, fontSize: 11 }}>{p.inferred_persona}</span>
-                                        ) : '—'}
+                                        ) : '?'}
                                       </td>
-                                      <td>{p.suggested_action || '—'}</td>
-                                      <td>{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '—'}</td>
+                                      <td>{p.suggested_action || '?'}</td>
+                                      <td>{p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '?'}</td>
                                     </tr>
                                   );
                                 })}
@@ -1124,9 +1354,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                                   return (
                                     <tr key={e.id || `oc-${i}`}>
                                       <td><VerdictBadge type="commerce_outcome" /></td>
-                                      <td>{p.upsell_clicked != null ? (p.upsell_clicked ? '✓' : '—') : '—'}</td>
-                                      <td>{p.bundle_purchased != null ? (p.bundle_purchased ? '✓' : '—') : '—'}</td>
-                                      <td>{p.aov_delta != null ? (p.aov_delta >= 0 ? `+$${p.aov_delta.toFixed(2)}` : `-$${Math.abs(p.aov_delta).toFixed(2)}`) : '—'}</td>
+                                      <td>{p.upsell_clicked != null ? (p.upsell_clicked ? 'Yes' : 'No') : '?'}</td>
+                                      <td>{p.bundle_purchased != null ? (p.bundle_purchased ? 'Yes' : 'No') : '?'}</td>
+                                      <td>{p.aov_delta != null ? (p.aov_delta >= 0 ? `+$${p.aov_delta.toFixed(2)}` : `-$${Math.abs(p.aov_delta).toFixed(2)}`) : '?'}</td>
                                       <td className={styles.time}>{formatTime(e.timestamp || e.created_at)}</td>
                                     </tr>
                                   );
@@ -1144,10 +1374,11 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
               {activeTab === 'multimodal' && (
                 <div className={styles.summaryPane}>
                   {(() => {
-                    const imgEvt = events.find(e => eventMatches(e, ['image_intent_routing', 'cv_analysis', 'intent_classify']));
-                    const fusionEvt = events.find(e => eventMatches(e, ['multimodal_fusion', 'synthesis_reasoning', 'proposal_build']));
-                    const secEvt = events.find(e => eventMatches(e, ['image_security_scan', 'security_scan']));
-                    const hasData = imgEvt || fusionEvt || secEvt;
+                    const imgEvt = events.find(e => eventMatches(e, ['image_intent_routing', 'cv_analysis', 'intent_classify', 'image_context_received']));
+                    const fusionEvt = events.find(e => eventMatches(e, ['multimodal_fusion', 'synthesis_reasoning', 'proposal_build', 'right_panel_anchor_sections', 'recommendation_result']));
+                    const secEvt = events.find(e => eventMatches(e, ['image_security_scan', 'security_scan', 'image_security_posture']));
+                    const hasTracePanel = Boolean(trace?.right_panel && (Array.isArray((trace as any)?.right_panel?.anchor_sections) || (trace as any)?.right_panel?.mode));
+                    const hasData = imgEvt || fusionEvt || secEvt || hasTracePanel;
                     if (!hasData) return <div className={styles.empty}>No multimodal events recorded for this trace. Attach an image to your chat message to see image routing, fusion, and security scan details.</div>;
                     return (
                       <>
@@ -1168,6 +1399,10 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                             <div className={styles.kvRow}><span>Labels</span><span>{Array.isArray(fusionEvt.payload?.labels) ? fusionEvt.payload.labels.join(', ') : '--'}</span></div>
                             <div className={styles.kvRow}><span>OCR Text</span><span>{fusionEvt.payload?.ocr_text || '--'}</span></div>
                           </>
+                        ) : hasTracePanel ? (
+                          <div className={styles.muted}>
+                            Multimodal reasoning is present in right-panel contract mode: {(trace as any)?.right_panel?.mode || '--'}.
+                          </div>
                         ) : <div className={styles.muted}>No multimodal fusion event.</div>}
                         <div className={styles.sectionTitle}>Image Security Scan</div>
                         {secEvt ? (
@@ -1307,19 +1542,51 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                           {copyStatus && <span className={styles.copyStatus}>{copyStatus}</span>}
                         </div>
                       </div>
-                      <div className={styles.kvRow}><span>Severity</span><span>{security.severity || '—'}</span></div>
-                      <div className={styles.kvRow}><span>Risk (Adjusted)</span><span>{security.risk_adj ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>DREAD Avg</span><span>{security.dread?.avg ?? security.dread_avg ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>CVSS</span><span>{security.cvss?.score ?? security.cvss_score ?? '—'}</span></div>
-                      <div className={styles.kvRow}><span>PASTA Stage</span><span>{security.pasta?.current_stage || security.pasta?.stage || security.pasta_stage || '—'}</span></div>
+                      <div className={styles.kvRow}><span>Severity</span><span>{security.severity || '?'}</span></div>
+                      <div className={styles.kvRow}><span>Risk (Adjusted)</span><span>{security.risk_adj ?? '?'}</span></div>
+                      <div className={styles.kvRow}>
+                        <span>Composite Risk</span>
+                        <span><span className={styles.scoreChip}>{compositeRisk == null ? 'â€”' : `${Math.round(compositeRisk)}/100`}</span></span>
+                      </div>
+                      <div className={styles.kvRow}><span>DREAD Avg</span><span>{security.dread?.avg ?? security.dread_avg ?? 'Ã¢â‚¬â€'}</span></div>
+                      <div className={styles.kvRow}><span>DREAD Weighted Avg</span><span>{security.dread?.weighted_avg ?? security.dread_weighted_avg ?? 'Ã¢â‚¬â€'}</span></div>
+                      <div className={styles.kvRow}><span>CVSS</span><span>{security.cvss?.score ?? security.cvss_score ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>PASTA Stage</span><span>{security.pasta?.current_stage || security.pasta?.stage || security.pasta_stage || '?'}</span></div>
+                      <div className={styles.kvRow}><span>Policy Route</span><span>{security.policy_route || security.route || '?'}</span></div>
+                      <div className={styles.kvRow}><span>QR Destination</span><span>{qrInfo?.destination_url || 'â€”'}</span></div>
+                      <div className={styles.kvRow}><span>QR Final URL</span><span>{qrInfo?.final_url || 'â€”'}</span></div>
+                      <div className={styles.kvRow}><span>QR Redirect Hops</span><span>{qrInfo?.redirect_hops ?? 0}</span></div>
+                      <div className={styles.kvRow}><span>QR Reputation</span><span>{qrInfo?.reputation_verdict || 'â€”'}</span></div>
+                      <div className={styles.kvRow}><span>QR Confidence</span><span>{qrInfo?.confidence ?? 'â€”'}</span></div>
+                      <div className={styles.kvRow}><span>QR Intel Risk</span><span>{qrInfo?.intel_risk ?? 'â€”'}</span></div>
+                      <div className={styles.kvRow}><span>QR Intel Pending</span><span>{qrInfo?.intel_pending ? 'Yes' : 'No'}</span></div>
+                      <div className={styles.kvRow}>
+                        <span>QR Intel Sources</span>
+                        <span>{Array.isArray(qrInfo?.intel_sources) && qrInfo.intel_sources.length > 0 ? qrInfo.intel_sources.join(', ') : 'â€”'}</span>
+                      </div>                      <div className={styles.kvRow}>
+                        <span>Image Trust Channels</span>
+                        <span>
+                          <span className={trustChannels?.visual_embedding_trusted ? styles.booleanYes : styles.booleanNo}>
+                            visual:{trustChannels?.visual_embedding_trusted ? 'trusted' : 'untrusted'}
+                          </span>
+                          {' Â· '}
+                          <span className={trustChannels?.ocr_trusted ? styles.booleanYes : styles.booleanNo}>
+                            ocr:{trustChannels?.ocr_trusted ? 'trusted' : 'untrusted'}
+                          </span>
+                          {' Â· '}
+                          <span className={trustChannels?.qr_trusted ? styles.booleanYes : styles.booleanNo}>
+                            qr:{trustChannels?.qr_trusted ? 'trusted' : 'untrusted'}
+                          </span>
+                        </span>
+                      </div>
 
                       <div className={styles.sectionTitle}>CV Playbook</div>
                       {playbookPreview ? (
                         <div className={styles.playbookPanel}>
-                          <div className={styles.kvRow}><span>Playbook</span><span>{playbookData?.title || playbookData?.id || '—'}</span></div>
-                          <div className={styles.kvRow}><span>ID</span><span>{playbookData?.id || '—'}</span></div>
+                          <div className={styles.kvRow}><span>Playbook</span><span>{playbookData?.title || playbookData?.id || '?'}</span></div>
+                          <div className={styles.kvRow}><span>ID</span><span>{playbookData?.id || '?'}</span></div>
                           <div className={styles.kvRow}><span>Override</span><span>{playbookPreview.override ? 'Yes' : 'No'}</span></div>
-                          <div className={styles.kvRow}><span>Risk Band</span><span>{playbookPreview.risk_band || playbookPayload?.risk_band || '—'}</span></div>
+                          <div className={styles.kvRow}><span>Risk Band</span><span>{playbookPreview.risk_band || playbookPayload?.risk_band || '?'}</span></div>
                           <div className={styles.sectionTitle}>Evidence Tags</div>
                           <div className={styles.tagRow}>
                             {playbookTags.map((t: string) => (
@@ -1350,29 +1617,29 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
 
                       <div className={styles.sectionTitle}>OWASP LLM Top 10</div>
                       <div className={styles.tagRow}>
-                        {(security.owasp_llm || security.owasp || []).map((t: string) => (
+                        {owaspLlmTags.map((t: string) => (
                           <span key={t} className={styles.tag}>{t}</span>
                         ))}
-                        {(security.owasp_llm || security.owasp || []).length === 0 && <span className={styles.muted}>None</span>}
+                        {owaspLlmTags.length === 0 && <span className={styles.muted}>None</span>}
                       </div>
 
                       <div className={styles.sectionTitle}>OWASP Agentic Top 10</div>
                       <div className={styles.tagRow}>
-                        {(security.owasp_agentic || []).map((t: string) => (
+                        {owaspAgenticTags.map((t: string) => (
                           <span key={t} className={styles.tag}>{t}</span>
                         ))}
-                        {(security.owasp_agentic || []).length === 0 && <span className={styles.muted}>None</span>}
+                        {owaspAgenticTags.length === 0 && <span className={styles.muted}>None</span>}
                       </div>
 
                       <div className={styles.sectionTitle}>STRIDE</div>
                       <div className={styles.tagRow}>
-                        {(security.stride || []).map((t: string) => (
+                        {strideTags.map((t: string) => (
                           <span key={t} className={styles.tag}>{t}</span>
                         ))}
-                        {(security.stride || []).length === 0 && <span className={styles.muted}>None</span>}
+                        {strideTags.length === 0 && <span className={styles.muted}>None</span>}
                       </div>
 
-                      <div className={styles.sectionTitle}>MITRE ATLAS (Evidence‑based)</div>
+                      <div className={styles.sectionTitle}>MITRE ATLAS (Evidence?based)</div>
                       <table className={styles.smallTable}>
                         <thead>
                           <tr>
@@ -1387,9 +1654,9 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                           {mitreDetails.map((m: any) => (
                             <tr key={m.id}>
                               <td>{m.id}</td>
-                              <td>{m.name || '—'}</td>
-                              <td>{m.weight ?? '—'}</td>
-                              <td>{m.dread_avg ?? '—'}</td>
+                              <td>{m.name || '?'}</td>
+                              <td>{m.weight ?? '?'}</td>
+                              <td>{m.dread_avg ?? '?'}</td>
                               <td>
                                 <div className={styles.tagRow}>
                                   {(m.evidence_tags || []).map((t: string) => (
@@ -1401,7 +1668,11 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                             </tr>
                           ))}
                           {mitreDetails.length === 0 && (
-                            <tr><td colSpan={5} className={styles.muted}>No MITRE techniques detected.</td></tr>
+                            <tr><td colSpan={5} className={styles.muted}>
+                              {(security?.signals && Object.keys(security.signals).length > 0)
+                                ? 'Evaluated - no MITRE mapping for active signals.'
+                                : 'Evaluated - no issues detected.'}
+                            </td></tr>
                           )}
                         </tbody>
                       </table>
@@ -1415,6 +1686,65 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
                         ))}
                         {stages.length === 0 && <span className={styles.muted}>No workflow data.</span>}
                       </div>
+                    </>
+                  )}
+
+                  {/* Image Triage Signals */}
+                  {triageItems && triageItems.length > 0 && (
+                    <>
+                      <div className={styles.sectionTitle}>Image Triage Signals</div>
+                      {triageItems.map((t: any, idx: number) => {
+                        const sigs = t?.security?.signals || t?.signals || {};
+                        const ocrText = (t?.security?.extracted_text || t?.security?.ocr_text || t?.extracted_text || t?.ocr_text || t?.ocr?.best_text || '').trim();
+                        const payloads: any[] = sigs.qr_payloads || t?.qr_payloads || [];
+                        const filename = t?._filename || `Image ${idx + 1}`;
+                        const cleanFlag = t?.security?.clean;
+                        const clean = cleanFlag !== false && !sigs.qr_code_detected && !sigs.adversarial_detected && !sigs.steg_suspicious;
+                        return (
+                          <div key={idx} className={styles.triageBlock}>
+                            <div className={styles.kvRow}>
+                              <span>{filename}</span>
+                              <span className={clean ? styles.tagGreen : styles.tagRed}>{clean ? 'Clean' : 'Flagged'}</span>
+                            </div>
+                            {/* Narrative summary */}
+                            <div className={styles.triageNarrative}>{buildTriageNarrative(t)}</div>
+                            {/* OCR / extracted text */}
+                            {ocrText && (
+                              <>
+                                <div className={styles.sectionSubTitle}>OCR / Extracted Text</div>
+                                <pre className={styles.rawBlock}>{ocrText.slice(0, 400)}{ocrText.length > 400 ? '\n?' : ''}</pre>
+                              </>
+                            )}
+                            {!ocrText && (
+                              <>
+                                <div className={styles.sectionSubTitle}>OCR / Extracted Text</div>
+                                <div className={styles.muted}>Evaluated - no OCR text extracted.</div>
+                              </>
+                            )}
+                            {/* Decoded QR payloads */}
+                            {payloads.length > 0 && (
+                              <>
+                                <div className={styles.sectionSubTitle}>Decoded QR Payload{payloads.length > 1 ? 's' : ''}</div>
+                                {payloads.map((p: any, pi: number) => (
+                                  <div key={pi} className={styles.kvRow}>
+                                    <span>{p.type || 'QR'}</span>
+                                    <span className={styles.qrPayload} title={p.data}>{p.data}</span>
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                            {/* Active signal flags */}
+                            <div className={styles.tagRow}>
+                              {Object.entries(sigs)
+                                .filter(([k, v]) => typeof v === 'boolean' && v && k !== 'qr_payloads')
+                                .map(([k]) => <span key={k} className={styles.tagWarn}>{k}</span>)}
+                              {sigs.steg_score != null && (
+                                <span className={styles.tagWarn}>steg_score:{sigs.steg_score}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </>
                   )}
                 </div>
@@ -1521,3 +1851,5 @@ export default function DecisionTrace({ traceId, onClose }: { traceId: string | 
     </div>
   );
 }
+
+
