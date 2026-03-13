@@ -801,7 +801,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
 
     # Accept raw base64 attachment bytes in the evaluate path and hydrate deterministic metadata/text.
     try:
-        email = hydrate_attachments_from_bytes(email)
+        email = hydrate_attachments_from_bytes(email, tenant_id=tenant_id)
     except Exception:
         email = dict(email)
 
@@ -812,6 +812,31 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         ocr_sanitization_meta = {"gate": "ocr_qr_sanitization", "blocked_qr_url_count": 0, "error": "ocr_sanitize_failed"}
 
     extracted = extract_indicators(email, tenant_id=tenant_id)
+    # Fold steg signals from hydrated attachments into extracted indicators so
+    # they propagate into verdict, framework_correlation, DREAD, and playbook.
+    try:
+        _steg_atts = [a for a in (email.get("attachments") or []) if bool((a or {}).get("steg_suspicious"))]
+        if _steg_atts:
+            _existing_types = {str((i or {}).get("type") or "") for i in (extracted.get("indicators") or [])}
+            if "steg_suspicious" not in _existing_types:
+                extracted["indicators"] = list(extracted.get("indicators") or []) + [
+                    {
+                        "type": "steg_suspicious",
+                        "value": True,
+                        "reason": (
+                            f"steg_score={_steg_atts[0].get('steg_score', 0):.3f}; "
+                            f"attachment={_steg_atts[0].get('name') or 'unknown'}"
+                        ),
+                        "attachment_count": len(_steg_atts),
+                    }
+                ]
+                # Also flag steg_score_elevated for OWASP LLM02 mapping
+                if "steg_score_elevated" not in _existing_types:
+                    extracted["indicators"] = list(extracted.get("indicators") or []) + [
+                        {"type": "steg_score_elevated", "value": True, "reason": "steg_suspicious attachment present"}
+                    ]
+    except Exception:
+        pass
     yara_scan: Dict[str, Any] = {"engine": "disabled", "rules_loaded": 0, "match_count": 0, "matches": []}
     try:
         yara_scan = scan_email_yara(email, extracted)

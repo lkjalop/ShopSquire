@@ -183,6 +183,56 @@ def _bank_fingerprint(fields: Dict[str, Any]) -> str | None:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _get_steg_threshold(tenant_id: str | None = None) -> float | None:
+    """Return per-tenant steg sensitivity threshold, or None for global default."""
+    if not tenant_id:
+        return None
+    try:
+        from src.app.security.threshold_tuning import get_runtime_thresholds  # type: ignore
+        rt = get_runtime_thresholds(tenant_id)
+        v = rt.get("steg_threshold") or rt.get("steg_sensitivity_threshold")
+        return float(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _scan_pdf_images_steg(
+    blob: bytes,
+    *,
+    threshold: float | None = None,
+) -> "Any | None":
+    """Extract embedded images from a PDF and run steg analysis on each.
+
+    Returns the first suspicious StegResult found, or None if all clean.
+    Works with pypdf's page.images API (pypdf >= 3.4).  Falls back silently
+    when pypdf is unavailable or the PDF has no extractable raster images.
+    """
+    try:
+        import pypdf  # type: ignore
+        from PIL import Image as _PImage  # type: ignore
+        from src.app.security.steg_detector import detect_steganography  # type: ignore
+
+        reader = pypdf.PdfReader(io.BytesIO(blob))
+        for page in reader.pages[:5]:
+            images = getattr(page, "images", None) or []
+            for img_obj in images:
+                try:
+                    img_data = getattr(img_obj, "data", None) or b""
+                    if not img_data:
+                        continue
+                    pil_img = _PImage.open(io.BytesIO(img_data)).convert("RGB")
+                    out_buf = io.BytesIO()
+                    pil_img.save(out_buf, format="PNG")
+                    result = detect_steganography(out_buf.getvalue(), threshold=threshold)
+                    if result.is_suspicious:
+                        return result
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None
+
+
 def _extract_text(blob: bytes, *, content_type: str, filename: str) -> str:
     ctype = (content_type or "").lower()
     name = (filename or "").lower()
@@ -211,7 +261,11 @@ def _extract_text(blob: bytes, *, content_type: str, filename: str) -> str:
         return ""
 
 
-def hydrate_attachments_from_bytes(email: Dict[str, Any]) -> Dict[str, Any]:
+def hydrate_attachments_from_bytes(
+    email: Dict[str, Any],
+    *,
+    tenant_id: str | None = None,
+) -> Dict[str, Any]:
     atts = list(email.get("attachments") or [])
     hydrated: List[Dict[str, Any]] = []
     for a in atts:
@@ -288,6 +342,48 @@ def hydrate_attachments_from_bytes(email: Dict[str, Any]) -> Dict[str, Any]:
                     row["compression_artifact_score"] = 0.0
             if row.get("edited_regions") is None:
                 row["edited_regions"] = 0
+            # ── Steganographic analysis — image attachments + CID inline images ──
+            try:
+                _ctype = str(row.get("content_type") or "").lower()
+                _name = str(row.get("name") or "").lower()
+                _is_img = _ctype.startswith("image/") or _name.endswith(
+                    (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+                )
+                if _is_img and row.get("steg_score") is None:
+                    from src.app.security.steg_detector import detect_steganography as _detect_steg  # type: ignore
+                    _thr = _get_steg_threshold(tenant_id)
+                    _steg = _detect_steg(blob, threshold=_thr)
+                    row["steg_score"] = round(float(_steg.steg_score), 4)
+                    row["steg_suspicious"] = bool(_steg.is_suspicious)
+                    if _steg.is_suspicious:
+                        row["steg_explanations"] = list(_steg.explanations)[:8]
+                        row["steg_signals"] = {
+                            "lsb_entropy_r": round(float(_steg.lsb_entropy_r), 4),
+                            "lsb_entropy_g": round(float(_steg.lsb_entropy_g), 4),
+                            "lsb_entropy_b": round(float(_steg.lsb_entropy_b), 4),
+                            "chi_square_p": round(float(_steg.chi_square_p), 4),
+                            "spa_estimate": round(float(_steg.spa_estimate), 4),
+                        }
+            except Exception:
+                pass
+            # ── Steganographic analysis — PDF embedded images ──
+            try:
+                _ctype_pdf = str(row.get("content_type") or "").lower()
+                _name_pdf = str(row.get("name") or "").lower()
+                if ("pdf" in _ctype_pdf or _name_pdf.endswith(".pdf")) and row.get("steg_score") is None:
+                    _thr_pdf = _get_steg_threshold(tenant_id)
+                    _steg_pdf = _scan_pdf_images_steg(blob, threshold=_thr_pdf)
+                    if _steg_pdf is not None:
+                        row["steg_score"] = round(float(_steg_pdf.steg_score), 4)
+                        row["steg_suspicious"] = bool(_steg_pdf.is_suspicious)
+                        row["steg_source"] = "pdf_embedded_image"
+                        if _steg_pdf.is_suspicious:
+                            row["steg_explanations"] = list(_steg_pdf.explanations)[:8]
+                    else:
+                        row.setdefault("steg_score", 0.0)
+                        row.setdefault("steg_suspicious", False)
+            except Exception:
+                pass
         if parse_errors:
             row["parse_errors"] = parse_errors
         # Never persist raw attachment body in downstream evidence snapshots.

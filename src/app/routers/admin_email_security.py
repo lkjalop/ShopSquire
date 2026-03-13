@@ -2128,6 +2128,69 @@ def get_investigation(
     }
 
 
+# ---------------------------------------------------------------------------
+#  URL click-protect endpoint  (E-006)
+# ---------------------------------------------------------------------------
+
+@router.get("/click")
+def email_click_redirect(
+    t: str = "",
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Any:
+    """Click-protect redirect guard for rewritten email URLs.
+
+    Validates the HMAC-signed token, checks against IOC verdict cache, and
+    either issues a 302 redirect to the original URL or returns a 403 block
+    response when the URL has been classified as malicious since it was
+    delivered.
+
+    Expected usage: links in email bodies are rewritten at delivery time via
+    ``email_url_click_protect.rewrite_urls_in_email()``.
+    """
+    from fastapi.responses import RedirectResponse, JSONResponse
+    from src.app.security.email_url_click_protect import verify_click_redirect
+    from src.app.config import get_settings
+
+    secret = str(os.getenv("CLICK_PROTECT_SECRET") or getattr(get_settings(), "click_protect_secret", "") or "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="click_protect not configured (CLICK_PROTECT_SECRET unset)")
+    if not t:
+        raise HTTPException(status_code=400, detail="missing token")
+
+    url, blocked = verify_click_redirect(t, secret_key=secret)
+    if blocked or not url:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "status": "blocked",
+                "reason": "URL classified as malicious after delivery — click not allowed.",
+                "url": url[:120] if url else "",
+            },
+        )
+    return RedirectResponse(url=url, status_code=302)
+
+
+@router.post("/click/cache_verdict")
+def cache_click_verdict(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Manually cache an IOC verdict for a URL so future click-protect checks honour it.
+
+    Useful for analyst-driven retroactive blocking of URLs identified after delivery.
+    """
+    from src.app.security.email_url_click_protect import cache_ioc_verdict
+
+    url = str(payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    blocked = bool(payload.get("blocked", True))
+    verdict = str(payload.get("verdict") or ("block" if blocked else "allow"))
+    ttl = max(60, int(payload.get("ttl") or 900))
+    cache_ioc_verdict(url, blocked=blocked, verdict=verdict, ttl=ttl)
+    return {"status": "ok", "url": url[:120], "blocked": blocked, "verdict": verdict, "ttl": ttl}
+
+
 @router.post("/replay_lab/run")
 def replay_lab_run(
     payload: Dict[str, Any] = Body(default_factory=dict),
