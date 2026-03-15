@@ -994,6 +994,21 @@ body {
   color: #7c2d12;
 }
 
+.operatorMetrics {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.operatorMetricTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .hintBtn {
   border: 1px dashed var(--border);
   background: #fff;

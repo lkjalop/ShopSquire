@@ -7,11 +7,21 @@ returns the appropriate NQE template bank key for the template store.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 
 # ── Category keyword maps (order matters: first match wins) ──────
 _CATEGORY_PATTERNS: List[Tuple[str, List[str]]] = [
+    ("fresh_produce", [
+        r"\bfruit\b", r"\bapple\b", r"\bbanana\b", r"\borange\b", r"\bpear\b",
+        r"\bmango\b", r"\bgrape\b", r"\bmelon\b", r"\bberry\b", r"\bstrawberry\b",
+        r"\bblueberry\b", r"\braspberry\b", r"\bavocado\b", r"\bvegetable\b",
+        r"\blettuce\b", r"\bspinach\b", r"\bbroccoli\b", r"\bcarrot\b",
+        r"\bcabbage\b", r"\bcauliflower\b", r"\btomato\b", r"\bcucumber\b",
+        r"\bonion\b", r"\bpotato\b", r"\bpumpkin\b", r"\bproduce\b",
+        r"\bgrocery\b", r"\bfresh\s?produce\b",
+    ]),
     # Electronics — computers
     ("laptop", [
         r"\blaptop\b", r"\bnotebook\b", r"\bultrabook\b", r"\bmacbook\b",
@@ -55,6 +65,30 @@ _COMPILED_PATTERNS: List[Tuple[str, List[re.Pattern]]] = [
 
 # Image labels (from CV) → category hints
 _IMAGE_LABEL_MAP: Dict[str, str] = {
+    "fruit": "fresh_produce",
+    "apple": "fresh_produce",
+    "banana": "fresh_produce",
+    "orange": "fresh_produce",
+    "pear": "fresh_produce",
+    "mango": "fresh_produce",
+    "grape": "fresh_produce",
+    "strawberry": "fresh_produce",
+    "blueberry": "fresh_produce",
+    "raspberry": "fresh_produce",
+    "avocado": "fresh_produce",
+    "vegetable": "fresh_produce",
+    "lettuce": "fresh_produce",
+    "spinach": "fresh_produce",
+    "broccoli": "fresh_produce",
+    "carrot": "fresh_produce",
+    "cabbage": "fresh_produce",
+    "cauliflower": "fresh_produce",
+    "tomato": "fresh_produce",
+    "cucumber": "fresh_produce",
+    "onion": "fresh_produce",
+    "potato": "fresh_produce",
+    "produce": "fresh_produce",
+    "grocery": "fresh_produce",
     "laptop": "laptop", "notebook": "laptop", "keyboard": "accessory",
     "phone": "phone", "cell phone": "phone", "smartphone": "phone",
     "television": "tv", "tv": "tv", "monitor": "monitor",
@@ -62,6 +96,26 @@ _IMAGE_LABEL_MAP: Dict[str, str] = {
     "shirt": "clothing", "dress": "clothing", "shoe": "clothing",
     "refrigerator": "kitchen", "oven": "kitchen", "microwave": "kitchen",
 }
+
+
+def category_from_image_labels(image_labels: List[str] | None = None) -> str | None:
+    counts: Counter[str] = Counter()
+    for label in (image_labels or []):
+        lbl = str(label or "").lower().strip()
+        mapped = _IMAGE_LABEL_MAP.get(lbl)
+        if mapped:
+            counts[mapped] += 1
+    if not counts:
+        return None
+    ranked = counts.most_common()
+    top_count = ranked[0][1]
+    top_categories = [cat for cat, n in ranked if n == top_count]
+    if len(top_categories) == 1:
+        return top_categories[0]
+    for preferred in ("laptop", "phone", "tablet", "monitor", "accessory", "fresh_produce"):
+        if preferred in top_categories:
+            return preferred
+    return top_categories[0]
 
 
 def detect_category(
@@ -88,11 +142,9 @@ def detect_category(
                     return cat
 
     # 3. Image labels
-    for label in (image_labels or []):
-        lbl = label.lower().strip()
-        mapped = _IMAGE_LABEL_MAP.get(lbl)
-        if mapped:
-            return mapped
+    from_labels = category_from_image_labels(image_labels)
+    if from_labels:
+        return from_labels
 
     return "general"
 
@@ -193,11 +245,9 @@ def detect_entities(
                 categories.append({"slug": cat, "confidence": round(confidence, 2), "match_count": match_count})
 
     # Detect from image labels
-    for label in (image_labels or []):
-        lbl = label.lower().strip()
-        mapped = _IMAGE_LABEL_MAP.get(lbl)
-        if mapped and not any(c["slug"] == mapped for c in categories):
-            categories.append({"slug": mapped, "confidence": 0.7, "source": "image"})
+    label_category = category_from_image_labels(image_labels)
+    if label_category and not any(c["slug"] == label_category for c in categories):
+        categories.append({"slug": label_category, "confidence": 0.7, "source": "image"})
 
     # Detect from explicit constraints
     if isinstance(constraints, dict):

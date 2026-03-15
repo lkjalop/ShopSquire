@@ -7,6 +7,7 @@ import uuid
 import time
 import base64
 import hashlib
+import tempfile
 from typing import Dict, Any
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,7 @@ from sqlalchemy import text as sql_text
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.deps import get_redis, DummyRedis
 import logging
-from src.app.models.db import get_engine
+from src.app.models.db import get_engine, CURRENT_REQUEST
 from src.app.services.trace_contracts import validate_incident_matrix_gate
 from src.app.schemas.ui_contracts import IncidentEscalateResponse, IncidentMessageResponse
 from src.app.services.playbook_engine import (
@@ -37,7 +38,15 @@ router = APIRouter(prefix="/api/v1/admin/incidents", tags=["admin", "escalation"
 public_router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 
 _ROOM_SUBSCRIBERS: Dict[str, list[asyncio.Queue]] = {}
-_CHAT_DIR = Path(str(os.getenv("INCIDENT_CHAT_DIR", "/tmp/incidents_chat") or "/tmp/incidents_chat"))
+def _default_incident_chat_dir() -> Path:
+    configured = str(os.getenv("INCIDENT_CHAT_DIR", "") or "").strip()
+    if configured:
+        return Path(configured)
+    # Keep the fallback writable and cross-platform for local demo/test runs.
+    return Path(tempfile.gettempdir()) / "shopsquire" / "incidents_chat"
+
+
+_CHAT_DIR = _default_incident_chat_dir()
 _CHAT_DIR.mkdir(parents=True, exist_ok=True)
 
 _TOKENS_DIR = _CHAT_DIR / "tokens"
@@ -58,6 +67,18 @@ def _is_local_demo_host(req: Request) -> bool:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _current_incident_engine():
+    try:
+        req = CURRENT_REQUEST.get()
+        if req is not None and hasattr(req, "app") and hasattr(req.app, "state"):
+            eng = getattr(req.app.state, "engine", None)
+            if eng is not None:
+                return eng
+    except Exception:
+        pass
+    return get_engine()
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -1315,7 +1336,7 @@ def create_incident_record(
     created = False
     try:
         _ensure_incident_runtime_tables()
-        eng = get_engine()
+        eng = _current_incident_engine()
         with eng.begin() as conn:
             if dedupe_by_event and event_id:
                 existing = conn.execute(
@@ -1363,7 +1384,7 @@ def create_incident_record(
     except Exception:
         # Final fallback for bootstrap/runtime drift: create base table then insert.
         try:
-            eng = get_engine()
+            eng = _current_incident_engine()
             with eng.begin() as conn:
                 conn.execute(
                     sql_text(

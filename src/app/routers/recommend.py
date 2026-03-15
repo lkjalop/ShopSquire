@@ -25,7 +25,7 @@ from src.app.services.degradation import cb_is_open, cb_record
 from src.app.services.memory import Memory
 from src.app.services.conversation_state import ConversationState
 from src.app.services.recommendations import RecommendationService
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 from src.app.observability.health import dependency_health_snapshot
 from src.app.services.token_budget import TokenBudget, estimate_tokens, estimate_cost, infer_tier
 from src.app.services.tenant_quota import TenantQuotaGuard
@@ -36,6 +36,8 @@ from src.app.services.llm_provider import select_ollama_model, is_complex_query,
 from src.app.rules.engine import RuleEngine
 from src.app.services.ethical_ai import EthicalAIGuard
 from src.app.services.decision_log import log_trace_event, log_decision
+from src.app.services.catalog_profile import assess_catalog_relevance, get_cached_catalog_profile_with_meta
+from src.app.security.commerce_request_guard import inspect_commerce_request
 from src.app.services.agent_bus import AgentBus
 from src.app.services.agent_handoff import request_handoff_best_effort
 from src.app.deps import hash_uid
@@ -43,6 +45,7 @@ from src.app.services.risk_quantification import quantify as quantify_risk, fair
 from src.app.policy.gate import evaluate_policy_gate
 from src.app.services.search_events import log_search_event
 from src.app.services.checkout_upsell import recommend_checkout_upsell, ensure_recommend_interactions_table
+from src.app.services.bundle_pricing import evaluate_bundle_savings
 from src.app.services.recommendation_identity_graph import register_identity_observations, ensure_identity_graph_tables
 from src.app.services.recommendation_bandit import record_bandit_reward, ensure_recommend_bandit_tables
 from src.app.services.recommendation_als import train_recommend_als
@@ -199,6 +202,21 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
     try:
         already_persisted = bool(payload.get("_trace_recommendation_persisted"))
         if not already_persisted:
+            def _claims_products(msg: str | None) -> bool:
+                t = str(msg or "").lower()
+                return bool(re.search(r"\b(top picks|i['’]ve found \d+|found \d+ (matches|products|options))\b", t))
+
+            def _intent_snapshot_from_payload(p: Dict[str, Any]) -> Dict[str, Any]:
+                c = p.get("constraints_used") if isinstance(p.get("constraints_used"), dict) else {}
+                uc = p.get("use_case_analysis") if isinstance(p.get("use_case_analysis"), dict) else {}
+                return {
+                    "persona": p.get("buyer_persona") or c.get("buyer_persona"),
+                    "use_case_key": uc.get("use_case_key") or c.get("use_case"),
+                    "budget_min": c.get("budget_min"),
+                    "budget_max": c.get("budget_max"),
+                    "source": "recommendation_payload",
+                }
+
             products_src = []
             if isinstance(payload.get("results"), list):
                 products_src = payload.get("results") or []
@@ -206,6 +224,28 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
                 products_src = payload.get("products") or []
             elif isinstance((payload.get("proposal") or {}).get("results"), list):
                 products_src = (payload.get("proposal") or {}).get("results") or []
+
+            # Contract consistency guard:
+            # if summary claims picks, avoid returning empty products[].
+            if not products_src and _claims_products(
+                str(payload.get("assistant_message") or payload.get("message") or "")
+            ):
+                rp = payload.get("right_panel") if isinstance(payload.get("right_panel"), dict) else {}
+                seeded: List[Dict[str, Any]] = []
+                for section_key in ("lower_tier", "higher_tier"):
+                    sec = rp.get(section_key) if isinstance(rp.get(section_key), dict) else {}
+                    items = sec.get("items") if isinstance(sec.get("items"), list) else []
+                    for it in items:
+                        if isinstance(it, dict):
+                            seeded.append(dict(it))
+                if seeded:
+                    products_src = seeded
+                    payload["results"] = seeded
+                    payload["products"] = seeded
+                else:
+                    safe_empty_msg = "No products found in your current range. I can widen budget or show nearest in-stock options."
+                    payload["assistant_message"] = safe_empty_msg
+                    payload["message"] = safe_empty_msg
 
             products_summary: List[Dict[str, Any]] = []
             for p in products_src[:8]:
@@ -258,6 +298,7 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
                 payload={
                     "products_summary": products_summary,
                     "right_panel_contract": right_panel_contract,
+                    "intent_snapshot": _intent_snapshot_from_payload(payload),
                 },
             )
             payload["_trace_recommendation_persisted"] = True
@@ -315,6 +356,130 @@ def _incident_auto_create_enabled() -> bool:
         "yes",
         "on",
     )
+
+
+def _coarse_product_category(name: str, specs: Dict[str, Any] | None = None) -> str:
+    from src.app.services.category_router import detect_category
+    from src.app.services.product_taxonomy import infer_product_family
+
+    specs = specs if isinstance(specs, dict) else {}
+    text_blob = " ".join(
+        [
+            str(name or ""),
+            str(specs.get("category") or ""),
+            " ".join(str(x) for x in (specs.get("tags") or []) if x is not None),
+        ]
+    ).strip()
+    cat = detect_category(query=text_blob, image_labels=[str(specs.get("category") or "")], constraints=specs)
+    if cat and cat != "general":
+        return cat
+    family = infer_product_family(name=name, specs=specs)
+    family_map = {
+        "LAP": "laptop",
+        "MON": "monitor",
+        "PERIPH": "accessory",
+        "HEAD": "accessory",
+        "ACC": "accessory",
+        "COOL": "accessory",
+        "BAG": "accessory",
+    }
+    return family_map.get(family, "general")
+
+
+def _top_up_image_results(
+    *,
+    db,
+    results: List[Dict[str, Any]],
+    minimum_count: int,
+    image_category: str,
+    constraints: Dict[str, Any],
+    catalog_profile: Dict[str, Any],
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    if minimum_count <= 0 or len(results) >= minimum_count:
+        return results, {"applied": False, "added": 0, "reason": "already_sufficient"}
+    if not image_category or image_category == "general":
+        return results, {"applied": False, "added": 0, "reason": "unknown_image_category"}
+
+    existing_skus = {str((row or {}).get("sku") or "").strip() for row in (results or [])}
+    budget_min = constraints.get("budget_min")
+    budget_max = constraints.get("budget_max")
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT sku, name, price_cents, image_url, specs
+                FROM products
+                WHERE COALESCE(active, 1) = 1
+                ORDER BY COALESCE(price_cents, 0) ASC, name ASC
+                """
+            )
+        ).fetchall()
+    except Exception:
+        return results, {"applied": False, "added": 0, "reason": "catalog_query_failed"}
+
+    added = 0
+    fallback_rows: List[Dict[str, Any]] = []
+    for row in rows or []:
+        mapping = row._mapping if hasattr(row, "_mapping") else {}
+        sku_val = mapping.get("sku") if mapping else None
+        if not sku_val and isinstance(row, (tuple, list)) and len(row) > 0:
+            sku_val = row[0]
+        sku = str(sku_val or "").strip()
+        if not sku or sku in existing_skus:
+            continue
+        name = mapping.get("name") if mapping else (row[1] if isinstance(row, (tuple, list)) and len(row) > 1 else "")
+        price_cents = mapping.get("price_cents") if mapping else (row[2] if isinstance(row, (tuple, list)) and len(row) > 2 else None)
+        image_url = mapping.get("image_url") if mapping else (row[3] if isinstance(row, (tuple, list)) and len(row) > 3 else None)
+        raw_specs = mapping.get("specs") if mapping else (row[4] if isinstance(row, (tuple, list)) and len(row) > 4 else None)
+        if isinstance(raw_specs, str) and raw_specs.strip():
+            try:
+                specs = json.loads(raw_specs)
+            except Exception:
+                specs = {}
+        else:
+            specs = raw_specs if isinstance(raw_specs, dict) else {}
+        category = _coarse_product_category(str(name or ""), specs)
+        if category != image_category:
+            continue
+        if isinstance(price_cents, (int, float)):
+            if isinstance(budget_min, (int, float)) and price_cents < int(budget_min) * 100:
+                continue
+            if isinstance(budget_max, (int, float)) and price_cents > int(budget_max) * 100:
+                continue
+        fallback_rows.append(
+            {
+                "sku": sku,
+                "name": str(name or sku),
+                "price_cents": int(price_cents or 0),
+                "image_url": image_url,
+                "specs": specs,
+                "confidence": 0.51,
+                "factors": {"positive": ["catalog category match", "catalog fallback fill"], "negative": []},
+                "score": 0.01,
+                "score_norm": 50.0,
+                "rank_delta": None,
+                "why_not": [],
+                "contrastive_why": "",
+                "delta_vs_anchor": {},
+                "baseline_rank": None,
+                "rerank_delta": None,
+                "fallback_fill": True,
+            }
+        )
+        existing_skus.add(sku)
+        added += 1
+        if len(results) + len(fallback_rows) >= minimum_count:
+            break
+
+    merged = list(results or []) + fallback_rows
+    return merged, {
+        "applied": bool(fallback_rows),
+        "added": added,
+        "reason": "catalog_fill" if fallback_rows else "no_matching_fill_candidates",
+        "minimum_count": minimum_count,
+        "image_category": image_category,
+        "catalog_primary": catalog_profile.get("primary_category"),
+    }
 
 
 def _auto_create_incident_for_review(
@@ -497,6 +662,15 @@ _SUPPORTED_PRODUCT_TERMS = {
     "refrigerator",
     "dishwasher",
     "oven",
+}
+_SUPPORTED_COMMERCE_IMAGE_CATEGORIES = {
+    "laptop",
+    "desktop",
+    "phone",
+    "tablet",
+    "monitor",
+    "tv",
+    "accessory",
 }
 _UNSUPPORTED_PRODUCT_TERMS = {
     "kitchen",
@@ -1956,14 +2130,141 @@ def _candidate_matches_brand(candidate: Dict[str, Any] | None, brands: List[str]
     sku = str(c.get("sku") or "").lower()
     text_blob = f"{name} {sku}"
     alias = {
-        "apple": ["apple", "macbook"],
+        "apple": ["apple", "macbook", "imac"],
         "microsoft": ["microsoft", "surface"],
+        "asus": ["asus", "vivobook", "zenbook", "rog", "tuf"],
+        "lenovo": ["lenovo", "ideapad", "thinkpad", "yoga", "legion"],
+        "hp": ["hp", "envy", "victus", "omen", "omnibook", "elitebook", "probook"],
+        "dell": ["dell", "inspiron", "xps", "latitude", "vostro"],
+        "msi": ["msi", "stealth", "raider", "titan"],
+        "alienware": ["alienware"],
+        "acer": ["acer", "swift", "aspire", "predator", "nitro"],
+        "samsung": ["samsung", "galaxy book"],
+        "razer": ["razer", "blade"],
+        "gigabyte": ["gigabyte", "aorus"],
+        "toshiba": ["toshiba", "dynabook"],
     }
     for b in req:
         probes = alias.get(b, [b])
         if any(p in text_blob for p in probes):
             return True
     return False
+
+
+_SUPPORTED_IMAGE_BRAND_HINTS = {
+    "apple", "asus", "lenovo", "hp", "dell", "msi",
+    "alienware", "microsoft", "acer", "samsung", "razer", "gigabyte", "toshiba",
+}
+
+
+def _brand_display_name(brand: str | None) -> str:
+    key = str(brand or "").strip().lower()
+    return {
+        "apple": "Apple",
+        "asus": "ASUS",
+        "lenovo": "Lenovo",
+        "hp": "HP",
+        "dell": "Dell",
+        "msi": "MSI",
+        "alienware": "Alienware",
+        "microsoft": "Microsoft Surface",
+        "acer": "Acer",
+        "samsung": "Samsung",
+        "razer": "Razer",
+        "gigabyte": "Gigabyte",
+        "toshiba": "Toshiba",
+        "windows": "Windows",
+    }.get(key, key.capitalize() if key else "")
+
+
+def _brand_sql_predicate(brand: str | None) -> str:
+    key = str(brand or "").strip().lower()
+    if key == "apple":
+        return "(LOWER(p.name) LIKE '%apple%' OR LOWER(p.name) LIKE '%macbook%' OR LOWER(p.name) LIKE '%imac%' OR LOWER(p.sku) LIKE 'mb%')"
+    if key == "asus":
+        return "(LOWER(p.name) LIKE '%asus%' OR LOWER(p.name) LIKE '%vivobook%' OR LOWER(p.name) LIKE '%zenbook%' OR LOWER(p.name) LIKE '%rog%' OR LOWER(p.name) LIKE '%tuf%')"
+    if key == "lenovo":
+        return "(LOWER(p.name) LIKE '%lenovo%' OR LOWER(p.name) LIKE '%ideapad%' OR LOWER(p.name) LIKE '%thinkpad%' OR LOWER(p.name) LIKE '%yoga%' OR LOWER(p.name) LIKE '%legion%')"
+    if key == "hp":
+        return "(LOWER(p.name) LIKE '%hp %' OR LOWER(p.name) LIKE 'hp %' OR LOWER(p.name) LIKE '%envy%' OR LOWER(p.name) LIKE '%victus%' OR LOWER(p.name) LIKE '%omen%' OR LOWER(p.name) LIKE '%omnibook%' OR LOWER(p.name) LIKE '%elitebook%' OR LOWER(p.name) LIKE '%probook%')"
+    if key == "dell":
+        return "(LOWER(p.name) LIKE '%dell%' OR LOWER(p.name) LIKE '%inspiron%' OR LOWER(p.name) LIKE '%xps%' OR LOWER(p.name) LIKE '%latitude%' OR LOWER(p.name) LIKE '%vostro%')"
+    if key == "msi":
+        return "(LOWER(p.name) LIKE '%msi%' OR LOWER(p.name) LIKE '%stealth%' OR LOWER(p.name) LIKE '%raider%' OR LOWER(p.name) LIKE '%titan%')"
+    if key == "alienware":
+        return "(LOWER(p.name) LIKE '%alienware%')"
+    if key == "microsoft":
+        return "(LOWER(p.name) LIKE '%microsoft%' OR LOWER(p.name) LIKE '%surface%')"
+    if key == "acer":
+        return "(LOWER(p.name) LIKE '%acer%' OR LOWER(p.name) LIKE '%swift%' OR LOWER(p.name) LIKE '%aspire%' OR LOWER(p.name) LIKE '%predator%' OR LOWER(p.name) LIKE '%nitro%')"
+    if key == "samsung":
+        return "(LOWER(p.name) LIKE '%samsung%' OR LOWER(p.name) LIKE '%galaxy book%')"
+    if key == "razer":
+        return "(LOWER(p.name) LIKE '%razer%' OR LOWER(p.name) LIKE '%blade%')"
+    if key == "gigabyte":
+        return "(LOWER(p.name) LIKE '%gigabyte%' OR LOWER(p.name) LIKE '%aorus%')"
+    if key == "toshiba":
+        return "(LOWER(p.name) LIKE '%toshiba%' OR LOWER(p.name) LIKE '%dynabook%')"
+    if key == "windows":
+        return "(LOWER(p.name) NOT LIKE '%apple%' AND LOWER(p.name) NOT LIKE '%macbook%' AND LOWER(p.name) NOT LIKE '%imac%' AND LOWER(p.sku) NOT LIKE 'mb%')"
+    return ""
+
+
+def _persona_summary_label(persona: str | None, use_case: str | None) -> str:
+    key = str(use_case or persona or "").strip().lower()
+    labels = {
+        "university_general": "uni work",
+        "student": "student work",
+        "high_school": "schoolwork",
+        "office_general": "office work",
+        "office_finance": "finance work",
+        "office_executive": "professional work",
+        "content_creator": "creative work",
+        "content_creation": "creative work",
+        "gaming": "gaming",
+        "gaming_light": "light gaming",
+        "gaming_competitive": "competitive gaming",
+        "gaming_aaa_heavy": "AAA gaming",
+        "ai_ml_workstation": "AI and coding work",
+        "data_science_student": "coding and analysis",
+        "engineering_student": "engineering work",
+        "architecture_student": "design work",
+        "medical_student": "study and research",
+        "law_student": "study and reading",
+    }
+    if key in labels:
+        return labels[key]
+    if key.startswith("office_"):
+        return "office work"
+    if "student" in key:
+        return "study"
+    return ""
+
+
+def _resolve_supported_brand_hint(
+    explicit: str | None,
+    constraints: dict | None = None,
+    query_text: str | None = None,
+) -> str:
+    direct = str(explicit or "").strip().lower()
+    if direct in _SUPPORTED_IMAGE_BRAND_HINTS:
+        return direct
+    c = constraints if isinstance(constraints, dict) else {}
+    for key in ("_request_brand_hint", "_inferred_image_brand"):
+        val = str(c.get(key) or "").strip().lower()
+        if val in _SUPPORTED_IMAGE_BRAND_HINTS:
+            return val
+    for raw in (c.get("brands") or []):
+        val = str(raw or "").strip().lower()
+        if val in _SUPPORTED_IMAGE_BRAND_HINTS:
+            return val
+    q = str(query_text or "").lower()
+    if any(tok in q for tok in ("macbook", "mac book", "imac", "apple")):
+        return "apple"
+    for brand in ("msi", "asus", "lenovo", "dell", "hp", "alienware", "microsoft", "acer", "samsung", "razer", "gigabyte", "toshiba"):
+        if brand in q:
+            return brand
+    return ""
 
 
 def _candidate_has_discrete_gpu(candidate: Dict[str, Any] | None) -> bool:
@@ -2526,29 +2827,132 @@ def _llm_generate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         return r.json()
 
 
-def _deterministic_assistant_message(query: str, results: list[dict], constraints: dict) -> str | None:
+def _humanize_spec_list(specs: list) -> str:
+    """Convert internal spec constraint tokens into user-friendly phrases.
+
+    Examples:
+        "ram_gb_min:16"        → "16GB RAM"
+        "storage_gb_min:512"   → "512GB+ storage"
+        "gpu_vram_gb_min:8"    → "8GB GPU"
+        "refresh_hz_min:144"   → "144Hz+ display"
+        "display_inches_min:15"→ "15\"+ screen"
+    """
+    out: list[str] = []
+    for raw in (specs or []):
+        s = str(raw or "").strip()
+        if not s:
+            continue
+        key, _, val = s.partition(":")
+        key = key.strip().lower()
+        val = val.strip()
+        if key == "ram_gb_min" and val:
+            out.append(f"{val}GB RAM")
+        elif key == "storage_gb_min" and val:
+            out.append(f"{val}GB+ storage")
+        elif key == "gpu_vram_gb_min" and val:
+            out.append(f"{val}GB GPU")
+        elif key == "refresh_hz_min" and val:
+            out.append(f"{val}Hz+ display")
+        elif key == "display_inches_min" and val:
+            out.append(f'{val}"+ screen')
+        elif key == "battery_wh_min" and val:
+            out.append(f"{val}Wh+ battery")
+        elif key == "must_have_gpu":
+            out.append("dedicated GPU")
+        elif key in ("os", "operating_system") and val:
+            out.append(val)
+        elif val:
+            # Generic fallback: prettify key, show value
+            pretty_key = key.replace("_min", "").replace("_max", "").replace("_", " ").strip()
+            out.append(f"{pretty_key}: {val}")
+        # If no value and key is just a plain word, skip internal tokens
+    return ", ".join(out) if out else ""
+
+
+def _build_brand_budget_answer(query: str, results: list[dict], constraints: dict) -> str:
+    q_low = str(query or "").lower()
+    asks_budget = any(
+        tok in q_low for tok in (
+            "enough", "budget", "under $", "between $", "can i get one for", "is $",
+            "price", "cheap", "cheapest",
+        )
+    )
+    if not asks_budget:
+        return ""
+    brand_hint = str(
+        constraints.get("_strict_image_brand_hint")
+        or constraints.get("_inferred_image_brand")
+        or constraints.get("_request_brand_hint")
+        or ""
+    ).strip().lower()
+    if brand_hint not in _SUPPORTED_IMAGE_BRAND_HINTS:
+        req_brands = [str(b).strip().lower() for b in (constraints.get("brands") or []) if str(b).strip()]
+        for req_brand in req_brands:
+            if req_brand in _SUPPORTED_IMAGE_BRAND_HINTS:
+                brand_hint = req_brand
+                break
+    if brand_hint not in _SUPPORTED_IMAGE_BRAND_HINTS:
+        result_names = " ".join(str((row or {}).get("name") or "") for row in (results or [])[:3]).lower()
+        if any(tok in q_low for tok in ("macbook", "mac book", "apple")) or "macbook" in result_names:
+            brand_hint = "apple"
+        else:
+            for fallback_brand in ("msi", "asus", "lenovo", "dell", "hp", "alienware", "microsoft"):
+                if fallback_brand in q_low or fallback_brand in result_names:
+                    brand_hint = fallback_brand
+                    break
+    if brand_hint not in _SUPPORTED_IMAGE_BRAND_HINTS:
+        return ""
+    budget_max = (
+        constraints.get("budget_max")
+        or constraints.get("_request_budget_max")
+        or ((constraints.get("_price_filter_meta") or {}).get("budget_max") if isinstance(constraints.get("_price_filter_meta"), dict) else None)
+    )
+    if budget_max is None:
+        return ""
+    def _row_price(row: dict) -> float:
+        try:
+            cents = float((row or {}).get("price_cents") or 0)
+            return cents / 100.0 if cents > 0 else 0.0
+        except Exception:
+            return 0.0
+
+    try:
+        brand_rows = [
+            row for row in (results or [])
+            if isinstance(row, dict) and _candidate_matches_brand(row, [brand_hint])
+        ]
+        source_rows = brand_rows or list(results or [])
+        first_price = min(_row_price(row) for row in source_rows if _row_price(row) > 0)
+    except Exception:
+        first_price = 0.0
+    if first_price <= 0:
+        return ""
+    price_meta = constraints.get("_price_filter_meta") if isinstance(constraints.get("_price_filter_meta"), dict) else {}
+    fallback = str(price_meta.get("fallback") or "").strip().lower()
+    budget_cap = float(budget_max or 0)
+    over_budget = first_price > budget_cap or "nearest_above_budget" in fallback
+    brand_label = _brand_display_name(brand_hint)
+    if brand_hint == "apple":
+        if over_budget:
+            return (
+                f"No, not for Apple in the current catalog. The nearest Apple option starts around "
+                f"${int(round(first_price)):,}."
+            )
+        return f"Yes, this budget reaches Apple options starting around ${int(round(first_price)):,}."
+    brand_has_match = any(_candidate_matches_brand(row, [brand_hint]) for row in (results or []))
+    if over_budget:
+        return (
+            f"No, not for {brand_label} at this budget. The nearest "
+            f"{brand_label if brand_has_match else 'similar'} option starts around ${int(round(first_price)):,}."
+        )
+    return f"Yes, this budget reaches {brand_label if brand_has_match else 'similar'} options starting around ${int(round(first_price)):,}."
+
+
+def _deterministic_assistant_message(query: str, results: list[dict], constraints: dict, brand_budget_answer: str = "") -> str | None:
     if not results:
         return None
-    why_note = ""
-    try:
-        top_reasons: list[str] = []
-        for row in (results or [])[:2]:
-            name = str((row or {}).get("name") or "").strip()
-            pos = ((row or {}).get("factors") or {}).get("positive") or []
-            human = _humanize_positive_factor_tokens(pos)
-            if not name or not human:
-                continue
-            top_reasons.append(f"{name} ({', '.join(human[:2])})")
-        if top_reasons:
-            why_note = f" Top picks: {'; '.join(top_reasons)}."
-    except Exception:
-        why_note = ""
     budget_min = constraints.get("budget_min")
     budget_max = constraints.get("budget_max")
-    specs = constraints.get("specs") or []
-    spec_note = ""
-    if specs:
-        spec_note = f" Matching specs: {', '.join(specs)}."
 
     # ── Persona-aware humanization ────────────────────────────────────────────
     shopper_intent = constraints.get("shopper_intent") if isinstance(constraints.get("shopper_intent"), dict) else {}
@@ -2605,11 +3009,47 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
     else:
         core = f"found {n} option{plural} that match your criteria"
 
+    top_lines: list[str] = []
+    try:
+        for row in (results or [])[:2]:
+            name = str((row or {}).get("name") or "").strip()
+            if not name:
+                continue
+            price_cents = (row or {}).get("price_cents")
+            try:
+                price_text = f" (${int(round(float(price_cents or 0) / 100.0)):,})" if float(price_cents or 0) > 0 else ""
+            except Exception:
+                price_text = ""
+            top_lines.append(f"{name}{price_text}")
+    except Exception:
+        top_lines = []
+
+    core_line = f"I've {core}."
     if opening:
-        msg = f"{opening}I've {core}.{spec_note}{why_note}{urgency_note}{closing}"
+        core_line = f"{opening}I've {core}."
+
+    persona_label = _persona_summary_label(persona, use_case)
+    fit_line = ""
+    if top_lines:
+        if len(top_lines) == 1:
+            picks = top_lines[0]
+        else:
+            picks = ", ".join(top_lines[:-1]) + f" and {top_lines[-1]}"
+        fit_line = f"Best fits for {persona_label}: {picks}." if persona_label else f"Best fits here: {picks}."
+
+    parts: list[str] = []
+    if brand_budget_answer:
+        parts.append(brand_budget_answer)
+        if fit_line:
+            parts.append(fit_line)
     else:
-        msg = f"I've {core}.{spec_note}{why_note}{urgency_note}{closing}"
-    return msg
+        parts.append(core_line)
+        if fit_line:
+            parts.append(fit_line)
+    if urgency_note:
+        parts.append(urgency_note.strip())
+    parts.append(closing.strip())
+    return " ".join(p for p in parts if p).strip()
 
 def _humanize_positive_factor_tokens(items: list[Any]) -> list[str]:
     """Convert internal scoring tags into short user-facing phrases.
@@ -2841,7 +3281,9 @@ def suggest(
     image_ocr_text: Optional[str] = None,
     image_hash: Optional[str] = None,
     image_intent: Optional[str] = None,
+    image_product_identity: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
+    fast_path: Optional[bool] = None,
     copywriting_enabled: Optional[bool] = None,
     copywriting_profile: Optional[str] = None,
     response: Response = None,
@@ -2849,6 +3291,8 @@ def suggest(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
     db=Depends(get_db),
 ) -> Dict:
+    route_t0 = time.perf_counter()
+    timing_breakdown: Dict[str, Any] = {"ollama_summary_ms": None}
     span = trace.get_current_span()
     try:
         uid_hash = hashlib.sha256(uid.encode("utf-8")).hexdigest()[:12]
@@ -2925,11 +3369,49 @@ def suggest(
         span.set_attribute("recommend.trace_id", trace_id)
     except Exception:
         pass
-    image_context = {"labels": [], "ocr": "", "hash": None, "intent": None}
+    image_context = {"labels": [], "ocr": "", "hash": None, "intent": None, "product_identity": {}}
+    fast_path_enabled = bool(fast_path)
+    if fast_path_enabled:
+        copywriting_enabled = False
+    _guard_t0 = time.perf_counter()
+    guard = inspect_commerce_request(
+        surface="recommend.suggest",
+        texts=[query, image_labels, image_ocr_text],
+        uid=uid,
+        sku_values=[],
+        quantity_values=[],
+    )
+    timing_breakdown["guard_ms"] = int((time.perf_counter() - _guard_t0) * 1000)
+    try:
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="security_scan",
+            source_type="recommend",
+            source_id="suggest.guard",
+            target_type="decision_trace",
+            target_id=trace_id,
+            payload={
+                "summary": f"suggest input {guard.get('verdict')}",
+                "severity": guard.get("severity"),
+                "risk": guard.get("risk"),
+                "mitre_atlas": guard.get("mitre_atlas") or [],
+                "mitre_attack": guard.get("mitre_attack") or [],
+                "signals": guard.get("reasons") or [],
+                "mitigations": guard.get("mitigations") or [],
+                "surface": guard.get("surface"),
+                "verdict": guard.get("verdict"),
+            },
+        )
+    except Exception:
+        pass
+    if guard.get("verdict") == "block":
+        raise HTTPException(status_code=400, detail=f"blocked_suggest: {', '.join(guard.get('reasons') or ['invalid_payload'])}")
     image_cv_signals_parsed: Dict[str, Any] = {}
-    incoming_image_payload = bool(image_labels or image_ocr_text or image_hash or image_intent or image_cv_signals)
+    incoming_image_payload = bool(image_labels or image_ocr_text or image_hash or image_intent or image_product_identity or image_cv_signals)
     image_reupload_reasons: list[str] = []
     image_gate_warning: str | None = None
+    catalog_profile: Dict[str, Any] = {}
+    catalog_relevance: Dict[str, Any] = {}
     try:
         if image_labels:
             labels = [s.strip() for s in str(image_labels).split(",") if str(s).strip()]
@@ -2940,6 +3422,10 @@ def suggest(
             image_context["hash"] = str(image_hash)[:128]
         if image_intent:
             image_context["intent"] = str(image_intent)[:32]
+        if image_product_identity:
+            parsed_pi = json.loads(str(image_product_identity))
+            if isinstance(parsed_pi, dict):
+                image_context["product_identity"] = parsed_pi
         if image_cv_signals:
             parsed_cv = json.loads(str(image_cv_signals))
             if isinstance(parsed_cv, dict):
@@ -3000,6 +3486,19 @@ def suggest(
         image_reupload_reasons = []
     if incoming_image_payload and not image_cv_signals_parsed and not (image_context.get("labels") or image_context.get("ocr")):
         image_reupload_reasons.append("insufficient_image_signals")
+    try:
+        _catalog_t0 = time.perf_counter()
+        catalog_profile, catalog_cache_meta = get_cached_catalog_profile_with_meta(db, tenant_id=tenant_id)
+        catalog_relevance = assess_catalog_relevance(
+            catalog_profile=catalog_profile,
+            image_context=image_context,
+            query=query,
+        )
+        timing_breakdown["catalog_profile_ms"] = int((time.perf_counter() - _catalog_t0) * 1000)
+        timing_breakdown["catalog_profile_cache_hit"] = bool((catalog_cache_meta or {}).get("cache_hit"))
+    except Exception:
+        catalog_profile = {}
+        catalog_relevance = {}
     query_effective = query
     if image_context.get("labels") or image_context.get("ocr"):
         query_effective = (
@@ -3748,6 +4247,7 @@ def suggest(
         cached_ocr = str(cached_image_ctx.get("ocr") or "")[:500]
         cached_hash = str(cached_image_ctx.get("hash") or "")[:128] or None
         cached_intent = str(cached_image_ctx.get("intent") or "")[:32] or None
+        cached_product_identity = cached_image_ctx.get("product_identity") if isinstance(cached_image_ctx.get("product_identity"), dict) else {}
         if not image_context.get("labels") and cached_labels:
             image_context["labels"] = [str(x) for x in cached_labels][:12]
         if not image_context.get("ocr") and cached_ocr:
@@ -3756,7 +4256,9 @@ def suggest(
             image_context["hash"] = cached_hash
         if not image_context.get("intent") and cached_intent:
             image_context["intent"] = cached_intent
-        if image_context.get("labels") or image_context.get("ocr"):
+        if not image_context.get("product_identity") and cached_product_identity:
+            image_context["product_identity"] = dict(cached_product_identity)
+        if image_context.get("labels") or image_context.get("ocr") or image_context.get("product_identity"):
             query_effective = (
                 f"{query or ''} image_labels:{' '.join(image_context.get('labels') or [])} "
                 f"image_ocr:{image_context.get('ocr') or ''}"
@@ -3767,6 +4269,7 @@ def suggest(
                 "intent": image_context.get("intent"),
                 "labels": list(image_context.get("labels") or [])[:12],
                 "ocr": str(image_context.get("ocr") or "")[:500],
+                "product_identity": dict(image_context.get("product_identity") or {}),
                 "ts": int(time.time()),
             }
             kv = kv_for_image
@@ -3836,6 +4339,7 @@ def suggest(
         },
     )
     nlp_ms = int((time.perf_counter() - nlp_start) * 1000)
+    timing_breakdown["nlp_ms"] = nlp_ms
     followup_explain = _is_followup_explain_query(query)
     complexity_context = {
         "conversation_turn": int(kv.get("conversation_turn") or 0),
@@ -3867,6 +4371,13 @@ def suggest(
     # Ollama intent routing with staged rollout: off -> shadow -> percent -> full.
     ollama_meta: Dict[str, Any] = {}
     ollama_rollout = _resolve_ollama_intent_rollout(flags, uid=uid, trace_id=trace_id)
+    if fast_path_enabled:
+        ollama_rollout = {
+            **ollama_rollout,
+            "invoke_ollama": False,
+            "shadow_capture": False,
+            "stage": "fast_path",
+        }
     try:
         model = select_ollama_model(query_effective, context=complexity_context)
         complex_bool = is_complex_query(query_effective, context=complexity_context)
@@ -3949,6 +4460,8 @@ def suggest(
                 },
             },
         }
+        if dt_ms is not None:
+            timing_breakdown["ollama_summary_ms"] = int(dt_ms)
     except Exception:
         r = complexity_explain(query_effective, context=complexity_context)
         cb = is_complex_query(query_effective, context=complexity_context)
@@ -4061,6 +4574,7 @@ def suggest(
         "slots": nlp.get("slots") or {},
         "shortlist_lock_active": shortlist_lock_active,
         "turn_intent": turn_intent,
+        "_request_budget_max": budget_max,
     }
     if not constraints.get("use_case"):
         inferred_use_case, inferred_tags = _infer_use_case_from_query_text(query_effective)
@@ -4540,6 +5054,7 @@ def suggest(
         pass
     image_brand_mismatch_note = None
     strict_image_brand_hint = None
+    inferred_image_brand = None
     _budget_mismatch_question: Dict[str, Any] | None = None
     _BRAND_LABEL_PATTERNS = {
         "apple":     ["macbook", "imac", "mac mini", "mac pro", "apple"],
@@ -4566,12 +5081,15 @@ def suggest(
             if any(any(pat in t for pat in _patterns) for t in img_labels_low):
                 inferred_brand = _brand
                 break
+        inferred_image_brand = inferred_brand
+        if inferred_brand:
+            constraints["_request_brand_hint"] = inferred_brand
         if inferred_brand and not (constraints.get("brands") or []):
             constraints["brands"] = [inferred_brand]
             if str(inferred_brand).lower() == "apple":
                 strict_image_brand_hint = "apple"
-            elif str(inferred_brand).lower() in {"lenovo", "dell", "hp", "asus", "acer", "msi", "microsoft", "samsung", "razer", "gigabyte", "toshiba"}:
-                strict_image_brand_hint = "windows"
+            elif str(inferred_brand).lower() in _SUPPORTED_IMAGE_BRAND_HINTS:
+                strict_image_brand_hint = str(inferred_brand).lower()
             log_trace_event(
                 trace_id=trace_id,
                 event_type="nqe_assumption_applied",
@@ -4618,7 +5136,7 @@ def suggest(
             _floor = _BRAND_PRICE_FLOORS.get(str(inferred_brand).lower())
             _budget_val = float(constraints.get("budget_max") or 0)
             if _floor and _budget_val > 0 and _budget_val < _floor:
-                _brand_display = str(inferred_brand).capitalize()
+                _brand_display = _brand_display_name(inferred_brand)
                 if not image_brand_mismatch_note:
                     image_brand_mismatch_note = (
                         f"Your image suggests a {_brand_display} device, but your budget of "
@@ -4648,10 +5166,107 @@ def suggest(
         _brands_norm = [str(b).lower() for b in (constraints.get("brands") or []) if str(b).strip()]
         if "apple" in _brands_norm and any(tok in str(query_effective or "").lower() for tok in ("macbook", "mac book", "apple")):
             strict_image_brand_hint = "apple"
-        elif any(b in _brands_norm for b in ("lenovo", "dell", "hp", "asus", "acer", "msi", "microsoft", "samsung")) or "windows" in str(query_effective or "").lower():
+        else:
+            for req_brand in _brands_norm:
+                if req_brand in _SUPPORTED_IMAGE_BRAND_HINTS:
+                    strict_image_brand_hint = strict_image_brand_hint or req_brand
+                    break
+        if not strict_image_brand_hint and "windows" in str(query_effective or "").lower():
             strict_image_brand_hint = strict_image_brand_hint or "windows"
+        if strict_image_brand_hint in (_SUPPORTED_IMAGE_BRAND_HINTS | {"windows"}):
+            constraints["_request_brand_hint"] = strict_image_brand_hint
     except Exception:
         pass
+    try:
+        _resolved_brand_hint = _resolve_supported_brand_hint(strict_image_brand_hint, constraints, query_effective)
+        if _resolved_brand_hint and not strict_image_brand_hint:
+            strict_image_brand_hint = _resolved_brand_hint
+        if _resolved_brand_hint:
+            constraints["_request_brand_hint"] = _resolved_brand_hint
+    except Exception:
+        pass
+
+    def _rows_to_candidate_dicts(rows: list[Any] | None) -> list[dict]:
+        out: list[dict] = []
+        for row in (rows or []):
+            try:
+                out.append({
+                    "id": row.get("id"),
+                    "sku": row.get("sku"),
+                    "name": row.get("name"),
+                    "price_cents": row.get("price_cents"),
+                    "currency": row.get("currency"),
+                    "image_url": row.get("image_url"),
+                    "stock": row.get("stock"),
+                    "specs": row.get("specs") or {},
+                })
+            except Exception:
+                continue
+        return out
+
+    def _fetch_brand_candidates_in_band(brand_hint: str | None, min_c: int, max_c: int, limit_rows: int = 24) -> list[dict]:
+        brand_pred = _brand_sql_predicate(brand_hint)
+        if not brand_pred:
+            return []
+        rows = db.execute(
+            text(
+                f"""
+                SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
+                       COALESCE(SUM(i.stock), 0) as stock
+                FROM products p
+                LEFT JOIN inventory i ON i.product_id = p.id
+                WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                  AND {brand_pred}
+                GROUP BY p.id
+                ORDER BY p.price_cents ASC
+                LIMIT :limit_rows
+                """
+            ),
+            {"min_c": int(min_c), "max_c": int(max_c), "limit_rows": int(limit_rows)},
+        ).mappings().all()
+        return _rows_to_candidate_dicts(rows)
+
+    def _fetch_brand_nearest_above_budget(brand_hint: str | None, baseline_c: int, span_c: int, limit_rows: int = 24) -> tuple[list[dict], dict]:
+        brand_pred = _brand_sql_predicate(brand_hint)
+        if not brand_pred:
+            return [], {}
+        floor_row = db.execute(
+            text(
+                f"""
+                SELECT MIN(p.price_cents) AS min_price_cents
+                FROM products p
+                WHERE p.active = 1
+                  AND p.price_cents >= :baseline_c
+                  AND {brand_pred}
+                """
+            ),
+            {"baseline_c": int(baseline_c)},
+        ).mappings().first()
+        floor_c = int((floor_row or {}).get("min_price_cents") or 0)
+        if floor_c <= 0:
+            return [], {}
+        rows = db.execute(
+            text(
+                f"""
+                SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
+                       COALESCE(SUM(i.stock), 0) as stock
+                FROM products p
+                LEFT JOIN inventory i ON i.product_id = p.id
+                WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                  AND {brand_pred}
+                GROUP BY p.id
+                ORDER BY p.price_cents ASC
+                LIMIT :limit_rows
+                """
+            ),
+            {"min_c": int(floor_c), "max_c": int(floor_c + span_c), "limit_rows": int(limit_rows)},
+        ).mappings().all()
+        return _rows_to_candidate_dicts(rows), {
+            "budget_min": int(floor_c / 100),
+            "budget_max": int((floor_c + span_c) / 100),
+            "fallback": f"{str(brand_hint or '').lower()}_nearest_above_budget",
+            "brand_hint": str(brand_hint or "").lower(),
+        }
     try:
         if constraints.get("quantity") is None:
             qty = _extract_quantity_from_query(query_effective)
@@ -4760,12 +5375,16 @@ def suggest(
         )
         _image_blob = _decode_session_image_blob(kv if isinstance(kv, dict) else {}, image_context.get("hash"))
         _vision_min_conf = float(os.getenv("CV_IDENTITY_IMAGE_MIN_CONF", "0.6") or 0.6)
+        _vision_brand_only_min_conf = float(os.getenv("CV_IDENTITY_BRAND_ONLY_MIN_CONF", "0.35") or 0.35)
+        _low_conf_brand_candidate: Dict[str, Any] = {}
         if _image_blob:
             _id_candidate = identify_product_from_image(
                 _image_blob,
                 user_query=query or "",
                 trace_id=trace_id,
             )
+            if isinstance(_id_candidate, dict):
+                _low_conf_brand_candidate = dict(_id_candidate)
             if bool(_id_candidate.get("identified")) and float(_id_candidate.get("confidence") or 0.0) >= _vision_min_conf:
                 _id_result = _id_candidate
                 _id_source = "vision_image"
@@ -4777,6 +5396,15 @@ def suggest(
                 trace_id=trace_id,
             )
             _id_source = "text_heuristic"
+        if (not _id_result) and _low_conf_brand_candidate:
+            _weak_labels = [str(x).strip().lower() for x in (image_context.get("labels") or []) if str(x).strip()]
+            _labels_weak = not _weak_labels or all(len(x) <= 8 or "text" in x or "overlay" in x for x in _weak_labels)
+            _image_flagged = bool(image_reupload_reasons or image_cv_signals_parsed.get("payment_social_engineering") or image_cv_signals_parsed.get("pci_card_exposed") or image_cv_signals_parsed.get("steg_suspicious"))
+            _brand_only = str(_low_conf_brand_candidate.get("brand") or "").strip()
+            _brand_conf = float(_low_conf_brand_candidate.get("confidence") or 0.0)
+            if _image_flagged and _labels_weak and _brand_only and _brand_conf >= _vision_brand_only_min_conf:
+                _id_result = dict(_low_conf_brand_candidate)
+                _id_source = "vision_brand_rescue"
         if _id_result:
             if _id_result.get("identified"):
                 _identity_constraints = _id_to_constraints(_id_result)
@@ -4831,8 +5459,81 @@ def suggest(
     image_identity_confidence = float(_id_conf_raw)
     if incoming_image_payload and image_identity_confidence < 0.45:
         image_reupload_reasons.append("identity_confidence_low")
+    if incoming_image_payload and bool(catalog_relevance.get("off_domain")):
+        _image_cat = str(catalog_relevance.get("image_category") or "").strip().lower()
+        _soft_allow_supported_commerce = (
+            _image_cat in _SUPPORTED_COMMERCE_IMAGE_CATEGORIES
+            and (bool((_id_result or {}).get("identified")) or image_identity_confidence >= 0.6)
+        )
+        if _soft_allow_supported_commerce:
+            catalog_relevance["off_domain"] = False
+            catalog_relevance["low_support"] = True
+            catalog_relevance["soft_warning"] = "supported_commerce_category_not_primary_in_catalog"
+    if incoming_image_payload and bool(catalog_relevance.get("off_domain")):
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="unsupported_request",
+                source_type="agent",
+                source_id="Catalog_Guard_Agent",
+                target_type="system",
+                target_id=None,
+                payload={
+                    "reason": "image_off_domain_for_catalog",
+                    "image_category": catalog_relevance.get("image_category"),
+                    "catalog_primary": catalog_relevance.get("catalog_primary"),
+                    "dominant_categories": catalog_relevance.get("dominant_categories") or [],
+                },
+            )
+        except Exception:
+            pass
+        payload = {
+            "status": "unsupported_request",
+            "results": [],
+            "proposal": {"decision_mode": "rules", "ranked_skus": []},
+            "constraints_used": constraints,
+            "followup_contract": followup_contract,
+            "intent_execution_plan": intent_execution_plan,
+            "policy_version": flags.get("POLICY_VERSION", "v1"),
+            "message": "The uploaded image does not match this merchant catalog.",
+            "assistant_message": (
+                f"This image looks like {catalog_relevance.get('image_category')}, but this store is primarily "
+                f"{catalog_relevance.get('catalog_primary')}. I did not substitute unrelated products."
+            ),
+            "catalog_profile": catalog_profile,
+            "catalog_relevance": catalog_relevance,
+            "timing_breakdown": {
+                **timing_breakdown,
+                "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
+            },
+            "degraded": True,
+            "eligible": not simulate,
+            "agent_chain": [
+                {"agent": "Catalog_Guard_Agent", "confidence": 0.98, "duration_ms": timing_breakdown.get("catalog_profile_ms")},
+            ],
+            "trace_tags": strategy_corr.get("tags") or [],
+            "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+            "llm_model": llm_model,
+            "model_tier": model_tier,
+            "complexity_signals": complexity_signals,
+        }
+        payload = _ensure_trace_response(payload, trace_id, flags)
+        return _with_trace(payload, trace_id)
     if incoming_image_payload and image_reupload_reasons:
         image_reupload_reasons = list(dict.fromkeys([str(r) for r in image_reupload_reasons if str(r)]))
+        try:
+            _apple_like_labels = any(
+                any(tok in str(lbl).lower() for tok in ("macbook", "apple", "imac", "mac mini", "mac pro"))
+                for lbl in ((image_context.get("labels") or []) + [str((image_context.get("product_identity") or {}).get("brand") or "")])
+            )
+            if _apple_like_labels:
+                inferred_image_brand = "apple"
+                strict_image_brand_hint = "apple"
+                constraints["_request_brand_hint"] = "apple"
+                constraints["_inferred_image_brand"] = "apple"
+                constraints["brands"] = ["apple"]
+        except Exception:
+            pass
         _hard_lock_reasons = {"qr_prompt_injection"}
         _hard_lock = any(r in _hard_lock_reasons for r in image_reupload_reasons) or bool(
             ("adversarial_score_high" in image_reupload_reasons) and ("manipulation_detected" in image_reupload_reasons)
@@ -4905,9 +5606,7 @@ def suggest(
             }
             payload = _ensure_trace_response(payload, trace_id, flags)
             return _with_trace(payload, trace_id)
-        image_gate_warning = (
-            "Image had risky overlays/QR content. Continuing with visual-sanitized ranking from trusted channels."
-        )
+        image_gate_warning = None
     # Emit model selection early so tiering is visible even on early returns.
     try:
         log_trace_event(
@@ -5393,6 +6092,7 @@ def suggest(
             limit = 50 if (constraints.get("budget_min") is not None or constraints.get("budget_max") is not None) else 10
             candidates = service.retrieve_candidates(query_effective, limit=limit)
             retrieve_ms = int((time.perf_counter() - _t0) * 1000)
+            timing_breakdown["retrieve_ms"] = retrieve_ms
         retrieved_count = len(candidates or [])
         logging.info(f"recommend.suggest: retrieved {retrieved_count} candidates (ms={retrieve_ms})")
         if _is_laptop_focused_query(query_effective, constraints):
@@ -5483,6 +6183,7 @@ def suggest(
         budget_min_val = constraints.get("budget_min")
         budget_max_val = constraints.get("budget_max")
         if (budget_min_val is not None or budget_max_val is not None) and not shortlist_lock_active:
+            effective_brand_hint = _resolve_supported_brand_hint(strict_image_brand_hint, constraints, query_effective)
             filtered = []
             for c in candidates:
                 price_cents = c.get("price_cents")
@@ -5503,6 +6204,43 @@ def suggest(
                     "candidates_before": retrieved_count,
                     "candidates_after": len(candidates),
                 }
+                if effective_brand_hint in _SUPPORTED_IMAGE_BRAND_HINTS:
+                    filter_meta_price["brand_hint"] = effective_brand_hint
+                try:
+                    # For image-driven or explicit brand requests, do not stop at generic
+                    # in-budget matches if a brand-family pass can recover the intended line.
+                    if effective_brand_hint in _SUPPORTED_IMAGE_BRAND_HINTS:
+                        brand_filtered = [c for c in (filtered or []) if _candidate_matches_brand(c, [effective_brand_hint])]
+                        if brand_filtered:
+                            candidates = brand_filtered
+                            filter_meta_price["fallback"] = "in_budget_brand_family"
+                            filter_meta_price["brand_hint"] = effective_brand_hint
+                            filter_meta_price["candidates_after"] = len(candidates)
+                        else:
+                            min_c = int(budget_min_val * 100) if budget_min_val is not None else 0
+                            max_c = int(budget_max_val * 100) if budget_max_val is not None else 10_000_000
+                            brand_band_alt = _fetch_brand_candidates_in_band(effective_brand_hint, min_c, max_c)
+                            if brand_band_alt:
+                                candidates = brand_band_alt
+                                filter_meta_price["fallback"] = "db_price_range_brand"
+                                filter_meta_price["brand_hint"] = effective_brand_hint
+                                filter_meta_price["candidates_after"] = len(candidates)
+                            else:
+                                current_span = None
+                                if budget_min_val is not None and budget_max_val is not None:
+                                    current_span = max(200, int(float(budget_max_val) - float(budget_min_val)))
+                                span_c = max(40_000, int(max(400, int(current_span or 400)) * 100))
+                                nearest_alt, nearest_meta = _fetch_brand_nearest_above_budget(
+                                    effective_brand_hint,
+                                    max_c,
+                                    span_c,
+                                )
+                                if nearest_alt:
+                                    candidates = nearest_alt
+                                    filter_meta_price.update(nearest_meta)
+                                    filter_meta_price["candidates_after"] = len(candidates)
+                except Exception:
+                    pass
                 try:
                     log_trace_event(
                         trace_id=trace_id,
@@ -5521,10 +6259,11 @@ def suggest(
                 try:
                     min_c = int(budget_min_val * 100) if budget_min_val is not None else 0
                     max_c = int(budget_max_val * 100) if budget_max_val is not None else 10_000_000
-                    _brand_only_mode = str(strict_image_brand_hint or "").lower() == "apple"
+                    _brand_mode = str(strict_image_brand_hint or "").lower()
                     _brand_where = ""
-                    if _brand_only_mode:
-                        _brand_where = " AND (LOWER(p.name) LIKE '%apple%' OR LOWER(p.name) LIKE '%macbook%' OR LOWER(p.sku) LIKE 'mb%') "
+                    _brand_pred = _brand_sql_predicate(_brand_mode)
+                    if _brand_pred:
+                        _brand_where = f" AND {_brand_pred} "
                     rows = db.execute(
                         text(
                             f"""
@@ -5561,8 +6300,10 @@ def suggest(
                         "budget_max": budget_max_val,
                         "candidates_before": retrieved_count,
                         "candidates_after": len(candidates),
-                        "fallback": "db_price_range_brand" if str(strict_image_brand_hint or "").lower() in {"apple", "windows"} else "db_price_range",
+                        "fallback": "db_price_range_brand" if _brand_pred else "db_price_range",
                     }
+                    if _brand_pred and _brand_mode in _SUPPORTED_IMAGE_BRAND_HINTS:
+                        filter_meta_price["brand_hint"] = _brand_mode
                     try:
                         log_trace_event(
                             trace_id=trace_id,
@@ -5582,14 +6323,10 @@ def suggest(
                     brand_jump_meta = {}
                     try:
                         brand_hint = str(strict_image_brand_hint or "").lower()
-                        if brand_hint in {"apple", "windows"}:
+                        brand_pred = _brand_sql_predicate(brand_hint)
+                        if brand_pred:
                             min_c = int(budget_min_val * 100) if budget_min_val is not None else 0
                             max_c = int(budget_max_val * 100) if budget_max_val is not None else 10_000_000
-                            if brand_hint == "apple":
-                                brand_pred = "(LOWER(p.name) LIKE '%apple%' OR LOWER(p.name) LIKE '%macbook%' OR LOWER(p.sku) LIKE 'mb%')"
-                            else:
-                                # Windows-first nearest band excludes Apple/MacBook.
-                                brand_pred = "(LOWER(p.name) NOT LIKE '%apple%' AND LOWER(p.name) NOT LIKE '%macbook%' AND LOWER(p.sku) NOT LIKE 'mb%')"
                             # Exact in-budget brand-family matches first.
                             rows_brand = db.execute(
                                 text(
@@ -5668,7 +6405,7 @@ def suggest(
                                             "budget_max": int((floor_c + span_c) / 100),
                                             "candidates_before": retrieved_count,
                                             "candidates_after": len(brand_jump_alt),
-                                            "fallback": "apple_nearest_above_budget" if brand_hint == "apple" else "windows_nearest_above_budget",
+                                            "fallback": f"{brand_hint}_nearest_above_budget",
                                             "brand_hint": brand_hint,
                                         }
                     except Exception:
@@ -5703,6 +6440,15 @@ def suggest(
                         jump_alt = []
                         jump_meta = {}
                         try:
+                            q_low_price = str(query_effective or query or "").lower()
+                            explicit_hard_cap = any(tok in q_low_price for tok in (" under ", " below ", " max ", " at most ", " no more than "))
+                            allow_nearest_viable_fallback = (
+                                (budget_min_val is not None and budget_max_val is not None)
+                                or any(tok in q_low_price for tok in ("nearest", "closest", "widen", "broaden", "expand"))
+                                or not explicit_hard_cap
+                            )
+                            if not allow_nearest_viable_fallback:
+                                raise RuntimeError("nearest_viable_fallback_disabled_for_hard_cap")
                             current_span = None
                             if budget_min_val is not None and budget_max_val is not None:
                                 current_span = max(200, int(float(budget_max_val) - float(budget_min_val)))
@@ -5974,6 +6720,63 @@ def suggest(
                         )
                     except Exception:
                         pass
+                elif incoming_image_payload:
+                    # Visual mode recovery: when strict spec filter zeroes out results,
+                    # run a relaxed-spec nearest pass before returning empty.
+                    recovered_visual = []
+                    try:
+                        effective_brand_hint = _resolve_supported_brand_hint(strict_image_brand_hint, constraints, query_effective)
+                        relaxed_specs = []
+                        for s in specs:
+                            s_low = str(s).lower()
+                            if any(tok in s_low for tok in ("ram_gb_min", "storage_gb_min", "gpu_vram_gb_min", "refresh_hz_min")):
+                                continue
+                            relaxed_specs.append(s)
+                        near_q = f"{query_effective} show nearest in-stock options"
+                        if effective_brand_hint in _SUPPORTED_IMAGE_BRAND_HINTS and effective_brand_hint not in str(near_q).lower():
+                            near_q = f"{near_q} {effective_brand_hint}".strip()
+                        recalled = service.retrieve_candidates(near_q, limit=max(24, int(limit or 10) * 3)) or []
+                        recalled = [c for c in recalled if _candidate_looks_like_laptop(c)]
+                        if effective_brand_hint in _SUPPORTED_IMAGE_BRAND_HINTS:
+                            brand_recalled = [c for c in recalled if _candidate_matches_brand(c, [effective_brand_hint])]
+                            if brand_recalled:
+                                recalled = brand_recalled
+                        if relaxed_specs:
+                            recovered_visual = [c for c in recalled if _match_spec(c, relaxed_specs)]
+                        if not recovered_visual:
+                            recovered_visual = recalled
+                        if not recovered_visual and effective_brand_hint in _SUPPORTED_IMAGE_BRAND_HINTS:
+                            baseline_c = int(float(budget_max_val or budget_min_val or 0) * 100)
+                            span_c = max(40_000, int(max(400, int((float(budget_max_val or 0) - float(budget_min_val or 0)) or 400)) * 100))
+                            recovered_visual, _nearest_meta = _fetch_brand_nearest_above_budget(
+                                effective_brand_hint,
+                                baseline_c,
+                                span_c,
+                            )
+                    except Exception:
+                        recovered_visual = []
+                    if recovered_visual:
+                        candidates = recovered_visual
+                        filter_spec_applied = True
+                        filter_meta_spec = {
+                            "specs": specs,
+                            "relaxed_specs": relaxed_specs if isinstance(relaxed_specs, list) else [],
+                            "candidates_before": retrieved_count,
+                            "candidates_after": len(candidates),
+                            "fallback": "visual_relaxed_spec_nearest",
+                        }
+                        try:
+                            log_trace_event(
+                                trace_id=trace_id,
+                                event_type="agent_process",
+                                source_type="agent",
+                                source_id="Spec_Filter_Agent",
+                                target_type="system",
+                                target_id=None,
+                                payload=filter_meta_spec,
+                            )
+                        except Exception:
+                            pass
                 elif os.getenv("TEST_USE_FALLBACK_PRODUCTS", "0").lower() in ("1", "true", "yes"):
                     try:
                         _fallback = [
@@ -6488,6 +7291,7 @@ def suggest(
             _why_by_sku = {}
             _delta_by_sku = {}
         rerank_ms = int((time.perf_counter() - _rerank_t0) * 1000)
+        timing_breakdown["rerank_ms"] = rerank_ms
         cb_record(redis, "recommend", True, degradation_cfg)
         try:
             log_trace_event(
@@ -6932,6 +7736,7 @@ def suggest(
         })
 
     results = []
+    image_lane_fill: Dict[str, Any] = {"applied": False, "added": 0, "reason": "not_image_flow"}
     top_score = scored[0]["score"] if scored else 0.0
     min_score = scored[-1]["score"] if scored else 0.0
     def _normalize_score(val: float) -> float:
@@ -6993,6 +7798,17 @@ def suggest(
                 results = fallback_rows
         except Exception:
             pass
+    if incoming_image_payload and not bool(catalog_relevance.get("off_domain")):
+        _fill_t0 = time.perf_counter()
+        results, image_lane_fill = _top_up_image_results(
+            db=db,
+            results=results,
+            minimum_count=3,
+            image_category=str(catalog_relevance.get("image_category") or catalog_profile.get("primary_category") or "general"),
+            constraints=constraints,
+            catalog_profile=catalog_profile,
+        )
+        timing_breakdown["image_fill_ms"] = int((time.perf_counter() - _fill_t0) * 1000)
     # Persist search event for BI/funnel tracking
     try:
         log_search_event(
@@ -7096,6 +7912,10 @@ def suggest(
         "llm_model": llm_model,
         "model_tier": model_tier,
         "complexity_signals": complexity_signals,
+        "timing_breakdown": {
+            **timing_breakdown,
+            "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
+        },
         "fraud": fraud_summary,
         "turn_type": turn_type,
         "turn_intent": turn_intent,
@@ -7112,6 +7932,7 @@ def suggest(
             severity,
         ),
         "policy_notes": policy_notes,
+        "image_lane_fill": image_lane_fill,
         # Attach a lightweight escalation hint when bulk stock is insufficient
         "escalation": ({
             "approval_required": True,
@@ -7569,8 +8390,12 @@ def suggest(
     except Exception:
         payload["recommendation_tiers"] = {"minimum": [], "recommended": [], "show_split": False}
     assistant_message = None
+    constraints["_price_filter_meta"] = filter_meta_price or {}
+    constraints["_strict_image_brand_hint"] = strict_image_brand_hint
+    constraints["_inferred_image_brand"] = inferred_image_brand
+    brand_budget_answer = _build_brand_budget_answer(query, results, constraints)
     llm_summary_job_id = None
-    llm_summary_requested = bool(nlp.get("llm_fallback") or explanation_request)
+    llm_summary_requested = (not fast_path_enabled) and bool(nlp.get("llm_fallback") or explanation_request)
     if llm_summary_requested and rule_eval.get("recommend_llm", True):
         assistant_message, llm_summary_job_id = _summarize_results(query, results, constraints, llm_model, trace_id)
     if explanation_request:
@@ -7592,7 +8417,11 @@ def suggest(
         except Exception:
             pass
     if not assistant_message:
-        assistant_message = _deterministic_assistant_message(query, results, constraints)
+        assistant_message = _deterministic_assistant_message(query, results, constraints, brand_budget_answer=brand_budget_answer)
+    elif brand_budget_answer:
+        _assistant_low = str(assistant_message or "").strip().lower()
+        if not (_assistant_low.startswith("yes,") or _assistant_low.startswith("no,")):
+            assistant_message = f"{brand_budget_answer} {assistant_message}"
     try:
         _bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
         _bf_status = str(_bf.get("status") or "").strip().lower()
@@ -7609,7 +8438,7 @@ def suggest(
             payload["alternatives"] = list(dict.fromkeys([str(x) for x in _alts if str(x).strip()]))[:4]
     except Exception:
         pass
-    if image_brand_mismatch_note:
+    if image_brand_mismatch_note and not brand_budget_answer:
         assistant_message = f"{assistant_message} {image_brand_mismatch_note}" if assistant_message else image_brand_mismatch_note
     if gpu_inference_note:
         assistant_message = f"{assistant_message} {gpu_inference_note}" if assistant_message else gpu_inference_note
@@ -7617,8 +8446,6 @@ def suggest(
     note, unmatched = _emit_inventory_brand_notice(results=results, constraints=constraints, decision_id=decision_id, trace_id=trace_id)
     if note:
         assistant_message = (assistant_message or "") + note
-    if image_gate_warning:
-        assistant_message = f"{assistant_message} {image_gate_warning}" if assistant_message else image_gate_warning
     # Comparative synthesis for "which is better" queries
     try:
         needs_synthesis = any(
@@ -7674,25 +8501,6 @@ def suggest(
             _suitable_count = sum(1 for v in _uc_verdicts if v.get("suitable"))
             _overkill_count = sum(1 for v in _uc_verdicts if v.get("verdict") == "overkill")
             _total_assessed = len(_uc_verdicts)
-            if _total_assessed > 0:
-                _uc_note = f"\n\n📋 Use-case analysis ({_uc_label}): {_suitable_count}/{_total_assessed} top results meet minimum requirements."
-                if _overkill_count > 0:
-                    _uc_note += f" ⚡ {_overkill_count}/{_total_assessed} may be overkill for this use-case — consider a more cost-effective option."
-                    _top_excess = []
-                    for v in _uc_verdicts:
-                        _top_excess.extend(v.get("excess", [])[:1])
-                    if _top_excess:
-                        _uc_note += f" ({'; '.join(_top_excess[:2])})"
-                if any(v.get("gaps") for v in _uc_verdicts):
-                    _top_gaps = []
-                    for v in _uc_verdicts:
-                        _top_gaps.extend(v.get("gaps", [])[:1])
-                    if _top_gaps:
-                        _uc_note += f" Key gaps: {'; '.join(_top_gaps[:2])}."
-                _uc_apps = (_use_case_specs.get("apps") or [])[:3]
-                if _uc_apps:
-                    _uc_note += f" Key apps: {', '.join(_uc_apps)}."
-                assistant_message = (assistant_message or "") + _uc_note
             payload["use_case_analysis"] = {
                 "use_case_key": _use_case_match,
                 "label": _uc_label,
@@ -7856,6 +8664,14 @@ def suggest(
                         if isinstance(p, dict)
                     ],
                     "right_panel_contract": _safe_right_panel,
+                    "intent_snapshot": {
+                        "persona": constraints.get("buyer_persona"),
+                        "use_case_key": (payload.get("use_case_analysis") or {}).get("use_case_key"),
+                        "budget_min": constraints.get("budget_min"),
+                        "budget_max": constraints.get("budget_max"),
+                        "intent": (nlp or {}).get("intent"),
+                        "source": "recommend.final_payload",
+                    },
                 },
             )
     except Exception:
@@ -7908,6 +8724,8 @@ def suggest(
             )
             assistant_message = copy_out.get("assistant_message") or assistant_message
             copy_meta = copy_out.get("meta") if isinstance(copy_out.get("meta"), dict) else {}
+            if copy_meta.get("latency_ms") is not None:
+                timing_breakdown["copywriting_ms"] = copy_meta.get("latency_ms")
             if trace_id and (copy_meta.get("applied") or copywriting_enabled):
                 log_trace_event(
                     trace_id=trace_id,
@@ -7946,6 +8764,12 @@ def suggest(
                     "Use widen/search-nearest to see the closest viable options."
                 )
         payload["assistant_message"] = assistant_message
+        payload["catalog_profile"] = catalog_profile
+        payload["catalog_relevance"] = catalog_relevance
+        payload["timing_breakdown"] = {
+            **timing_breakdown,
+            "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
+        }
     turn_type = _classify_turn_type(
         results_count=len(results or []),
         followup_explain=followup_explain,
@@ -7954,6 +8778,18 @@ def suggest(
     referents = _extract_referents(query=query, prior_shortlist=prior_shortlist, current_results=results or [])
     if llm_summary_job_id:
         payload["llm_summary_job_id"] = llm_summary_job_id
+    try:
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="timing_breakdown",
+            source_type="agent",
+            source_id="Latency_Trace_Agent",
+            target_type="system",
+            target_id=None,
+            payload=payload.get("timing_breakdown") or {},
+        )
+    except Exception:
+        pass
     try:
         previous_envelope = kv.get("last_result_envelope") if isinstance(kv.get("last_result_envelope"), dict) else {}
         current_envelope = _build_envelope_snapshot(
@@ -8348,6 +9184,34 @@ def checkout_upsell(
     if not skus:
         raise HTTPException(status_code=400, detail="cart_skus is required")
     trace_id = str(uuid.uuid4())
+    guard = inspect_commerce_request(
+        surface="recommend.checkout_upsell",
+        texts=[uid, query, persona, use_case, skus],
+        sku_values=skus,
+        uid=uid,
+        quantity_values=[1 for _ in skus],
+    )
+    log_trace_event(
+        trace_id=trace_id,
+        event_type="security_scan",
+        source_type="recommend",
+        source_id="checkout_upsell.guard",
+        target_type="decision_trace",
+        target_id=trace_id,
+        payload={
+            "summary": f"checkout_upsell input {guard.get('verdict')}",
+            "severity": guard.get("severity"),
+            "risk": guard.get("risk"),
+            "mitre_atlas": guard.get("mitre_atlas") or [],
+            "mitre_attack": guard.get("mitre_attack") or [],
+            "signals": guard.get("reasons") or [],
+            "mitigations": guard.get("mitigations") or [],
+            "surface": guard.get("surface"),
+            "verdict": guard.get("verdict"),
+        },
+    )
+    if guard.get("verdict") == "block":
+        raise HTTPException(status_code=400, detail=f"blocked_checkout_upsell: {', '.join(guard.get('reasons') or ['invalid_payload'])}")
     try:
         recs = recommend_checkout_upsell(
             db,
@@ -8360,6 +9224,41 @@ def checkout_upsell(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"checkout_upsell_failed: {exc}")
+    bundle_savings: Dict[str, Any] = {}
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT sku, name, price_cents, specs
+                FROM products
+                WHERE sku IN :skus
+                """
+            ).bindparams(bindparam("skus", expanding=True)),
+            {"skus": skus},
+        ).fetchall()
+        bundle_items: list[dict[str, Any]] = []
+        for row in rows or []:
+            raw_specs = row[3] if isinstance(row, (list, tuple)) else None
+            specs = {}
+            if isinstance(raw_specs, str) and raw_specs.strip():
+                try:
+                    specs = json.loads(raw_specs)
+                except Exception:
+                    specs = {}
+            elif isinstance(raw_specs, dict):
+                specs = raw_specs
+            bundle_items.append(
+                {
+                    "sku": row[0],
+                    "name": row[1],
+                    "quantity": 1,
+                    "price_cents": int(row[2] or 0),
+                    "specs": specs,
+                }
+            )
+        bundle_savings = evaluate_bundle_savings(bundle_items)
+    except Exception:
+        bundle_savings = {}
     try:
         policy_version = load_feature_flags(os.getenv("FEATURE_FLAGS_PATH") or get_settings().feature_flags_path).get("POLICY_VERSION", "v1")
     except Exception:
@@ -8411,6 +9310,7 @@ def checkout_upsell(
                     "mode": "cart_upsell",
                     "summary": "Checkout upsell suggestions selected for current cart.",
                 },
+                "bundle_savings": bundle_savings,
                 **_trace_meta_payload(policy_version=policy_version, context_ids=["cart_skus", "upsell_factors"]),
             },
         )
@@ -8424,6 +9324,7 @@ def checkout_upsell(
         "trace_id": trace_id,
         "decision_trace_id": trace_id,
         "policy_version": policy_version,
+        "bundle_savings": bundle_savings,
     }
 
 

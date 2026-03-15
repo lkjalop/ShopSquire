@@ -366,6 +366,298 @@ def test_image_hint_apple_uses_nearest_above_budget_before_generic_alternatives(
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
+def test_flagged_macbook_image_forces_apple_brand_family_before_generic_windows(monkeypatch):
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p-generic-low-1", "sku": "GEN-LOW-1", "name": "Lenovo IdeaPad Budget", "price_cents": 89900, "currency": "USD", "stock": 5}
+        ]
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-apple-near-flag-1','MBP14-FLAG','MacBook Pro 14',159900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-apple-near-flag-1','p-apple-near-flag-1',5,'default')"))
+            db.commit()
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": "u-apple-flagged",
+                "query": "please help me choose for university budget 700 to 1100",
+                "budget_min": 700,
+                "budget_max": 1100,
+                "image_labels": "macbook,laptop",
+                "image_cv_signals": json.dumps({
+                    "qr_code_detected": True,
+                    "qr_external_url_detected": True,
+                    "payment_social_engineering": True,
+                }),
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        results = body.get("results") or []
+        assert results, body
+        names = [str((x or {}).get("name") or "").lower() for x in results[:3]]
+        assert any(("macbook" in n or "apple" in n) for n in names), names
+        assert (body.get("price_filter") or {}).get("brand_hint") == "apple"
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_image_hint_asus_uses_specific_brand_fallback_before_generic_windows(monkeypatch):
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-asus-near-1','ASUS-NEAR-1','ASUS Vivobook S16',127800,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-generic-low-2','GEN-LOW-2','Dell Inspiron Generic',89900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-asus-near-1','p-asus-near-1',5,'default')"))
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-generic-low-2','p-generic-low-2',5,'default')"))
+            db.commit()
+
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": "u-asus-nearest",
+                "query": "show me laptops for university under 1200",
+                "budget_max": 1200,
+                "image_labels": "asus,vivobook,laptop",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        results = body.get("results") or []
+        assert results, body
+        names = [str((x or {}).get("name") or "").lower() for x in results[:3]]
+        assert any("asus" in n or "vivobook" in n for n in names), names
+        assert body.get("price_filter", {}).get("fallback") in {
+            "asus_nearest_above_budget",
+            "db_price_range_brand",
+        }
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_image_hint_msi_uses_brand_band_before_generic_windows(monkeypatch):
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p-generic-dell-1", "sku": "GEN-DELL-1", "name": "Dell DB16255", "price_cents": 139900, "currency": "USD", "stock": 6},
+            {"id": "p-generic-hp-1", "sku": "GEN-HP-1", "name": "HP OmniBook", "price_cents": 149900, "currency": "USD", "stock": 6},
+        ]
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-msi-near-1','MSI-NEAR-1','MSI Modern 15 H AI',149900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-msi-near-1','p-msi-near-1',5,'default')"))
+            db.commit()
+
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": "u-msi-nearest",
+                "query": "show me laptops between 1300 to 1500 msi",
+                "budget_min": 1300,
+                "budget_max": 1500,
+                "image_labels": "msi,gaming,laptop",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        results = body.get("results") or []
+        assert results, body
+        names = [str((x or {}).get("name") or "").lower() for x in results[:3]]
+        assert any("msi" in n for n in names), names
+        assert body.get("price_filter", {}).get("brand_hint") == "msi"
+        assert body.get("price_filter", {}).get("fallback") in {
+            "in_budget_brand_family",
+            "db_price_range_brand",
+            "msi_nearest_above_budget",
+        }
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_flagged_weak_label_msi_uses_request_product_identity_before_generic_windows(monkeypatch):
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p-generic-hp-2", "sku": "GEN-HP-2", "name": "HP OmniBook", "price_cents": 109900, "currency": "USD", "stock": 6},
+        ]
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-msi-near-req-1','MSI-REQ-1','MSI Modern 15 H AI',149900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-msi-near-req-1','p-msi-near-req-1',5,'default')"))
+            db.commit()
+
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": "u-msi-product-identity",
+                "query": "which should i buy for work budget 1300 to 1500",
+                "budget_min": 1300,
+                "budget_max": 1500,
+                "image_labels": "ms texti",
+                "image_product_identity": json.dumps({"brand": "MSI", "identified": True, "confidence": 0.41}),
+                "image_cv_signals": json.dumps({"payment_social_engineering": True, "pci_card_exposed": True}),
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        results = body.get("results") or []
+        assert results, body
+        names = [str((x or {}).get("name") or "").lower() for x in results[:3]]
+        assert any("msi" in n for n in names), names
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_flagged_weak_label_msi_uses_low_confidence_vision_brand_rescue(monkeypatch):
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p-generic-hp-3", "sku": "GEN-HP-3", "name": "HP Generic", "price_cents": 109900, "currency": "USD", "stock": 6},
+        ]
+        uid = "u-msi-brand-rescue"
+        mem = Memory(get_redis())
+        kv = mem.get_kv(uid) or {}
+        kv["image_blob_cache"] = {"img-msi-brand-rescue": base64.b64encode(b"fake-image-bytes").decode("ascii")}
+        mem.set_kv(uid, kv)
+
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active)
+                    VALUES ('p-msi-near-rescue-1','MSI-RESCUE-1','MSI Modern 15 H AI',149900,'USD','{}',1)
+                    """
+                )
+            )
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-msi-near-rescue-1','p-msi-near-rescue-1',5,'default')"))
+            db.commit()
+
+        import src.app.services.product_identity_agent as pia
+
+        monkeypatch.setattr(
+            pia,
+            "identify_product_from_image",
+            lambda image_bytes, user_query=None, trace_id=None, timeout_s=12.0: {
+                "ok": True,
+                "identified": True,
+                "brand": "MSI",
+                "product_type": "laptop",
+                "confidence": 0.41,
+            },
+        )
+        monkeypatch.setattr(
+            pia,
+            "identify_product_from_text",
+            lambda labels, ocr_text, user_query=None, trace_id=None: {
+                "ok": True,
+                "identified": False,
+                "confidence": 0.0,
+            },
+        )
+
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": uid,
+                "query": "which should i buy for work budget 1300 to 1500",
+                "budget_min": 1300,
+                "budget_max": 1500,
+                "image_hash": "img-msi-brand-rescue",
+                "image_labels": "ms texti",
+                "image_cv_signals": json.dumps({"payment_social_engineering": True, "pci_card_exposed": True}),
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        results = body.get("results") or []
+        assert results, body
+        names = [str((x or {}).get("name") or "").lower() for x in results[:3]]
+        assert any("msi" in n for n in names), names
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
+def test_candidate_matches_brand_does_not_treat_generic_thin_as_msi():
+    row = {"name": 'Asus VivoBook 15.6" Full HD Thin & Light Laptop', "sku": "ASUS-THIN-1"}
+    assert recommend_router._candidate_matches_brand(row, ["msi"]) is False
+
+
+def test_deterministic_summary_hides_matching_specs_tokens_after_budget_answer():
+    msg = recommend_router._deterministic_assistant_message(
+        "is 1200 enough for asus?",
+        [{"name": "ASUS Vivobook 15", "price_cents": 95900, "factors": {"positive": ["+use_case_tag:student"]}}],
+        {"budget_max": 1200, "use_case": "university_general", "specs": ["ram_gb_min:16", "storage_gb_min:512"]},
+        brand_budget_answer="Yes, this budget reaches ASUS options starting around $959.",
+    )
+    assert isinstance(msg, str)
+    assert "Matching specs" not in msg
+    assert "ram_gb_min" not in msg
+    assert "storage_gb_min" not in msg
+    assert "ASUS Vivobook 15 ($959)" in msg
+
+
+def test_assistant_message_hides_visual_security_and_use_case_telemetry():
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p1", "sku": "APL-1", "name": "Apple MacBook Air", "price_cents": 179900, "currency": "USD", "stock": 4}
+        ]
+        r = client.get(
+            "/api/v1/recommend/suggest",
+            params={
+                "uid": "u-no-telemetry",
+                "query": "which laptop should i get for university is 1200 enough",
+                "budget_max": 1200,
+                "image_labels": "macbook,laptop,apple",
+                "image_cv_signals": json.dumps({
+                    "qr_code_detected": True,
+                    "payment_social_engineering": True,
+                }),
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        msg = str(body.get("assistant_message") or "")
+        assert "Use-case analysis" not in msg
+        assert "visual-sanitized ranking from trusted channels" not in msg
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
 def test_followup_shortlist_lock_preserves_envelope_and_logs_diff(monkeypatch):
     orig_retrieve = RecommendationService.retrieve_candidates
     try:

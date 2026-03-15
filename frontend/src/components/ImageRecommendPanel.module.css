@@ -214,6 +214,26 @@
 .trustYellow { background: #fef3c7; color: #92400e; }
 .trustOrange { background: #ffedd5; color: #9a3412; }
 .trustRed { background: #fee2e2; color: #991b1b; }
+.domainBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 4px;
+  background: #e0f2fe;
+  color: #075985;
+}
+.fillBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 4px;
+  background: #ecfccb;
+  color: #3f6212;
+}
 
 /* Budget widen */
 .widenBox {

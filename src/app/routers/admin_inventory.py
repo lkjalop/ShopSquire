@@ -12,9 +12,19 @@ from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, require_role_or_oi
 from src.app.erp.jobs import run_netsuite_delta_sync, enqueue_netsuite_outbound, run_netsuite_outbound_sync, _SnapshotConnector
 from src.app.erp.sync import sync_inventory
 from src.app.erp.provider_registry import load_provider
+from src.app.services.catalog_profile import invalidate_catalog_profile_cache
 
 
 router = APIRouter(prefix="/api/v1/admin/inventory", tags=["admin-inventory"])
+
+
+def _invalidate_catalog_profile_after_product_write(tenant_id: str | None) -> None:
+    # Keep this close to the write endpoints so future product CRUD additions
+    # invalidate the merchant catalog profile cache by default.
+    try:
+        invalidate_catalog_profile_cache(tenant_id=str(tenant_id) if tenant_id is not None else None)
+    except Exception:
+        pass
 
 
 def _load_csv_connector(path: str | None = None):
@@ -250,6 +260,8 @@ def sync(
     from src.app.observability.metrics import record_inventory_sync
 
     out = sync_inventory(connector=c, tenant_id=str(tenant_id) if tenant_id is not None else None, dry_run=dry_run, upsert_products=upsert_products)
+    if not dry_run and upsert_products and not out.get("error"):
+        _invalidate_catalog_profile_after_product_write(str(tenant_id) if tenant_id is not None else None)
     try:
         record_inventory_sync(
             str(out.get("source") or connector_id),
@@ -341,6 +353,8 @@ def sync_erp_delta(
         dry_run=dry_run,
         upsert_products=upsert_products,
     )
+    if not dry_run and upsert_products and not out.get("error"):
+        _invalidate_catalog_profile_after_product_write(str(tenant_id) if tenant_id is not None else None)
     if not dry_run and not out.get("error") and next_cursor is not None and prev_cursor != next_cursor:
         try:
             getattr(c, "set_cursor")(tenant_id=str(tenant_id) if tenant_id is not None else None, entity_type="inventory", cursor_value=next_cursor)

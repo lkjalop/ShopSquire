@@ -11,6 +11,7 @@ export interface ImageAnalysisContext {
     qr_prompt_injection?: boolean;
     manipulation_detected?: boolean;
     qr_external_url_detected?: boolean;
+    steg_suspicious?: boolean;
     [key: string]: any;
   };
   /** Optional filename or source identifier shown in the group header */
@@ -39,6 +40,10 @@ interface ImageGroup {
   widenState?: { budgetMin: number; budgetMax: number; noResults: boolean; nearestPrice?: number };
   /** Preserve image context per group so widen/nearest stay image-aware. */
   context?: ImageAnalysisContext | null;
+  offDomain?: boolean;
+  lowSupport?: boolean;
+  domainBadge?: string | null;
+  fillBadge?: string | null;
 }
 
 type TrustLevel = 'green' | 'yellow' | 'orange' | 'red';
@@ -63,11 +68,31 @@ const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | unde
 const WIDEN_STEPS = [200, 400];
 const RECOMMEND_TIMEOUT_MS = 7000;
 
+function persistOperatorMetrics(timing: any, traceId: string | null, source = 'visual_search') {
+  if (!timing || typeof timing !== 'object') return;
+  try {
+    localStorage.setItem('shopsquire_operator_metrics', JSON.stringify({
+      catalogProfileCacheHit:
+        typeof timing.catalog_profile_cache_hit === 'boolean'
+          ? timing.catalog_profile_cache_hit
+          : timing.catalog_profile_cache_hit == null
+            ? null
+            : Boolean(timing.catalog_profile_cache_hit),
+      catalogProfileMs: timing.catalog_profile_ms == null ? null : Number(timing.catalog_profile_ms) || 0,
+      routeTotalMs: timing.route_total_ms == null ? null : Number(timing.route_total_ms) || 0,
+      ollamaSummaryMs: timing.ollama_summary_ms == null ? null : Number(timing.ollama_summary_ms) || 0,
+      traceId,
+      source,
+      recordedAt: new Date().toISOString(),
+    }));
+  } catch {}
+}
+
 /* ---------- helpers ---------- */
-function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], sessionSuspicious: number): TrustLevel {
+export function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], sessionSuspicious: number): TrustLevel {
   if (sessionSuspicious >= 3 || signals.qr_prompt_injection) return 'red';
   if (signals.qr_external_url_detected) return 'orange';
-  if (sessionSuspicious >= 2 || signals.manipulation_detected) return 'orange';
+  if (sessionSuspicious >= 2 || signals.manipulation_detected || signals.steg_suspicious) return 'orange';
   if (signals.qr_code_detected) return 'yellow';
   return 'green';
 }
@@ -88,13 +113,14 @@ const TRUST_NOTES: Record<TrustLevel, string> = {
 
 /** Convert raw CV labels to a friendly brand / product name for the buyer. */
 function friendlyBrand(labels: string[], ocrText: string, sourceName?: string, userQuery?: string): string {
-  const all = [
-    ...labels.map(l => l.toLowerCase()),
-    ocrText.toLowerCase(),
-    String(sourceName || '').toLowerCase(),
-    String(userQuery || '').toLowerCase(),
-  ];
-  const joined = all.join(' ');
+  const lbl = labels.map(l => String(l || '').toLowerCase());
+  const ocr = String(ocrText || '').toLowerCase();
+  const src = String(sourceName || '').toLowerCase();
+  const q = String(userQuery || '').toLowerCase();
+  const joined = [...lbl, ocr, src, q].join(' ');
+  const hasDeviceHint = /laptop|notebook|computer|pc|macbook|chromebook|copilot|intel|amd|ryzen|ssd|ram|gpu/.test(joined);
+  const likelyFruit = /fruit|apple[-_\s]?red|red apple|granny smith|gala apple/.test(joined);
+  if (likelyFruit && !hasDeviceHint) return 'Product';
   if (/macbook|apple.*mac/i.test(joined)) return 'MacBook';
   if (/mac|apple/i.test(joined)) return 'Apple';
   if (/lenovo|ideapad|thinkpad|legion|yoga/i.test(joined)) return 'Lenovo';
@@ -154,7 +180,7 @@ const CLARIFYING_QUESTIONS: Record<string, { prompt: string; options: string[] }
   },
   office: {
     prompt: 'What kind of office work?',
-    options: ['Emails & documents', 'Video calls & meetings', 'Data / spreadsheets', 'Light design work'],
+    options: ['Emails & documents', 'Video calls & meetings', 'Data / spreadsheets', 'Coding / dev work', 'Video rendering / design'],
   },
   general: {
     prompt: 'What will you mainly use this for?',
@@ -191,6 +217,18 @@ function extractBudgetMax(query: string, fallbackMax?: number): number | undefin
     const v = Number(under[1]);
     if (Number.isFinite(v)) return v;
   }
+  const enough = q.match(/\b(?:is|around|about|budget|max(?:imum)?|up to)?\s*\$?\s*(\d{3,5})\s*(?:enough|budget|max(?:imum)?|cap)?\b/i);
+  if (enough) {
+    const v = Number(enough[1]);
+    if (Number.isFinite(v)) return v;
+  }
+  const allNums = (q.match(/\b\d{3,5}\b/g) || [])
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n));
+  if (allNums.length > 0) {
+    const v = Math.max(...allNums);
+    if (v >= 300 && v <= 10000) return v;
+  }
   return fallbackMax;
 }
 
@@ -215,32 +253,131 @@ function assistantClaimsProducts(text: string | null | undefined): boolean {
   return /top picks|i['’]ve found \d+|found \d+ (?:matches|products|options)/i.test(String(text || ''));
 }
 
+function normalizeProductCard(raw: any): ProductCard | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const sku = String(raw.sku || raw.id || '').trim();
+  const name = String(raw.name || raw.title || '').trim();
+  if (!sku && !name) return null;
+  const price =
+    typeof raw.price_cents === 'number' && raw.price_cents > 0
+      ? raw.price_cents / 100
+      : typeof raw.price === 'number'
+        ? raw.price
+        : typeof raw.price_dollars === 'number'
+          ? raw.price_dollars
+          : 0;
+  const specsSummary =
+    raw.specs_summary
+    || [raw.specs?.cpu, raw.specs?.ram_gb ? `${raw.specs.ram_gb}GB` : null, raw.specs?.gpu]
+      .filter(Boolean)
+      .join(' \u00B7 ');
+  return {
+    sku,
+    name: name || sku || 'Unknown',
+    price,
+    specs_summary: specsSummary || undefined,
+    use_case_fit: raw.use_case_suitability || raw.use_case_fit || raw.reason || null,
+    image_url: raw.image_url || null,
+  };
+}
+
 function parseProducts(data: any): ProductCard[] {
-  const raw = data.results || data.products || [];
-  return raw.map((p: any) => ({
-    sku: p.sku || '',
-    name: p.name || 'Unknown',
-    price: p.price_cents ? p.price_cents / 100 : (p.price || 0),
-    specs_summary: [p.specs?.cpu, p.specs?.ram_gb ? `${p.specs.ram_gb}GB` : null, p.specs?.gpu].filter(Boolean).join(' \u00B7 '),
-    use_case_fit: p.use_case_suitability || p.use_case_fit || null,
-    image_url: p.image_url || null,
-  }));
+  const raw: any[] = [];
+  if (Array.isArray(data?.results)) raw.push(...data.results);
+  if (Array.isArray(data?.products)) raw.push(...data.products);
+  const rightPanel = data?.right_panel;
+  if (rightPanel && typeof rightPanel === 'object') {
+    if (Array.isArray(rightPanel?.lower_tier?.items)) raw.push(...rightPanel.lower_tier.items);
+    if (Array.isArray(rightPanel?.higher_tier?.items)) raw.push(...rightPanel.higher_tier.items);
+    if (Array.isArray(rightPanel?.anchor_sections)) {
+      for (const section of rightPanel.anchor_sections) {
+        if (Array.isArray(section?.top_products)) raw.push(...section.top_products);
+      }
+    }
+  }
+  const seen = new Set<string>();
+  const out: ProductCard[] = [];
+  for (const item of raw) {
+    const card = normalizeProductCard(item);
+    if (!card) continue;
+    const key = card.sku || card.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(card);
+  }
+  return out;
+}
+
+function buildNearestLabel(brandLabel: string): string {
+  const brand = String(brandLabel || '').trim();
+  if (!brand) return 'Show nearest';
+  if (/^macbook$/i.test(brand)) return 'Show nearest MacBook';
+  return `Show nearest ${brand}`;
+}
+
+function buildNearestQuery(query: string, brandLabel: string): string {
+  const clean = stripBudgetHints(query);
+  const brand = String(brandLabel || '').trim();
+  const needsDeviceHint = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(clean);
+  if (!brand) return `${clean} show nearest in-stock options`.trim();
+  if (/^macbook$/i.test(brand)) return `${clean} ${needsDeviceHint ? 'laptop ' : ''}apple macbook show nearest in-stock options`.trim();
+  return `${clean} ${needsDeviceHint ? 'laptop ' : ''}${brand} show nearest in-stock options`.trim();
+}
+
+function buildNoResultsText(brandLabel: string): string {
+  const brand = String(brandLabel || '').trim();
+  if (!brand) return 'No products found in your budget range.';
+  if (/^product$/i.test(brand)) return 'This image does not look like a laptop product photo. Try a clearer device image or use a text query.';
+  if (/^macbook$/i.test(brand)) return 'No MacBook products found in your budget range.';
+  return `No ${brand} products found in your budget range.`;
+}
+
+function _prettyReason(reason: string): string {
+  const r = String(reason || '').trim();
+  if (!r) return '';
+  if (/^\+?embedding_similarity$/i.test(r)) return 'close visual/spec match';
+  if (/^\+?cross_encoder$/i.test(r)) return 'strong text-to-product match';
+  if (/^\+?in_stock$/i.test(r)) return 'in stock';
+  if (/^\+?use_case_match/i.test(r)) return 'fits your use case';
+  return r.replace(/^[+-]/, '').replace(/_/g, ' ');
+}
+
+function naturalSummary(rawSummary: string, products: ProductCard[], query: string, brand: string): string {
+  const raw = String(rawSummary || '').trim();
+  if (products.length === 0) {
+    if (raw && /catalog|unrelated products|does not match this merchant/i.test(raw)) return raw;
+    return buildNoResultsText(brand);
+  }
+  const useCase =
+    /highschool|high school|student|university|uni|college/i.test(query) ? 'study' :
+    /gaming|fps|gpu|rtx/i.test(query) ? 'gaming' :
+    /work|office|meeting|excel/i.test(query) ? 'work' : 'daily use';
+  const top = products.slice(0, 2).map((p) => {
+    const why = _prettyReason(p.use_case_fit || '');
+    return why ? `${p.name} (${why})` : p.name;
+  });
+  const r = raw.replace(/\(\s*[+-]?[a-z_]+(?:\s*,\s*[+-]?[a-z_]+)*\s*\)/gi, '').trim();
+  if (r && r.length < 180) return r;
+  return `Best ${useCase} picks here are ${top.join(' and ')}.`;
 }
 
 async function fetchSuggest(
   query: string,
   ctx: ImageAnalysisContext | null,
   budgetMax?: number,
-): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[]; traceId: string | null }> {
+): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[]; traceId: string | null; offDomain: boolean; lowSupport: boolean; domainBadge: string | null; fillBadge: string | null }> {
   const params = new URLSearchParams({ uid: DEFAULT_UID, query: query || 'show me laptops' });
   if (ctx) {
-    params.set('image_labels', (ctx.labels || []).join(','));
+    const labels = [...(ctx.labels || [])];
+    const srcName = String(ctx.source_name || '').toLowerCase();
+    if (srcName) labels.push(srcName.replace(/\.[a-z0-9]+$/i, ''));
+    params.set('image_labels', labels.join(','));
     params.set('image_ocr_text', (ctx.ocr_text || '').slice(0, 500));
     params.set('image_cv_signals', JSON.stringify(ctx.cv_signals || {}));
   }
   if (budgetMax) params.set('budget_max', String(budgetMax));
-  // Keep visual-search latency low; ranking relevance matters more than style polish here.
   params.set('copywriting_enabled', 'false');
+  params.set('fast_path', 'true');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RECOMMEND_TIMEOUT_MS);
 
@@ -252,11 +389,24 @@ async function fetchSuggest(
     });
     const data = await safeJson(resp);
     if (!resp.ok || !data) throw new Error(data?.detail || `recommend_failed (${resp.status})`);
+    persistOperatorMetrics(
+      data?.timing_breakdown,
+      data.decision_trace_id || data.trace_id || data.decision_id || null,
+      ctx ? 'visual_search' : 'text_fallback',
+    );
     return {
       products: parseProducts(data),
       summary: data.assistant_message || '',
       nextQuestions: Array.isArray(data.next_questions) ? data.next_questions : [],
       traceId: data.decision_trace_id || data.trace_id || data.decision_id || null,
+      offDomain: Boolean(data?.catalog_relevance?.off_domain),
+      lowSupport: Boolean(data?.catalog_relevance?.low_support),
+      domainBadge: data?.catalog_relevance?.off_domain
+        ? (data?.catalog_relevance?.low_support ? 'Low catalog support' : 'Off-domain image')
+        : null,
+      fillBadge: data?.image_lane_fill?.applied
+        ? `Filled to 3 using in-catalog ${String(data?.image_lane_fill?.image_category || 'catalog')} alternatives`
+        : null,
     };
   } catch (err: any) {
     if (err?.name === 'AbortError') {
@@ -291,20 +441,27 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     const profile = apple ? 'apple macbook' : 'windows laptop';
 
     const baseMax = Number.isFinite(Number(budgetMax)) ? Number(budgetMax) : 1200;
-    const raisedMax = baseMax + 400;
-    const r2 = await fetchSuggest(`${cleanBase} ${profile} show nearest in-stock options above budget`.trim(), ctx, raisedMax);
-    if ((r2.products || []).length > 0) {
-      return {
-        ...r2,
-        summary: r2.summary || (
-          apple
-            ? `No in-budget MacBook found. Showing nearest MacBook options up to $${raisedMax.toLocaleString()}.`
-            : `No in-budget Windows option found. Showing nearest Windows options up to $${raisedMax.toLocaleString()}.`
-        ),
-      };
+    const steps = apple ? [400, 800] : [400, 800, 1400];
+    for (const step of steps) {
+      const raisedMax = baseMax + step;
+      const r2 = await fetchSuggest(`${cleanBase} ${profile} show nearest in-stock options above budget`.trim(), ctx, raisedMax);
+      if ((r2.products || []).length > 0) {
+        return {
+          ...r2,
+          summary: r2.summary || (
+            apple
+              ? `No in-budget MacBook found. Showing nearest MacBook options up to $${raisedMax.toLocaleString()}.`
+              : `No in-budget Windows option found. Showing nearest Windows options up to $${raisedMax.toLocaleString()}.`
+          ),
+        };
+      }
     }
 
-    return fetchSuggest(`${cleanBase} show nearest in-stock alternatives`.trim(), ctx, raisedMax);
+    return fetchSuggest(
+      `${cleanBase} show nearest in-stock alternatives`.trim(),
+      ctx,
+      baseMax + (apple ? 800 : 1600),
+    );
   }, []);
 
   const buildGroups = useCallback(async () => {
@@ -352,18 +509,25 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               products: [],
               summary: '',
               context: ctx,
+              lowSupport: false,
+              domainBadge: null,
+              fillBadge: null,
             } as ImageGroup,
             traceId: null as string | null,
           };
         }
 
         try {
-          const imageQuery = `${stripBudgetHints(userQuery)} ${brand}`.trim();
+          const base = stripBudgetHints(userQuery);
+          const addLaptopToken = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(base) && !/^product$/i.test(brand);
+          const imageQuery = `${base} ${addLaptopToken ? 'laptop' : ''} ${brand}`.trim();
           const result = await fetchSuggest(imageQuery, ctx, parsedBudgetMax);
           let pickedTraceId: string | null = result.traceId || null;
           let products = result.products.slice(0, 3);
           let safeSummary = sanitizeSummary(result.summary, products.length, `Top ${brand} picks matching your image.`);
-          if (products.length === 0) {
+          let trustLevel = trust;
+          let securityNote = note;
+          if (products.length === 0 && !result.offDomain) {
             const chain = await runBrandFallbackChain(userQuery, brand, ctx, parsedBudgetMax);
             if (chain) {
               pickedTraceId = pickedTraceId || chain.traceId || null;
@@ -371,20 +535,30 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               safeSummary = sanitizeSummary(chain.summary, products.length, `Top ${brand} picks matching your image.`);
             }
           }
+          if (result.offDomain) {
+            trustLevel = trust === 'red' ? trust : 'orange';
+            securityNote = 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.';
+            products = [];
+          }
           if (products.length === 0 && assistantClaimsProducts(safeSummary)) {
             safeSummary = 'No products found in your budget range.';
           }
+          safeSummary = naturalSummary(safeSummary, products, userQuery, brand);
           return {
             group: {
               source: ctx.source_name || `Image ${i + 1}: ${brand}`,
               icon: '\uD83D\uDCF8',
-              trustLevel: trust,
+              trustLevel,
               friendlyBrand: brand,
-              securityNote: note,
+              securityNote,
               products,
               summary: safeSummary,
               widenState: products.length === 0 ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
               context: ctx,
+              offDomain: result.offDomain,
+              lowSupport: result.lowSupport,
+              domainBadge: result.domainBadge,
+              fillBadge: result.fillBadge,
             } as ImageGroup,
             traceId: pickedTraceId,
           };
@@ -403,6 +577,9 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               summary: timeoutMsg,
               widenState: { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true },
               context: ctx,
+              lowSupport: false,
+              domainBadge: null,
+              fillBadge: null,
             } as ImageGroup,
             traceId: null as string | null,
           };
@@ -438,6 +615,9 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           summary: safeSummary,
           widenState: products.length === 0 ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
           context: null,
+          lowSupport: false,
+          domainBadge: null,
+          fillBadge: null,
         });
       } catch {
         /* query fetch failed — still show image groups */
@@ -491,15 +671,21 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     const group = groups[groupIdx];
     if (!group) return;
     try {
-      const nearestQuery = `${stripBudgetHints(userQuery)} ${group.friendlyBrand || ''} show nearest in-stock options`.trim();
-      const result = await fetchSuggest(nearestQuery, group.context || null);
+      const baseMax = group.widenState?.budgetMax || extractBudgetMax(userQuery, 1200) || 1200;
+      const nearestBudgetMax = Math.max(1800, baseMax + 1200);
+      const nearestQuery = buildNearestQuery(userQuery, group.friendlyBrand);
+      const result = await fetchSuggest(nearestQuery, group.context || null, nearestBudgetMax);
       setGroups(prev => {
         const updated = [...prev];
         const nextProducts = result.products.slice(0, 3);
         updated[groupIdx] = {
           ...updated[groupIdx],
           products: nextProducts,
-          summary: sanitizeSummary(result.summary, nextProducts.length, 'Showing nearest available products at any price.'),
+          summary: sanitizeSummary(
+            result.summary,
+            nextProducts.length,
+            `${buildNearestLabel(group.friendlyBrand).replace(/^Show /, 'Showing ')} up to $${nearestBudgetMax.toLocaleString()}.`,
+          ),
           widenState: nextProducts.length > 0 ? undefined : { budgetMin: 0, budgetMax: 0, noResults: true },
         };
         return updated;
@@ -555,6 +741,8 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               <span className={styles.anchorIcon}>{group.icon}</span>
               <span>{group.source}</span>
               <span className={`${styles.trustBadge} ${trustClass}`}>{TRUST_LABELS[group.trustLevel]}</span>
+              {group.domainBadge && <span className={styles.domainBadge}>{group.domainBadge}</span>}
+              {group.fillBadge && <span className={styles.fillBadge}>{group.fillBadge}</span>}
             </div>
 
             {/* Security note — friendly, non-scary */}
@@ -608,22 +796,24 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             {/* Budget widen */}
             {group.widenState?.noResults && group.trustLevel !== 'red' && (
               <div className={styles.widenBox}>
-                <div className={styles.widenText}>No products found in your budget range.</div>
-                <div className={styles.widenButtons}>
-                  {WIDEN_STEPS.map((step) => (
-                    <button key={step} className={styles.widenBtn} onClick={() => handleWiden(idx, step)}>
-                      Widen +${step}
+                <div className={styles.widenText}>{group.offDomain ? group.summary : buildNoResultsText(group.friendlyBrand)}</div>
+                {!group.offDomain && !/^product$/i.test(group.friendlyBrand) && (
+                  <div className={styles.widenButtons}>
+                    {WIDEN_STEPS.map((step) => (
+                      <button key={step} className={styles.widenBtn} onClick={() => handleWiden(idx, step)}>
+                        Widen +${step}
+                      </button>
+                    ))}
+                    <button className={styles.widenBtnAlt} onClick={() => handleShowNearest(idx)}>
+                      {buildNearestLabel(group.friendlyBrand)}
                     </button>
-                  ))}
-                  <button className={styles.widenBtnAlt} onClick={() => handleShowNearest(idx)}>
-                    Show nearest
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             )}
 
             {/* LLM Summary */}
-            {group.summary && group.products.length > 0 && (
+            {group.summary && (
               <div className={styles.summary}>{group.summary}</div>
             )}
           </div>

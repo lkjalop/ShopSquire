@@ -43,7 +43,7 @@ def _split_blocks(text: str) -> list[list[str]]:
     return blocks
 
 
-def parse_laptop_products(path: str = "docs/laptop-products-exp.txt") -> list[dict]:
+def parse_laptop_products(path: str = "docs/laptop-products-new.txt") -> list[dict]:
     p = Path(path)
     if not p.exists():
         return []
@@ -150,6 +150,68 @@ def _svg_for_name(name: str) -> str:
 </svg>'''
 
 
+def _ensure_accessories(db, static_root: Path) -> None:
+    accessories = [
+        {"sku": "ACC-USB-HUB", "name": "USB-C Hub", "price_cents": 4900, "specs": {"category": "usb_hub", "tags": ["usb_hub", "student", "office", "creator"]}},
+        {"sku": "BAG-SLEEVE-15", "name": "Laptop Sleeve 15 inch", "price_cents": 2900, "specs": {"category": "laptop_sleeve", "tags": ["laptop_sleeve", "student", "office", "travel"]}},
+        {"sku": "PERIPH-MOUSE-WL", "name": "Wireless Mouse", "price_cents": 3900, "specs": {"category": "mouse", "tags": ["mouse", "student", "office_general", "university_general"]}},
+        {"sku": "ACC-SSD-1TB", "name": "1TB External SSD", "price_cents": 12900, "specs": {"category": "external_ssd", "tags": ["external_ssd", "creator", "engineering_student", "content_creator"]}},
+        {"sku": "ACC-DOCK-USB-C", "name": "USB-C Docking Station", "price_cents": 14900, "specs": {"category": "dock", "tags": ["dock", "office_general", "business_professional", "developer"]}},
+        {"sku": "MON-27-QHD", "name": "27 inch QHD Productivity Monitor", "price_cents": 24900, "specs": {"category": "monitor", "tags": ["monitor", "office_finance", "computer_science_student", "content_creator"]}},
+        {"sku": "HEAD-NC-01", "name": "Noise Cancelling Headset", "price_cents": 11900, "specs": {"category": "headset", "tags": ["headset", "business_professional", "gaming_casual", "music_production"]}},
+        {"sku": "COOL-PAD-01", "name": "Cooling Pad", "price_cents": 5900, "specs": {"category": "cooling_pad", "tags": ["cooling_pad", "gaming_competitive", "gaming_aaa_heavy"]}},
+        {"sku": "COOL-STAND-01", "name": "Adjustable Laptop Stand", "price_cents": 4500, "specs": {"category": "laptop_stand", "tags": ["laptop_stand", "office_general", "creator", "student"]}},
+        {"sku": "PERIPH-GMOUSE-01", "name": "RGB Gaming Mouse", "price_cents": 6900, "specs": {"category": "gaming_mouse", "tags": ["gaming_mouse", "gaming_competitive", "gaming_aaa_heavy"]}},
+        {"sku": "ACC-CHARGER-100W", "name": "100W Compact Charger", "price_cents": 7900, "specs": {"category": "compact_charger", "tags": ["compact_charger", "office_executive", "student", "travel"]}},
+        {"sku": "ACC-PBANK-20K", "name": "20,000mAh USB-C Power Bank", "price_cents": 8900, "specs": {"category": "power_bank", "tags": ["power_bank", "office_executive", "university_general", "medical_student"]}},
+        {"sku": "ACC-CABLE-USB-C", "name": "Extra USB-C Charging Cable", "price_cents": 1900, "specs": {"category": "extra_charging_cable", "tags": ["extra_charging_cable", "medical_student", "note_taking_student"]}},
+        {"sku": "ACC-STYLUS-01", "name": "Precision Stylus Pen", "price_cents": 5900, "specs": {"category": "stylus", "tags": ["stylus", "design_student", "architecture_student", "note_taking_student"]}},
+        {"sku": "ACC-CARDREADER-01", "name": "USB-C SD Card Reader", "price_cents": 3900, "specs": {"category": "card_reader", "tags": ["card_reader", "content_creator", "photography"]}},
+        {"sku": "ACC-AUDIO-IF-01", "name": "Compact Audio Interface", "price_cents": 15900, "specs": {"category": "audio_interface", "tags": ["audio_interface", "music_production", "creator"]}},
+    ]
+    for acc in accessories:
+        exists = db.execute(text("SELECT 1 FROM products WHERE sku = :sku"), {"sku": acc["sku"]}).scalar()
+        if exists:
+            continue
+        pid = _uuid()
+        svg_path = static_root / f"{acc['sku']}.svg"
+        if not svg_path.exists():
+            try:
+                svg_content = _svg_for_name(acc["name"])
+                svg_path.write_text(svg_content, encoding="utf-8")
+            except Exception:
+                pass
+        image_url = f"/static/images/{acc['sku']}.svg"
+        db.execute(
+            text(
+                "INSERT INTO products (id, sku, name, price_cents, currency, image_url, specs, active, updated_at) "
+                "VALUES (:id, :sku, :name, :price, 'USD', :image_url, :specs, true, :updated_at)"
+            ),
+            {
+                "id": pid,
+                "sku": acc["sku"],
+                "name": acc["name"],
+                "price": acc["price_cents"],
+                "image_url": image_url,
+                "specs": json.dumps({"rating": 4.6, "shipping_days": 2, **(acc.get("specs") or {})}),
+                "updated_at": datetime.utcnow(),
+            },
+        )
+        db.execute(
+            text(
+                "INSERT INTO inventory (id, product_id, stock, warehouse, updated_at) "
+                "VALUES (:id, :product_id, :stock, :warehouse, :updated_at)"
+            ),
+            {
+                "id": _uuid(),
+                "product_id": pid,
+                "stock": 50,
+                "warehouse": "default",
+                "updated_at": datetime.utcnow(),
+            },
+        )
+
+
 def seed_customers(db):
     existing = db.execute(text("SELECT COUNT(*) FROM customers")).scalar() or 0
     if existing > 0:
@@ -200,8 +262,10 @@ def seed_products(db):
                     pass
         except Exception:
             pass
+        _ensure_accessories(db, static_root)
         return
-    source_path = os.getenv("PRODUCT_SOURCE_TXT", "docs/laptop-products-exp.txt")
+    default_source = "docs/laptop-products-new.txt" if Path("docs/laptop-products-new.txt").exists() else "docs/laptop-products-exp.txt"
+    source_path = os.getenv("PRODUCT_SOURCE_TXT", default_source)
     parsed = parse_laptop_products(source_path)
     if not parsed:
         parsed = [
@@ -218,7 +282,7 @@ def seed_products(db):
         rating = _rating_for_price(price)
         ship_days = _shipping_days_for_price(price)
         specs = item.get("specs") or {}
-        specs.update({"rating": rating, "shipping_days": ship_days})
+        specs.update({"rating": rating, "shipping_days": ship_days, "category": "laptop", "tags": ["laptop", "primary_device"]})
         # Create a lightweight local SVG image for the product (small, text-based)
         svg_path = static_root / f"{sku}.svg"
         if not svg_path.exists():
@@ -259,52 +323,7 @@ def seed_products(db):
         )
 
     # Ensure accessory products exist for cart persistence
-    accessories = [
-        {"sku": "ACC-USB-HUB", "name": "USB-C Hub", "price_cents": 4900},
-        {"sku": "ACC-SLEEVE", "name": "Laptop Sleeve", "price_cents": 2900},
-        {"sku": "ACC-MOUSE", "name": "Wireless Mouse", "price_cents": 3900},
-    ]
-    for acc in accessories:
-        exists = db.execute(text("SELECT 1 FROM products WHERE sku = :sku"), {"sku": acc["sku"]}).scalar()
-        if exists:
-            continue
-        pid = _uuid()
-        svg_path = static_root / f"{acc['sku']}.svg"
-        if not svg_path.exists():
-            try:
-                svg_content = _svg_for_name(acc["name"])
-                svg_path.write_text(svg_content, encoding="utf-8")
-            except Exception:
-                pass
-        image_url = f"/static/images/{acc['sku']}.svg"
-        db.execute(
-            text(
-                "INSERT INTO products (id, sku, name, price_cents, currency, image_url, specs, active, updated_at) "
-                "VALUES (:id, :sku, :name, :price, 'USD', :image_url, :specs, true, :updated_at)"
-            ),
-            {
-                "id": pid,
-                "sku": acc["sku"],
-                "name": acc["name"],
-                "price": acc["price_cents"],
-                "image_url": image_url,
-                "specs": json.dumps({"rating": 4.6, "shipping_days": 2}),
-                "updated_at": datetime.utcnow(),
-            },
-        )
-        db.execute(
-            text(
-                "INSERT INTO inventory (id, product_id, stock, warehouse, updated_at) "
-                "VALUES (:id, :product_id, :stock, :warehouse, :updated_at)"
-            ),
-            {
-                "id": _uuid(),
-                "product_id": pid,
-                "stock": 50,
-                "warehouse": "default",
-                "updated_at": datetime.utcnow(),
-            },
-        )
+    _ensure_accessories(db, static_root)
 
 
 def seed_orders(db):

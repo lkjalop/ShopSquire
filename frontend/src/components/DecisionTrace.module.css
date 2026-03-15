@@ -197,6 +197,14 @@
   padding: 16px;
 }
 
+.kvBlock {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f9fafb;
+  margin-bottom: 10px;
+}
+
 /* Table */
 .table {
   width: 100%;
@@ -743,6 +751,47 @@
   background: linear-gradient(90deg, #10b981, #f59e0b, #ef4444);
   border-radius: 4px;
   transition: width 0.4s ease;
+}
+
+.timingBars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+
+.timingRow {
+  display: grid;
+  grid-template-columns: 140px 1fr 68px;
+  gap: 10px;
+  align-items: center;
+}
+
+.timingLabel {
+  font-size: 12px;
+  color: #374151;
+  font-weight: 600;
+}
+
+.timingTrack {
+  height: 10px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.timingFill {
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.timingValue {
+  font-size: 12px;
+  color: #1f2937;
+  font-weight: 700;
+  text-align: right;
 }
 
 .explainList {

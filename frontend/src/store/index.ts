@@ -18,11 +18,27 @@ export interface CartItem {
   price_cents?: number;
 }
 
+export interface BundleSavingsState {
+  status?: string;
+  message?: string;
+  subtotal_cents?: number;
+  laptop_subtotal_cents?: number;
+  accessories_subtotal_cents?: number;
+  discount_cents?: number;
+  applied_discount_cents?: number;
+  final_total_cents?: number;
+  estimated_final_total_cents?: number;
+  amount_to_next_cents?: number;
+  approval_required?: boolean;
+  approval_badge?: string | null;
+}
+
 export interface CartState {
   cart_id: string;
   items: CartItem[];
   subtotal_cents: number;
   currency: string;
+  bundle_savings?: BundleSavingsState;
 }
 
 export interface AuthUser {
@@ -71,13 +87,13 @@ export const useCartStore = create<CartSlice>()((set) => ({
         (sum, i) => sum + (i.price_cents ?? 0) * i.quantity,
         0
       );
-      return { cart: { ...state.cart, items, subtotal_cents } };
+      return { cart: { ...state.cart, items, subtotal_cents, bundle_savings: undefined } };
     }),
 
   optimisticClear: () =>
     set((state) => {
       if (!state.cart) return state;
-      return { cart: { ...state.cart, items: [], subtotal_cents: 0 } };
+      return { cart: { ...state.cart, items: [], subtotal_cents: 0, bundle_savings: undefined } };
     }),
 }));
 

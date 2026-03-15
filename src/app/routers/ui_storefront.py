@@ -435,11 +435,36 @@ def checkout() -> HTMLResponse:
         row.innerHTML = '<span>' + (item.name || item.sku) + ' &times;' + item.quantity + '</span><span>' + price + '</span>';
         rows.appendChild(row);
       }});
+      var bundle = cartSummary.bundle_savings || null;
+      if (bundle) {{
+        var laptopRow = document.createElement('div');
+        laptopRow.className = 'summary-row';
+        laptopRow.innerHTML = '<span>Laptop price</span><span>$' + (((bundle.laptop_subtotal_cents || 0) / 100).toLocaleString()) + '</span>';
+        rows.appendChild(laptopRow);
+
+        var accRow = document.createElement('div');
+        accRow.className = 'summary-row';
+        accRow.innerHTML = '<span>Accessories</span><span>$' + (((bundle.accessories_subtotal_cents || 0) / 100).toLocaleString()) + '</span>';
+        rows.appendChild(accRow);
+
+        var discountRow = document.createElement('div');
+        discountRow.className = 'summary-row';
+        var discountLabel = bundle.approval_required ? 'Bundle discount (pending review)' : 'Bundle discount (laptop only)';
+        discountRow.innerHTML = '<span>' + discountLabel + '</span><span>- $' + ((((bundle.approval_required ? bundle.discount_cents : (bundle.applied_discount_cents || bundle.discount_cents)) || 0) / 100).toLocaleString()) + '</span>';
+        rows.appendChild(discountRow);
+      }}
       var total = document.createElement('div');
       total.className = 'summary-row total';
-      var sub = cartSummary.subtotal_cents ? '$' + (cartSummary.subtotal_cents / 100).toLocaleString() : '';
-      total.innerHTML = '<span>Total</span><span>' + sub + '</span>';
+      var totalCents = bundle ? (bundle.final_total_cents || cartSummary.subtotal_cents || 0) : (cartSummary.subtotal_cents || 0);
+      var sub = totalCents ? '$' + (totalCents / 100).toLocaleString() : '';
+      total.innerHTML = '<span>' + ((bundle && bundle.approval_required) ? 'Current total' : 'Final total') + '</span><span>' + sub + '</span>';
       rows.appendChild(total);
+      if (bundle && bundle.approval_required) {{
+        var est = document.createElement('div');
+        est.className = 'summary-row';
+        est.innerHTML = '<span>Estimated total after approval</span><span>$' + (((bundle.estimated_final_total_cents || 0) / 100).toLocaleString()) + '</span>';
+        rows.appendChild(est);
+      }}
       if (sec) sec.style.display = 'block';
     }}
 
@@ -495,7 +520,9 @@ def checkout() -> HTMLResponse:
           return;
         }}
         setLoading(true);
-        var amountCents = (cartSummary && cartSummary.subtotal_cents) ? cartSummary.subtotal_cents : 0;
+        var amountCents = (cartSummary && cartSummary.bundle_savings && cartSummary.bundle_savings.final_total_cents)
+          ? cartSummary.bundle_savings.final_total_cents
+          : ((cartSummary && cartSummary.subtotal_cents) ? cartSummary.subtotal_cents : 0);
         fetch('/api/v1/payments/checkout-initiate', {{
           method: 'POST',
           headers: {{'Content-Type': 'application/json'}},

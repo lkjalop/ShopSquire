@@ -11,6 +11,7 @@ from sqlalchemy import text
 from src.app.erp.connectors.base import InventoryConnector, InventoryRecord
 from src.app.models.db import db_session
 from src.app.services.embeddings import VectorStoreEmbeddings
+from src.app.services.catalog_profile import invalidate_catalog_profile_cache
 from src.app.repositories.embeddings import upsert_product_embedding
 
 
@@ -303,6 +304,8 @@ def sync_inventory(
                             except Exception:
                                 pass
                 db.commit()
+                if upsert_products and applied > 0:
+                    invalidate_catalog_profile_cache(tenant_id=tenant_id)
     except Exception as exc:
         err = str(exc)
 

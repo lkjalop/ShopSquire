@@ -98,6 +98,16 @@ type ReadyzResponse = {
   reasons?: string[];
 };
 
+type OperatorMetricSnapshot = {
+  catalogProfileCacheHit?: boolean | null;
+  catalogProfileMs?: number | null;
+  routeTotalMs?: number | null;
+  ollamaSummaryMs?: number | null;
+  traceId?: string | null;
+  source?: string | null;
+  recordedAt?: string | null;
+};
+
 type ProductWhyExplanation = {
   sku?: string;
   reason_summary?: string;
@@ -137,7 +147,35 @@ function laneTitle(lane: DeviceLane): string {
   return 'Windows Laptop Options';
 }
 
-function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string): string {
+function _prettyReason(reason: string): string {
+  const r = String(reason || '').trim();
+  if (!r) return '';
+  if (/^\+?embedding_similarity$/i.test(r)) return 'close visual/spec match';
+  if (/^\+?cross_encoder$/i.test(r)) return 'strong semantic match';
+  if (/^\+?in_stock$/i.test(r)) return 'in stock';
+  if (/^\+?price_fit$/i.test(r)) return 'fits the budget';
+  if (/^\+?use_case_match/i.test(r)) return 'fits this use case';
+  return r.replace(/^[+-]/, '').replace(/_/g, ' ');
+}
+
+function _shortUseCase(query: string): string {
+  const q = String(query || '').toLowerCase();
+  if (/highschool|high school|student|university|uni|college/.test(q)) return 'study';
+  if (/gaming|fps|rtx|gpu/.test(q)) return 'gaming';
+  if (/office|work|excel|meetings|zoom/.test(q)) return 'work';
+  if (/design|video|editing|creator|creative/.test(q)) return 'creative';
+  return 'daily use';
+}
+
+function _stripTechnicalTokens(text: string): string {
+  return String(text || '')
+    .replace(/\(\s*[+-]?[a-z_]+(?:\s*,\s*[+-]?[a-z_]+)*\s*\)/gi, '')
+    .replace(/\b[+-](?:embedding_similarity|cross_encoder|in_stock|price_fit|use_case_match)\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, query?: string): string {
   if (!items.length) {
     if (lane === 'tablet_chromebook') return 'No strong tablet/chromebook inventory match yet. Consider widening budget or screen-size range.';
     return 'No close matches in this lane right now. Try adjusting budget or use-case filters.';
@@ -145,18 +183,23 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string):
   const prices = items.map((p) => productPrice(p)).filter((v) => v > 0);
   const minPrice = prices.length ? Math.min(...prices) : 0;
   const maxPrice = prices.length ? Math.max(...prices) : 0;
+  const useCase = _shortUseCase(String(query || ''));
+  const top = items.slice(0, 2).map((p) => {
+    const reason = Array.isArray(p.why) && p.why.length > 0 ? _prettyReason(String(p.why[0])) : '';
+    return reason ? `${p.name} (${reason})` : p.name;
+  });
   const budgetHint = String(budgetStatus || '').toLowerCase().includes('low')
     ? 'Budget is tight, so value-focused picks are prioritized.'
     : String(budgetStatus || '').toLowerCase().includes('high')
       ? 'Budget allows performance-oriented options.'
       : 'Recommendations balance value and use-case fit.';
   if (lane === 'windows') {
-    return `${budgetHint} Windows picks range from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()} and are ranked for practicality and compatibility.`;
+    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks range from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()}.`;
   }
   if (lane === 'macbook') {
-    return `${budgetHint} MacBook picks prioritize battery life and reliability, from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()}.`;
+    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()}.`;
   }
-  return `${budgetHint} Tablet/Chromebook alternatives are shown when budget or lightweight study workflows make them a better fit ($${minPrice.toLocaleString()}-$${maxPrice.toLocaleString()}).`;
+  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, $${minPrice.toLocaleString()}-$${maxPrice.toLocaleString()}).`;
 }
 
 
@@ -323,6 +366,14 @@ export default function App() {
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [readyz, setReadyz] = useState<ReadyzResponse | null>(null);
   const [readyzLoading, setReadyzLoading] = useState(false);
+  const [operatorMetrics, setOperatorMetrics] = useState<OperatorMetricSnapshot | null>(() => {
+    try {
+      const raw = localStorage.getItem('shopsquire_operator_metrics');
+      return raw ? JSON.parse(raw) as OperatorMetricSnapshot : null;
+    } catch {
+      return null;
+    }
+  });
   const [escalationOpen, setEscalationOpen] = useState(false);
   const [escalationIncidentId, setEscalationIncidentId] = useState<string | null>(null);
   const [escalationBuyerToken, setEscalationBuyerToken] = useState<string | null>(null);
@@ -345,6 +396,28 @@ export default function App() {
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = (localStorage.getItem('uid') || 'demo-user');
 
+  const persistOperatorMetrics = useCallback((timing: any, nextTraceId?: string | null, source = 'chat') => {
+    if (!timing || typeof timing !== 'object') return;
+    const snapshot: OperatorMetricSnapshot = {
+      catalogProfileCacheHit:
+        typeof timing.catalog_profile_cache_hit === 'boolean'
+          ? timing.catalog_profile_cache_hit
+          : timing.catalog_profile_cache_hit == null
+            ? null
+            : Boolean(timing.catalog_profile_cache_hit),
+      catalogProfileMs: timing.catalog_profile_ms == null ? null : Number(timing.catalog_profile_ms) || 0,
+      routeTotalMs: timing.route_total_ms == null ? null : Number(timing.route_total_ms) || 0,
+      ollamaSummaryMs: timing.ollama_summary_ms == null ? null : Number(timing.ollama_summary_ms) || 0,
+      traceId: nextTraceId || null,
+      source,
+      recordedAt: new Date().toISOString(),
+    };
+    setOperatorMetrics(snapshot);
+    try {
+      localStorage.setItem('shopsquire_operator_metrics', JSON.stringify(snapshot));
+    } catch {}
+  }, []);
+
   const switchRightPanelMode = useCallback((nextMode: RightPanelMode) => {
     setRightPanelMode((prevMode) => {
       if (prevMode !== nextMode) {
@@ -352,6 +425,49 @@ export default function App() {
       }
       return nextMode;
     });
+  }, []);
+
+  const toImageTriageContexts = useCallback((triageResults: any[], files: File[]) => {
+    return triageResults.map((t: any, idx: number) => ({
+      ...(t || {}),
+      labels: Array.isArray(t?.labels) ? t.labels : [],
+      ocr_text:
+        (typeof t?.security?.extracted_text === 'string' ? t.security.extracted_text : '')
+        || (typeof t?.extracted_text === 'string' ? t.extracted_text : ''),
+      cv_signals: {
+        ...(typeof t?.security?.signals === 'object' && t.security.signals ? t.security.signals : {}),
+        qr_code_detected: Boolean(t?.security?.signals?.qr_code_detected),
+        qr_prompt_injection: Boolean(t?.security?.signals?.qr_prompt_injection),
+        manipulation_detected: Boolean(t?.security?.signals?.manipulation_detected),
+        qr_external_url_detected: Boolean(
+          t?.security?.signals?.qr_external_url_detected || t?.security?.signals?.qr_external_url
+        ),
+        qr_redirect_probe:
+          (typeof t?.security?.qr_redirect_probe === 'object' && t.security.qr_redirect_probe)
+          ? t.security.qr_redirect_probe
+          : {},
+      },
+      source_name: files[idx]?.name || `Image ${idx + 1}`,
+    }));
+  }, []);
+
+  const fetchImageTriages = useCallback(async (files: File[], fast = false) => {
+    const triagePromises = files.map(async (file) => {
+      const fd = new FormData();
+      fd.append('image', file);
+      const triagePath = fast ? '/api/v1/vision/triage?fast=1' : '/api/v1/vision/triage';
+      const r = await fetch(apiUrl(triagePath), {
+        method: 'POST',
+        body: fd,
+        headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+      });
+      if (!r.ok) return null;
+      const data = await safeJson(r);
+      if (!data) return null;
+      data._filename = file.name;
+      return data;
+    });
+    return (await Promise.all(triagePromises)).filter(Boolean);
   }, []);
 
   const handleRightPanelBack = useCallback(() => {
@@ -624,7 +740,7 @@ export default function App() {
     const snippets = items
       .slice(0, 2)
       .map((p) => {
-        const why = Array.isArray(p.why) ? p.why.filter(Boolean).slice(0, 2) : [];
+        const why = Array.isArray(p.why) ? p.why.filter(Boolean).slice(0, 2).map((w) => _prettyReason(String(w))) : [];
         if (!p?.name || why.length === 0) return '';
         return `${p.name} (${why.join(', ')})`;
       })
@@ -796,24 +912,10 @@ export default function App() {
       // If images are attached, triage them first
       let imageTriageResults: any[] = [];
       if (hasImages) {
+        const useFastImageTriage = !complaintIntent && !explicitComplaintIntent;
         setImageRoutingInFlight(true);
         try {
-          const triagePromises = currentAttachedFiles.map(async (file) => {
-            const fd = new FormData();
-            fd.append('image', file);
-            const r = await fetch(apiUrl('/api/v1/vision/triage'), {
-              method: 'POST',
-              body: fd,
-              headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
-            });
-            if (!r.ok) return null;
-            const data = await safeJson(r);
-            if (!data) return null;
-            // Attach filename so the Security Matrix can label each triage block
-            data._filename = file.name;
-            return data;
-          });
-          imageTriageResults = (await Promise.all(triagePromises)).filter(Boolean);
+          imageTriageResults = await fetchImageTriages(currentAttachedFiles, useFastImageTriage);
         } finally {
           setImageRoutingInFlight(false);
         }
@@ -838,37 +940,29 @@ export default function App() {
 
         // Shopping intent with images (no damage): switch to visual_search panel
         if (!anyDamage && imageTriageResults.length > 0 && !complaintIntent && !explicitComplaintIntent) {
-          const triageCtxs = imageTriageResults.map((t: any, idx: number) => ({
-            ...(t || {}),
-            labels: Array.isArray(t?.labels) ? t.labels : [],
-            ocr_text:
-              (typeof t?.security?.extracted_text === 'string' ? t.security.extracted_text : '')
-              || (typeof t?.extracted_text === 'string' ? t.extracted_text : ''),
-            cv_signals: {
-              ...(typeof t?.security?.signals === 'object' && t.security.signals ? t.security.signals : {}),
-              qr_code_detected: Boolean(t?.security?.signals?.qr_code_detected),
-              qr_prompt_injection: Boolean(t?.security?.signals?.qr_prompt_injection),
-              manipulation_detected: Boolean(t?.security?.signals?.manipulation_detected),
-              qr_external_url_detected: Boolean(
-                t?.security?.signals?.qr_external_url_detected || t?.security?.signals?.qr_external_url
-              ),
-              qr_redirect_probe:
-                (typeof t?.security?.qr_redirect_probe === 'object' && t.security.qr_redirect_probe)
-                ? t.security.qr_redirect_probe
-                : {},
-            },
-            source_name: currentAttachedFiles[idx]?.name || `Image ${idx + 1}`,
-          }));
+          const triageCtxs = toImageTriageContexts(imageTriageResults, currentAttachedFiles);
           setImageTriageContexts(triageCtxs);
           setImageTriageRaw(imageTriageResults);
           switchRightPanelMode('visual_search');
           setVisualSearchQuery(q);
 
+          // Defer heavier security enrichment after visual search is already open.
+          void (async () => {
+            try {
+              const deepResults = await fetchImageTriages(currentAttachedFiles, false);
+              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
+              setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
+              setImageTriageRaw(deepResults);
+            } catch {
+              // Keep the fast-path visual route even if deep enrichment fails.
+            }
+          })();
+
           // Give the user a feedback message and short-circuit — the right panel handles recs
           const imageNames = currentAttachedFiles.map(f => f.name).join(', ');
           setMessages(prev => [...prev, {
             role: 'assistant' as const,
-            content: `I've analysed your images (${imageNames}). Check the **Visual Search** panel on the right for per-image product recommendations.`,
+            content: `I checked your images (${imageNames}). Open **Visual Search** on the right to see per-image matches, nearest alternatives, and why each pick fits.`,
             timestamp: new Date(),
           }]);
           setIsThinking(false);
@@ -959,6 +1053,7 @@ export default function App() {
             labels: t?.labels || [],
             ocr_text: t?.extracted_text || '',
             image_hash: t?.image_hash || null,
+            product_identity: t?.product_identity || null,
             damage_score: t?.damage_score ?? 0,
             is_product_photo: t?.is_product_photo ?? false,
             intent_routing: t?.intent_routing || null,
@@ -968,6 +1063,9 @@ export default function App() {
           chatPayload.image_labels = requestImageContext.labels || [];
           chatPayload.image_ocr_text = requestImageContext.ocrText || '';
           chatPayload.image_hash = requestImageContext.imageHash || undefined;
+          if ((requestImageContext as any).productIdentity) {
+            chatPayload.image_product_identity = (requestImageContext as any).productIdentity;
+          }
           chatPayload.image_intent = 'visual_search';
         }
         chatPayload.recent_messages = messages.slice(-6).map(m => {
@@ -1073,6 +1171,8 @@ export default function App() {
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
+        const nextTraceId = data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null;
+        persistOperatorMetrics(data.timing_breakdown, nextTraceId, Array.isArray(chatPayload.images) && chatPayload.images.length > 0 ? 'chat+image' : 'chat');
         try {
           const persona = String(data.buyer_persona || data.buyer_persona_candidate || '').trim();
           if (persona) localStorage.setItem('shopsquire_last_persona', persona);
@@ -1094,7 +1194,7 @@ export default function App() {
             return updated;
           });
         }
-        setTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
+        setTraceId(nextTraceId);
 
         if (isDisambiguation) {
           // Show disambiguation buttons instead of products
@@ -1117,7 +1217,7 @@ export default function App() {
           const whySummary = summarizeWhy(prods);
           const hasAssistantBody = typeof respAssistant === 'string' && respAssistant.trim().length > 0;
           const baseLine = hasAssistantBody
-            ? respAssistant.trim()
+            ? _stripTechnicalTokens(respAssistant.trim())
             : `I found ${prods.length} ${mode === 'compare' ? 'products to compare' : 'matching products'} and I’m showing the top ${visibleProducts.length}.`;
           const includeWhy = whySummary && !/top picks:/i.test(baseLine);
           const budgetNote = budgetAdvice && !baseLine.includes('budget') ? `\n\n⚠️ Budget note: ${budgetAdvice}` : '';
@@ -1528,6 +1628,43 @@ export default function App() {
                     {Array.isArray(readyz?.reasons) && readyz?.reasons.length > 0 && (
                       <div className={styles.readinessReasons}>Issues: {readyz.reasons.join(', ')}</div>
                     )}
+                    {operatorMetrics && (
+                      <div className={styles.operatorMetrics}>
+                        <div className={styles.operatorMetricTitle}>Last Recommend</div>
+                        <div className={styles.readinessRow}>
+                          <span>Catalog cache</span>
+                          <span
+                            className={
+                              operatorMetrics.catalogProfileCacheHit == null
+                                ? styles.muted
+                                : operatorMetrics.catalogProfileCacheHit
+                                  ? styles.readyOk
+                                  : styles.readyBad
+                            }
+                          >
+                            {operatorMetrics.catalogProfileCacheHit == null ? '--' : operatorMetrics.catalogProfileCacheHit ? 'hit' : 'miss'}
+                          </span>
+                        </div>
+                        {operatorMetrics.catalogProfileMs != null && (
+                          <div className={styles.readinessRow}>
+                            <span>Catalog profile</span>
+                            <span>{Math.round(Number(operatorMetrics.catalogProfileMs) || 0)}ms</span>
+                          </div>
+                        )}
+                        {operatorMetrics.ollamaSummaryMs != null && (
+                          <div className={styles.readinessRow}>
+                            <span>Ollama summary</span>
+                            <span>{Math.round(Number(operatorMetrics.ollamaSummaryMs) || 0)}ms</span>
+                          </div>
+                        )}
+                        {operatorMetrics.routeTotalMs != null && (
+                          <div className={styles.readinessRow}>
+                            <span>Total route</span>
+                            <span>{Math.round(Number(operatorMetrics.routeTotalMs) || 0)}ms</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className={styles.rightBody}>
@@ -1593,7 +1730,12 @@ export default function App() {
                               ))}
                             </div>
                             <div className={styles.deviceLaneSummary}>
-                              {laneSummary(lane, items, rightPanelContract?.budget_status)}
+                              {laneSummary(
+                                lane,
+                                items,
+                                rightPanelContract?.budget_status,
+                                visualSearchQuery || String(localStorage.getItem('shopsquire_last_user_query') || ''),
+                              )}
                             </div>
                           </section>
                         );

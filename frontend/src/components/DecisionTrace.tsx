@@ -35,6 +35,7 @@ type Trace = {
   };
   products?: any[];
   right_panel?: { anchor_sections?: any[] } | null;
+  timing_breakdown?: Record<string, any> | null;
 };
 
 // Icons
@@ -677,6 +678,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     [...(events || [])].reverse().find((e) => String(e.event_type || '').toLowerCase() === 'upsell_promotion_selected')
     || null;
   const upsellPromoted = Array.isArray(upsellEvent?.payload?.promoted) ? upsellEvent?.payload?.promoted : [];
+  const upsellBundle = (upsellEvent?.payload?.bundle_savings && typeof upsellEvent.payload.bundle_savings === 'object')
+    ? upsellEvent.payload.bundle_savings
+    : null;
   const owaspLlmTags = (security?.owasp_llm && Array.isArray(security.owasp_llm))
     ? security.owasp_llm
     : (Array.isArray(security?.owasp_llm_top10) ? security.owasp_llm_top10 : (security?.owasp || []));
@@ -1090,34 +1094,44 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   {upsellPromoted.length === 0 ? (
                     <div className={styles.muted}>No upsell promotions recorded in this trace.</div>
                   ) : (
-                    <table className={styles.smallTable}>
-                      <thead>
-                        <tr>
-                          <th>SKU</th>
-                          <th>Confidence</th>
-                          <th>Model</th>
-                          <th>Reason Codes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {upsellPromoted.map((p: any, idx: number) => (
-                          <tr key={`${p?.sku || 'sku'}-${idx}`}>
-                            <td>{p?.sku || '?'}</td>
-                            <td>
-                              {typeof p?.reason_confidence === 'number'
-                                ? `${Math.round((p.reason_confidence || 0) * 100)}%`
-                                : '?'}
-                            </td>
-                            <td>{p?.model_source || 'rules'}</td>
-                            <td>
-                              {Array.isArray(p?.reason_codes) && p.reason_codes.length
-                                ? p.reason_codes.slice(0, 3).map((r: any) => `${r.code}(${Math.round((r.confidence || 0) * 100)}%)`).join(', ')
-                                : (Array.isArray(p?.reasons) ? p.reasons.join(', ') : '?')}
-                            </td>
+                    <>
+                      {upsellBundle && (
+                        <div className={styles.kvBlock}>
+                          <div className={styles.kvRow}><span>Bundle status</span><span>{upsellBundle.status || '?'}</span></div>
+                          <div className={styles.kvRow}><span>Message</span><span>{upsellBundle.message || '?'}</span></div>
+                          <div className={styles.kvRow}><span>Discount requested</span><span>{Math.round(Number(upsellBundle.requested_discount_percent || 0) * 100)}%</span></div>
+                          <div className={styles.kvRow}><span>Approval required</span><span>{String(Boolean(upsellBundle.approval_required))}</span></div>
+                        </div>
+                      )}
+                      <table className={styles.smallTable}>
+                        <thead>
+                          <tr>
+                            <th>SKU</th>
+                            <th>Confidence</th>
+                            <th>Model</th>
+                            <th>Reason Codes</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {upsellPromoted.map((p: any, idx: number) => (
+                            <tr key={`${p?.sku || 'sku'}-${idx}`}>
+                              <td>{p?.sku || '?'}</td>
+                              <td>
+                                {typeof p?.reason_confidence === 'number'
+                                  ? `${Math.round((p.reason_confidence || 0) * 100)}%`
+                                  : '?'}
+                              </td>
+                              <td>{p?.model_source || 'rules'}</td>
+                              <td>
+                                {Array.isArray(p?.reason_codes) && p.reason_codes.length
+                                  ? p.reason_codes.slice(0, 3).map((r: any) => `${r.code}(${Math.round((r.confidence || 0) * 100)}%)`).join(', ')
+                                  : (Array.isArray(p?.reasons) ? p.reasons.join(', ') : '?')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
                   )}
                   <div className={styles.sectionTitle}>Post?hoc Outcome</div>
                   <div className={styles.posthocRow}>
@@ -1234,7 +1248,49 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                     const constraintsSi = !si
                       ? (events.find(e => e.payload?.constraints?.shopper_intent)?.payload?.constraints?.shopper_intent || null)
                       : null;
-                    const intent = si || constraintsSi;
+                    const recPayload: any = recommendationEventPayload || {};
+                    const recConstraints: any = recPayload?.constraints_used || recPayload?.constraints || {};
+                    const recUseCase: any = recPayload?.use_case_analysis || {};
+                    const recPersona =
+                      recPayload?.buyer_persona
+                      || recPayload?.buyer_persona_candidate
+                      || recConstraints?.buyer_persona
+                      || null;
+                    const recUseCaseKey =
+                      recUseCase?.use_case_key
+                      || recConstraints?.use_case
+                      || null;
+                    const recBudgetMin = Number(
+                      recConstraints?.budget_min
+                      ?? recPayload?.budget_min
+                      ?? NaN
+                    );
+                    const recBudgetMax = Number(
+                      recConstraints?.budget_max
+                      ?? recPayload?.budget_max
+                      ?? NaN
+                    );
+                    const budgetTier = (() => {
+                      if (Number.isFinite(recBudgetMax)) {
+                        if (recBudgetMax <= 900) return 'tight';
+                        if (recBudgetMax <= 1500) return 'mid';
+                        return 'high';
+                      }
+                      return null;
+                    })();
+                    const synthesizedIntent = (!si && !constraintsSi && (recPersona || recUseCaseKey || Number.isFinite(recBudgetMax)))
+                      ? {
+                          persona: recPersona || null,
+                          budget_tier: budgetTier,
+                          priority_factors: Array.isArray(recUseCase?.priority_factors) ? recUseCase.priority_factors : [],
+                          accessory_affinities: Array.isArray(recUseCase?.accessory_affinities) ? recUseCase.accessory_affinities : [],
+                          use_case_key: recUseCaseKey || null,
+                          budget_min: Number.isFinite(recBudgetMin) ? recBudgetMin : null,
+                          budget_max: Number.isFinite(recBudgetMax) ? recBudgetMax : null,
+                          source: 'recommendation_result_fallback',
+                        }
+                      : null;
+                    const intent = si || constraintsSi || synthesizedIntent;
                     const hasAny = intent || abandonEvts.length > 0 || outcomeEvts.length > 0;
                     if (!hasAny) return (
                       <div className={styles.empty}>
@@ -1259,6 +1315,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                   Persona: {intent.persona}
                                 </span>
                               )}
+                              {intent.use_case_key && (
+                                <span className={styles.intentBadge} style={{ background: '#0f766e' }}>
+                                  Use-case: {String(intent.use_case_key).replace(/_/g, ' ')}
+                                </span>
+                              )}
                               {intent.urgency && (
                                 <span className={styles.intentBadge} style={{ background: urgencyColor(intent.urgency) }}>
                                   Urgency: {intent.urgency}
@@ -1277,6 +1338,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               {intent.price_sensitivity && (
                                 <span className={styles.intentBadge} style={{ background: '#92400e' }}>
                                   Price sensitivity: {intent.price_sensitivity}
+                                </span>
+                              )}
+                              {(Number.isFinite(Number(intent.budget_min)) || Number.isFinite(Number(intent.budget_max))) && (
+                                <span className={styles.intentBadge} style={{ background: '#1d4ed8' }}>
+                                  Budget band: {Number.isFinite(Number(intent.budget_min)) ? `$${Number(intent.budget_min).toLocaleString()}` : '$0'}-{Number.isFinite(Number(intent.budget_max)) ? `$${Number(intent.budget_max).toLocaleString()}` : '?'}
                                 </span>
                               )}
                             </div>
@@ -1423,7 +1489,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   {(() => {
                     const cxEvt = events.find(e => eventMatches(e, ['tier_complexity_score', 'tier_decision', 'model_selection']));
                     const escEvt = events.find(e => eventMatches(e, ['tier_escalation', 'tier_decision']));
+                    const timingEvt = events.find(e => eventMatches(e, 'timing_breakdown'));
                     const msTr = trace?.model_selection || {};
+                    const timing = (timingEvt?.payload || (trace as any)?.timing_breakdown || {}) as Record<string, any>;
                     const score = cxEvt?.payload?.score ?? cxEvt?.payload?.complexity_score ?? (msTr as any).tier;
                     const hasModelFallback = Boolean(
                       (msTr as any)?.selected ||
@@ -1470,6 +1538,65 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             <div className={styles.kvRow}><span>To</span><span>{escEvt.payload?.to_tier || '--'}</span></div>
                             <div className={styles.kvRow}><span>Reason</span><span>{escEvt.payload?.reason || '--'}</span></div>
                           </>
+                        )}
+                        <div className={styles.sectionTitle}>Timing Breakdown</div>
+                        {Object.keys(timing || {}).length > 0 ? (
+                          <>
+                            {(() => {
+                              const rows = [
+                                ['route_total_ms', 'Total Route'],
+                                ['guard_ms', 'Input Guard'],
+                                ['catalog_profile_ms', 'Catalog Profile'],
+                                ['nlp_ms', 'NLP'],
+                                ['ollama_summary_ms', 'Ollama Summary'],
+                                ['retrieve_ms', 'Retrieval'],
+                                ['rerank_ms', 'Rerank'],
+                                ['image_fill_ms', 'Image Fill'],
+                                ['copywriting_ms', 'Copywriting'],
+                              ].filter(([key]) => typeof timing?.[key] === 'number');
+                              const maxMs = Math.max(1, ...rows.map(([key]) => Number(timing[key]) || 0));
+                              return (
+                                <div className={styles.timingBars}>
+                                  {rows.map(([key, label]) => (
+                                    <div key={key} className={styles.timingRow}>
+                                      <div className={styles.timingLabel}>{label}</div>
+                                      <div className={styles.timingTrack}>
+                                        <div
+                                          className={styles.timingFill}
+                                          style={{ width: `${Math.max(4, ((Number(timing[key]) || 0) / maxMs) * 100)}%` }}
+                                        />
+                                      </div>
+                                      <div className={styles.timingValue}>{`${Math.round(Number(timing[key]) || 0)}ms`}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                            <table className={styles.smallTable}>
+                              <thead><tr><th>Stage</th><th>Latency</th></tr></thead>
+                              <tbody>
+                                {[
+                                  ['route_total_ms', 'Total Route'],
+                                  ['guard_ms', 'Input Guard'],
+                                  ['catalog_profile_ms', 'Catalog Profile'],
+                                  ['catalog_profile_cache_hit', 'Catalog Cache Hit'],
+                                  ['nlp_ms', 'NLP'],
+                                  ['ollama_summary_ms', 'Ollama Summary'],
+                                  ['retrieve_ms', 'Retrieval'],
+                                  ['rerank_ms', 'Rerank'],
+                                  ['image_fill_ms', 'Image Fill'],
+                                  ['copywriting_ms', 'Copywriting'],
+                                ].filter(([key]) => Object.prototype.hasOwnProperty.call(timing || {}, key)).map(([key, label]) => (
+                                  <tr key={key}>
+                                    <td>{label}</td>
+                                    <td>{key === 'catalog_profile_cache_hit' ? (timing[key] ? 'Yes' : 'No') : timing[key] == null ? 'Skipped' : `${Math.round(Number(timing[key]) || 0)}ms`}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
+                        ) : (
+                          <div className={styles.muted}>No stage timing data recorded for this trace.</div>
                         )}
                       </>
                     );

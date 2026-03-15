@@ -585,6 +585,7 @@ def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any
         "ransomware_indicator",
         "homoglyph_injection",
         "invisible_text_suspected",
+        "ocr_low_confidence_uncertain",
     ):
         if isinstance(img.get(k), bool):
             sec_signals[k] = bool(img.get(k))
@@ -631,10 +632,23 @@ def _extract_image_cv_signals(image_obj: Dict[str, Any] | None) -> Dict[str, Any
         "manipulation_detected": manipulation,
         "adversarial_score": float(sec_signals.get("adversarial_score") or 0.0),
         "steg_suspicious": bool(sec_signals.get("steg_suspicious")),
+        "ocr_low_confidence_uncertain": bool(sec_signals.get("ocr_low_confidence_uncertain")),
         "qr_payloads": sec_signals.get("qr_payloads") if isinstance(sec_signals.get("qr_payloads"), list) else [],
         "qr_payload_types": sec_signals.get("qr_payload_types") if isinstance(sec_signals.get("qr_payload_types"), list) else [],
         "qr_redirect_probe": sec_signals.get("qr_redirect_probe") if isinstance(sec_signals.get("qr_redirect_probe"), dict) else {},
     }
+
+
+def _extract_image_product_identity(image_obj: Dict[str, Any] | None) -> Dict[str, Any]:
+    img = image_obj if isinstance(image_obj, dict) else {}
+    ident = img.get("product_identity")
+    if isinstance(ident, dict):
+        return dict(ident)
+    sec = img.get("security") if isinstance(img.get("security"), dict) else {}
+    ident = sec.get("product_identity")
+    if isinstance(ident, dict):
+        return dict(ident)
+    return {}
 
 
 def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -648,11 +662,16 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
     adversarial = float(s.get("adversarial_score") or 0.0)
     encoded = bool(s.get("encoded_payload_detected"))
     polyglot = bool(s.get("polyglot_suspected"))
+    ocr_uncertain = bool(s.get("ocr_low_confidence_uncertain"))
 
     hard_lock = bool(
-        qr_injection
-        or (qr_external and (manipulation or steg or adversarial >= 0.75))
-        or polyglot
+        polyglot
+        or (
+            qr_injection
+            and (qr_external or ocr_injection)
+            and (manipulation or steg or adversarial >= 0.75 or encoded)
+        )
+        or (qr_external and (manipulation or steg or adversarial >= 0.9))
     )
     needs_review = bool(
         hard_lock
@@ -661,6 +680,7 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
         or steg
         or adversarial >= 0.5
         or encoded
+        or ocr_uncertain
     )
     degraded = bool(
         qr_detected
@@ -671,6 +691,7 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
         or steg
         or adversarial >= 0.35
         or encoded
+        or ocr_uncertain
     )
     if hard_lock:
         route = "lockdown"
@@ -898,6 +919,7 @@ async def chat_query(
     image_ocr_text_in = (payload or {}).get("image_ocr_text")
     image_hash_in = (payload or {}).get("image_hash")
     image_intent_in = (payload or {}).get("image_intent")
+    image_product_identity_in = (payload or {}).get("image_product_identity")
     image_cv_signals_in: Dict[str, Any] = {}
     damage_score_in: float = 0.0
     is_product_photo_in: bool = False
@@ -913,6 +935,8 @@ async def chat_query(
                 image_ocr_text_in = first.get("ocr_text")
             if not image_hash_in:
                 image_hash_in = first.get("image_hash") or first.get("hash")
+            if not image_product_identity_in:
+                image_product_identity_in = _extract_image_product_identity(first)
             damage_score_in = float(first.get("damage_score") or 0.0)
             is_product_photo_in = bool(first.get("is_product_photo"))
             image_cv_signals_in = _extract_image_cv_signals(first)
@@ -1312,6 +1336,8 @@ async def chat_query(
                 params["image_intent"] = image_intent_in.strip()[:32]
         else:
             params["image_security_mode"] = "text_only_fallback"
+        if isinstance(image_product_identity_in, dict) and image_product_identity_in:
+            params["image_product_identity"] = json.dumps(image_product_identity_in, separators=(",", ":"))[:1000]
         if image_cv_signals_in:
             params["image_cv_signals"] = json.dumps(image_cv_signals_in, separators=(",", ":"))[:1000]
     except Exception:
@@ -1513,6 +1539,7 @@ async def chat_query(
                         or image_cv_signals_in.get("qr_prompt_injection")
                         or image_cv_signals_in.get("qr_external_url_detected")
                         or image_cv_signals_in.get("manipulation_detected")
+                        or image_cv_signals_in.get("ocr_low_confidence_uncertain")
                     ),
                 },
             )
@@ -1521,6 +1548,7 @@ async def chat_query(
                 "qr_prompt_injection": bool(image_cv_signals_in.get("qr_prompt_injection")),
                 "qr_external_url_detected": bool(image_cv_signals_in.get("qr_external_url_detected")),
                 "ocr_prompt_injection": bool(image_cv_signals_in.get("ocr_prompt_injection")),
+                "ocr_low_confidence_uncertain": bool(image_cv_signals_in.get("ocr_low_confidence_uncertain")),
                 "manipulation_detected": bool(image_cv_signals_in.get("manipulation_detected")),
                 "damage_detected": bool(image_cv_signals_in.get("damage_detected")),
                 "steg_suspicious": bool(image_cv_signals_in.get("steg_suspicious")),

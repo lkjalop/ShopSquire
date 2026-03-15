@@ -4,7 +4,22 @@ import type { Product } from '../App';
 import { apiUrl, safeJson } from '../lib/api';
 
 type CartItem = { sku: string; quantity: number; price_cents?: number; name?: string };
-type CartState = { cart_id: string; items: CartItem[]; subtotal_cents: number; currency: string };
+type BundleSavings = {
+  status?: string;
+  message?: string;
+  subtotal_cents?: number;
+  laptop_subtotal_cents?: number;
+  accessories_subtotal_cents?: number;
+  discount_cents?: number;
+  applied_discount_cents?: number;
+  final_total_cents?: number;
+  estimated_final_total_cents?: number;
+  amount_to_next_cents?: number;
+  approval_required?: boolean;
+  approval_badge?: string | null;
+  approval_id?: string | null;
+};
+type CartState = { cart_id: string; items: CartItem[]; subtotal_cents: number; currency: string; bundle_savings?: BundleSavings };
 
 export default function CartPanel({
   uid,
@@ -99,6 +114,7 @@ export default function CartPanel({
   }, [upsellTraceId, onTraceId]);
 
   const items = cart?.items || [];
+  const bundle = cart?.bundle_savings;
   const goToCheckout = () => {
     // Persist cart snapshot so the checkout page can show an order summary
     try {
@@ -107,6 +123,13 @@ export default function CartPanel({
       // sessionStorage unavailable — continue anyway
     }
     window.location.href = '/ui/checkout';
+  };
+  const openApprovalReview = () => {
+    const approvalId = String(bundle?.approval_id || '').trim();
+    const url = new URL('/admin', window.location.origin);
+    url.searchParams.set('tab', 'approvals');
+    if (approvalId) url.searchParams.set('approval_id', approvalId);
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -122,6 +145,48 @@ export default function CartPanel({
         <div className={styles.muted}>Cart is empty. Add a product to see upsell suggestions.</div>
       ) : (
         <>
+          {bundle && (
+            <div className={styles.bundleCard}>
+              <div className={styles.bundleHeader}>
+                <div className={styles.sectionTitle}>Bundle Savings</div>
+                {bundle.approval_badge && (
+                  <span className={bundle.approval_required ? styles.pendingBadge : styles.appliedBadge}>
+                    {bundle.approval_badge}
+                  </span>
+                )}
+              </div>
+              <div className={styles.bundleMessage}>{bundle.message || 'Bundle pricing is available for laptop + accessory carts.'}</div>
+              <div className={styles.bundleRows}>
+                <div className={styles.summaryLine}><span>Laptop price</span><span>${(((bundle.laptop_subtotal_cents || 0) / 100)).toLocaleString()}</span></div>
+                <div className={styles.summaryLine}><span>Accessories</span><span>${(((bundle.accessories_subtotal_cents || 0) / 100)).toLocaleString()}</span></div>
+                <div className={styles.summaryLine}>
+                  <span>{bundle.approval_required ? 'Bundle discount (pending review)' : 'Bundle discount (laptop only)'}</span>
+                  <span>- ${((((bundle.approval_required ? bundle.discount_cents : (bundle.applied_discount_cents || bundle.discount_cents)) || 0) / 100)).toLocaleString()}</span>
+                </div>
+                <div className={`${styles.summaryLine} ${styles.summaryTotal}`}>
+                  <span>{bundle.approval_required ? 'Current total' : 'Final total'}</span>
+                  <span>${((((bundle.final_total_cents || cart?.subtotal_cents || 0) / 100)).toLocaleString())}</span>
+                </div>
+                {bundle.approval_required && (
+                  <div className={styles.summaryLine}>
+                    <span>Estimated total after approval</span>
+                    <span>${((((bundle.estimated_final_total_cents || 0) / 100)).toLocaleString())}</span>
+                  </div>
+                )}
+                {bundle.approval_id && (
+                  <div className={styles.summaryLine}>
+                    <span>Approval ID</span>
+                    <span>{bundle.approval_id}</span>
+                  </div>
+                )}
+                {bundle.approval_required && (
+                  <div className={styles.btnRow}>
+                    <button className={styles.btn} onClick={openApprovalReview}>Open reviewer queue</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {items.map((it) => (
             <div key={it.sku} className={styles.row}>
               <div className={styles.rowLeft}>
@@ -146,7 +211,7 @@ export default function CartPanel({
               <div className={styles.muted}>{cart?.currency || 'USD'}</div>
             </div>
             <div className={styles.rowRight}>
-              <div className={styles.price}>${((cart?.subtotal_cents || 0) / 100).toLocaleString()}</div>
+              <div className={styles.price}>${(((bundle?.final_total_cents ?? cart?.subtotal_cents ?? 0) / 100)).toLocaleString()}</div>
               <div className={styles.btnRow}>
                 <button className={styles.btn} onClick={() => onRefresh()}>Refresh</button>
                 <button className={styles.btn} onClick={() => onClear()}>Clear</button>
@@ -160,7 +225,11 @@ export default function CartPanel({
       <div className={styles.upsellSection}>
         <div className={styles.sectionTitle}>Recommended Add-Ons</div>
         {loadingUpsell && <div className={styles.muted}>Loading suggestions...</div>}
-        {!loadingUpsell && upsells.length === 0 && <div className={styles.muted}>No suggestions yet.</div>}
+        {!loadingUpsell && upsells.length === 0 && (
+          <div className={styles.muted}>
+            No compatible add-ons found right now. We avoid showing unrelated products.
+          </div>
+        )}
 
         {!loadingUpsell && upsells.length > 0 && (
           <>

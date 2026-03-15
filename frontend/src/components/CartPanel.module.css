@@ -36,6 +36,66 @@
   background: var(--surface-2, #f6f9fc);
 }
 
+.bundleCard {
+  border: 1px solid #d7e4d8;
+  border-radius: 12px;
+  background: #f4fbf3;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bundleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bundleMessage {
+  font-size: 13px;
+  color: #244434;
+}
+
+.bundleRows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summaryLine {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: #1f2937;
+}
+
+.summaryTotal {
+  font-weight: 700;
+  padding-top: 6px;
+  border-top: 1px solid #d7e4d8;
+}
+
+.appliedBadge,
+.pendingBadge {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.appliedBadge {
+  background: #d7f0dd;
+  color: #0f5132;
+}
+
+.pendingBadge {
+  background: #fff0c2;
+  color: #8a5a00;
+}
+
 .rowLeft {
   display: flex;
   flex-direction: column;

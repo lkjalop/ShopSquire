@@ -40,6 +40,9 @@ def test_ollama_vision_models_basic(model):
         pytest.skip(f"Vision generation timed out for model '{model}'; skipping")
     if result is None:
         pytest.skip(f"Vision provider returned no result for model '{model}'; skipping")
-    labels, text = result
+    if isinstance(result, tuple) and len(result) >= 3:
+        labels, text, _product_identity = result
+    else:
+        labels, text = result
     assert isinstance(labels, list)
     assert isinstance(text, str)

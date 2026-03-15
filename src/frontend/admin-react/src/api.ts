@@ -18,6 +18,7 @@ export type ApprovalItem = {
   payload: any;
   reason?: string | null;
   status: 'pending' | 'approved' | 'rejected';
+  created_at?: string;
 };
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;

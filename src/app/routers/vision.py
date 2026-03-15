@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from typing import Any, Dict, List, Optional
 import json
 import os
@@ -28,6 +28,17 @@ _PRODUCT_LABEL_KW = {
 _DAMAGE_LABEL_KW = {
     "crack", "broken", "dent", "scratch", "shatter", "damage",
     "defect", "torn", "crushed", "scuff", "stain",
+}
+
+_BRAND_HINT_KW = {
+    "apple": ("apple", "macbook", "imac", "mac mini", "mac pro"),
+    "msi": ("msi", "raider", "stealth", "creator", "thin a15", "modern 15"),
+    "lenovo": ("lenovo", "thinkpad", "ideapad", "legion", "yoga"),
+    "asus": ("asus", "vivobook", "zenbook", "rog", "tuf", "proart"),
+    "dell": ("dell", "xps", "inspiron", "latitude", "precision", "alienware"),
+    "hp": ("hp", "hewlett", "envy", "spectre", "pavilion", "omen", "victus", "zbook"),
+    "microsoft": ("microsoft", "surface"),
+    "acer": ("acer", "aspire", "nitro", "predator", "swift"),
 }
 
 
@@ -60,6 +71,27 @@ def _compute_image_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()[:32]
 
 
+def _labels_are_weak(labels: List[str]) -> bool:
+    vals = [str(x).strip().lower() for x in (labels or []) if str(x).strip()]
+    if not vals:
+        return True
+    return all(len(v) <= 8 or any(tok in v for tok in ("text", "overlay", "image", "photo")) for v in vals)
+
+
+def _brand_hint_from_text(*parts: str) -> Optional[str]:
+    combined = " ".join(str(p or "") for p in parts).lower()
+    if not combined.strip():
+        return None
+    # Common weak MSI overlay artifact naming: "ms-texti", "ms texti".
+    # Treat this as MSI only on the weak-label rescue path, not as a global alias.
+    if any(tok in combined for tok in ("ms-texti", "ms texti")):
+        return "msi"
+    for brand, keywords in _BRAND_HINT_KW.items():
+        if any(kw in combined for kw in keywords):
+            return brand
+    return None
+
+
 def _derive_query_from_analysis(analysis: Dict) -> str:
     if not isinstance(analysis, dict):
         return "product"
@@ -73,7 +105,11 @@ def _derive_query_from_analysis(analysis: Dict) -> str:
 
 
 @router.post("/triage")
-async def triage(image: UploadFile = File(...), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+async def triage(
+    image: UploadFile = File(...),
+    fast: bool = Query(False),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
     """Run lightweight CV triage from uploaded image and persist event metadata."""
     if image is None:
         raise HTTPException(status_code=400, detail="image_required")
@@ -113,15 +149,16 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
     labels = []
     extracted_text = ""
     product_identity = None
-    provider_name = "none"
-    try:
-        provider = ManagedCVProvider()
-        provider_name = provider.provider
-        labels, extracted_text, product_identity = await provider.get_labels_and_text(
-            content, mode="visual_search",
-        )
-    except Exception:
-        labels, extracted_text, product_identity = [], "", None
+    provider_name = "fast_local" if fast else "none"
+    if not fast:
+        try:
+            provider = ManagedCVProvider()
+            provider_name = provider.provider
+            labels, extracted_text, product_identity = await provider.get_labels_and_text(
+                content, mode="visual_search",
+            )
+        except Exception:
+            labels, extracted_text, product_identity = [], "", None
 
     # P3: Always append sanitized filename as a weak hint (not just when labels empty)
     if name:
@@ -229,10 +266,13 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
                         if host and host not in ("127.0.0.1", "localhost"):
                             security_signals["qr_external_url"] = True
                             security_signals["qr_external_url_detected"] = True
-                            try:
-                                qr_redirect_probe = await _probe_redirect_chain(data, timeout_s=1.25, max_hops=3)
-                            except Exception:
-                                qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
+                            if not fast:
+                                try:
+                                    qr_redirect_probe = await _probe_redirect_chain(data, timeout_s=1.25, max_hops=3)
+                                except Exception:
+                                    qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
+                            else:
+                                qr_redirect_probe = {"enabled": False, "checked": False, "chain": [], "deferred": True}
                             break
             except Exception:
                 pass
@@ -284,47 +324,75 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
     except Exception:
         pass
 
-    try:
-        from src.app.security.adversarial_image_detector import detect_adversarial
-        adv = detect_adversarial(content)
-        if hasattr(adv, "is_adversarial") and adv.is_adversarial:
-            security_signals["adversarial_detected"] = True
-            security_clean = False
-        if hasattr(adv, "diffusion_score") and adv.diffusion_score > 0.7:
-            security_signals["ai_generated_suspected"] = True
-    except Exception:
-        pass
+    if not fast:
+        try:
+            from src.app.security.adversarial_image_detector import detect_adversarial
+            adv = detect_adversarial(content)
+            if hasattr(adv, "is_adversarial") and adv.is_adversarial:
+                security_signals["adversarial_detected"] = True
+                security_clean = False
+            if hasattr(adv, "diffusion_score") and adv.diffusion_score > 0.7:
+                security_signals["ai_generated_suspected"] = True
+        except Exception:
+            pass
 
     # ── Fix 3: steganography detection ──
-    try:
-        from src.app.security.steg_detector import detect_steganography
-        steg = detect_steganography(content)
-        if hasattr(steg, "is_suspicious") and steg.is_suspicious:
-            security_signals["steg_suspicious"] = True
-            security_clean = False
-        if hasattr(steg, "composite_score"):
-            security_signals["steg_score"] = round(float(steg.composite_score), 3)
-    except Exception:
-        pass
+    if not fast:
+        try:
+            from src.app.security.steg_detector import detect_steganography
+            steg = detect_steganography(content)
+            steg_score = float(getattr(steg, "steg_score", 0.0) or 0.0)
+            steg_elevated_min = float(os.getenv("CV_STEG_ELEVATED_MIN", "0.385") or 0.385)
+            if hasattr(steg, "is_suspicious") and steg.is_suspicious:
+                security_signals["steg_suspicious"] = True
+                security_clean = False
+            if steg_score:
+                security_signals["steg_score"] = round(steg_score, 3)
+            if steg_score >= steg_elevated_min:
+                security_signals["steg_score_elevated"] = True
+                security_clean = False
+            if getattr(steg, "explanations", None):
+                security_signals["steg_explanations"] = list(getattr(steg, "explanations", []) or [])[:8]
+            if getattr(steg, "details", None):
+                security_signals["steg_details"] = dict(getattr(steg, "details", {}) or {})
+        except Exception:
+            pass
 
     # OCR normalization + detector pass (PayID/PCI/crypto/ransom/encoded/unicode).
     try:
         ocr_det = _normalize_ocr_and_detect(extracted_text)
         stage_a_text = str(extracted_text or "").strip()
         deep_trigger = bool(
-            (not stage_a_text)
+            (
+                not stage_a_text
+                and any(
+                    bool(security_signals.get(sig))
+                    for sig in (
+                        "qr_code_detected",
+                        "qr_external_url",
+                        "qr_external_url_detected",
+                        "filename_brand_mismatch",
+                    )
+                )
+            )
             or (len(stage_a_text) < 12 and bool(security_signals.get("qr_code_detected")))
         )
-        if deep_trigger:
+        if deep_trigger and not fast:
             # Risk-triggered deep OCR for low-evidence or overlay-heavy images.
             from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
             deep = run_risk_triggered_multicontrast_ocr(content, ocr_provider=None, enabled=True)
             deep_text = str(deep.get("best_text") or "").strip()
+            deep_conf = float(deep.get("best_confidence") or 0.0)
+            deep_min_conf = float(os.getenv("CV_STAGE_B_OCR_CONFIDENCE_MIN", "0.45") or 0.45)
             if deep_text:
                 extracted_text = deep_text[:500]
                 ocr_det = _normalize_ocr_and_detect(extracted_text)
             if bool(deep.get("invisible_text_suspected")):
                 security_signals["invisible_text_suspected"] = True
+                security_clean = False
+            # Stage-B still uncertain: keep visual flow available, but mark untrusted/degraded.
+            if (not deep_text) or deep_conf < deep_min_conf:
+                security_signals["ocr_low_confidence_uncertain"] = True
                 security_clean = False
 
         if bool(ocr_det.get("payment_social_engineering")):
@@ -348,6 +416,72 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
     except Exception:
         pass
 
+    # Product identity rescue for weak/flagged product-like images.
+    if not fast and not product_identity:
+        try:
+            weak_labels = _labels_are_weak(labels)
+            flagged = bool(security_signals)
+            product_like = _is_product_photo(labels, resp["damage_score"]) or any(
+                kw in " ".join(str(x).lower() for x in (labels or []))
+                for kw in _PRODUCT_LABEL_KW
+            )
+            if weak_labels or flagged or product_like:
+                from src.app.services.product_identity_agent import (
+                    identify_product_from_image,
+                    identify_product_from_text,
+                )
+
+                hint_text = " ".join(labels or [])
+                filename_hint = os.path.splitext(str(name or ""))[0].replace("-", " ").replace("_", " ")
+                text_rescue = identify_product_from_text(
+                    labels=labels or [],
+                    ocr_text="",
+                    user_query=filename_hint,
+                    trace_id=None,
+                )
+                if bool(text_rescue.get("identified")) and str(text_rescue.get("brand") or "").strip():
+                    product_identity = {
+                        "brand": str(text_rescue.get("brand") or "").strip(),
+                        "model": str(text_rescue.get("model") or "").strip() or None,
+                        "category": str(text_rescue.get("product_type") or "laptop").strip().lower(),
+                        "confidence": float(text_rescue.get("confidence") or 0.0),
+                        "source": "visual_brand_hint",
+                    }
+
+                if not product_identity and not weak_labels:
+                    direct_hint_brand = _brand_hint_from_text(hint_text, filename_hint)
+                    if direct_hint_brand:
+                        product_identity = {
+                            "brand": direct_hint_brand.upper() if direct_hint_brand == "msi" else direct_hint_brand.capitalize(),
+                            "model": None,
+                            "category": "laptop",
+                            "confidence": 0.31,
+                            "source": "filename_or_label_hint",
+                        }
+
+                if not product_identity:
+                    stage_b = identify_product_from_image(
+                        content,
+                        user_query=filename_hint or None,
+                        trace_id=None,
+                        timeout_s=float(os.getenv("CV_IDENTITY_STAGE_B_TIMEOUT_S", "6.0") or 6.0),
+                    )
+                    if isinstance(stage_b, dict):
+                        brand = str(stage_b.get("brand") or "").strip()
+                        if bool(stage_b.get("identified")) and brand:
+                            product_identity = {
+                                "brand": brand,
+                                "model": str(stage_b.get("model") or "").strip() or None,
+                                "category": str(stage_b.get("product_type") or "laptop").strip().lower(),
+                                "confidence": float(stage_b.get("confidence") or 0.0),
+                                "source": "vision_stage_b",
+                            }
+        except Exception:
+            pass
+
+    if product_identity:
+        resp["product_identity"] = product_identity
+
     resp["security"] = {
         "clean": security_clean,
         "signals": security_signals,
@@ -355,6 +489,8 @@ async def triage(image: UploadFile = File(...), role: str = Depends(require_role
         # Surface the OCR/extracted text here so the UI Security Matrix can show it
         "extracted_text": (extracted_text or "")[:500],
         "qr_redirect_probe": qr_redirect_probe,
+        "analysis_stage": "fast" if fast else "full",
+        "deferred_deep_analysis": bool(fast),
     }
     # Attach productive QR data (manufacturer URLs, model hints) for downstream identity extraction
     if qr_product_data:

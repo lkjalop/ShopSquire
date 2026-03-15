@@ -9,6 +9,12 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from sqlalchemy import text
+from src.app.services.product_taxonomy import (
+    ACCESSORY_FAMILIES,
+    infer_accessory_slug,
+    infer_product_family,
+    product_tags,
+)
 
 
 _SUSPICIOUS_NAME_PAT = re.compile(
@@ -33,13 +39,22 @@ class UpsellCandidate:
 
 _SKU_FAMILY_PAT = re.compile(r"^SYN-([A-Z]+)-", re.IGNORECASE)
 
+_PERSONA_ACCESSORY_SLUGS: dict[str, set[str]] = {
+    "student": {"laptop_sleeve", "mouse", "power_bank", "usb_hub", "dock"},
+    "gamer": {"gaming_mouse", "headset", "cooling_pad", "laptop_stand", "monitor"},
+    "creator": {"external_ssd", "monitor", "card_reader", "audio_interface", "dock"},
+    "office": {"dock", "monitor", "headset", "compact_charger", "usb_hub"},
+    "corporate": {"dock", "monitor", "headset", "compact_charger", "laptop_sleeve"},
+    "engineer": {"dock", "monitor", "external_ssd", "mouse", "usb_hub"},
+}
+
 
 def _sku_family(sku: str | None) -> str:
     s = str(sku or "").strip().upper()
     m = _SKU_FAMILY_PAT.match(s)
     if m:
         return str(m.group(1) or "").upper()
-    return "UNK"
+    return infer_product_family(sku=s)
 
 
 def _infer_intent_family(query: str | None, persona: str | None, use_case: str | None) -> str | None:
@@ -73,6 +88,17 @@ def _family_complement_weight(cart_family: str, candidate_family: str) -> float:
     if not row:
         return 0.0
     return float(row.get(str(candidate_family or "UNK").upper(), 0.0))
+
+
+def _persona_accessory_boost(persona: str | None, accessory_slug: str | None) -> float:
+    persona_key = str(persona or "").strip().lower()
+    slug = str(accessory_slug or "").strip().lower()
+    if not persona_key or not slug:
+        return 0.0
+    wanted = _PERSONA_ACCESSORY_SLUGS.get(persona_key) or set()
+    if slug in wanted:
+        return 1.0
+    return 0.0
 
 
 def _user_family_history(db, uid: str | None, lookback_days: int = 180) -> dict[str, float]:
@@ -419,15 +445,15 @@ def _lifecycle_profile(db, uid_hash: str | None) -> dict[str, Any]:
 
 
 _UPSELL_REASON_LABELS: dict[str, str] = {
-    "bundle_affinity": "Frequently paired with your cart",
-    "frequently_bought_together": "Frequently bought together",
-    "margin_guardrail": "Healthy margin within policy guardrails",
-    "low_return_risk": "Historically low return risk",
-    "inventory_pressure": "Inventory pressure favors this add-on",
-    "cart_family_fit": "Fits your current cart category",
-    "query_intent_fit": "Matches your latest shopping intent",
-    "persona_fit": "Aligned with your shopper persona",
-    "history_affinity": "Aligned with your transaction history",
+    "bundle_affinity": "Often purchased with similar carts",
+    "frequently_bought_together": "Popular companion item",
+    "margin_guardrail": "Good value-to-price tradeoff",
+    "low_return_risk": "Reliable pick with low return risk",
+    "inventory_pressure": "Stock position favors this option",
+    "cart_family_fit": "Complements items already in your cart",
+    "query_intent_fit": "Matches your latest shopping goal",
+    "persona_fit": "Fits your shopper profile",
+    "history_affinity": "Consistent with your past purchases",
 }
 
 _UPSELL_REASON_BASE_WEIGHTS: dict[str, float] = {
@@ -616,6 +642,18 @@ def recommend_checkout_upsell(
     user_history = _user_family_history(db, uid_hash, lookback_days=180)
     cart_families = {_sku_family(s) for s in cart_set if s}
     intent_family = _infer_intent_family(query=query, persona=persona, use_case=use_case)
+    # If a laptop is already in cart and we have other families in stock, suppress
+    # same-family laptop upsells and prioritize complementary add-ons.
+    accessory_like_families = set(ACCESSORY_FAMILIES)
+    non_lap_available = any(
+        _sku_family(str(p.get("sku") or "")) in accessory_like_families and int(p.get("stock") or 0) > 0
+        for p in products
+    )
+    allowed_candidate_families: set[str] | None = None
+    if "LAP" in cart_families:
+        # For laptop checkouts, only show true accessories if available.
+        # If no accessory families exist, return empty suggestions instead of irrelevant items.
+        allowed_candidate_families = set(accessory_like_families) if non_lap_available else set()
 
     cart_price = sum(int((by_sku.get(s) or {}).get("price_cents") or 0) for s in cart_set)
     feature_rows: list[dict[str, Any]] = []
@@ -633,7 +671,16 @@ def recommend_checkout_upsell(
         if cart_price > 0 and cart_price <= 1200 and price > int(cart_price * 1.9):
             continue
         name = str(p.get("name") or sku)
-        cand_family = _sku_family(sku)
+        specs_dict = p.get("specs") or {}
+        if isinstance(specs_dict, str):
+            try:
+                specs_dict = json.loads(specs_dict)
+            except Exception:
+                specs_dict = {}
+        cand_family = infer_product_family(sku=sku, name=name, specs=specs_dict)
+        if allowed_candidate_families is not None and cand_family not in allowed_candidate_families:
+            continue
+        accessory_slug = infer_accessory_slug(sku=sku, name=name, specs=specs_dict)
         co = float(copurchase.get(sku, 0.0))
         recent = int(recent_sales.get(sku, 0))
         prior = int(prior_sales.get(sku, 0))
@@ -658,21 +705,9 @@ def recommend_checkout_upsell(
         # Affinity boost: use-case accessories match gives a small positive nudge
         affinity_boost = 0.0
         if affinity_set:
-            specs_dict = p.get("specs") or {}
-            if isinstance(specs_dict, str):
-                try:
-                    specs_dict = json.loads(specs_dict)
-                except Exception:
-                    specs_dict = {}
-            cat_tags = {
-                str(t).lower().replace(" ", "_")
-                for t in (
-                    [str(specs_dict.get("category") or "")]
-                    + list(specs_dict.get("tags") or [])
-                    + [str(p.get("category") or "")]
-                )
-                if t
-            }
+            cat_tags = product_tags(sku=sku, name=name, specs=specs_dict)
+            if accessory_slug:
+                cat_tags.add(accessory_slug)
             if cat_tags & affinity_set:
                 # Raise affinity_boost to 1.0 so accessories can compete with
                 # same-family laptop re-recommendations in the total score.
@@ -687,13 +722,14 @@ def recommend_checkout_upsell(
         else:
             query_intent_fit = 0.0
         persona_fit = 0.0
+        persona_slug_boost = _persona_accessory_boost(persona, accessory_slug)
         persona_key = str(persona or "").strip().lower()
         if persona_key:
             if persona_key in {"student", "gamer", "office", "corporate", "engineer", "creator"}:
                 if "LAP" in cart_families:
                     # Cart already has a laptop; persona_fit should now reward
                     # use-case accessories (mouse, headset, bag, etc.) instead.
-                    persona_fit = 1.0 if affinity_boost > 0 else 0.0
+                    persona_fit = max(1.0 if affinity_boost > 0 else 0.0, persona_slug_boost)
                 else:
                     persona_fit = 1.0 if cand_family == "LAP" else 0.0
             elif persona_key in {"fashion", "apparel"}:
@@ -712,6 +748,7 @@ def recommend_checkout_upsell(
             + cart_family_fit * 2.4
             + query_intent_fit * 1.8
             + persona_fit * 1.4
+            + persona_slug_boost * 1.8
             + history_affinity * 1.1
         )
         factors = {
@@ -728,6 +765,7 @@ def recommend_checkout_upsell(
             "cart_family_fit": round(cart_family_fit, 4),
             "query_intent_fit": round(query_intent_fit, 4),
             "persona_fit": round(persona_fit, 4),
+            "persona_slug_boost": round(persona_slug_boost, 4),
             "history_affinity": round(history_affinity, 4),
         }
         poisoned, poison_reason = _looks_poisoned(name, sku, factors, ints, recent)
@@ -777,6 +815,9 @@ def recommend_checkout_upsell(
         if persona_fit >= 0.8:
             tags.append("persona_fit")
             reasons.append("Aligned with your current buyer persona")
+        if persona_slug_boost >= 0.8:
+            tags.append("persona_bundle_fit")
+            reasons.append("Strong accessory fit for this persona and cart")
         if history_affinity >= 0.5:
             tags.append("history_affinity")
             reasons.append("Aligned with your recent transaction history")
@@ -864,6 +905,9 @@ def recommend_checkout_upsell(
             sku = str(p.get("sku") or "").strip()
             if not sku or sku in cart_set:
                 continue
+            cand_family = _sku_family(sku)
+            if allowed_candidate_families is not None and cand_family not in allowed_candidate_families:
+                continue
             stock = int(p.get("stock") or 0)
             if stock <= 0:
                 continue
@@ -877,6 +921,9 @@ def recommend_checkout_upsell(
                 for p in products:
                     sku = str(p.get("sku") or "").strip()
                     if not sku or sku in cart_set:
+                        continue
+                    cand_family = _sku_family(sku)
+                    if allowed_candidate_families is not None and cand_family not in allowed_candidate_families:
                         continue
                     stock = int(p.get("stock") or 0)
                     if stock <= 0:
