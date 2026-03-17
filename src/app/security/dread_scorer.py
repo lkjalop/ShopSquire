@@ -65,6 +65,7 @@ _CV_SIGNAL_MITRE: Dict[str, str] = {
     "product_identity_low_confidence": "AML.T0043",
     "multimodal_attack_surface_high": "AML.T0051",
     "steg_suspicious": "T1027",
+    "steg_score_elevated": "T1027",
     "qr_code_detected": "T1566",
     "qr_external_url_detected": "T1566.002",
     "qr_external_url": "T1566.002",
@@ -112,6 +113,7 @@ _CV_SIGNAL_OWASP: Dict[str, str] = {
     "cross_image_split_injection": "LLM01:PromptInjection",
     "agentic_tool_injection": "LLM01:PromptInjection",
     "agentic_tool_abuse": "LLM08:ExcessiveAgency",
+    "steg_score_elevated": "LLM02:InsecureOutputHandling",
 }
 
 # ── Kill-chain stage inference ──
@@ -134,6 +136,7 @@ _SIGNAL_KILL_CHAIN: Dict[str, str] = {
     "prompt_injection": "Exploitation",
     "jailbreak": "Exploitation",
     "unicode_obfuscation": "Exploitation",
+    "steg_score_elevated": "Weaponization",
     "agentic_tool_abuse": "Installation",
     "unexpected_code_exec": "Installation",
     "training_poisoning": "Installation",

@@ -1442,11 +1442,33 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
     """
     if not _allow_public_escalation(request):
         raise HTTPException(status_code=403, detail="public_escalation_disabled")
+    # LOLBin enrichment — inject behavioral profiles when attack_hypothesis is lolbin
+    enriched_context = body.context
+    try:
+        from src.app.security.lolbin_behavioral_catalog import enrich_lolbin_indicators
+        _attack_hyp = (
+            (body.context or {}).get("security_payload", {}) or {}
+        ).get("attack_hypothesis", "")
+        if _attack_hyp == "lolbin_command_sequence":
+            _lolbin_hits = (
+                (body.context or {}).get("security_payload", {}) or {}
+            ).get("lolbin_hits", [])
+            if _lolbin_hits:
+                _profiles = enrich_lolbin_indicators(_lolbin_hits)
+                enriched_context = dict(body.context or {})
+                enriched_context["lolbin_behavioral_profiles"] = _profiles
+                enriched_context["lolbin_summary"] = "; ".join(
+                    f"{p['binary']} ({p['mitre_sub_technique']})"
+                    for p in _profiles
+                    if p.get("mitre_sub_technique")
+                )
+    except Exception:
+        pass
     return create_incident_record(
         case_id=body.case_id,
         trace_id=body.trace_id,
         reason=body.reason,
-        context=body.context,
+        context=enriched_context,
         created_by="buyer",
         severity="warn",
         title="Buyer escalation: human review requested",

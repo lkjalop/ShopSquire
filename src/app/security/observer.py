@@ -742,6 +742,21 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
                     current = "Stage6"
         except Exception:
             pass
+        # Fill PASTA gaps: steg, cross-modal, PCI, ransomware
+        try:
+            if signals.get("steg_suspicious") or signals.get("steg_score_elevated"):
+                _sn = int(current.replace("Stage", "") or "1")
+                if _sn < 4:
+                    current = "Stage4"
+            if signals.get("cross_modal_mismatch") or signals.get("pci_card_exposed") \
+                    or signals.get("multimodal_attack_surface_high"):
+                _sn = int(current.replace("Stage", "") or "1")
+                if _sn < 5:
+                    current = "Stage5"
+            if signals.get("ransomware_indicator"):
+                current = "Stage6"
+        except Exception:
+            pass
         workflow = []
         reached = False
         for s in stages:

@@ -554,6 +554,102 @@ def _metadata_strip_score(image_bytes: bytes, img: Any) -> tuple[bool, float]:
 
 _STEG_THRESHOLD = 0.42
 
+# ── LSB content extraction (length-prefix format used by embed_steg_payload.py) ─────────
+_LSB_PREFIX_BITS = 32  # 4-byte big-endian length prefix
+
+
+def _try_extract_lsb_content(channel: Any) -> str | None:
+    """Attempt to extract a UTF-8 payload embedded with a 32-bit length-prefix header.
+
+    Handles two header conventions:
+    - Convention A (embed_steg_payload.py): 32-bit header = number of BITS in payload
+    - Convention B (steg_embed.py / common tools): 32-bit header = number of CHARS in payload
+
+    Returns the decoded string if extraction is plausible, otherwise None.
+    Silent — all errors swallowed (best-effort only).
+    """
+    try:
+        flat = (channel.flatten() & 1).tolist()
+        if len(flat) < _LSB_PREFIX_BITS + 8:
+            return None
+        # Read 32-bit length from header
+        header_val = 0
+        for i, shift in enumerate(range(_LSB_PREFIX_BITS - 1, -1, -1)):
+            header_val |= flat[i] << shift
+
+        def _decode_bits(bits_list: list, num_bits: int) -> str | None:
+            if num_bits > len(bits_list):
+                return None
+            chars: list[int] = []
+            for i in range(0, num_bits - 7, 8):
+                byte = 0
+                for shift, b in zip(range(7, -1, -1), bits_list[i: i + 8]):
+                    byte |= b << shift
+                if byte == 0:
+                    break
+                chars.append(byte)
+            if not chars:
+                return None
+            text = bytes(chars).decode("utf-8", errors="replace")
+            printable = sum(1 for c in text if c.isprintable() or c in ("\n", "\r", "\t"))
+            if printable < 0.5 * len(text) or len(text) < 8:
+                return None
+            return text
+
+        payload_bits_region = flat[_LSB_PREFIX_BITS:]
+
+        # Convention A: header = bit count
+        if 8 <= header_val <= 4096 * 8:
+            result = _decode_bits(payload_bits_region, header_val)
+            if result:
+                return result
+
+        # Convention B: header = char count (32 + N*8 payload bits)
+        if 1 <= header_val <= 4096:
+            result = _decode_bits(payload_bits_region, header_val * 8)
+            if result:
+                return result
+
+        return None
+    except Exception:
+        return None
+
+
+def _try_extract_lsb_content_flat(arr: Any) -> str | None:
+    """Extract payload from flat RGB array (steg_embed.py embeds across all channels)."""
+    try:
+        flat = (arr.flatten() & 1).tolist()
+        if len(flat) < _LSB_PREFIX_BITS + 8:
+            return None
+        header_val = 0
+        for i, shift in enumerate(range(_LSB_PREFIX_BITS - 1, -1, -1)):
+            header_val |= flat[i] << shift
+
+        # Convention B: header = char count
+        if 1 <= header_val <= 4096:
+            num_bits = header_val * 8
+            bit_region = flat[_LSB_PREFIX_BITS: _LSB_PREFIX_BITS + num_bits]
+            if len(bit_region) < num_bits:
+                return None
+            chars: list[int] = []
+            for i in range(0, num_bits, 8):
+                byte = 0
+                for shift, b in zip(range(7, -1, -1), bit_region[i: i + 8]):
+                    byte |= b << shift
+                if byte == 0:
+                    break
+                chars.append(byte)
+            if not chars:
+                return None
+            text = bytes(chars).decode("utf-8", errors="replace")
+            printable = sum(1 for c in text if c.isprintable() or c in ("\n", "\r", "\t"))
+            if printable < 0.5 * len(text) or len(text) < 8:
+                return None
+            return text
+        return None
+    except Exception:
+        return None
+
 
 def detect_steganography(
     image_bytes: bytes,
@@ -654,7 +750,32 @@ def detect_steganography(
     )
     composite = float(min(1.0, max(0.0, composite)))
 
+    # ── Dual-detector override ────────────────────────────────────────────────
+    # When both chi-square uniformity AND SPA independently indicate steganography
+    # at moderate confidence — a co-firing unlikely in natural images — promote
+    # composite above threshold even if entropy is low (typical of small payloads).
+    if chi_p > 0.75 and spa > 0.18 and composite < thr:
+        composite = thr + 0.04  # just above threshold, not inflating the score
+
+    # ── Length-prefix content extraction (our embed_steg_payload.py format) ──
+    # Try to extract a real payload from the red channel (our format) and then
+    # from the flat RGB array (steg_embed.py / common tool format).
+    # If extraction succeeds the image is definitively suspicious.
+    extracted_content: str | None = None
+    try:
+        extracted_content = _try_extract_lsb_content(r_ch)
+        if extracted_content is None:
+            extracted_content = _try_extract_lsb_content(g_ch)
+        if extracted_content is None:
+            extracted_content = _try_extract_lsb_content_flat(arr)
+    except Exception:
+        extracted_content = None
+    if extracted_content:
+        composite = max(composite, thr + 0.10)
+
     explanations = []
+    if extracted_content:
+        explanations.append(f"LSB content extraction succeeded ({len(extracted_content)} chars recovered): \"{extracted_content[:80]}{'…' if len(extracted_content) > 80 else ''}\"")
     if avg_entropy > 0.97:
         explanations.append(f"LSB entropy very high ({avg_entropy:.4f}), typical of steganographic embedding")
     if chi_p > 0.5:
@@ -701,6 +822,7 @@ def detect_steganography(
         details={
             "threshold": thr,
             "avg_lsb_entropy": round(avg_entropy, 4),
+            **({"decoded_content": extracted_content} if extracted_content else {}),
             "composite_weights": {
                 "entropy": 0.16,
                 "chi_square": 0.13,

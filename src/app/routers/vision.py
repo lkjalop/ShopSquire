@@ -15,6 +15,7 @@ from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.intake_gate import strict_image_ingest_gate
 from src.app.services.image_intake import sanitize_image
 from src.app.routers.support_complaints import _normalize_ocr_and_detect, _probe_redirect_chain
+from src.app.security.passive_payload_analysis import classify_passive_payload
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 
@@ -482,6 +483,12 @@ async def triage(
     if product_identity:
         resp["product_identity"] = product_identity
 
+    payload_analysis = classify_passive_payload(
+        filename=str(name or ""),
+        extracted_text=(extracted_text or "")[:500],
+        signals=security_signals,
+    )
+
     resp["security"] = {
         "clean": security_clean,
         "signals": security_signals,
@@ -491,6 +498,13 @@ async def triage(
         "qr_redirect_probe": qr_redirect_probe,
         "analysis_stage": "fast" if fast else "full",
         "deferred_deep_analysis": bool(fast),
+        "payload_analysis": payload_analysis,
+        "decoded_artifact_available": payload_analysis.get("decoded_artifact_available"),
+        "payload_type": payload_analysis.get("payload_type"),
+        "attack_hypothesis": payload_analysis.get("attack_hypothesis"),
+        "mitre_attack": payload_analysis.get("mitre_attack") or [],
+        "decode_path": payload_analysis.get("decode_path"),
+        "suggested_next_step": payload_analysis.get("suggested_next_step"),
     }
     # Attach productive QR data (manufacturer URLs, model hints) for downstream identity extraction
     if qr_product_data:

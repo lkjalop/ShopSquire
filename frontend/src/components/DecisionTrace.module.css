@@ -883,3 +883,44 @@
   color: #92400e;
   margin: 2px 3px 2px 0;
 }
+
+.payloadGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.actionRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.primaryAction,
+.secondaryAction {
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.primaryAction {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.secondaryAction {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+}
+
+.actionStatus {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #374151;
+}

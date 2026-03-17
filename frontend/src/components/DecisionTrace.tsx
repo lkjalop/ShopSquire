@@ -192,6 +192,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [minimized, setMinimized] = useState(false);
   const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll'>('poll');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const traceIdText = typeof traceId === 'string' ? traceId : '';
+  const [payloadActionStatus, setPayloadActionStatus] = useState<Record<string, string>>({});
   const [posthocType, setPosthocType] = useState<string>('fraud_confirmed');
   const [posthocValue, setPosthocValue] = useState<string>('true');
   const [posthocNote, setPosthocNote] = useState<string>('');
@@ -731,6 +733,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   function buildTriageNarrative(t: any): string {
     const sigs = t?.security?.signals || t?.signals || {};
     const filename = t?._filename || 'image';
+    const payloadAnalysis = t?.security?.payload_analysis || t?.payload_analysis || {};
     const parts: string[] = [];
 
     if (sigs.qr_code_detected) {
@@ -745,7 +748,20 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (sigs.qr_external_url) parts.push('QR code contains an external URL; flagged for review.');
     if (sigs.adversarial_detected) parts.push('Adversarial perturbation signature found; image may be crafted to mislead the classifier.');
     if (sigs.ai_generated_suspected) parts.push('High diffusion-model score ? image may be AI-generated.');
-    if (sigs.steg_suspicious) parts.push(`Steganography anomaly detected (score: ${sigs.steg_score ?? '?'}); metadata may be hiding a payload.`);
+    if (payloadAnalysis.attack_hypothesis === 'ransomware' || sigs.ransomware_indicator) {
+      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR — sandbox detonation required before any further processing. Do NOT execute on a live host.');
+    } else if (payloadAnalysis.attack_hypothesis && payloadAnalysis.attack_hypothesis !== 'unknown') {
+      parts.push(`Passive triage suggests ${String(payloadAnalysis.attack_hypothesis).replace(/_/g, ' ')} behavior.`);
+    } else if (sigs.steg_suspicious) {
+      parts.push(`Steganography anomaly detected (score: ${sigs.steg_score ?? '?'}); metadata may be hiding a payload.`);
+    }
+    if (payloadAnalysis.pasta_stage) {
+      parts.push(`PASTA ${payloadAnalysis.pasta_stage}.`);
+    }
+    const _dp = payloadAnalysis.decode_path;
+    if (_dp && _dp !== 'safe_passive_decode_only') {
+      parts.push(`Decode advisory: ${_dp.replace(/_/g, ' ')}.`);
+    }
 
     const ocrText = (t?.security?.extracted_text || t?.security?.ocr_text || t?.extracted_text || t?.ocr_text || '').trim();
     if (ocrText) parts.push(`OCR/extracted text: "${ocrText.slice(0, 200)}${ocrText.length > 200 ? '?' : ''}"`);
@@ -753,6 +769,57 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (parts.length === 0) parts.push(`No threats detected in ${filename}. Image appears benign.`);
     return parts.join(' ');
   }
+
+  const triggerPayloadAction = useCallback(async (
+    itemKey: string,
+    t: any,
+    action: 'analyze_payload_further' | 'queue_sandbox_detonation',
+  ) => {
+    if (!traceId) {
+      setPayloadActionStatus((prev) => ({ ...prev, [itemKey]: 'No trace id available.' }));
+      return;
+    }
+    const payloadAnalysis = t?.security?.payload_analysis || t?.payload_analysis || {};
+    const filename = t?._filename || 'image';
+    try {
+      setPayloadActionStatus((prev) => ({ ...prev, [itemKey]: action === 'queue_sandbox_detonation' ? 'Queueing sandbox detonation...' : 'Creating analyst follow-up...' }));
+      const resp = await fetch(apiUrl('/api/v1/incidents/escalate'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(authHeaders || {}) },
+        body: JSON.stringify({
+          trace_id: traceId,
+          reason: action,
+          context: {
+            filename,
+            security_payload: payloadAnalysis,
+            signals: t?.security?.signals || t?.signals || {},
+            extracted_text: t?.security?.extracted_text || t?.extracted_text || '',
+          },
+        }),
+      });
+      const data = await safeJson(resp);
+      if (resp.ok && data?.ok && data?.incident_id) {
+        const _profiles: any[] = data?.lolbin_behavioral_profiles || [];
+        const _ransomware = data?.ransomware_indicator || payloadAnalysis?.attack_hypothesis === 'ransomware';
+        const _profileSummary = _profiles.length > 0
+          ? ` LOLBin profiles: ${_profiles.map((p: any) => p.binary || p.full_name).join(', ')}.`
+          : '';
+        const _ransomwareWarning = _ransomware ? ' ⚠\ufe0f Ransomware indicator — do NOT execute outside sandbox.' : '';
+        setPayloadActionStatus((prev) => ({
+          ...prev,
+          [itemKey]: action === 'queue_sandbox_detonation'
+            ? `Sandbox detonation queued via incident ${data.incident_id}.${_profileSummary}${_ransomwareWarning}`
+            : `Payload follow-up queued via incident ${data.incident_id}.${_profileSummary}${_ransomwareWarning}`,
+        }));
+        return;
+      }
+      const detail = (data && (data.detail || data.error)) ? String(data.detail || data.error) : `http_${resp.status}`;
+      setPayloadActionStatus((prev) => ({ ...prev, [itemKey]: `Action failed: ${detail}.` }));
+    } catch (e: any) {
+      setPayloadActionStatus((prev) => ({ ...prev, [itemKey]: `Action failed: ${e?.message || 'network_error'}.` }));
+    }
+  }, [authHeaders, traceId]);
 
   const buildSecurityReport = () => ({
     decision_id: trace?.decision_id,
@@ -1813,6 +1880,42 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         ))}
                         {stages.length === 0 && <span className={styles.muted}>No workflow data.</span>}
                       </div>
+                      {/* Per-signal PASTA stage chips derived from active signals */}
+                      {(() => {
+                        const _sigs = security?.signals || {};
+                        const _SIGNAL_PASTA: Record<string, string> = {
+                          ransomware_indicator: 'Stage6',
+                          c2_beacon: 'Stage5',
+                          lolbin_command_sequence: 'Stage4',
+                          cross_modal_mismatch: 'Stage5',
+                          pci_card_exposed: 'Stage5',
+                          multimodal_attack_surface_high: 'Stage5',
+                          steg_suspicious: 'Stage4',
+                          steg_score_elevated: 'Stage4',
+                          macros_embedded: 'Stage4',
+                          adversarial_detected: 'Stage3',
+                          qr_prompt_injection: 'Stage3',
+                        };
+                        const _STAGE_CLASS: Record<string, string> = {
+                          Stage6: styles.tagRed,
+                          Stage5: styles.tagRed,
+                          Stage4: styles.tagWarn,
+                          Stage3: styles.tagWarn,
+                        };
+                        const chips = Object.entries(_SIGNAL_PASTA)
+                          .filter(([sig]) => _sigs[sig])
+                          .map(([sig, stage]) => ({ sig, stage }));
+                        if (chips.length === 0) return null;
+                        return (
+                          <div className={styles.tagRow} style={{ marginTop: '4px' }}>
+                            {chips.map(({ sig, stage }) => (
+                              <span key={sig} className={_STAGE_CLASS[stage] || styles.tag} title={sig}>
+                                {stage} \u2014 {sig.replace(/_/g, ' ')}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </>
                   )}
 
@@ -1824,7 +1927,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         const sigs = t?.security?.signals || t?.signals || {};
                         const ocrText = (t?.security?.extracted_text || t?.security?.ocr_text || t?.extracted_text || t?.ocr_text || t?.ocr?.best_text || '').trim();
                         const payloads: any[] = sigs.qr_payloads || t?.qr_payloads || [];
+                        const payloadAnalysis = t?.security?.payload_analysis || t?.payload_analysis || {};
+                        const mitreAttack: string[] = Array.isArray(t?.security?.mitre_attack)
+                          ? t.security.mitre_attack
+                          : Array.isArray(payloadAnalysis?.mitre_attack)
+                            ? payloadAnalysis.mitre_attack
+                            : [];
                         const filename = t?._filename || `Image ${idx + 1}`;
+                        const itemKey = `${traceId || 'trace'}:${idx}:${filename}`;
                         const cleanFlag = t?.security?.clean;
                         const clean = cleanFlag !== false && !sigs.qr_code_detected && !sigs.adversarial_detected && !sigs.steg_suspicious;
                         return (
@@ -1848,6 +1958,30 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 <div className={styles.muted}>Evaluated - no OCR text extracted.</div>
                               </>
                             )}
+                            <div className={styles.sectionSubTitle}>Payload Assessment</div>
+                            <div className={styles.payloadGrid}>
+                              <div className={styles.kvRow}><span>Decoded artifact available</span><span>{renderValue(Boolean(payloadAnalysis.decoded_artifact_available))}</span></div>
+                              <div className={styles.kvRow}><span>Payload type</span><span>{renderValue(payloadAnalysis.payload_type || 'unknown')}</span></div>
+                              <div className={styles.kvRow}><span>Attack hypothesis</span><span>{renderValue(payloadAnalysis.attack_hypothesis || 'unknown')}</span></div>
+                              {payloadAnalysis.pasta_stage && (
+                                <div className={styles.kvRow}><span>PASTA stage</span><span className={styles.tagWarn}>{payloadAnalysis.pasta_stage}</span></div>
+                              )}
+                              <div className={styles.kvRow}><span>Decode path</span><span className={(
+                                payloadAnalysis.decode_path === 'sandbox_required_do_not_execute'
+                                  ? styles.tagRed
+                                  : payloadAnalysis.decode_path === 'lolbin_command_decode'
+                                    ? styles.tagWarn
+                                    : undefined
+                              )}>{renderValue(payloadAnalysis.decode_path || 'safe_passive_decode_only')}</span></div>
+                              <div className={styles.kvRow}><span>Suggested next step</span><span>{renderValue(payloadAnalysis.suggested_next_step || 'allow')}</span></div>
+                            </div>
+                            <div className={styles.sectionSubTitle}>MITRE Attack</div>
+                            <div className={styles.tagRow}>
+                              {mitreAttack.map((tag: string) => (
+                                <span key={tag} className={styles.tagWarn}>{tag}</span>
+                              ))}
+                              {mitreAttack.length === 0 && <span className={styles.muted}>None</span>}
+                            </div>
                             {/* Decoded QR payloads */}
                             {payloads.length > 0 && (
                               <>
@@ -1864,11 +1998,54 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             <div className={styles.tagRow}>
                               {Object.entries(sigs)
                                 .filter(([k, v]) => typeof v === 'boolean' && v && k !== 'qr_payloads')
-                                .map(([k]) => <span key={k} className={styles.tagWarn}>{k}</span>)}
+                                .map(([k]) => {
+                                  const SIGNAL_LABELS: Record<string, string> = {
+                                    ransomware_indicator: 'Ransomware Indicator',
+                                    steg_suspicious: 'Steg Anomaly',
+                                    steg_score_elevated: 'Steg Score Elevated',
+                                    c2_beacon: 'C2 Beacon',
+                                    lolbin_command_sequence: 'LOLBin Command Sequence',
+                                    macros_embedded: 'Embedded Macros',
+                                    cross_modal_mismatch: 'Cross-Modal Mismatch',
+                                    pci_card_exposed: 'PCI Card Exposed',
+                                    multimodal_attack_surface_high: 'High Attack Surface',
+                                    adversarial_detected: 'Adversarial Image',
+                                    ai_generated_suspected: 'AI-Generated Suspected',
+                                    qr_code_detected: 'QR Code',
+                                    qr_prompt_injection: 'QR Prompt Injection',
+                                    qr_external_url: 'QR External URL',
+                                  };
+                                  const label = SIGNAL_LABELS[k] || k.replace(/_/g, ' ');
+                                  const isCritical = k === 'ransomware_indicator' || k === 'c2_beacon' || k === 'lolbin_command_sequence';
+                                  return <span key={k} className={isCritical ? styles.tagRed : styles.tagWarn}>{label}</span>;
+                                })}
                               {sigs.steg_score != null && (
-                                <span className={styles.tagWarn}>steg_score:{sigs.steg_score}</span>
+                                <span className={styles.tagWarn}>steg score: {sigs.steg_score}</span>
                               )}
                             </div>
+                            {!clean && (
+                              <>
+                                <div className={styles.actionRow}>
+                                  <button
+                                    type="button"
+                                    className={styles.secondaryAction}
+                                    onClick={() => triggerPayloadAction(itemKey, t, 'analyze_payload_further')}
+                                  >
+                                    Analyze payload further
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={styles.primaryAction}
+                                    onClick={() => triggerPayloadAction(itemKey, t, 'queue_sandbox_detonation')}
+                                  >
+                                    Queue sandbox detonation
+                                  </button>
+                                </div>
+                                {payloadActionStatus[itemKey] && (
+                                  <div className={styles.actionStatus}>{payloadActionStatus[itemKey]}</div>
+                                )}
+                              </>
+                            )}
                           </div>
                         );
                       })}
@@ -1969,7 +2146,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
               )}
 
               {!trace && (
-                <div className={styles.empty}>Loading trace data for {traceId}...</div>
+                <div className={styles.empty}>{traceIdText ? `Loading trace data for ${traceIdText}...` : 'Loading trace data...'}</div>
               )}
             </div>
           </>

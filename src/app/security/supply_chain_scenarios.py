@@ -192,6 +192,48 @@ def sc04_c2_beaconing() -> Dict[str, Any]:
         ),
     }
 
+# ── SC-04b  C2 via agentic steg channel ──────────────────────────────────
+
+def sc04b_c2_steg_image_channel() -> Dict[str, Any]:
+    """SC-04b: C2 instructions delivered via LSB steganography in product image submissions.
+
+    Threat model: adversary submits catalog/returns images with LSB-encoded C2 polling
+    instructions targeting the AI vision processing pipeline. This vector is not covered
+    by network XDR platforms (Darktrace, ExtraHop, Cortex XDR) because it requires
+    visibility into the vision inference pipeline, not the network layer.
+    """
+    return {
+        "scenario_id": "SC-04B",
+        "name": "C2 via Image Steganography (Agentic AI Pipeline)",
+        "mitre_attack": ["T1027.001", "T1071.001", "T1573.002"],
+        "owasp_tags": ["ASI07:InsecureInterAgentComms", "LLM05:SupplyChainVulnerabilities"],
+        "kill_chain": ["delivery", "command_and_control"],
+        "pasta_stage": "Stage4 — Exploitation & Vulnerability Analysis",
+        "payload": {
+            "event_type": "steg_c2_channel",
+            "carrier": "product_catalog_image_upload",
+            # Inert RFC-5737/RFC-2606 reserved ranges only
+            "decoded_payload": "c2_beacon:interval=60:jitter=0.15:dst=203.0.113.99:domain=c2.example.com",
+            "encoding": "lsb_green_channel",
+            "estimated_capacity_pct": 0.08,
+            "steg_score": 0.67,
+            "detection_signals": [
+                "lsb_entropy_elevated",
+                "chi_square_uniformity_high",
+                "spa_capacity_estimate_positive",
+            ],
+        },
+        "expected_signals": ["c2_beacon", "steg_unknown_payload"],
+        "expected_severity": "high",
+        "human_escalation_expected": True,
+        "description": (
+            "An adversary uploads a product image with C2 polling instructions encoded in the "
+            "green channel LSBs. The steg detector flags elevated entropy and chi-square "
+            "uniformity; passive decode extracts the beacon configuration targeting a TEST-NET-3 "
+            "IP (RFC-5737). This scenario is specific to agentic AI platforms — traditional "
+            "network XDR has no visibility into vision-pipeline-borne C2 channels."
+        ),
+    }
 
 # ── SC-05  LOLBin abuse ─────────────────────────────────────────────────
 
@@ -354,6 +396,7 @@ ALL_SCENARIOS = {
     "SC-02": sc02_watering_hole,
     "SC-03": sc03_cicd_pipeline_poison,
     "SC-04": sc04_c2_beaconing,
+    "SC-04B": sc04b_c2_steg_image_channel,
     "SC-05": sc05_lolbin_abuse,
     "SC-06": sc06_macro_document,
     "SC-07": sc07_dependency_confusion,

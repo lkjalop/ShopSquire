@@ -27,6 +27,8 @@ _SIGNAL_TO_ATLAS: Dict[str, str] = {
     "cross_image_split_injection": "AML.T0051",
     "agentic_tool_injection": "AML.T0051",
     "agentic_tool_abuse": "AML.T0040",
+    "steg_suspicious": "AML.T0043",
+    "steg_score_elevated": "AML.T0043",
 }
 
 _SIGNAL_TO_ATTACK: Dict[str, str] = {
@@ -200,6 +202,8 @@ def _pasta(signals: Dict[str, Any], severity: str | None, *, dread: Dict[str, An
             current = "Stage5"
         if bool(signals.get("cross_modal_mismatch")) or bool(signals.get("multimodal_attack_surface_high")):
             current = "Stage5"
+        if bool(signals.get("steg_suspicious")) or bool(signals.get("steg_score_elevated")):
+            current = "Stage4"
         if bool(signals.get("ransomware_indicator")):
             current = "Stage6"
         if str(severity or "").lower() in ("high", "critical", "error"):

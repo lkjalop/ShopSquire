@@ -9,6 +9,11 @@ from typing import Any, Dict, List, Tuple
 
 from src.app.config import load_feature_flags, get_settings
 from src.app.rules.tenant_config_store import TenantConfigStore
+try:
+    from src.app.security.lolbin_behavioral_catalog import enrich_lolbin_indicators as _enrich_lolbin
+except Exception:
+    def _enrich_lolbin(hits):  # type: ignore
+        return []
 
 
 KNOWN_BRANDS = [
@@ -713,7 +718,19 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
         indicators.append({"type": "dangerous_tool_intent", "value": True, "reason": "Disallowed tool intent in content"})
     lolbin_hits = sorted({m.group(1).lower() for m in _LOLBINS_PAT.finditer(analysis_text)})
     if lolbin_hits:
-        indicators.append({"type": "lolbin_command", "value": lolbin_hits, "reason": "Living-off-the-land binary pattern detected"})
+        _profiles = _enrich_lolbin(lolbin_hits)
+        _lolbin_reason = "; ".join(
+            f"{p['full_name']} ({p['mitre_sub_technique']}): {p['description'][:150]}…"
+            for p in _profiles
+        ) or "Living-off-the-land binary pattern detected"
+        indicators.append({
+            "type": "lolbin_command",
+            "value": lolbin_hits,
+            "reason": _lolbin_reason,
+            "behavioral_profiles": _profiles,
+            "pasta_stage": _profiles[0]["pasta_stage_name"] if _profiles else "Stage4 — Exploitation & Vulnerability Analysis",
+            "decode_path": "lolbin_command_decode",
+        })
         has_external_link = bool(re.search(r"https?://", analysis_text))
         has_risky_attachment = bool(suspicious_attachments(attachments))
         if has_external_link or has_risky_attachment:
