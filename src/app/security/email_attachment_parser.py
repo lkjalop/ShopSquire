@@ -10,12 +10,30 @@ from xml.etree import ElementTree as ET
 
 
 _PDF_TEXT_PAT = re.compile(rb"\(([^()]*)\)\s*Tj")
+_PDF_URI_PAT = re.compile(rb"/URI\s*\(([^)]{4,512})\)")
 _PRINTABLE_PAT = re.compile(rb"[A-Za-z0-9][A-Za-z0-9 \-_/.:,]{5,}")
 _BSB_PAT = re.compile(r"\bBSB[\s:]*([0-9]{3}[- ]?[0-9]{3})", re.IGNORECASE)
-_ACC_PAT = re.compile(r"\b(?:account\s*(?:no|number)?)[\s:]*([0-9 ]{6,24})", re.IGNORECASE)
+_ACC_PAT = re.compile(r"\b(?:account\s*(?:no|number)?)[\s:]*([0-9 -]{6,24})", re.IGNORECASE)
 _SWIFT_PAT = re.compile(r"\bSWIFT[\s:]*([A-Z0-9]{8,11})\b", re.IGNORECASE)
 _IBAN_PAT = re.compile(r"\bIBAN[\s:]*([A-Z0-9]{12,34})\b", re.IGNORECASE)
 _BENEF_PAT = re.compile(r"\b(?:account\s+name|beneficiary|payee)[\s:]*([A-Za-z0-9 .&,'-]{3,80})\b", re.IGNORECASE)
+_PAYMENT_HINT_PAT = re.compile(
+    r"(?i)\b("
+    r"bank(?:ing)?\s+details?"
+    r"|remittance"
+    r"|payment"
+    r"|bsb"
+    r"|swift"
+    r"|iban"
+    r"|beneficiary"
+    r"|payee"
+    r"|account(?:\s+name|\s+number|\s+no)?"
+    r"|invoice"
+    r"|abn"
+    r"|updated\s+payment\s+details?"
+    r"|bank(?:ing)?\s+details?\s+have\s+changed"
+    r")\b"
+)
 
 
 def _decode_b64(raw: str) -> bytes:
@@ -52,7 +70,23 @@ def _extract_zip_xml_text(blob: bytes) -> str:
     return " ".join(out)[:20000]
 
 
-def _extract_pdf_text(blob: bytes) -> str:
+def _dedupe_text_blocks(parts: List[str]) -> str:
+    out: List[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        for line in re.split(r"[\r\n]+", str(part or "")):
+            cleaned = re.sub(r"\s+", " ", line).strip()
+            if len(cleaned) < 2:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(cleaned)
+    return "\n".join(out)[:20000]
+
+
+def _extract_pdf_text_basic(blob: bytes) -> str:
     # Best effort: use installed parser first, then fallback to lightweight pattern extraction.
     try:
         import pypdf  # type: ignore
@@ -85,6 +119,55 @@ def _extract_pdf_text(blob: bytes) -> str:
         return rough[:20000]
     except Exception:
         return ""
+
+
+def _extract_pdf_urls(blob: bytes) -> List[str]:
+    urls: List[str] = []
+    for match in _PDF_URI_PAT.finditer(blob):
+        try:
+            url = match.group(1).decode("latin-1", errors="ignore").strip()
+            if url and url not in urls:
+                urls.append(url)
+        except Exception:
+            continue
+    try:
+        rough = " ".join([x.decode("latin-1", errors="ignore") for x in _PRINTABLE_PAT.findall(blob)])
+        for url in re.findall(r"https?://[^\s<>'\"`]+", rough, re.IGNORECASE):
+            if url not in urls:
+                urls.append(url)
+    except Exception:
+        pass
+    return urls[:12]
+
+
+def _pdf_text_looks_unusable(text: str) -> bool:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(cleaned) < 80:
+        return True
+    alpha_count = sum(ch.isalpha() for ch in cleaned)
+    if alpha_count < 25:
+        return True
+    pdf_syntax_hits = 0
+    for tok in (" obj ", " endobj", " stream", " endstream", "/type", "/font", "/page", "/catalog", "reportlab generated pdf", "%%eof", "xref"):
+        if tok in cleaned.lower():
+            pdf_syntax_hits += 1
+    if pdf_syntax_hits >= 4 and len(_PAYMENT_HINT_PAT.findall(cleaned)) == 0:
+        return True
+    hint_count = len(_PAYMENT_HINT_PAT.findall(cleaned))
+    return hint_count == 0 and len(cleaned.split()) < 24
+
+
+def _extract_pdf_text(blob: bytes) -> str:
+    primary = _extract_pdf_text_basic(blob)
+    parts: List[str] = [primary] if str(primary or "").strip() else []
+    if _pdf_text_looks_unusable(primary):
+        ocr_text = _ocr_pdf_pages(blob, max_pages=4, scale=2.2)
+        if str(ocr_text or "").strip():
+            parts.append(ocr_text)
+    urls = _extract_pdf_urls(blob)
+    if urls:
+        parts.append("\n".join(urls))
+    return _dedupe_text_blocks(parts)
 
 def _pdf_forensics(blob: bytes) -> Dict[str, Any]:
     # Best-effort metadata + suspicious feature counters (no heavy parsing required).
@@ -143,6 +226,70 @@ def _try_image_ocr(blob: bytes) -> str:
         return str(txt)[:20000]
     except Exception:
         return ""
+
+
+def _preview_png_b64(blob: bytes, *, content_type: str, filename: str, max_side: int = 320) -> str | None:
+    try:
+        from PIL import Image  # type: ignore
+
+        ctype = str(content_type or "").lower()
+        name = str(filename or "").lower()
+        img = None
+        if ctype.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")):
+            img = Image.open(io.BytesIO(blob))
+        elif "pdf" in ctype or name.endswith(".pdf"):
+            try:
+                import pypdfium2 as pdfium  # type: ignore
+
+                pdf = pdfium.PdfDocument(blob)
+                if len(pdf) > 0:
+                    page = pdf[0]
+                    bitmap = page.render(scale=1.5)
+                    img = bitmap.to_pil()
+            except Exception:
+                img = None
+        if img is None:
+            return None
+        img = img.convert("RGB")
+        img.thumbnail((max_side, max_side))
+        out = io.BytesIO()
+        img.save(out, format="PNG")
+        return base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception:
+        return None
+
+
+def _ocr_pdf_pages(blob: bytes, *, max_pages: int = 3, scale: float = 2.0) -> str:
+    """Rasterize PDF pages and OCR them.
+
+    Prefers pypdfium2 because it is lightweight and works well in the current
+    Windows dev environment without requiring external poppler/ghostscript.
+    """
+    texts: List[str] = []
+
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+
+        pdf = pdfium.PdfDocument(blob)
+        page_count = min(len(pdf), max_pages)
+        for idx in range(page_count):
+            try:
+                page = pdf[idx]
+                bitmap = page.render(scale=scale)
+                pil_image = bitmap.to_pil()
+                out = io.BytesIO()
+                pil_image.save(out, format="PNG")
+                txt = _try_image_ocr(out.getvalue())
+                if txt.strip():
+                    texts.append(txt.strip())
+            except Exception:
+                continue
+        if texts:
+            return "\n".join(texts)[:20000]
+    except Exception:
+        pass
+
+    return ""
 
 
 def _extract_bank_fields(text: str) -> Dict[str, Any]:
@@ -309,6 +456,7 @@ def hydrate_attachments_from_bytes(
                     row["embedded_files_count"] = int(f.get("embedded_files_count") or 0)
                     row["pdf_objstm_count"] = int(f.get("objstm_count") or 0)
                     row["pdf_xrefstm_present"] = bool(f.get("xrefstm_present"))
+                    row["pdf_embedded_urls"] = _extract_pdf_urls(blob)
             except Exception:
                 pass
             # Explicit bank field extraction + fingerprint
@@ -316,9 +464,21 @@ def hydrate_attachments_from_bytes(
                 bank_fields = _extract_bank_fields(str(row.get("extracted_text") or ""))
                 if bank_fields:
                     row["bank_fields"] = bank_fields
+                    if bank_fields.get("beneficiary") and not row.get("extracted_account_name"):
+                        row["extracted_account_name"] = str(bank_fields.get("beneficiary") or "")
                     fp = _bank_fingerprint(bank_fields)
                     if fp:
                         row["extracted_bank_fingerprint"] = fp
+            except Exception:
+                pass
+            try:
+                preview_b64 = _preview_png_b64(
+                    blob,
+                    content_type=str(row.get("content_type") or ""),
+                    filename=str(row.get("name") or ""),
+                )
+                if preview_b64:
+                    row["preview_png_b64"] = preview_b64
             except Exception:
                 pass
             # Deterministic structural hashes for drift checks when upstream did not provide them.
@@ -357,6 +517,7 @@ def hydrate_attachments_from_bytes(
                     row["steg_suspicious"] = bool(_steg.is_suspicious)
                     if _steg.is_suspicious:
                         row["steg_explanations"] = list(_steg.explanations)[:8]
+                        row["steg_details"] = dict(_steg.details or {})
                         row["steg_signals"] = {
                             "lsb_entropy_r": round(float(_steg.lsb_entropy_r), 4),
                             "lsb_entropy_g": round(float(_steg.lsb_entropy_g), 4),
@@ -379,6 +540,7 @@ def hydrate_attachments_from_bytes(
                         row["steg_source"] = "pdf_embedded_image"
                         if _steg_pdf.is_suspicious:
                             row["steg_explanations"] = list(_steg_pdf.explanations)[:8]
+                            row["steg_details"] = dict(_steg_pdf.details or {})
                     else:
                         row.setdefault("steg_score", 0.0)
                         row.setdefault("steg_suspicious", False)

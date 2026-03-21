@@ -57,6 +57,13 @@ def test_approved_domains_pass(url):
     assert g.is_allowed(url) is True
 
 
+def test_demo_qr_provider_domains_are_allowlisted():
+    g = _make_guard()
+    assert g.is_allowed("https://scanned.page/p/R2g2Jb") is True
+    assert g.is_allowed("https://www.scanned.page/r/R2g2Jb") is True
+    assert g.is_allowed("https://qr.scanned.page/uploads/pdf/demo.pdf") is True
+
+
 # ---------------------------------------------------------------------------
 # is_allowed: dead-drop domains always blocked
 # ---------------------------------------------------------------------------

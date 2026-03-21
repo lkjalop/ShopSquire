@@ -28,3 +28,16 @@ def test_cidr_override_match_unit(tmp_path):
 def test_provider_fallback_graceful_unit():
     geo = _geoip_enrich("198.51.100.23")
     assert isinstance(geo, dict)
+
+
+def test_offline_geoip_heuristics_cover_known_ips_unit():
+    google = _geoip_enrich("8.8.8.8")
+    assert google.get("asn") == 15169
+    assert google.get("country") == "US"
+    assert bool(google.get("is_hosting")) is True
+    assert float(google.get("risk", 0.0)) >= 0.8
+
+    torish = _geoip_enrich("185.220.101.1")
+    assert bool(torish.get("is_vpn")) is True
+    assert bool(torish.get("is_hosting")) is True
+    assert float(torish.get("risk", 0.0)) >= 0.9

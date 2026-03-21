@@ -13,7 +13,14 @@ def test_email_lab_analyze_populates_trace_and_security_matrix(page, test_server
     # Click Analyze and wait for verdict/status updates in the right panel.
     page.get_by_role("button", name="Analyze email and populate security matrix").click()
     # Verdict and reasons should be populated (or explicit failure surfaced).
-    page.wait_for_timeout(1500)
+    page.wait_for_function(
+        """() => {
+            const verdict = (document.querySelector('#verdict')?.textContent || '').trim().toLowerCase();
+            const status = (document.querySelector('#status')?.textContent || '').trim().toLowerCase();
+            return (verdict && verdict !== 'n/a') || (status && !status.startsWith('analyzing'));
+        }""",
+        timeout=20000,
+    )
     verdict_text = (page.locator("#verdict").inner_text(timeout=12000) or "").strip()
     status_text = (page.locator("#status").text_content() or "").strip()
     if verdict_text.lower() == "n/a" and not status_text:
@@ -35,9 +42,12 @@ def test_email_lab_analyze_populates_trace_and_security_matrix(page, test_server
 
     reasons_text = page.locator("#reasons").inner_text(timeout=10000)
     assert reasons_text is not None
+    page.locator("text=Human Gate Thresholds").wait_for(state="visible", timeout=12000)
+    assert page.locator("text=Human Gate Thresholds").count() >= 1
+    assert page.locator("text=Refresh Connector Health").count() >= 1
 
     # Trace id should be created and the trace rail should render at least one event.
     trace_id = page.locator("#trace_id").inner_text(timeout=10000)
     assert trace_id and trace_id.lower() != "n/a"
     # At least one trace event card appears.
-    page.locator("#trace .ev").first.wait_for(state="visible", timeout=12000)
+    page.wait_for_function("() => document.querySelectorAll('#trace .ev').length > 0", timeout=12000)

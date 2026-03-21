@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "urls": [
+        "https://scanned.page/p/R2g2Jb",
+        "https://www.scanned.page/p/R2g2Jb",
+        "https://scanned.page/r/R2g2Jb",
+        "https://www.scanned.page/r/R2g2Jb"
+      ],
+      "local_path": "dump/SSN-numberz - Sheet1.pdf",
+      "content_type": "application/pdf",
+      "filename": "SSN-numberz - Sheet1.pdf",
+      "tag": "qr_ssn_offline_fixture"
+    }
+  ]
+}

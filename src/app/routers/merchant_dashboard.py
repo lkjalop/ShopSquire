@@ -480,6 +480,9 @@ def merchant_email_lab(request: Request):
     if not (_is_loopback(request) or _is_local_demo_host(request)):
         raise HTTPException(status_code=403, detail="email_lab_local_only")
 
+    import os as _os
+    _owner_key = _os.getenv("OWNER_API_KEY", "local-owner-key")
+
     html = """
     <!doctype html>
     <html>
@@ -556,6 +559,31 @@ def merchant_email_lab(request: Request):
           .sev-error   { background: #fff1f0; border-left: 4px solid #ef4444; color: #b91c1c; }
           .sev-warning { background: #fffbeb; border-left: 4px solid #f59e0b; color: #92400e; }
           .sev-info    { background: #eff6ff; border-left: 4px solid #3b82f6; color: #1d4ed8; }
+          .right-rail.detached {
+            position: fixed;
+            top: 72px;
+            right: 16px;
+            width: min(560px, 44vw);
+            max-height: calc(100vh - 88px);
+            z-index: 1000;
+            background: rgba(243, 246, 251, 0.98);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
+            padding: 10px;
+          }
+          .rail-toolbar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+          .card-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+          .summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+          .finding-list { margin:0; padding-left:16px; }
+          .finding-list li { margin:4px 0; }
+          .section-label { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#64748b; margin-bottom:4px; font-weight:700; }
+          .evidence-block { padding:10px; border:1px solid var(--border); border-radius:10px; background:#fff; margin-top:8px; }
+          .attachment-row { padding:10px; border:1px solid var(--border); border-radius:10px; background:#fff; margin-top:8px; }
+          .thumb-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px; }
+          .thumb-grid img { width:100%; border:1px solid var(--border); border-radius:8px; background:#fff; }
+          .trace-toggle { display:flex; gap:6px; margin:8px 0; }
+          .trace-toggle button.active { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
           /* Scrollbar */
           ::-webkit-scrollbar { width: 5px; height: 5px; }
           ::-webkit-scrollbar-track { background: transparent; }
@@ -614,7 +642,38 @@ def merchant_email_lab(request: Request):
               </div>
             </div>
           </div>
-          <div class="pane col" style="overflow-y:auto; max-height:calc(100vh - 60px);">
+          <div class="pane col right-rail" id="right_rail" style="overflow-y:auto; max-height:calc(100vh - 60px);">
+            <div class="rail-toolbar">
+              <button class="btn" type="button" onclick="toggleDetachRightRail()">Detach Rail</button>
+              <button class="btn" type="button" onclick="openRightRailTab()">Open In New Tab</button>
+            </div>
+            <div class="card" id="exec_card" style="display:none;">
+              <h4>Executive Summary</h4>
+              <div class="body">
+                <div class="summary-grid">
+                  <div>
+                    <div class="section-label">What Happened</div>
+                    <div id="exec_what_happened" class="small"></div>
+                  </div>
+                  <div>
+                    <div class="section-label">Business Risk</div>
+                    <div id="exec_business_risk" class="small"></div>
+                  </div>
+                </div>
+                <div style="margin-top:8px;">
+                  <div class="section-label">Why It Was Flagged</div>
+                  <div id="exec_why_flagged" class="small"></div>
+                </div>
+                <div style="margin-top:8px;">
+                  <div class="section-label">Immediate Actions</div>
+                  <div id="exec_immediate_actions" class="small"></div>
+                </div>
+                <div style="margin-top:8px;">
+                  <div class="section-label">Recommended Next Steps</div>
+                  <div id="exec_next_steps" class="small"></div>
+                </div>
+              </div>
+            </div>
             <!-- Security Overview Panel (populated after Analyze) -->
             <div class="card" id="sec_overview" style="display:none;">
               <h4>Security Overview</h4>
@@ -644,6 +703,12 @@ def merchant_email_lab(request: Request):
                 </div>
                 <div class="small" style="margin-top:6px;" id="trust_actions"></div>
                 <div class="small" style="margin-top:4px; color:#94a3b8;" id="trust_reasons"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="infra_card">
+              <h4>Sender / Infrastructure Correlation</h4>
+              <div class="body">
+                <div id="infra_sections" class="small"></div>
               </div>
             </div>
             <!-- Threat Correlation (MITRE/DREAD/CVSS/KEV/PASTA) -->
@@ -677,7 +742,19 @@ def merchant_email_lab(request: Request):
             <div class="card" style="margin-top:10px; display:none;" id="attach_card">
               <h4>Attachment Forensics</h4>
               <div class="body">
-                <div id="attach_forensics" class="small mono" style="max-height:130px; overflow:auto;"></div>
+                <div id="attach_forensics" class="small" style="max-height:340px; overflow:auto;"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="pdf_diff_card">
+              <h4>Supplier Baseline Diff</h4>
+              <div class="body">
+                <div id="pdf_diff_sections" class="small"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="visual_diff_card">
+              <h4>Supplier Baseline Visual Diff</h4>
+              <div class="body">
+                <div id="visual_diff_sections" class="small"></div>
               </div>
             </div>
             <!-- QR / OCR Findings -->
@@ -687,12 +764,66 @@ def merchant_email_lab(request: Request):
                 <div id="qr_findings" class="small"></div>
               </div>
             </div>
+            <!-- Playbook Run -->
+            <div class="card" style="margin-top:10px; display:none;" id="playbook_card">
+              <h4>Playbook Run</h4>
+              <div class="body">
+                <div class="row" style="gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                  <span class="pill" id="pb_name">-</span>
+                  <span class="pill" id="pb_status" style="background:#22c55e22;color:#166534;">-</span>
+                </div>
+                <div class="small" style="margin-bottom:4px; font-weight:600;">Actions completed:</div>
+                <div id="pb_actions" class="small" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+                <div class="small" style="margin-top:6px; color:#94a3b8;" id="pb_next_steps"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="evidence_card">
+              <h4>Evidence</h4>
+              <div class="body">
+                <div id="evidence_sections" class="small"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="actions_card">
+              <h4>Actions</h4>
+              <div class="body">
+                <div id="actions_sections" class="small"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="integrations_card">
+              <h4>Integrations</h4>
+              <div class="body">
+                <div id="integrations_sections" class="small"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="gov_card">
+              <h4>Supplier Governance</h4>
+              <div class="body">
+                <div id="gov_sections" class="small"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="graph_card">
+              <h4>Vendor Trust Graph</h4>
+              <div class="body">
+                <div id="graph_sections" class="small"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="tones_card">
+              <h4>Verdict In 3 Views</h4>
+              <div class="body">
+                <div id="tones_sections" class="small"></div>
+              </div>
+            </div>
             <!-- Decision Trace (SSE stream) -->
             <div class="card" style="margin-top:10px;">
               <h4>Decision Trace & Security Matrix</h4>
               <div class="body">
                 <div class="small">Trace ID: <span class="mono" id="trace_id">n/a</span></div>
-                <div class="trace" id="trace" style="max-height:280px;"></div>
+                <div class="trace-toggle">
+                  <button class="btn active" id="trace_btn_explain" type="button" onclick="setTraceMode('explain')">Explain</button>
+                  <button class="btn" id="trace_btn_raw" type="button" onclick="setTraceMode('raw')">Raw</button>
+                </div>
+                <div class="trace" id="trace_human" style="max-height:280px;"></div>
+                <div class="trace" id="trace" style="max-height:280px; display:none;"></div>
               </div>
             </div>
             <!-- Related Incident -->
@@ -719,6 +850,9 @@ def merchant_email_lab(request: Request):
             { label: 'Shipping delay notice (Info)', subject: 'Shipping delay', body: 'Minor delay expected with current shipment.' },
           ];
           let currentDecisionId = null;
+          let currentSecurityResult = null;
+          let currentConnectorHealth = null;
+          let currentFeedbackSummary = null;
           let es = null;
           function getCookie(name){
             try{
@@ -746,34 +880,46 @@ def merchant_email_lab(request: Request):
           function newEmailPreset(){ document.getElementById('to').value='accounts@ingramfаke.com.au'; document.getElementById('subject').value='Updated Payment Details'; document.getElementById('body').value='We are changing our payment procedures in the next couple of weeks. Disregard any previous remittance instructions.'; }
           function renderInbox(){ const list = document.getElementById('inbox'); list.innerHTML=''; for(const p of presets){ const d=document.createElement('div'); d.className='item'; d.innerHTML=`<div class='item-from'>${p.label}</div><div class='item-sub'>${p.subject}</div><div class='item-preview'>${p.body.slice(0,72)}…</div>`; d.onclick=()=>{ document.getElementById('subject').value=p.subject; document.getElementById('body').value=p.body; }; list.appendChild(d);} }
           renderInbox();
-          document.getElementById('files').addEventListener('change', async (ev)=>{ const out=[]; for(const f of ev.target.files){ const b64 = await toB64(f); const sha = await sha256(f); out.push(`${f.name} · ${sha}`); } document.getElementById('att_list').textContent = out.join('\n'); });
-          function toB64(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(file); }); }
+          document.getElementById('files').addEventListener('change', async (ev)=>{ try{ const out=[]; for(const f of ev.target.files){ const sha = await sha256(f); out.push(`${f.name} · ${sha}`); } document.getElementById('att_list').textContent = out.join('\\\\n'); document.getElementById('status').textContent = out.length ? `${out.length} attachment(s) ready` : ''; } catch(e){ const msg = 'Attachment read failed: ' + String(e && e.message ? e.message : e); document.getElementById('status').textContent = msg; pushTraceNotice('attachment_read_failed', { error: msg }); } });
+          function bytesToBase64(bytes){ const chunk = 0x8000; let binary = ''; for(let i=0;i<bytes.length;i+=chunk){ binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length))); } return btoa(binary); }
+          function toB64Raw(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>{ try { res(bytesToBase64(new Uint8Array(r.result))); } catch(err){ rej(err); } }; r.onerror=()=>rej(r.error || new Error('file_read_failed')); r.readAsArrayBuffer(file); }); }
           async function sha256(file){ const buf = await file.arrayBuffer(); const dig = await crypto.subtle.digest('SHA-256', buf); const arr = Array.from(new Uint8Array(dig), b=>b.toString(16).padStart(2,'0')); return arr.join(''); }
           function collectAttachments(){ const files = document.getElementById('files').files; const atts=[]; for(const f of files){ atts.push({ name: f.name, content_type: f.type, size_bytes: f.size, content_b64: null }); }
             // Re-read b64 for payload construction
-            return Promise.all(Array.from(files).map(f=>toB64(f))).then(b64s=>{ for(let i=0;i<b64s.length;i++){ atts[i].content_b64 = b64s[i]; } return atts; }); }
+            return Promise.all(Array.from(files).map(f=>toB64Raw(f))).then(b64s=>{ for(let i=0;i<b64s.length;i++){ atts[i].content_b64 = b64s[i]; } return atts; }); }
           async function loadDemoAssets(){
             document.getElementById('status').textContent='Loading demo assets…';
-            const targets = [
-              { url: '/static/email_lab/invoice_demo.md', name: 'invoice_demo.md', type: 'text/markdown' },
-              { url: '/static/email_lab/email_demo.eml', name: 'email_demo.eml', type: 'message/rfc822' },
-              { url: '/static/email_lab/homoglyph_demo.txt', name: 'homoglyph_demo.txt', type: 'text/plain' },
+            // Use inline demo content — static files may not exist in all environments
+            const demoFiles = [
+              {
+                name: 'invoice_demo.txt',
+                type: 'text/plain',
+                text: 'INVOICE #INV-2026-0142\\\\nIngramWake Pty Ltd\\\\nABN: 51 123 456 789\\\\nBSB: 062-000\\\\nAccount: 12345678\\\\nAmount Due: $48,500.00\\\\nDue Date: 2026-04-01\\\\nPlease remit to the above account. Banking details have changed from prior invoices.',
+              },
+              {
+                name: 'homoglyph_demo.txt',
+                type: 'text/plain',
+                text: 'From: accounts@ingramf\\u0430ke.com.au\\\\nSubject: Updated Payment Details\\\\nPlease note: our banking details have \\u0441hanged. Disregard any previous remittance instructions.\\\\nNew BSB: 062-111  Account: 98765432',
+              },
+              {
+                name: 'catalog_attachment.txt',
+                type: 'text/plain',
+                text: 'IngramWake March 2026 Catalog\\\\nProduct Ref: IW-CAT-2026-03\\\\nNote: All orders must be remitted to our new account effective immediately.\\\\nContact: payments@ingramwake.finance',
+              },
             ];
             const atts=[]; const list=[];
-            for(const t of targets){
+            for(const f of demoFiles){
               try{
-                const r = await fetch(t.url);
-                const b = await r.arrayBuffer();
-                const b64 = 'data:' + t.type + ';base64,' + btoa(String.fromCharCode(...new Uint8Array(b)));
-                const sha = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', b)), b=>b.toString(16).padStart(2,'0')).join('');
-                atts.push({ name: t.name, content_type: t.type, size_bytes: b.byteLength, content_b64: b64 });
-                list.push(`${t.name} · ${sha}`);
-              }catch(e){ /* ignore */ }
+                const enc = new TextEncoder().encode(f.text);
+                const b64 = bytesToBase64(enc);
+                const sha = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', enc)), b=>b.toString(16).padStart(2,'0')).join('');
+                atts.push({ name: f.name, content_type: f.type, size_bytes: enc.byteLength, content_b64: b64 });
+                list.push(`${f.name} · ${sha.slice(0,16)}…`);
+              }catch(e){ list.push(`${f.name} · encode_error`); }
             }
-            // Stash into a hidden file list by creating virtual File objects isn't trivial; pass via global
             window.__demoAtts = atts;
-            document.getElementById('att_list').textContent = list.join('\n');
-            document.getElementById('status').textContent='Demo assets ready';
+            document.getElementById('att_list').textContent = list.join('\\\\n');
+            document.getElementById('status').textContent=`Demo assets ready (${atts.length} inline files)`;
           }
           async function collectAllAttachments(){
             const fromUpload = await collectAttachments();
@@ -792,9 +938,667 @@ def merchant_email_lab(request: Request):
             }catch(e){}
           }
           /* ── Render structured security panels from evaluate response ── */
+          function resetPlaybookRunCard(){
+            try{
+              window.__emailLabPlaybookRun = null;
+              const pbc = document.getElementById('playbook_card');
+              if(pbc) pbc.style.display = 'none';
+              const name = document.getElementById('pb_name'); if(name) name.textContent = '-';
+              const status = document.getElementById('pb_status'); if(status) status.textContent = '-';
+              const actions = document.getElementById('pb_actions'); if(actions) actions.innerHTML = '';
+              const next = document.getElementById('pb_next_steps'); if(next) next.textContent = '';
+            }catch(e){}
+          }
+          function renderPlaybookRun(pb){
+            try{
+              if(!pb) return;
+              const acts = Array.isArray(pb.actions_completed) ? pb.actions_completed : (Array.isArray(pb.actions) ? pb.actions : []);
+              if(!(pb.playbook_id || pb.title || pb.id || acts.length || pb.status || pb.outcome)) return;
+              const pbc = document.getElementById('playbook_card'); pbc.style.display='block';
+              const pbName = pb.playbook_id || pb.title || pb.id || 'unknown';
+              document.getElementById('pb_name').textContent = pbName;
+              const pbSt = pb.status || pb.outcome || 'completed';
+              document.getElementById('pb_status').textContent = pbSt;
+              document.getElementById('pb_actions').innerHTML = acts.slice(0,8).map(a=>`<span class='pill'>${typeof a==='string'?a:JSON.stringify(a)}</span>`).join('');
+              const nxt = Array.isArray(pb.next_steps) ? pb.next_steps.join(' · ') : (pb.next_step || '');
+              document.getElementById('pb_next_steps').textContent = nxt ? ('Next: ' + nxt) : '';
+            }catch(e){ pushTraceNotice('render_playbook_error', { error: String(e) }); }
+          }
+          function mergePlaybookRun(update){
+            try{
+              const prev = window.__emailLabPlaybookRun || {};
+              const prevActs = Array.isArray(prev.actions_completed) ? prev.actions_completed : [];
+              const nextActs = Array.isArray(update?.actions_completed) ? update.actions_completed : (Array.isArray(update?.actions) ? update.actions : []);
+              const mergedActs = [];
+              for(const item of prevActs.concat(nextActs)){
+                const normalized = typeof item === 'string' ? item : JSON.stringify(item);
+                if(normalized && !mergedActs.includes(normalized)) mergedActs.push(normalized);
+              }
+              const merged = Object.assign({}, prev, update || {});
+              if(mergedActs.length) merged.actions_completed = mergedActs;
+              window.__emailLabPlaybookRun = merged;
+              renderPlaybookRun(merged);
+            }catch(e){}
+          }
+          function ingestPlaybookTraceEvent(it){
+            try{
+              const payload = it?.payload || {};
+              const original = String(payload._original_event_type || it?.event_type || '');
+              if(payload.playbook_id || payload.title || payload.id){
+                mergePlaybookRun({
+                  playbook_id: payload.playbook_id || payload.id || payload.title,
+                  title: payload.title || payload.playbook_id || payload.id || null,
+                  status: payload.status || (original === 'playbook_selected' ? 'selected' : undefined),
+                });
+              }
+              if(payload.action_type){
+                mergePlaybookRun({
+                  status: payload.status || 'running',
+                  actions_completed: [payload.action_type],
+                });
+              }
+              const executed = payload?.evidence?.result?.executed;
+              if(Array.isArray(executed) && executed.length){
+                mergePlaybookRun({
+                  status: payload.status || 'completed',
+                  actions_completed: executed.map(step => step?.action_type || step).filter(Boolean),
+                });
+              }
+              if(original === 'playbook_run_completed' || payload.outcome || payload.next_step || payload.next_steps){
+                mergePlaybookRun({
+                  status: payload.status || undefined,
+                  outcome: payload.outcome || undefined,
+                  next_step: payload.next_step || undefined,
+                  next_steps: Array.isArray(payload.next_steps) ? payload.next_steps : undefined,
+                });
+              }
+            }catch(e){}
+          }
+          function escHtml(value){
+            return String(value == null ? '' : value)
+              .replaceAll('&', '&amp;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;')
+              .replaceAll('"', '&quot;');
+          }
+          function listHtml(items){
+            const rows = (Array.isArray(items) ? items : []).filter(Boolean);
+            if(!rows.length) return '<div class="small" style="color:#94a3b8;">No additional details.</div>';
+            return `<ul class="finding-list">${rows.map(item=>`<li>${escHtml(item)}</li>`).join('')}</ul>`;
+          }
+          function reasonToPlainEnglish(reason){
+            const map = {
+              oob_verification_required: 'The message asks for a change that should be verified using a trusted phone number or supplier portal.',
+              bimi_visual_brand_similarity_spoof: 'Branding looks close to a known supplier, but the identity checks do not fully line up.',
+              auth_alignment_failed_under_dmarc_policy: 'The sender failed normal email identity checks, so the platform could not trust it as genuine.',
+              forced_reauth_required: 'Trust controls treated this message as risky enough to require stronger identity verification.',
+              llm_policy_gate_denied: 'The content matched policy rules that require security review instead of auto-approval.',
+              artifact_risk_block_band: 'The attachments contained enough high-risk signals to force a security review.',
+              artifact_risk_review_band: 'The attachments did not look normal enough to auto-approve, so they were sent for review.',
+              sandbox_detonation_malicious: 'A sandbox or malware detonation signal showed behavior consistent with a malicious file or link.',
+              ioc_enrichment_malicious_hit: 'The message matched threat indicators already associated with known malicious activity.',
+              progressive_access_restricted: 'Trust policy reduced access because the message did not meet the expected confidence threshold.',
+              progressive_access_challenge: 'Trust policy requires an extra verification step before acting on this message.',
+              vendor_master_mismatch: 'The sender does not match the expected supplier record.',
+              approved_contact_mismatch: 'The sender or reply address is not one of the approved supplier contacts.',
+              bank_fingerprint_baseline_mismatch: 'The requested bank details do not match the trusted supplier baseline.',
+              bank_fingerprint_extracted_mismatch: 'Bank details extracted from the attachment differ from the trusted supplier baseline.',
+              vendor_homoglyph_impersonation: 'The message uses lookalike characters to imitate a trusted brand or supplier.',
+              pdf_producer_vulnerable: 'A PDF attachment was created with a tool associated with known security issues.'
+            };
+            return map[reason] || String(reason || '').replaceAll('_', ' ');
+          }
+          function severityToBusinessRisk(j, thr){
+            const dreadAvg = parseFloat((((thr||{}).dread||{}).avg ?? (thr||{}).dread_avg ?? 0) || 0);
+            const cvss = parseFloat((((thr||{}).cvss||{}).score ?? 0) || 0);
+            const band = String(j.risk_band || '').toLowerCase();
+            const stage = String((thr||{}).pasta_stage || (thr||{}).kill_chain_stage || '').trim();
+            if(band === 'high' || dreadAvg >= 7 || cvss >= 8){
+              return `High business risk. This email could lead to payment fraud, supplier impersonation, or account misuse if staff act on it. ${stage ? `Threat modeling places it at ${stage}.` : ''}`.trim();
+            }
+            if(band === 'medium' || dreadAvg >= 4.5 || cvss >= 5){
+              return `Moderate business risk. The message shows enough suspicious behavior that acting on it could create financial loss or trust issues without verification. ${stage ? `Current threat stage: ${stage}.` : ''}`.trim();
+            }
+            return `Lower business risk. The message still needs review, but current evidence suggests limited business impact if normal controls stay in place. ${stage ? `Current threat stage: ${stage}.` : ''}`.trim();
+          }
+          function findingToPlainEnglish(f){
+            if(!f || typeof f !== 'object') return '';
+            const biz = String(f.business_meaning || '').trim();
+            if(biz) return biz;
+            const summary = String(f.summary || '').trim();
+            if(summary) return summary;
+            const kind = String(f.finding_type || 'finding').replaceAll('_', ' ');
+            const ev = Array.isArray(f.evidence) ? f.evidence.filter(Boolean) : [];
+            return ev.length ? `${kind}: ${ev.slice(0,2).join(' | ')}` : kind;
+          }
+          function findingContextLine(f){
+            if(!f || typeof f !== 'object') return '';
+            const t = f.threat_context || {};
+            const dread = t.dread || {};
+            const comp = Array.isArray(f.compliance_mapping) ? f.compliance_mapping : [];
+            const fw = comp.slice(0,2).map(x => `${x.framework}${Array.isArray(x.controls) && x.controls.length ? ' ' + x.controls[0] : ''}`).join(', ');
+            const parts = [
+              String(f.confidence_band || 'medium') + ' confidence',
+              String(f.source_type || 'policy'),
+              String(t.pasta_stage || ''),
+              dread.damage!=null ? `Damage ${dread.damage}` : '',
+              dread.reproducibility!=null ? `Repro ${dread.reproducibility}` : '',
+              fw ? `Audit: ${fw}` : ''
+            ].filter(Boolean);
+            return parts.join(' · ');
+          }
+          function provenanceChipLabel(src){
+            const s = String(src || '').toLowerCase().trim();
+            if(s === 'ocr') return 'OCR';
+            if(s === 'static') return 'static';
+            if(s === 'baseline') return 'baseline';
+            if(s === 'intel') return 'intel';
+            if(s === 'policy') return 'policy';
+            if(s === 'behavioral') return 'behavioral';
+            return s || 'policy';
+          }
+          function provenanceChipHtml(src){
+            return `<span class="pill">${escHtml(provenanceChipLabel(src))}</span>`;
+          }
+          function findingProvenanceChips(f){
+            if(!f || typeof f !== 'object') return '';
+            const chips = [];
+            if(f.source_type) chips.push(provenanceChipHtml(f.source_type));
+            if(f.evidence_kind) chips.push(`<span class="pill">${escHtml(String(f.evidence_kind))}</span>`);
+            if(f.confidence_band) chips.push(`<span class="pill">${escHtml(String(f.confidence_band))} confidence</span>`);
+            return chips.join(' ');
+          }
+          function findingDrilldownHtml(f){
+            if(!f || typeof f !== 'object') return '';
+            const d = f.drilldown || {};
+            if(!d || typeof d !== 'object' || !Object.keys(d).length) return '';
+            const evidence = Array.isArray(f.evidence) ? f.evidence.filter(Boolean) : [];
+            const mitre = Array.isArray(f.mitre_attack) && f.mitre_attack.length ? f.mitre_attack : (Array.isArray(((f.threat_context||{}).mitre_attack)) ? (f.threat_context||{}).mitre_attack : []);
+            const comp = Array.isArray(f.compliance_mapping) ? f.compliance_mapping : [];
+            const compRows = comp.map(x => `${x.framework}${Array.isArray(x.controls) && x.controls.length ? `: ${x.controls.join(', ')}` : ''}`);
+            const pasta = String(f.pasta_stage || ((f.threat_context||{}).pasta_stage || '')).trim();
+            const dread = (f.threat_context || {}).dread || {};
+            const blocks = [
+              d.business_risk ? `<div><strong>Business risk:</strong> ${escHtml(d.business_risk)}</div>` : '',
+              d.affected_scope ? `<div><strong>Affected scope:</strong> ${escHtml(d.affected_scope)}</div>` : '',
+              evidence.length ? `<div><strong>Evidence:</strong>${listHtml(evidence)}</div>` : '',
+              Array.isArray(d.forensic_checks) && d.forensic_checks.length ? `<div><strong>Forensics:</strong>${listHtml(d.forensic_checks)}</div>` : '',
+              Array.isArray(d.hunt_queries) && d.hunt_queries.length ? `<div><strong>Threat hunting:</strong>${listHtml(d.hunt_queries)}</div>` : '',
+              Array.isArray(d.crisis_actions) && d.crisis_actions.length ? `<div><strong>Crisis / comms:</strong>${listHtml(d.crisis_actions)}</div>` : '',
+              (pasta || mitre.length || compRows.length) ? `<div><strong>Frameworks:</strong>${listHtml([
+                pasta ? `PASTA: ${pasta}` : null,
+                mitre.length ? `MITRE: ${mitre.join(', ')}` : null,
+                dread.damage!=null ? `DREAD: D=${dread.damage} R=${dread.reproducibility} E=${dread.exploitability} A=${dread.affected_users} Dv=${dread.discoverability}` : null,
+                ...compRows
+              ])}</div>` : ''
+            ].filter(Boolean);
+            return `<details class="finding-drilldown"><summary>Drill down</summary><div class="finding-drilldown-body">${blocks.join('')}</div></details>`;
+          }
+          function attachmentProvenanceChips(item){
+            if(!item || typeof item !== 'object') return '';
+            const chips = [];
+            if(Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.length) chips.push(provenanceChipHtml('ocr'));
+            if(item.pdf_forensics && Object.keys(item.pdf_forensics).length) chips.push(provenanceChipHtml('static'));
+            if(item.baseline_similarity && Object.keys(item.baseline_similarity).length) chips.push(provenanceChipHtml('baseline'));
+            if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) chips.push(provenanceChipHtml('intel'));
+            if(item.supports_sender_claim) chips.push(provenanceChipHtml('policy'));
+            return Array.from(new Set(chips)).join(' ');
+          }
+          function buildExecutiveSummary(j){
+            const ev = j.evidence_snapshot || {};
+            const card = ev.explainability_card || j.explainability_card || {};
+            const thr = ev.threat_correlation || j.threat_correlation || {};
+            const tc = ev.trust_case || j.trust_case || {};
+            const pb = ev.playbook_run || j.playbook_run || j.playbook || {};
+            const ranked = Array.isArray(ev.top_ranked_findings) ? ev.top_ranked_findings : (Array.isArray(card.top_ranked_findings) ? card.top_ranked_findings : []);
+            const why = ranked.length
+              ? ranked.map(f => `${findingToPlainEnglish(f)} (${findingContextLine(f)})`)
+              : (Array.isArray(card.why_flagged) ? card.why_flagged.map(reasonToPlainEnglish) : (j.reasons||[]).map(reasonToPlainEnglish));
+            const what = `The platform treated this email as ${(j.verdict_action || 'review').replaceAll('_', ' ')} because the sender identity, attachment content, or trust controls did not look consistent with a normal supplier message.`;
+            const immediate = [];
+            if(String(j.route || '').includes('security_review')) immediate.push('Do not reply, pay, or change supplier details from this email.');
+            if(why.some(item => /supplier|bank|payment/i.test(item))) immediate.push('Verify the request using a phone number or supplier portal you already trust.');
+            immediate.push('Quarantine the email and notify finance or security before any business action.');
+            const next = [];
+            if(ranked.length){
+              for(const f of ranked){
+                if(Array.isArray(f.next_steps)) next.push(...f.next_steps);
+              }
+            }
+            if(Array.isArray(tc.actions)) next.push(...tc.actions.map(x => String(x).replaceAll('_',' ')));
+            if(Array.isArray(pb.next_steps)) next.push(...pb.next_steps);
+            if(!next.length) next.push('Review the attachments, confirm supplier identity, and record the outcome in the incident or ticket.');
+            return {
+              what,
+              why,
+              impact: severityToBusinessRisk(j, thr),
+              immediate: Array.from(new Set(immediate)),
+              next: Array.from(new Set(next)).slice(0, 6),
+            };
+          }
+          function renderExecutiveSummary(j){
+            const card = document.getElementById('exec_card');
+            const summary = buildExecutiveSummary(j);
+            card.style.display = 'block';
+            document.getElementById('exec_what_happened').textContent = summary.what;
+            document.getElementById('exec_why_flagged').innerHTML = listHtml(summary.why);
+            document.getElementById('exec_business_risk').textContent = summary.impact;
+            document.getElementById('exec_immediate_actions').innerHTML = listHtml(summary.immediate);
+            document.getElementById('exec_next_steps').innerHTML = listHtml(summary.next);
+          }
+          function renderEvidenceSummary(j){
+            const ev = j.evidence_snapshot || {};
+            const thr = ev.threat_correlation || j.threat_correlation || {};
+            const tc = ev.trust_case || j.trust_case || {};
+            const artIntel = ev.artifact_intel || {};
+            const atts = Array.isArray(ev.attachment_forensics) ? ev.attachment_forensics : [];
+            const auth = ev.auth_verdicts || {};
+            const ranked = Array.isArray(ev.top_ranked_findings) ? ev.top_ranked_findings : [];
+            const gate = ev.pre_agent_gate || {};
+            const agentRuns = Array.isArray(ev.agent_runs) ? ev.agent_runs : [];
+            const sections = [];
+            sections.push(`<div class="evidence-block"><div class="section-label">Top Ranked Evidence</div>${listHtml(
+              ranked.length ? ranked.map(f => `${findingToPlainEnglish(f)} ${findingProvenanceChips(f)} [${escHtml(findingContextLine(f))}]${Array.isArray(f.next_steps) && f.next_steps.length ? ` Next: ${escHtml(f.next_steps[0])}` : ''}${findingDrilldownHtml(f)}`) : ['No ranked evidence available yet.']
+            )}</div>`);
+            sections.push(`<div class="evidence-block"><div class="section-label">Sender / Auth</div>${listHtml([
+              auth.spf_result ? `SPF: ${auth.spf_result}` : null,
+              auth.dkim_result ? `DKIM: ${auth.dkim_result}` : null,
+              auth.dmarc_result ? `DMARC: ${auth.dmarc_result}` : null,
+              auth.dmarc_fail ? 'DMARC alignment failed for this message.' : null
+            ])}</div>`);
+            sections.push(`<div class="evidence-block"><div class="section-label">Attachment Signals</div>${listHtml([
+              atts.length ? `${atts.length} attachment(s) were parsed and inspected.` : 'No attachment evidence was returned.',
+              (((artIntel||{}).signal_scores||{}).band) ? `Attachment risk band: ${artIntel.signal_scores.band}` : null,
+              (((artIntel||{}).signal_scores||{}).total!=null) ? `Attachment risk score: ${artIntel.signal_scores.total}` : null
+            ])}</div>`);
+            sections.push(`<div class="evidence-block"><div class="section-label">Trust Baseline Deviation</div>${listHtml([
+              tc.level ? `Trust level: ${tc.level}` : null,
+              tc.progressive_access ? `Access policy: ${tc.progressive_access}` : null,
+              ...(Array.isArray(tc.reasons) ? tc.reasons.map(reasonToPlainEnglish) : [])
+            ])}</div>`);
+            sections.push(`<div class="evidence-block"><div class="section-label">Threat Intel Correlation</div>${listHtml([
+              Array.isArray(thr.mitre_attack) && thr.mitre_attack.length ? `Mapped to MITRE: ${thr.mitre_attack.join(', ')}` : null,
+              Array.isArray(thr.kev) && thr.kev.length ? `Known exploited references: ${thr.kev.join(', ')}` : null,
+              (((thr||{}).cvss||{}).score!=null) ? `CVSS: ${thr.cvss.score} ${thr.cvss.severity || ''}` : null,
+              (((thr||{}).dread||{}).avg!=null) ? `DREAD average: ${thr.dread.avg}` : null
+            ])}</div>`);
+            sections.push(`<div class="evidence-block"><div class="section-label">Agent Safety & Audit</div>${listHtml([
+              gate.artifact_text_untrusted ? 'Attachment and OCR text were treated as untrusted before model-facing analysis.' : null,
+              gate.ocr_text_sanitized ? 'OCR and extracted text were sanitized before explanation and reasoning.' : null,
+              gate.blocked_attachment_count!=null ? `Blocked attachments before model access: ${gate.blocked_attachment_count}` : null,
+              gate.blocked_qr_url_count!=null ? `Blocked QR URLs before model access: ${gate.blocked_qr_url_count}` : null,
+              Array.isArray(gate.blocked_tool_intents) && gate.blocked_tool_intents.length ? `Blocked tool intents: ${gate.blocked_tool_intents.join(', ')}` : null,
+              agentRuns.length ? `Scoped agents executed: ${agentRuns.map(r => r.agent_name).join(', ')}` : 'No agent audit rows were returned.'
+            ])}</div>`);
+            const el = document.getElementById('evidence_sections');
+            document.getElementById('evidence_card').style.display = 'block';
+            el.innerHTML = sections.join('');
+          }
+          function renderActionsSummary(j){
+            const ev = j.evidence_snapshot || {};
+            const tc = ev.trust_case || j.trust_case || {};
+            const pb = ev.playbook_run || j.playbook_run || j.playbook || {};
+            const ap = ev.action_policy || j.action_policy || {};
+            const hg = ev.human_gate || j.human_gate || ap.human_gate || {};
+            const immediate = [
+              'Hold payment changes and do not trust this email on sender reputation alone.',
+              'Quarantine the email and preserve the attachments for review.',
+            ];
+            const analyst = [];
+            const owner = [];
+            const recovery = [];
+            if(Array.isArray(tc.actions)) analyst.push(...tc.actions.map(x => String(x).replaceAll('_', ' ')));
+            if(Array.isArray(pb.actions_completed)) analyst.push(...pb.actions_completed.map(x => String(x).replaceAll('_', ' ')));
+            owner.push('Verify the supplier using an existing trusted contact path.');
+            owner.push('Check whether finance, procurement, or accounts payable acted on the request.');
+            recovery.push('Push indicators and verdict to SIEM or XDR for correlation and case tracking.');
+            recovery.push('If a user interacted with the message, review account access and session controls.');
+            const gating = [
+              ap.lane ? `Human gate lane: ${String(ap.lane_label || ap.lane).replaceAll('_',' ')}` : null,
+              ap.lane_reason ? ap.lane_reason : null,
+              hg.business_hold_message ? hg.business_hold_message : null,
+              Array.isArray(ap.threshold_reasons) && ap.threshold_reasons.length ? `Threshold reasons: ${ap.threshold_reasons.join(' | ')}` : null,
+              Array.isArray(ap.auto_allowed_actions) && ap.auto_allowed_actions.length ? `Auto-allowed: ${ap.auto_allowed_actions.join(', ')}` : null,
+              Array.isArray(ap.human_approval_actions) && ap.human_approval_actions.length ? `Human approval required: ${ap.human_approval_actions.join(', ')}` : null,
+              Array.isArray(ap.blocked_actions) && ap.blocked_actions.length ? `Blocked by policy: ${ap.blocked_actions.join(', ')}` : null
+            ];
+            const html = [
+              `<div class="evidence-block"><div class="section-label">Human Gate Thresholds</div>${listHtml(gating)}</div>`,
+              `<div class="evidence-block"><div class="section-label">Immediate</div>${listHtml(immediate)}</div>`,
+              `<div class="evidence-block"><div class="section-label">Analyst</div>${listHtml(Array.from(new Set(analyst)).slice(0,8))}</div>`,
+              `<div class="evidence-block"><div class="section-label">Business Owner</div>${listHtml(owner)}</div>`,
+              `<div class="evidence-block"><div class="section-label">Recovery</div>${listHtml(recovery)}</div>`
+            ];
+            document.getElementById('actions_card').style.display = 'block';
+            document.getElementById('actions_sections').innerHTML = html.join('');
+          }
+          function renderInfrastructureSummary(j){
+            const ev = j.evidence_snapshot || {};
+            const infra = ev.sender_infrastructure || {};
+            const hf = ev.header_forensics || {};
+            const geo = infra.originating_geo || {};
+            const rel = infra.related_incidents || {};
+            const items = [
+              infra.sender_address ? `Sender: ${infra.sender_address}` : null,
+              infra.reply_to ? `Reply-To: ${infra.reply_to}` : null,
+              infra.reply_domain_mismatch ? 'Reply-To domain differs from the sender domain.' : null,
+              infra.originating_ip ? `Originating IP: ${infra.originating_ip}` : null,
+              geo.country ? `GeoIP country: ${geo.country}` : null,
+              geo.asn ? `ASN: ${geo.asn}${geo.asn_org ? ` (${geo.asn_org})` : ''}` : null,
+              infra.reputation && infra.reputation.risk_score!=null ? `Infrastructure risk score: ${infra.reputation.risk_score}` : null,
+              Array.isArray(infra.reputation?.flags) && infra.reputation.flags.length ? `Reputation flags: ${infra.reputation.flags.join(', ')}` : null,
+              hf.mailer_fingerprint ? `Mailer fingerprint: ${hf.mailer_fingerprint}` : null,
+              hf.message_id_domain_mismatch ? 'Message-ID domain does not match the sender domain.' : null,
+              hf.message_id_reuse ? 'Message-ID reuse was detected.' : null,
+              rel.count ? `Related incidents found: ${rel.count}` : 'Related incidents found: 0',
+            ];
+            const relatedHtml = Array.isArray(rel.matches) && rel.matches.length
+              ? `<div class="evidence-block"><div class="section-label">Related Incidents</div>${listHtml(rel.matches.map(m => `${m.incident_id} (${m.severity || 'unknown'}) via ${(m.match_on || []).join(', ')}`))}</div>`
+              : '';
+            document.getElementById('infra_card').style.display = 'block';
+            document.getElementById('infra_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Infrastructure</div>${listHtml(items)}</div>${relatedHtml}`;
+          }
+          async function replaySiemHandoff(){
+            try{
+              const j = currentSecurityResult || {};
+              const siem = j.siem_handoff || {};
+              const event = siem.event || {};
+              if(!event || !Object.keys(event).length){
+                document.getElementById('status').textContent = 'No handoff event available to replay.';
+                return;
+              }
+              document.getElementById('status').textContent = 'Replaying SIEM/XDR handoff…';
+              const r = await fetch('/api/v1/admin/email_security/connectors/replay-event', {
+                method:'POST',
+                headers:{ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() },
+                body: JSON.stringify({ event })
+              });
+              const out = await r.json().catch(()=>null);
+              if(!r.ok || !out){
+                document.getElementById('status').textContent = `Replay failed (${r.status})`;
+                return;
+              }
+              j.siem_handoff = { event, status: (out.result || {}) };
+              currentSecurityResult = j;
+              renderIntegrationsSummary(j);
+              document.getElementById('status').textContent = 'SIEM/XDR handoff replayed.';
+            }catch(e){
+              document.getElementById('status').textContent = 'SIEM/XDR replay error';
+            }
+          }
+          async function refreshConnectorHealth(){
+            try{
+              let r = await fetch('/api/v1/admin/email_security/connectors/dashboard?hours=24&dlq_limit=5', { headers:{ 'x-api-key': getOwnerKey() } });
+              const out = await r.json().catch(()=>null);
+              if(r.ok && out){ currentConnectorHealth = out; if(currentSecurityResult) renderIntegrationsSummary(currentSecurityResult); }
+            }catch(e){}
+          }
+          async function refreshFeedbackSummary(tenantId){
+            try{
+              const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+              let r = await fetch(`/api/v1/admin/email_security/feedback/summary${q}`, { headers:{ 'x-api-key': getOwnerKey() } });
+              const out = await r.json().catch(()=>null);
+              if(r.ok && out){ currentFeedbackSummary = out; if(currentSecurityResult) renderIntegrationsSummary(currentSecurityResult); }
+            }catch(e){}
+          }
+          async function submitFeedbackOutcome(outcomeType, outcomeValue, reasonCode){
+            try{
+              const incidentId = String((document.getElementById('inc_id')?.textContent || '')).trim();
+              if(!incidentId || incidentId === '-'){
+                document.getElementById('status').textContent = 'No related incident is available to label yet.';
+                return;
+              }
+              const tenantId = String((((currentSecurityResult || {}).siem_handoff || {}).event || {}).tenant_id || 'default');
+              document.getElementById('status').textContent = 'Recording analyst outcome…';
+              const payload = {
+                incident_ids: [incidentId],
+                outcome_type: outcomeType,
+                outcome_value: outcomeValue,
+                actor_id: 'email_lab',
+                actor_role: 'owner',
+                note: reasonCode,
+                reason_code: reasonCode
+              };
+              const r = await fetch('/api/v1/admin/email_security/feedback/bulk_label', {
+                method:'POST',
+                headers:{ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() },
+                body: JSON.stringify(payload)
+              });
+              const out = await r.json().catch(()=>null);
+              if(!r.ok || !out){
+                document.getElementById('status').textContent = `Outcome recording failed (${r.status})`;
+                return;
+              }
+              document.getElementById('status').textContent = `Outcome recorded: ${outcomeValue}`;
+              await refreshFeedbackSummary(tenantId);
+            }catch(e){
+              document.getElementById('status').textContent = 'Outcome recording error';
+            }
+          }
+          function renderIntegrationsSummary(j){
+            const siem = j.siem_handoff || {};
+            const pb = (j.evidence_snapshot || {}).playbook_run || j.playbook_run || {};
+            const st = siem.status || {};
+            const hc = currentConnectorHealth || {};
+            const fb = currentFeedbackSummary || {};
+            const hcSummary = hc.summary || {};
+            const byTarget = Array.isArray(hc.by_target) ? hc.by_target : [];
+            const statusLines = [
+              j.decision_trace_id ? `Decision trace: ${j.decision_trace_id}` : null,
+              pb.playbook_id ? `Playbook: ${pb.playbook_id}` : null,
+              j.verdict_action ? `Verdict action: ${String(j.verdict_action).replaceAll('_', ' ')}` : null,
+              j.escalation ? `Escalation path: ${String(j.escalation).replaceAll('_', ' ')}` : null,
+              Array.isArray(st.sent) && st.sent.length ? `Sent to: ${st.sent.join(', ')}` : null,
+              Array.isArray(st.retrying) && st.retrying.length ? `Retrying: ${st.retrying.join(', ')}` : null,
+              Array.isArray(st.failed) && st.failed.length ? `Failed: ${st.failed.join(', ')}` : null,
+              Array.isArray(st.dlq) && st.dlq.length ? `DLQ: ${st.dlq.join(', ')}` : null,
+              hcSummary.attempts!=null ? `Connector attempts (24h): ${hcSummary.attempts}` : null,
+              hcSummary.success_rate!=null ? `Connector success rate: ${(parseFloat(hcSummary.success_rate||0)*100).toFixed(0)}%` : null,
+              byTarget.length ? `Targets: ${byTarget.map(t => `${t.target} sent=${t.sent||0} dlq=${t.dlq||0}`).join(' | ')}` : null,
+              fb.false_positive_rate!=null ? `False-positive rate: ${(parseFloat(fb.false_positive_rate||0)*100).toFixed(1)}%` : null,
+            ];
+            document.getElementById('integrations_card').style.display = 'block';
+            document.getElementById('integrations_sections').innerHTML = `<div class="evidence-block"><div class="section-label">SIEM / XDR Handoff State</div>${listHtml(statusLines)}<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn" type="button" onclick="replaySiemHandoff()">Push To SIEM / XDR</button><button class="btn" type="button" onclick="refreshConnectorHealth()">Refresh Connector Health</button></div></div><div class="evidence-block"><div class="section-label">Analyst Outcome Workflow</div>${listHtml(['Use these controls after review to improve precision and governance.', 'Mark Legit lowers false-positive risk. Mark Malicious reinforces true-positive coverage. Baseline Update requests human review before trust changes.'])}<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn" type="button" onclick="submitFeedbackOutcome('analyst_review','false_positive','marked_legit')">Mark Legit</button><button class="btn" type="button" onclick="submitFeedbackOutcome('analyst_review','true_positive','confirmed_malicious')">Mark Malicious</button><button class="btn" type="button" onclick="submitFeedbackOutcome('business_exception','approved_exception','business_approved')">Approved Exception</button><button class="btn" type="button" onclick="submitFeedbackOutcome('baseline_review','approved_exception','baseline_update_requested')">Request Baseline Update</button></div></div>`;
+            const tenantId = String(((siem.event || {}).tenant_id || 'default'));
+            if(!currentConnectorHealth) refreshConnectorHealth();
+            if(!currentFeedbackSummary) refreshFeedbackSummary(tenantId);
+          }
+          function renderSupplierGovernance(j){
+            const ev = j.evidence_snapshot || {};
+            const gov = ev.supplier_governance || {};
+            if(!gov || !gov.supplier_key) return;
+            const sections = [
+              `Supplier: ${gov.vendor_name || gov.supplier_key}`,
+              `Governance state: ${String(gov.governance_state || 'stable').replaceAll('_',' ')}`,
+              Array.isArray(gov.approved_domains) && gov.approved_domains.length ? `Approved domains: ${gov.approved_domains.join(', ')}` : null,
+              Array.isArray(gov.observed_domains) && gov.observed_domains.length ? `Observed domains: ${gov.observed_domains.join(', ')}` : null,
+              Array.isArray(gov.approved_bank_fingerprints) && gov.approved_bank_fingerprints.length ? `Approved bank fingerprints: ${gov.approved_bank_fingerprints.join(', ')}` : null,
+              Array.isArray(gov.observed_bank_fingerprints) && gov.observed_bank_fingerprints.length ? `Observed bank fingerprints: ${gov.observed_bank_fingerprints.join(', ')}` : null,
+              Array.isArray(gov.pending_updates) && gov.pending_updates.length ? `Pending review: ${gov.pending_updates.join(' | ')}` : 'No pending supplier governance updates.'
+            ];
+            document.getElementById('gov_card').style.display = 'block';
+            document.getElementById('gov_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Governance Snapshot</div>${listHtml(sections)}</div>`;
+          }
+          function renderVendorTrustGraph(j){
+            const ev = j.evidence_snapshot || {};
+            const graph = ev.vendor_trust_graph || {};
+            if(!graph || !graph.supplier_key) return;
+            const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+            const edges = Array.isArray(graph.edges) ? graph.edges : [];
+            const sections = [
+              `Supplier key: ${graph.supplier_key}`,
+              `Nodes: ${graph.node_count || nodes.length || 0}`,
+              `Edges: ${graph.edge_count || edges.length || 0}`,
+              Array.isArray(graph.risk_notes) && graph.risk_notes.length ? `Risk notes: ${graph.risk_notes.join(', ')}` : null,
+              nodes.length ? `Entities: ${nodes.slice(0,8).map(n => `${n.label} (${n.type})`).join(' | ')}` : null,
+              edges.length ? `Relationships: ${edges.slice(0,8).map(e => `${e.source.split(':').slice(-1)[0]} -> ${e.target.split(':').slice(-1)[0]} (${e.relation})`).join(' | ')}` : null
+            ];
+            document.getElementById('graph_card').style.display = 'block';
+            document.getElementById('graph_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Trust Graph Snapshot</div>${listHtml(sections)}</div>`;
+          }
+          function renderVerdictTones(j){
+            const ev = j.evidence_snapshot || {};
+            const explain = ev.explainability_card || j.explainability_card || {};
+            const attachmentForensics = Array.isArray(ev.attachment_forensics) ? ev.attachment_forensics : [];
+            const ranked = Array.isArray(ev.top_ranked_findings) ? ev.top_ranked_findings : [];
+            const rawEvidence = [];
+            for(const item of attachmentForensics.slice(0,2)){
+              if(Array.isArray(item.evidence_excerpt_lines)){
+                rawEvidence.push(...item.evidence_excerpt_lines.map(line => `${item.file_name}: ${line}`));
+              }
+            }
+            if(ranked.length){
+              rawEvidence.unshift(...ranked.map(f => `${String(f.agent_origin || 'agent')}: ${findingToPlainEnglish(f)} [${findingContextLine(f)}]`));
+            }
+            if(!rawEvidence.length && Array.isArray(j.reasons)){
+              rawEvidence.push(...j.reasons.slice(0,4));
+            }
+            const businessSafe = buildExecutiveSummary(j).what + ' ' + buildExecutiveSummary(j).impact;
+            const analyst = explain.analyst_summary || `Flagged due to ${(j.reasons || []).slice(0,4).join(', ')}.`;
+            const html = [
+              `<div class="evidence-block"><div class="section-label">Business-Safe Summary</div><div>${escHtml(businessSafe)}</div></div>`,
+              `<div class="evidence-block"><div class="section-label">Analyst Summary</div><div>${escHtml(analyst)}</div></div>`,
+              `<div class="evidence-block"><div class="section-label">Raw Technical Evidence</div>${listHtml(rawEvidence)}</div>`
+            ];
+            document.getElementById('tones_card').style.display = 'block';
+            document.getElementById('tones_sections').innerHTML = html.join('');
+          }
+          function renderAttachmentForensics(ev){
+            const artIntel = ev.artifact_intel || {};
+            const attGate = ev.attachment_ingest_gate || {};
+            const items = Array.isArray(ev.attachment_forensics) ? ev.attachment_forensics : [];
+            if(!(Object.keys(artIntel).length || Object.keys(attGate).length || items.length)) return;
+            const ac = document.getElementById('attach_card'); ac.style.display='block';
+            const rows = [];
+            if(attGate.attachment_count!=null){
+              rows.push(`<div class="evidence-block"><div class="section-label">Intake Gate</div>${listHtml([
+                `Attachments received: ${attGate.attachment_count}`,
+                `Accepted: ${attGate.accepted_count || 0}`,
+                `Blocked: ${attGate.blocked_count || 0}`,
+                Array.isArray(attGate.block_reasons) && attGate.block_reasons.length ? `Block reasons: ${attGate.block_reasons.join(', ')}` : null
+              ])}</div>`);
+            }
+            for(const item of items){
+              const pdf = item.pdf_forensics || {};
+              const sim = item.baseline_similarity || {};
+              rows.push(
+                `<div class="attachment-row">
+                  <div class="row" style="justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
+                    <div><strong>${escHtml(item.file_name || 'attachment')}</strong><div class="small">${escHtml(item.file_type || 'unknown')}</div><div style="margin-top:6px;">${attachmentProvenanceChips(item)}</div></div>
+                    <div class="small mono">${escHtml((item.sha256 || '').slice(0,20))}${item.sha256 ? '…' : ''}</div>
+                  </div>
+                  <div class="small" style="margin-top:6px;">${escHtml(item.text_summary || 'No text extracted from this attachment.')}</div>
+                  <div class="small" style="margin-top:6px;"><strong>Supports sender claim:</strong> ${escHtml(String(item.supports_sender_claim || 'neutral').replaceAll('_',' '))}</div>
+                  <div class="small" style="margin-top:6px;">${listHtml([
+                    item.bank_fields_present ? 'Attachment contains bank or remittance fields.' : null,
+                    item.embedded_urls && item.embedded_urls.length ? `Embedded URLs: ${item.embedded_urls.join(', ')}` : null,
+                    item.suspicious_instructions && item.suspicious_instructions.length ? item.suspicious_instructions.join(' ') : null,
+                    item.brand_supplier_mismatch_signals && item.brand_supplier_mismatch_signals.length ? item.brand_supplier_mismatch_signals.join(' ') : null,
+                    item.evidence_excerpt_lines && item.evidence_excerpt_lines.length ? `Evidence excerpts: ${item.evidence_excerpt_lines.join(' | ')}` : null,
+                    pdf.producer ? `PDF producer: ${pdf.producer}` : null,
+                    (pdf.embedded_files_count||0) > 0 ? `Embedded files: ${pdf.embedded_files_count}` : null,
+                    (pdf.object_stream_count||0) > 0 ? `Object streams: ${pdf.object_stream_count}` : null,
+                    sim.template_aligned === false ? 'Template similarity check failed against the baseline.' : null,
+                    sim.logo_layout_aligned === false ? 'Logo or layout similarity check failed against the baseline.' : null
+                  ])}</div>
+                </div>`
+              );
+            }
+            document.getElementById('attach_forensics').innerHTML = rows.join('');
+          }
+          function renderPdfBaselineDiff(ev){
+            const diff = ev.attachment_baseline_diffs || {};
+            const comps = Array.isArray(diff.comparisons) ? diff.comparisons : [];
+            if(!comps.length) return;
+            document.getElementById('pdf_diff_card').style.display = 'block';
+            document.getElementById('pdf_diff_sections').innerHTML = comps.map(item => {
+              const bbox = Array.isArray(item.drift_bbox) && item.drift_bbox.length ? item.drift_bbox.join(', ') : 'none';
+              const visualGrid = item.baseline_preview_b64 && item.candidate_preview_b64 && (item.overlay_preview_b64 || item.heatmap_preview_b64)
+                ? `<div class="thumb-grid">
+                    <div><div class="section-label">Baseline</div><img alt="pdf baseline preview" src="data:image/png;base64,${item.baseline_preview_b64 || ''}" /></div>
+                    <div><div class="section-label">Candidate</div><img alt="pdf candidate preview" src="data:image/png;base64,${item.candidate_preview_b64 || ''}" /></div>
+                    <div><div class="section-label">Overlay</div><img alt="pdf overlay preview" src="data:image/png;base64,${item.overlay_preview_b64 || item.heatmap_preview_b64 || ''}" /></div>
+                  </div>
+                  ${item.heatmap_preview_b64 ? `<div class="thumb-grid" style="grid-template-columns:1fr;"><div><div class="section-label">Heatmap</div><img alt="pdf heatmap preview" src="data:image/png;base64,${item.heatmap_preview_b64}" /></div></div>` : ''}`
+                : '';
+              return `<div class="attachment-row">
+                <div><strong>Baseline:</strong> ${escHtml(item.baseline_file || '-')}</div>
+                <div><strong>Compare:</strong> ${escHtml(item.candidate_file || '-')}</div>
+                <div class="small" style="margin-top:6px;"><strong>Text similarity:</strong> ${escHtml(String(item.text_similarity ?? '-'))} Â· <strong>Visual drift:</strong> ${escHtml(String(item.mean_pixel_diff ?? '-'))} Â· <strong>Drift box:</strong> ${escHtml(bbox)}</div>
+                <div class="small" style="margin-top:6px;">${listHtml([
+                  Array.isArray(item.differences) && item.differences.length ? `Differences: ${item.differences.join(' ')}` : 'No major structural differences were detected.',
+                  item.baseline_urls && item.baseline_urls.length ? `Baseline URLs: ${item.baseline_urls.join(', ')}` : null,
+                  item.candidate_urls && item.candidate_urls.length ? `Candidate URLs: ${item.candidate_urls.join(', ')}` : null,
+                  item.baseline_bank_fields && Object.keys(item.baseline_bank_fields).length ? `Baseline bank fields: ${JSON.stringify(item.baseline_bank_fields)}` : null,
+                  item.candidate_bank_fields && Object.keys(item.candidate_bank_fields).length ? `Candidate bank fields: ${JSON.stringify(item.candidate_bank_fields)}` : null
+                ])}</div>${visualGrid}
+              </div>`;
+            }).join('');
+          }
+          function renderVisualBaselineDiff(ev){
+            const diff = ev.attachment_visual_diffs || {};
+            const comps = Array.isArray(diff.comparisons) ? diff.comparisons : [];
+            if(!comps.length) return;
+            document.getElementById('visual_diff_card').style.display = 'block';
+            document.getElementById('visual_diff_sections').innerHTML = comps.map(item => {
+              const bbox = Array.isArray(item.drift_bbox) && item.drift_bbox.length ? item.drift_bbox.join(', ') : 'none';
+              return `<div class="attachment-row">
+                <div><strong>Baseline:</strong> ${escHtml(item.baseline_file || '-')}</div>
+                <div><strong>Compare:</strong> ${escHtml(item.candidate_file || '-')}</div>
+                <div class="small" style="margin-top:6px;">Mean pixel drift: ${escHtml(String(item.mean_pixel_diff ?? '-'))} · Drift box: ${escHtml(bbox)}</div>
+                <div class="thumb-grid">
+                  <div><div class="section-label">Baseline</div><img alt="baseline preview" src="data:image/png;base64,${item.baseline_preview_b64 || ''}" /></div>
+                  <div><div class="section-label">Candidate</div><img alt="candidate preview" src="data:image/png;base64,${item.candidate_preview_b64 || ''}" /></div>
+                  <div><div class="section-label">Heatmap</div><img alt="diff heatmap" src="data:image/png;base64,${item.diff_preview_b64 || ''}" /></div>
+                </div>
+              </div>`;
+            }).join('');
+          }
+          function renderNarrativeTraceEvent(it){
+            const payload = it?.payload || {};
+            const eventType = String(it?.event_type || 'event');
+            const sentenceMap = {
+              security_scan: 'The security scanner collected signals from the email body and attachments.',
+              sender_trust_assessed: 'Sender trust and supplier relationship confidence were recalculated.',
+              ioc_enrichment_fusion: 'Threat indicators were checked against enrichment and intelligence sources.',
+              policy_gate: 'The policy gate decided whether the message could be allowed, reviewed, or escalated.',
+              playbook_selected: 'A response playbook was selected for this incident.',
+              playbook_run_completed: 'The playbook finished and reported its next steps.'
+            };
+            const narrative = sentenceMap[eventType] || `The platform recorded ${eventType.replaceAll('_', ' ')}.`;
+            return `<div class="ev"><div class="meta">${escHtml(eventType)} · ${escHtml(it?.created_at || '')}</div><div>${escHtml(narrative)}</div></div>`;
+          }
+          function setTraceMode(mode){
+            const explain = mode !== 'raw';
+            document.getElementById('trace_human').style.display = explain ? 'block' : 'none';
+            document.getElementById('trace').style.display = explain ? 'none' : 'block';
+            document.getElementById('trace_btn_explain').classList.toggle('active', explain);
+            document.getElementById('trace_btn_raw').classList.toggle('active', !explain);
+          }
+          function toggleDetachRightRail(){
+            document.getElementById('right_rail').classList.toggle('detached');
+          }
+          function openRightRailTab(){
+            try{
+              const win = window.open('', '_blank');
+              if(!win) return;
+              const content = document.getElementById('right_rail').innerHTML;
+              win.document.write(`<!doctype html><html><head><title>Email Lab Right Rail</title><style>body{font-family:Segoe UI,Arial,sans-serif;background:#f3f6fb;color:#0f172a;padding:18px}.card{border:1px solid #dbe3ee;border-radius:12px;background:#fff;margin-bottom:12px}.card h4{margin:0;padding:12px 14px;border-bottom:1px solid #dbe3ee}.body{padding:12px 14px}.pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid #dbe3ee;background:#f8fafc;margin:2px}.small{font-size:12px;color:#475569}.mono{font-family:Consolas,monospace}.finding-list{padding-left:18px}.section-label{font-size:11px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:4px}.evidence-block,.attachment-row{padding:10px;border:1px solid #dbe3ee;border-radius:10px;background:#fff;margin-top:8px}.row{display:flex;gap:8px;flex-wrap:wrap}.rail-toolbar{display:none}</style></head><body>${content}</body></html>`);
+              win.document.close();
+            }catch(e){}
+          }
           function renderSecurityPanels(j){
             try{
+              currentSecurityResult = j;
               const ev = j.evidence_snapshot || {};
+              renderExecutiveSummary(j);
+              renderEvidenceSummary(j);
+              renderActionsSummary(j);
+              renderInfrastructureSummary(j);
+              renderIntegrationsSummary(j);
+              renderSupplierGovernance(j);
+              renderVendorTrustGraph(j);
+              renderVerdictTones(j);
               /* ── Security Overview ── */
               const ov = document.getElementById('sec_overview'); ov.style.display='block';
               const badges = document.getElementById('sec_badges');
@@ -866,23 +1670,16 @@ def merchant_email_lab(request: Request):
                 document.getElementById('det_result').style.color = det.malicious ? '#ef4444' : '#22c55e';
                 document.getElementById('ioc_hits').textContent = (iocC.url||0) + (iocC.domain||0) + (iocC.hash||0);
                 document.getElementById('ioc_resolution').textContent = iocQ.resolution || '-';
-                document.getElementById('enrich_latency').textContent = j.latency ? `${(j.latency*1000).toFixed(0)}ms` : '-';
+                const enrichSecs = ((j.latency || {}).enrichment_seconds ?? (ev.latency || {}).enrichment_seconds);
+                document.getElementById('enrich_latency').textContent = enrichSecs!=null ? `${(parseFloat(enrichSecs)*1000).toFixed(0)}ms` : '-';
                 const findings = det.findings || det.ioc_list || [];
                 document.getElementById('sandbox_findings').innerHTML = Array.isArray(findings) ? findings.slice(0,6).map(f=>`<div>• ${typeof f==='string'?f:JSON.stringify(f)}</div>`).join('') : '';
               }
 
               /* ── Attachment Forensics ── */
-              const artIntel = ev.artifact_intel || {};
-              const attGate = ev.attachment_ingest_gate || {};
-              if(Object.keys(artIntel).length || Object.keys(attGate).length){
-                const ac = document.getElementById('attach_card'); ac.style.display='block';
-                const lines = [];
-                if(attGate.signal_score!=null) lines.push(`Signal Score: ${attGate.signal_score}`);
-                if(attGate.band) lines.push(`Band: ${attGate.band}`);
-                if(artIntel.signals) lines.push(`Signals: ${JSON.stringify(artIntel.signals).slice(0,200)}`);
-                if(artIntel.intel_sources) lines.push(`Sources: ${JSON.stringify(artIntel.intel_sources).slice(0,150)}`);
-                document.getElementById('attach_forensics').innerHTML = lines.map(l=>`<div>${l}</div>`).join('');
-              }
+              renderAttachmentForensics(ev);
+              renderPdfBaselineDiff(ev);
+              renderVisualBaselineDiff(ev);
 
               /* ── QR / OCR ── */
               const qr = ev.ocr_qr_sanitization || {};
@@ -896,10 +1693,24 @@ def merchant_email_lab(request: Request):
                 if(qr.ocr_tokens) parts.push(`OCR tokens: ${qr.ocr_tokens}`);
                 document.getElementById('qr_findings').innerHTML = parts.map(p=>`<div>• ${p}</div>`).join('');
               }
+
+              /* ── Playbook Run ── */
+              const pb = ev.playbook_run || j.playbook_run || ev.playbook || j.playbook || null;
+              if(pb && (pb.playbook_id || pb.title || pb.actions_completed)){
+                mergePlaybookRun(pb);
+                const pbName = pb.playbook_id || pb.title || pb.id || 'unknown';
+                document.getElementById('pb_name').textContent = pbName;
+                const pbSt = pb.status || pb.outcome || 'completed';
+                document.getElementById('pb_status').textContent = pbSt;
+                const acts = Array.isArray(pb.actions_completed) ? pb.actions_completed : (Array.isArray(pb.actions) ? pb.actions : []);
+                document.getElementById('pb_actions').innerHTML = acts.slice(0,8).map(a=>`<span class='pill'>${typeof a==='string'?a:JSON.stringify(a)}</span>`).join('');
+                const nxt = Array.isArray(pb.next_steps) ? pb.next_steps.join(' · ') : (pb.next_step || '');
+                if(nxt){ document.getElementById('pb_next_steps').textContent = 'Next: ' + nxt; }
+              }
             }catch(e){ pushTraceNotice('render_panels_error', { error: String(e) }); }
           }
 
-          async function analyze(){ document.getElementById('status').textContent='Analyzing…'; const to = document.getElementById('to').value.trim(); const subj = document.getElementById('subject').value.trim(); const body = document.getElementById('body').value.trim(); const atts = await collectAllAttachments(); const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
+          async function analyze(){ resetPlaybookRunCard(); document.getElementById('status').textContent='Analyzing…'; const to = document.getElementById('to').value.trim(); const subj = document.getElementById('subject').value.trim(); const body = document.getElementById('body').value.trim(); let atts = []; try { atts = await collectAllAttachments(); } catch(attErr){ const msg = 'Attachment encoding failed: ' + String(attErr && attErr.message ? attErr.message : attErr); document.getElementById('status').textContent = msg; pushTraceNotice('attachment_encoding_failed', { error: msg }); return; } const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
               let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(payload) });
               if (r.status === 401 || r.status === 403) {
@@ -918,11 +1729,19 @@ def merchant_email_lab(request: Request):
             } catch(e) { document.getElementById('status').textContent='Analyze error'; pushTraceNotice('analyze_error', { endpoint: '/api/v1/email_security/evaluate', error: String(e && e.message ? e.message : e) }); }
           }
           async function submitEscalate(){
+            resetPlaybookRunCard();
             document.getElementById('status').textContent='Analyzing & escalating…';
             const to = document.getElementById('to').value.trim();
             const subj = document.getElementById('subject').value.trim();
             const body = document.getElementById('body').value.trim();
-            const atts = await collectAllAttachments();
+            let atts = [];
+            try { atts = await collectAllAttachments(); }
+            catch(attErr){
+              const msg = 'Attachment encoding failed: ' + String(attErr && attErr.message ? attErr.message : attErr);
+              document.getElementById('status').textContent = msg;
+              pushTraceNotice('attachment_encoding_failed', { error: msg });
+              return;
+            }
             const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
               let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(payload) });
@@ -951,7 +1770,7 @@ def merchant_email_lab(request: Request):
               } catch(esc) { document.getElementById('status').textContent='Analyzed (escalation failed)'; pushTraceNotice('escalation_error', { endpoint: '/api/v1/incidents/escalate', error: String(esc && esc.message ? esc.message : esc) }); }
             } catch(e) { document.getElementById('status').textContent='Submit error'; pushTraceNotice('submit_error', { endpoint: '/api/v1/email_security/evaluate', error: String(e && e.message ? e.message : e) }); }
           }
-          function attachTrace(traceId){ currentDecisionId = traceId; document.getElementById('trace_id').textContent = traceId; const box = document.getElementById('trace'); box.innerHTML=''; if(es) try{ es.close(); }catch(e){}
+          function attachTrace(traceId){ currentDecisionId = traceId; document.getElementById('trace_id').textContent = traceId; const box = document.getElementById('trace'); const human = document.getElementById('trace_human'); box.innerHTML=''; if(human) human.innerHTML=''; if(es) try{ es.close(); }catch(e){}
             es = new EventSource(`/api/v1/trace/${encodeURIComponent(traceId)}/events/stream`);
             function formatFrameworks(fr){
               try{
@@ -978,7 +1797,7 @@ def merchant_email_lab(request: Request):
                 const d=document.createElement('div'); d.className='ev'; const tag = (it.event_type||'event'); const ts = it.created_at || '';
                 const frameworks = formatFrameworks(it?.payload?.frameworks || {});
                 d.innerHTML = `<div class='meta'>${tag} · ${ts}</div>` + (frameworks ? (`<div class='small' style='margin-bottom:6px; display:flex; gap:6px; flex-wrap:wrap;'>${frameworks}</div>`) : '') + `<div class='mono'>${JSON.stringify(it.payload||{}, null, 0).slice(0, 300)}</div>`;
-                box.appendChild(d); box.scrollTop = box.scrollHeight; } } catch(e){} };
+                box.appendChild(d); box.scrollTop = box.scrollHeight; if(human){ const h=document.createElement('div'); h.innerHTML = renderNarrativeTraceEvent(it); if(h.firstChild) human.appendChild(h.firstChild); human.scrollTop = human.scrollHeight; } ingestPlaybookTraceEvent(it); } } catch(e){} };
             es.onerror = ()=>{};
             // Attempt to find a related incident for this trace.
             findRelatedIncident(traceId);
@@ -1006,12 +1825,21 @@ def merchant_email_lab(request: Request):
               document.getElementById('inc_sev').textContent = (match.severity || 'unknown').toString();
               document.getElementById('inc_pb').textContent = ((match.playbook||{}).title || 'n/a');
               try{
-                const t = await fetch(`/api/v1/admin/incidents/${encodeURIComponent(match.id)}/room/token`, { method:'POST', headers:{ 'x-api-key': getOwnerKey() } });
+                let roomIncidentId = match.id || '';
+                const traceRef = String((match.evidence_snapshot || {}).trace_id || (match.evidence_snapshot || {}).decision_id || traceId || '').trim();
+                if(traceRef){
+                  try{
+                    const incR = await fetch(`/api/v1/admin/incidents/${encodeURIComponent(traceRef)}`, { headers:{ 'x-api-key': getOwnerKey() } });
+                    const incJ = await incR.json().catch(()=>null);
+                    if(incR.ok && incJ && incJ.id){ roomIncidentId = incJ.id; }
+                  }catch(e){}
+                }
+                const t = await fetch(`/api/v1/admin/incidents/${encodeURIComponent(roomIncidentId)}/room/token`, { method:'POST', headers:{ 'x-api-key': getOwnerKey() } });
                 const tj = await t.json();
                 if(tj && tj.staff_token){
                   const tok = tj.staff_token;
                   const btn = document.getElementById('inc_join');
-                  btn.onclick = function(){ window.open(`/merchant/incident-room-lite?incident_id=${encodeURIComponent(match.id)}&token=${encodeURIComponent(tok)}`, '_blank'); };
+                  btn.onclick = function(){ window.open(`/merchant/incident-room-lite?incident_id=${encodeURIComponent(roomIncidentId)}&token=${encodeURIComponent(tok)}`, '_blank'); };
                 }
               }catch(e){}
             }catch(e){ document.getElementById('inc_status').textContent = 'error'; }
@@ -1026,18 +1854,30 @@ def merchant_email_lab(request: Request):
               { trace_id: traceId, event_type: 'policy_gate', source_type: 'agent', source_id: 'Email_Policy_Gate_Agent', payload: { decision: 'review', reason: 'rule_first_gate' } },
             ];
             try{
-              const r = await fetch('/api/v1/trace/events', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(batch) });
-              if(!r.ok){ document.getElementById('status').textContent='Simulation failed'; return; }
+              let r = await fetch('/api/v1/trace/events', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(batch) });
+              if(r.status === 401 || r.status === 403){
+                r = await fetch('/api/v1/trace/events', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }, body: JSON.stringify(batch) });
+              }
+              if(!r.ok){ document.getElementById('status').textContent='Simulation failed ('+r.status+')'; pushTraceNotice('simulation_failed', { status: r.status }); return; }
               document.getElementById('status').textContent='Simulation events sent';
-            }catch(e){ document.getElementById('status').textContent='Simulation error'; }
+            }catch(e){ document.getElementById('status').textContent='Simulation error'; pushTraceNotice('simulation_error', { error: String(e && e.message ? e.message : e) }); }
           }
           // Explicit exports for Playwright/runtime checks.
           window.analyze = analyze;
           window.simulateAgents = simulateAgents;
+          window.addEventListener('error', function(ev){
+            try{
+              const msg = 'UI script error: ' + String(ev && ev.message ? ev.message : ev);
+              document.getElementById('status').textContent = msg;
+              pushTraceNotice('ui_script_error', { error: msg });
+            } catch(e){}
+          });
           // Preload defaults
           newEmailPreset();
         </script>
       </body>
     </html>
     """
-    return HTMLResponse(content=html)
+    resp = HTMLResponse(content=html)
+    resp.set_cookie("shopsquire_api_key", _owner_key, httponly=False, samesite="strict")
+    return resp

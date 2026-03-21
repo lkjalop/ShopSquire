@@ -1,0 +1,24 @@
+{
+  "countries": {
+    "ZZ": {
+      "label": "Unknown / unrouted",
+      "risk_floor": 0.35,
+      "tags": ["unknown_geo"]
+    },
+    "DE": {
+      "label": "Requires context review when paired with Tor/VPN",
+      "risk_floor": 0.45,
+      "tags": ["eu", "needs_context"]
+    },
+    "GB": {
+      "label": "Requires context review when paired with hosting/VPN",
+      "risk_floor": 0.45,
+      "tags": ["uk", "needs_context"]
+    },
+    "US": {
+      "label": "Requires context review when public DNS or cloud infra is used for supplier mail",
+      "risk_floor": 0.3,
+      "tags": ["public_cloud_context"]
+    }
+  }
+}

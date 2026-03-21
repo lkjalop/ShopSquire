@@ -1,0 +1,61 @@
+{
+  "exact_ips": {
+    "8.8.8.8": {
+      "asn": 15169,
+      "org": "Google Public DNS",
+      "country": "US",
+      "is_hosting": true,
+      "is_vpn": false,
+      "risk": 0.82,
+      "tags": ["public_dns", "anycast", "bad_asn"]
+    },
+    "8.8.4.4": {
+      "asn": 15169,
+      "org": "Google Public DNS",
+      "country": "US",
+      "is_hosting": true,
+      "is_vpn": false,
+      "risk": 0.82,
+      "tags": ["public_dns", "anycast", "bad_asn"]
+    },
+    "1.1.1.1": {
+      "asn": 13335,
+      "org": "Cloudflare DNS",
+      "country": "US",
+      "is_hosting": true,
+      "is_vpn": false,
+      "risk": 0.82,
+      "tags": ["public_dns", "anycast", "bad_asn"]
+    },
+    "1.0.0.1": {
+      "asn": 13335,
+      "org": "Cloudflare DNS",
+      "country": "US",
+      "is_hosting": true,
+      "is_vpn": false,
+      "risk": 0.82,
+      "tags": ["public_dns", "anycast", "bad_asn"]
+    },
+    "45.95.147.236": {
+      "asn": 9009,
+      "org": "VPN / Hosting Heuristic",
+      "country": "GB",
+      "is_hosting": true,
+      "is_vpn": true,
+      "risk": 0.91,
+      "tags": ["vpn", "hosting", "heuristic_match"]
+    }
+  },
+  "cidr_overrides": [
+    {
+      "cidr": "185.220.100.0/22",
+      "asn": 60729,
+      "org": "Tor Exit Relay Heuristic",
+      "country": "DE",
+      "is_hosting": true,
+      "is_vpn": true,
+      "risk": 0.96,
+      "tags": ["tor", "privacy_relay", "heuristic_match"]
+    }
+  ]
+}

@@ -12,6 +12,7 @@ _HYPOTHESIS_TO_MITRE: Dict[str, List[str]] = {
     "ransomware":              ["T1486", "T1059", "T1490"],
     "macros":                  ["T1566.001", "T1204.002", "T1059.005"],
     "steg_unknown_payload":    ["T1027.001", "T1027"],
+    "pii_data_exfil_via_qr":  ["T1041", "T1566.002", "T1078"],
     "unknown":                 [],
 }
 
@@ -25,6 +26,7 @@ _HYPOTHESIS_TO_PASTA: Dict[str, str] = {
     "data_exfiltration":       "Stage5 — Weakness & Vulnerability Analysis",
     "c2_beacon":               "Stage4 — Exploitation & Vulnerability Analysis",
     "steg_unknown_payload":    "Stage4 — Exploitation & Vulnerability Analysis",
+    "pii_data_exfil_via_qr":  "Stage5 — Weakness & Vulnerability Analysis",
     "unknown":                 "Stage2 — Technical Scope Definition",
 }
 
@@ -38,6 +40,7 @@ _HYPOTHESIS_TO_DECODE_PATH: Dict[str, str] = {
     "data_exfiltration":      "sandbox_required_do_not_execute",
     "c2_beacon":               "sandbox_required_do_not_execute",
     "steg_unknown_payload":    "safe_passive_decode_only",
+    "pii_data_exfil_via_qr":  "safe_passive_decode_only",
     "unknown":                 "safe_passive_decode_only",
 }
 
@@ -63,6 +66,10 @@ SIGNAL_LABELS: Dict[str, str] = {
     "multimodal_attack_surface_high":   "Multimodal Attack Surface High",
     "supply_chain":                     "Supply Chain Signal",
     "data_exfiltration":                "Data Exfiltration Pattern",
+    "ssn_detected":                     "SSN in Linked Artifact",
+    "pii_detected":                     "PII Data Exposed",
+    "pii_types":                        "PII Types Found",
+    "ssn_count":                        "SSN Count",
 }
 
 
@@ -176,6 +183,8 @@ def classify_passive_payload(
     elif bool(sigs.get("steg_suspicious")) and not decoded_artifact_available:
         # Steg is flagged but no readable payload decoded — honest unknown with steg signal
         hypothesis = "steg_unknown_payload"
+    elif sigs.get("ssn_detected") or sigs.get("pii_detected"):
+        hypothesis = "pii_data_exfil_via_qr"
 
     # Wire ransomware_indicator back into signals so PASTA logic in observer.py and
     # framework_correlation._pasta() can promote to Stage6.
@@ -189,7 +198,7 @@ def classify_passive_payload(
     if hypothesis in {"lolbin_command_sequence", "c2_beacon", "ransomware", "macros", "steg_unknown_payload"} \
             or bool(sigs.get("steg_suspicious")):
         suggested_next_step = "queue_sandbox_detonation"
-    elif hypothesis in {"prompt_injection", "data_exfiltration", "payment_fraud"} \
+    elif hypothesis in {"prompt_injection", "data_exfiltration", "payment_fraud", "pii_data_exfil_via_qr"} \
             or bool(sigs.get("steg_score_elevated")):
         suggested_next_step = "review"
     else:
@@ -197,11 +206,12 @@ def classify_passive_payload(
 
     # Build per-binary behavioral profiles when hypothesis is lolbin
     lolbin_profiles: List[Dict[str, Any]] = []
+    lolbin_hits: List[str] = []
     if hypothesis == "lolbin_command_sequence":
         try:
             from src.app.security.lolbin_behavioral_catalog import enrich_lolbin_indicators, LOLBIN_CATALOG
-            detected = [k for k in LOLBIN_CATALOG if k in content_text]
-            lolbin_profiles = enrich_lolbin_indicators(detected)
+            lolbin_hits = [k for k in LOLBIN_CATALOG if k in content_text]
+            lolbin_profiles = enrich_lolbin_indicators(lolbin_hits)
         except Exception:
             pass
 
@@ -213,7 +223,8 @@ def classify_passive_payload(
         "pasta_stage": pasta_stage,
         "decode_path": decode_path,
         "suggested_next_step": suggested_next_step,
+        "lolbin_hits": lolbin_hits,
         "lolbin_behavioral_profiles": lolbin_profiles,
+        "signal_labels": SIGNAL_LABELS,
         "signals_updated": sigs,
     }
-

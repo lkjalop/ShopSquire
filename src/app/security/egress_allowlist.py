@@ -70,6 +70,10 @@ _BUILTIN_ALLOWED_DOMAINS: FrozenSet[str] = frozenset(
         "urlhaus.abuse.ch",
         "urlhaus-api.abuse.ch",
         "mb-api.abuse.ch",
+        # Demo QR/document provider used by linked-artifact analysis fixtures
+        "scanned.page",
+        "www.scanned.page",
+        "qr.scanned.page",
         "pypi.org",
         "pypi.python.org",
         "files.pythonhosted.org",

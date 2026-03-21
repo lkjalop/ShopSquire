@@ -43,6 +43,80 @@ _BRAND_HINT_KW = {
 }
 
 
+def _vision_payload_drilldown(
+    finding_type: str,
+    *,
+    payload_analysis: Dict[str, Any],
+    security_signals: Dict[str, Any],
+    linked_artifact: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    linked = linked_artifact if isinstance(linked_artifact, dict) else {}
+    qr_probe = security_signals.get("qr_redirect_probe") if isinstance(security_signals.get("qr_redirect_probe"), dict) else {}
+    if finding_type == "lolbin_command_sequence":
+        return {
+            "headline": "Hidden LOLBin command sequence detected",
+            "what_to_look_for": [
+                "PowerShell, certutil, mshta, regsvr32, rundll32, bitsadmin, wscript, or cscript launches",
+                "Encoded commands, download-and-execute chains, or suspicious child processes",
+                "Outbound requests to fetch payloads immediately after artifact handling",
+            ],
+            "affected_scope": "Any endpoint or user session that opened or processed the image may be affected.",
+            "potential_damage": "Payload staging, malware execution, or follow-on compromise using trusted tools.",
+        }
+    if finding_type == "c2_beacon_pattern":
+        return {
+            "headline": "Hidden C2 beacon pattern detected",
+            "what_to_look_for": [
+                "Repeated low-volume callback traffic or beacon intervals",
+                "Proxy, DNS, firewall, or XDR telemetry showing check-ins after the image was handled",
+                "Small recurring packets, jitter, or unusual periodic requests",
+            ],
+            "affected_scope": "Any host that opened the artifact or shows the same callback behavior in telemetry.",
+            "potential_damage": "Persistence and remote tasking if the hidden pattern was operationalized.",
+        }
+    if finding_type == "data_exfiltration_instruction":
+        return {
+            "headline": "Hidden data exfiltration instructions detected",
+            "what_to_look_for": [
+                "Archive creation, compression, browser uploads, curl/wget/scp/rclone activity",
+                "Cloud bucket access, unusual file access, or outbound transfers after artifact interaction",
+                "Endpoint, eBPF, EDR, proxy, and identity evidence tied to the same user or host",
+            ],
+            "affected_scope": "Potentially affected users are those who opened the artifact or had access to targeted data sources.",
+            "potential_damage": "Sensitive files, credentials, or business data may have been staged or targeted for theft.",
+        }
+    if finding_type == "prompt_injection_hidden":
+        carrier = "steganography"
+        if bool(security_signals.get("qr_prompt_injection")):
+            carrier = "QR payload"
+        elif bool(security_signals.get("invisible_text_suspected")):
+            carrier = "text overlay / hidden OCR content"
+        return {
+            "headline": "Hidden prompt injection detected",
+            "carrier": carrier,
+            "what_to_look_for": [
+                "Model or agent logs showing unsafe tool requests or abnormal context leakage",
+                "Any workflow that ingested the artifact before sanitization",
+                "Prompt text attempting to override instructions or reveal protected context",
+            ],
+            "business_risk": "AI decision quality, tool safety, and downstream automation integrity may be affected.",
+        }
+    if finding_type == "ssn_leakage_linked_qr":
+        return {
+            "headline": "Linked QR path suggests SSN or PII leakage",
+            "linked_artifact_type": linked.get("linked_artifact_type"),
+            "ssn_count": len(linked.get("ssn_hits") or []),
+            "pii_types": linked.get("pii_type") or [],
+            "what_to_look_for": [
+                "Public-link exposure, object permission failures, or RBAC/ABAC misconfiguration",
+                "Access logs, referrers, GeoIP, and hosting ASN traffic to the exposed artifact",
+                "Whether the exposure came from insider misuse, supplier publication, or external access",
+            ],
+            "business_risk": "Potential privacy-reporting, reputational, and legal exposure if the linked content was publicly accessible.",
+        }
+    return {}
+
+
 def _compute_damage_score(analysis: Dict) -> float:
     """Derive a 0.0-1.0 damage score from CV triage analysis."""
     if not isinstance(analysis, dict):
@@ -203,8 +277,14 @@ async def triage(
             is_product_photo=resp["is_product_photo"],
         )
         resp["intent_routing"] = intent_result
+        # Promote intent + damage_score to top-level so the frontend can gate without
+        # digging into nested structures (App.tsx toImageTriageContexts reads these)
+        resp["intent"] = intent_result.get("intent", "visual_search")
+        resp["damage_score"] = max(float(resp.get("damage_score") or 0.0),
+                                   float(intent_result.get("damage_score") or 0.0))
     except Exception:
         resp["intent_routing"] = {"intent": "disambiguate", "confidence": 0.0, "reason": "router_error"}
+        resp["intent"] = "visual_search"
 
     # Security scan: QR/barcode + adversarial detection (best-effort)
     security_clean = True
@@ -225,6 +305,7 @@ async def triage(
         pass
 
     qr_product_data: Dict[str, Any] = {}
+    linked_artifact_result: Dict[str, Any] | None = None
     qr_redirect_probe: Dict[str, Any] = {"enabled": False, "checked": False, "chain": []}
     try:
         from src.app.rules.barcode_decode import decode_barcodes
@@ -272,6 +353,22 @@ async def triage(
                                     qr_redirect_probe = await _probe_redirect_chain(data, timeout_s=1.25, max_hops=3)
                                 except Exception:
                                     qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
+                                # ── Auto-analyze linked artifact (SSN / PII / payload scan) ──
+                                try:
+                                    from src.app.security.linked_artifact_analysis import analyze_linked_artifact
+                                    linked = analyze_linked_artifact(url=data, timeout=6.0)
+                                    linked_artifact_result = linked if isinstance(linked, dict) else None
+                                    resp["linked_artifact"] = linked
+                                    if linked.get("pii_detected"):
+                                        security_signals["pii_detected"] = True
+                                        security_signals["pii_types"] = linked.get("pii_type", [])
+                                        security_clean = False
+                                    if linked.get("ssn_hits"):
+                                        security_signals["ssn_detected"] = True
+                                        security_signals["ssn_count"] = len(linked["ssn_hits"])
+                                        security_clean = False
+                                except Exception:
+                                    pass
                             else:
                                 qr_redirect_probe = {"enabled": False, "checked": False, "chain": [], "deferred": True}
                             break
@@ -363,6 +460,7 @@ async def triage(
     try:
         ocr_det = _normalize_ocr_and_detect(extracted_text)
         stage_a_text = str(extracted_text or "").strip()
+        filename_hint_for_ocr = os.path.splitext(str(name or "").lower())[0].replace("-", " ").replace("_", " ")
         deep_trigger = bool(
             (
                 not stage_a_text
@@ -377,6 +475,7 @@ async def triage(
                 )
             )
             or (len(stage_a_text) < 12 and bool(security_signals.get("qr_code_detected")))
+            or (not stage_a_text and any(tok in filename_hint_for_ocr for tok in ("ms texti", "ms-texti")))
         )
         if deep_trigger and not fast:
             # Risk-triggered deep OCR for low-evidence or overlay-heavy images.
@@ -488,6 +587,59 @@ async def triage(
         extracted_text=(extracted_text or "")[:500],
         signals=security_signals,
     )
+    security_signals = dict(payload_analysis.get("signals_updated") or security_signals)
+    if payload_analysis.get("attack_hypothesis") not in (None, "", "unknown"):
+        if payload_analysis.get("suggested_next_step") != "allow" or security_signals:
+            security_clean = False
+    payload_findings: list[dict[str, Any]] = []
+    hypothesis = str(payload_analysis.get("attack_hypothesis") or "").strip().lower()
+    payload_map = {
+        "lolbin_command_sequence": {
+            "finding_type": "lolbin_command_sequence",
+            "headline": "Hidden LOLBin command sequence detected",
+            "business_risk": "The image appears to hide commands that abuse trusted operating-system tools to fetch or launch payloads.",
+        },
+        "c2_beacon": {
+            "finding_type": "c2_beacon_pattern",
+            "headline": "Hidden C2 beacon pattern detected",
+            "business_risk": "The decoded content resembles callback or beacon instructions that should be threat-hunted on network and endpoint telemetry.",
+        },
+        "data_exfiltration": {
+            "finding_type": "data_exfiltration_instruction",
+            "headline": "Hidden data-exfiltration instructions detected",
+            "business_risk": "The image appears to hide instructions for collecting or moving sensitive data out of the environment.",
+        },
+        "prompt_injection": {
+            "finding_type": "prompt_injection_hidden",
+            "headline": "Hidden prompt injection detected",
+            "business_risk": "The artifact appears designed to manipulate AI or agent workflows if the content is ingested without sanitization.",
+        },
+        "pii_data_exfil_via_qr": {
+            "finding_type": "ssn_leakage_linked_qr",
+            "headline": "Linked QR path suggests SSN or PII leakage",
+            "business_risk": "The QR-linked content appears to expose sensitive identity data and should be treated as a privacy incident candidate.",
+        },
+    }
+    mapped = payload_map.get(hypothesis)
+    if mapped:
+        payload_findings.append(
+            {
+                "finding_type": mapped["finding_type"],
+                "headline": mapped["headline"],
+                "business_risk": mapped["business_risk"],
+                "mitre_attack": payload_analysis.get("mitre_attack") or [],
+                "pasta_stage": payload_analysis.get("pasta_stage"),
+                "decode_path": payload_analysis.get("decode_path"),
+                "suggested_next_step": payload_analysis.get("suggested_next_step"),
+                "evidence": list(security_signals.get("steg_explanations") or [])[:3] or [str(x) for x in (payload_analysis.get("lolbin_hits") or [])[:3]],
+                "drilldown": _vision_payload_drilldown(
+                    mapped["finding_type"],
+                    payload_analysis=payload_analysis,
+                    security_signals=security_signals,
+                    linked_artifact=linked_artifact_result,
+                ),
+            }
+        )
 
     resp["security"] = {
         "clean": security_clean,
@@ -503,8 +655,12 @@ async def triage(
         "payload_type": payload_analysis.get("payload_type"),
         "attack_hypothesis": payload_analysis.get("attack_hypothesis"),
         "mitre_attack": payload_analysis.get("mitre_attack") or [],
+        "pasta_stage": payload_analysis.get("pasta_stage"),
         "decode_path": payload_analysis.get("decode_path"),
         "suggested_next_step": payload_analysis.get("suggested_next_step"),
+        "lolbin_behavioral_profiles": payload_analysis.get("lolbin_behavioral_profiles") or [],
+        "signal_labels": payload_analysis.get("signal_labels") or {},
+        "payload_findings": payload_findings,
     }
     # Attach productive QR data (manufacturer URLs, model hints) for downstream identity extraction
     if qr_product_data:

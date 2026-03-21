@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 import json
+import ipaddress
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional, Tuple, Dict, Any
@@ -35,6 +36,21 @@ def _load_json(path: str) -> Dict[str, Any]:
 
 def _load_overrides():
     return _load_json(os.path.join("config", "security", "geoip_overrides.json")).get("overrides", [])
+
+
+def _load_offline_heuristics() -> Dict[str, Any]:
+    data = _load_json(os.path.join("config", "security", "geoip_offline_heuristics.json"))
+    return data if isinstance(data, dict) else {}
+
+
+def _load_asn_risk_profiles() -> Dict[str, Any]:
+    data = _load_json(os.path.join("config", "security", "asn_risk_profiles.json"))
+    return data if isinstance(data, dict) else {}
+
+
+def _load_country_risk_profiles() -> Dict[str, Any]:
+    data = _load_json(os.path.join("config", "security", "geo_country_risk_profiles.json"))
+    return data if isinstance(data, dict) else {}
 
 
 def _load_bad_asn() -> set[int]:
@@ -169,8 +185,6 @@ def _ip_api_lookup(ip: str) -> Optional[Dict[str, Any]]:
 
 
 def _override_match(ip: str) -> Optional[Dict[str, Any]]:
-    import ipaddress
-
     try:
         ip_obj = ipaddress.ip_address(ip)
     except Exception:
@@ -195,6 +209,80 @@ def _override_match(ip: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _offline_heuristic_lookup(ip: str) -> Optional[Dict[str, Any]]:
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+    except Exception:
+        return None
+
+    if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+        return {
+            "asn": None,
+            "asn_org": "private_network",
+            "country": "ZZ",
+            "is_hosting": False,
+            "is_vpn": False,
+            "risk": 0.0,
+            "matched_override": False,
+            "offline_heuristic": "private_or_loopback",
+        }
+    if any(
+        ip_obj in ipaddress.ip_network(cidr)
+        for cidr in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")
+    ):
+        return {
+            "asn": None,
+            "asn_org": "TEST-NET",
+            "country": "ZZ",
+            "is_hosting": False,
+            "is_vpn": False,
+            "risk": 0.35,
+            "matched_override": False,
+            "offline_heuristic": "documentation_range",
+        }
+
+    heur = _load_offline_heuristics()
+    exact = heur.get("exact_ips") if isinstance(heur.get("exact_ips"), dict) else {}
+    row = exact.get(ip) if isinstance(exact, dict) else None
+    if isinstance(row, dict):
+        out = {
+            "asn": int(row.get("asn") or 0) or None,
+            "asn_org": row.get("org"),
+            "country": row.get("country"),
+            "is_hosting": bool(row.get("is_hosting")),
+            "is_vpn": bool(row.get("is_vpn")),
+            "risk": float(row.get("risk", 0.45)),
+            "matched_override": False,
+            "offline_heuristic": "exact_ip",
+        }
+        if row.get("tags") is not None:
+            out["tags"] = list(row.get("tags") or [])[:8]
+        return out
+
+    cidr_rows = heur.get("cidr_overrides") if isinstance(heur.get("cidr_overrides"), list) else []
+    for entry in cidr_rows:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            if ip_obj in ipaddress.ip_network(str(entry.get("cidr") or ""), strict=False):
+                out = {
+                    "asn": int(entry.get("asn") or 0) or None,
+                    "asn_org": entry.get("org"),
+                    "country": entry.get("country"),
+                    "is_hosting": bool(entry.get("is_hosting")),
+                    "is_vpn": bool(entry.get("is_vpn")),
+                    "risk": float(entry.get("risk", 0.75)),
+                    "matched_override": False,
+                    "offline_heuristic": "cidr_match",
+                }
+                if entry.get("tags") is not None:
+                    out["tags"] = list(entry.get("tags") or [])[:8]
+                return out
+        except Exception:
+            continue
+    return None
+
+
 def _risk_from_asn(asn: Optional[int], org: Optional[str], country: Optional[str], base: float) -> float:
     bad = _load_bad_asn()
     r = base
@@ -205,6 +293,20 @@ def _risk_from_asn(asn: Optional[int], org: Optional[str], country: Optional[str
         org_l = (org or "").lower()
         if any(k in org_l for k in ("aws", "amazon", "google", "microsoft", "azure", "cloudflare", "ovh", "digitalocean", "contabo", "linode", "vultr", "m247", "hetzner")):
             r = max(r, 0.75)
+    except Exception:
+        pass
+    try:
+        profiles = _load_asn_risk_profiles()
+        row = (profiles.get("profiles") or {}).get(str(int(asn))) if asn and isinstance((profiles.get("profiles") or {}), dict) else None
+        if isinstance(row, dict):
+            r = max(r, float(row.get("risk_floor", r)))
+    except Exception:
+        pass
+    try:
+        c_profiles = _load_country_risk_profiles()
+        row = (c_profiles.get("countries") or {}).get(str(country or "").upper()) if isinstance((c_profiles.get("countries") or {}), dict) else None
+        if isinstance(row, dict):
+            r = max(r, float(row.get("risk_floor", r)))
     except Exception:
         pass
     # Bound 0..1
@@ -226,8 +328,8 @@ def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
         if cached:
             record_geoip_cache_hit()
             return cached
-        # Provider chain: MaxMind (local) -> IP2Location (API) -> ip-api.com (free) -> defaults
-        provider_data = _mmdb_lookup(ip) or _ip2location_lookup(ip) or _ip_api_lookup(ip) or {}
+        # Provider chain: MaxMind (local) -> offline heuristics -> IP2Location (API) -> ip-api.com (free) -> defaults
+        provider_data = _mmdb_lookup(ip) or _offline_heuristic_lookup(ip) or _ip2location_lookup(ip) or _ip_api_lookup(ip) or {}
         asn = provider_data.get("asn")
         org = provider_data.get("asn_org")
         cc = provider_data.get("country") or os.getenv("GEOIP_COUNTRY_DEFAULT")
@@ -235,10 +337,14 @@ def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
             "asn": asn,
             "asn_org": org,
             "country": cc,
-            "is_hosting": False,
-            "is_vpn": False,
+            "is_hosting": bool(provider_data.get("is_hosting")),
+            "is_vpn": bool(provider_data.get("is_vpn")),
             "matched_override": False,
         }
+        if provider_data.get("offline_heuristic") is not None:
+            result["offline_heuristic"] = provider_data.get("offline_heuristic")
+        if provider_data.get("tags") is not None:
+            result["tags"] = list(provider_data.get("tags") or [])[:8]
 
     # Risk computation and hosting/vpn heuristics
     base_risk = float(result.get("risk", 0.2))
@@ -249,7 +355,33 @@ def enrich_ip(ip: Optional[str]) -> Dict[str, Any]:
     if not result.get("is_hosting"):
         result["is_hosting"] = any(k in org_l for k in ("cloud", "hosting", "aws", "google", "azure", "ovh", "digitalocean", "hetzner", "linode", "vultr", "m247"))
     if not result.get("is_vpn"):
-        result["is_vpn"] = any(k in org_l for k in ("vpn", "proxy", "m247", "nord", "expressvpn"))
+        result["is_vpn"] = any(k in org_l for k in ("vpn", "proxy", "m247", "nord", "expressvpn", "tor"))
+
+    try:
+        profiles = _load_asn_risk_profiles()
+        row = (profiles.get("profiles") or {}).get(str(int(result.get("asn")))) if result.get("asn") and isinstance((profiles.get("profiles") or {}), dict) else None
+        if isinstance(row, dict):
+            result["asn_profile"] = {
+                "label": row.get("label"),
+                "category": row.get("category"),
+                "risk_floor": row.get("risk_floor"),
+                "tags": list(row.get("tags") or [])[:8],
+            }
+            result["is_hosting"] = bool(result.get("is_hosting") or row.get("is_hosting"))
+            result["is_vpn"] = bool(result.get("is_vpn") or row.get("is_vpn"))
+    except Exception:
+        pass
+    try:
+        c_profiles = _load_country_risk_profiles()
+        crow = (c_profiles.get("countries") or {}).get(str(result.get("country") or "").upper()) if isinstance((c_profiles.get("countries") or {}), dict) else None
+        if isinstance(crow, dict):
+            result["country_profile"] = {
+                "label": crow.get("label"),
+                "risk_floor": crow.get("risk_floor"),
+                "tags": list(crow.get("tags") or [])[:8],
+            }
+    except Exception:
+        pass
 
     # Emit Prom metrics for dashboards
     try:

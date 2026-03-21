@@ -1,0 +1,52 @@
+{
+  "profiles": {
+    "13335": {
+      "label": "Cloudflare anycast edge / public DNS",
+      "category": "anycast_dns",
+      "risk_floor": 0.82,
+      "is_hosting": true,
+      "is_vpn": false,
+      "tags": ["public_dns", "anycast", "edge_infrastructure"]
+    },
+    "15169": {
+      "label": "Google infrastructure / public DNS",
+      "category": "public_cloud_dns",
+      "risk_floor": 0.82,
+      "is_hosting": true,
+      "is_vpn": false,
+      "tags": ["public_dns", "cloud", "edge_infrastructure"]
+    },
+    "60729": {
+      "label": "Tor exit relay heuristic",
+      "category": "privacy_network",
+      "risk_floor": 0.96,
+      "is_hosting": true,
+      "is_vpn": true,
+      "tags": ["tor", "privacy_relay"]
+    },
+    "9009": {
+      "label": "Hosting / VPN heuristic",
+      "category": "hosting_vpn",
+      "risk_floor": 0.91,
+      "is_hosting": true,
+      "is_vpn": true,
+      "tags": ["hosting", "vpn"]
+    },
+    "16509": {
+      "label": "AWS cloud infrastructure",
+      "category": "public_cloud",
+      "risk_floor": 0.8,
+      "is_hosting": true,
+      "is_vpn": false,
+      "tags": ["aws", "cloud", "hosting"]
+    },
+    "14618": {
+      "label": "Amazon infrastructure",
+      "category": "public_cloud",
+      "risk_floor": 0.8,
+      "is_hosting": true,
+      "is_vpn": false,
+      "tags": ["amazon", "cloud", "hosting"]
+    }
+  }
+}
