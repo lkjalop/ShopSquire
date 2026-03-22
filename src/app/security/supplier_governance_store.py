@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+from urllib.parse import quote, unquote
 from typing import Any, Dict, List
 
 from sqlalchemy import text
@@ -84,6 +85,113 @@ def _hash16(value: str | None) -> str | None:
         return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
     except Exception:
         return None
+
+
+def _governance_version_hash(profile: Dict[str, Any]) -> str:
+    seed = json.dumps(
+        {
+            "approved_domains": _norm_list(list(profile.get("approved_domains") or [])),
+            "approved_contacts": _norm_list(list(profile.get("approved_contacts") or [])),
+            "approved_bank_fingerprints": _norm_list(list(profile.get("approved_bank_fingerprints") or [])),
+            "trusted_template_hashes": _norm_list(list(profile.get("trusted_template_hashes") or [])),
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12]
+
+
+def _parse_history_entry(entry: str) -> Dict[str, Any]:
+    text = str(entry or "").strip()
+    parts = text.split(":")
+    action = parts[0] if parts else "recorded"
+    update_key = parts[1] if len(parts) > 1 else ""
+    actor_role = None
+    actor_id = None
+    reviewer_note = None
+    version_hash = None
+    for part in parts[2:]:
+        if part.startswith("by="):
+            _, _, raw = part.partition("=")
+            if ":" in raw:
+                actor_role, actor_id = raw.split(":", 1)
+            else:
+                actor_role = raw
+        elif part.startswith("note="):
+            _, _, raw = part.partition("=")
+            reviewer_note = unquote(raw or "").strip() or None
+        elif part.startswith("version="):
+            _, _, raw = part.partition("=")
+            version_hash = str(raw or "").strip() or None
+    update_type, _, update_value = update_key.partition(":")
+    action_label = {
+        "approve": "Approved",
+        "reject": "Rejected",
+        "rollback": "Rolled back",
+        "pending": "Pending review for",
+    }.get(action, action.title())
+    state = {
+        "approve": "approved",
+        "reject": "rejected",
+        "rollback": "rolled_back",
+        "pending": "pending",
+    }.get(action, "recorded")
+    return {
+        "action": action,
+        "update_key": update_key,
+        "update_type": update_type or None,
+        "update_value": update_value or None,
+        "actor_role": actor_role,
+        "actor_id": actor_id,
+        "reviewer_note": reviewer_note,
+        "version_hash": version_hash,
+        "summary": f"{action_label} {update_type.replace('_', ' ') if update_type else 'governance item'}{f' {update_value}' if update_value else ''}".strip(),
+        "state": state,
+    }
+
+
+def build_supplier_governance_timeline(*, profile: Dict[str, Any]) -> List[Dict[str, Any]]:
+    prof = profile if isinstance(profile, dict) else {}
+    timeline: List[Dict[str, Any]] = []
+    updated_at = str(prof.get("updated_at") or "").strip() or None
+    pending = [str(x or "").strip() for x in (prof.get("pending_updates") or []) if str(x or "").strip()]
+    for idx, entry in enumerate((prof.get("history") or [])[-32:]):
+        row = _parse_history_entry(str(entry or ""))
+        row["index"] = idx + 1
+        row["created_at"] = updated_at
+        timeline.append(row)
+    for item in pending:
+        update_type, _, update_value = item.partition(":")
+        timeline.append(
+            {
+                "index": len(timeline) + 1,
+                "created_at": updated_at,
+                "action": "pending",
+                "update_key": item,
+                "update_type": update_type or None,
+                "update_value": update_value or None,
+                "actor_role": None,
+                "actor_id": None,
+                "reviewer_note": None,
+                "version_hash": prof.get("version_hash"),
+                "summary": f"Pending review for {update_type.replace('_', ' ') if update_type else 'governance item'}{f' {update_value}' if update_value else ''}".strip(),
+                "state": "pending",
+            }
+        )
+    latest_by_update: Dict[str, int] = {}
+    for idx, row in enumerate(timeline):
+        update_key = str(row.get("update_key") or "").strip()
+        if update_key:
+            latest_by_update[update_key] = idx
+    for idx, row in enumerate(timeline):
+        update_key = str(row.get("update_key") or "").strip()
+        if not update_key:
+            continue
+        latest_idx = latest_by_update.get(update_key, idx)
+        if latest_idx != idx and row.get("state") not in {"pending", "rolled_back"}:
+            row["state"] = "superseded"
+            row["summary"] = f"{row.get('summary') or 'Governance action'} (superseded)"
+    return timeline[-40:]
 
 
 def _attachment_contacts(attachment_forensics: List[Dict[str, Any]]) -> List[str]:
@@ -315,6 +423,9 @@ def get_supplier_governance_profile(*, tenant_id: str | None, supplier_key: str)
     profile["tenant_id"] = tenant
     profile["supplier_key"] = supplier
     profile["governance_state"] = "review_required" if profile.get("pending_updates") else "stable"
+    profile["version_hash"] = _governance_version_hash(profile)
+    profile["version_timeline"] = build_supplier_governance_timeline(profile=profile)
+    profile["version_count"] = len(profile.get("version_timeline") or [])
     return profile
 
 
@@ -357,6 +468,13 @@ def list_supplier_governance_profiles(*, tenant_id: str | None = None, limit: in
                 "pending_updates": pending,
                 "history": history[-12:],
                 "governance_state": "review_required" if pending else "stable",
+                "version_hash": _governance_version_hash(
+                    {
+                        "approved_domains": _json_list(row[3]),
+                        "approved_bank_fingerprints": _json_list(row[5]),
+                    }
+                ),
+                "version_count": len(history[-12:]) + len(pending),
                 "updated_at": row[9],
             }
         )
@@ -379,8 +497,8 @@ def review_supplier_governance_update(
     decision_n = str(decision or "").strip().lower()
     if not supplier or not update:
         return {"ok": False, "error": "supplier_key_and_update_key_required"}
-    if decision_n not in {"approve", "reject"}:
-        return {"ok": False, "error": "decision_must_be_approve_or_reject"}
+    if decision_n not in {"approve", "reject", "rollback"}:
+        return {"ok": False, "error": "decision_must_be_approve_reject_or_rollback"}
     profile = get_supplier_governance_profile(tenant_id=tenant, supplier_key=supplier)
     if not profile:
         return {"ok": False, "error": "supplier_profile_not_found"}
@@ -402,11 +520,27 @@ def review_supplier_governance_update(
             approved_bank_fps = _norm_list(approved_bank_fps + [value])
         elif prefix == "review_template_hash" and value:
             trusted_hashes = _norm_list(trusted_hashes + [value])
-    history.append(
+    elif decision_n == "rollback":
+        if prefix == "review_domain" and value:
+            approved_domains = [item for item in approved_domains if item != value]
+        elif prefix == "review_bank_fingerprint" and value:
+            approved_bank_fps = [item for item in approved_bank_fps if item != value]
+        elif prefix == "review_template_hash" and value:
+            trusted_hashes = [item for item in trusted_hashes if item != value]
+    prospective_profile = {
+        "approved_domains": approved_domains,
+        "approved_bank_fingerprints": approved_bank_fps,
+        "trusted_template_hashes": trusted_hashes,
+    }
+    history_entry = (
         f"{decision_n}:{update}:by={str(actor_role or 'owner').strip()}:{str(actor_id or 'admin').strip()}"
+        f":version={_governance_version_hash(prospective_profile)}"
     )
     if note:
-        notes.append(f"review_note:{str(note).strip()[:180]}")
+        clean_note = str(note).strip()[:180]
+        history_entry += f":note={quote(clean_note, safe='')}"
+        notes.append(f"review_note:{clean_note}")
+    history.append(history_entry)
 
     try:
         _ensure_supplier_governance_table()

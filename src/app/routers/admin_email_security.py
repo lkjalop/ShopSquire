@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 
 from src.app.models.db import db_session
@@ -48,6 +49,8 @@ from src.app.security.adversarial_email_pipeline import (
     write_benchmark_report,
 )
 from src.app.security.supplier_governance_store import (
+    build_incident_graph_snapshot,
+    build_supplier_governance_timeline,
     get_supplier_governance_profile,
     list_supplier_governance_profiles,
     review_supplier_governance_update,
@@ -634,6 +637,13 @@ def supplier_governance_dashboard(
     return list_supplier_governance_profiles(tenant_id=tenant_id, limit=limit)
 
 
+@router.get("/supplier-governance/console", response_class=HTMLResponse)
+def supplier_governance_console(
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> HTMLResponse:
+    return _render_supplier_governance_console_v2()
+
+
 @router.get("/supplier-governance/{supplier_key}")
 def supplier_governance_profile(
     supplier_key: str,
@@ -644,6 +654,264 @@ def supplier_governance_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="supplier_governance_not_found")
     return profile
+
+
+@router.get("/supplier-governance/{supplier_key}/timeline")
+def supplier_governance_timeline(
+    supplier_key: str,
+    tenant_id: Optional[str] = None,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    profile = get_supplier_governance_profile(tenant_id=tenant_id, supplier_key=supplier_key)
+    if not profile:
+        raise HTTPException(status_code=404, detail="supplier_governance_not_found")
+    incident_graph = build_incident_graph_snapshot(
+        tenant_id=tenant_id,
+        supplier_key=supplier_key,
+        evidence_snapshot={"supplier_governance": profile},
+    )
+    return {
+        "supplier_key": supplier_key,
+        "tenant_id": str(tenant_id or "default"),
+        "version_hash": profile.get("version_hash"),
+        "version_count": profile.get("version_count"),
+        "timeline": build_supplier_governance_timeline(profile=profile),
+        "incident_timeline": list((incident_graph.get("timeline") or []))[:20],
+        "relationships": incident_graph.get("relationships") or {},
+    }
+
+
+def _render_supplier_governance_console() -> HTMLResponse:
+    html = """
+    <html>
+      <head>
+        <title>Supplier Governance Timeline</title>
+        <style>
+          body { font-family: Arial, sans-serif; background:#f8fafc; color:#0f172a; margin:0; }
+          .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+          .layout { display:grid; grid-template-columns: 360px 1fr; gap:18px; align-items:start; }
+          .card { background:#fff; border:1px solid #dbe3ef; border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+          .title { font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; }
+          .pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+          .stable { background:#dcfce7; color:#166534; } .review_required { background:#fef3c7; color:#92400e; }
+          .pending { background:#fef3c7; color:#92400e; } .recorded { background:#e2e8f0; color:#334155; }
+          .approved { background:#dcfce7; color:#166534; } .rejected { background:#fee2e2; color:#991b1b; }
+          .rolled_back { background:#ede9fe; color:#5b21b6; } .superseded { background:#e2e8f0; color:#475569; }
+          .muted { color:#64748b; font-size:13px; }
+          ul { padding-left:18px; }
+          table { width:100%; border-collapse:collapse; }
+          th, td { text-align:left; padding:10px 12px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
+          th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#475569; background:#f8fafc; }
+          button { padding:8px 12px; border-radius:10px; border:1px solid #cbd5e1; background:#fff; cursor:pointer; }
+          select { width:100%; padding:8px 10px; border-radius:10px; border:1px solid #cbd5e1; }
+          .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+          code { background:#f1f5f9; padding:2px 4px; border-radius:6px; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <h1>Supplier Governance Timeline</h1>
+          <div class="muted" style="margin-bottom:16px;">Pending approvals, approval history, version hash, and related incident context for supplier trust decisions.</div>
+          <div class="layout">
+            <div class="card">
+              <div class="title">Suppliers</div>
+              <select id="supplier_select" size="14" style="height:520px;"></select>
+            </div>
+            <div>
+              <div class="card">
+                <div class="row" style="justify-content:space-between;">
+                  <div>
+                    <div class="title">Governance Snapshot</div>
+                    <div id="supplier_name" style="font-size:24px; font-weight:700;">Loading…</div>
+                  </div>
+                  <div class="row">
+                    <span id="gov_state" class="pill review_required">loading</span>
+                    <span id="gov_version" class="pill recorded">version</span>
+                  </div>
+                </div>
+                <div id="gov_summary" class="muted" style="margin-top:10px;"></div>
+              </div>
+              <div class="card" style="margin-top:16px;">
+                <div class="title">Version Timeline</div>
+                <table>
+                  <thead><tr><th>State</th><th>Summary</th><th>Actor</th><th>Note</th><th>Version</th><th>Updated</th></tr></thead>
+                  <tbody id="timeline_rows"><tr><td colspan="6" class="muted">Select a supplier.</td></tr></tbody>
+                </table>
+              </div>
+              <div class="card" style="margin-top:16px;">
+                <div class="title">Related Incident History</div>
+                <table>
+                  <thead><tr><th>When</th><th>Incident</th><th>Severity</th><th>Reasons</th></tr></thead>
+                  <tbody id="incident_rows"><tr><td colspan="4" class="muted">Select a supplier.</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <script>
+          function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+          async function api(path){
+            const r = await fetch(path, { headers:{ 'x-api-key':'local-owner-key' } });
+            return await r.json();
+          }
+          async function loadList(){
+            const out = await api('/api/v1/admin/email_security/supplier-governance?limit=100');
+            const items = out.items || [];
+            const sel = document.getElementById('supplier_select');
+            sel.innerHTML = items.map(item => `<option value="${esc(item.supplier_key)}">${esc(item.vendor_name || item.supplier_key)} (${esc(item.governance_state)})</option>`).join('');
+            sel.onchange = () => loadSupplier(sel.value);
+            if(items.length){ sel.value = items[0].supplier_key; await loadSupplier(items[0].supplier_key); }
+          }
+          async function loadSupplier(key){
+            const profile = await api(`/api/v1/admin/email_security/supplier-governance/${encodeURIComponent(key)}`);
+            const timeline = await api(`/api/v1/admin/email_security/supplier-governance/${encodeURIComponent(key)}/timeline`);
+            document.getElementById('supplier_name').textContent = profile.vendor_name || profile.supplier_key || key;
+            const govState = document.getElementById('gov_state');
+            govState.textContent = String(profile.governance_state || 'stable').replaceAll('_',' ');
+            govState.className = `pill ${esc(profile.governance_state || 'stable')}`;
+            document.getElementById('gov_version').textContent = `v ${esc(profile.version_hash || 'unknown')}`;
+            document.getElementById('gov_summary').innerHTML = [
+              `Pending updates: <strong>${esc((profile.pending_updates || []).length)}</strong>`,
+              `Approved domains: <strong>${esc((profile.approved_domains || []).length)}</strong>`,
+              `Approved bank fingerprints: <strong>${esc((profile.approved_bank_fingerprints || []).length)}</strong>`,
+              `Trusted template hashes: <strong>${esc((profile.trusted_template_hashes || []).length)}</strong>`
+            ].join(' · ');
+            document.getElementById('timeline_rows').innerHTML = (timeline.timeline || []).map(item => `<tr>
+              <td><span class="pill ${esc(item.state || 'recorded')}">${esc(item.state || 'recorded')}</span></td>
+              <td>${esc(item.summary || '-')}<div class="muted"><code>${esc(item.update_key || '')}</code></div></td>
+              <td>${esc(item.actor_role || '-')} ${item.actor_id ? `/${esc(item.actor_id)}` : ''}</td>
+              <td>${esc(item.created_at || '-')}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="muted">No governance timeline recorded yet.</td></tr>';
+            document.getElementById('incident_rows').innerHTML = (timeline.incident_timeline || []).map(item => `<tr>
+              <td>${esc(item.created_at || '-')}</td>
+              <td>${esc(item.incident_id || '-')}</td>
+              <td>${esc(item.severity || 'info')}</td>
+              <td>${esc((item.reasons || []).join(', '))}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="muted">No related incidents recorded yet.</td></tr>';
+          }
+          loadList();
+        </script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
+def _render_supplier_governance_console_v2() -> HTMLResponse:
+    html = """
+    <html>
+      <head>
+        <title>Supplier Governance Timeline</title>
+        <style>
+          body { font-family: Arial, sans-serif; background:#f8fafc; color:#0f172a; margin:0; }
+          .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+          .layout { display:grid; grid-template-columns: 360px 1fr; gap:18px; align-items:start; }
+          .card { background:#fff; border:1px solid #dbe3ef; border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+          .title { font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; }
+          .pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+          .stable { background:#dcfce7; color:#166534; } .review_required { background:#fef3c7; color:#92400e; }
+          .pending { background:#fef3c7; color:#92400e; } .recorded { background:#e2e8f0; color:#334155; }
+          .approved { background:#dcfce7; color:#166534; } .rejected { background:#fee2e2; color:#991b1b; }
+          .rolled_back { background:#ede9fe; color:#5b21b6; } .superseded { background:#e2e8f0; color:#475569; }
+          .muted { color:#64748b; font-size:13px; }
+          table { width:100%; border-collapse:collapse; }
+          th, td { text-align:left; padding:10px 12px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
+          th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#475569; background:#f8fafc; }
+          select { width:100%; padding:8px 10px; border-radius:10px; border:1px solid #cbd5e1; }
+          .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+          code { background:#f1f5f9; padding:2px 4px; border-radius:6px; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <h1>Supplier Governance Timeline</h1>
+          <div class="muted" style="margin-bottom:16px;">Pending approvals, approval history, rollback visibility, reviewer notes, version hash, and related incident context for supplier trust decisions.</div>
+          <div class="layout">
+            <div class="card">
+              <div class="title">Suppliers</div>
+              <select id="supplier_select" size="14" style="height:520px;"></select>
+            </div>
+            <div>
+              <div class="card">
+                <div class="row" style="justify-content:space-between;">
+                  <div>
+                    <div class="title">Governance Snapshot</div>
+                    <div id="supplier_name" style="font-size:24px; font-weight:700;">Loading...</div>
+                  </div>
+                  <div class="row">
+                    <span id="gov_state" class="pill review_required">loading</span>
+                    <span id="gov_version" class="pill recorded">version</span>
+                  </div>
+                </div>
+                <div id="gov_summary" class="muted" style="margin-top:10px;"></div>
+              </div>
+              <div class="card" style="margin-top:16px;">
+                <div class="title">Version Timeline</div>
+                <table>
+                  <thead><tr><th>State</th><th>Summary</th><th>Actor</th><th>Note</th><th>Version</th><th>Updated</th></tr></thead>
+                  <tbody id="timeline_rows"><tr><td colspan="6" class="muted">Select a supplier.</td></tr></tbody>
+                </table>
+              </div>
+              <div class="card" style="margin-top:16px;">
+                <div class="title">Related Incident History</div>
+                <table>
+                  <thead><tr><th>When</th><th>Incident</th><th>Severity</th><th>Reasons</th></tr></thead>
+                  <tbody id="incident_rows"><tr><td colspan="4" class="muted">Select a supplier.</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <script>
+          function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+          async function api(path){
+            const r = await fetch(path, { headers:{ 'x-api-key':'local-owner-key' } });
+            return await r.json();
+          }
+          async function loadList(){
+            const out = await api('/api/v1/admin/email_security/supplier-governance?limit=100');
+            const items = out.items || [];
+            const sel = document.getElementById('supplier_select');
+            sel.innerHTML = items.map(item => `<option value="${esc(item.supplier_key)}">${esc(item.vendor_name || item.supplier_key)} (${esc(item.governance_state)})</option>`).join('');
+            sel.onchange = () => loadSupplier(sel.value);
+            if(items.length){ sel.value = items[0].supplier_key; await loadSupplier(items[0].supplier_key); }
+          }
+          async function loadSupplier(key){
+            const profile = await api(`/api/v1/admin/email_security/supplier-governance/${encodeURIComponent(key)}`);
+            const timeline = await api(`/api/v1/admin/email_security/supplier-governance/${encodeURIComponent(key)}/timeline`);
+            document.getElementById('supplier_name').textContent = profile.vendor_name || profile.supplier_key || key;
+            const govState = document.getElementById('gov_state');
+            govState.textContent = String(profile.governance_state || 'stable').replaceAll('_',' ');
+            govState.className = `pill ${esc(profile.governance_state || 'stable')}`;
+            document.getElementById('gov_version').textContent = `v ${esc(profile.version_hash || 'unknown')}`;
+            document.getElementById('gov_summary').innerHTML = [
+              `Pending updates: <strong>${esc((profile.pending_updates || []).length)}</strong>`,
+              `Approved domains: <strong>${esc((profile.approved_domains || []).length)}</strong>`,
+              `Approved bank fingerprints: <strong>${esc((profile.approved_bank_fingerprints || []).length)}</strong>`,
+              `Trusted template hashes: <strong>${esc((profile.trusted_template_hashes || []).length)}</strong>`,
+              `Timeline entries: <strong>${esc(timeline.version_count || (timeline.timeline || []).length || 0)}</strong>`
+            ].join(' · ');
+            document.getElementById('timeline_rows').innerHTML = (timeline.timeline || []).map(item => `<tr>
+              <td><span class="pill ${esc(item.state || 'recorded')}">${esc(item.state || 'recorded')}</span></td>
+              <td>${esc(item.summary || '-')}<div class="muted"><code>${esc(item.update_key || '')}</code></div></td>
+              <td>${esc(item.actor_role || '-')} ${item.actor_id ? `/${esc(item.actor_id)}` : ''}</td>
+              <td>${esc(item.reviewer_note || '-')}</td>
+              <td>${esc(item.version_hash || '-')}</td>
+              <td>${esc(item.created_at || '-')}</td>
+            </tr>`).join('') || '<tr><td colspan="6" class="muted">No governance timeline recorded yet.</td></tr>';
+            document.getElementById('incident_rows').innerHTML = (timeline.incident_timeline || []).map(item => `<tr>
+              <td>${esc(item.created_at || '-')}</td>
+              <td>${esc(item.incident_id || '-')}</td>
+              <td>${esc(item.severity || 'info')}</td>
+              <td>${esc((item.reasons || []).join(', '))}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="muted">No related incidents recorded yet.</td></tr>';
+          }
+          loadList();
+        </script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 
 @router.post("/supplier-governance/review")
@@ -663,6 +931,64 @@ def supplier_governance_review(
     if not out.get("ok"):
         raise HTTPException(status_code=400, detail=out.get("error") or "supplier_governance_review_failed")
     return out
+
+
+def _connector_registry_snapshot(*, hours: int = 24) -> Dict[str, Any]:
+    dashboard = get_handoff_dashboard(hours=hours, dlq_limit=50, target=None)
+    reliability = dashboard.get("reliability") if isinstance(dashboard.get("reliability"), dict) else {}
+    by_target = {str((row or {}).get("target") or ""): row for row in (reliability.get("by_target") or []) if isinstance(row, dict)}
+
+    definitions = [
+        {"target": "siem_webhook", "label": "Generic SIEM Webhook", "envs": ["SIEM_WEBHOOK_URL"], "category": "siem"},
+        {"target": "splunk_hec", "label": "Splunk HEC", "envs": ["SPLUNK_HEC_URL", "SPLUNK_HEC_TOKEN"], "category": "siem"},
+        {"target": "elastic", "label": "Elastic Security", "envs": ["ELASTIC_SECURITY_EVENTS_URL"], "category": "siem"},
+        {"target": "sentinel", "label": "Microsoft Sentinel", "envs": ["SENTINEL_INGEST_URL"], "category": "siem"},
+        {"target": "crowdstrike", "label": "CrowdStrike Falcon", "envs": ["CROWDSTRIKE_FALCON_EVENTS_URL"], "category": "xdr"},
+        {"target": "proofpoint", "label": "Proofpoint", "envs": ["PROOFPOINT_EVENTS_URL"], "category": "email_security"},
+        {"target": "mimecast", "label": "Mimecast", "envs": ["MIMECAST_EVENTS_URL"], "category": "email_security"},
+        {"target": "ticketing_webhook", "label": "Ticketing / Case System", "envs": ["SECURITY_TICKETING_WEBHOOK_URL"], "category": "case_mgmt"},
+    ]
+    registry: List[Dict[str, Any]] = []
+    for item in definitions:
+        target = str(item["target"])
+        configured = all(bool(str(os.getenv(env) or "").strip()) for env in item["envs"])
+        row = by_target.get(target) or {}
+        attempts = int(row.get("attempts") or 0)
+        sent = int(row.get("sent") or 0)
+        dlq = int(row.get("dlq") or 0)
+        retrying = int(row.get("retrying") or 0)
+        health = "not_configured"
+        if configured:
+            if dlq > 0:
+                health = "failing"
+            elif retrying > 0:
+                health = "degraded"
+            elif sent > 0 or attempts > 0:
+                health = "healthy"
+            else:
+                health = "configured_idle"
+        registry.append(
+            {
+                "target": target,
+                "label": item["label"],
+                "category": item["category"],
+                "configured": configured,
+                "health": health,
+                "required_env": item["envs"],
+                "attempts": attempts,
+                "sent": sent,
+                "dlq": dlq,
+                "retrying": retrying,
+                "avg_attempts": float(row.get("avg_attempts") or 0.0),
+                "max_backoff_ms": int(row.get("max_backoff_ms") or 0),
+            }
+        )
+    return {
+        "window_hours": hours,
+        "targets": registry,
+        "summary": dashboard.get("summary") if isinstance(dashboard.get("summary"), dict) else {},
+        "delivery_history": list((dashboard.get("dlq") or {}).get("items") or [])[:50],
+    }
 
 
 @router.get("/incidents")
@@ -1037,6 +1363,125 @@ def connector_reliability(
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     return get_handoff_reliability(hours=hours)
+
+
+@router.get("/connectors/registry")
+def connector_registry(
+    hours: int = 24,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    return _connector_registry_snapshot(hours=hours)
+
+
+@router.get("/connectors/console", response_class=HTMLResponse)
+def connector_registry_console(
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> HTMLResponse:
+    html = """
+    <html>
+      <head>
+        <title>Email Security Connector Console</title>
+        <style>
+          body { font-family: Arial, sans-serif; background:#f8fafc; color:#0f172a; margin:0; }
+          .wrap { max-width: 1200px; margin: 0 auto; padding: 24px; }
+          .hero { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; }
+          .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-bottom:20px; }
+          .card { background:#fff; border:1px solid #dbe3ef; border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+          .title { font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; }
+          .value { font-size:28px; font-weight:700; }
+          table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #dbe3ef; border-radius:14px; overflow:hidden; }
+          th, td { text-align:left; padding:10px 12px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
+          th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#475569; background:#f8fafc; }
+          .pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+          .healthy { background:#dcfce7; color:#166534; } .degraded { background:#fef3c7; color:#92400e; }
+          .failing { background:#fee2e2; color:#b91c1c; } .not_configured, .configured_idle { background:#e2e8f0; color:#334155; }
+          .muted { color:#64748b; font-size:13px; }
+          details { margin-top:12px; } summary { cursor:pointer; font-weight:600; }
+          .actions { display:flex; gap:8px; flex-wrap:wrap; }
+          button { padding:8px 12px; border-radius:10px; border:1px solid #cbd5e1; background:#fff; cursor:pointer; }
+          code { background:#f1f5f9; padding:2px 4px; border-radius:6px; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="hero">
+            <div>
+              <h1>Email Security Connector Registry</h1>
+              <div class="muted">Configuration state, delivery health, retries, and DLQ history for downstream security handoff.</div>
+            </div>
+            <div class="actions">
+              <button onclick="loadAll()">Refresh</button>
+              <button onclick="replayDlq()">Replay DLQ</button>
+            </div>
+          </div>
+          <div class="grid" id="summary"></div>
+          <div class="card">
+            <div class="title">Connector Registry</div>
+            <table>
+              <thead><tr><th>Target</th><th>State</th><th>Config</th><th>Attempts</th><th>Sent</th><th>Retrying</th><th>DLQ</th><th>Env</th></tr></thead>
+              <tbody id="registry_rows"><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="card" style="margin-top:16px;">
+            <div class="title">Delivery History</div>
+            <table>
+              <thead><tr><th>Target</th><th>Decision</th><th>Attempts</th><th>Status</th><th>Last Error</th><th>Updated</th></tr></thead>
+              <tbody id="history_rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <details class="card">
+            <summary>API endpoints</summary>
+            <div class="muted" style="margin-top:10px;">
+              <div><code>/api/v1/admin/email_security/connectors/registry</code></div>
+              <div><code>/api/v1/admin/email_security/connectors/dashboard</code></div>
+              <div><code>/api/v1/admin/email_security/connectors/reliability</code></div>
+              <div><code>/api/v1/admin/email_security/connectors/dlq</code></div>
+            </div>
+          </details>
+        </div>
+        <script>
+          async function api(path, opts){
+            const r = await fetch(path, { headers: { 'x-api-key': 'local-owner-key' }, ...(opts || {}) });
+            return await r.json();
+          }
+          function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+          async function loadAll(){
+            const reg = await api('/api/v1/admin/email_security/connectors/registry?hours=24');
+            const summary = reg.summary || {};
+            document.getElementById('summary').innerHTML = [
+              ['Attempts', summary.attempts ?? 0],
+              ['Sent', summary.sent ?? 0],
+              ['Retrying', summary.retrying ?? 0],
+              ['DLQ', summary.dlq ?? 0],
+            ].map(([k,v]) => `<div class="card"><div class="title">${esc(k)}</div><div class="value">${esc(v)}</div></div>`).join('');
+            const rows = (reg.targets || []).map(row => `<tr>
+              <td><strong>${esc(row.label)}</strong><div class="muted">${esc(row.target)}</div></td>
+              <td><span class="pill ${esc(row.health)}">${esc(String(row.health).replaceAll('_',' '))}</span></td>
+              <td>${row.configured ? 'Configured' : 'Not configured'}</td>
+              <td>${esc(row.attempts)}</td><td>${esc(row.sent)}</td><td>${esc(row.retrying)}</td><td>${esc(row.dlq)}</td>
+              <td>${(row.required_env || []).map(x => `<code>${esc(x)}</code>`).join(' ')}</td>
+            </tr>`).join('');
+            document.getElementById('registry_rows').innerHTML = rows || '<tr><td colspan="8" class="muted">No connector targets configured.</td></tr>';
+            const hist = (reg.delivery_history || []).map(item => `<tr>
+              <td>${esc(item.target)}</td>
+              <td>${esc(item.decision_id || item.trace_id || '-')}</td>
+              <td>${esc(item.attempts)}</td>
+              <td>${esc(item.status)}</td>
+              <td>${esc(item.last_error || '-')}</td>
+              <td>${esc(item.updated_at || '-')}</td>
+            </tr>`).join('');
+            document.getElementById('history_rows').innerHTML = hist || '<tr><td colspan="6" class="muted">No delivery history recorded in the current window.</td></tr>';
+          }
+          async function replayDlq(){
+            await api('/api/v1/admin/email_security/connectors/dlq/replay', { method:'POST', headers:{ 'Content-Type':'application/json','x-api-key':'local-owner-key' }, body: JSON.stringify({ limit: 20, dry_run: false }) });
+            await loadAll();
+          }
+          loadAll();
+        </script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
 
 
 @router.get("/connectors/lab-profile")

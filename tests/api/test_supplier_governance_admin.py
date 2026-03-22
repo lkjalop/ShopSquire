@@ -109,3 +109,74 @@ def test_admin_incident_graph_endpoint_returns_timeline_and_relationships():
     assert isinstance(vendor_graph.get("timeline"), list)
     governance = body.get("supplier_governance") or {}
     assert governance.get("supplier_key") == "ingramtech.com.au"
+
+
+def test_supplier_governance_timeline_endpoint_and_console():
+    _seed_governance()
+    client = TestClient(create_app())
+
+    dashboard = client.get(
+        "/api/v1/admin/email_security/supplier-governance?tenant_id=tenant-admin-governance",
+        headers={"x-api-key": "local-owner-key"},
+    )
+    assert dashboard.status_code == 200, dashboard.text
+    items = (dashboard.json() or {}).get("items") or []
+    row = next(i for i in items if i.get("supplier_key") == "ingramtech.com.au")
+    pending = row.get("pending_updates") or []
+    assert pending
+
+    approve = client.post(
+        "/api/v1/admin/email_security/supplier-governance/review",
+        headers={"x-api-key": "local-owner-key"},
+        json={
+            "tenant_id": "tenant-admin-governance",
+            "supplier_key": "ingramtech.com.au",
+            "update_key": pending[0],
+            "decision": "approve",
+            "actor_id": "tester",
+            "actor_role": "owner",
+            "note": "approved after callback verification",
+        },
+    )
+    assert approve.status_code == 200, approve.text
+
+    rollback = client.post(
+        "/api/v1/admin/email_security/supplier-governance/review",
+        headers={"x-api-key": "local-owner-key"},
+        json={
+            "tenant_id": "tenant-admin-governance",
+            "supplier_key": "ingramtech.com.au",
+            "update_key": pending[0],
+            "decision": "rollback",
+            "actor_id": "tester",
+            "actor_role": "owner",
+            "note": "supplier approval withdrawn after later dispute",
+        },
+    )
+    assert rollback.status_code == 200, rollback.text
+
+    timeline = client.get(
+        "/api/v1/admin/email_security/supplier-governance/ingramtech.com.au/timeline?tenant_id=tenant-admin-governance",
+        headers={"x-api-key": "local-owner-key"},
+    )
+    assert timeline.status_code == 200, timeline.text
+    body = timeline.json()
+    assert body.get("supplier_key") == "ingramtech.com.au"
+    assert isinstance(body.get("timeline"), list)
+    assert "version_hash" in body
+    assert isinstance(body.get("incident_timeline"), list)
+    assert any((item or {}).get("state") == "rolled_back" for item in (body.get("timeline") or []))
+    assert any("callback verification" in str((item or {}).get("reviewer_note") or "") for item in (body.get("timeline") or []))
+    assert any((item or {}).get("version_hash") for item in (body.get("timeline") or []))
+
+    console = client.get(
+        "/api/v1/admin/email_security/supplier-governance/console",
+        headers={"x-api-key": "local-owner-key"},
+    )
+    assert console.status_code == 200, console.text
+    html = console.text
+    assert "Supplier Governance Timeline" in html
+    assert "/api/v1/admin/email_security/supplier-governance/" in html
+    assert "Version Timeline" in html
+    assert "Related Incident History" in html
+    assert "rollback visibility" in html
