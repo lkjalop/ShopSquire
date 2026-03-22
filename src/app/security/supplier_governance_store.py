@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from typing import Any, Dict, List
 
 from sqlalchemy import text
@@ -31,6 +32,7 @@ def _ensure_supplier_governance_table() -> None:
                       trusted_template_hashes_json TEXT NOT NULL DEFAULT '[]',
                       observed_template_hashes_json TEXT NOT NULL DEFAULT '[]',
                       pending_updates_json TEXT NOT NULL DEFAULT '[]',
+                      history_json TEXT NOT NULL DEFAULT '[]',
                       notes_json TEXT NOT NULL DEFAULT '[]',
                       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                       PRIMARY KEY (tenant_id, supplier_key)
@@ -73,6 +75,15 @@ def _domain_from_addr(addr: str | None) -> str:
     if "@" not in raw:
         return raw
     return raw.rsplit("@", 1)[-1].strip()
+
+
+def _hash16(value: str | None) -> str | None:
+    try:
+        if not value:
+            return None
+        return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return None
 
 
 def _attachment_contacts(attachment_forensics: List[Dict[str, Any]]) -> List[str]:
@@ -135,6 +146,7 @@ def _load_existing_profile(*, tenant_id: str, supplier_key: str) -> Dict[str, An
                            trusted_template_hashes_json,
                            observed_template_hashes_json,
                            pending_updates_json,
+                           history_json,
                            notes_json
                     FROM supplier_governance_profiles
                     WHERE tenant_id=:tenant AND supplier_key=:supplier
@@ -157,7 +169,8 @@ def _load_existing_profile(*, tenant_id: str, supplier_key: str) -> Dict[str, An
         "trusted_template_hashes": _json_list(row[7]),
         "observed_template_hashes": _json_list(row[8]),
         "pending_updates": _json_list(row[9]),
-        "notes": _json_list(row[10]),
+        "history": _json_list(row[10]),
+        "notes": _json_list(row[11]),
     }
 
 
@@ -227,6 +240,7 @@ def update_supplier_governance_snapshot(
         "trusted_template_hashes": trusted_template_hashes[:32],
         "observed_template_hashes": observed_template_hashes[:32],
         "pending_updates": pending_updates[:24],
+        "history": list(existing.get("history") or [])[:48],
         "governance_state": "review_required" if pending_updates else "stable",
     }
 
@@ -242,14 +256,14 @@ def update_supplier_governance_snapshot(
                       approved_contacts_json, observed_contacts_json,
                       approved_bank_fingerprints_json, observed_bank_fingerprints_json,
                       trusted_template_hashes_json, observed_template_hashes_json,
-                      pending_updates_json, notes_json, updated_at
+                      pending_updates_json, history_json, notes_json, updated_at
                     ) VALUES (
                       :tenant, :supplier, :vendor_name,
                       :approved_domains, :observed_domains,
                       :approved_contacts, :observed_contacts,
                       :approved_bank_fps, :observed_bank_fps,
                       :trusted_hashes, :observed_hashes,
-                      :pending_updates, :notes, CURRENT_TIMESTAMP
+                      :pending_updates, :history_json, :notes, CURRENT_TIMESTAMP
                     )
                     ON CONFLICT(tenant_id, supplier_key) DO UPDATE SET
                       vendor_name=:vendor_name,
@@ -262,6 +276,7 @@ def update_supplier_governance_snapshot(
                       trusted_template_hashes_json=:trusted_hashes,
                       observed_template_hashes_json=:observed_hashes,
                       pending_updates_json=:pending_updates,
+                      history_json=:history_json,
                       notes_json=:notes,
                       updated_at=CURRENT_TIMESTAMP
                     """
@@ -279,6 +294,7 @@ def update_supplier_governance_snapshot(
                     "trusted_hashes": json.dumps(snapshot["trusted_template_hashes"], ensure_ascii=False),
                     "observed_hashes": json.dumps(snapshot["observed_template_hashes"], ensure_ascii=False),
                     "pending_updates": json.dumps(snapshot["pending_updates"], ensure_ascii=False),
+                    "history_json": json.dumps(snapshot["history"], ensure_ascii=False),
                     "notes": json.dumps(notes[:32], ensure_ascii=False),
                 },
             )
@@ -286,6 +302,146 @@ def update_supplier_governance_snapshot(
     except Exception:
         pass
     return snapshot
+
+
+def get_supplier_governance_profile(*, tenant_id: str | None, supplier_key: str) -> Dict[str, Any]:
+    tenant = str(tenant_id or "default")
+    supplier = str(supplier_key or "").strip().lower()
+    if not supplier:
+        return {}
+    profile = _load_existing_profile(tenant_id=tenant, supplier_key=supplier)
+    if not profile:
+        return {}
+    profile["tenant_id"] = tenant
+    profile["supplier_key"] = supplier
+    profile["governance_state"] = "review_required" if profile.get("pending_updates") else "stable"
+    return profile
+
+
+def list_supplier_governance_profiles(*, tenant_id: str | None = None, limit: int = 50) -> Dict[str, Any]:
+    _ensure_supplier_governance_table()
+    tenant = str(tenant_id or "").strip() or None
+    rows = []
+    try:
+        with db_session() as db:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT tenant_id, supplier_key, vendor_name,
+                           approved_domains_json, observed_domains_json,
+                           approved_bank_fingerprints_json, observed_bank_fingerprints_json,
+                           pending_updates_json, history_json, updated_at
+                    FROM supplier_governance_profiles
+                    WHERE (:tenant_id IS NULL OR tenant_id=:tenant_id)
+                    ORDER BY updated_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant_id": tenant, "limit": max(1, min(int(limit or 50), 200))},
+            ).fetchall()
+    except Exception:
+        rows = []
+    items = []
+    for row in rows or []:
+        pending = _json_list(row[7])
+        history = _json_list(row[8])
+        items.append(
+            {
+                "tenant_id": row[0],
+                "supplier_key": row[1],
+                "vendor_name": row[2],
+                "approved_domains": _json_list(row[3]),
+                "observed_domains": _json_list(row[4]),
+                "approved_bank_fingerprints": _json_list(row[5]),
+                "observed_bank_fingerprints": _json_list(row[6]),
+                "pending_updates": pending,
+                "history": history[-12:],
+                "governance_state": "review_required" if pending else "stable",
+                "updated_at": row[9],
+            }
+        )
+    return {"items": items, "count": len(items)}
+
+
+def review_supplier_governance_update(
+    *,
+    tenant_id: str | None,
+    supplier_key: str,
+    update_key: str,
+    decision: str,
+    actor_id: str,
+    actor_role: str,
+    note: str | None = None,
+) -> Dict[str, Any]:
+    tenant = str(tenant_id or "default")
+    supplier = str(supplier_key or "").strip().lower()
+    update = str(update_key or "").strip()
+    decision_n = str(decision or "").strip().lower()
+    if not supplier or not update:
+        return {"ok": False, "error": "supplier_key_and_update_key_required"}
+    if decision_n not in {"approve", "reject"}:
+        return {"ok": False, "error": "decision_must_be_approve_or_reject"}
+    profile = get_supplier_governance_profile(tenant_id=tenant, supplier_key=supplier)
+    if not profile:
+        return {"ok": False, "error": "supplier_profile_not_found"}
+
+    approved_domains = _norm_list(list(profile.get("approved_domains") or []))
+    approved_bank_fps = _norm_list(list(profile.get("approved_bank_fingerprints") or []))
+    trusted_hashes = _norm_list(list(profile.get("trusted_template_hashes") or []))
+    pending = _norm_list(list(profile.get("pending_updates") or []))
+    history = _norm_list(list(profile.get("history") or []))
+    notes = _norm_list(list(profile.get("notes") or []))
+
+    pending = [item for item in pending if item != update]
+    prefix, _, value = update.partition(":")
+    value = value.strip()
+    if decision_n == "approve":
+        if prefix == "review_domain" and value:
+            approved_domains = _norm_list(approved_domains + [value])
+        elif prefix == "review_bank_fingerprint" and value:
+            approved_bank_fps = _norm_list(approved_bank_fps + [value])
+        elif prefix == "review_template_hash" and value:
+            trusted_hashes = _norm_list(trusted_hashes + [value])
+    history.append(
+        f"{decision_n}:{update}:by={str(actor_role or 'owner').strip()}:{str(actor_id or 'admin').strip()}"
+    )
+    if note:
+        notes.append(f"review_note:{str(note).strip()[:180]}")
+
+    try:
+        _ensure_supplier_governance_table()
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    UPDATE supplier_governance_profiles
+                    SET approved_domains_json=:approved_domains,
+                        approved_bank_fingerprints_json=:approved_bank_fps,
+                        trusted_template_hashes_json=:trusted_hashes,
+                        pending_updates_json=:pending_updates,
+                        history_json=:history_json,
+                        notes_json=:notes_json,
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE tenant_id=:tenant AND supplier_key=:supplier
+                    """
+                ),
+                {
+                    "tenant": tenant,
+                    "supplier": supplier,
+                    "approved_domains": json.dumps(approved_domains, ensure_ascii=False),
+                    "approved_bank_fps": json.dumps(approved_bank_fps, ensure_ascii=False),
+                    "trusted_hashes": json.dumps(trusted_hashes, ensure_ascii=False),
+                    "pending_updates": json.dumps(pending, ensure_ascii=False),
+                    "history_json": json.dumps(history[-64:], ensure_ascii=False),
+                    "notes_json": json.dumps(notes[-64:], ensure_ascii=False),
+                },
+            )
+            db.commit()
+    except Exception as exc:
+        return {"ok": False, "error": f"update_failed:{exc}"}
+
+    updated = get_supplier_governance_profile(tenant_id=tenant, supplier_key=supplier)
+    return {"ok": True, "decision": decision_n, "supplier_key": supplier, "profile": updated}
 
 
 def build_vendor_trust_graph_snapshot(
@@ -356,4 +512,91 @@ def build_vendor_trust_graph_snapshot(
         "edges": edges[:32],
         "risk_notes": risk_notes[:12],
         "graph_state": "elevated_risk" if risk_notes else "stable",
+    }
+
+
+def build_incident_graph_snapshot(
+    *,
+    tenant_id: str | None,
+    supplier_key: str | None,
+    evidence_snapshot: Dict[str, Any],
+    limit: int = 12,
+) -> Dict[str, Any]:
+    tenant = str(tenant_id or "default")
+    supplier = str(supplier_key or "").strip().lower()
+    supplier_hash = _hash16(supplier)
+    rows = []
+    if supplier_hash:
+        try:
+            with db_session() as db:
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT id, created_at, severity, risk_band, reasons_json, evidence_json
+                        FROM email_security_incidents
+                        WHERE tenant_id=:tenant_id AND supplier_key_hash=:supplier_key_hash
+                        ORDER BY created_at DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant, "supplier_key_hash": supplier_hash, "limit": max(1, min(int(limit or 12), 50))},
+                ).fetchall()
+        except Exception:
+            rows = []
+
+    timeline: List[Dict[str, Any]] = []
+    domains: set[str] = set()
+    banks: set[str] = set()
+    templates: set[str] = set()
+    related_ids: List[str] = []
+    for row in rows or []:
+        reasons = _json_list(row[4])
+        ev = {}
+        try:
+            ev = json.loads(row[5] or "{}")
+        except Exception:
+            ev = {}
+        gov = ev.get("supplier_governance") if isinstance(ev.get("supplier_governance"), dict) else {}
+        for dom in (gov.get("observed_domains") or [])[:8]:
+            if str(dom or "").strip():
+                domains.add(str(dom))
+        for fp in (gov.get("observed_bank_fingerprints") or [])[:8]:
+            if str(fp or "").strip():
+                banks.add(str(fp))
+        for th in (gov.get("observed_template_hashes") or [])[:8]:
+            if str(th or "").strip():
+                templates.add(str(th))
+        timeline.append(
+            {
+                "incident_id": row[0],
+                "created_at": row[1],
+                "severity": row[2],
+                "risk_band": row[3],
+                "reasons": reasons[:6],
+            }
+        )
+        related_ids.append(str(row[0]))
+
+    current_gov = evidence_snapshot.get("supplier_governance") if isinstance(evidence_snapshot.get("supplier_governance"), dict) else {}
+    for dom in (current_gov.get("observed_domains") or [])[:8]:
+        if str(dom or "").strip():
+            domains.add(str(dom))
+    for fp in (current_gov.get("observed_bank_fingerprints") or [])[:8]:
+        if str(fp or "").strip():
+            banks.add(str(fp))
+    for th in (current_gov.get("observed_template_hashes") or [])[:8]:
+        if str(th or "").strip():
+            templates.add(str(th))
+
+    return {
+        "supplier_key": supplier,
+        "supplier_key_hash": supplier_hash,
+        "incident_count": len(timeline),
+        "timeline": timeline[:12],
+        "relationships": {
+            "domains": sorted(domains)[:24],
+            "bank_fingerprints": sorted(banks)[:24],
+            "template_hashes": sorted(templates)[:24],
+        },
+        "related_incident_ids": related_ids[:12],
     }

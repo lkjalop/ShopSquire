@@ -18,6 +18,7 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
 from src.app.services.security_playbooks import get_cv_playbook_by_id
 from src.app.security.email_security import evaluate_email_security
 from src.app.security.siem_adapter import (
+    emit_security_handoff,
     get_handoff_dashboard,
     get_handoff_reliability,
     list_handoff_dlq,
@@ -45,6 +46,11 @@ from src.app.security.adversarial_email_pipeline import (
     generate_adversarial_corpus,
     run_external_benchmark_pack,
     write_benchmark_report,
+)
+from src.app.security.supplier_governance_store import (
+    get_supplier_governance_profile,
+    list_supplier_governance_profiles,
+    review_supplier_governance_update,
 )
 
 
@@ -619,6 +625,46 @@ def list_suppliers(
     return {"suppliers": suppliers}
 
 
+@router.get("/supplier-governance")
+def supplier_governance_dashboard(
+    tenant_id: Optional[str] = None,
+    limit: int = 50,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    return list_supplier_governance_profiles(tenant_id=tenant_id, limit=limit)
+
+
+@router.get("/supplier-governance/{supplier_key}")
+def supplier_governance_profile(
+    supplier_key: str,
+    tenant_id: Optional[str] = None,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    profile = get_supplier_governance_profile(tenant_id=tenant_id, supplier_key=supplier_key)
+    if not profile:
+        raise HTTPException(status_code=404, detail="supplier_governance_not_found")
+    return profile
+
+
+@router.post("/supplier-governance/review")
+def supplier_governance_review(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    out = review_supplier_governance_update(
+        tenant_id=payload.get("tenant_id"),
+        supplier_key=str(payload.get("supplier_key") or "").strip(),
+        update_key=str(payload.get("update_key") or "").strip(),
+        decision=str(payload.get("decision") or "").strip(),
+        actor_id=str(payload.get("actor_id") or "email_lab"),
+        actor_role=str(payload.get("actor_role") or role or "owner"),
+        note=str(payload.get("note") or "").strip() or None,
+    )
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=out.get("error") or "supplier_governance_review_failed")
+    return out
+
+
 @router.get("/incidents")
 def list_incidents(
     tenant_id: Optional[str] = None,
@@ -821,6 +867,22 @@ def get_incident(
         "ticket": {"created": bool(r[12]), "rate_limited": bool(r[13]), "deduped": bool(r[14])},
     }
     return {"incident": inc}
+
+
+@router.get("/incidents/{incident_id}/graph")
+def get_incident_graph(
+    incident_id: str,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    body = get_incident(incident_id=incident_id, role=role)
+    inc = body.get("incident") if isinstance(body, dict) else {}
+    evidence = inc.get("evidence_snapshot") if isinstance(inc.get("evidence_snapshot"), dict) else {}
+    return {
+        "incident_id": incident_id,
+        "incident_graph": evidence.get("incident_graph") if isinstance(evidence.get("incident_graph"), dict) else {},
+        "vendor_trust_graph": evidence.get("vendor_trust_graph") if isinstance(evidence.get("vendor_trust_graph"), dict) else {},
+        "supplier_governance": evidence.get("supplier_governance") if isinstance(evidence.get("supplier_governance"), dict) else {},
+    }
 
 
 @router.get("/playbooks/{playbook_id}")
@@ -1077,6 +1139,18 @@ def connector_dlq_requeue(
     if not out.get("ok"):
         raise HTTPException(status_code=404, detail="not_found")
     return out
+
+
+@router.post("/connectors/replay-event")
+def connector_replay_event(
+    payload: Dict[str, Any] = Body(default_factory=dict),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+    if not event:
+        raise HTTPException(status_code=400, detail="event_required")
+    result = emit_security_handoff(event)
+    return {"ok": True, "result": result}
 
 
 @router.get("/url-recheck/dashboard")

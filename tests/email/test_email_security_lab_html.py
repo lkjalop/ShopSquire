@@ -30,6 +30,9 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
     assert "renderInfrastructureSummary(j);" in html
     assert "renderSupplierGovernance(j);" in html
     assert "renderVendorTrustGraph(j);" in html
+    assert "reviewSupplierGovernance(updateKey, decision)" in html
+    assert "Incident Timeline" in html
+    assert "Relationship Buckets" in html
     assert "renderVerdictTones(j);" in html
     assert "renderAttachmentForensics(ev);" in html
     assert "renderPdfBaselineDiff(ev);" in html
@@ -45,6 +48,9 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
     assert "Refresh Connector Health" in html
     assert "Mark Legit" in html
     assert "Request Baseline Update" in html
+    assert "Pending Approvals" in html
+    assert ">Approve</button>" in html
+    assert ">Reject</button>" in html
     assert "<details class=\"finding-drilldown\">" in html
     assert 'alt="pdf overlay preview"' in html
     assert 'alt="pdf heatmap preview"' in html

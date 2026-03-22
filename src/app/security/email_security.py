@@ -33,6 +33,7 @@ from src.app.security.semantic_bec_scorer import score_semantic_bec
 from src.app.security.thread_conversation_graph import analyze_thread_conversation_graph
 from src.app.security.passive_payload_analysis import classify_passive_payload
 from src.app.security.supplier_governance_store import (
+    build_incident_graph_snapshot,
     build_vendor_trust_graph_snapshot,
     update_supplier_governance_snapshot,
 )
@@ -1531,6 +1532,7 @@ def _build_action_policy(
     auth = evidence_snapshot.get("auth") if isinstance(evidence_snapshot.get("auth"), dict) else {}
     infra = evidence_snapshot.get("sender_infrastructure") if isinstance(evidence_snapshot.get("sender_infrastructure"), dict) else {}
     trust_case = evidence_snapshot.get("trust_case") if isinstance(evidence_snapshot.get("trust_case"), dict) else {}
+    governance = evidence_snapshot.get("supplier_governance") if isinstance(evidence_snapshot.get("supplier_governance"), dict) else {}
 
     def _has(predicate) -> bool:
         return any(predicate(f) for f in ranked)
@@ -1540,8 +1542,12 @@ def _build_action_policy(
     has_auth_failure = bool(auth.get("dmarc_fail")) or _has(lambda f: str(f.get("finding_type") or "") in {"auth_failure", "reply_drift"})
     has_known_bad_infra = _has(lambda f: str(f.get("finding_type") or "") == "infrastructure_anomaly") or bool(((infra.get("reputation") if isinstance(infra.get("reputation"), dict) else {}) or {}).get("known_bad"))
     has_conflicting_evidence = _has(lambda f: str(f.get("finding_category") or "") == "contextual_supplier_mismatch") and not (has_direct_payment or has_auth_failure)
+    pending_updates = [str(x or "") for x in (governance.get("pending_updates") or []) if str(x or "").strip()]
+    has_pending_bank_review = any(x.startswith("review_bank_fingerprint:") for x in pending_updates)
+    has_pending_domain_review = any(x.startswith("review_domain:") for x in pending_updates)
+    has_pending_template_review = any(x.startswith("review_template_hash:") for x in pending_updates)
     highest_conf = max((float(f.get("confidence_score") or 0.0) for f in ranked), default=0.0)
-    high_business_impact = bool(has_direct_payment or has_baseline_mismatch or has_known_bad_infra or severity == "error")
+    high_business_impact = bool(has_direct_payment or has_baseline_mismatch or has_known_bad_infra or severity == "error" or has_pending_bank_review)
     trusted_sender = not has_auth_failure and str(trust_case.get("level") or "").lower() in {"trusted", "medium"} and not bool(infra.get("reply_domain_mismatch"))
 
     lane = "lane_1_auto_allow"
@@ -1549,7 +1555,7 @@ def _build_action_policy(
     if route == "security_review" or has_direct_payment or (has_auth_failure and has_baseline_mismatch) or has_known_bad_infra:
         lane = "lane_2_auto_escalate"
         lane_reason = "High-confidence fraud or sender-trust controls were triggered, so the platform escalated immediately while preserving evidence."
-    elif route == "human_review" or has_conflicting_evidence or (high_business_impact and 0.45 <= highest_conf < 0.85):
+    elif route == "human_review" or has_conflicting_evidence or has_pending_bank_review or has_pending_domain_review or has_pending_template_review or (high_business_impact and 0.45 <= highest_conf < 0.85):
         lane = "lane_3_human_gate"
         lane_reason = "The message has meaningful business risk or conflicting evidence, so a human must approve the final sensitive action."
     elif trusted_sender and not has_direct_payment and not has_baseline_mismatch:
@@ -1577,6 +1583,12 @@ def _build_action_policy(
         threshold_reasons.append("Sender infrastructure or related incident overlap increased confidence this is hostile.")
     if has_conflicting_evidence:
         threshold_reasons.append("Some evidence is suspicious but not conclusive enough for unsupervised business action.")
+    if has_pending_bank_review:
+        threshold_reasons.append("A newly observed bank fingerprint still requires supplier-governance approval.")
+    if has_pending_domain_review:
+        threshold_reasons.append("A newly observed sender or supplier domain still requires supplier-governance approval.")
+    if has_pending_template_review:
+        threshold_reasons.append("A newly observed supplier template hash still requires governance review before trust can be extended.")
     if not threshold_reasons:
         threshold_reasons.append(lane_reason)
 
@@ -1600,6 +1612,9 @@ def _build_action_policy(
             "sender_auth_failure": has_auth_failure,
             "known_bad_infrastructure": has_known_bad_infra,
             "conflicting_evidence": has_conflicting_evidence,
+            "pending_bank_review": has_pending_bank_review,
+            "pending_domain_review": has_pending_domain_review,
+            "pending_template_review": has_pending_template_review,
             "high_business_impact": high_business_impact,
         },
         "human_gate": {
@@ -3401,27 +3416,37 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 evidence_snapshot=evs,
             )
             top_ranked_findings = _dedupe_ranked_findings(structured_findings, limit=3)
-            action_policy = _build_action_policy(
-                verdict=v,
-                structured_findings=structured_findings,
-                evidence_snapshot=evs,
-            )
             evs["structured_findings"] = structured_findings
             evs["top_ranked_findings"] = top_ranked_findings
-            evs["action_policy"] = action_policy
-            evs["human_gate"] = dict(action_policy.get("human_gate") or {})
             supplier_governance = update_supplier_governance_snapshot(
                 tenant_id=tenant_id,
                 email=email,
                 evidence_snapshot=evs,
                 structured_findings=structured_findings,
             )
+            evs["supplier_governance"] = supplier_governance
+            incident_graph = build_incident_graph_snapshot(
+                tenant_id=tenant_id,
+                supplier_key=str((supplier_governance or {}).get("supplier_key") or ""),
+                evidence_snapshot=evs,
+            )
+            action_policy = _build_action_policy(
+                verdict=v,
+                structured_findings=structured_findings,
+                evidence_snapshot=evs,
+            )
             vendor_trust_graph = build_vendor_trust_graph_snapshot(
                 governance_snapshot=supplier_governance,
                 evidence_snapshot=evs,
                 structured_findings=structured_findings,
             )
-            evs["supplier_governance"] = supplier_governance
+            if isinstance(vendor_trust_graph, dict):
+                vendor_trust_graph["incident_count"] = int((incident_graph or {}).get("incident_count") or 0)
+                vendor_trust_graph["timeline"] = list((incident_graph or {}).get("timeline") or [])[:6]
+                vendor_trust_graph["related_incident_ids"] = list((incident_graph or {}).get("related_incident_ids") or [])[:8]
+            evs["action_policy"] = action_policy
+            evs["human_gate"] = dict(action_policy.get("human_gate") or {})
+            evs["incident_graph"] = incident_graph
             evs["vendor_trust_graph"] = vendor_trust_graph
             evs["agent_runs"] = _build_agent_runs_audit(
                 evidence_snapshot=evs,
@@ -3973,6 +3998,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "policy_gate": v.get("policy_gate"),
                     "trust_case": v.get("trust_case"),
                     "access_policy": v.get("access_policy"),
+                    "incident_graph": (v.get("evidence_snapshot") or {}).get("incident_graph"),
+                    "vendor_trust_graph": (v.get("evidence_snapshot") or {}).get("vendor_trust_graph"),
                 },
             )
             handoff = emit_security_handoff(normalized)

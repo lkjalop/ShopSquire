@@ -100,6 +100,12 @@ def test_email_security_returns_explainability_card():
     assert trust_graph.get("supplier_key") == governance.get("supplier_key")
     assert isinstance(trust_graph.get("nodes"), list)
     assert isinstance(trust_graph.get("edges"), list)
+    incident_graph = evidence.get("incident_graph") or {}
+    assert incident_graph.get("supplier_key") == governance.get("supplier_key")
+    assert isinstance(incident_graph.get("timeline"), list)
+    assert isinstance((incident_graph.get("relationships") or {}).get("domains"), list)
+    assert isinstance((incident_graph.get("relationships") or {}).get("bank_fingerprints"), list)
+    assert isinstance((incident_graph.get("relationships") or {}).get("template_hashes"), list)
 
 
 def test_reference_material_is_demoted_below_direct_invoice_findings():
@@ -136,6 +142,37 @@ def test_reference_material_is_demoted_below_direct_invoice_findings():
     structured = ((out.get("evidence_snapshot") or {}).get("structured_findings") or [])
     assert any((f.get("finding_category") == "contextual_test_artifact") for f in structured)
     assert all((ranked_item.get("finding_category") != "contextual_test_artifact") for ranked_item in ranked)
+
+
+def test_pending_supplier_governance_updates_force_human_gate():
+    from src.app.security.email_security import evaluate_email_security
+
+    out = evaluate_email_security(
+        {
+            "message_id": "<gov-human-gate@x>",
+            "from_addr": "accounts@ingramfake.com.au",
+            "reply_to": "accounts@ingramfake.com.au",
+            "subject": "Updated remittance details",
+            "body": "Please use the new account immediately.",
+            "attachments": [
+                {
+                    "name": "IngramFake_March2026_Catalog.pdf",
+                    "content_type": "application/pdf",
+                    "extracted_text": "Banking details have changed. BSB 062-111 Account 12345678",
+                    "sha256": "c" * 64,
+                    "template_hash": "tmpl-bad",
+                }
+            ],
+            "vendor_domain": "ingramtech.com.au",
+        },
+        tenant_id="tenant-governance-human-gate",
+    )
+    evidence = out.get("evidence_snapshot") or {}
+    gov = evidence.get("supplier_governance") or {}
+    assert any(str(x).startswith("review_") for x in (gov.get("pending_updates") or []))
+    action_policy = evidence.get("action_policy") or {}
+    assert action_policy.get("lane") in {"lane_2_auto_escalate", "lane_3_human_gate"}
+    assert any("governance approval" in str(x).lower() or "bank fingerprint" in str(x).lower() or "supplier-governance" in str(x).lower() for x in (action_policy.get("threshold_reasons") or []))
 
 
 @pytest.mark.parametrize(

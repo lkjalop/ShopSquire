@@ -1375,6 +1375,42 @@ def merchant_email_lab(request: Request):
               document.getElementById('status').textContent = 'Outcome recording error';
             }
           }
+          async function reviewSupplierGovernance(updateKey, decision){
+            try{
+              const gov = (((currentSecurityResult || {}).evidence_snapshot || {}).supplier_governance || {});
+              const supplierKey = String(gov.supplier_key || '').trim();
+              if(!supplierKey || !updateKey){
+                document.getElementById('status').textContent = 'No supplier governance item is available to review.';
+                return;
+              }
+              const tenantId = String((((currentSecurityResult || {}).siem_handoff || {}).event || {}).tenant_id || gov.tenant_id || 'default');
+              document.getElementById('status').textContent = `${decision === 'approve' ? 'Approving' : 'Rejecting'} governance update…`;
+              const r = await fetch('/api/v1/admin/email_security/supplier-governance/review', {
+                method:'POST',
+                headers:{ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() },
+                body: JSON.stringify({
+                  tenant_id: tenantId,
+                  supplier_key: supplierKey,
+                  update_key: updateKey,
+                  decision: decision,
+                  actor_id: 'email_lab',
+                  actor_role: 'owner'
+                })
+              });
+              const out = await r.json().catch(()=>null);
+              if(!r.ok || !out || !out.ok){
+                document.getElementById('status').textContent = `Supplier governance review failed (${r.status})`;
+                return;
+              }
+              if(currentSecurityResult && currentSecurityResult.evidence_snapshot){
+                currentSecurityResult.evidence_snapshot.supplier_governance = out.profile || gov;
+              }
+              renderSupplierGovernance(currentSecurityResult || {});
+              document.getElementById('status').textContent = `Supplier governance update ${decision}d`;
+            }catch(e){
+              document.getElementById('status').textContent = 'Supplier governance review error';
+            }
+          }
           function renderIntegrationsSummary(j){
             const siem = j.siem_handoff || {};
             const pb = (j.evidence_snapshot || {}).playbook_run || j.playbook_run || {};
@@ -1407,6 +1443,10 @@ def merchant_email_lab(request: Request):
             const ev = j.evidence_snapshot || {};
             const gov = ev.supplier_governance || {};
             if(!gov || !gov.supplier_key) return;
+            const pending = Array.isArray(gov.pending_updates) ? gov.pending_updates : [];
+            const pendingHtml = pending.length
+              ? pending.map(item => `<div class="attachment-row"><div><strong>${escHtml(item)}</strong></div><div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn" type="button" onclick="reviewSupplierGovernance(${JSON.stringify(item)}, 'approve')">Approve</button><button class="btn" type="button" onclick="reviewSupplierGovernance(${JSON.stringify(item)}, 'reject')">Reject</button></div></div>`).join('')
+              : `<div class="small">No supplier governance approvals are pending.</div>`;
             const sections = [
               `Supplier: ${gov.vendor_name || gov.supplier_key}`,
               `Governance state: ${String(gov.governance_state || 'stable').replaceAll('_',' ')}`,
@@ -1414,10 +1454,11 @@ def merchant_email_lab(request: Request):
               Array.isArray(gov.observed_domains) && gov.observed_domains.length ? `Observed domains: ${gov.observed_domains.join(', ')}` : null,
               Array.isArray(gov.approved_bank_fingerprints) && gov.approved_bank_fingerprints.length ? `Approved bank fingerprints: ${gov.approved_bank_fingerprints.join(', ')}` : null,
               Array.isArray(gov.observed_bank_fingerprints) && gov.observed_bank_fingerprints.length ? `Observed bank fingerprints: ${gov.observed_bank_fingerprints.join(', ')}` : null,
-              Array.isArray(gov.pending_updates) && gov.pending_updates.length ? `Pending review: ${gov.pending_updates.join(' | ')}` : 'No pending supplier governance updates.'
+              Array.isArray(gov.history) && gov.history.length ? `Recent decisions: ${gov.history.slice(-6).join(' | ')}` : null,
+              pending.length ? `Pending review count: ${pending.length}` : 'No pending supplier governance updates.'
             ];
             document.getElementById('gov_card').style.display = 'block';
-            document.getElementById('gov_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Governance Snapshot</div>${listHtml(sections)}</div>`;
+            document.getElementById('gov_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Governance Snapshot</div>${listHtml(sections)}</div><div class="evidence-block"><div class="section-label">Pending Approvals</div>${pendingHtml}</div>`;
           }
           function renderVendorTrustGraph(j){
             const ev = j.evidence_snapshot || {};
@@ -1425,16 +1466,32 @@ def merchant_email_lab(request: Request):
             if(!graph || !graph.supplier_key) return;
             const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
             const edges = Array.isArray(graph.edges) ? graph.edges : [];
+            const incidentGraph = ev.incident_graph || {};
+            const timeline = Array.isArray(graph.timeline) ? graph.timeline : ((Array.isArray(incidentGraph.timeline)) ? incidentGraph.timeline : []);
+            const rel = (incidentGraph.relationships && typeof incidentGraph.relationships === 'object') ? incidentGraph.relationships : {};
             const sections = [
               `Supplier key: ${graph.supplier_key}`,
               `Nodes: ${graph.node_count || nodes.length || 0}`,
               `Edges: ${graph.edge_count || edges.length || 0}`,
+              `Related incidents: ${graph.incident_count || (incidentGraph.incident_count || 0)}`,
               Array.isArray(graph.risk_notes) && graph.risk_notes.length ? `Risk notes: ${graph.risk_notes.join(', ')}` : null,
+              (ev.supplier_governance && Array.isArray(ev.supplier_governance.history) && ev.supplier_governance.history.length) ? `Governance history: ${ev.supplier_governance.history.slice(-6).join(' | ')}` : null,
               nodes.length ? `Entities: ${nodes.slice(0,8).map(n => `${n.label} (${n.type})`).join(' | ')}` : null,
               edges.length ? `Relationships: ${edges.slice(0,8).map(e => `${e.source.split(':').slice(-1)[0]} -> ${e.target.split(':').slice(-1)[0]} (${e.relation})`).join(' | ')}` : null
             ];
+            const relationshipSections = [
+              Array.isArray(rel.domains) && rel.domains.length ? `Domains: ${rel.domains.join(', ')}` : null,
+              Array.isArray(rel.bank_fingerprints) && rel.bank_fingerprints.length ? `Bank fingerprints: ${rel.bank_fingerprints.join(', ')}` : null,
+              Array.isArray(rel.template_hashes) && rel.template_hashes.length ? `Template hashes: ${rel.template_hashes.join(', ')}` : null
+            ];
+            const timelineHtml = timeline.length
+              ? `<div class="evidence-block"><div class="section-label">Incident Timeline</div>${listHtml(timeline.slice(0,8).map(item => `${item.created_at || '-'} · ${item.incident_id || '-'} · ${item.severity || 'info'}${Array.isArray(item.reasons) && item.reasons.length ? ` · ${item.reasons.join(', ')}` : ''}`))}</div>`
+              : '';
+            const relationshipHtml = relationshipSections.some(Boolean)
+              ? `<div class="evidence-block"><div class="section-label">Relationship Buckets</div>${listHtml(relationshipSections)}</div>`
+              : '';
             document.getElementById('graph_card').style.display = 'block';
-            document.getElementById('graph_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Trust Graph Snapshot</div>${listHtml(sections)}</div>`;
+            document.getElementById('graph_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Trust Graph Snapshot</div>${listHtml(sections)}</div>${relationshipHtml}${timelineHtml}`;
           }
           function renderVerdictTones(j){
             const ev = j.evidence_snapshot || {};
