@@ -3369,6 +3369,15 @@ def get_incident(incident_id: str, role: str = Depends(require_role([ROLE_MERCHA
                     {"id": incident_id},
                 ).mappings().first()
                 if not row:
+                    row = db.execute(
+                        sql_text(
+                            "SELECT id, event_id, created_at, created_by, severity, title, description, status, "
+                            "assigned_to, team, sla_status, sla_due_at, runbook_id, runbook_run_id "
+                            "FROM incidents WHERE event_id = :event_id ORDER BY created_at DESC LIMIT 1"
+                        ),
+                        {"event_id": incident_id},
+                    ).mappings().first()
+                if not row:
                     raise HTTPException(status_code=404, detail="Incident not found")
                 out = dict(row)
                 desc_raw = out.get("description")

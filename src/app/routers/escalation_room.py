@@ -1246,6 +1246,14 @@ class EscalateRequest(BaseModel):
     context: dict | None = None
 
 
+class LinkedArtifactAnalyzeRequest(BaseModel):
+    trace_id: str | None = None
+    reason: str | None = None
+    filename: str | None = None
+    artifact_url: str | None = None
+    context: dict | None = None
+
+
 def _seed_incident_chat_context(
     incident_id: str,
     *,
@@ -1431,7 +1439,7 @@ def create_incident_record(
         context=context,
     )
     _ = created
-    return {"ok": True, "incident_id": incident_id, **toks}
+    return {"ok": True, "incident_id": incident_id, "context": context or {}, **toks}
 
 
 @public_router.post("/escalate", response_model=IncidentEscalateResponse)
@@ -1442,25 +1450,23 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
     """
     if not _allow_public_escalation(request):
         raise HTTPException(status_code=403, detail="public_escalation_disabled")
-    # LOLBin enrichment — inject behavioral profiles when attack_hypothesis is lolbin
-    enriched_context = body.context
+    enriched_context = dict(body.context or {})
     try:
-        from src.app.security.lolbin_behavioral_catalog import enrich_lolbin_indicators
-        _attack_hyp = (
-            (body.context or {}).get("security_payload", {}) or {}
-        ).get("attack_hypothesis", "")
-        if _attack_hyp == "lolbin_command_sequence":
-            _lolbin_hits = (
-                (body.context or {}).get("security_payload", {}) or {}
-            ).get("lolbin_hits", [])
-            if _lolbin_hits:
-                _profiles = enrich_lolbin_indicators(_lolbin_hits)
-                enriched_context = dict(body.context or {})
-                enriched_context["lolbin_behavioral_profiles"] = _profiles
+        from src.app.security.lolbin_behavioral_catalog import LOLBIN_CATALOG, enrich_lolbin_indicators
+
+        sec_payload = dict(enriched_context.get("security_payload") or {})
+        attack_hypothesis = str(sec_payload.get("attack_hypothesis") or "")
+        if attack_hypothesis == "lolbin_command_sequence":
+            existing_profiles = list(sec_payload.get("lolbin_behavioral_profiles") or [])
+            extracted = str(enriched_context.get("extracted_text") or "").lower()
+            lolbin_hits = list(sec_payload.get("lolbin_hits") or []) or [key for key in LOLBIN_CATALOG if key in extracted]
+            profiles = existing_profiles or (enrich_lolbin_indicators(lolbin_hits) if lolbin_hits else [])
+            if profiles:
+                enriched_context["lolbin_behavioral_profiles"] = profiles
                 enriched_context["lolbin_summary"] = "; ".join(
-                    f"{p['binary']} ({p['mitre_sub_technique']})"
-                    for p in _profiles
-                    if p.get("mitre_sub_technique")
+                    f"{p['full_name']} ({p['mitre_sub_technique']}): {str(p.get('description') or '')[:120]}..."
+                    for p in profiles
+                    if p.get("full_name") and p.get("mitre_sub_technique")
                 )
     except Exception:
         pass
@@ -1474,6 +1480,40 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
         title="Buyer escalation: human review requested",
         dedupe_by_event=True,
     )
+
+
+@public_router.post("/analyze-linked-artifact")
+def public_analyze_linked_artifact(body: LinkedArtifactAnalyzeRequest, request: Request) -> Dict:
+    if not _allow_public_escalation(request):
+        raise HTTPException(status_code=403, detail="public_escalation_disabled")
+    artifact_url = str(body.artifact_url or "").strip()
+    if not artifact_url:
+        raise HTTPException(status_code=400, detail="artifact_url_required")
+    try:
+        from src.app.security.linked_artifact_analysis import analyze_linked_artifact
+
+        analysis = analyze_linked_artifact(url=artifact_url)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"linked_artifact_analysis_failed:{exc}")
+
+    enriched_context = dict(body.context or {})
+    enriched_context["linked_artifact_analysis"] = analysis
+    enriched_context["linked_artifact_url"] = artifact_url
+    if body.filename:
+        enriched_context["filename"] = body.filename
+
+    result = create_incident_record(
+        case_id=None,
+        trace_id=body.trace_id,
+        reason=body.reason or "analyze_linked_artifact",
+        context=enriched_context,
+        created_by="buyer",
+        severity="warn",
+        title="Buyer escalation: linked artifact analysis requested",
+        dedupe_by_event=False,
+    )
+    result["analysis"] = analysis
+    return result
 
 
 class PublicChatMessage(BaseModel):

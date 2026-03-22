@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFi
 from typing import Optional, Dict, Any, List
 
 from src.app.schemas.email_security import EmailEvaluateRequest, EmailEvaluateResponse
-from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER
+from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.email_security import evaluate_email_security
 from src.app.security.prompt_injection_eval import (
     default_prompt_injection_corpus,
@@ -28,7 +28,7 @@ def evaluate(
     payload: EmailEvaluateRequest,
     request: Request,
     x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
-    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ):
     tenant_id = payload.tenant_id or x_tenant_id
     email = {
