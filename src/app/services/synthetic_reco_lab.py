@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from src.app.models.db import db_session
 from src.app.deps import hash_uid
+from src.app.services.catalog_profile import invalidate_catalog_profile_cache
 from src.app.services.checkout_upsell import ensure_recommend_interactions_table
 from src.app.services.recommendations import RecommendationService
 from scripts.seed_demo_data import parse_laptop_products
@@ -290,6 +291,7 @@ def seed_multicategory_catalog(
             by_cat[cat] = len(items)
         try:
             db.commit()
+            invalidate_catalog_profile_cache()
         except Exception:
             pass
     return {"status": "ok", "seeded": seeded, "categories": by_cat}

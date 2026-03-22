@@ -395,6 +395,8 @@ def _top_up_image_results(
     constraints: Dict[str, Any],
     catalog_profile: Dict[str, Any],
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    from src.app.services.product_taxonomy import infer_product_family
+
     if minimum_count <= 0 or len(results) >= minimum_count:
         return results, {"applied": False, "added": 0, "reason": "already_sufficient"}
     if not image_category or image_category == "general":
@@ -439,6 +441,9 @@ def _top_up_image_results(
         else:
             specs = raw_specs if isinstance(raw_specs, dict) else {}
         category = _coarse_product_category(str(name or ""), specs)
+        family = infer_product_family(sku=sku, name=str(name or ""), specs=specs)
+        if str(image_category or "").strip().lower() == "laptop" and family != "LAP":
+            continue
         if category != image_category:
             continue
         if isinstance(price_cents, (int, float)):
@@ -999,7 +1004,13 @@ def _classify_turn_intent(
     q = str(query or "").strip().lower()
     if followup_explain:
         return "EXPLAIN"
-    if re.search(r"\b(warranty|return|refund|broken|damaged|repair|replacement|support|bsod|blue screen|stop code)\b", q):
+    if re.search(
+        r"\b("
+        r"warranty|return|refund|broken|damaged|cracked|shattered|repair|replacement|support|"
+        r"not working|faulty|dead pixel|screen damage|bsod|blue screen|stop code"
+        r")\b",
+        q,
+    ):
         return "SUPPORT_CLAIM"
     if re.search(r"\b(compare|vs|versus|difference|which one|better)\b", q):
         return "COMPARE"
@@ -1332,6 +1343,8 @@ def _infer_use_case_from_query_text(query: str | None) -> tuple[str | None, list
         if _uc:
             if _uc == "business_professional":
                 return "office_general", ["office", "office_general"]
+            if _uc == "high_school":
+                return "high_school", ["student", "high_school"]
             if _uc.startswith("office_"):
                 return _uc, ["office", _uc]
             if _uc.endswith("_student") or _uc.startswith("university_"):
@@ -1340,10 +1353,29 @@ def _infer_use_case_from_query_text(query: str | None) -> tuple[str | None, list
     except Exception:
         pass
 
+    high_school_markers = (
+        "high school",
+        "highschool",
+        "yr 7",
+        "yr 8",
+        "yr 9",
+        "yr 10",
+        "yr 11",
+        "yr 12",
+        "year 7",
+        "year 8",
+        "year 9",
+        "year 10",
+        "year 11",
+        "year 12",
+        "teen",
+        "hsc",
+        "vce",
+        "gcse",
+    )
     student_markers = (
         "university",
         "college",
-        "school",
         "student",
         "class",
         "lecture",
@@ -1387,12 +1419,34 @@ def _infer_use_case_from_query_text(query: str | None) -> tuple[str | None, list
         if any(m in q for m in ("executive", "director", "travel", "boardroom", "presentation")):
             return "office_executive", ["office", "office_executive"]
         return "office_general", ["office", "office_general"]
+    if any(m in q for m in high_school_markers) and not any(m in q for m in heavy_markers):
+        if any(m in q for m in ("note taking", "handwriting", "stylus", "pen", "2-in-1", "touch")):
+            return "high_school", ["student", "high_school", "note_taking_student"]
+        return "high_school", ["student", "high_school"]
     if any(m in q for m in student_markers) and not any(m in q for m in heavy_markers):
         if any(m in q for m in ("note taking", "handwriting", "stylus", "pen", "2-in-1", "touch")):
             return "note_taking_student", ["student", "note_taking_student"]
         if any(m in q for m in ("arts", "visual arts", "design")):
             return "design_student", ["student", "design_student"]
         return "university_general", ["student", "university_general"]
+    return None, []
+
+
+def _latest_query_use_case_override(query: str | None) -> tuple[str | None, list[str]]:
+    q = str(query or "").lower()
+    if not q:
+        return None, []
+    gaming_markers = (
+        "gaming", "gamer", "fps", "rtx", "geforce", "esports", "fortnite", "valorant",
+        "cyberpunk", "steam", "gpu", "3d", "render", "rendering", "video editing",
+        "creative", "cad", "blender", "machine learning", "ai training",
+    )
+    office_markers = (
+        "work", "office", "corporate", "business", "email", "outlook", "teams",
+        "zoom", "excel", "powerpoint", "presentation", "meeting",
+    )
+    if any(m in q for m in office_markers) and not any(m in q for m in gaming_markers):
+        return _infer_use_case_from_query_text(q)
     return None, []
 
 
@@ -2490,7 +2544,7 @@ def _apply_nqe_selection_to_constraints(
 
     if qid == "ask_use_case":
         mapping = {
-            "use_case_student": ("university_general", ["student", "university_general"]),
+            "use_case_student": ("high_school", ["student", "high_school"]),
             "use_case_business": ("office_general", ["office", "office_general"]),
             "use_case_gaming": ("gaming", ["gaming"]),
             "use_case_video_editing": ("content_creator", ["content_creator"]),
@@ -2504,8 +2558,8 @@ def _apply_nqe_selection_to_constraints(
                 use_case, tags = ("ai_ml_workstation", ["ai_ml_workstation"])
             elif any(tok in val for tok in ("video", "editing", "creative", "render")):
                 use_case, tags = ("content_creator", ["content_creator"])
-            elif any(tok in val for tok in ("school", "student")):
-                use_case, tags = ("university_general", ["student", "university_general"])
+            elif "high school" in val or "school" in val or "student" in val:
+                use_case, tags = ("high_school", ["student", "high_school"])
             elif any(tok in val for tok in ("work", "business", "office")):
                 use_case, tags = ("office_general", ["office", "office_general"])
         if use_case:
@@ -2756,6 +2810,44 @@ def _build_security_payload(details: Dict[str, Any] | None, severity: str | None
     }
 
 
+def _apply_image_security_response_fields(
+    payload: Dict[str, Any],
+    *,
+    analysis_details: Dict[str, Any] | None,
+    severity: str | None,
+    image_reupload_reasons: list[str] | None,
+    image_cv_signals_parsed: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    image_untrusted = bool(image_reupload_reasons)
+    security_route = "visual_sanitized" if image_untrusted else "allow"
+    trust_channels = _derive_trust_channels(security_route)
+    qr_details = _derive_qr_details_from_signals(image_cv_signals_parsed or {}, policy_route=security_route)
+    security_summary = (
+        "Image flagged; using text-only fallback until a clean product photo is uploaded."
+        if image_untrusted
+        else None
+    )
+    if not isinstance(payload.get("security"), dict):
+        payload["security"] = _build_security_payload(analysis_details or {}, severity)
+    payload["image_reupload_reasons"] = list(image_reupload_reasons or [])
+    payload["security"]["policy_route"] = security_route
+    payload["security"]["route"] = security_route
+    payload["security"]["image_untrusted"] = image_untrusted
+    payload["security"]["image_trust_channels"] = trust_channels
+    payload["security"]["qr"] = qr_details
+    if image_untrusted and not isinstance(payload.get("right_panel"), dict):
+        payload["right_panel"] = {
+            "mode": "shopping",
+            "show_tiers": True,
+            "budget_status": "unknown",
+            "image_untrusted": True,
+            "image_degraded_mode": True,
+            "security_route": security_route,
+            "security_summary": security_summary,
+        }
+    return payload
+
+
 def _summarize_results(
     query: str,
     results: list[dict],
@@ -2948,6 +3040,73 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
     return f"Yes, this budget reaches {brand_label if brand_has_match else 'similar'} options starting around ${int(round(first_price)):,}."
 
 
+def _budget_reasoning_requested(query: str | None) -> bool:
+    q = str(query or "").strip().lower()
+    if not q:
+        return False
+    if "why" in q and any(tok in q for tok in ("budget", "enough", "go higher", "worth", "value")):
+        return True
+    return any(
+        phrase in q
+        for phrase in (
+            "is 1800 enough",
+            "is $",
+            "is enough",
+            "should i go higher",
+            "go higher",
+            "worth it",
+            "better value",
+            "good enough",
+            "overkill",
+        )
+    )
+
+
+def _build_budget_reasoning_note(query: str | None, results: list[dict], constraints: dict) -> str:
+    if not _budget_reasoning_requested(query):
+        return ""
+    budget_max = constraints.get("budget_max")
+    try:
+        budget_cap = float(budget_max) if budget_max is not None else 0.0
+    except Exception:
+        budget_cap = 0.0
+    if budget_cap <= 0:
+        return ""
+
+    use_case = str(constraints.get("use_case") or "").strip().replace("_", " ")
+    bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
+    status = str(bf.get("status") or "").strip().lower()
+    floor = bf.get("floor")
+    try:
+        floor_val = float(floor) if floor is not None else 0.0
+    except Exception:
+        floor_val = 0.0
+
+    prices = [p for p in (_result_price_dollars(r) for r in (results or [])) if isinstance(p, (int, float))]
+    if not prices:
+        return ""
+    cheapest = min(float(p) for p in prices)
+    strongest = _result_price_dollars((results or [None])[0]) or cheapest
+    label = use_case or "this use case"
+
+    if status == "high":
+        return (
+            f"Yes, ${int(budget_cap):,} is more than enough for {label}. "
+            f"A strong fit is already available around ${int(round(strongest)):,}, so going higher is mostly about premium headroom rather than necessity."
+        )
+    if status == "ok":
+        if floor_val and budget_cap >= floor_val * 1.45:
+            return (
+                f"Yes, ${int(budget_cap):,} is a strong budget for {label}. "
+                f"You already have viable options from about ${int(round(cheapest)):,}, and going higher would mostly buy extra performance headroom or nicer build/display quality."
+            )
+        return (
+            f"Yes, ${int(budget_cap):,} is workable for {label}. "
+            f"The current shortlist starts around ${int(round(cheapest)):,}; going a bit higher would mainly help if you want more long-term headroom."
+        )
+    return ""
+
+
 def _deterministic_assistant_message(query: str, results: list[dict], constraints: dict, brand_budget_answer: str = "") -> str | None:
     if not results:
         return None
@@ -3011,8 +3170,26 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
 
     top_lines: list[str] = []
     try:
+        def _display_name(row: dict) -> str:
+            specs = (row or {}).get("specs")
+            if isinstance(specs, dict):
+                label = str(specs.get("display_name") or "").strip()
+                subtitle = str(specs.get("subtitle") or "").strip()
+                if subtitle:
+                    storage = ""
+                    try:
+                        m = re.search(r"\[[^\]]+\]", subtitle)
+                        storage = m.group(0) if m else ""
+                    except Exception:
+                        storage = ""
+                    if storage:
+                        return f"{label} {storage}".strip()
+                if label:
+                    return label
+            return str((row or {}).get("name") or "").strip()
+
         for row in (results or [])[:2]:
-            name = str((row or {}).get("name") or "").strip()
+            name = _display_name(row)
             if not name:
                 continue
             price_cents = (row or {}).get("price_cents")
@@ -3036,14 +3213,19 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
         else:
             picks = ", ".join(top_lines[:-1]) + f" and {top_lines[-1]}"
         fit_line = f"Best fits for {persona_label}: {picks}." if persona_label else f"Best fits here: {picks}."
+    budget_reasoning = _build_budget_reasoning_note(query, results, constraints)
 
     parts: list[str] = []
     if brand_budget_answer:
         parts.append(brand_budget_answer)
+        if budget_reasoning:
+            parts.append(budget_reasoning)
         if fit_line:
             parts.append(fit_line)
     else:
         parts.append(core_line)
+        if budget_reasoning:
+            parts.append(budget_reasoning)
         if fit_line:
             parts.append(fit_line)
     if urgency_note:
@@ -3429,6 +3611,11 @@ def suggest(
         if image_cv_signals:
             parsed_cv = json.loads(str(image_cv_signals))
             if isinstance(parsed_cv, dict):
+                damage_score = 0.0
+                try:
+                    damage_score = float(parsed_cv.get("damage_score") or 0.0)
+                except Exception:
+                    damage_score = 0.0
                 qr_detected = bool(
                     parsed_cv.get("qr_code_detected")
                     or parsed_cv.get("qr_detected")
@@ -3459,11 +3646,18 @@ def suggest(
                     "ocr_prompt_injection": bool(parsed_cv.get("ocr_prompt_injection")),
                     "manipulation_detected": manipulation,
                     "adversarial_score": adversarial,
+                    "intent_cv_triage": bool(parsed_cv.get("intent_cv_triage")),
+                    "damage_score": damage_score,
                     "steg_suspicious": bool(parsed_cv.get("steg_suspicious")),
+                    "pii_detected": bool(parsed_cv.get("pii_detected")),
+                    "ssn_detected": bool(parsed_cv.get("ssn_detected")),
+                    "ssn_count": int(parsed_cv.get("ssn_count") or 0) if parsed_cv.get("ssn_count") is not None else 0,
                     "qr_payload_types": parsed_cv.get("qr_payload_types") if isinstance(parsed_cv.get("qr_payload_types"), list) else [],
                     "qr_payloads": parsed_cv.get("qr_payloads") if isinstance(parsed_cv.get("qr_payloads"), list) else [],
                     "qr_redirect_probe": parsed_cv.get("qr_redirect_probe") if isinstance(parsed_cv.get("qr_redirect_probe"), dict) else {},
                 }
+                if not image_context.get("intent") and image_cv_signals_parsed.get("intent_cv_triage"):
+                    image_context["intent"] = "cv_triage"
                 if qr_detected:
                     image_reupload_reasons.append("qr_code_detected")
                 if qr_external:
@@ -4248,16 +4442,24 @@ def suggest(
         cached_hash = str(cached_image_ctx.get("hash") or "")[:128] or None
         cached_intent = str(cached_image_ctx.get("intent") or "")[:32] or None
         cached_product_identity = cached_image_ctx.get("product_identity") if isinstance(cached_image_ctx.get("product_identity"), dict) else {}
-        if not image_context.get("labels") and cached_labels:
-            image_context["labels"] = [str(x) for x in cached_labels][:12]
-        if not image_context.get("ocr") and cached_ocr:
-            image_context["ocr"] = cached_ocr
-        if not image_context.get("hash") and cached_hash:
-            image_context["hash"] = cached_hash
-        if not image_context.get("intent") and cached_intent:
-            image_context["intent"] = cached_intent
-        if not image_context.get("product_identity") and cached_product_identity:
-            image_context["product_identity"] = dict(cached_product_identity)
+        has_current_image_signal = bool(
+            image_context.get("labels")
+            or image_context.get("ocr")
+            or image_context.get("hash")
+            or image_context.get("product_identity")
+            or incoming_image_payload
+        )
+        if not has_current_image_signal:
+            if not image_context.get("labels") and cached_labels:
+                image_context["labels"] = [str(x) for x in cached_labels][:12]
+            if not image_context.get("ocr") and cached_ocr:
+                image_context["ocr"] = cached_ocr
+            if not image_context.get("hash") and cached_hash:
+                image_context["hash"] = cached_hash
+            if not image_context.get("intent") and cached_intent:
+                image_context["intent"] = cached_intent
+            if not image_context.get("product_identity") and cached_product_identity:
+                image_context["product_identity"] = dict(cached_product_identity)
         if image_context.get("labels") or image_context.get("ocr") or image_context.get("product_identity"):
             query_effective = (
                 f"{query or ''} image_labels:{' '.join(image_context.get('labels') or [])} "
@@ -4576,6 +4778,13 @@ def suggest(
         "turn_intent": turn_intent,
         "_request_budget_max": budget_max,
     }
+    if (
+        str(image_context.get("intent") or "").strip().lower() == "cv_triage"
+        or float(image_cv_signals_parsed.get("damage_score") or 0.0) > 0.4
+    ):
+        turn_intent = "SUPPORT_CLAIM"
+        constraints["turn_intent"] = turn_intent
+        constraints.setdefault("issue_type", "damage")
     if not constraints.get("use_case"):
         inferred_use_case, inferred_tags = _infer_use_case_from_query_text(query_effective)
         if inferred_use_case:
@@ -4738,6 +4947,15 @@ def suggest(
     except Exception:
         pass
     # ── ShopperIntent extraction: feed accumulated slots into persona/priority context ──
+    try:
+        latest_use_case, latest_tags = _latest_query_use_case_override(query)
+        if latest_use_case:
+            constraints["use_case"] = latest_use_case
+            constraints["use_case_tags"] = latest_tags
+            if latest_use_case.startswith("office_"):
+                constraints["buyer_persona"] = "corporate"
+    except Exception:
+        pass
     _shopper_intent = None
     try:
         from types import SimpleNamespace as _SN
@@ -5487,36 +5705,115 @@ def suggest(
             )
         except Exception:
             pass
-        payload = {
-            "status": "unsupported_request",
-            "results": [],
-            "proposal": {"decision_mode": "rules", "ranked_skus": []},
-            "constraints_used": constraints,
-            "followup_contract": followup_contract,
-            "intent_execution_plan": intent_execution_plan,
-            "policy_version": flags.get("POLICY_VERSION", "v1"),
-            "message": "The uploaded image does not match this merchant catalog.",
-            "assistant_message": (
-                f"This image looks like {catalog_relevance.get('image_category')}, but this store is primarily "
-                f"{catalog_relevance.get('catalog_primary')}. I did not substitute unrelated products."
-            ),
-            "catalog_profile": catalog_profile,
-            "catalog_relevance": catalog_relevance,
-            "timing_breakdown": {
-                **timing_breakdown,
-                "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
-            },
-            "degraded": True,
-            "eligible": not simulate,
-            "agent_chain": [
-                {"agent": "Catalog_Guard_Agent", "confidence": 0.98, "duration_ms": timing_breakdown.get("catalog_profile_ms")},
-            ],
-            "trace_tags": strategy_corr.get("tags") or [],
-            "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
-            "llm_model": llm_model,
-            "model_tier": model_tier,
-            "complexity_signals": complexity_signals,
-        }
+        if (
+            str(turn_intent or "").upper() == "SUPPORT_CLAIM"
+            or str(image_context.get("intent") or "").strip().lower() == "cv_triage"
+            or float(image_cv_signals_parsed.get("damage_score") or 0.0) > 0.4
+        ):
+            _issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
+            _warranty = _infer_account_warranty_status(uid)
+            payload = {
+                "status": "support_claim",
+                "results": [],
+                "proposal": {"decision_mode": "support", "ranked_skus": []},
+                "constraints_used": constraints,
+                "followup_contract": followup_contract,
+                "intent_execution_plan": intent_execution_plan,
+                "policy_version": flags.get("POLICY_VERSION", "v1"),
+                "message": "The uploaded image was routed to support instead of shopping recommendations.",
+                "assistant_message": (
+                    "This looks like a damaged device. I can help with repair, warranty, or return steps. "
+                    + (
+                        "I found account order history to review next."
+                        if str(_warranty.get("status") or "").strip().lower() == "found"
+                        else "Upload a receipt or order reference if you have one."
+                    )
+                ),
+                "right_panel": {
+                    "mode": "support",
+                    "show_tiers": False,
+                    "summary": f"Support flow active for {(_issue or 'device issue').replace('_', ' ')}.",
+                    "image_untrusted": False,
+                    "image_degraded_mode": True,
+                    "security_route": "allow",
+                    "security_summary": "Catalog shopping was skipped because this image appears to show damage or a support issue.",
+                    "support_cards": [
+                        {
+                            "id": "warranty_status",
+                            "title": "Warranty/Coverage",
+                            "status": _warranty.get("status") or "unknown",
+                            "message": _warranty.get("message") or "Sign in and provide order details to verify coverage.",
+                            "order_ref": _warranty.get("order_ref"),
+                        },
+                        {
+                            "id": "repair_return",
+                            "title": "Repair / Return Path",
+                            "status": "review",
+                            "message": "Upload clear device and receipt photos to determine repair, return, or in-store diagnostics.",
+                        },
+                    ],
+                    "faq_playbooks": [
+                        {
+                            "id": "faq_cracked_screen",
+                            "title": "Physical damage claims",
+                            "steps": ["Capture damage close-up", "Capture serial/label", "Attach receipt or order reference"],
+                        },
+                    ],
+                    "parallel_agents": [
+                        "CV_Triage_Agent",
+                        "Warranty_Agent",
+                        "Support_Playbook_Agent",
+                    ],
+                },
+                "catalog_profile": catalog_profile,
+                "catalog_relevance": catalog_relevance,
+                "timing_breakdown": {
+                    **timing_breakdown,
+                    "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
+                },
+                "degraded": True,
+                "eligible": not simulate,
+                "agent_chain": [
+                    {"agent": "Catalog_Guard_Agent", "confidence": 0.98, "duration_ms": timing_breakdown.get("catalog_profile_ms")},
+                    {"agent": "Support_Routing_Agent", "confidence": 0.94, "duration_ms": None},
+                ],
+                "trace_tags": strategy_corr.get("tags") or [],
+                "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+                "llm_model": llm_model,
+                "model_tier": model_tier,
+                "complexity_signals": complexity_signals,
+            }
+        else:
+            payload = {
+                "status": "unsupported_request",
+                "results": [],
+                "proposal": {"decision_mode": "rules", "ranked_skus": []},
+                "constraints_used": constraints,
+                "followup_contract": followup_contract,
+                "intent_execution_plan": intent_execution_plan,
+                "policy_version": flags.get("POLICY_VERSION", "v1"),
+                "message": "The uploaded image does not match this merchant catalog.",
+                "assistant_message": (
+                    f"This image looks like {catalog_relevance.get('image_category')}, but this store is primarily "
+                    f"{catalog_relevance.get('catalog_primary')}. I did not substitute unrelated products."
+                ),
+                "catalog_profile": catalog_profile,
+                "catalog_relevance": catalog_relevance,
+                "timing_breakdown": {
+                    **timing_breakdown,
+                    "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
+                },
+                "degraded": True,
+                "eligible": not simulate,
+                "agent_chain": [
+                    {"agent": "Catalog_Guard_Agent", "confidence": 0.98, "duration_ms": timing_breakdown.get("catalog_profile_ms")},
+                ],
+                "trace_tags": strategy_corr.get("tags") or [],
+                "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+                "llm_model": llm_model,
+                "model_tier": model_tier,
+                "complexity_signals": complexity_signals,
+            }
         payload = _ensure_trace_response(payload, trace_id, flags)
         return _with_trace(payload, trace_id)
     if incoming_image_payload and image_reupload_reasons:
@@ -6033,40 +6330,119 @@ def suggest(
                 )
         except Exception:
             pass
-        payload = {
-            "results": [],
-            "proposal": {"decision_mode": "rules", "ranked_skus": []},
-            "constraints_used": constraints,
-            "followup_contract": followup_contract,
-            "intent_execution_plan": intent_execution_plan,
-            "policy_version": flags.get("POLICY_VERSION", "v1"),
-            "assistant_message": (
-                "I can narrow this quickly with one or two details. "
-                "If you skip details, I'll assume sensible defaults and show constrained alternatives."
-            ),
-            "next_questions": next_questions,
-            "question_plan": question_plan,
-            "confidence_band": question_plan.get("confidence_band"),
-            "ambiguity_reason": question_plan.get("ambiguity_reason"),
-            "needs_disambiguation": _compute_needs_disambiguation(
-                question_plan=question_plan,
-                next_questions=next_questions,
-            ),
-            "view_mode": view_hint.get("view_mode"),
-            "view_reason": view_hint.get("view_reason"),
-            "agent_chain": [
-                {"agent": "NQE_Agent", "confidence": None, "duration_ms": None},
-            ],
-            "trace_tags": strategy_corr.get("tags") or [],
-            "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
-            "llm_model": llm_model,
-            "model_tier": model_tier,
-            "complexity_signals": complexity_signals,
-            "nqe_selection_applied": nqe_selection_applied,
-            "turn_type": turn_type,
-            "referents": referents,
-            "memory_confidence": round(float(memory_confidence), 4),
-        }
+        if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
+            _issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
+            _warranty = _infer_account_warranty_status(uid)
+            payload = {
+                "results": [],
+                "proposal": {"decision_mode": "support", "ranked_skus": []},
+                "constraints_used": constraints,
+                "followup_contract": followup_contract,
+                "intent_execution_plan": intent_execution_plan,
+                "policy_version": flags.get("POLICY_VERSION", "v1"),
+                "assistant_message": (
+                    "This looks like a damaged device. I can help with repair, warranty, or return steps. "
+                    + (
+                        "I found account order history to review next."
+                        if str(_warranty.get("status") or "").strip().lower() == "found"
+                        else "Upload a receipt or order reference if you have one."
+                    )
+                ),
+                "right_panel": {
+                    "mode": "support",
+                    "show_tiers": False,
+                    "summary": f"Support flow active for {(_issue or 'device issue').replace('_', ' ')}.",
+                    "image_untrusted": bool(image_reupload_reasons),
+                    "image_degraded_mode": bool(image_reupload_reasons),
+                    "security_route": "visual_sanitized" if image_reupload_reasons else "allow",
+                    "security_summary": (
+                        "Image flagged; using text-only fallback until a clean product photo is uploaded."
+                        if image_reupload_reasons
+                        else None
+                    ),
+                    "support_cards": [
+                        {
+                            "id": "warranty_status",
+                            "title": "Warranty/Coverage",
+                            "status": _warranty.get("status") or "unknown",
+                            "message": _warranty.get("message") or "Sign in and provide order details to verify coverage.",
+                            "order_ref": _warranty.get("order_ref"),
+                        },
+                        {
+                            "id": "repair_return",
+                            "title": "Repair / Return Path",
+                            "status": "review",
+                            "message": "Upload clear device and receipt photos to determine repair, return, or in-store diagnostics.",
+                        },
+                    ],
+                    "faq_playbooks": [
+                        {
+                            "id": "faq_cracked_screen",
+                            "title": "Physical damage claims",
+                            "steps": ["Capture damage close-up", "Capture serial/label", "Attach receipt or order reference"],
+                        },
+                    ],
+                    "parallel_agents": [
+                        "CV_Triage_Agent",
+                        "Warranty_Agent",
+                        "Support_Playbook_Agent",
+                    ],
+                },
+                "next_questions": [],
+                "question_plan": question_plan,
+                "confidence_band": question_plan.get("confidence_band"),
+                "ambiguity_reason": question_plan.get("ambiguity_reason"),
+                "needs_disambiguation": False,
+                "view_mode": view_hint.get("view_mode"),
+                "view_reason": view_hint.get("view_reason"),
+                "agent_chain": [
+                    {"agent": "Support_Routing_Agent", "confidence": 0.94, "duration_ms": None},
+                ],
+                "trace_tags": strategy_corr.get("tags") or [],
+                "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+                "llm_model": llm_model,
+                "model_tier": model_tier,
+                "complexity_signals": complexity_signals,
+                "nqe_selection_applied": nqe_selection_applied,
+                "turn_type": turn_type,
+                "referents": referents,
+                "memory_confidence": round(float(memory_confidence), 4),
+            }
+        else:
+            payload = {
+                "results": [],
+                "proposal": {"decision_mode": "rules", "ranked_skus": []},
+                "constraints_used": constraints,
+                "followup_contract": followup_contract,
+                "intent_execution_plan": intent_execution_plan,
+                "policy_version": flags.get("POLICY_VERSION", "v1"),
+                "assistant_message": (
+                    "I can narrow this quickly with one or two details. "
+                    "If you skip details, I'll assume sensible defaults and show constrained alternatives."
+                ),
+                "next_questions": next_questions,
+                "question_plan": question_plan,
+                "confidence_band": question_plan.get("confidence_band"),
+                "ambiguity_reason": question_plan.get("ambiguity_reason"),
+                "needs_disambiguation": _compute_needs_disambiguation(
+                    question_plan=question_plan,
+                    next_questions=next_questions,
+                ),
+                "view_mode": view_hint.get("view_mode"),
+                "view_reason": view_hint.get("view_reason"),
+                "agent_chain": [
+                    {"agent": "NQE_Agent", "confidence": None, "duration_ms": None},
+                ],
+                "trace_tags": strategy_corr.get("tags") or [],
+                "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+                "llm_model": llm_model,
+                "model_tier": model_tier,
+                "complexity_signals": complexity_signals,
+                "nqe_selection_applied": nqe_selection_applied,
+                "turn_type": turn_type,
+                "referents": referents,
+                "memory_confidence": round(float(memory_confidence), 4),
+            }
         _log_early_decision(
             status="clarifying_questions",
             proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
@@ -6580,6 +6956,13 @@ def suggest(
                                 "model_tier": model_tier,
                                 "complexity_signals": complexity_signals,
                             }
+                            payload = _apply_image_security_response_fields(
+                                payload,
+                                analysis_details=analysis.get("details") or {},
+                                severity=severity,
+                                image_reupload_reasons=image_reupload_reasons,
+                                image_cv_signals_parsed=image_cv_signals_parsed,
+                            )
                             _log_early_decision(
                                 status="no_results",
                                 proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
@@ -7179,6 +7562,13 @@ def suggest(
                 "complexity_signals": complexity_signals,
                 "security": _build_security_payload(analysis.get("details") or {}, severity),
             }
+            payload = _apply_image_security_response_fields(
+                payload,
+                analysis_details=analysis.get("details") or {},
+                severity=severity,
+                image_reupload_reasons=image_reupload_reasons,
+                image_cv_signals_parsed=image_cv_signals_parsed,
+            )
             _log_early_decision(
                 status="no_results",
                 proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
@@ -8547,25 +8937,33 @@ def suggest(
             "confidence": _id_result.get("confidence"),
         }
     try:
+        payload = _apply_image_security_response_fields(
+            payload,
+            analysis_details=analysis.get("details") or {},
+            severity=severity,
+            image_reupload_reasons=image_reupload_reasons,
+            image_cv_signals_parsed=image_cv_signals_parsed,
+        )
         _image_untrusted = bool(image_reupload_reasons)
         _security_route = "visual_sanitized" if _image_untrusted else "allow"
-        _trust_channels = _derive_trust_channels(_security_route)
-        _qr_details = _derive_qr_details_from_signals(image_cv_signals_parsed, policy_route=_security_route)
         _security_summary = (
             "Image flagged; using text-only fallback until a clean product photo is uploaded."
             if _image_untrusted
             else None
         )
-        payload["image_reupload_reasons"] = list(image_reupload_reasons or [])
-        if isinstance(payload.get("security"), dict):
-            payload["security"]["policy_route"] = _security_route
-            payload["security"]["route"] = _security_route
-            payload["security"]["image_untrusted"] = _image_untrusted
-            payload["security"]["image_trust_channels"] = _trust_channels
-            payload["security"]["qr"] = _qr_details
         if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
             _issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
             _warranty = _infer_account_warranty_status(uid)
+            results = []
+            payload["results"] = []
+            assistant_message = (
+                "This looks like a damaged device. I can help with repair, warranty, or return steps. "
+                + (
+                    "I found account order history to review next."
+                    if str(_warranty.get("status") or "").strip().lower() == "found"
+                    else "Upload a receipt or order reference if you have one."
+                )
+            )
             payload["right_panel"] = {
                 "mode": "support",
                 "show_tiers": False,
@@ -8746,7 +9144,7 @@ def suggest(
                 )
         except Exception:
             pass
-        if not results:
+        if not results and str(turn_intent or "").upper() != "SUPPORT_CLAIM":
             _msg_low = str(assistant_message or "").lower()
             _explicit_no_results = any(
                 tok in _msg_low

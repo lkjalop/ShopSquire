@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
+import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 import styles from './ImageRecommendPanel.module.css';
 
 /* ---------- types ---------- */
@@ -16,11 +17,17 @@ export interface ImageAnalysisContext {
   };
   /** Optional filename or source identifier shown in the group header */
   source_name?: string;
+  /** Intent classification from image_intent_router (cv_triage / visual_search / faq) */
+  intent_routing?: { intent?: string; confidence?: number; reason?: string } | null;
+  /** Damage score from vision triage (0–1) */
+  damage_score?: number | null;
 }
 
 interface ProductCard {
   sku: string;
   name: string;
+  display_name?: string;
+  subtitle?: string;
   price: number;
   specs_summary?: string;
   use_case_fit?: string;
@@ -44,6 +51,11 @@ interface ImageGroup {
   lowSupport?: boolean;
   domainBadge?: string | null;
   fillBadge?: string | null;
+  /** One-line "why this fired" for the analyst header */
+  detectionReason?: string | null;
+  /** True when the image was classified as a damaged device — show repair card instead of products */
+  isRepairIntent?: boolean;
+  repairContext?: { brand: string; damage_score: number } | null;
 }
 
 type TrustLevel = 'green' | 'yellow' | 'orange' | 'red';
@@ -66,7 +78,7 @@ export interface Props {
 const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
 const WIDEN_STEPS = [200, 400];
-const RECOMMEND_TIMEOUT_MS = 7000;
+const RECOMMEND_TIMEOUT_MS = 15000;
 
 function persistOperatorMetrics(timing: any, traceId: string | null, source = 'visual_search') {
   if (!timing || typeof timing !== 'object') return;
@@ -90,11 +102,52 @@ function persistOperatorMetrics(timing: any, traceId: string | null, source = 'v
 
 /* ---------- helpers ---------- */
 export function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], sessionSuspicious: number): TrustLevel {
+  const s = signals as Record<string, any>;
   if (sessionSuspicious >= 3 || signals.qr_prompt_injection) return 'red';
+  // Explicit threat-hypothesis signals always warrant orange
+  if (s.ransomware_indicator || s.c2_beacon_detected || s.payment_social_engineering) return 'orange';
   if (signals.qr_external_url_detected) return 'orange';
   if (sessionSuspicious >= 2 || signals.manipulation_detected || signals.steg_suspicious) return 'orange';
   if (signals.qr_code_detected) return 'yellow';
   return 'green';
+}
+
+export function shouldUseFastPath(query: string): boolean {
+  const q = String(query || '').toLowerCase();
+  if (!q.trim()) return true;
+  const hasBudgetSignal = /\$\s*\d{3,5}|\b\d{3,5}\b|\bbudget\b|\bunder\b|\baround\b|\bup to\b/.test(q);
+  const wantsReasoning = /\benough\b|\bgo higher\b|\bworth it\b|\bbetter value\b|\boverkill\b|\bwhy\b|\brecommend(?:ed)?\b/.test(q);
+  return !(hasBudgetSignal && wantsReasoning);
+}
+
+/** One-line analyst explanation for why this image lane was flagged. */
+function buildLaneDetectionReason(signals: ImageAnalysisContext['cv_signals']): string {
+  const s = signals as Record<string, any>;
+  if (signals.qr_prompt_injection) return 'Detected because QR payload is an injection attempt targeting the AI assistant.';
+  if (s.ransomware_indicator) return 'Detected because decoded payload references ransomware extension/locking patterns.';
+  if (s.payment_social_engineering) return 'Detected because QR payload is an external payment/social-engineering link.';
+  if (signals.steg_suspicious) return 'Detected because hidden payload found via steganographic anomaly in pixel data.';
+  if (signals.qr_external_url_detected) return 'Detected because QR payload redirects to an external unverified URL.';
+  if (signals.adversarial_detected) return 'Detected because adversarial perturbations found targeting the CV model.';
+  if (signals.manipulation_detected) return 'Detected because pixel-level manipulation detected; image integrity compromised.';
+  return 'Suspicious signals detected in uploaded image.';
+}
+
+function buildBuyerSecurityNotice(signals: ImageAnalysisContext['cv_signals']): string {
+  const s = signals as Record<string, any>;
+  if (s.payment_social_engineering || signals.qr_external_url_detected || signals.qr_code_detected) {
+    return 'Suspicious QR-linked document detected. Admin notified. Recommendations remain available while this image is under review.';
+  }
+  if (s.c2_beacon_detected) {
+    return 'Suspicious hidden payload indicators detected. Admin notified. Recommendations remain available while this image is under review.';
+  }
+  if (signals.steg_suspicious) {
+    return 'Suspicious steganographic payload indicators detected. Admin notified. Recommendations remain available while this image is under review.';
+  }
+  if (signals.adversarial_detected || signals.manipulation_detected) {
+    return 'Image integrity warning detected. Admin notified. Recommendations remain available while this image is under review.';
+  }
+  return 'Suspicious signals detected. Admin notified. Recommendations remain available while this image is under review.';
 }
 
 const TRUST_LABELS: Record<TrustLevel, string> = {
@@ -138,7 +191,8 @@ function friendlyBrand(labels: string[], ocrText: string, sourceName?: string, u
 /** Detect use-case from query for clarifying questions. */
 function detectUseCase(query: string): string | null {
   const q = query.toLowerCase();
-  if (/universit|uni\b|college|school|student|lecture|study/i.test(q)) return 'university';
+  if (/highschool|high school|yr\s?(?:7|8|9|10|11|12)|year\s?(?:7|8|9|10|11|12)|teen/i.test(q)) return 'school';
+  if (/universit|uni\b|college|student|lecture|study/i.test(q)) return 'university';
   if (/gaming|game|fps|rtx|gpu/i.test(q)) return 'gaming';
   if (/cod(e|ing)|develop|program/i.test(q)) return 'coding';
   if (/content|creat|video|edit|design|photo/i.test(q)) return 'content_creation';
@@ -148,6 +202,7 @@ function detectUseCase(query: string): string | null {
 
 /** Default budget ceiling (AUD cents * 100 → display dollars) for a given use-case. */
 const USE_CASE_BUDGET: Record<string, number> = {
+  school: 1100,
   university: 1200,
   coding: 1500,
   gaming: 2000,
@@ -174,6 +229,10 @@ function buildProsNote(p: ProductCard, userQuery: string): string {
 
 /** Clarifying questions based on detected use-case */
 const CLARIFYING_QUESTIONS: Record<string, { prompt: string; options: string[] }> = {
+  school: {
+    prompt: 'What will your son mainly use it for at school?',
+    options: ['Classwork & homework', 'Coding & projects', 'Creative assignments', 'Light gaming', 'General school use'],
+  },
   university: {
     prompt: 'What will you mainly use it for at uni?',
     options: ['Note-taking & lectures', 'Coding & development', 'Content creation', 'Light gaming', 'General uni work'],
@@ -274,6 +333,8 @@ function normalizeProductCard(raw: any): ProductCard | null {
   return {
     sku,
     name: name || sku || 'Unknown',
+    display_name: raw.display_name || raw.specs?.display_name || undefined,
+    subtitle: raw.subtitle || raw.specs?.subtitle || undefined,
     price,
     specs_summary: specsSummary || undefined,
     use_case_fit: raw.use_case_suitability || raw.use_case_fit || raw.reason || null,
@@ -326,10 +387,18 @@ function buildNearestQuery(query: string, brandLabel: string): string {
 
 function buildNoResultsText(brandLabel: string): string {
   const brand = String(brandLabel || '').trim();
-  if (!brand) return 'No products found in your budget range.';
-  if (/^product$/i.test(brand)) return 'This image does not look like a laptop product photo. Try a clearer device image or use a text query.';
-  if (/^macbook$/i.test(brand)) return 'No MacBook products found in your budget range.';
-  return `No ${brand} products found in your budget range.`;
+  if (!brand) return 'No in-stock products fit this budget right now.';
+  if (/^product$/i.test(brand)) return 'This image appears outside this laptop catalog. Upload a device photo or use a text query.';
+  if (/^macbook$/i.test(brand)) return 'No in-stock MacBook products fit this budget right now.';
+  return `No in-stock ${brand} products fit this budget right now.`;
+}
+
+function inferSummaryUseCase(query: string): 'study' | 'gaming' | 'work' | 'daily use' {
+  const q = String(query || '').toLowerCase();
+  if (/highschool|high school|yr\s?(?:7|8|9|10|11|12)|year\s?(?:7|8|9|10|11|12)|teen|student|university|uni|college/i.test(q)) return 'study';
+  if (/gaming|fps|gpu|rtx|render|creative|video editing/i.test(q)) return 'gaming';
+  if (/work|office|meeting|excel|corporate|business/i.test(q)) return 'work';
+  return 'daily use';
 }
 
 function _prettyReason(reason: string): string {
@@ -345,20 +414,60 @@ function _prettyReason(reason: string): string {
 function naturalSummary(rawSummary: string, products: ProductCard[], query: string, brand: string): string {
   const raw = String(rawSummary || '').trim();
   if (products.length === 0) {
+    if (raw && /timed out|could not load/i.test(raw)) return raw;
     if (raw && /catalog|unrelated products|does not match this merchant/i.test(raw)) return raw;
     return buildNoResultsText(brand);
   }
-  const useCase =
-    /highschool|high school|student|university|uni|college/i.test(query) ? 'study' :
-    /gaming|fps|gpu|rtx/i.test(query) ? 'gaming' :
-    /work|office|meeting|excel/i.test(query) ? 'work' : 'daily use';
+  const useCase = inferSummaryUseCase(query);
   const top = products.slice(0, 2).map((p) => {
-    const why = _prettyReason(p.use_case_fit || '');
-    return why ? `${p.name} (${why})` : p.name;
+    const title = productDisplayName(p);
+    const why = buildProsNote(p, query) || _prettyReason(p.use_case_fit || '');
+    return why ? `${title} (${why})` : title;
   });
   const r = raw.replace(/\(\s*[+-]?[a-z_]+(?:\s*,\s*[+-]?[a-z_]+)*\s*\)/gi, '').trim();
   if (r && r.length < 180) return r;
   return `Best ${useCase} picks here are ${top.join(' and ')}.`;
+}
+
+function lockedOffDomainSummary(query: string): string {
+  const useCase = inferSummaryUseCase(query);
+  const q = String(query || '').toLowerCase();
+  const likelyApple = /apple/.test(q);
+  const hint =
+    useCase === 'work'
+      ? 'Upload a work laptop or electronics photo, or use a text query.'
+      : useCase === 'study'
+        ? 'Upload a study laptop or device photo, or use a text query.'
+        : 'Upload a device photo from this store category, or use a text query.';
+  const prefix = likelyApple
+    ? 'The uploaded image looks like fruit or a non-device product, not a laptop.'
+    : 'This image appears outside the current merchant catalog.';
+  return `${prefix} I did not substitute unrelated products. ${hint}`;
+}
+
+function looksOffDomainContext(ctx: ImageAnalysisContext | null, brandLabel: string): boolean {
+  const brand = String(brandLabel || '').trim().toLowerCase();
+  if (brand === 'product') return true;
+  const joined = `${ctx?.source_name || ''} ${(ctx?.labels || []).join(' ')} ${ctx?.ocr_text || ''}`.toLowerCase();
+  return /fruit|apple[-_\s]?red|red apple|banana|lettuce|fresh produce|grocery/.test(joined) && !/laptop|notebook|computer|macbook|chromebook|intel|amd|ryzen/.test(joined);
+}
+
+function conciseLaneReason(products: ProductCard[], query: string, brand: string): string {
+  if (!products.length) return buildNoResultsText(brand);
+  const useCase = inferSummaryUseCase(query);
+  const top = products[0];
+  const title = productDisplayName(top);
+  const subtitle = productSubtitle(top);
+  if (useCase === 'work') {
+    return `${title}${subtitle ? ` • ${subtitle}` : ''} is a sensible work pick with enough memory and storage for everyday office tasks.`;
+  }
+  if (useCase === 'study') {
+    return `${title}${subtitle ? ` • ${subtitle}` : ''} fits study use with practical specs for classes, homework, and browser-heavy work.`;
+  }
+  if (useCase === 'gaming') {
+    return `${title}${subtitle ? ` • ${subtitle}` : ''} is one of the stronger gaming matches from the uploaded device image.`;
+  }
+  return `${title}${subtitle ? ` • ${subtitle}` : ''} is the closest in-catalog match for this uploaded image.`;
 }
 
 async function fetchSuggest(
@@ -370,14 +479,27 @@ async function fetchSuggest(
   if (ctx) {
     const labels = [...(ctx.labels || [])];
     const srcName = String(ctx.source_name || '').toLowerCase();
+    const triageIntent = String(ctx.intent_routing?.intent || '').trim();
+    const damageScore = typeof ctx.damage_score === 'number' ? ctx.damage_score : 0;
     if (srcName) labels.push(srcName.replace(/\.[a-z0-9]+$/i, ''));
     params.set('image_labels', labels.join(','));
     params.set('image_ocr_text', (ctx.ocr_text || '').slice(0, 500));
-    params.set('image_cv_signals', JSON.stringify(ctx.cv_signals || {}));
+    if (triageIntent) params.set('image_intent', triageIntent);
+    // Strip non-primitive signal values (e.g. steg_details.decoded_content) to avoid URL overflow (Bad Request)
+    const _rawSigs = ctx.cv_signals || {};
+    const _safeSigs: Record<string, any> = {};
+    for (const [k, v] of Object.entries(_rawSigs)) {
+      if (v !== null && v !== undefined && typeof v !== 'object' && typeof v !== 'function') {
+        _safeSigs[k] = v;
+      }
+    }
+    if (triageIntent === 'cv_triage') _safeSigs.intent_cv_triage = true;
+    if (damageScore > 0) _safeSigs.damage_score = damageScore;
+    params.set('image_cv_signals', JSON.stringify(_safeSigs));
   }
   if (budgetMax) params.set('budget_max', String(budgetMax));
   params.set('copywriting_enabled', 'false');
-  params.set('fast_path', 'true');
+  params.set('fast_path', shouldUseFastPath(query) ? 'true' : 'false');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RECOMMEND_TIMEOUT_MS);
 
@@ -497,6 +619,29 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
         const trust = computeTrustLevel(ctx.cv_signals || {}, sessionSuspiciousCount);
         const brand = friendlyBrand(ctx.labels, ctx.ocr_text, ctx.source_name, userQuery);
         const note = TRUST_NOTES[trust];
+        const forcedOffDomain = looksOffDomainContext(ctx, brand);
+
+        // ── Damage / Repair intent gate ──
+        // If vision triage classified this as a damaged device (cv_triage intent or damage_score > 0.4),
+        // skip product recommendations and return a repair/warranty card instead.
+        const triageIntent = ctx.intent_routing?.intent;
+        const damageScore = typeof ctx.damage_score === 'number' ? ctx.damage_score : 0;
+        if (triageIntent === 'cv_triage' || damageScore > 0.4) {
+          return {
+            group: {
+              source: ctx.source_name || `Image ${i + 1}`,
+              icon: '🔧',
+              trustLevel: 'green' as TrustLevel,
+              friendlyBrand: brand,
+              securityNote: '',
+              products: [],
+              summary: '',
+              isRepairIntent: true,
+              repairContext: { brand, damage_score: damageScore },
+            } as ImageGroup,
+            traceId: null as string | null,
+          };
+        }
 
         if (trust === 'red') {
           return {
@@ -517,6 +662,27 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           };
         }
 
+        if (forcedOffDomain) {
+          return {
+            group: {
+              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
+              icon: '\uD83D\uDCF8',
+              trustLevel: trust === 'red' ? trust : 'orange',
+              friendlyBrand: brand,
+              securityNote: 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.',
+              products: [],
+              summary: lockedOffDomainSummary(userQuery),
+              widenState: undefined,
+              context: ctx,
+              offDomain: true,
+              lowSupport: true,
+              domainBadge: 'Off-domain image',
+              fillBadge: null,
+            } as ImageGroup,
+            traceId: null as string | null,
+          };
+        }
+
         try {
           const base = stripBudgetHints(userQuery);
           const addLaptopToken = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(base) && !/^product$/i.test(brand);
@@ -526,7 +692,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           let products = result.products.slice(0, 3);
           let safeSummary = sanitizeSummary(result.summary, products.length, `Top ${brand} picks matching your image.`);
           let trustLevel = trust;
-          let securityNote = note;
+          let securityNote = trust === 'green' ? note : buildBuyerSecurityNotice(ctx.cv_signals || {});
           if (products.length === 0 && !result.offDomain) {
             const chain = await runBrandFallbackChain(userQuery, brand, ctx, parsedBudgetMax);
             if (chain) {
@@ -535,15 +701,18 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               safeSummary = sanitizeSummary(chain.summary, products.length, `Top ${brand} picks matching your image.`);
             }
           }
-          if (result.offDomain) {
+          if (result.offDomain || forcedOffDomain) {
             trustLevel = trust === 'red' ? trust : 'orange';
             securityNote = 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.';
             products = [];
+            safeSummary = lockedOffDomainSummary(userQuery);
           }
           if (products.length === 0 && assistantClaimsProducts(safeSummary)) {
             safeSummary = 'No products found in your budget range.';
           }
-          safeSummary = naturalSummary(safeSummary, products, userQuery, brand);
+          safeSummary = (result.offDomain || forcedOffDomain)
+            ? lockedOffDomainSummary(userQuery)
+            : conciseLaneReason(products, userQuery, brand);
           return {
             group: {
               source: ctx.source_name || `Image ${i + 1}: ${brand}`,
@@ -553,12 +722,13 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               securityNote,
               products,
               summary: safeSummary,
-              widenState: products.length === 0 ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
+              widenState: products.length === 0 && !(result.offDomain || forcedOffDomain) ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
               context: ctx,
-              offDomain: result.offDomain,
-              lowSupport: result.lowSupport,
-              domainBadge: result.domainBadge,
+              offDomain: result.offDomain || forcedOffDomain,
+              lowSupport: result.lowSupport || forcedOffDomain,
+              domainBadge: forcedOffDomain ? 'Off-domain image' : result.domainBadge,
               fillBadge: result.fillBadge,
+              detectionReason: trust === 'green' ? null : buildLaneDetectionReason(ctx.cv_signals || {}),
             } as ImageGroup,
             traceId: pickedTraceId,
           };
@@ -572,14 +742,18 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               icon: '\uD83D\uDCF8',
               trustLevel: trust,
               friendlyBrand: brand,
-              securityNote: note,
+              securityNote: forcedOffDomain
+                ? 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.'
+                : (trust === 'green' ? note : buildBuyerSecurityNotice(ctx.cv_signals || {})),
               products: [],
-              summary: timeoutMsg,
-              widenState: { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true },
+              summary: forcedOffDomain ? lockedOffDomainSummary(userQuery) : timeoutMsg,
+              widenState: forcedOffDomain ? undefined : { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true },
               context: ctx,
-              lowSupport: false,
-              domainBadge: null,
+              offDomain: forcedOffDomain,
+              lowSupport: forcedOffDomain,
+              domainBadge: forcedOffDomain ? 'Off-domain image' : null,
               fillBadge: null,
+              detectionReason: forcedOffDomain ? null : (trust === 'green' ? null : buildLaneDetectionReason(ctx.cv_signals || {})),
             } as ImageGroup,
             traceId: null as string | null,
           };
@@ -645,7 +819,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
 
   const handleWiden = useCallback(async (groupIdx: number, widenAmount: number) => {
     const group = groups[groupIdx];
-    if (!group?.widenState) return;
+    if (!group?.widenState || group.offDomain) return;
     const newMax = (group.widenState.budgetMax || 1500) + widenAmount;
     try {
       const widenedQuery = `${stripBudgetHints(userQuery)} ${group.friendlyBrand || ''}`.trim();
@@ -669,7 +843,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
 
   const handleShowNearest = useCallback(async (groupIdx: number) => {
     const group = groups[groupIdx];
-    if (!group) return;
+    if (!group || group.offDomain) return;
     try {
       const baseMax = group.widenState?.budgetMax || extractBudgetMax(userQuery, 1200) || 1200;
       const nearestBudgetMax = Math.max(1800, baseMax + 1200);
@@ -752,29 +926,61 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               </div>
             )}
 
+            {/* ── Repair / Warranty card (damage intent detected) ── */}
+            {group.isRepairIntent && (
+              <div className={styles.securityNote} style={{ borderLeft: '4px solid #f97316', background: '#fff7ed' }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  🔧 This looks like a damaged {group.repairContext?.brand || group.friendlyBrand}.
+                </div>
+                <p style={{ margin: '0 0 8px' }}>Would you like to:</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('Start a warranty or repair claim')}>
+                    Start a warranty / repair claim
+                  </button>
+                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('How do I return a damaged product?')}>
+                    Check the return &amp; repair policy
+                  </button>
+                  <button className={styles.clarifyBtn} onClick={() => onClarify?.(`Find a ${group.repairContext?.brand || group.friendlyBrand} repair centre near me`)}>
+                    Find a repair centre near me
+                  </button>
+                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('What are my options for a cracked screen?')}>
+                    FAQ: cracked screen options
+                  </button>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 12, color: '#92400e' }}>
+                  📎 If you have a receipt or proof of purchase, upload it with your next message — or sign in to pull up your order history.
+                </div>
+              </div>
+            )}
+
             {/* Red block for this image */}
-            {group.trustLevel === 'red' && (
+            {group.trustLevel === 'red' && !group.isRepairIntent && (
               <div className={styles.escalationBanner}>
                 Recommendations paused for this image due to security signals.
               </div>
             )}
 
-            {/* Product cards */}
-            {group.products.length > 0 && (
+            {/* Product cards — not shown for repair intent or red trust */}
+            {!group.isRepairIntent && group.products.length > 0 && (
               <div className={styles.cardRow}>
                 {group.products.map((p) => (
                   <div key={p.sku} className={styles.card}>
+                    {(() => {
+                      const title = productDisplayName(p);
+                      const subtitle = productSubtitle(p);
+                      return (
+                        <>
                     <img
                       className={styles.cardImg}
                       src={p.image_url || `/static/images/${p.sku}.svg`}
-                      alt={p.name}
+                      alt={title}
                       onError={(e) => { (e.target as HTMLImageElement).src = '/static/images/placeholder.svg'; }}
                     />
                     <div className={styles.cardBody}>
-                      <a className={styles.cardNameLink} href={`/ui/product/${encodeURIComponent(p.sku || '')}`} title={p.name}>
-                        <div className={styles.cardName}>{p.name}</div>
+                      <a className={styles.cardNameLink} href={`/ui/product/${encodeURIComponent(p.sku || '')}`} title={title}>
+                        <div className={styles.cardName}>{title}</div>
                       </a>
-                      <div className={styles.cardMeta}>{p.specs_summary || '\u2014'}</div>
+                      <div className={styles.cardMeta}>{subtitle || p.specs_summary || '\u2014'}</div>
                       {(() => { const pros = buildProsNote(p, userQuery); return pros ? <div className={styles.cardFit}>\u2713 {pros}</div> : null; })()}
                       {p.use_case_fit && p.use_case_fit !== buildProsNote(p, userQuery) && <div className={styles.cardFit}>{p.use_case_fit}</div>}
                       {p.sku && <a className={styles.cardLink} href={`/ui/product/${encodeURIComponent(p.sku)}`}>View details</a>}
@@ -788,12 +994,15 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
                     >
                       Add to cart
                     </button>
+                        </>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
             )}
 
-            {/* Budget widen */}
+            {/* Budget widen — suppressed for security-locked and red lanes */}
             {group.widenState?.noResults && group.trustLevel !== 'red' && (
               <div className={styles.widenBox}>
                 <div className={styles.widenText}>{group.offDomain ? group.summary : buildNoResultsText(group.friendlyBrand)}</div>

@@ -811,6 +811,14 @@
   background: #fafafa;
 }
 
+.behaviorCard {
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  background: #f8fbff;
+}
+
 .triageNarrative {
   font-size: 13px;
   color: #374151;
@@ -889,6 +897,63 @@
   grid-template-columns: 1fr;
   gap: 2px;
   margin-bottom: 8px;
+}
+
+.incidentBrief {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.briefCard {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.briefTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.briefBody {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #1f2937;
+}
+
+.actionList {
+  margin: 0;
+  padding-left: 18px;
+  color: #1f2937;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.detailSection {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  margin-bottom: 12px;
+}
+
+.detailToggle {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  color: #334155;
+  padding: 10px 12px;
+  list-style: none;
+}
+
+.detailBody {
+  padding: 0 12px 12px;
 }
 
 .actionRow {

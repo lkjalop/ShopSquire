@@ -74,7 +74,12 @@ def match_use_case_from_query(query: str) -> Optional[str]:
     """Best-effort match a user query to a use-case key via keyword mapping."""
     q = (query or "").lower()
     keyword_map = {
-        "university_general": ["university", "school", "college", "student", "study", "coursework"],
+        "high_school": [
+            "high school", "highschool", "yr 7", "yr 8", "yr 9", "yr 10",
+            "yr 11", "yr 12", "year 7", "year 8", "year 9", "year 10",
+            "year 11", "year 12", "teen", "hsc", "vce", "gcse", "secondary school",
+        ],
+        "university_general": ["university", "college", "student", "study", "coursework", "campus"],
         "engineering_student": ["engineering", "cad", "autocad", "solidworks", "mechanical", "civil eng"],
         "computer_science_student": ["computer science", "compsci", "cs student", "programming student", "coding student", "software dev"],
         "data_science_student": ["data science", "machine learning student", "ml student", "data analytics"],

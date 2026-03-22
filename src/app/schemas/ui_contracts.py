@@ -44,6 +44,7 @@ class IncidentEscalateResponse(StrictModel):
     buyer_token: str
     staff_token: str
     ttl_seconds: int
+    context: Optional[Dict[str, Any]] = None
 
 
 class IncidentMessageResponse(StrictModel):

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import styles from './CartPanel.module.css';
 import type { Product } from '../App';
 import { apiUrl, safeJson } from '../lib/api';
+import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 
-type CartItem = { sku: string; quantity: number; price_cents?: number; name?: string };
+type CartItem = { sku: string; quantity: number; price_cents?: number; name?: string; specs?: Record<string, any> | null };
 type BundleSavings = {
   status?: string;
   message?: string;
@@ -190,7 +191,8 @@ export default function CartPanel({
           {items.map((it) => (
             <div key={it.sku} className={styles.row}>
               <div className={styles.rowLeft}>
-                <div className={styles.name}>{it.name || it.sku}</div>
+                <div className={styles.name}>{productDisplayName(it)}</div>
+                {productSubtitle(it) && <div className={styles.sku}>{productSubtitle(it)}</div>}
                 <div className={styles.sku}>{it.sku}</div>
                 <div className={styles.qty}>Qty: {it.quantity}</div>
               </div>
@@ -237,7 +239,8 @@ export default function CartPanel({
               {upsells.map((p) => (
                 <div key={p.sku} className={styles.row}>
                   <div className={styles.rowLeft}>
-                    <div className={styles.name}>{p.name}</div>
+                    <div className={styles.name}>{productDisplayName(p)}</div>
+                    {productSubtitle(p) && <div className={styles.sku}>{productSubtitle(p)}</div>}
                     <div className={styles.sku}>{p.sku}</div>
                     {(p.why && p.why.length > 0) && (
                       <div className={styles.pillRow}>

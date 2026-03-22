@@ -11,13 +11,17 @@ import { useDualSTT } from './hooks/useDualSTT';
 import CartPanel from './components/CartPanel';
 import LoginModal from './components/LoginModal';
 import AdminDashboard from './components/AdminDashboard';
+import { productShortLabel } from './lib/productDisplay';
 
 export type Product = {
   sku: string;
   name: string;
+  display_name?: string;
+  subtitle?: string;
   price: number;
   features?: string[];
   image_url?: string;
+  specs?: Record<string, any>;
   why?: string[];
   score_norm?: number;
   why_codes?: { code: string; label: string; confidence: number; weight?: number; weighted_score?: number }[];
@@ -119,6 +123,20 @@ type ProductWhyExplanation = {
 
 type DeviceLane = 'windows' | 'macbook' | 'tablet_chromebook';
 
+function normalizeTraceId(value: any): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (value && typeof value === 'object') {
+    for (const key of ['trace_id', 'decision_trace_id', 'decision_id', 'case_id', 'id']) {
+      const nested = (value as any)?.[key];
+      if (typeof nested === 'string' && nested.trim()) return nested.trim();
+    }
+  }
+  return null;
+}
+
 function productPrice(p: any): number {
   const direct = Number(p?.price);
   if (Number.isFinite(direct) && direct > 0) return direct;
@@ -160,7 +178,8 @@ function _prettyReason(reason: string): string {
 
 function _shortUseCase(query: string): string {
   const q = String(query || '').toLowerCase();
-  if (/highschool|high school|student|university|uni|college/.test(q)) return 'study';
+  if (/highschool|high school|yr\s?(?:7|8|9|10|11|12)|year\s?(?:7|8|9|10|11|12)|teen/.test(q)) return 'high school';
+  if (/student|university|uni|college/.test(q)) return 'study';
   if (/gaming|fps|rtx|gpu/.test(q)) return 'gaming';
   if (/office|work|excel|meetings|zoom/.test(q)) return 'work';
   if (/design|video|editing|creator|creative/.test(q)) return 'creative';
@@ -186,7 +205,8 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, 
   const useCase = _shortUseCase(String(query || ''));
   const top = items.slice(0, 2).map((p) => {
     const reason = Array.isArray(p.why) && p.why.length > 0 ? _prettyReason(String(p.why[0])) : '';
-    return reason ? `${p.name} (${reason})` : p.name;
+    const label = productShortLabel(p);
+    return reason ? `${label} (${reason})` : label;
   });
   const budgetHint = String(budgetStatus || '').toLowerCase().includes('low')
     ? 'Budget is tight, so value-focused picks are prioritized.'
@@ -448,6 +468,9 @@ export default function App() {
           : {},
       },
       source_name: files[idx]?.name || `Image ${idx + 1}`,
+      // Propagate damage/repair intent signals so ImageRecommendPanel can gate on them
+      intent_routing: (typeof t?.intent_routing === 'object' && t.intent_routing) ? t.intent_routing : null,
+      damage_score: typeof t?.damage_score === 'number' ? t.damage_score : null,
     }));
   }, []);
 
@@ -741,8 +764,9 @@ export default function App() {
       .slice(0, 2)
       .map((p) => {
         const why = Array.isArray(p.why) ? p.why.filter(Boolean).slice(0, 2).map((w) => _prettyReason(String(w))) : [];
-        if (!p?.name || why.length === 0) return '';
-        return `${p.name} (${why.join(', ')})`;
+        const label = productShortLabel(p);
+        if (!label || why.length === 0) return '';
+        return `${label} (${why.join(', ')})`;
       })
       .filter(Boolean);
     return snippets.length > 0 ? `Top picks: ${snippets.join('; ')}.` : '';
@@ -1006,7 +1030,7 @@ export default function App() {
             image_url: item.image_url,
           } as Product;
         });
-        setTraceId(data.decision_trace_id || data.trace_id || proposal.trace_id || null);
+        setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || proposal.trace_id || null));
         if (prods.length > 0) {
           setDisplayProducts(prods);
           switchRightPanelMode('cv');
@@ -1171,7 +1195,7 @@ export default function App() {
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
-        const nextTraceId = data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null;
+        const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
         persistOperatorMetrics(data.timing_breakdown, nextTraceId, Array.isArray(chatPayload.images) && chatPayload.images.length > 0 ? 'chat+image' : 'chat');
         try {
           const persona = String(data.buyer_persona || data.buyer_persona_candidate || '').trim();
@@ -1841,9 +1865,9 @@ export default function App() {
                   {rightPanelMode === 'faq' ? (
                     <RightPanelExtras mode="faq" />
                   ) : rightPanelMode === 'visual_search' ? (
-                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(tid)} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="visual_search" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'image_context' ? (
-                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(tid)} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
+                    <RightPanelExtras mode="image_context" initialImageContexts={imageTriageContexts} userQuery={visualSearchQuery} onTraceId={(tid) => setTraceId(normalizeTraceId(tid))} onClarify={(q) => { if (isThinking) return; setInputValue(q); handleSend({ queryOverride: q }); }} onAdd={addToCart} />
                   ) : rightPanelMode === 'cv' ? (
                     <RightPanelExtras
                       mode="cv"
@@ -1864,7 +1888,7 @@ export default function App() {
                         setEscalationOpen(true);
                         setMessages(prev => [...prev, { role: 'assistant', content: 'Escalated to human review. Opening escalation room...', timestamp: new Date() }]);
                       }}
-                      onTraceId={(tid) => setTraceId(tid)}
+                      onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
                       onResult={(cvRes: any) => {
                         setCvPrefillImages([]);
                         maybeAppendCvSecurityNote(cvRes);
@@ -1899,7 +1923,7 @@ export default function App() {
                         onRemove={removeFromCart}
                         onClear={clearCartAll}
                         onAdd={addToCart}
-                        onTraceId={(tid) => setTraceId(tid)}
+                        onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
                       />
                     ) : (
                       <ProductGrid

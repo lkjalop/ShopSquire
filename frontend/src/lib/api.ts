@@ -1,5 +1,19 @@
 const rawBase = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined;
-const API_BASE = rawBase ? rawBase.replace(/\/+$/, '') : '';
+
+function resolveImplicitApiBase(): string {
+  if (typeof window === 'undefined') return '';
+  const { protocol, hostname, host, port } = window.location;
+  const localHost = hostname.toLowerCase();
+  const isLocal = localHost === '127.0.0.1' || localHost === 'localhost';
+  if (!isLocal) return '';
+  if (port === '8080') return `${protocol}//${host}`;
+  if (port === '5173' || port === '4173' || port === '3000') {
+    return `${protocol}//${hostname}:8080`;
+  }
+  return '';
+}
+
+const API_BASE = rawBase ? rawBase.replace(/\/+$/, '') : resolveImplicitApiBase();
 const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 
 export function getApiBase(): string {

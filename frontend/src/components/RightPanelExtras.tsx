@@ -324,6 +324,8 @@ export default function RightPanelExtras({
           labels: Array.isArray(irc.labels) ? irc.labels : [],
           ocr_text: typeof irc.ocr_text === 'string' ? irc.ocr_text : '',
           cv_signals: irc.cv_signals || {},
+          intent_routing: (typeof irc.intent_routing === 'object' && irc.intent_routing) ? irc.intent_routing : null,
+          damage_score: typeof irc.damage_score === 'number' ? irc.damage_score : null,
         };
         setImageRecommendCtxs(prev => [...prev, newCtx]);
         const sigs = irc.cv_signals || {};
@@ -393,6 +395,8 @@ export default function RightPanelExtras({
           labels: Array.isArray(irc.labels) ? irc.labels : [],
           ocr_text: typeof irc.ocr_text === 'string' ? irc.ocr_text : '',
           cv_signals: irc.cv_signals || {},
+          intent_routing: (typeof irc.intent_routing === 'object' && irc.intent_routing) ? irc.intent_routing : null,
+          damage_score: typeof irc.damage_score === 'number' ? irc.damage_score : null,
         };
         setImageRecommendCtxs(prev => [...prev, newCtx]);
         // Track suspicious uploads for progressive escalation

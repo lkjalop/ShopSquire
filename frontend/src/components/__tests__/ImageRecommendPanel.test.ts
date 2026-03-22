@@ -3,7 +3,7 @@
  * Unit tests for computeTrustLevel — covers steg + all trust branches.
  */
 import { describe, it, expect } from 'vitest';
-import { computeTrustLevel } from '../ImageRecommendPanel';
+import { computeTrustLevel, shouldUseFastPath } from '../ImageRecommendPanel';
 
 const clean = () => ({});
 
@@ -62,5 +62,15 @@ describe('computeTrustLevel', () => {
 
   it('steg_suspicious false does not raise level', () => {
     expect(computeTrustLevel({ steg_suspicious: false }, 0)).toBe('green');
+  });
+});
+
+describe('shouldUseFastPath', () => {
+  it('keeps fast path for plain visual search queries', () => {
+    expect(shouldUseFastPath('show me gaming laptops')).toBe(true);
+  });
+
+  it('disables fast path for budget reasoning questions', () => {
+    expect(shouldUseFastPath('im looking for a gaming laptop? is 1800 enough? or should i go higher? why?')).toBe(false);
   });
 });
