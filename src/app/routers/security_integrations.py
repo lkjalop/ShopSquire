@@ -574,7 +574,16 @@ def security_events_ingest(
             pass
     action = str(policy.get("action") or "").lower()
     ticket = None
-    if action in {"escalate", "block"}:
+    should_ticket = (
+        action in {"escalate", "block"}
+        and not bool(out.get("deduped"))
+        and (
+            action == "block"
+            or vendor.lower() in {"crowdstrike", "firewall", "generic_firewall"}
+            or bool(corr.get("multi_source"))
+        )
+    )
+    if should_ticket:
         try:
             t = TicketingAgent().create_ticket(
                 title=f"Security event {action}: {canonical.get('type') or 'unknown'}",

@@ -34,7 +34,7 @@ def _find_free_port(start: int = 8099) -> int:
 @pytest.fixture(scope="module")
 def test_server():
     """Start the FastAPI app with uvicorn in a background thread for browser tests."""
-    port = int(os.getenv("PLAYWRIGHT_TEST_PORT", "8099"))
+    requested_port = int(os.getenv("PLAYWRIGHT_TEST_PORT", "8099"))
     host = os.getenv("PLAYWRIGHT_TEST_HOST", "127.0.0.1")
     prev_skip_db_reset = os.environ.get("SKIP_DB_RESET")
     prev_skip_restore_db_engine = os.environ.get("SKIP_RESTORE_DB_ENGINE")
@@ -112,10 +112,10 @@ def test_server():
     os.environ["SKIP_RESTORE_DB_ENGINE"] = "1"
     # Skip checkout dialog in Playwright widget tests by default to avoid hangs
     os.environ.setdefault("TEST_SKIP_CHECKOUT", "1")
-    # If port is occupied, increment to a free one
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex((host, port)) == 0:
-            port = _find_free_port(port + 1)
+    # Always allocate a free port for the test server.
+    # This avoids the race where a connect probe succeeds but another process binds
+    # the same port before uvicorn starts.
+    port = _find_free_port(requested_port)
     # Import app after environment is prepared
     # Import app after environment is prepared. Wrap with logging for debug.
     try:

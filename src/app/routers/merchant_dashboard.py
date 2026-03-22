@@ -1927,7 +1927,9 @@ def merchant_email_lab(request: Request):
               const ex = []; try { const ev = j.evidence_snapshot||{}; const ioc = ev.ioc_counts||{}; ex.push(`IOC: url=${ioc.url||0} domain=${ioc.domain||0} hash=${ioc.hash||0}`); if(ev.sender_trust && ev.sender_trust.sender_trust_score!=null){ ex.push(`Trust=${parseFloat(ev.sender_trust.sender_trust_score).toFixed(2)}`); } } catch(e) {}
               document.getElementById('extract').textContent = ex.join(' | ');
               renderSecurityPanels(j);
-              const tid = j.decision_trace_id || j.decision_id || payload.message_id; if (tid) { attachTrace(tid); }
+              const tid = j.decision_trace_id || j.decision_id || payload.message_id;
+              pushTraceNotice('analysis_ready', { trace_id: tid, verdict_action: j.verdict_action || 'unknown', severity: j.severity || 'info', reasons: (j.reasons||[]).slice(0,3), attachment_count: Array.isArray(atts) ? atts.length : 0 });
+              if (tid) { attachTrace(tid); }
               document.getElementById('status').textContent='✓ Analysis complete';
             } catch(e) { document.getElementById('status').textContent='Analyze error'; pushTraceNotice('analyze_error', { endpoint: '/api/v1/email_security/evaluate', error: String(e && e.message ? e.message : e) }); }
           }
@@ -1955,7 +1957,9 @@ def merchant_email_lab(request: Request):
               if(!r.ok || !j){ const err=(j && (j.detail||j.error) ? (j.detail||j.error) : 'no details'); document.getElementById('status').textContent='Analyze failed ('+r.status+')'; pushTraceNotice('submit_analyze_failed', { status: r.status, error: err, endpoint: '/api/v1/email_security/evaluate' }); return; }
               document.getElementById('verdict').textContent = (j.verdict_action || 'unknown') + ' / ' + (j.severity || 'info');
               document.getElementById('reasons').textContent = (j.reasons||[]).slice(0,6).join(', ');
-              const tid = j.decision_trace_id || j.decision_id || payload.message_id; if (tid) { attachTrace(tid); }
+              const tid = j.decision_trace_id || j.decision_id || payload.message_id;
+              pushTraceNotice('analysis_ready', { trace_id: tid, verdict_action: j.verdict_action || 'unknown', severity: j.severity || 'info', reasons: (j.reasons||[]).slice(0,3), attachment_count: Array.isArray(atts) ? atts.length : 0 });
+              if (tid) { attachTrace(tid); }
               renderSecurityPanels(j);
               // Now escalate: create an incident via the public escalation endpoint
               try {

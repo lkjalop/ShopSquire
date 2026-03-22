@@ -19,10 +19,22 @@ _ALLOWED_TYPES = {"phish", "prompt-injection", "qr", "steg", "gan", "network", "
 _ALLOWED_STORAGE_TARGETS = {"database", "object", "warehouse", "lakehouse", "block"}
 _TENANT_STORAGE_POLICY_KEY = "security_event_storage_policy"
 _tenant_cfg_store = TenantConfigStore(cache_ttl=5)
+_SECURITY_EVENT_TABLE_READY = False
+_ACTOR_STATE_TABLE_READY = False
+_TRACE_CORRELATION_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _risk_band_rank(value: Any) -> int:
+    band = str(value or "low").strip().lower()
+    if band == "high":
+        return 3
+    if band == "medium":
+        return 2
+    return 1
 
 
 def _parse_ts(raw: Any) -> str:
@@ -169,6 +181,9 @@ def _get_actor_key(event: Dict[str, Any]) -> str | None:
 
 
 def _ensure_actor_state_table() -> None:
+    global _ACTOR_STATE_TABLE_READY
+    if _ACTOR_STATE_TABLE_READY:
+        return
     with db_session() as db:
         try:
             db.execute(
@@ -189,6 +204,7 @@ def _ensure_actor_state_table() -> None:
                 )
             )
             db.commit()
+            _ACTOR_STATE_TABLE_READY = True
         except Exception:
             try:
                 db.rollback()
@@ -197,12 +213,12 @@ def _ensure_actor_state_table() -> None:
 
 
 def _compute_impossible_travel(event: Dict[str, Any], geo: Dict[str, Any]) -> Dict[str, Any]:
-    _ensure_actor_state_table()
     tenant_id = str(event.get("tenant_id") or "default")
     actor_seed = _get_actor_key(event)
     actor_key = f"{tenant_id}:{actor_seed}" if actor_seed else None
     if not actor_key:
         return {"detected": False, "reason": "missing_actor_key"}
+    _ensure_actor_state_table()
 
     evt_ts = _parse_ts(event.get("event_time"))
     curr_country = str(geo.get("country") or "")
@@ -457,6 +473,9 @@ def decide_policy_action(canonical_event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def ensure_security_event_ingest_table() -> None:
+    global _SECURITY_EVENT_TABLE_READY
+    if _SECURITY_EVENT_TABLE_READY:
+        return
     with db_session() as db:
         try:
             db.execute(
@@ -511,6 +530,7 @@ def ensure_security_event_ingest_table() -> None:
                 except Exception:
                     pass
             db.commit()
+            _SECURITY_EVENT_TABLE_READY = True
         except Exception:
             try:
                 db.rollback()
@@ -667,7 +687,39 @@ def ingest_security_event(vendor: str, payload: Dict[str, Any], storage_targets:
         blk_path = root / uid[:2] / f"{uid}.json"
         storage_results["block"] = _append_jsonl(blk_path, record)
 
-    corr = correlate_by_trace(trace_id=canonical.get("trace_id"), tenant_id=canonical.get("tenant_id"))
+    trace_id = str(canonical.get("trace_id") or "").strip()
+    tenant_key = str(canonical.get("tenant_id") or "default")
+    cache_key = (tenant_key, trace_id) if trace_id else None
+    if cache_key and "database" in targets:
+        cache_entry = _TRACE_CORRELATION_CACHE.get(cache_key)
+        if db_stored and not db_deduped:
+            highest_rank = max(_risk_band_rank(policy.get("risk_band")), int(cache_entry.get("highest_rank") or 1)) if cache_entry else _risk_band_rank(policy.get("risk_band"))
+            sources = set(cache_entry.get("sources") or []) if cache_entry else set()
+            sources.add(str(canonical.get("vendor") or "unknown"))
+            cache_entry = {
+                "event_count": (int(cache_entry.get("event_count") or 0) + 1) if cache_entry else 1,
+                "sources": sorted(sources),
+                "highest_rank": highest_rank,
+            }
+            _TRACE_CORRELATION_CACHE[cache_key] = cache_entry
+        if cache_entry:
+            corr = {
+                "trace_id": trace_id,
+                "tenant_id": tenant_key,
+                "event_count": int(cache_entry.get("event_count") or 0),
+                "sources": list(cache_entry.get("sources") or []),
+                "highest_risk_band": "high" if int(cache_entry.get("highest_rank") or 1) >= 3 else "medium" if int(cache_entry.get("highest_rank") or 1) == 2 else "low",
+                "multi_source": len(list(cache_entry.get("sources") or [])) >= 2,
+            }
+        else:
+            corr = correlate_by_trace(trace_id=trace_id, tenant_id=tenant_key)
+            _TRACE_CORRELATION_CACHE[cache_key] = {
+                "event_count": int(corr.get("event_count") or 0),
+                "sources": list(corr.get("sources") or []),
+                "highest_rank": _risk_band_rank(corr.get("highest_risk_band")),
+            }
+    else:
+        corr = correlate_by_trace(trace_id=canonical.get("trace_id"), tenant_id=canonical.get("tenant_id"))
     return {
         "ok": True,
         "id": rid,
@@ -686,37 +738,51 @@ def correlate_by_trace(trace_id: Any, tenant_id: Any) -> Dict[str, Any]:
     ten = str(tenant_id or "").strip() or "default"
     if not tid:
         return {"trace_id": None, "tenant_id": ten, "event_count": 0, "sources": [], "highest_risk_band": "low"}
-    rows: List[Tuple[Any, Any]] = []
+    event_count = 0
+    source_count = 0
+    highest_rank = 1
+    sources: List[str] = []
     with db_session() as db:
         try:
-            rows = db.execute(
+            row = db.execute(
                 text(
                     """
-                    SELECT vendor, risk_band
+                    SELECT
+                      COUNT(1) AS event_count,
+                      COUNT(DISTINCT vendor) AS source_count,
+                      MAX(CASE risk_band WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END) AS highest_rank,
+                      GROUP_CONCAT(DISTINCT vendor) AS vendors
                     FROM security_event_ingest
                     WHERE trace_id = :t AND tenant_id = :ten
                     """
                 ),
                 {"t": tid, "ten": ten},
-            ).fetchall()
+            ).fetchone()
         except Exception:
-            rows = []
-    bands = {"low": 1, "medium": 2, "high": 3}
-    max_band = "low"
-    src: List[str] = []
-    for r in rows or []:
-        v = str(r[0] or "unknown")
-        b = str(r[1] or "low")
-        src.append(v)
-        if bands.get(b, 0) > bands.get(max_band, 0):
-            max_band = b
+            row = None
+    if row:
+        try:
+            event_count = int(row[0] or 0)
+        except Exception:
+            event_count = 0
+        try:
+            source_count = int(row[1] or 0)
+        except Exception:
+            source_count = 0
+        try:
+            highest_rank = int(row[2] or 1)
+        except Exception:
+            highest_rank = 1
+        vendors_blob = str(row[3] or "").strip()
+        sources = sorted([part.strip() for part in vendors_blob.split(",") if part.strip()]) if vendors_blob else []
+    highest_band = "high" if highest_rank >= 3 else "medium" if highest_rank == 2 else "low"
     return {
         "trace_id": tid,
         "tenant_id": ten,
-        "event_count": len(rows or []),
-        "sources": sorted(set(src)),
-        "highest_risk_band": max_band,
-        "multi_source": len(set(src)) >= 2,
+        "event_count": event_count,
+        "sources": sources,
+        "highest_risk_band": highest_band,
+        "multi_source": source_count >= 2,
     }
 
 
