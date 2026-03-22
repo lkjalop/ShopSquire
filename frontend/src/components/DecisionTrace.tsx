@@ -85,6 +85,34 @@ function formatTime(ts: string | undefined): string {
   }
 }
 
+function inlineText(value: any): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    const primitive = value.every((item) => item === null || typeof item !== 'object');
+    if (primitive) return value.map((item) => String(item)).join(', ');
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '[array]';
+    }
+  }
+  if (typeof value === 'object') {
+    const eventType = String(value._original_event_type || value.original_event_type || value.event_type || '').trim();
+    if (eventType) return humanizeKey(eventType);
+    const keys = Object.keys(value);
+    if (keys.length === 0) return '{}';
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return `{${keys.join(', ')}}`;
+    }
+  }
+  return String(value);
+}
+
 // Generate summary from event
 function getSummary(evt: TraceEvent): string {
   if (evt.event_type === 'turn_envelope_diff') {
@@ -103,13 +131,19 @@ function getSummary(evt: TraceEvent): string {
     if (applied === false) return `Copywriting skipped (${evt.payload?.reason || 'disabled'})`;
     return `Copywriting applied ? tone: ${tone}${profile ? ` / ${profile}` : ''}`;
   }
-  if (evt.payload?.summary) return evt.payload.summary;
-  if (evt.payload?.action) return evt.payload.action;
-  if (evt.payload?.model) return `Model: ${evt.payload.model}`;
-  if (evt.payload?.rule_id) return `Rule: ${evt.payload.rule_id}`;
-  if (evt.payload?.tool) return `Tool: ${evt.payload.tool}`;
-  if (evt.payload?.query) return `Query: ${evt.payload.query.slice(0, 50)}...`;
-  if (evt.source_id) return evt.source_id;
+  const summary = inlineText(evt.payload?.summary);
+  if (summary) return summary;
+  const action = inlineText(evt.payload?.action);
+  if (action) return action;
+  const model = inlineText(evt.payload?.model);
+  if (model) return `Model: ${model}`;
+  const ruleId = inlineText(evt.payload?.rule_id);
+  if (ruleId) return `Rule: ${ruleId}`;
+  const tool = inlineText(evt.payload?.tool);
+  if (tool) return `Tool: ${tool}`;
+  const query = inlineText(evt.payload?.query);
+  if (query) return `Query: ${query.slice(0, 50)}...`;
+  if (evt.source_id) return String(evt.source_id);
   const original = evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type;
   return String(original || 'event').replace(/_/g, ' ');
 }
@@ -121,27 +155,57 @@ function humanizeKey(key: string): string {
 }
 
 function renderValue(value: any) {
-  if (value === null || value === undefined) return <span className={styles.muted}>--</span>;
+  const unknownText = new Set(['', '?', '--', '—', 'â€”', 'unknown', 'n/a', 'null', 'undefined']);
+  if (value === null || value === undefined) return <span className={styles.muted}>Not available</span>;
   if (typeof value === 'boolean') {
     return <span className={value ? styles.booleanYes : styles.booleanNo}>{value ? 'Yes' : 'No'}</span>;
   }
   if (typeof value === 'number') return <span className={styles.mono}>{value}</span>;
   if (typeof value === 'string') {
-    const trimmed = value.length > 220 ? `${value.slice(0, 220)}...` : value;
-    return <span className={styles.valueText} title={value}>{trimmed}</span>;
+    const normalized = value.trim();
+    if (unknownText.has(normalized.toLowerCase())) return <span className={styles.muted}>Not available</span>;
+    const cleaned = normalized
+      .replaceAll('â€”', 'Not available')
+      .replaceAll('Ã¢â‚¬â€', 'Not available')
+      .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', 'Not available');
+    const trimmed = cleaned.length > 220 ? `${cleaned.slice(0, 220)}...` : cleaned;
+    return <span className={styles.valueText} title={cleaned}>{trimmed}</span>;
   }
   if (Array.isArray(value)) {
-    if (value.length === 0) return <span className={styles.muted}>Empty</span>;
+    if (value.length === 0) return <span className={styles.muted}>Not observed</span>;
     const isPrimitive = value.every((v) => (v === null) || (typeof v !== 'object'));
     if (isPrimitive) return <span className={styles.valueText}>{value.join(', ')}</span>;
     return <pre className={styles.detailJson}>{JSON.stringify(value, null, 2)}</pre>;
   }
   if (typeof value === 'object') {
     const keys = Object.keys(value || {});
-    if (keys.length === 0) return <span className={styles.muted}>Empty</span>;
+    if (keys.length === 0) return <span className={styles.muted}>Not observed</span>;
     return <pre className={styles.detailJson}>{JSON.stringify(value, null, 2)}</pre>;
   }
   return <span className={styles.valueText}>{String(value)}</span>;
+}
+
+function isMissingValue(value: any): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return ['', '?', '--', '—', 'â€”', 'unknown', 'n/a', 'null', 'undefined'].includes(normalized);
+  }
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  return false;
+}
+
+function formatDisplayText(value: any, fallback = 'Not available'): string {
+  if (isMissingValue(value)) return fallback;
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(', ');
+  return String(value)
+    .replaceAll('_', ' ')
+    .replaceAll('â€”', fallback)
+    .replaceAll('Ã¢â‚¬â€', fallback)
+    .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', fallback);
 }
 
 function eventAliases(evt: TraceEvent): string[] {
@@ -162,6 +226,16 @@ function eventMatches(evt: TraceEvent, expected: string | string[]): boolean {
   if (want.size === 0) return false;
   const aliases = eventAliases(evt);
   return aliases.some((x) => want.has(x));
+}
+
+function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
+  const payloads: any[] = Array.isArray(sigs?.qr_payloads) ? sigs.qr_payloads : [];
+  for (const p of payloads) {
+    const data = String((p && (p.data || p.url || p.href)) || '').trim();
+    if (/^https?:\/\//i.test(data)) return data;
+  }
+  const candidate = String(sigs?.qr_external_url || sigs?.qr_final_url || '').trim();
+  return /^https?:\/\//i.test(candidate) ? candidate : null;
 }
 
 export default function DecisionTrace({ traceId, onClose, imageTriage }: { traceId: string | null; onClose: () => void; imageTriage?: any[] }) {
@@ -194,6 +268,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const traceIdText = typeof traceId === 'string' ? traceId : '';
   const [payloadActionStatus, setPayloadActionStatus] = useState<Record<string, string>>({});
+  const [linkedArtifactResults, setLinkedArtifactResults] = useState<Record<string, any>>({});
   const [posthocType, setPosthocType] = useState<string>('fraud_confirmed');
   const [posthocValue, setPosthocValue] = useState<string>('true');
   const [posthocNote, setPosthocNote] = useState<string>('');
@@ -729,6 +804,28 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return [];
   })();
 
+  /** One-line "why this fired" for the analyst — driven by hypothesis first, signals as fallback. */
+  function buildWhyFiredLine(sigs: Record<string, any>, payloadAnalysis: any): string | null {
+    const hyp = payloadAnalysis?.attack_hypothesis;
+    const DETECTION_MAP: Record<string, string> = {
+      c2_beacon:              'Detected because decoded payload referenced beacon/check-in terms.',
+      lolbin_command_sequence:'Detected because hidden payload contains LOLBin execution patterns.',
+      prompt_injection:       'Detected because payload contains AI system-prompt override instructions.',
+      data_exfiltration:      'Detected because payload references exfiltration commands or data upload patterns.',
+      ransomware:             'Detected because payload contains file-lock/ransomware indicators.',
+      payment_fraud:          'Detected because QR payload is an external payment/social-engineering link.',
+      macros:                 'Detected because payload references VBA macro or Office script execution patterns.',
+      steg_unknown_payload:   'Detected because steganography anomaly flagged but payload is not decodable.',
+    };
+    if (hyp && hyp !== 'unknown' && DETECTION_MAP[hyp]) return DETECTION_MAP[hyp];
+    if (hyp && hyp !== 'unknown') return `Detected because passive triage classified this as ${String(hyp).replace(/_/g, ' ')}.`;
+    if (sigs.qr_prompt_injection) return 'Detected because QR payload is an injection attempt.';
+    if (sigs.steg_suspicious) return 'Detected because steganographic anomaly found in pixel data.';
+    if (sigs.adversarial_detected) return 'Detected because adversarial perturbations found in image.';
+    if (sigs.manipulation_detected) return 'Detected because pixel-level image manipulation detected.';
+    return null;
+  }
+
   /** Build a plain-English heuristic narrative from a single triage result. */
   function buildTriageNarrative(t: any): string {
     const sigs = t?.security?.signals || t?.signals || {};
@@ -770,10 +867,74 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return parts.join(' ');
   }
 
+  function summarizeSecurityFindingType(findingType: string): string {
+    const mapping: Record<string, string> = {
+      ssn_leakage_linked_qr: 'Linked QR path suggests SSN or PII exposure.',
+      prompt_injection_hidden: 'Hidden prompt-injection content was detected.',
+      c2_beacon_pattern: 'Hidden beacon or callback behavior was detected.',
+      lolbin_command_sequence: 'Hidden LOLBin execution instructions were detected.',
+      data_exfiltration_instruction: 'Hidden data-exfiltration instructions were detected.',
+    };
+    return mapping[findingType] || `${formatDisplayText(findingType, 'Security finding detected')}.`;
+  }
+
+  function getSecurityIncidentBrief() {
+    const payloadFindings: any[] = triageItems.flatMap((item: any) => item?.security?.payload_findings || item?.payload_findings || []);
+    const threatHunterLeads: any[] = triageItems.flatMap((item: any) => item?.security?.threat_hunter_leads || item?.threat_hunter_leads || []);
+    const primaryFinding = payloadFindings[0] || {};
+    const payloadAnalysis = triageItems[0]?.security?.payload_analysis || triageItems[0]?.payload_analysis || {};
+    const sigs = triageItems[0]?.security?.signals || triageItems[0]?.signals || security?.signals || {};
+    const severity = formatDisplayText(security?.severity || 'review', 'review').toLowerCase();
+    const route = formatDisplayText(security?.policy_route || security?.route || 'review', 'review');
+    const decision =
+      primaryFinding.headline ||
+      (payloadAnalysis.attack_hypothesis && payloadAnalysis.attack_hypothesis !== 'unknown'
+        ? `${formatDisplayText(payloadAnalysis.attack_hypothesis)} detected`
+        : severity === 'high'
+          ? 'Security review required'
+          : 'Review recommended');
+    const triggers = [
+      buildWhyFiredLine(sigs, payloadAnalysis),
+      sigs.qr_external_url ? 'A QR code points to an external destination.' : null,
+      qrInfo?.reputation_verdict && qrInfo.reputation_verdict !== 'benign' ? `QR reputation is ${formatDisplayText(qrInfo.reputation_verdict)}.` : null,
+      primaryFinding.business_risk ? summarizeSecurityFindingType(primaryFinding.finding_type || '') : null,
+    ].filter(Boolean) as string[];
+    const agentFindings = [
+      sigs.qr_code_detected ? 'Payload Agent: decoded QR content was inspected.' : null,
+      payloadFindings.length ? `Security Agent: ${summarizeSecurityFindingType(String(primaryFinding.finding_type || ''))}` : null,
+      !isMissingValue(qrInfo?.intel_risk) || !isMissingValue(qrInfo?.reputation_verdict) ? 'Correlation Agent: QR destination reputation and linked artifact context were checked.' : null,
+      threatHunterLeads.length ? `Threat Hunter Agent: ${formatDisplayText(threatHunterLeads[0]?.title, 'Evidence-backed hunting lead generated')}.` : null,
+      playbookPreview ? `Playbook Agent: ${formatDisplayText(playbookData?.title || playbookData?.id || 'response playbook')} is recommended.` : null,
+    ].filter(Boolean) as string[];
+    const businessImpact = primaryFinding.business_risk
+      || (payloadAnalysis.attack_hypothesis === 'pii_data_exfil_via_qr'
+        ? 'Sensitive identity data could be exposed or redirected outside approved channels.'
+        : 'The image may trigger unsafe follow-on actions unless it is reviewed.');
+    const actions = [
+      payloadAnalysis.attack_hypothesis === 'pii_data_exfil_via_qr' ? 'Do not share or act on the linked QR content.' : 'Do not trust the linked content yet.',
+      'Escalate to security or privacy review.',
+      payloadAnalysis.suggested_next_step === 'review' ? 'Review linked artifact or payload evidence before any business action.' : null,
+      threatHunterLeads.length ? formatDisplayText(threatHunterLeads[0]?.what_to_hunt_next?.[0], 'Use the threat-hunter lead only on hosts or users tied to this artifact.') : null,
+      qrInfo?.destination_url || qrInfo?.final_url ? 'Push this to SIEM/XDR if the incident needs broader correlation.' : null,
+    ].filter(Boolean) as string[];
+    const pushRecommendation = severity === 'high' || route.toLowerCase().includes('escal')
+      ? 'Push to SIEM/XDR now'
+      : 'Hold push until human review';
+    return {
+      decision: `${decision} - ${severity} confidence`,
+      triggers: Array.from(new Set(triggers)).slice(0, 3),
+      agentFindings: Array.from(new Set(agentFindings)).slice(0, 4),
+      businessImpact,
+      actions,
+      pushRecommendation,
+      threatHunterLeads,
+    };
+  }
+
   const triggerPayloadAction = useCallback(async (
     itemKey: string,
     t: any,
-    action: 'analyze_payload_further' | 'queue_sandbox_detonation',
+    action: 'analyze_payload_further' | 'queue_sandbox_detonation' | 'analyze_linked_artifact',
   ) => {
     if (!traceId) {
       setPayloadActionStatus((prev) => ({ ...prev, [itemKey]: 'No trace id available.' }));
@@ -781,36 +942,74 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     }
     const payloadAnalysis = t?.security?.payload_analysis || t?.payload_analysis || {};
     const filename = t?._filename || 'image';
+    const sigs = t?.security?.signals || t?.signals || {};
     try {
-      setPayloadActionStatus((prev) => ({ ...prev, [itemKey]: action === 'queue_sandbox_detonation' ? 'Queueing sandbox detonation...' : 'Creating analyst follow-up...' }));
-      const resp = await fetch(apiUrl('/api/v1/incidents/escalate'), {
+      const linkedArtifactUrl = getLinkedArtifactUrl(sigs);
+      const isLinked = action === 'analyze_linked_artifact';
+      setPayloadActionStatus((prev) => ({ ...prev, [itemKey]:
+        action === 'queue_sandbox_detonation'
+          ? 'Queueing sandbox detonation...'
+          : isLinked
+            ? 'Fetching linked document in safe passive mode...'
+            : 'Creating analyst follow-up...'
+      }));
+      const resp = await fetch(apiUrl(isLinked ? '/api/v1/incidents/analyze-linked-artifact' : '/api/v1/incidents/escalate'), {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...(authHeaders || {}) },
-        body: JSON.stringify({
+        body: JSON.stringify(isLinked ? {
+          trace_id: traceId,
+          reason: action,
+          filename,
+          artifact_url: linkedArtifactUrl,
+          context: {
+            filename,
+            security_payload: payloadAnalysis,
+            signals: sigs,
+            extracted_text: t?.security?.extracted_text || t?.extracted_text || '',
+          },
+        } : {
           trace_id: traceId,
           reason: action,
           context: {
             filename,
             security_payload: payloadAnalysis,
-            signals: t?.security?.signals || t?.signals || {},
+            signals: sigs,
             extracted_text: t?.security?.extracted_text || t?.extracted_text || '',
           },
         }),
       });
       const data = await safeJson(resp);
       if (resp.ok && data?.ok && data?.incident_id) {
-        const _profiles: any[] = data?.lolbin_behavioral_profiles || [];
+        if (isLinked) {
+          const analysis = data?.analysis || data?.context?.linked_artifact_analysis || {};
+          setLinkedArtifactResults((prev) => ({ ...prev, [itemKey]: analysis }));
+          const artifactType = String(analysis?.linked_artifact_type || 'unknown').replace(/_/g, ' ');
+          const hypothesis = String(analysis?.linked_attack_hypothesis || 'unknown').replace(/_/g, ' ');
+          const nextStep = String(analysis?.linked_suggested_next_step || 'review').replace(/_/g, ' ');
+          const pii = analysis?.pii_detected ? ` | PII: ${(analysis?.pii_type || []).join(', ') || 'detected'}` : '';
+          const ssn = Array.isArray(analysis?.ssn_hits) && analysis.ssn_hits.length > 0 ? ` | SSNs: ${analysis.ssn_hits.length}` : '';
+          setPayloadActionStatus((prev) => ({
+            ...prev,
+            [itemKey]: `Linked artifact analyzed (${data.incident_id}). Type: ${artifactType} | Hypothesis: ${hypothesis} | Next: ${nextStep}${pii}${ssn}.`,
+          }));
+          return;
+        }
+        const _profiles: any[] = data?.context?.lolbin_behavioral_profiles || data?.lolbin_behavioral_profiles || [];
         const _ransomware = data?.ransomware_indicator || payloadAnalysis?.attack_hypothesis === 'ransomware';
         const _profileSummary = _profiles.length > 0
-          ? ` LOLBin profiles: ${_profiles.map((p: any) => p.binary || p.full_name).join(', ')}.`
+          ? ` ${_profiles.map((p: any) => `${p.full_name || p.binary} (${p.mitre_sub_technique || 'MITRE'})`).join(' | ')}.`
           : '';
         const _ransomwareWarning = _ransomware ? ' ⚠\ufe0f Ransomware indicator — do NOT execute outside sandbox.' : '';
+        const _hypothesis = String(payloadAnalysis?.attack_hypothesis || 'unknown').replace(/_/g, ' ');
+        const _payloadType = String(payloadAnalysis?.payload_type || 'unknown').replace(/_/g, ' ');
+        const _nextStep = String(payloadAnalysis?.suggested_next_step || 'allow').replace(/_/g, ' ');
+        const _triage = `Hypothesis: ${_hypothesis} | Payload: ${_payloadType} | Next: ${_nextStep}.`;
         setPayloadActionStatus((prev) => ({
           ...prev,
           [itemKey]: action === 'queue_sandbox_detonation'
-            ? `Sandbox detonation queued via incident ${data.incident_id}.${_profileSummary}${_ransomwareWarning}`
-            : `Payload follow-up queued via incident ${data.incident_id}.${_profileSummary}${_ransomwareWarning}`,
+            ? `Sandbox detonation queued (${data.incident_id}). ${_triage}${_profileSummary}${_ransomwareWarning}`
+            : `Analyst follow-up queued (${data.incident_id}). ${_triage}${_profileSummary}${_ransomwareWarning}`,
         }));
         return;
       }
@@ -1729,6 +1928,60 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   )}
                   {security && (
                     <>
+                      {(() => {
+                        const incident = getSecurityIncidentBrief();
+                        return (
+                          <div className={styles.incidentBrief}>
+                            <div className={styles.briefCard}>
+                              <div className={styles.briefTitle}>Decision</div>
+                              <div className={styles.briefBody}>{incident.decision}</div>
+                            </div>
+                            <div className={styles.briefCard}>
+                              <div className={styles.briefTitle}>Business Impact</div>
+                              <div className={styles.briefBody}>{incident.businessImpact}</div>
+                            </div>
+                            <div className={styles.briefCard}>
+                              <div className={styles.briefTitle}>What Triggered It</div>
+                              <ul className={styles.actionList}>
+                                {incident.triggers.map((item, idx) => <li key={`trigger-${idx}`}>{item}</li>)}
+                              </ul>
+                            </div>
+                            <div className={styles.briefCard}>
+                              <div className={styles.briefTitle}>What Agents Found</div>
+                              <ul className={styles.actionList}>
+                                {incident.agentFindings.map((item, idx) => <li key={`agent-${idx}`}>{item}</li>)}
+                              </ul>
+                            </div>
+                            <div className={styles.briefCard}>
+                              <div className={styles.briefTitle}>What To Do Now</div>
+                              <ul className={styles.actionList}>
+                                {incident.actions.map((item, idx) => <li key={`action-${idx}`}>{item}</li>)}
+                              </ul>
+                            </div>
+                            <div className={styles.briefCard}>
+                              <div className={styles.briefTitle}>Push Recommendation</div>
+                              <div className={styles.briefBody}>
+                                <span className={incident.pushRecommendation.includes('Hold') ? styles.tagWarn : styles.tagRed}>
+                                  {incident.pushRecommendation}
+                                </span>
+                              </div>
+                            </div>
+                            {incident.threatHunterLeads?.length ? (
+                              <div className={styles.briefCard}>
+                                <div className={styles.briefTitle}>Threat Hunter Leads</div>
+                                <ul className={styles.actionList}>
+                                  {incident.threatHunterLeads.slice(0, 2).map((lead: any, idx: number) => (
+                                    <li key={`hunter-${idx}`}>{formatDisplayText(lead?.title, 'Evidence-backed hunting lead available')}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+                      <details className={styles.detailSection}>
+                        <summary className={styles.detailToggle}>Open security matrix detail</summary>
+                        <div className={styles.detailBody}>
                       <div className={styles.sectionHeaderRow}>
                         <div className={styles.sectionTitle}>Security Overview</div>
                         <div className={styles.sectionActions}>
@@ -1736,28 +1989,29 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           {copyStatus && <span className={styles.copyStatus}>{copyStatus}</span>}
                         </div>
                       </div>
-                      <div className={styles.kvRow}><span>Severity</span><span>{security.severity || '?'}</span></div>
-                      <div className={styles.kvRow}><span>Risk (Adjusted)</span><span>{security.risk_adj ?? '?'}</span></div>
+                      <div className={styles.kvRow}><span>Severity</span><span>{formatDisplayText(security.severity, 'Review')}</span></div>
+                      <div className={styles.kvRow}><span>Risk (Adjusted)</span><span>{formatDisplayText(security.risk_adj, 'Pending enrichment')}</span></div>
                       <div className={styles.kvRow}>
                         <span>Composite Risk</span>
-                        <span><span className={styles.scoreChip}>{compositeRisk == null ? 'â€”' : `${Math.round(compositeRisk)}/100`}</span></span>
+                        <span><span className={styles.scoreChip}>{compositeRisk == null ? 'Pending enrichment' : `${Math.round(compositeRisk)}/100`}</span></span>
                       </div>
-                      <div className={styles.kvRow}><span>DREAD Avg</span><span>{security.dread?.avg ?? security.dread_avg ?? 'Ã¢â‚¬â€'}</span></div>
-                      <div className={styles.kvRow}><span>DREAD Weighted Avg</span><span>{security.dread?.weighted_avg ?? security.dread_weighted_avg ?? 'Ã¢â‚¬â€'}</span></div>
-                      <div className={styles.kvRow}><span>CVSS</span><span>{security.cvss?.score ?? security.cvss_score ?? '?'}</span></div>
-                      <div className={styles.kvRow}><span>PASTA Stage</span><span>{security.pasta?.current_stage || security.pasta?.stage || security.pasta_stage || '?'}</span></div>
-                      <div className={styles.kvRow}><span>Policy Route</span><span>{security.policy_route || security.route || '?'}</span></div>
-                      <div className={styles.kvRow}><span>QR Destination</span><span>{qrInfo?.destination_url || 'â€”'}</span></div>
-                      <div className={styles.kvRow}><span>QR Final URL</span><span>{qrInfo?.final_url || 'â€”'}</span></div>
-                      <div className={styles.kvRow}><span>QR Redirect Hops</span><span>{qrInfo?.redirect_hops ?? 0}</span></div>
-                      <div className={styles.kvRow}><span>QR Reputation</span><span>{qrInfo?.reputation_verdict || 'â€”'}</span></div>
-                      <div className={styles.kvRow}><span>QR Confidence</span><span>{qrInfo?.confidence ?? 'â€”'}</span></div>
-                      <div className={styles.kvRow}><span>QR Intel Risk</span><span>{qrInfo?.intel_risk ?? 'â€”'}</span></div>
+                      <div className={styles.kvRow}><span>DREAD Avg</span><span>{formatDisplayText(security.dread?.avg ?? security.dread_avg, 'Not available')}</span></div>
+                      <div className={styles.kvRow}><span>DREAD Weighted Avg</span><span>{formatDisplayText(security.dread?.weighted_avg ?? security.dread_weighted_avg, 'Not available')}</span></div>
+                      <div className={styles.kvRow}><span>CVSS</span><span>{formatDisplayText(security.cvss?.score ?? security.cvss_score, 'Not available')}</span></div>
+                      <div className={styles.kvRow}><span>PASTA Stage</span><span>{formatDisplayText(security.pasta?.current_stage || security.pasta?.stage || security.pasta_stage, 'Not available')}</span></div>
+                      <div className={styles.kvRow}><span>Policy Route</span><span>{formatDisplayText(security.policy_route || security.route, 'Review')}</span></div>
+                      <div className={styles.kvRow}><span>QR Destination</span><span>{formatDisplayText(qrInfo?.destination_url, 'No linked artifact')}</span></div>
+                      <div className={styles.kvRow}><span>QR Final URL</span><span>{formatDisplayText(qrInfo?.final_url, 'Not available')}</span></div>
+                      <div className={styles.kvRow}><span>QR Redirect Hops</span><span>{formatDisplayText(qrInfo?.redirect_hops ?? 0, '0')}</span></div>
+                      <div className={styles.kvRow}><span>QR Reputation</span><span>{formatDisplayText(qrInfo?.reputation_verdict, 'Pending enrichment')}</span></div>
+                      <div className={styles.kvRow}><span>QR Confidence</span><span>{formatDisplayText(qrInfo?.confidence, 'Not available')}</span></div>
+                      <div className={styles.kvRow}><span>QR Intel Risk</span><span>{formatDisplayText(qrInfo?.intel_risk, 'Pending enrichment')}</span></div>
                       <div className={styles.kvRow}><span>QR Intel Pending</span><span>{qrInfo?.intel_pending ? 'Yes' : 'No'}</span></div>
                       <div className={styles.kvRow}>
                         <span>QR Intel Sources</span>
-                        <span>{Array.isArray(qrInfo?.intel_sources) && qrInfo.intel_sources.length > 0 ? qrInfo.intel_sources.join(', ') : 'â€”'}</span>
-                      </div>                      <div className={styles.kvRow}>
+                        <span>{Array.isArray(qrInfo?.intel_sources) && qrInfo.intel_sources.length > 0 ? qrInfo.intel_sources.join(', ') : 'Pending enrichment'}</span>
+                      </div>
+                      <div className={styles.kvRow}>
                         <span>Image Trust Channels</span>
                         <span>
                           <span className={trustChannels?.visual_embedding_trusted ? styles.booleanYes : styles.booleanNo}>
@@ -1777,10 +2031,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                       <div className={styles.sectionTitle}>CV Playbook</div>
                       {playbookPreview ? (
                         <div className={styles.playbookPanel}>
-                          <div className={styles.kvRow}><span>Playbook</span><span>{playbookData?.title || playbookData?.id || '?'}</span></div>
-                          <div className={styles.kvRow}><span>ID</span><span>{playbookData?.id || '?'}</span></div>
+                          <div className={styles.kvRow}><span>Playbook</span><span>{formatDisplayText(playbookData?.title || playbookData?.id, 'Not available')}</span></div>
+                          <div className={styles.kvRow}><span>ID</span><span>{formatDisplayText(playbookData?.id, 'Not available')}</span></div>
                           <div className={styles.kvRow}><span>Override</span><span>{playbookPreview.override ? 'Yes' : 'No'}</span></div>
-                          <div className={styles.kvRow}><span>Risk Band</span><span>{playbookPreview.risk_band || playbookPayload?.risk_band || '?'}</span></div>
+                          <div className={styles.kvRow}><span>Risk Band</span><span>{formatDisplayText(playbookPreview.risk_band || playbookPayload?.risk_band, 'Not available')}</span></div>
                           <div className={styles.sectionTitle}>Evidence Tags</div>
                           <div className={styles.tagRow}>
                             {playbookTags.map((t: string) => (
@@ -1808,6 +2062,35 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                       ) : (
                         <div className={styles.muted}>No CV playbook recorded for this trace.</div>
                       )}
+                      <div className={styles.sectionTitle}>Threat Hunter Leads</div>
+                      {Array.isArray(security?.threat_hunter_leads) && security.threat_hunter_leads.length > 0 ? (
+                        <div className={styles.playbookPanel}>
+                          {security.threat_hunter_leads.slice(0, 3).map((lead: any, idx: number) => (
+                            <details key={lead?.lead_id || `hunter-lead-${idx}`} className={styles.detailSection}>
+                              <summary className={styles.detailToggle}>{formatDisplayText(lead?.title, 'Threat hunting lead')}</summary>
+                              <div className={styles.detailBody}>
+                                <div className={styles.kvRow}><span>Confidence</span><span>{formatDisplayText(lead?.confidence_band, 'medium')}</span></div>
+                                <div className={styles.kvRow}><span>Likely Next Stage</span><span>{formatDisplayText(lead?.likely_kill_chain_stage, 'Not available')}</span></div>
+                                <div className={styles.sectionTitle}>What We Observed</div>
+                                <ul className={styles.playbookList}>{(lead?.what_we_observed || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
+                                <div className={styles.sectionTitle}>What To Hunt Next</div>
+                                <ul className={styles.playbookList}>{(lead?.what_to_hunt_next || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
+                                <div className={styles.sectionTitle}>Where To Check</div>
+                                <ul className={styles.playbookList}>{(lead?.where_to_check || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
+                                <div className={styles.sectionTitle}>What Would Confirm It</div>
+                                <ul className={styles.playbookList}>{(lead?.confirmation_signals || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
+                                <div className={styles.sectionTitle}>What Would Weaken It</div>
+                                <ul className={styles.playbookList}>{(lead?.disproving_signals || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
+                                {lead?.analyst_guidance ? <div className={styles.kvRow}><span>Analyst Guidance</span><span>{formatDisplayText(lead?.analyst_guidance, 'Not available')}</span></div> : null}
+                              </div>
+                            </details>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className={styles.muted}>No evidence-backed threat-hunting leads were generated for this trace.</div>
+                      )}
+                        </div>
+                      </details>
 
                       <div className={styles.sectionTitle}>OWASP LLM Top 10</div>
                       <div className={styles.tagRow}>
@@ -1833,7 +2116,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         {strideTags.length === 0 && <span className={styles.muted}>None</span>}
                       </div>
 
-                      <div className={styles.sectionTitle}>MITRE ATLAS (Evidence?based)</div>
+                      <div className={styles.sectionTitle}>MITRE ATLAS (Evidence-based)</div>
                       <table className={styles.smallTable}>
                         <thead>
                           <tr>
@@ -1848,9 +2131,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           {mitreDetails.map((m: any) => (
                             <tr key={m.id}>
                               <td>{m.id}</td>
-                              <td>{m.name || '?'}</td>
-                              <td>{m.weight ?? '?'}</td>
-                              <td>{m.dread_avg ?? '?'}</td>
+                              <td>{formatDisplayText(m.name, 'Not available')}</td>
+                              <td>{formatDisplayText(m.weight, 'Not available')}</td>
+                              <td>{formatDisplayText(m.dread_avg, 'Not available')}</td>
                               <td>
                                 <div className={styles.tagRow}>
                                   {(m.evidence_tags || []).map((t: string) => (
@@ -1935,6 +2218,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             : [];
                         const filename = t?._filename || `Image ${idx + 1}`;
                         const itemKey = `${traceId || 'trace'}:${idx}:${filename}`;
+                        const linkedArtifact = linkedArtifactResults[itemKey] || t?.security?.linked_artifact_analysis || payloadAnalysis?.linked_artifact_analysis || {};
                         const cleanFlag = t?.security?.clean;
                         const clean = cleanFlag !== false && !sigs.qr_code_detected && !sigs.adversarial_detected && !sigs.steg_suspicious;
                         return (
@@ -1943,6 +2227,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               <span>{filename}</span>
                               <span className={clean ? styles.tagGreen : styles.tagRed}>{clean ? 'Clean' : 'Flagged'}</span>
                             </div>
+                            {/* Why this fired — one-liner analyst detection reason */}
+                            {!clean && (() => {
+                              const _why = buildWhyFiredLine(sigs, payloadAnalysis);
+                              return _why ? (
+                                <div className={styles.kvRow}>
+                                  <span className={styles.tagWarn}>Why flagged</span>
+                                  <span className={styles.muted}>{_why}</span>
+                                </div>
+                              ) : null;
+                            })()}
                             {/* Narrative summary */}
                             <div className={styles.triageNarrative}>{buildTriageNarrative(t)}</div>
                             {/* OCR / extracted text */}
@@ -1975,6 +2269,46 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               )}>{renderValue(payloadAnalysis.decode_path || 'safe_passive_decode_only')}</span></div>
                               <div className={styles.kvRow}><span>Suggested next step</span><span>{renderValue(payloadAnalysis.suggested_next_step || 'allow')}</span></div>
                             </div>
+                            {linkedArtifact?.linked_artifact_available && (
+                              <>
+                                <div className={styles.sectionSubTitle}>Linked Artifact Analysis</div>
+                                <div className={styles.payloadGrid}>
+                                  <div className={styles.kvRow}><span>Linked artifact available</span><span>{renderValue(Boolean(linkedArtifact.linked_artifact_available))}</span></div>
+                                  <div className={styles.kvRow}><span>Linked artifact type</span><span>{renderValue(linkedArtifact.linked_artifact_type || 'unknown')}</span></div>
+                                  <div className={styles.kvRow}><span>PII detected</span><span>{renderValue(Boolean(linkedArtifact.pii_detected))}</span></div>
+                                  <div className={styles.kvRow}><span>PII type</span><span>{renderValue(linkedArtifact.pii_type || [])}</span></div>
+                                  <div className={styles.kvRow}><span>SSN hits</span><span>{renderValue(linkedArtifact.ssn_hits || [])}</span></div>
+                                  <div className={styles.kvRow}><span>Linked hypothesis</span><span>{renderValue(linkedArtifact.linked_attack_hypothesis || 'unknown')}</span></div>
+                                  <div className={styles.kvRow}><span>Linked decode path</span><span>{renderValue(linkedArtifact.linked_decode_path || 'safe_passive_link_fetch_only')}</span></div>
+                                  <div className={styles.kvRow}><span>Linked next step</span><span>{renderValue(linkedArtifact.linked_suggested_next_step || 'review')}</span></div>
+                                </div>
+                                {linkedArtifact.linked_text_excerpt && (
+                                  <>
+                                    <div className={styles.sectionSubTitle}>Linked Artifact Text Excerpt</div>
+                                    <pre className={styles.rawBlock}>{String(linkedArtifact.linked_text_excerpt)}</pre>
+                                  </>
+                                )}
+                              </>
+                            )}
+                            {Array.isArray(payloadAnalysis?.lolbin_behavioral_profiles) && payloadAnalysis.lolbin_behavioral_profiles.length > 0 && (
+                              <>
+                                <div className={styles.sectionSubTitle}>LOLBin Behavioral Analysis</div>
+                                {payloadAnalysis.lolbin_behavioral_profiles.map((profile: any, pi: number) => (
+                                  <div key={pi} className={styles.behaviorCard}>
+                                    <div className={styles.kvRow}>
+                                      <span><strong>{profile.full_name || profile.detected_as || 'LOLBin'}</strong></span>
+                                      <span className={styles.tagWarn}>{profile.mitre_sub_technique || 'MITRE'}</span>
+                                    </div>
+                                    <div className={styles.triageNarrative}>{profile.description || 'Behavioral context unavailable.'}</div>
+                                    <div className={styles.kvRow}><span>Kill-chain stage</span><span>{profile.kill_chain_stage || '?'}</span></div>
+                                    <div className={styles.kvRow}><span>Detection note</span><span className={styles.muted}>{profile.detection_note || '?'}</span></div>
+                                    {Array.isArray(profile.abuse_patterns) && profile.abuse_patterns.length > 0 && (
+                                      <pre className={styles.rawBlock}>{profile.abuse_patterns.join('\n')}</pre>
+                                    )}
+                                  </div>
+                                ))}
+                              </>
+                            )}
                             <div className={styles.sectionSubTitle}>MITRE Attack</div>
                             <div className={styles.tagRow}>
                               {mitreAttack.map((tag: string) => (
@@ -1999,7 +2333,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               {Object.entries(sigs)
                                 .filter(([k, v]) => typeof v === 'boolean' && v && k !== 'qr_payloads')
                                 .map(([k]) => {
-                                  const SIGNAL_LABELS: Record<string, string> = {
+                                  const SIGNAL_LABELS: Record<string, string> = payloadAnalysis?.signal_labels || {
                                     ransomware_indicator: 'Ransomware Indicator',
                                     steg_suspicious: 'Steg Anomaly',
                                     steg_score_elevated: 'Steg Score Elevated',
@@ -2026,6 +2360,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             {!clean && (
                               <>
                                 <div className={styles.actionRow}>
+                                  {getLinkedArtifactUrl(sigs) && (
+                                    <button
+                                      type="button"
+                                      className={styles.secondaryAction}
+                                      onClick={() => triggerPayloadAction(itemKey, t, 'analyze_linked_artifact')}
+                                    >
+                                      Analyze linked document
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     className={styles.secondaryAction}

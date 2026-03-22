@@ -33,6 +33,32 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
     assert "reviewSupplierGovernance(updateKey, decision)" in html
     assert "Incident Timeline" in html
     assert "Relationship Buckets" in html
+    assert "What Triggered It" in html
+    assert "What Agents Found" in html
+    assert "Threat Hunter Leads" in html
+    assert "Do This Now" in html
+    assert "Governance / Trust" in html
+    assert "Audit / Compliance" in html
+    assert "Notifications / Push" in html
+    assert "Plain-English triggers" in html
+    assert "Trust degraded" in html
+    assert "Audit mapping available" in html
+    assert "Attachment detail" in html
+    assert "Open related incident detail" in html
+    assert "Open governance and trust detail" in html
+    assert "Open trust graph detail" in html
+    assert "Open raw and explain trace" in html
+    assert "Open audit mapping" in html
+    assert "Open sandbox and IOC detail" in html
+    assert "Push Recommendation" in html
+    assert "Push to SIEM/XDR now" in html
+    assert "Already pushed" in html
+    assert "Hold push until human review" in html
+    assert "Push to Proofpoint/Mimecast recommended" in html
+    assert "Threat hunter leads" in html
+    assert "Connector registry and delivery history" in html
+    assert "Connector Registry" in html
+    assert "Delivery History" in html
     assert "renderVerdictTones(j);" in html
     assert "renderAttachmentForensics(ev);" in html
     assert "renderPdfBaselineDiff(ev);" in html
@@ -43,7 +69,7 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
     assert "attachmentProvenanceChips(item)" in html
     assert "provenanceChipLabel(src)" in html
     assert "Top Ranked Evidence" in html
-    assert "Agent Safety & Audit" in html
+    assert "Agent audit" in html
     assert "Human Gate Thresholds" in html
     assert "Refresh Connector Health" in html
     assert "Mark Legit" in html

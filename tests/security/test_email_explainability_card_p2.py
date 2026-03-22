@@ -80,6 +80,12 @@ def test_email_security_returns_explainability_card():
     human_gate = evidence.get("human_gate") or {}
     assert human_gate.get("business_hold_message")
     assert isinstance(human_gate.get("sensitive_actions"), list)
+    hunter_leads = evidence.get("threat_hunter_leads") or []
+    assert isinstance(hunter_leads, list) and hunter_leads
+    assert hunter_leads[0].get("title")
+    assert isinstance(hunter_leads[0].get("what_to_hunt_next"), list)
+    assert isinstance(hunter_leads[0].get("confirmation_signals"), list)
+    assert isinstance(hunter_leads[0].get("disproving_signals"), list)
     gate = evidence.get("pre_agent_gate") or {}
     assert gate.get("artifact_text_untrusted") is True
     assert gate.get("ocr_text_sanitized") is True
@@ -217,3 +223,5 @@ def test_hidden_payloads_are_promoted_to_structured_findings(file_name: str, exp
     assert finding.get("drilldown")
     assert isinstance((finding.get("drilldown") or {}).get("forensic_checks"), list)
     assert isinstance((finding.get("compliance_mapping") or []), list) and finding.get("compliance_mapping")
+    hunter_leads = ((out.get("evidence_snapshot") or {}).get("threat_hunter_leads") or [])
+    assert any(str((lead or {}).get("finding_type") or "") == expected_type for lead in hunter_leads)

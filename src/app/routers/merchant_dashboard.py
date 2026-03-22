@@ -622,7 +622,7 @@ def merchant_email_lab(request: Request):
                 <div class="row"><div class="field-label" style="min-width:60px">To</div><input id="to" placeholder="accounts@supplier.com" /></div>
                 <div class="row" style="margin-top:8px"><div class="field-label" style="min-width:60px">Subject</div><input id="subject" placeholder="Supplier remittance update" /></div>
                 <div style="margin-top:10px" class="field-label">Body</div>
-                <textarea id="body" placeholder="Type email body…"></textarea>
+                <textarea id="body" placeholder="Type email body..."></textarea>
                 <div style="margin-top:10px" class="field-label">Attachments</div>
                 <input type="file" id="files" multiple />
                 <div id="att_list" class="small mono" style="margin-top:6px; white-space:pre-wrap;"></div>
@@ -648,11 +648,11 @@ def merchant_email_lab(request: Request):
               <button class="btn" type="button" onclick="openRightRailTab()">Open In New Tab</button>
             </div>
             <div class="card" id="exec_card" style="display:none;">
-              <h4>Executive Summary</h4>
+              <h4>Decision</h4>
               <div class="body">
                 <div class="summary-grid">
                   <div>
-                    <div class="section-label">What Happened</div>
+                    <div class="section-label">Decision</div>
                     <div id="exec_what_happened" class="small"></div>
                   </div>
                   <div>
@@ -661,22 +661,22 @@ def merchant_email_lab(request: Request):
                   </div>
                 </div>
                 <div style="margin-top:8px;">
-                  <div class="section-label">Why It Was Flagged</div>
+                  <div class="section-label">What Triggered It</div>
                   <div id="exec_why_flagged" class="small"></div>
                 </div>
                 <div style="margin-top:8px;">
-                  <div class="section-label">Immediate Actions</div>
+                  <div class="section-label">Do This Now</div>
                   <div id="exec_immediate_actions" class="small"></div>
                 </div>
                 <div style="margin-top:8px;">
-                  <div class="section-label">Recommended Next Steps</div>
+                  <div class="section-label">Human Gate</div>
                   <div id="exec_next_steps" class="small"></div>
                 </div>
               </div>
             </div>
             <!-- Security Overview Panel (populated after Analyze) -->
             <div class="card" id="sec_overview" style="display:none;">
-              <h4>Security Overview</h4>
+              <h4>What Triggered It</h4>
               <div class="body">
                 <div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:8px;" id="sec_badges"></div>
                 <div id="sec_verdict_bar" style="padding:8px 10px; border-radius:8px; margin-bottom:8px; font-weight:600;"></div>
@@ -686,16 +686,21 @@ def merchant_email_lab(request: Request):
             <!-- BEC Kill Chain -->
             <div class="card" style="margin-top:10px; display:none;" id="bec_card">
               <h4>BEC Kill Chain</h4>
-              <div class="body">
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open kill chain detail</summary>
+                <div class="body" style="padding-top:0;">
                 <div id="bec_stage" style="font-weight:700; color:#f97316; font-size:15px;"></div>
                 <div id="bec_flow" class="small" style="margin-top:6px;"></div>
                 <div class="row" style="margin-top:6px; gap:6px; flex-wrap:wrap;" id="bec_badges"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- Trust Case & Access Policy -->
             <div class="card" style="margin-top:10px; display:none;" id="trust_card">
               <h4>Trust Case & Access Policy</h4>
-              <div class="body">
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open trust detail</summary>
+                <div class="body" style="padding-top:0;">
                 <div class="row" style="gap:10px; flex-wrap:wrap;">
                   <div><div class="small">Trust Score</div><div id="trust_score" style="font-size:22px; font-weight:700;">-</div></div>
                   <div><div class="small">Level</div><div id="trust_level" style="font-size:14px; font-weight:600;">-</div></div>
@@ -703,18 +708,24 @@ def merchant_email_lab(request: Request):
                 </div>
                 <div class="small" style="margin-top:6px;" id="trust_actions"></div>
                 <div class="small" style="margin-top:4px; color:#94a3b8;" id="trust_reasons"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="infra_card">
-              <h4>Sender / Infrastructure Correlation</h4>
-              <div class="body">
-                <div id="infra_sections" class="small"></div>
-              </div>
+              <h4>Related Incidents</h4>
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open related incident detail</summary>
+                <div class="body" style="padding-top:0;">
+                  <div id="infra_sections" class="small"></div>
+                </div>
+              </details>
             </div>
             <!-- Threat Correlation (MITRE/DREAD/CVSS/KEV/PASTA) -->
             <div class="card" style="margin-top:10px; display:none;" id="threat_card">
-              <h4>Threat Correlation</h4>
-              <div class="body">
+              <h4>Audit / Compliance</h4>
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open audit mapping</summary>
+                <div class="body" style="padding-top:0;">
                 <div class="row" style="gap:6px; flex-wrap:wrap;" id="threat_badges"></div>
                 <div style="margin-top:8px; display:grid; grid-template-columns:1fr 1fr; gap:6px;">
                   <div><div class="small">DREAD avg</div><div id="dread_avg" style="font-weight:700;">-</div></div>
@@ -723,12 +734,15 @@ def merchant_email_lab(request: Request):
                   <div><div class="small">PASTA Stage</div><div id="pasta_stage" style="font-weight:700;">-</div></div>
                 </div>
                 <div class="small" style="margin-top:6px;" id="kev_list"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- Sandbox / Detonation / IOC -->
             <div class="card" style="margin-top:10px; display:none;" id="sandbox_card">
               <h4>Sandbox & IOC Enrichment</h4>
-              <div class="body">
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open sandbox and IOC detail</summary>
+                <div class="body" style="padding-top:0;">
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
                   <div><div class="small">Detonation</div><div id="det_result" style="font-weight:700;">-</div></div>
                   <div><div class="small">IOC Malicious</div><div id="ioc_hits" style="font-weight:700;">0</div></div>
@@ -736,7 +750,8 @@ def merchant_email_lab(request: Request):
                   <div><div class="small">Enrichment Latency</div><div id="enrich_latency" class="small">-</div></div>
                 </div>
                 <div class="small" style="margin-top:6px;" id="sandbox_findings"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- Attachment Forensics -->
             <div class="card" style="margin-top:10px; display:none;" id="attach_card">
@@ -747,26 +762,35 @@ def merchant_email_lab(request: Request):
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="pdf_diff_card">
               <h4>Supplier Baseline Diff</h4>
-              <div class="body">
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open PDF diff detail</summary>
+                <div class="body" style="padding-top:0;">
                 <div id="pdf_diff_sections" class="small"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="visual_diff_card">
               <h4>Supplier Baseline Visual Diff</h4>
-              <div class="body">
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open visual diff detail</summary>
+                <div class="body" style="padding-top:0;">
                 <div id="visual_diff_sections" class="small"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- QR / OCR Findings -->
             <div class="card" style="margin-top:10px; display:none;" id="qr_card">
               <h4>QR / OCR Findings</h4>
-              <div class="body">
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open QR and OCR detail</summary>
+                <div class="body" style="padding-top:0;">
                 <div id="qr_findings" class="small"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- Playbook Run -->
             <div class="card" style="margin-top:10px; display:none;" id="playbook_card">
-              <h4>Playbook Run</h4>
+              <h4>What Agents Found</h4>
               <div class="body">
                 <div class="row" style="gap:6px; flex-wrap:wrap; margin-bottom:6px;">
                   <span class="pill" id="pb_name">-</span>
@@ -778,68 +802,85 @@ def merchant_email_lab(request: Request):
               </div>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="evidence_card">
-              <h4>Evidence</h4>
+              <h4>Top Evidence</h4>
               <div class="body">
                 <div id="evidence_sections" class="small"></div>
               </div>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="actions_card">
-              <h4>Actions</h4>
+              <h4>What To Do Now</h4>
               <div class="body">
                 <div id="actions_sections" class="small"></div>
               </div>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="integrations_card">
-              <h4>Integrations</h4>
+              <h4>Notifications / Push</h4>
               <div class="body">
                 <div id="integrations_sections" class="small"></div>
               </div>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="gov_card">
-              <h4>Supplier Governance</h4>
-              <div class="body">
-                <div id="gov_sections" class="small"></div>
-              </div>
+              <h4>Governance / Trust</h4>
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open governance and trust detail</summary>
+                <div class="body" style="padding-top:0;">
+                  <div id="gov_sections" class="small"></div>
+                </div>
+              </details>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="graph_card">
               <h4>Vendor Trust Graph</h4>
-              <div class="body">
-                <div id="graph_sections" class="small"></div>
-              </div>
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open trust graph detail</summary>
+                <div class="body" style="padding-top:0;">
+                  <div id="graph_sections" class="small"></div>
+                </div>
+              </details>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="tones_card">
               <h4>Verdict In 3 Views</h4>
-              <div class="body">
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open explanation detail</summary>
+                <div class="body" style="padding-top:0;">
                 <div id="tones_sections" class="small"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- Decision Trace (SSE stream) -->
             <div class="card" style="margin-top:10px;">
               <h4>Decision Trace & Security Matrix</h4>
-              <div class="body">
+              <div class="body" style="padding-bottom:0;">
                 <div class="small">Trace ID: <span class="mono" id="trace_id">n/a</span></div>
+              </div>
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open raw and explain trace</summary>
+                <div class="body" style="padding-top:0;">
                 <div class="trace-toggle">
                   <button class="btn active" id="trace_btn_explain" type="button" onclick="setTraceMode('explain')">Explain</button>
                   <button class="btn" id="trace_btn_raw" type="button" onclick="setTraceMode('raw')">Raw</button>
                 </div>
                 <div class="trace" id="trace_human" style="max-height:280px;"></div>
                 <div class="trace" id="trace" style="max-height:280px; display:none;"></div>
-              </div>
+                </div>
+              </details>
             </div>
             <!-- Related Incident -->
             <div class="card" style="margin-top:10px;">
               <h4>Related Incident</h4>
-              <div class="body">
-                <div class="small">Status: <span id="inc_status">none</span></div>
-                <div id="inc_card" style="display:none; margin-top:8px;">
-                  <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-                    <span class="pill">ID <span class="mono" id="inc_id">-</span></span>
-                    <span class="pill">Severity <span id="inc_sev">-</span></span>
-                    <span class="pill">Playbook <span id="inc_pb">-</span></span>
-                    <button class="btn" id="inc_join">Join Room</button>
+              <details>
+                <summary class="body" style="cursor:pointer; font-weight:600;">Open related incident detail</summary>
+                <div class="body" style="padding-top:0;">
+                  <div class="small">Status: <span id="inc_status">none</span></div>
+                  <div id="inc_card" style="display:none; margin-top:8px;">
+                    <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+                      <span class="pill">ID <span class="mono" id="inc_id">-</span></span>
+                      <span class="pill">Severity <span id="inc_sev">-</span></span>
+                      <span class="pill">Playbook <span id="inc_pb">-</span></span>
+                      <button class="btn" id="inc_join">Join Room</button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </details>
             </div>
           </div>
         </div>
@@ -1119,20 +1160,44 @@ def merchant_email_lab(request: Request):
             const pasta = String(f.pasta_stage || ((f.threat_context||{}).pasta_stage || '')).trim();
             const dread = (f.threat_context || {}).dread || {};
             const blocks = [
-              d.business_risk ? `<div><strong>Business risk:</strong> ${escHtml(d.business_risk)}</div>` : '',
-              d.affected_scope ? `<div><strong>Affected scope:</strong> ${escHtml(d.affected_scope)}</div>` : '',
+              `<div><strong>What we found:</strong> ${escHtml(findingToPlainEnglish(f))}</div>`,
+              d.business_risk ? `<div><strong>Why it matters:</strong> ${escHtml(d.business_risk)}</div>` : '',
               evidence.length ? `<div><strong>Evidence:</strong>${listHtml(evidence)}</div>` : '',
-              Array.isArray(d.forensic_checks) && d.forensic_checks.length ? `<div><strong>Forensics:</strong>${listHtml(d.forensic_checks)}</div>` : '',
-              Array.isArray(d.hunt_queries) && d.hunt_queries.length ? `<div><strong>Threat hunting:</strong>${listHtml(d.hunt_queries)}</div>` : '',
-              Array.isArray(d.crisis_actions) && d.crisis_actions.length ? `<div><strong>Crisis / comms:</strong>${listHtml(d.crisis_actions)}</div>` : '',
-              (pasta || mitre.length || compRows.length) ? `<div><strong>Frameworks:</strong>${listHtml([
+              Array.isArray(d.forensic_checks) && d.forensic_checks.length ? `<div><strong>What to investigate next:</strong>${listHtml(d.forensic_checks)}</div>` : '',
+              d.affected_scope ? `<div><strong>Affected scope:</strong> ${escHtml(d.affected_scope)}</div>` : '',
+              (pasta || mitre.length || compRows.length) ? `<div><strong>Framework mapping:</strong>${listHtml([
                 pasta ? `PASTA: ${pasta}` : null,
                 mitre.length ? `MITRE: ${mitre.join(', ')}` : null,
                 dread.damage!=null ? `DREAD: D=${dread.damage} R=${dread.reproducibility} E=${dread.exploitability} A=${dread.affected_users} Dv=${dread.discoverability}` : null,
                 ...compRows
               ])}</div>` : ''
             ].filter(Boolean);
-            return `<details class="finding-drilldown"><summary>Drill down</summary><div class="finding-drilldown-body">${blocks.join('')}</div></details>`;
+            const rawBlocks = [
+              Array.isArray(d.hunt_queries) && d.hunt_queries.length ? `<div><strong>Threat hunting:</strong>${listHtml(d.hunt_queries)}</div>` : '',
+              Array.isArray(d.crisis_actions) && d.crisis_actions.length ? `<div><strong>Crisis / comms:</strong>${listHtml(d.crisis_actions)}</div>` : '',
+              `<div><strong>Raw technical detail:</strong> ${escHtml(findingContextLine(f) || 'Additional technical context available.')}</div>`
+            ].filter(Boolean);
+            return `<details class="finding-drilldown"><summary>Drill down</summary><div class="finding-drilldown-body">${blocks.join('')}${rawBlocks.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${rawBlocks.join('')}</div></details>` : ''}</div></details>`;
+          }
+          function threatHunterLeadHtml(lead){
+            if(!lead || typeof lead !== 'object') return '';
+            const stage = String(lead.likely_kill_chain_stage || '').trim();
+            const body = [
+              Array.isArray(lead.what_we_observed) && lead.what_we_observed.length ? `<div><strong>What we found:</strong>${listHtml(lead.what_we_observed)}</div>` : '',
+              lead.why_it_matters ? `<div><strong>Why it matters:</strong> ${escHtml(String(lead.why_it_matters))}</div>` : '',
+              Array.isArray(lead.what_to_hunt_next) && lead.what_to_hunt_next.length ? `<div><strong>What to check next:</strong>${listHtml(lead.what_to_hunt_next)}</div>` : '',
+              Array.isArray(lead.confirmation_signals) && lead.confirmation_signals.length ? `<div><strong>What would confirm it:</strong>${listHtml(lead.confirmation_signals)}</div>` : '',
+              Array.isArray(lead.disproving_signals) && lead.disproving_signals.length ? `<div><strong>What would weaken it:</strong>${listHtml(lead.disproving_signals)}</div>` : '',
+              Array.isArray(lead.where_to_check) && lead.where_to_check.length ? `<div><strong>Where to check:</strong>${listHtml(lead.where_to_check)}</div>` : '',
+              Array.isArray(lead.push_downstream) && lead.push_downstream.length ? `<div><strong>What to push downstream:</strong>${listHtml(lead.push_downstream)}</div>` : '',
+              lead.analyst_guidance ? `<div><strong>Analyst guidance:</strong> ${escHtml(String(lead.analyst_guidance))}</div>` : ''
+            ].filter(Boolean);
+            const technical = [
+              stage ? `Likely next stage: ${stage}` : null,
+              Array.isArray(lead.evidence_refs) && lead.evidence_refs.length ? `Evidence refs: ${lead.evidence_refs.join(', ')}` : null,
+              lead.business_guidance ? `Scope note: ${lead.business_guidance}` : null
+            ].filter(Boolean);
+            return `<details class="finding-drilldown"><summary>${escHtml(String(lead.title || 'Threat hunter lead'))} <span class="pill">${escHtml(String(lead.confidence_band || 'medium'))} confidence</span></summary><div class="finding-drilldown-body">${body.join('')}${technical.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${listHtml(technical)}</div></details>` : ''}</div></details>`;
           }
           function attachmentProvenanceChips(item){
             if(!item || typeof item !== 'object') return '';
@@ -1150,30 +1215,32 @@ def merchant_email_lab(request: Request):
             const thr = ev.threat_correlation || j.threat_correlation || {};
             const tc = ev.trust_case || j.trust_case || {};
             const pb = ev.playbook_run || j.playbook_run || j.playbook || {};
+            const ap = ev.action_policy || j.action_policy || {};
+            const hg = ev.human_gate || j.human_gate || ap.human_gate || {};
             const ranked = Array.isArray(ev.top_ranked_findings) ? ev.top_ranked_findings : (Array.isArray(card.top_ranked_findings) ? card.top_ranked_findings : []);
             const why = ranked.length
-              ? ranked.map(f => `${findingToPlainEnglish(f)} (${findingContextLine(f)})`)
+              ? ranked.map(f => findingToPlainEnglish(f))
               : (Array.isArray(card.why_flagged) ? card.why_flagged.map(reasonToPlainEnglish) : (j.reasons||[]).map(reasonToPlainEnglish));
-            const what = `The platform treated this email as ${(j.verdict_action || 'review').replaceAll('_', ' ')} because the sender identity, attachment content, or trust controls did not look consistent with a normal supplier message.`;
-            const immediate = [];
-            if(String(j.route || '').includes('security_review')) immediate.push('Do not reply, pay, or change supplier details from this email.');
-            if(why.some(item => /supplier|bank|payment/i.test(item))) immediate.push('Verify the request using a phone number or supplier portal you already trust.');
-            immediate.push('Quarantine the email and notify finance or security before any business action.');
+            const decision = `${String(j.risk_band || 'medium').replaceAll('_', ' ')} confidence · ${String(ap.lane_label || ap.lane || 'auto escalated').replaceAll('_', ' ')}`;
+            let what = 'Security review required.';
+            if(why.some(item => /bank|payment|remittance/i.test(item))) what = 'Likely supplier payment fraud.';
+            else if(why.some(item => /supplier|baseline|document/i.test(item))) what = 'Likely supplier impersonation or supplier document fraud.';
+            else if(why.some(item => /sender|reply|auth|dmarc/i.test(item))) what = 'Likely sender trust or supplier identity issue.';
+            const immediate = [
+              'Do not pay',
+              'Verify supplier via approved contact',
+              'Quarantine and notify finance/security'
+            ];
             const next = [];
-            if(ranked.length){
-              for(const f of ranked){
-                if(Array.isArray(f.next_steps)) next.push(...f.next_steps);
-              }
-            }
-            if(Array.isArray(tc.actions)) next.push(...tc.actions.map(x => String(x).replaceAll('_',' ')));
-            if(Array.isArray(pb.next_steps)) next.push(...pb.next_steps);
-            if(!next.length) next.push('Review the attachments, confirm supplier identity, and record the outcome in the incident or ticket.');
+            if(hg.business_hold_message) next.push(hg.business_hold_message);
+            else if(Array.isArray(ap.human_approval_actions) && ap.human_approval_actions.length) next.push('Approval required before accepting new bank details or supplier trust changes.');
+            else next.push('No extra approval is required before routine evidence review.');
             return {
-              what,
+              what: `${what} ${decision}`.trim(),
               why,
               impact: severityToBusinessRisk(j, thr),
-              immediate: Array.from(new Set(immediate)),
-              next: Array.from(new Set(next)).slice(0, 6),
+              immediate,
+              next: Array.from(new Set(next)).slice(0, 3),
             };
           }
           function renderExecutiveSummary(j){
@@ -1188,48 +1255,71 @@ def merchant_email_lab(request: Request):
           }
           function renderEvidenceSummary(j){
             const ev = j.evidence_snapshot || {};
-            const thr = ev.threat_correlation || j.threat_correlation || {};
-            const tc = ev.trust_case || j.trust_case || {};
-            const artIntel = ev.artifact_intel || {};
             const atts = Array.isArray(ev.attachment_forensics) ? ev.attachment_forensics : [];
-            const auth = ev.auth_verdicts || {};
             const ranked = Array.isArray(ev.top_ranked_findings) ? ev.top_ranked_findings : [];
+            const structured = Array.isArray(ev.structured_findings) ? ev.structured_findings : [];
             const gate = ev.pre_agent_gate || {};
             const agentRuns = Array.isArray(ev.agent_runs) ? ev.agent_runs : [];
+            const hunterLeads = Array.isArray(ev.threat_hunter_leads) ? ev.threat_hunter_leads : [];
             const sections = [];
             sections.push(`<div class="evidence-block"><div class="section-label">Top Ranked Evidence</div>${listHtml(
-              ranked.length ? ranked.map(f => `${findingToPlainEnglish(f)} ${findingProvenanceChips(f)} [${escHtml(findingContextLine(f))}]${Array.isArray(f.next_steps) && f.next_steps.length ? ` Next: ${escHtml(f.next_steps[0])}` : ''}${findingDrilldownHtml(f)}`) : ['No ranked evidence available yet.']
+              ranked.length ? ranked.map(f => `${findingToPlainEnglish(f)} ${findingProvenanceChips(f)}${findingDrilldownHtml(f)}`) : ['No ranked evidence available yet.']
             )}</div>`);
-            sections.push(`<div class="evidence-block"><div class="section-label">Sender / Auth</div>${listHtml([
-              auth.spf_result ? `SPF: ${auth.spf_result}` : null,
-              auth.dkim_result ? `DKIM: ${auth.dkim_result}` : null,
-              auth.dmarc_result ? `DMARC: ${auth.dmarc_result}` : null,
-              auth.dmarc_fail ? 'DMARC alignment failed for this message.' : null
-            ])}</div>`);
-            sections.push(`<div class="evidence-block"><div class="section-label">Attachment Signals</div>${listHtml([
-              atts.length ? `${atts.length} attachment(s) were parsed and inspected.` : 'No attachment evidence was returned.',
-              (((artIntel||{}).signal_scores||{}).band) ? `Attachment risk band: ${artIntel.signal_scores.band}` : null,
-              (((artIntel||{}).signal_scores||{}).total!=null) ? `Attachment risk score: ${artIntel.signal_scores.total}` : null
-            ])}</div>`);
-            sections.push(`<div class="evidence-block"><div class="section-label">Trust Baseline Deviation</div>${listHtml([
-              tc.level ? `Trust level: ${tc.level}` : null,
-              tc.progressive_access ? `Access policy: ${tc.progressive_access}` : null,
-              ...(Array.isArray(tc.reasons) ? tc.reasons.map(reasonToPlainEnglish) : [])
-            ])}</div>`);
-            sections.push(`<div class="evidence-block"><div class="section-label">Threat Intel Correlation</div>${listHtml([
-              Array.isArray(thr.mitre_attack) && thr.mitre_attack.length ? `Mapped to MITRE: ${thr.mitre_attack.join(', ')}` : null,
-              Array.isArray(thr.kev) && thr.kev.length ? `Known exploited references: ${thr.kev.join(', ')}` : null,
-              (((thr||{}).cvss||{}).score!=null) ? `CVSS: ${thr.cvss.score} ${thr.cvss.severity || ''}` : null,
-              (((thr||{}).dread||{}).avg!=null) ? `DREAD average: ${thr.dread.avg}` : null
-            ])}</div>`);
-            sections.push(`<div class="evidence-block"><div class="section-label">Agent Safety & Audit</div>${listHtml([
+            const byAgent = {};
+            for(const finding of structured){
+              const agent = String((finding || {}).agent_origin || '').trim();
+              if(!agent) continue;
+              if(!byAgent[agent]) byAgent[agent] = [];
+              byAgent[agent].push(finding);
+            }
+            const agentEvidenceLine = (agentName, fallback) => {
+              const items = Array.isArray(byAgent[agentName]) ? byAgent[agentName] : [];
+              const top = items.slice(0, 2).map(f => findingToPlainEnglish(f)).filter(Boolean);
+              if(top.length){
+                return `${fallback} Evidence: ${top.join(' ')}`;
+              }
+              return fallback;
+            };
+            const agentSummaries = agentRuns.map(r => {
+              const name = String(r.agent_name || 'agent').replaceAll('_', ' ');
+              const mapping = {
+                sender_auth_agent: agentEvidenceLine('sender_auth_agent', 'Sender/Auth Agent: checked whether the sender identity and reply behavior matched a normal supplier message.'),
+                attachment_forensics_agent: agentEvidenceLine('attachment_forensics_agent', 'Attachment Agent: inspected the documents for payment changes, hidden content, or risky instructions.'),
+                baseline_agent: agentEvidenceLine('baseline_agent', 'Baseline Agent: compared the documents against the trusted supplier baseline.'),
+                correlation_agent: agentEvidenceLine('correlation_agent', 'Correlation Agent: checked related incidents and supporting infrastructure context.'),
+                explanation_agent: 'Explanation Agent: turned the evidence into a business-safe summary and next steps.',
+                playbook_agent: agentEvidenceLine('playbook_agent', 'Playbook Agent: selected the safest response steps allowed by policy.')
+              };
+              return mapping[r.agent_name] || `${name}: agent completed successfully.`;
+            });
+            const threatHunterSummary = hunterLeads.length
+              ? `Threat Hunter Agent: produced ${hunterLeads.length} evidence-backed lead${hunterLeads.length === 1 ? '' : 's'} for the most likely follow-on checks.`
+              : null;
+            if(threatHunterSummary) agentSummaries.push(threatHunterSummary);
+            sections.push(`<div class="evidence-block"><div class="section-label">What Agents Found</div>${listHtml(
+              agentSummaries.length ? Array.from(new Set(agentSummaries)) : ['5 agents completed successfully.']
+            )}${(gate.artifact_text_untrusted || gate.ocr_text_sanitized || agentRuns.length) ? `<details style="margin-top:8px;"><summary>Agent audit</summary><div style="margin-top:8px;">${listHtml([
               gate.artifact_text_untrusted ? 'Attachment and OCR text were treated as untrusted before model-facing analysis.' : null,
               gate.ocr_text_sanitized ? 'OCR and extracted text were sanitized before explanation and reasoning.' : null,
               gate.blocked_attachment_count!=null ? `Blocked attachments before model access: ${gate.blocked_attachment_count}` : null,
               gate.blocked_qr_url_count!=null ? `Blocked QR URLs before model access: ${gate.blocked_qr_url_count}` : null,
               Array.isArray(gate.blocked_tool_intents) && gate.blocked_tool_intents.length ? `Blocked tool intents: ${gate.blocked_tool_intents.join(', ')}` : null,
-              agentRuns.length ? `Scoped agents executed: ${agentRuns.map(r => r.agent_name).join(', ')}` : 'No agent audit rows were returned.'
-            ])}</div>`);
+              agentRuns.length ? `Scoped agents executed: ${agentRuns.map(r => r.agent_name).join(', ')}` : null
+            ])}</div></details>` : ''}</div>`);
+            if(hunterLeads.length){
+              sections.push(`<div class="evidence-block"><div class="section-label">Threat Hunter Leads</div>${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div>`);
+            }
+            sections.push(`<div class="evidence-block"><div class="section-label">Attachments</div>${listHtml(
+              atts.length ? atts.map(item => {
+                const labels = [];
+                if(item.supports_sender_claim === false || (Array.isArray(item.brand_supplier_mismatch_signals) && item.brand_supplier_mismatch_signals.length)) labels.push('baseline drift');
+                if(item.bank_fields_present || (Array.isArray(item.suspicious_instructions) && item.suspicious_instructions.some(x => /bank|payment|remittance/i.test(String(x||''))))) labels.push('bank change');
+                if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) labels.push('QR or URL');
+                if(Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||'')))) labels.push('hidden payload');
+                if(!labels.length) labels.push('review required');
+                return `${item.file_name || 'attachment'}: ${labels.join(', ')}`;
+              }) : ['No attachment evidence was returned.']
+            )}</div>`);
             const el = document.getElementById('evidence_sections');
             document.getElementById('evidence_card').style.display = 'block';
             el.innerHTML = sections.join('');
@@ -1240,9 +1330,11 @@ def merchant_email_lab(request: Request):
             const pb = ev.playbook_run || j.playbook_run || j.playbook || {};
             const ap = ev.action_policy || j.action_policy || {};
             const hg = ev.human_gate || j.human_gate || ap.human_gate || {};
+            const hunterLeads = Array.isArray(ev.threat_hunter_leads) ? ev.threat_hunter_leads : [];
             const immediate = [
-              'Hold payment changes and do not trust this email on sender reputation alone.',
-              'Quarantine the email and preserve the attachments for review.',
+              'Do not pay',
+              'Verify supplier via approved contact',
+              'Quarantine and notify finance/security'
             ];
             const analyst = [];
             const owner = [];
@@ -1254,20 +1346,23 @@ def merchant_email_lab(request: Request):
             recovery.push('Push indicators and verdict to SIEM or XDR for correlation and case tracking.');
             recovery.push('If a user interacted with the message, review account access and session controls.');
             const gating = [
-              ap.lane ? `Human gate lane: ${String(ap.lane_label || ap.lane).replaceAll('_',' ')}` : null,
-              ap.lane_reason ? ap.lane_reason : null,
+              ap.lane ? `${String(ap.lane_label || ap.lane).replaceAll('_',' ')}` : null,
               hg.business_hold_message ? hg.business_hold_message : null,
-              Array.isArray(ap.threshold_reasons) && ap.threshold_reasons.length ? `Threshold reasons: ${ap.threshold_reasons.join(' | ')}` : null,
-              Array.isArray(ap.auto_allowed_actions) && ap.auto_allowed_actions.length ? `Auto-allowed: ${ap.auto_allowed_actions.join(', ')}` : null,
-              Array.isArray(ap.human_approval_actions) && ap.human_approval_actions.length ? `Human approval required: ${ap.human_approval_actions.join(', ')}` : null,
-              Array.isArray(ap.blocked_actions) && ap.blocked_actions.length ? `Blocked by policy: ${ap.blocked_actions.join(', ')}` : null
+              Array.isArray(ap.human_approval_actions) && ap.human_approval_actions.length ? 'Approval required before accepting new bank details or supplier trust changes.' : null
             ];
             const html = [
               `<div class="evidence-block"><div class="section-label">Human Gate Thresholds</div>${listHtml(gating)}</div>`,
-              `<div class="evidence-block"><div class="section-label">Immediate</div>${listHtml(immediate)}</div>`,
-              `<div class="evidence-block"><div class="section-label">Analyst</div>${listHtml(Array.from(new Set(analyst)).slice(0,8))}</div>`,
-              `<div class="evidence-block"><div class="section-label">Business Owner</div>${listHtml(owner)}</div>`,
-              `<div class="evidence-block"><div class="section-label">Recovery</div>${listHtml(recovery)}</div>`
+              `<div class="evidence-block"><div class="section-label">Do This Now</div>${listHtml(immediate)}</div>`,
+              hunterLeads.length ? `<details class="evidence-block" style="display:block;"><summary>Threat hunter leads</summary><div style="margin-top:8px;">${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div></details>` : '',
+              `<details class="evidence-block" style="display:block;"><summary>More response options</summary><div style="margin-top:8px;">${listHtml([
+                ...Array.from(new Set(analyst)).slice(0,8),
+                ...owner,
+                ...recovery,
+                Array.isArray(ap.threshold_reasons) && ap.threshold_reasons.length ? `Threshold reasons: ${ap.threshold_reasons.join(' | ')}` : null,
+                Array.isArray(ap.auto_allowed_actions) && ap.auto_allowed_actions.length ? `Auto-allowed: ${ap.auto_allowed_actions.join(', ')}` : null,
+                Array.isArray(ap.human_approval_actions) && ap.human_approval_actions.length ? `Human approval required: ${ap.human_approval_actions.join(', ')}` : null,
+                Array.isArray(ap.blocked_actions) && ap.blocked_actions.length ? `Blocked by policy: ${ap.blocked_actions.join(', ')}` : null
+              ])}</div></details>`
             ];
             document.getElementById('actions_card').style.display = 'block';
             document.getElementById('actions_sections').innerHTML = html.join('');
@@ -1278,25 +1373,26 @@ def merchant_email_lab(request: Request):
             const hf = ev.header_forensics || {};
             const geo = infra.originating_geo || {};
             const rel = infra.related_incidents || {};
-            const items = [
+            const summary = [
+              rel.count ? `${rel.count} related incidents found` : 'No related incidents found',
+              infra.reply_domain_mismatch ? 'Sender trust looks inconsistent with normal supplier behavior.' : null,
+              hf.message_id_domain_mismatch ? 'Message-ID domain does not match the sender domain.' : null,
+            ];
+            const relatedHtml = Array.isArray(rel.matches) && rel.matches.length
+              ? `<div class="evidence-block"><div class="section-label">Related Incidents</div>${listHtml(rel.matches.map(m => `${m.incident_id} (${m.severity || 'unknown'}) via ${(m.match_on || []).join(', ')}`))}</div>`
+              : '';
+            document.getElementById('infra_card').style.display = 'block';
+            document.getElementById('infra_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Related Incidents</div>${listHtml(summary)}</div>${relatedHtml}<details class="evidence-block" style="display:block;"><summary>Sender and infrastructure detail</summary><div style="margin-top:8px;">${listHtml([
               infra.sender_address ? `Sender: ${infra.sender_address}` : null,
               infra.reply_to ? `Reply-To: ${infra.reply_to}` : null,
-              infra.reply_domain_mismatch ? 'Reply-To domain differs from the sender domain.' : null,
               infra.originating_ip ? `Originating IP: ${infra.originating_ip}` : null,
               geo.country ? `GeoIP country: ${geo.country}` : null,
               geo.asn ? `ASN: ${geo.asn}${geo.asn_org ? ` (${geo.asn_org})` : ''}` : null,
               infra.reputation && infra.reputation.risk_score!=null ? `Infrastructure risk score: ${infra.reputation.risk_score}` : null,
               Array.isArray(infra.reputation?.flags) && infra.reputation.flags.length ? `Reputation flags: ${infra.reputation.flags.join(', ')}` : null,
               hf.mailer_fingerprint ? `Mailer fingerprint: ${hf.mailer_fingerprint}` : null,
-              hf.message_id_domain_mismatch ? 'Message-ID domain does not match the sender domain.' : null,
-              hf.message_id_reuse ? 'Message-ID reuse was detected.' : null,
-              rel.count ? `Related incidents found: ${rel.count}` : 'Related incidents found: 0',
-            ];
-            const relatedHtml = Array.isArray(rel.matches) && rel.matches.length
-              ? `<div class="evidence-block"><div class="section-label">Related Incidents</div>${listHtml(rel.matches.map(m => `${m.incident_id} (${m.severity || 'unknown'}) via ${(m.match_on || []).join(', ')}`))}</div>`
-              : '';
-            document.getElementById('infra_card').style.display = 'block';
-            document.getElementById('infra_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Infrastructure</div>${listHtml(items)}</div>${relatedHtml}`;
+              hf.message_id_reuse ? 'Message-ID reuse was detected.' : null
+            ])}</div></details>`;
           }
           async function replaySiemHandoff(){
             try{
@@ -1307,7 +1403,7 @@ def merchant_email_lab(request: Request):
                 document.getElementById('status').textContent = 'No handoff event available to replay.';
                 return;
               }
-              document.getElementById('status').textContent = 'Replaying SIEM/XDR handoff…';
+              document.getElementById('status').textContent = 'Replaying SIEM/XDR handoff...';
               const r = await fetch('/api/v1/admin/email_security/connectors/replay-event', {
                 method:'POST',
                 headers:{ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() },
@@ -1349,7 +1445,7 @@ def merchant_email_lab(request: Request):
                 return;
               }
               const tenantId = String((((currentSecurityResult || {}).siem_handoff || {}).event || {}).tenant_id || 'default');
-              document.getElementById('status').textContent = 'Recording analyst outcome…';
+              document.getElementById('status').textContent = 'Recording analyst outcome...';
               const payload = {
                 incident_ids: [incidentId],
                 outcome_type: outcomeType,
@@ -1418,7 +1514,33 @@ def merchant_email_lab(request: Request):
             const hc = currentConnectorHealth || {};
             const fb = currentFeedbackSummary || {};
             const hcSummary = hc.summary || {};
-            const byTarget = Array.isArray(hc.by_target) ? hc.by_target : [];
+            const reliability = hc.reliability || {};
+            const byTarget = Array.isArray(reliability.by_target) ? reliability.by_target : [];
+            const dlqItems = Array.isArray(((hc.dlq || {}).items)) ? (hc.dlq || {}).items : [];
+            const shouldPush = !!(j.route === 'security_review' || j.severity === 'error' || (Array.isArray(st.failed) && st.failed.length));
+            const shouldHold = Array.isArray((j.action_policy || {}).human_approval_actions) && (j.action_policy || {}).human_approval_actions.length > 0;
+            const shouldRouteMail = !!(Array.isArray(j.reasons) && j.reasons.some(r => /auth|reply|spoof|supplier|bimi|dmarc/i.test(String(r || ''))));
+            const pushBadge = shouldHold
+              ? `<span class='pill' style='background:#f9731622;color:#9a3412;'>Hold push until human review</span>`
+              : (Array.isArray(st.sent) && st.sent.length
+                ? `<span class='pill' style='background:#22c55e22;color:#166534;'>Already pushed</span>`
+                : (shouldPush
+                  ? `<span class='pill' style='background:#dc262622;color:#991b1b;'>Push to SIEM/XDR now</span>`
+                  : `<span class='pill'>Passive monitoring only</span>`));
+            const mailBadge = shouldRouteMail
+              ? `<span class='pill' style='background:#2563eb22;color:#1d4ed8;'>Push to Proofpoint/Mimecast recommended</span>`
+              : '';
+            const approvalBadge = shouldHold
+              ? `<span class='pill' style='background:#f59e0b22;color:#92400e;'>Approval required before trust or payment changes</span>`
+              : `<span class='pill' style='background:#22c55e22;color:#166534;'>No extra human approval needed for routine push</span>`;
+            const pushSummary = [
+              shouldPush ? 'Push this incident to SIEM/XDR now for correlation and case tracking.' : 'Passive telemetry only is sufficient right now unless new evidence appears.',
+              shouldHold ? 'Human review should happen before sending a stronger trust or enforcement signal downstream.' : null,
+              shouldRouteMail ? 'Email security middleware push is recommended because sender trust or impersonation signals are present.' : null,
+              Array.isArray(st.sent) && st.sent.length ? `Already sent to: ${st.sent.join(', ')}` : null,
+              Array.isArray(st.failed) && st.failed.length ? `Push failed for: ${st.failed.join(', ')}` : null,
+              Array.isArray(st.retrying) && st.retrying.length ? `Retrying: ${st.retrying.join(', ')}` : null
+            ];
             const statusLines = [
               j.decision_trace_id ? `Decision trace: ${j.decision_trace_id}` : null,
               pb.playbook_id ? `Playbook: ${pb.playbook_id}` : null,
@@ -1433,8 +1555,14 @@ def merchant_email_lab(request: Request):
               byTarget.length ? `Targets: ${byTarget.map(t => `${t.target} sent=${t.sent||0} dlq=${t.dlq||0}`).join(' | ')}` : null,
               fb.false_positive_rate!=null ? `False-positive rate: ${(parseFloat(fb.false_positive_rate||0)*100).toFixed(1)}%` : null,
             ];
+            const connectorRows = byTarget.length
+              ? byTarget.map(t => `${t.target}: sent ${t.sent||0}, retrying ${t.retrying||0}, DLQ ${t.dlq||0}, skipped ${t.skipped||0}, success ${(parseFloat(t.success_rate||0)*100).toFixed(0)}%`)
+              : ['No connector registry data available yet.'];
+            const deliveryRows = dlqItems.length
+              ? dlqItems.slice(0, 8).map(item => `${item.target || 'target'}: ${item.reason || item.status || 'delivery issue'} (${item.created_at || 'time unavailable'})`)
+              : ['No failed deliveries are currently queued in the DLQ.'];
             document.getElementById('integrations_card').style.display = 'block';
-            document.getElementById('integrations_sections').innerHTML = `<div class="evidence-block"><div class="section-label">SIEM / XDR Handoff State</div>${listHtml(statusLines)}<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn" type="button" onclick="replaySiemHandoff()">Push To SIEM / XDR</button><button class="btn" type="button" onclick="refreshConnectorHealth()">Refresh Connector Health</button></div></div><div class="evidence-block"><div class="section-label">Analyst Outcome Workflow</div>${listHtml(['Use these controls after review to improve precision and governance.', 'Mark Legit lowers false-positive risk. Mark Malicious reinforces true-positive coverage. Baseline Update requests human review before trust changes.'])}<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn" type="button" onclick="submitFeedbackOutcome('analyst_review','false_positive','marked_legit')">Mark Legit</button><button class="btn" type="button" onclick="submitFeedbackOutcome('analyst_review','true_positive','confirmed_malicious')">Mark Malicious</button><button class="btn" type="button" onclick="submitFeedbackOutcome('business_exception','approved_exception','business_approved')">Approved Exception</button><button class="btn" type="button" onclick="submitFeedbackOutcome('baseline_review','approved_exception','baseline_update_requested')">Request Baseline Update</button></div></div>`;
+            document.getElementById('integrations_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Push Recommendation</div><div class="row" style="margin-bottom:8px; gap:6px; flex-wrap:wrap;">${pushBadge}${approvalBadge}${mailBadge}</div>${listHtml(pushSummary)}<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn" type="button" onclick="replaySiemHandoff()">Push To SIEM / XDR</button><button class="btn" type="button" onclick="refreshConnectorHealth()">Refresh Connector Health</button></div></div><details class="evidence-block" style="display:block;"><summary>Connector registry and delivery history</summary><div style="margin-top:8px;"><div class="section-label">Connector Registry</div>${listHtml(connectorRows)}<div class="section-label" style="margin-top:10px;">Delivery History</div>${listHtml(deliveryRows)}</div></details><details class="evidence-block" style="display:block;"><summary>Push state and analyst workflow</summary><div style="margin-top:8px;">${listHtml(statusLines)}${listHtml(['Use these controls after review to improve precision and governance.', 'Mark Legit lowers false-positive risk. Mark Malicious reinforces true-positive coverage. Baseline Update requests human review before trust changes.'])}<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn" type="button" onclick="submitFeedbackOutcome('analyst_review','false_positive','marked_legit')">Mark Legit</button><button class="btn" type="button" onclick="submitFeedbackOutcome('analyst_review','true_positive','confirmed_malicious')">Mark Malicious</button><button class="btn" type="button" onclick="submitFeedbackOutcome('business_exception','approved_exception','business_approved')">Approved Exception</button><button class="btn" type="button" onclick="submitFeedbackOutcome('baseline_review','approved_exception','baseline_update_requested')">Request Baseline Update</button></div></div></details>`;
             const tenantId = String(((siem.event || {}).tenant_id || 'default'));
             if(!currentConnectorHealth) refreshConnectorHealth();
             if(!currentFeedbackSummary) refreshFeedbackSummary(tenantId);
@@ -1449,16 +1577,18 @@ def merchant_email_lab(request: Request):
               : `<div class="small">No supplier governance approvals are pending.</div>`;
             const sections = [
               `Supplier: ${gov.vendor_name || gov.supplier_key}`,
-              `Governance state: ${String(gov.governance_state || 'stable').replaceAll('_',' ')}`,
+              `Trust state: ${String(gov.governance_state || 'stable').replaceAll('_',' ')}`,
+              pending.length ? `Pending supplier review: ${pending.length} item(s)` : 'No pending supplier governance updates.'
+            ];
+            const detailRows = [
               Array.isArray(gov.approved_domains) && gov.approved_domains.length ? `Approved domains: ${gov.approved_domains.join(', ')}` : null,
               Array.isArray(gov.observed_domains) && gov.observed_domains.length ? `Observed domains: ${gov.observed_domains.join(', ')}` : null,
               Array.isArray(gov.approved_bank_fingerprints) && gov.approved_bank_fingerprints.length ? `Approved bank fingerprints: ${gov.approved_bank_fingerprints.join(', ')}` : null,
               Array.isArray(gov.observed_bank_fingerprints) && gov.observed_bank_fingerprints.length ? `Observed bank fingerprints: ${gov.observed_bank_fingerprints.join(', ')}` : null,
-              Array.isArray(gov.history) && gov.history.length ? `Recent decisions: ${gov.history.slice(-6).join(' | ')}` : null,
-              pending.length ? `Pending review count: ${pending.length}` : 'No pending supplier governance updates.'
+              Array.isArray(gov.history) && gov.history.length ? `Recent decisions: ${gov.history.slice(-6).join(' | ')}` : null
             ];
             document.getElementById('gov_card').style.display = 'block';
-            document.getElementById('gov_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Governance Snapshot</div>${listHtml(sections)}</div><div class="evidence-block"><div class="section-label">Pending Approvals</div>${pendingHtml}</div>`;
+            document.getElementById('gov_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Governance Snapshot</div>${listHtml(sections)}</div><div class="evidence-block"><div class="section-label">Pending Approvals</div>${pendingHtml}</div><details class="evidence-block" style="display:block;"><summary>Trust and governance detail</summary><div style="margin-top:8px;">${listHtml(detailRows)}</div></details>`;
           }
           function renderVendorTrustGraph(j){
             const ev = j.evidence_snapshot || {};
@@ -1471,13 +1601,8 @@ def merchant_email_lab(request: Request):
             const rel = (incidentGraph.relationships && typeof incidentGraph.relationships === 'object') ? incidentGraph.relationships : {};
             const sections = [
               `Supplier key: ${graph.supplier_key}`,
-              `Nodes: ${graph.node_count || nodes.length || 0}`,
-              `Edges: ${graph.edge_count || edges.length || 0}`,
               `Related incidents: ${graph.incident_count || (incidentGraph.incident_count || 0)}`,
-              Array.isArray(graph.risk_notes) && graph.risk_notes.length ? `Risk notes: ${graph.risk_notes.join(', ')}` : null,
-              (ev.supplier_governance && Array.isArray(ev.supplier_governance.history) && ev.supplier_governance.history.length) ? `Governance history: ${ev.supplier_governance.history.slice(-6).join(' | ')}` : null,
-              nodes.length ? `Entities: ${nodes.slice(0,8).map(n => `${n.label} (${n.type})`).join(' | ')}` : null,
-              edges.length ? `Relationships: ${edges.slice(0,8).map(e => `${e.source.split(':').slice(-1)[0]} -> ${e.target.split(':').slice(-1)[0]} (${e.relation})`).join(' | ')}` : null
+              Array.isArray(graph.risk_notes) && graph.risk_notes.length ? `Risk notes: ${graph.risk_notes.join(', ')}` : null
             ];
             const relationshipSections = [
               Array.isArray(rel.domains) && rel.domains.length ? `Domains: ${rel.domains.join(', ')}` : null,
@@ -1491,7 +1616,12 @@ def merchant_email_lab(request: Request):
               ? `<div class="evidence-block"><div class="section-label">Relationship Buckets</div>${listHtml(relationshipSections)}</div>`
               : '';
             document.getElementById('graph_card').style.display = 'block';
-            document.getElementById('graph_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Trust Graph Snapshot</div>${listHtml(sections)}</div>${relationshipHtml}${timelineHtml}`;
+            document.getElementById('graph_sections').innerHTML = `<div class="evidence-block"><div class="section-label">Related Incident Summary</div>${listHtml(sections)}</div>${relationshipHtml}${timelineHtml}<details class="evidence-block" style="display:block;"><summary>Trust graph detail</summary><div style="margin-top:8px;">${listHtml([
+              `Nodes: ${graph.node_count || nodes.length || 0}`,
+              `Edges: ${graph.edge_count || edges.length || 0}`,
+              nodes.length ? `Entities: ${nodes.slice(0,8).map(n => `${n.label} (${n.type})`).join(' | ')}` : null,
+              edges.length ? `Relationships: ${edges.slice(0,8).map(e => `${e.source.split(':').slice(-1)[0]} -> ${e.target.split(':').slice(-1)[0]} (${e.relation})`).join(' | ')}` : null
+            ])}</div></details>`;
           }
           function renderVerdictTones(j){
             const ev = j.evidence_snapshot || {};
@@ -1538,15 +1668,20 @@ def merchant_email_lab(request: Request):
             for(const item of items){
               const pdf = item.pdf_forensics || {};
               const sim = item.baseline_similarity || {};
+              const summaryTags = [];
+              if(item.supports_sender_claim === false || (Array.isArray(item.brand_supplier_mismatch_signals) && item.brand_supplier_mismatch_signals.length)) summaryTags.push('baseline drift');
+              if(item.bank_fields_present || (Array.isArray(item.suspicious_instructions) && item.suspicious_instructions.some(x => /bank|payment|remittance/i.test(String(x||''))))) summaryTags.push('bank change');
+              if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) summaryTags.push('QR or URL');
+              if(Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||'')))) summaryTags.push('hidden payload');
+              if(!summaryTags.length) summaryTags.push('review required');
               rows.push(
                 `<div class="attachment-row">
                   <div class="row" style="justify-content:space-between; align-items:flex-start; gap:8px; flex-wrap:wrap;">
                     <div><strong>${escHtml(item.file_name || 'attachment')}</strong><div class="small">${escHtml(item.file_type || 'unknown')}</div><div style="margin-top:6px;">${attachmentProvenanceChips(item)}</div></div>
                     <div class="small mono">${escHtml((item.sha256 || '').slice(0,20))}${item.sha256 ? '…' : ''}</div>
                   </div>
-                  <div class="small" style="margin-top:6px;">${escHtml(item.text_summary || 'No text extracted from this attachment.')}</div>
-                  <div class="small" style="margin-top:6px;"><strong>Supports sender claim:</strong> ${escHtml(String(item.supports_sender_claim || 'neutral').replaceAll('_',' '))}</div>
-                  <div class="small" style="margin-top:6px;">${listHtml([
+                  <div class="small" style="margin-top:6px;">${escHtml(summaryTags.join(', '))}</div>
+                  <details style="margin-top:8px;"><summary>Attachment detail</summary><div style="margin-top:8px;" class="small">${escHtml(item.text_summary || 'No text extracted from this attachment.')}<div style="margin-top:6px;"><strong>Supports sender claim:</strong> ${escHtml(String(item.supports_sender_claim || 'neutral').replaceAll('_',' '))}</div>${listHtml([
                     item.bank_fields_present ? 'Attachment contains bank or remittance fields.' : null,
                     item.embedded_urls && item.embedded_urls.length ? `Embedded URLs: ${item.embedded_urls.join(', ')}` : null,
                     item.suspicious_instructions && item.suspicious_instructions.length ? item.suspicious_instructions.join(' ') : null,
@@ -1557,7 +1692,7 @@ def merchant_email_lab(request: Request):
                     (pdf.object_stream_count||0) > 0 ? `Object streams: ${pdf.object_stream_count}` : null,
                     sim.template_aligned === false ? 'Template similarity check failed against the baseline.' : null,
                     sim.logo_layout_aligned === false ? 'Logo or layout similarity check failed against the baseline.' : null
-                  ])}</div>
+                  ])}</div></details>
                 </div>`
               );
             }
@@ -1667,8 +1802,10 @@ def merchant_email_lab(request: Request):
                 + (j.escalation ? `<span class='pill'>Escalation: ${j.escalation}</span>` : '');
               const vBar = document.getElementById('sec_verdict_bar');
               vBar.style.background = sevColor + '22'; vBar.style.color = sevColor; vBar.style.borderLeft = `4px solid ${sevColor}`;
-              vBar.textContent = `${j.verdict_action||'unknown'} / ${j.severity||'info'}`;
-              document.getElementById('sec_reasons_list').innerHTML = (j.reasons||[]).map(r=>`<div style='margin:2px 0;'>• ${r}</div>`).join('');
+              vBar.textContent = `Plain-English triggers`;
+              const plainReasons = (j.reasons||[]).map(reasonToPlainEnglish).filter(Boolean);
+              const rawReasonRows = (j.reasons||[]).map(r=>`<div style='margin:2px 0;'>• ${r}</div>`).join('');
+              document.getElementById('sec_reasons_list').innerHTML = `${listHtml(plainReasons.slice(0,6))}${rawReasonRows ? `<details style="margin-top:8px;"><summary>Raw policy reasons</summary><div style="margin-top:8px;">${rawReasonRows}</div></details>` : ''}`;
 
               /* ── BEC Kill Chain ── */
               const bec = ev.bec_kill_chain || j.bec_kill_chain || {};
@@ -1694,9 +1831,12 @@ def merchant_email_lab(request: Request):
                 document.getElementById('trust_level').textContent = tc.level || '-';
                 document.getElementById('trust_access').textContent = tc.progressive_access || '-';
                 const acts = tc.actions || [];
-                document.getElementById('trust_actions').innerHTML = acts.map(a=>`<span class='pill'>${a}</span>`).join(' ');
+                document.getElementById('trust_actions').innerHTML = `<div>Trust degraded</div>${acts.length || (tc.reasons || []).length ? `<details style="margin-top:8px;"><summary>Trust detail</summary><div style="margin-top:8px;">${listHtml([
+                  ...acts.map(a => String(a).replaceAll('_',' ')),
+                  ...(tc.reasons || []).map(reasonToPlainEnglish)
+                ])}</div></details>` : ''}`;
                 const reasons = tc.reasons || [];
-                document.getElementById('trust_reasons').textContent = reasons.join(', ');
+                document.getElementById('trust_reasons').textContent = reasons.length ? 'Audit mapping available' : '';
               }
 
               /* ── Threat Correlation (MITRE / DREAD / CVSS / KEV / PASTA) ── */
@@ -1705,15 +1845,21 @@ def merchant_email_lab(request: Request):
                 const tc2 = document.getElementById('threat_card'); tc2.style.display='block';
                 const mitre = Array.isArray(thr.mitre_attack) ? thr.mitre_attack : [];
                 const kev = Array.isArray(thr.kev) ? thr.kev : [];
-                document.getElementById('threat_badges').innerHTML = mitre.map(m=>`<span class='pill' style='background:#4338ca22;color:#4338ca;'>MITRE ${m}</span>`).join('')
-                  + kev.map(k=>`<span class='pill' style='background:#dc262622;color:#dc2626;'>KEV ${k}</span>`).join('');
+                document.getElementById('threat_badges').innerHTML = `<span class='pill'>Audit mapping available</span>`;
                 const dread = thr.dread || {};
                 document.getElementById('dread_avg').textContent = dread.avg!=null ? dread.avg : (thr.dread_avg!=null ? thr.dread_avg : '-');
                 const cvss = thr.cvss || {};
                 document.getElementById('cvss_score').textContent = cvss.score!=null ? `${cvss.score} (${cvss.severity||''})` : '-';
                 document.getElementById('kc_stage').textContent = thr.kill_chain_stage || '-';
                 document.getElementById('pasta_stage').textContent = thr.pasta_stage || (ev.pasta_stage) || '-';
-                document.getElementById('kev_list').textContent = kev.length ? `KEV: ${kev.join(', ')}` : '';
+                document.getElementById('kev_list').innerHTML = `<details style="margin-top:8px;"><summary>Framework detail</summary><div style="margin-top:8px;">${listHtml([
+                  mitre.length ? `MITRE: ${mitre.join(', ')}` : null,
+                  kev.length ? `KEV: ${kev.join(', ')}` : null,
+                  dread.avg!=null ? `DREAD average: ${dread.avg}` : null,
+                  cvss.score!=null ? `CVSS: ${cvss.score} ${cvss.severity || ''}` : null,
+                  thr.kill_chain_stage ? `Kill chain: ${thr.kill_chain_stage}` : null,
+                  (thr.pasta_stage || ev.pasta_stage) ? `PASTA: ${thr.pasta_stage || ev.pasta_stage}` : null
+                ])}</div></details>`;
               }
 
               /* ── Sandbox / Detonation / IOC ── */
@@ -1730,7 +1876,7 @@ def merchant_email_lab(request: Request):
                 const enrichSecs = ((j.latency || {}).enrichment_seconds ?? (ev.latency || {}).enrichment_seconds);
                 document.getElementById('enrich_latency').textContent = enrichSecs!=null ? `${(parseFloat(enrichSecs)*1000).toFixed(0)}ms` : '-';
                 const findings = det.findings || det.ioc_list || [];
-                document.getElementById('sandbox_findings').innerHTML = Array.isArray(findings) ? findings.slice(0,6).map(f=>`<div>• ${typeof f==='string'?f:JSON.stringify(f)}</div>`).join('') : '';
+                document.getElementById('sandbox_findings').innerHTML = `<details><summary>Sandbox / IOC detail</summary><div style="margin-top:8px;">${Array.isArray(findings) ? findings.slice(0,6).map(f=>`<div>• ${typeof f==='string'?f:JSON.stringify(f)}</div>`).join('') : ''}</div></details>`;
               }
 
               /* ── Attachment Forensics ── */

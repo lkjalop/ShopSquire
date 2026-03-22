@@ -95,6 +95,10 @@ def test_vision_triage_surfaces_payload_findings(monkeypatch):
     assert payload_findings
     assert payload_findings[0].get("finding_type") == "prompt_injection_hidden"
     assert isinstance((payload_findings[0].get("drilldown") or {}).get("what_to_look_for"), list)
+    hunter_leads = sec.get("threat_hunter_leads") or []
+    assert hunter_leads
+    assert hunter_leads[0].get("title")
+    assert isinstance((hunter_leads[0].get("what_to_hunt_next") or []), list)
 
 
 def test_vision_triage_maps_qr_linked_pii_to_drilldown(monkeypatch):
@@ -137,6 +141,8 @@ def test_vision_triage_maps_qr_linked_pii_to_drilldown(monkeypatch):
     assert payload_findings[0].get("finding_type") == "ssn_leakage_linked_qr"
     drilldown = payload_findings[0].get("drilldown") or {}
     assert "RBAC" in " ".join(drilldown.get("what_to_look_for") or []) or "ABAC" in " ".join(drilldown.get("what_to_look_for") or [])
+    hunter_leads = sec.get("threat_hunter_leads") or []
+    assert any((lead.get("finding_type") == "ssn_leakage_linked_qr") for lead in hunter_leads)
 
 
 def test_vision_triage_uses_offline_fixture_for_qr_linked_pii(monkeypatch, tmp_path):

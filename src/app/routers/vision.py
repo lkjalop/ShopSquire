@@ -15,7 +15,9 @@ from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.intake_gate import strict_image_ingest_gate
 from src.app.services.image_intake import sanitize_image
 from src.app.routers.support_complaints import _normalize_ocr_and_detect, _probe_redirect_chain
+from src.app.security.linked_artifact_analysis import analyze_linked_artifact
 from src.app.security.passive_payload_analysis import classify_passive_payload
+from src.app.security.threat_hunter_leads import build_threat_hunter_leads
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 
@@ -355,7 +357,6 @@ async def triage(
                                     qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
                                 # ── Auto-analyze linked artifact (SSN / PII / payload scan) ──
                                 try:
-                                    from src.app.security.linked_artifact_analysis import analyze_linked_artifact
                                     linked = analyze_linked_artifact(url=data, timeout=6.0)
                                     linked_artifact_result = linked if isinstance(linked, dict) else None
                                     resp["linked_artifact"] = linked
@@ -662,6 +663,14 @@ async def triage(
         "signal_labels": payload_analysis.get("signal_labels") or {},
         "payload_findings": payload_findings,
     }
+    try:
+        resp["security"]["threat_hunter_leads"] = build_threat_hunter_leads(
+            findings=payload_findings,
+            evidence_snapshot={},
+            llm_assist={},
+        )
+    except Exception:
+        resp["security"]["threat_hunter_leads"] = []
     # Attach productive QR data (manufacturer URLs, model hints) for downstream identity extraction
     if qr_product_data:
         resp["qr_product_data"] = qr_product_data

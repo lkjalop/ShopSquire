@@ -42,6 +42,7 @@ from src.app.security.bimi_verifier import verify_bimi_provider_backed
 from src.app.security.ransomware_detector import analyze_ransomware_artifacts, coverage_limits as ransomware_coverage_limits
 from src.app.security.siem_adapter import build_normalized_security_event, emit_security_handoff
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
+from src.app.security.threat_hunter_leads import build_threat_hunter_leads
 from src.app.security.maestro_boundaries import validate_agent_action
 from src.app.security.email_dns_verify import run_dns_auth_checks
 import time
@@ -3448,6 +3449,11 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             evs["human_gate"] = dict(action_policy.get("human_gate") or {})
             evs["incident_graph"] = incident_graph
             evs["vendor_trust_graph"] = vendor_trust_graph
+            evs["threat_hunter_leads"] = build_threat_hunter_leads(
+                findings=structured_findings,
+                evidence_snapshot=evs,
+                llm_assist=llm_assist if isinstance(llm_assist, dict) else {},
+            )
             evs["agent_runs"] = _build_agent_runs_audit(
                 evidence_snapshot=evs,
                 structured_findings=structured_findings,
@@ -3455,6 +3461,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             )
             v["action_policy"] = action_policy
             v["human_gate"] = dict(action_policy.get("human_gate") or {})
+            v["threat_hunter_leads"] = list(evs.get("threat_hunter_leads") or [])
     except Exception:
         pass
     try:
@@ -3474,6 +3481,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             explainability_card["agent_runs"] = list((v["evidence_snapshot"].get("agent_runs") or [])[:6])
             explainability_card["action_policy"] = dict(v["evidence_snapshot"].get("action_policy") or {})
             explainability_card["human_gate"] = dict(v["evidence_snapshot"].get("human_gate") or {})
+            explainability_card["threat_hunter_leads"] = list((v["evidence_snapshot"].get("threat_hunter_leads") or [])[:4])
         v["explainability_card"] = explainability_card
         if isinstance(v.get("evidence_snapshot"), dict):
             v["evidence_snapshot"]["explainability_card"] = explainability_card
