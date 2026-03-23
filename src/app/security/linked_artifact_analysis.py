@@ -7,6 +7,7 @@ import re
 from html import unescape
 from typing import Any, Dict, List
 from urllib.parse import urljoin, urlparse
+import ipaddress
 
 from src.app.security.email_attachment_parser import _extract_pdf_text, _extract_text, _ocr_pdf_pages, _pdf_forensics
 from src.app.security.safe_requests import safe_request
@@ -23,7 +24,12 @@ _SSN_PAT = re.compile(
 )
 # Secondary bare 9-digit match (valid SSN range heuristics: area 001-899 excl 666, group/serial nonzero)
 _SSN_BARE_PAT = re.compile(r"\b([2-8]\d{2}(?!00)\d{2}(?!0000)\d{4})\b")
+_SSN_GLUE_PAT = re.compile(
+    r"\b([2-8]\d{2}[-. ]\d{2}[-. ]\d{4})(?=\d?[/.-]\d{1,2}[/.-]\d{2,4}\b)",
+    re.IGNORECASE,
+)
 _CC_PAT = re.compile(r"\b(?:\d[ -]?){13,19}\b")
+_DOB_PAT = re.compile(r"\bdate\s+of\s+birth\b", re.IGNORECASE)
 _LURE_PATTERNS = [
     re.compile(r"\bpay(?:ment)?\b", re.IGNORECASE),
     re.compile(r"\binvoice\b", re.IGNORECASE),
@@ -54,6 +60,70 @@ _PDF_INTERNAL_MARKERS = (
 
 
 _SCANNED_PAGE_PATH_PREFIXES = {"p", "r", "s", "qr"}
+
+
+def _internal_domain_hints() -> List[str]:
+    raw = str(os.getenv("LINKED_ARTIFACT_INTERNAL_DOMAINS") or "").strip()
+    hints = [part.strip().lower() for part in raw.split(",") if part.strip()]
+    hints.extend(["shopsquire", "localhost"])
+    seen: set[str] = set()
+    return [hint for hint in hints if hint and not (hint in seen or seen.add(hint))]
+
+
+def _classify_linked_owner_scope(*, raw_url: str, final_url: str, pii_detected: bool) -> Dict[str, Any]:
+    candidate = str(final_url or raw_url or "").strip()
+    host = str(urlparse(candidate).hostname or "").strip().lower()
+    owner_scope = "unknown"
+    owner_reason = "No destination host was available for privacy ownership assessment."
+    if host:
+        internal_hints = _internal_domain_hints()
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback:
+                owner_scope = "likely_internal_platform"
+                owner_reason = "The linked destination resolves to a private or loopback address."
+            else:
+                owner_scope = "external_or_third_party"
+                owner_reason = "The linked destination resolves to a public IP address."
+        except ValueError:
+            if any(host == hint or host.endswith(f".{hint}") or hint in host for hint in internal_hints):
+                owner_scope = "likely_internal_platform"
+                owner_reason = "The linked destination matches an internal or platform-owned domain hint."
+            elif host.endswith((".internal", ".corp", ".local")):
+                owner_scope = "likely_internal_platform"
+                owner_reason = "The linked destination uses an internal-only naming pattern."
+            elif host in {"scanned.page", "www.scanned.page", "qr.scanned.page"}:
+                owner_scope = "external_redirect_service"
+                owner_reason = "The QR destination is a public redirect service; the underlying document owner still needs human verification."
+            else:
+                owner_scope = "external_or_third_party"
+                owner_reason = "The linked destination appears to be publicly hosted outside platform-owned domain hints."
+
+    exposure_scope = "unknown"
+    severity_hint = "medium"
+    if pii_detected:
+        if owner_scope == "likely_internal_platform":
+            exposure_scope = "potential_internal_or_customer_pii"
+            severity_hint = "critical"
+        elif owner_scope == "external_or_third_party":
+            exposure_scope = "potential_external_or_third_party_pii"
+            severity_hint = "high"
+        elif owner_scope == "external_redirect_service":
+            exposure_scope = "redirect_service_to_unknown_owner"
+            severity_hint = "high"
+        else:
+            exposure_scope = "regulated_data_owner_unknown"
+            severity_hint = "high"
+
+    return {
+        "linked_host": host or None,
+        "linked_owner_scope": owner_scope,
+        "linked_owner_reason": owner_reason,
+        "linked_exposure_scope": exposure_scope,
+        "linked_breach_severity_hint": severity_hint,
+        "linked_human_verification_required": bool(pii_detected),
+        "linked_crisis_management_required": bool(pii_detected),
+    }
 
 
 def _load_offline_fixture_map() -> Dict[str, Any]:
@@ -301,31 +371,46 @@ def analyze_linked_artifact(*, url: str, timeout: float = 8.0, max_bytes: int = 
     if not raw_url:
         out["error"] = "linked_url_missing"
         return out
-    resp = None
-    fetch_error = None
-    try:
-        resp = safe_request("GET", raw_url, timeout=timeout, allow_redirects=True)
-    except Exception as exc:
-        fetch_error = f"linked_fetch_failed:{exc}"
-
     blob = b""
     content_type = ""
     filename = "artifact"
     final_url = raw_url
-    if resp is not None:
-        final_url = str(getattr(resp, "url", "") or raw_url)
-        out["linked_redirect_chain"] = [raw_url] + ([final_url] if final_url and final_url != raw_url else [])
-        out["linked_final_url"] = final_url
-        out["linked_http_status"] = int(resp.status_code)
-        if int(resp.status_code or 0) < 400:
-            blob = bytes(resp.content or b"")
-            content_type = str(resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-            parsed = urlparse(final_url)
-            filename = _content_disposition_filename(resp.headers) or parsed.path.rsplit("/", 1)[-1] or "artifact"
-
     use_offline_fixture = False
+    resp = None
+    fetch_error = None
+    fixture = _offline_fixture_for_url(raw_url)
+    if fixture:
+        try:
+            blob = open(fixture["local_path"], "rb").read()
+            content_type = str(fixture.get("content_type") or content_type or "").strip().lower()
+            filename = str(fixture.get("filename") or filename or "artifact").strip()
+            out["linked_offline_fixture"] = True
+            out["linked_offline_fixture_tag"] = fixture.get("tag")
+            out["linked_final_url"] = raw_url
+            out["linked_redirect_chain"] = [raw_url]
+            use_offline_fixture = True
+        except Exception:
+            blob = b""
+
+    if not blob:
+        try:
+            resp = safe_request("GET", raw_url, timeout=timeout, allow_redirects=True)
+        except Exception as exc:
+            fetch_error = f"linked_fetch_failed:{exc}"
+
+        if resp is not None:
+            final_url = str(getattr(resp, "url", "") or raw_url)
+            out["linked_redirect_chain"] = [raw_url] + ([final_url] if final_url and final_url != raw_url else [])
+            out["linked_final_url"] = final_url
+            out["linked_http_status"] = int(resp.status_code)
+            if int(resp.status_code or 0) < 400:
+                blob = bytes(resp.content or b"")
+                content_type = str(resp.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+                parsed = urlparse(final_url)
+                filename = _content_disposition_filename(resp.headers) or parsed.path.rsplit("/", 1)[-1] or "artifact"
+
     if (not blob) or (len(blob) > max_bytes) or (resp is not None and int(resp.status_code or 0) >= 400):
-        fixture = _offline_fixture_for_url(raw_url) or _offline_fixture_for_url(final_url)
+        fixture = fixture or _offline_fixture_for_url(raw_url) or _offline_fixture_for_url(final_url)
         if fixture:
             try:
                 blob = open(fixture["local_path"], "rb").read()
@@ -403,11 +488,14 @@ def analyze_linked_artifact(*, url: str, timeout: float = 8.0, max_bytes: int = 
 
     # SSN detection: try full-pattern first (hyphenated / spaced), then bare 9-digit heuristic
     _ssn_raw = [m for grp in _SSN_PAT.findall(combined_text) for m in (grp if isinstance(grp, tuple) else (grp,)) if m]
+    _ssn_glued = _SSN_GLUE_PAT.findall(combined_text)
     _ssn_bare = _SSN_BARE_PAT.findall(combined_text) if not _ssn_raw else []
-    ssn_hits = sorted(set(_ssn_raw + _ssn_bare))[:20]
+    ssn_hits = sorted(set(_ssn_raw + _ssn_glued + _ssn_bare))[:20]
     pii_types: List[str] = []
     if ssn_hits:
         pii_types.append("ssn")
+    elif "ssn" in combined_text.lower() and _DOB_PAT.search(combined_text):
+        pii_types.append("regulated_identity_document")
     if _CC_PAT.search(combined_text):
         pii_types.append("pci")
 
@@ -422,7 +510,7 @@ def analyze_linked_artifact(*, url: str, timeout: float = 8.0, max_bytes: int = 
         attack_hypothesis = "linked_archive_staging"
         decode_path = "sandbox_required_do_not_execute"
         suggested_next_step = "queue_sandbox_detonation"
-    elif ssn_hits:
+    elif pii_types:
         attack_hypothesis = "linked_pii_exposure"
         decode_path = "safe_passive_pii_extract"
         suggested_next_step = "review"
@@ -457,4 +545,11 @@ def analyze_linked_artifact(*, url: str, timeout: float = 8.0, max_bytes: int = 
         "linked_pdf_forensics": pdf_forensics,
         "linked_ocr_used": ocr_used,
     })
+    out.update(
+        _classify_linked_owner_scope(
+            raw_url=raw_url,
+            final_url=final_url,
+            pii_detected=bool(pii_types),
+        )
+    )
     return out

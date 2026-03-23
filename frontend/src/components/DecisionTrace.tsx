@@ -878,6 +878,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return mapping[findingType] || `${formatDisplayText(findingType, 'Security finding detected')}.`;
   }
 
+  function getOwnerScopeMeta(scope: any): { label: string; className: string } | null {
+    const normalized = String(scope || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized === 'likely_internal_platform') return { label: 'Owner: internal', className: styles.tagGreen };
+    if (normalized === 'external_or_third_party') return { label: 'Owner: external', className: styles.tagRed };
+    if (normalized === 'external_redirect_service') return { label: 'Owner: redirect / unknown', className: styles.tagWarn };
+    return { label: 'Owner: unknown', className: styles.tagWarn };
+  }
+
   function buildSecurityAgentBriefs() {
     const payloadFindings: any[] = triageItems.flatMap((item: any) => item?.security?.payload_findings || item?.payload_findings || []);
     const threatHunterLeads: any[] = triageItems.flatMap((item: any) => item?.security?.threat_hunter_leads || item?.threat_hunter_leads || []);
@@ -925,6 +934,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     const primaryFinding = payloadFindings[0] || {};
     const payloadAnalysis = triageItems[0]?.security?.payload_analysis || triageItems[0]?.payload_analysis || {};
     const sigs = triageItems[0]?.security?.signals || triageItems[0]?.signals || security?.signals || {};
+    const linkedArtifact = triageItems.map((item: any) => item?.security?.linked_artifact_analysis || item?.payload_analysis?.linked_artifact_analysis || null).find(Boolean)
+      || triageItems.map((item: any) => {
+        const findings = item?.security?.payload_findings || item?.payload_findings || [];
+        return Array.isArray(findings) ? findings.map((f: any) => f?.linked_artifact).find(Boolean) : null;
+      }).find(Boolean)
+      || {};
+    const ownerScopeMeta = getOwnerScopeMeta(linkedArtifact?.linked_owner_scope);
     const severity = formatDisplayText(security?.severity || 'review', 'review').toLowerCase();
     const route = formatDisplayText(security?.policy_route || security?.route || 'review', 'review');
     const decision =
@@ -963,6 +979,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       actions,
       pushRecommendation,
       threatHunterLeads,
+      ownerScopeMeta,
+      ownerReason: formatDisplayText(linkedArtifact?.linked_owner_reason, ''),
+      exposureScope: formatDisplayText(linkedArtifact?.linked_exposure_scope, ''),
+      humanVerificationRequired: Boolean(linkedArtifact?.linked_human_verification_required),
     };
   }
 
@@ -1970,10 +1990,25 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             <div className={styles.briefCard}>
                               <div className={styles.briefTitle}>Decision</div>
                               <div className={styles.briefBody}>{incident.decision}</div>
+                              {(incident.ownerScopeMeta || incident.humanVerificationRequired) && (
+                                <div className={styles.tagRow} style={{ marginTop: 8 }}>
+                                  {incident.ownerScopeMeta && (
+                                    <span className={incident.ownerScopeMeta.className}>{incident.ownerScopeMeta.label}</span>
+                                  )}
+                                  {incident.humanVerificationRequired && (
+                                    <span className={styles.tagWarn}>Human verification required</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             <div className={styles.briefCard}>
                               <div className={styles.briefTitle}>Business Impact</div>
                               <div className={styles.briefBody}>{incident.businessImpact}</div>
+                              {(incident.ownerReason || incident.exposureScope) && (
+                                <div className={styles.muted} style={{ marginTop: 8 }}>
+                                  {[incident.ownerReason, incident.exposureScope ? `Exposure scope: ${incident.exposureScope.replace(/_/g, ' ')}` : ''].filter(Boolean).join(' ')}
+                                </div>
+                              )}
                             </div>
                             <div className={styles.briefCard}>
                               <div className={styles.briefTitle}>What Triggered It</div>
@@ -2336,6 +2371,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 <div className={styles.payloadGrid}>
                                   <div className={styles.kvRow}><span>Linked artifact available</span><span>{renderValue(Boolean(linkedArtifact.linked_artifact_available))}</span></div>
                                   <div className={styles.kvRow}><span>Linked artifact type</span><span>{renderValue(linkedArtifact.linked_artifact_type || 'unknown')}</span></div>
+                                  <div className={styles.kvRow}><span>Linked owner scope</span><span>{(() => { const meta = getOwnerScopeMeta(linkedArtifact.linked_owner_scope); return meta ? <span className={meta.className}>{meta.label}</span> : renderValue('unknown'); })()}</span></div>
+                                  <div className={styles.kvRow}><span>Exposure scope</span><span>{renderValue(linkedArtifact.linked_exposure_scope || 'unknown')}</span></div>
+                                  <div className={styles.kvRow}><span>Human verification required</span><span>{renderValue(Boolean(linkedArtifact.linked_human_verification_required))}</span></div>
                                   <div className={styles.kvRow}><span>PII detected</span><span>{renderValue(Boolean(linkedArtifact.pii_detected))}</span></div>
                                   <div className={styles.kvRow}><span>PII type</span><span>{renderValue(linkedArtifact.pii_type || [])}</span></div>
                                   <div className={styles.kvRow}><span>SSN hits</span><span>{renderValue(linkedArtifact.ssn_hits || [])}</span></div>
@@ -2343,6 +2381,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                   <div className={styles.kvRow}><span>Linked decode path</span><span>{renderValue(linkedArtifact.linked_decode_path || 'safe_passive_link_fetch_only')}</span></div>
                                   <div className={styles.kvRow}><span>Linked next step</span><span>{renderValue(linkedArtifact.linked_suggested_next_step || 'review')}</span></div>
                                 </div>
+                                {!isMissingValue(linkedArtifact.linked_owner_reason) && (
+                                  <>
+                                    <div className={styles.sectionSubTitle}>Owner Assessment</div>
+                                    <div className={styles.muted}>{formatDisplayText(linkedArtifact.linked_owner_reason, 'Not available')}</div>
+                                  </>
+                                )}
                                 {linkedArtifact.linked_text_excerpt && (
                                   <>
                                     <div className={styles.sectionSubTitle}>Linked Artifact Text Excerpt</div>

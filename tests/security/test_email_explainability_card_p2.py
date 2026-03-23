@@ -253,3 +253,71 @@ def test_hidden_payloads_are_promoted_to_structured_findings(file_name: str, exp
     assert isinstance((finding.get("compliance_mapping") or []), list) and finding.get("compliance_mapping")
     hunter_leads = ((out.get("evidence_snapshot") or {}).get("threat_hunter_leads") or [])
     assert any(str((lead or {}).get("finding_type") or "") == expected_type for lead in hunter_leads)
+
+
+def test_email_attachment_qr_privacy_path_promotes_linked_ssn_exposure(monkeypatch, tmp_path):
+    from src.app.security.email_security import evaluate_email_security
+    import src.app.security.linked_artifact_analysis as linked
+
+    class _FakeQRResult:
+        codes = [{"data": "https://scanned.page/p/R2g2Jb", "type": "QR_CODE"}]
+
+    fixture = tmp_path / "offline-qr-ssn.pdf"
+    fixture.write_bytes(b"%PDF-1.7\n1 0 obj\n(SSN 123-45-6789)\nendobj\n")
+
+    def _fake_safe_request(method: str, url: str, **_: object):
+        raise RuntimeError("network blocked")
+
+    monkeypatch.setattr("src.app.rules.barcode_decode.decode_barcodes", lambda *_args, **_kwargs: _FakeQRResult())
+    monkeypatch.setattr(linked, "safe_request", _fake_safe_request)
+    monkeypatch.setattr(
+        linked,
+        "_load_offline_fixture_map",
+        lambda: {
+            "entries": [
+                {
+                    "urls": ["https://scanned.page/p/R2g2Jb"],
+                    "local_path": str(fixture),
+                    "content_type": "application/pdf",
+                    "filename": "offline-qr-ssn.pdf",
+                    "tag": "qr_ssn_offline_fixture",
+                }
+            ]
+        },
+    )
+
+    out = evaluate_email_security(
+        {
+            "message_id": "<qr-privacy-email@x>",
+            "from_addr": "supplier@example.com",
+            "reply_to": "supplier@example.com",
+            "subject": "QR identity document",
+            "body": "Please review the attached artifact.",
+            "attachments": [
+                {
+                    "name": "QR-SSN.png",
+                    "content_type": "image/png",
+                    "content_b64": base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii"),
+                    "size_bytes": 8,
+                }
+            ],
+        },
+        tenant_id="tenant-qr-privacy-email",
+    )
+    evidence = out.get("evidence_snapshot") or {}
+    structured = evidence.get("structured_findings") or []
+    matches = [f for f in structured if str(f.get("finding_type") or "") == "ssn_leakage_linked_qr"]
+    assert matches, structured
+    finding = matches[0]
+    linked_artifact = finding.get("linked_artifact") or {}
+    assert linked_artifact.get("linked_offline_fixture") is True
+    assert linked_artifact.get("linked_attack_hypothesis") == "linked_pii_exposure"
+    assert linked_artifact.get("linked_human_verification_required") is True
+    assert str((finding.get("retrieval_context") or {}).get("linked_exposure_scope") or "").strip()
+    drilldown = finding.get("drilldown") or {}
+    assert isinstance(drilldown.get("privacy_scope"), list) and drilldown.get("privacy_scope")
+    assert isinstance(drilldown.get("human_verification"), list) and drilldown.get("human_verification")
+    ranked = evidence.get("top_ranked_findings") or []
+    assert any(str((row or {}).get("finding_type") or "") == "ssn_leakage_linked_qr" for row in ranked)
+    hunter_leads = evidence.get("threat_hunter_leads") or []
+    assert any(str((lead or {}).get("finding_type") or "") == "ssn_leakage_linked_qr" for lead in hunter_leads)

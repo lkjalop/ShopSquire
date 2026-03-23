@@ -7,6 +7,7 @@ import re
 import zipfile
 from typing import Any, Dict, List
 from xml.etree import ElementTree as ET
+from urllib.parse import urlparse
 
 
 _PDF_TEXT_PAT = re.compile(rb"\(([^()]*)\)\s*Tj")
@@ -525,6 +526,67 @@ def hydrate_attachments_from_bytes(
                             "chi_square_p": round(float(_steg.chi_square_p), 4),
                             "spa_estimate": round(float(_steg.spa_estimate), 4),
                         }
+            except Exception:
+                pass
+            # QR-linked artifact enrichment for image attachments.
+            try:
+                _ctype = str(row.get("content_type") or "").lower()
+                _name = str(row.get("name") or "").lower()
+                _is_img = _ctype.startswith("image/") or _name.endswith(
+                    (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+                )
+                if _is_img:
+                    from src.app.rules.barcode_decode import decode_barcodes  # type: ignore
+                    from src.app.security.linked_artifact_analysis import analyze_linked_artifact  # type: ignore
+
+                    qr_codes = decode_barcodes([("email_attachment", blob)])
+                    qr_payloads: List[str] = []
+                    qr_findings: List[str] = list(row.get("qr_redirect_findings") or []) if isinstance(row.get("qr_redirect_findings"), list) else []
+                    linked_artifact: Dict[str, Any] | None = None
+                    for item in (getattr(qr_codes, "codes", None) or []):
+                        data = str((item or {}).get("data") or "").strip()
+                        if not data:
+                            continue
+                        qr_payloads.append(data[:500])
+                        if data.lower().startswith(("http://", "https://")):
+                            host = str(urlparse(data).hostname or "").strip().lower()
+                            if host and host not in {"127.0.0.1", "localhost"}:
+                                qr_findings.append(f"QR code points to external URL: {data[:180]}")
+                                if linked_artifact is None:
+                                    linked = analyze_linked_artifact(url=data, timeout=2.5)
+                                    linked_artifact = linked if isinstance(linked, dict) else None
+                    if qr_payloads:
+                        row["qr_payloads"] = qr_payloads[:8]
+                    if qr_findings:
+                        row["qr_redirect_findings"] = list(dict.fromkeys(qr_findings))[:6]
+                    if linked_artifact:
+                        row["linked_artifact"] = {
+                            "linked_final_url": linked_artifact.get("linked_final_url"),
+                            "linked_artifact_type": linked_artifact.get("linked_artifact_type"),
+                            "linked_attack_hypothesis": linked_artifact.get("linked_attack_hypothesis"),
+                            "linked_owner_scope": linked_artifact.get("linked_owner_scope"),
+                            "linked_owner_reason": linked_artifact.get("linked_owner_reason"),
+                            "linked_exposure_scope": linked_artifact.get("linked_exposure_scope"),
+                            "linked_breach_severity_hint": linked_artifact.get("linked_breach_severity_hint"),
+                            "linked_human_verification_required": linked_artifact.get("linked_human_verification_required"),
+                            "linked_crisis_management_required": linked_artifact.get("linked_crisis_management_required"),
+                            "linked_offline_fixture": linked_artifact.get("linked_offline_fixture"),
+                            "linked_offline_fixture_tag": linked_artifact.get("linked_offline_fixture_tag"),
+                            "pii_detected": linked_artifact.get("pii_detected"),
+                            "pii_type": list(linked_artifact.get("pii_type") or [])[:4] if isinstance(linked_artifact.get("pii_type"), list) else [],
+                            "ssn_hits": list(linked_artifact.get("ssn_hits") or [])[:5] if isinstance(linked_artifact.get("ssn_hits"), list) else [],
+                            "linked_text_excerpt": str(linked_artifact.get("linked_text_excerpt") or "")[:240],
+                        }
+                        if linked_artifact.get("linked_attack_hypothesis") == "linked_pii_exposure":
+                            qr_findings.append("Linked artifact appears to expose SSNs or other regulated identity data.")
+                        if linked_artifact.get("pii_detected"):
+                            row["pii_detected"] = True
+                            row["pii_type"] = list(linked_artifact.get("pii_type") or [])[:4] if isinstance(linked_artifact.get("pii_type"), list) else []
+                        if linked_artifact.get("ssn_hits"):
+                            row["ssn_detected"] = True
+                            row["ssn_count"] = len(list(linked_artifact.get("ssn_hits") or []))
+                        if qr_findings:
+                            row["qr_redirect_findings"] = list(dict.fromkeys(qr_findings))[:6]
             except Exception:
                 pass
             # ── Steganographic analysis — PDF embedded images ──

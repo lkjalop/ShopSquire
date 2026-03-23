@@ -575,6 +575,9 @@ def _attachment_forensics_snapshot(
                 "parse_errors": list(att.get("parse_errors") or []) if isinstance(att.get("parse_errors"), list) else [],
                 "ssn_detected": bool(att.get("ssn_detected")),
                 "pii_detected": bool(att.get("pii_detected")),
+                "pii_type": list(att.get("pii_type") or []) if isinstance(att.get("pii_type"), list) else [],
+                "ssn_count": int(att.get("ssn_count") or 0),
+                "linked_artifact": dict(att.get("linked_artifact") or {}) if isinstance(att.get("linked_artifact"), dict) else {},
                 "steg": {
                     "score": att.get("steg_score"),
                     "suspicious": bool(att.get("steg_suspicious")),
@@ -1563,6 +1566,35 @@ def _decorate_structured_findings(
         if isinstance(row.get("mitre_attack"), list) and row.get("mitre_attack"):
             row["threat_context"]["mitre_attack"] = list(row.get("mitre_attack") or [])[:5]
         row["drilldown"] = dict(bundle.get("drilldown") or {}) if isinstance(bundle.get("drilldown"), dict) else {}
+        if str(row.get("finding_type") or "") == "ssn_leakage_linked_qr":
+            linked = row.get("linked_artifact") if isinstance(row.get("linked_artifact"), dict) else {}
+            retrieval = row.get("retrieval_context") if isinstance(row.get("retrieval_context"), dict) else {}
+            owner_scope = str((linked.get("linked_owner_scope") or retrieval.get("linked_owner_scope") or "")).strip()
+            exposure_scope = str((linked.get("linked_exposure_scope") or retrieval.get("linked_exposure_scope") or "")).strip()
+            owner_reason = str(linked.get("linked_owner_reason") or "").strip()
+            final_url = str(linked.get("linked_final_url") or "").strip()
+            pii_types = [str(x) for x in (linked.get("pii_type") or []) if str(x or "").strip()]
+            ssn_hits = list(linked.get("ssn_hits") or []) if isinstance(linked.get("ssn_hits"), list) else []
+            privacy_scope_lines = []
+            if owner_scope:
+                privacy_scope_lines.append(f"Owner scope: {owner_scope.replace('_', ' ')}")
+            if exposure_scope:
+                privacy_scope_lines.append(f"Exposure scope: {exposure_scope.replace('_', ' ')}")
+            if owner_reason:
+                privacy_scope_lines.append(owner_reason)
+            if pii_types:
+                privacy_scope_lines.append(f"PII types: {', '.join(pii_types[:3])}")
+            if ssn_hits:
+                privacy_scope_lines.append(f"SSN pattern count: {len(ssn_hits)}")
+            if final_url:
+                privacy_scope_lines.append(f"Linked destination: {final_url[:180]}")
+            if privacy_scope_lines:
+                row["drilldown"]["privacy_scope"] = privacy_scope_lines
+            if bool(linked.get("linked_human_verification_required") or retrieval.get("linked_human_verification_required")):
+                row["drilldown"]["human_verification"] = [
+                    "Confirm whether the linked content belongs to the platform, a supplier, or a third party before declaring breach scope.",
+                    "Verify access-control posture, audience, and actual access logs before claiming confirmed exposure.",
+                ]
         row["compliance_mapping"] = _finding_compliance_mapping(
             finding_type=str(row.get("finding_type") or ""),
             category=category,
@@ -1957,6 +1989,7 @@ def _build_structured_findings(
                 )
             )
         qr_findings = [str(x) for x in (item.get("qr_redirect_findings") or []) if str(x or "").strip()]
+        linked_artifact = dict(item.get("linked_artifact") or {}) if isinstance(item.get("linked_artifact"), dict) else {}
         if qr_findings:
             findings.append(
                 _normalize_finding(
@@ -2006,6 +2039,22 @@ def _build_structured_findings(
             if hypothesis == "lolbin_command_sequence":
                 payload_evidence.extend([str(x) for x in (payload_analysis.get("lolbin_hits") or []) if str(x or "").strip()][:3])
             payload_evidence.extend(qr_findings[:2])
+            if hypothesis == "pii_data_exfil_via_qr" and linked_artifact:
+                owner_scope = str(linked_artifact.get("linked_owner_scope") or "").strip()
+                exposure_scope = str(linked_artifact.get("linked_exposure_scope") or "").strip()
+                final_url = str(linked_artifact.get("linked_final_url") or "").strip()
+                pii_types = [str(x) for x in (linked_artifact.get("pii_type") or []) if str(x or "").strip()]
+                ssn_hits = list(linked_artifact.get("ssn_hits") or []) if isinstance(linked_artifact.get("ssn_hits"), list) else []
+                if final_url:
+                    payload_evidence.append(f"Linked destination: {final_url[:180]}")
+                if pii_types:
+                    payload_evidence.append(f"PII types detected: {', '.join(pii_types[:3])}")
+                if ssn_hits:
+                    payload_evidence.append(f"SSN pattern count: {len(ssn_hits)}")
+                if owner_scope:
+                    payload_evidence.append(f"Exposure owner scope: {owner_scope.replace('_', ' ')}")
+                if exposure_scope:
+                    payload_evidence.append(f"Exposure scope: {exposure_scope.replace('_', ' ')}")
             payload_evidence = [x for x in payload_evidence if x][:6]
             row = _normalize_finding(
                 finding_id=f"{finding_type}_{fname}",
@@ -2024,6 +2073,10 @@ def _build_structured_findings(
                     "baseline_version": suggested_baseline_version or None,
                     "payload_type": payload_analysis.get("payload_type"),
                     "decode_path": payload_analysis.get("decode_path"),
+                    "linked_owner_scope": linked_artifact.get("linked_owner_scope") if linked_artifact else None,
+                    "linked_exposure_scope": linked_artifact.get("linked_exposure_scope") if linked_artifact else None,
+                    "linked_breach_severity_hint": linked_artifact.get("linked_breach_severity_hint") if linked_artifact else None,
+                    "linked_human_verification_required": linked_artifact.get("linked_human_verification_required") if linked_artifact else None,
                 },
                 recommended_action=suggested_action,
             )
@@ -2032,6 +2085,8 @@ def _build_structured_findings(
             row["pasta_stage"] = str(payload_analysis.get("pasta_stage") or "")
             row["suggested_next_step"] = str(payload_analysis.get("suggested_next_step") or "")
             row["lolbin_behavioral_profiles"] = list(payload_analysis.get("lolbin_behavioral_profiles") or [])[:4]
+            if linked_artifact:
+                row["linked_artifact"] = linked_artifact
             findings.append(row)
 
     for item in diff_rows:

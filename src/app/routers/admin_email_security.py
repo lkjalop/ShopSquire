@@ -933,6 +933,177 @@ def supplier_governance_review(
     return out
 
 
+def _privacy_exposure_rows(*, tenant_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    rows: List[Any] = []
+    try:
+        with db_session() as db:
+            rows = db.execute(
+                text(
+                    """
+                    SELECT id, created_at, tenant_id, severity, risk_band, evidence_json
+                    FROM email_security_incidents
+                    WHERE (:tenant_id IS NULL OR tenant_id = :tenant_id)
+                    ORDER BY created_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant_id": tenant_id, "limit": max(1, min(int(limit or 100), 500))},
+            ).fetchall()
+    except Exception:
+        rows = []
+    out: List[Dict[str, Any]] = []
+    for r in rows or []:
+        evidence = _json_load(r[5], {}) if len(r) > 5 else {}
+        if not isinstance(evidence, dict):
+            continue
+        findings = evidence.get("structured_findings") if isinstance(evidence.get("structured_findings"), list) else []
+        matches = [f for f in findings if isinstance(f, dict) and str(f.get("finding_type") or "") == "ssn_leakage_linked_qr"]
+        if not matches:
+            continue
+        finding = matches[0]
+        linked = finding.get("linked_artifact") if isinstance(finding.get("linked_artifact"), dict) else {}
+        retrieval = finding.get("retrieval_context") if isinstance(finding.get("retrieval_context"), dict) else {}
+        owner_scope = str((linked.get("linked_owner_scope") or retrieval.get("linked_owner_scope") or "")).strip() or "unknown"
+        exposure_scope = str((linked.get("linked_exposure_scope") or retrieval.get("linked_exposure_scope") or "")).strip() or "unknown"
+        pii_types = [str(x) for x in (linked.get("pii_type") or []) if str(x or "").strip()] if isinstance(linked.get("pii_type"), list) else []
+        ssn_hits = list(linked.get("ssn_hits") or []) if isinstance(linked.get("ssn_hits"), list) else []
+        out.append(
+            {
+                "incident_id": r[0],
+                "created_at": r[1],
+                "tenant_id": r[2],
+                "severity": r[3],
+                "risk_band": r[4],
+                "decision_id": evidence.get("decision_id") or evidence.get("trace_id"),
+                "trace_id": evidence.get("trace_id") or evidence.get("decision_id"),
+                "owner_scope": owner_scope,
+                "owner_reason": str(linked.get("linked_owner_reason") or "").strip(),
+                "exposure_scope": exposure_scope,
+                "human_verification_required": bool(linked.get("linked_human_verification_required") or retrieval.get("linked_human_verification_required")),
+                "crisis_management_required": bool(linked.get("linked_crisis_management_required")),
+                "breach_severity_hint": str((linked.get("linked_breach_severity_hint") or retrieval.get("linked_breach_severity_hint") or "")).strip() or "unknown",
+                "linked_final_url": str(linked.get("linked_final_url") or "").strip(),
+                "linked_artifact_type": str(linked.get("linked_artifact_type") or "").strip() or "unknown",
+                "linked_attack_hypothesis": str(linked.get("linked_attack_hypothesis") or "").strip() or "unknown",
+                "pii_types": pii_types,
+                "ssn_hit_count": len(ssn_hits),
+                "offline_fixture": bool(linked.get("linked_offline_fixture")),
+            }
+        )
+    return out
+
+
+@router.get("/privacy/review")
+def privacy_review_dashboard(
+    tenant_id: Optional[str] = None,
+    limit: int = 100,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    items = _privacy_exposure_rows(tenant_id=tenant_id, limit=limit)
+    return {
+        "tenant_id": str(tenant_id or "default"),
+        "count": len(items),
+        "items": items,
+        "summary": {
+            "internal_candidates": sum(1 for item in items if item.get("owner_scope") == "likely_internal_platform"),
+            "external_candidates": sum(1 for item in items if item.get("owner_scope") == "external_or_third_party"),
+            "redirect_service_unknowns": sum(1 for item in items if item.get("owner_scope") == "external_redirect_service"),
+            "human_verification_required": sum(1 for item in items if item.get("human_verification_required")),
+            "crisis_management_required": sum(1 for item in items if item.get("crisis_management_required")),
+        },
+    }
+
+
+@router.get("/privacy/console", response_class=HTMLResponse)
+def privacy_review_console(
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> HTMLResponse:
+    html = """
+    <html>
+      <head>
+        <title>Email Security Privacy Review</title>
+        <style>
+          body { font-family: Arial, sans-serif; background:#f8fafc; color:#0f172a; margin:0; }
+          .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+          .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-bottom:20px; }
+          .card { background:#fff; border:1px solid #dbe3ef; border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+          .title { font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; }
+          .value { font-size:28px; font-weight:700; }
+          table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #dbe3ef; border-radius:14px; overflow:hidden; }
+          th, td { text-align:left; padding:10px 12px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
+          th { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:#475569; background:#f8fafc; }
+          .pill { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+          .internal { background:#dcfce7; color:#166534; } .external { background:#fee2e2; color:#991b1b; }
+          .redirect { background:#fef3c7; color:#92400e; } .unknown { background:#e2e8f0; color:#334155; }
+          .critical { background:#fee2e2; color:#991b1b; } .high { background:#fef3c7; color:#92400e; } .medium { background:#e0f2fe; color:#075985; }
+          .muted { color:#64748b; font-size:13px; }
+          code { background:#f1f5f9; padding:2px 4px; border-radius:6px; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <h1>Privacy Exposure Review</h1>
+          <div class="muted" style="margin-bottom:16px;">Confirmed QR-linked PII/SSN findings only. Use this view to scope ownership, verify exposure, and gate legal/comms escalation.</div>
+          <div class="grid" id="summary"></div>
+          <table>
+            <thead><tr><th>Incident</th><th>Owner Scope</th><th>Exposure</th><th>PII</th><th>Severity</th><th>Verification</th><th>Linked Artifact</th></tr></thead>
+            <tbody id="rows"><tr><td colspan="7" class="muted">Loading...</td></tr></tbody>
+          </table>
+          <details class="card" style="margin-top:16px;">
+            <summary>Review workflow</summary>
+            <div class="muted" style="margin-top:10px;">
+              <ul>
+                <li>Confirm whether the QR target was actually reachable and accessed.</li>
+                <li>Verify owner scope from IAM, SaaS audit, object-store history, and access-control state.</li>
+                <li>Escalate to privacy/legal/comms only if regulated exposure is confirmed, not just suspected.</li>
+              </ul>
+            </div>
+          </details>
+        </div>
+        <script>
+          function esc(v){ return String(v ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+          function ownerPill(scope){
+            const s = String(scope || '').trim().toLowerCase();
+            if(s === 'likely_internal_platform') return '<span class="pill internal">internal</span>';
+            if(s === 'external_or_third_party') return '<span class="pill external">external</span>';
+            if(s === 'external_redirect_service') return '<span class="pill redirect">redirect / unknown</span>';
+            return '<span class="pill unknown">unknown</span>';
+          }
+          function severityPill(level){
+            const s = String(level || 'unknown').trim().toLowerCase();
+            const cls = s === 'critical' ? 'critical' : s === 'high' ? 'high' : s === 'medium' ? 'medium' : 'unknown';
+            return `<span class="pill ${cls}">${esc(s)}</span>`;
+          }
+          async function load(){
+            const r = await fetch('/api/v1/admin/email_security/privacy/review?limit=100', { headers:{ 'x-api-key':'local-owner-key' } });
+            const j = await r.json();
+            const sum = j.summary || {};
+            document.getElementById('summary').innerHTML = [
+              ['Confirmed privacy cases', j.count || 0],
+              ['Internal candidates', sum.internal_candidates || 0],
+              ['External candidates', sum.external_candidates || 0],
+              ['Redirect / unknown', sum.redirect_service_unknowns || 0],
+              ['Need human verification', sum.human_verification_required || 0],
+              ['Crisis review flagged', sum.crisis_management_required || 0],
+            ].map(([label, value]) => `<div class="card"><div class="title">${esc(label)}</div><div class="value">${esc(value)}</div></div>`).join('');
+            document.getElementById('rows').innerHTML = (j.items || []).map(item => `<tr>
+              <td><strong>${esc(item.incident_id || '-')}</strong><div class="muted"><code>${esc(item.trace_id || item.decision_id || '-')}</code></div></td>
+              <td>${ownerPill(item.owner_scope)}<div class="muted" style="margin-top:6px;">${esc(item.owner_reason || '-')}</div></td>
+              <td>${esc(String(item.exposure_scope || 'unknown').replaceAll('_',' '))}</td>
+              <td>${esc((item.pii_types || []).join(', ') || 'none')}<div class="muted">SSN hits: ${esc(item.ssn_hit_count || 0)}</div></td>
+              <td>${severityPill(item.breach_severity_hint || item.severity || 'unknown')}<div class="muted">${esc(item.linked_attack_hypothesis || 'unknown')}</div></td>
+              <td>${item.human_verification_required ? '<span class="pill redirect">required</span>' : '<span class="pill internal">not required</span>'}${item.crisis_management_required ? '<div class="muted" style="margin-top:6px;">privacy/legal/comms hold</div>' : ''}</td>
+              <td>${esc(item.linked_artifact_type || 'unknown')}<div class="muted">${esc(item.linked_final_url || '-')}</div></td>
+            </tr>`).join('') || '<tr><td colspan="7" class="muted">No confirmed QR-linked privacy exposures found.</td></tr>';
+          }
+          load();
+        </script>
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
 def _connector_registry_snapshot(*, hours: int = 24) -> Dict[str, Any]:
     dashboard = get_handoff_dashboard(hours=hours, dlq_limit=50, target=None)
     reliability = dashboard.get("reliability") if isinstance(dashboard.get("reliability"), dict) else {}

@@ -1141,12 +1141,22 @@ def merchant_email_lab(request: Request):
           function provenanceChipHtml(src){
             return `<span class="pill">${escHtml(provenanceChipLabel(src))}</span>`;
           }
+          function ownerScopeBadgeHtml(scope){
+            const normalized = String(scope || '').trim().toLowerCase();
+            if(!normalized) return '';
+            if(normalized === 'likely_internal_platform') return '<span class="pill" style="background:#dcfce7;color:#166534;border-color:#bbf7d0;">Owner: internal</span>';
+            if(normalized === 'external_or_third_party') return '<span class="pill" style="background:#fee2e2;color:#991b1b;border-color:#fecaca;">Owner: external</span>';
+            if(normalized === 'external_redirect_service') return '<span class="pill" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">Owner: redirect / unknown</span>';
+            return '<span class="pill" style="background:#e2e8f0;color:#334155;border-color:#cbd5e1;">Owner: unknown</span>';
+          }
           function findingProvenanceChips(f){
             if(!f || typeof f !== 'object') return '';
             const chips = [];
             if(f.source_type) chips.push(provenanceChipHtml(f.source_type));
             if(f.evidence_kind) chips.push(`<span class="pill">${escHtml(String(f.evidence_kind))}</span>`);
             if(f.confidence_band) chips.push(`<span class="pill">${escHtml(String(f.confidence_band))} confidence</span>`);
+            const ownerScope = (f.linked_artifact && f.linked_artifact.linked_owner_scope) || ((f.retrieval_context || {}).linked_owner_scope);
+            if(ownerScope) chips.push(ownerScopeBadgeHtml(ownerScope));
             return chips.join(' ');
           }
           function findingDrilldownHtml(f){
@@ -1158,6 +1168,11 @@ def merchant_email_lab(request: Request):
             const compRows = comp.map(x => `${x.framework}${Array.isArray(x.controls) && x.controls.length ? `: ${x.controls.join(', ')}` : ''}`);
             const pasta = String(f.pasta_stage || ((f.threat_context||{}).pasta_stage || '')).trim();
             const dread = (f.threat_context || {}).dread || {};
+            const linkedArtifact = f.linked_artifact && typeof f.linked_artifact === 'object' ? f.linked_artifact : {};
+            const ownerScope = String(linkedArtifact.linked_owner_scope || ((f.retrieval_context||{}).linked_owner_scope || '')).trim();
+            const ownerReason = String(linkedArtifact.linked_owner_reason || '').trim();
+            const exposureScope = String(linkedArtifact.linked_exposure_scope || ((f.retrieval_context||{}).linked_exposure_scope || '')).trim();
+            const severityHint = String(linkedArtifact.linked_breach_severity_hint || ((f.retrieval_context||{}).linked_breach_severity_hint || '')).trim();
             const evidencePosture = [
               `Observed evidence: ${escHtml(String(f.evidence_kind || 'inferred'))}`,
               `Source: ${escHtml(String(f.source_type || 'policy'))}`,
@@ -1169,6 +1184,11 @@ def merchant_email_lab(request: Request):
               evidence.length ? `<div><strong>Evidence:</strong>${listHtml(evidence)}</div>` : '',
               Array.isArray(f.next_steps) && f.next_steps.length ? `<div><strong>What to investigate next:</strong>${listHtml(f.next_steps)}</div>` : (Array.isArray(d.forensic_checks) && d.forensic_checks.length ? `<div><strong>What to investigate next:</strong>${listHtml(d.forensic_checks)}</div>` : ''),
               d.affected_scope ? `<div><strong>Affected scope:</strong> ${escHtml(d.affected_scope)}</div>` : '',
+              Array.isArray(d.privacy_scope) && d.privacy_scope.length ? `<div><strong>Privacy scope:</strong>${listHtml(d.privacy_scope)}</div>` : '',
+              Array.isArray(d.human_verification) && d.human_verification.length ? `<div><strong>Human verification:</strong>${listHtml(d.human_verification)}</div>` : '',
+              ownerScope ? `<div><strong>Owner scope:</strong> ${ownerScopeBadgeHtml(ownerScope)}${ownerReason ? ` <span class="small" style="color:#64748b;">${escHtml(ownerReason)}</span>` : ''}</div>` : '',
+              exposureScope ? `<div><strong>Exposure scope:</strong> ${escHtml(exposureScope.replaceAll('_', ' '))}</div>` : '',
+              severityHint ? `<div><strong>Severity hint:</strong> ${escHtml(severityHint)}</div>` : '',
               evidencePosture.length ? `<div><strong>Evidence posture:</strong>${listHtml(evidencePosture)}</div>` : '',
               (pasta || mitre.length || compRows.length) ? `<div><strong>Framework mapping:</strong>${listHtml([
                 pasta ? `PASTA: ${pasta}` : null,
@@ -1367,7 +1387,9 @@ def merchant_email_lab(request: Request):
                 if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) labels.push('QR or URL');
                 if((item.steg && item.steg.suspicious) || (Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||''))))) labels.push('hidden payload');
                 if(!labels.length) labels.push('review required');
-                return `${item.file_name || 'attachment'}: ${Array.from(new Set(labels)).join(', ')}`;
+                const linkedArtifact = item.linked_artifact && typeof item.linked_artifact === 'object' ? item.linked_artifact : {};
+                const ownerBadge = linkedArtifact.linked_owner_scope ? ` ${ownerScopeBadgeHtml(linkedArtifact.linked_owner_scope)}` : '';
+                return `${item.file_name || 'attachment'}: ${Array.from(new Set(labels)).join(', ')}${ownerBadge}`;
               }) : ['No attachment evidence was returned.']
             )}</div>`);
             const el = document.getElementById('evidence_sections');

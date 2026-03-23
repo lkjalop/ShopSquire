@@ -70,6 +70,10 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
     assert "findingToPlainEnglish(f)" in html
     assert "findingProvenanceChips(f)" in html
     assert "findingDrilldownHtml(f)" in html
+    assert "ownerScopeBadgeHtml(scope)" in html
+    assert "Owner: internal" in html
+    assert "Owner: external" in html
+    assert "Owner: redirect / unknown" in html
     assert "attachmentProvenanceChips(item)" in html
     assert "provenanceChipLabel(src)" in html
     assert "Top Ranked Evidence" in html
