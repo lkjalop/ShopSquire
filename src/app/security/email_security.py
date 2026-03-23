@@ -445,6 +445,26 @@ def _attachment_forensics_snapshot(
     sender_domain = str(baseline_checks.get("sender_domain") or "").strip().lower()
     vendor_domain = str(baseline_checks.get("vendor_domain") or "").strip().lower()
     reply_domain = str(baseline_checks.get("reply_domain") or "").strip().lower()
+    known_bank_fp = str(baseline_checks.get("known_bank_fingerprint") or baseline_checks.get("bank_fingerprint") or "").strip()
+
+    def _attachment_material_class(name: str, extracted_text: str, urls: list[str], suspicious_instructions: list[str]) -> str:
+        lowered = str(name or "").strip().lower()
+        text = str(extracted_text or "").strip().lower()
+        ext = os.path.splitext(lowered)[1]
+        if ext in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".pdf", ".msg", ".eml"}:
+            if suspicious_instructions or urls:
+                return "active_payment_lure"
+            return "observed_supplier_artifact"
+        if ext in {".md", ".txt", ".json"}:
+            if any(tok in lowered for tok in ("guide", "scenario", "summary", "matrix", "taxonomy", "playbook", "spec", "report")):
+                return "reference_spec_material"
+            return "contextual_test_artifact"
+        if ext in {".py", ".ps1", ".sh"}:
+            if any(tok in text for tok in ("image.new", "generate", "simulat", "shopsquire", "invoice")):
+                return "contextual_test_artifact"
+        if suspicious_instructions or urls:
+            return "active_payment_lure"
+        return "contextual_test_artifact"
 
     def _text_summary(text: str) -> str:
         cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -510,6 +530,7 @@ def _attachment_forensics_snapshot(
             support_state = "contradicts_sender_claim"
         elif vendor_name and re.search(re.escape(vendor_name), extracted_text, re.IGNORECASE):
             support_state = "supports_sender_claim"
+        attachment_class = _attachment_material_class(name, extracted_text, urls, suspicious_instructions)
         summary.append(
             {
                 "file_name": name,
@@ -528,8 +549,14 @@ def _attachment_forensics_snapshot(
                     "template_aligned": name not in list(forensics_details.get("template_drift") or []),
                     "logo_layout_aligned": name not in list(forensics_details.get("logo_layout") or []),
                     "vendor_domain_matches": bool(vendor_domain and sender_domain and vendor_domain == sender_domain),
+                    "known_good_template_hash": str(att.get("expected_template_hash") or ""),
+                    "known_good_logo_hash": str(att.get("expected_logo_hash") or ""),
+                    "known_good_layout_hash": str(att.get("expected_layout_hash") or ""),
+                    "known_good_bank_fingerprint": known_bank_fp,
                 },
                 "supports_sender_claim": support_state,
+                "attachment_class": attachment_class,
+                "authority_level": "primary" if attachment_class in {"active_payment_lure", "observed_supplier_artifact"} else "contextual",
                 "bank_fields_present": bool(bank_fields),
                 "bank_fields": bank_fields,
                 "pdf_forensics": {
@@ -985,6 +1012,8 @@ def _finding_rank_score(finding: Dict[str, Any]) -> float:
         score -= 0.55
     elif category == "contextual_test_artifact":
         score -= 0.85
+    elif category == "reference_spec_material":
+        score -= 0.92
     elif category == "contextual_supplier_mismatch":
         score -= 0.1
     return round(score, 4)
@@ -994,10 +1023,12 @@ def _artifact_finding_category(filename: str, finding_type: str, summary: str) -
     name = str(filename or "").strip().lower()
     ftype = str(finding_type or "").strip().lower()
     text = str(summary or "").strip().lower()
-    if name.endswith((".md", ".json", ".py", ".txt")) or any(tok in name for tok in ("guide", "scenario", "test", "summary", "matrix", "spec", "report", "generate")):
-        if any(tok in name for tok in ("test", "scenario", "matrix", "spec", "generate", "guide", "report", "summary")):
-            return "contextual_test_artifact"
+    if name.endswith((".md", ".json", ".txt")) or any(tok in name for tok in ("guide", "scenario", "summary", "matrix", "spec", "report", "taxonomy", "playbook")):
+        if any(tok in name for tok in ("guide", "scenario", "summary", "matrix", "spec", "report", "taxonomy", "playbook")):
+            return "reference_spec_material"
         return "benign_reference_material"
+    if name.endswith((".py", ".ps1", ".sh")) or any(tok in name for tok in ("generate", "fixture", "sample_")):
+        return "contextual_test_artifact"
     if any(tok in ftype for tok in ("baseline_mismatch", "baseline_drift")):
         return "baseline_drift"
     if any(tok in ftype for tok in ("lolbin_command_sequence", "c2_beacon_pattern", "data_exfiltration_instruction")):
@@ -1023,6 +1054,12 @@ def _dedupe_ranked_findings(findings: list[dict[str, Any]], *, limit: int = 3) -
     out: list[dict[str, Any]] = []
     seen_keys: set[str] = set()
     policy_seen = False
+    has_direct_primary = any(
+        isinstance(f, dict)
+        and str(f.get("evidence_kind") or "") == "direct"
+        and str(f.get("finding_category") or "") not in {"contextual_test_artifact", "reference_spec_material", "benign_reference_material"}
+        for f in findings
+    )
     for row in sorted([f for f in findings if isinstance(f, dict)], key=_finding_rank_score, reverse=True):
         ftype = str(row.get("finding_type") or "")
         artifact = str(((row.get("artifact_ref") or {}).get("file_name") or "")).strip().lower()
@@ -1039,6 +1076,8 @@ def _dedupe_ranked_findings(findings: list[dict[str, Any]], *, limit: int = 3) -
                     policy_seen = True
                     continue
             policy_seen = True
+        if has_direct_primary and category in {"contextual_test_artifact", "reference_spec_material", "benign_reference_material"}:
+            continue
         seen_keys.add(key)
         out.append(row)
         if len(out) >= limit:
@@ -1382,6 +1421,24 @@ def _finding_business_bundle(
                 "agentic_ai_top10": _finding_agentic_tags(ftype, src, cat),
             },
         }
+    if "encoding_anomaly" in ftype or "message_hygiene" in ftype:
+        return {
+            "business_meaning": "The message looks poorly encoded or repackaged, which weakens trust in how it was produced and delivered.",
+            "business_outcome": "This is not proof of fraud by itself, but it strengthens the case that the message is not a normal supplier communication.",
+            "next_steps": [
+                "Treat the message as suspicious until sender identity and document evidence are resolved.",
+                "Use this as supporting context behind stronger payment, document, or sender findings.",
+            ],
+            "policy_mapping": ["message_hygiene_supporting_signal_only"],
+            "faq_mapping": ["How to interpret message hygiene and encoding anomalies"],
+            "threat_context": {
+                "pasta_stage": pasta_stage,
+                "dread": dread,
+                "mitre_attack": mitre_attack[:4],
+                "owasp_llm_top10": owasp[:4],
+                "agentic_ai_top10": _finding_agentic_tags(ftype, src, cat),
+            },
+        }
     if cat == "contextual_test_artifact":
         return {
             "business_meaning": "This file looks like test, lab, or reference material rather than a live supplier artifact.",
@@ -1392,6 +1449,24 @@ def _finding_business_bundle(
             ],
             "policy_mapping": ["contextual_test_artifact_non_authoritative"],
             "faq_mapping": ["How the platform treats test fixtures and reference material"],
+            "threat_context": {
+                "pasta_stage": pasta_stage,
+                "dread": dread,
+                "mitre_attack": mitre_attack[:4],
+                "owasp_llm_top10": owasp[:4],
+                "agentic_ai_top10": _finding_agentic_tags(ftype, src, cat),
+            },
+        }
+    if cat == "reference_spec_material":
+        return {
+            "business_meaning": "This file reads like specification, scenario, or test reference material rather than a live business artifact.",
+            "business_outcome": "It provides context for why the platform is cautious, but it should stay behind direct evidence from real invoices, images, or sender checks.",
+            "next_steps": [
+                "Keep this file as supporting context only.",
+                "Prioritize live supplier documents, sender identity, and direct payment-change evidence before acting.",
+            ],
+            "policy_mapping": ["reference_spec_material_non_authoritative"],
+            "faq_mapping": ["How the platform treats specifications, scenarios, and testing guides"],
             "threat_context": {
                 "pasta_stage": pasta_stage,
                 "dread": dread,
@@ -1692,6 +1767,17 @@ def _build_structured_findings(
     infra = ev.get("sender_infrastructure") if isinstance(ev.get("sender_infrastructure"), dict) else {}
     attachment_rows = ev.get("attachment_forensics") if isinstance(ev.get("attachment_forensics"), list) else []
     diff_rows = ((ev.get("attachment_baseline_diffs") or {}).get("comparisons") if isinstance(ev.get("attachment_baseline_diffs"), dict) else []) or []
+    verdict_indicators = [i for i in (verdict.get("indicators") or []) if isinstance(i, dict)]
+    direct_attachment_rows = [
+        item
+        for item in attachment_rows
+        if isinstance(item, dict) and str(item.get("attachment_class") or "") in {"active_payment_lure", "observed_supplier_artifact"}
+    ]
+    contextual_attachment_rows = [
+        item
+        for item in attachment_rows
+        if isinstance(item, dict) and str(item.get("attachment_class") or "") in {"contextual_test_artifact", "reference_spec_material", "benign_reference_material"}
+    ]
 
     if bool(auth.get("dmarc_fail")):
         findings.append(
@@ -1727,6 +1813,23 @@ def _build_structured_findings(
                 recommended_action=suggested_action,
             )
         )
+    if any(str((indicator or {}).get("type") or "") == "encoding_anomaly" for indicator in verdict_indicators):
+        findings.append(
+            _normalize_finding(
+                finding_id="sender_message_hygiene_encoding_anomaly",
+                finding_type="message_hygiene_encoding_anomaly",
+                summary="The message contains encoding artifacts that weaken sender trust and read like repackaged or poorly copied content.",
+                severity_hint="medium",
+                confidence_score=0.66,
+                source_type="policy",
+                evidence_kind="direct",
+                agent_origin="sender_auth_agent",
+                policy_weight=0.44,
+                evidence=["subject/body contains mojibake or broken character encoding sequences"],
+                retrieval_context={"supplier_domain": from_domain or None},
+                recommended_action=suggested_action,
+            )
+        )
     rep = (infra.get("reputation") if isinstance(infra.get("reputation"), dict) else {}) or {}
     if bool(rep.get("known_bad")) or bool((rep.get("flags") or [])):
         findings.append(
@@ -1746,19 +1849,24 @@ def _build_structured_findings(
             )
         )
     related = (infra.get("related_incidents") if isinstance(infra.get("related_incidents"), dict) else {}) or {}
-    if int(related.get("count") or 0) > 0:
+    if int(related.get("count") or 0) > 0 and (direct_attachment_rows or not contextual_attachment_rows):
+        observed_note = (
+            "Observed supplier artifacts already support this overlap."
+            if direct_attachment_rows
+            else "This overlap exists without direct attachment evidence yet."
+        )
         findings.append(
             _normalize_finding(
                 finding_id="correlation_related_incidents",
                 finding_type="related_incident_overlap",
-                summary=f"The sender or infrastructure overlaps with {int(related.get('count') or 0)} prior incident(s).",
+                summary=f"The sender or infrastructure overlaps with {int(related.get('count') or 0)} prior incident(s). {observed_note}",
                 severity_hint="medium",
-                confidence_score=0.73,
+                confidence_score=0.78 if direct_attachment_rows else 0.58,
                 source_type="intel",
                 evidence_kind="inferred",
                 agent_origin="correlation_agent",
-                policy_weight=0.45,
-                evidence=[f"{m.get('incident_id')} via {', '.join(m.get('match_on') or [])}" for m in (related.get("matches") or [])[:4] if isinstance(m, dict)],
+                policy_weight=0.52 if direct_attachment_rows else 0.28,
+                evidence=([observed_note] + [f"{m.get('incident_id')} via {', '.join(m.get('match_on') or [])}" for m in (related.get("matches") or [])[:4] if isinstance(m, dict)])[:5],
                 retrieval_context={"supplier_domain": from_domain or None},
                 recommended_action=suggested_action,
             )

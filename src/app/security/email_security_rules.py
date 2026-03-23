@@ -76,6 +76,7 @@ _OCR_OVERLAY_BENIGN_CATALOG_PAT = re.compile(
     r"(?i)(sku|model|spec(?:ification)?s?|warranty|catalog(?:ue)?|"
     r"resolution|inch|ram|ssd|cpu|battery|price|rrp)"
 )
+_ENCODING_ANOMALY_PAT = re.compile(r"(?:Ã.|â.|ðŸ|ï¸|�)")
 
 
 def _get_thresholds(*, tenant_id: str | None = None) -> Dict[str, Any]:
@@ -625,6 +626,14 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
         indicators.append({"type": "invoice_redirect", "value": True, "reason": "Invoice/remittance redirection pattern"})
     if _URGENCY_PAT.search(text):
         indicators.append({"type": "urgency_language", "value": True, "reason": "Urgency/pressure language"})
+    if _ENCODING_ANOMALY_PAT.search(subject) or _ENCODING_ANOMALY_PAT.search(body):
+        indicators.append(
+            {
+                "type": "encoding_anomaly",
+                "value": True,
+                "reason": "Message contains encoding artifacts or mojibake that weaken sender trust and readability.",
+            }
+        )
     vendor_domain = str(email.get("vendor_domain") or "").strip().lower()
     from_domain = str(from_domain_norm or "").strip().lower()
     trusted_vendor_domains = set([str(x).lower() for x in (thresholds.get("TRUSTED_VENDOR_DOMAINS", []) or [])])
@@ -841,4 +850,3 @@ def extract_indicators(email: Dict[str, Any], *, tenant_id: str | None = None) -
             },
         },
     }
-

@@ -36,6 +36,9 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
     assert "What Triggered It" in html
     assert "What Agents Found" in html
     assert "Threat Hunter Leads" in html
+    assert "Direct:</strong>" in html
+    assert "Inferred:</strong>" in html
+    assert "Context only:</strong>" in html
     assert "Do This Now" in html
     assert "Governance / Trust" in html
     assert "Audit / Compliance" in html
@@ -51,6 +54,7 @@ def test_email_lab_html_keeps_js_escape_sequences_and_playbook_panel():
     assert "Open audit mapping" in html
     assert "Open sandbox and IOC detail" in html
     assert "Push Recommendation" in html
+    assert "Target-specific hunt checklist" in html
     assert "Push to SIEM/XDR now" in html
     assert "Already pushed" in html
     assert "Hold push until human review" in html

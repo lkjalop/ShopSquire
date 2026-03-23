@@ -86,6 +86,7 @@ def test_email_security_returns_explainability_card():
     assert isinstance(hunter_leads[0].get("what_to_hunt_next"), list)
     assert isinstance(hunter_leads[0].get("confirmation_signals"), list)
     assert isinstance(hunter_leads[0].get("disproving_signals"), list)
+    assert isinstance(hunter_leads[0].get("target_checklists"), dict)
     gate = evidence.get("pre_agent_gate") or {}
     assert gate.get("artifact_text_untrusted") is True
     assert gate.get("ocr_text_sanitized") is True
@@ -146,8 +147,35 @@ def test_reference_material_is_demoted_below_direct_invoice_findings():
     assert action_policy.get("lane") in {"lane_2_auto_escalate", "lane_3_human_gate"}
     assert any("payment" in str(x).lower() or "baseline" in str(x).lower() for x in (action_policy.get("threshold_reasons") or []))
     structured = ((out.get("evidence_snapshot") or {}).get("structured_findings") or [])
-    assert any((f.get("finding_category") == "contextual_test_artifact") for f in structured)
+    assert any((f.get("finding_category") in {"contextual_test_artifact", "reference_spec_material"}) for f in structured)
     assert all((ranked_item.get("finding_category") != "contextual_test_artifact") for ranked_item in ranked)
+
+
+def test_contextual_only_findings_do_not_emit_threat_hunter_leads():
+    from src.app.security.threat_hunter_leads import build_threat_hunter_leads
+
+    leads = build_threat_hunter_leads(
+        findings=[
+            {
+                "finding_id": "ctx-1",
+                "finding_type": "data_exfiltration_instruction",
+                "evidence_kind": "contextual",
+                "finding_category": "reference_spec_material",
+                "confidence_score": 0.92,
+                "artifact_ref": {"file_name": "shopsquire_testing_guide_comprehensive.md"},
+                "evidence": ["This is only contextual test guidance."],
+                "threat_context": {"pasta_stage": "Actions on Objectives"},
+            }
+        ],
+        evidence_snapshot={
+            "sender_infrastructure": {
+                "originating_geo": {},
+                "related_incidents": {"count": 0, "matches": []},
+                "reputation": {"flags": []},
+            }
+        },
+    )
+    assert leads == []
 
 
 def test_pending_supplier_governance_updates_force_human_gate():

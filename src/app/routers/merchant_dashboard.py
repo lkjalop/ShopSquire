@@ -1152,19 +1152,24 @@ def merchant_email_lab(request: Request):
           function findingDrilldownHtml(f){
             if(!f || typeof f !== 'object') return '';
             const d = f.drilldown || {};
-            if(!d || typeof d !== 'object' || !Object.keys(d).length) return '';
             const evidence = Array.isArray(f.evidence) ? f.evidence.filter(Boolean) : [];
             const mitre = Array.isArray(f.mitre_attack) && f.mitre_attack.length ? f.mitre_attack : (Array.isArray(((f.threat_context||{}).mitre_attack)) ? (f.threat_context||{}).mitre_attack : []);
             const comp = Array.isArray(f.compliance_mapping) ? f.compliance_mapping : [];
             const compRows = comp.map(x => `${x.framework}${Array.isArray(x.controls) && x.controls.length ? `: ${x.controls.join(', ')}` : ''}`);
             const pasta = String(f.pasta_stage || ((f.threat_context||{}).pasta_stage || '')).trim();
             const dread = (f.threat_context || {}).dread || {};
+            const evidencePosture = [
+              `Observed evidence: ${escHtml(String(f.evidence_kind || 'inferred'))}`,
+              `Source: ${escHtml(String(f.source_type || 'policy'))}`,
+              f.finding_category ? `Classification: ${escHtml(String(f.finding_category).replaceAll('_', ' '))}` : null
+            ].filter(Boolean);
             const blocks = [
               `<div><strong>What we found:</strong> ${escHtml(findingToPlainEnglish(f))}</div>`,
-              d.business_risk ? `<div><strong>Why it matters:</strong> ${escHtml(d.business_risk)}</div>` : '',
+              (f.business_outcome || d.business_risk) ? `<div><strong>Why it matters:</strong> ${escHtml(f.business_outcome || d.business_risk)}</div>` : '',
               evidence.length ? `<div><strong>Evidence:</strong>${listHtml(evidence)}</div>` : '',
-              Array.isArray(d.forensic_checks) && d.forensic_checks.length ? `<div><strong>What to investigate next:</strong>${listHtml(d.forensic_checks)}</div>` : '',
+              Array.isArray(f.next_steps) && f.next_steps.length ? `<div><strong>What to investigate next:</strong>${listHtml(f.next_steps)}</div>` : (Array.isArray(d.forensic_checks) && d.forensic_checks.length ? `<div><strong>What to investigate next:</strong>${listHtml(d.forensic_checks)}</div>` : ''),
               d.affected_scope ? `<div><strong>Affected scope:</strong> ${escHtml(d.affected_scope)}</div>` : '',
+              evidencePosture.length ? `<div><strong>Evidence posture:</strong>${listHtml(evidencePosture)}</div>` : '',
               (pasta || mitre.length || compRows.length) ? `<div><strong>Framework mapping:</strong>${listHtml([
                 pasta ? `PASTA: ${pasta}` : null,
                 mitre.length ? `MITRE: ${mitre.join(', ')}` : null,
@@ -1177,11 +1182,13 @@ def merchant_email_lab(request: Request):
               Array.isArray(d.crisis_actions) && d.crisis_actions.length ? `<div><strong>Crisis / comms:</strong>${listHtml(d.crisis_actions)}</div>` : '',
               `<div><strong>Raw technical detail:</strong> ${escHtml(findingContextLine(f) || 'Additional technical context available.')}</div>`
             ].filter(Boolean);
+            if(!blocks.length && !rawBlocks.length) return '';
             return `<details class="finding-drilldown"><summary>Drill down</summary><div class="finding-drilldown-body">${blocks.join('')}${rawBlocks.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${rawBlocks.join('')}</div></details>` : ''}</div></details>`;
           }
           function threatHunterLeadHtml(lead){
             if(!lead || typeof lead !== 'object') return '';
             const stage = String(lead.likely_kill_chain_stage || '').trim();
+            const targetChecklists = lead.target_checklists && typeof lead.target_checklists === 'object' ? lead.target_checklists : {};
             const body = [
               Array.isArray(lead.what_we_observed) && lead.what_we_observed.length ? `<div><strong>What we found:</strong>${listHtml(lead.what_we_observed)}</div>` : '',
               lead.why_it_matters ? `<div><strong>Why it matters:</strong> ${escHtml(String(lead.why_it_matters))}</div>` : '',
@@ -1192,12 +1199,15 @@ def merchant_email_lab(request: Request):
               Array.isArray(lead.push_downstream) && lead.push_downstream.length ? `<div><strong>What to push downstream:</strong>${listHtml(lead.push_downstream)}</div>` : '',
               lead.analyst_guidance ? `<div><strong>Analyst guidance:</strong> ${escHtml(String(lead.analyst_guidance))}</div>` : ''
             ].filter(Boolean);
+            const checklistHtml = Object.keys(targetChecklists).length
+              ? `<details style="margin-top:8px;"><summary>Target-specific hunt checklist</summary><div style="margin-top:8px;">${Object.entries(targetChecklists).map(([target, checks]) => `<div style="margin-bottom:8px;"><strong>${escHtml(String(target))}:</strong>${listHtml(Array.isArray(checks) ? checks : [])}</div>`).join('')}</div></details>`
+              : '';
             const technical = [
               stage ? `Likely next stage: ${stage}` : null,
               Array.isArray(lead.evidence_refs) && lead.evidence_refs.length ? `Evidence refs: ${lead.evidence_refs.join(', ')}` : null,
               lead.business_guidance ? `Scope note: ${lead.business_guidance}` : null
             ].filter(Boolean);
-            return `<details class="finding-drilldown"><summary>${escHtml(String(lead.title || 'Threat hunter lead'))} <span class="pill">${escHtml(String(lead.confidence_band || 'medium'))} confidence</span></summary><div class="finding-drilldown-body">${body.join('')}${technical.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${listHtml(technical)}</div></details>` : ''}</div></details>`;
+            return `<details class="finding-drilldown"><summary>${escHtml(String(lead.title || 'Threat hunter lead'))} <span class="pill">${escHtml(String(lead.confidence_band || 'medium'))} confidence</span></summary><div class="finding-drilldown-body">${body.join('')}${checklistHtml}${technical.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${listHtml(technical)}</div></details>` : ''}</div></details>`;
           }
           function attachmentProvenanceChips(item){
             if(!item || typeof item !== 'object') return '';
@@ -1272,33 +1282,72 @@ def merchant_email_lab(request: Request):
               if(!byAgent[agent]) byAgent[agent] = [];
               byAgent[agent].push(finding);
             }
-            const agentEvidenceLine = (agentName, fallback) => {
+            const agentEvidenceBuckets = (agentName) => {
               const items = Array.isArray(byAgent[agentName]) ? byAgent[agentName] : [];
-              const top = items.slice(0, 2).map(f => findingToPlainEnglish(f)).filter(Boolean);
-              if(top.length){
-                return `${fallback} Evidence: ${top.join(' ')}`;
-              }
-              return fallback;
+              const direct = items.filter(f => String((f||{}).evidence_kind || '') === 'direct').slice(0, 2).map(f => findingToPlainEnglish(f)).filter(Boolean);
+              const inferred = items.filter(f => String((f||{}).evidence_kind || '') !== 'direct' && !['contextual_test_artifact','reference_spec_material','benign_reference_material'].includes(String((f||{}).finding_category || ''))).slice(0, 1).map(f => findingToPlainEnglish(f)).filter(Boolean);
+              const contextual = items.filter(f => ['contextual_test_artifact','reference_spec_material','benign_reference_material'].includes(String((f||{}).finding_category || ''))).slice(0, 1).map(f => findingToPlainEnglish(f)).filter(Boolean);
+              return { direct, inferred, contextual };
             };
-            const agentSummaries = agentRuns.map(r => {
-              const name = String(r.agent_name || 'agent').replaceAll('_', ' ');
-              const mapping = {
-                sender_auth_agent: agentEvidenceLine('sender_auth_agent', 'Sender/Auth Agent: checked whether the sender identity and reply behavior matched a normal supplier message.'),
-                attachment_forensics_agent: agentEvidenceLine('attachment_forensics_agent', 'Attachment Agent: inspected the documents for payment changes, hidden content, or risky instructions.'),
-                baseline_agent: agentEvidenceLine('baseline_agent', 'Baseline Agent: compared the documents against the trusted supplier baseline.'),
-                correlation_agent: agentEvidenceLine('correlation_agent', 'Correlation Agent: checked related incidents and supporting infrastructure context.'),
-                explanation_agent: 'Explanation Agent: turned the evidence into a business-safe summary and next steps.',
-                playbook_agent: agentEvidenceLine('playbook_agent', 'Playbook Agent: selected the safest response steps allowed by policy.')
+            const agentSummaryHtml = agentRuns.map(r => {
+              const agentName = String(r.agent_name || 'agent');
+              const labelMap = {
+                sender_auth_agent: 'Sender/Auth Agent',
+                attachment_forensics_agent: 'Attachment Agent',
+                baseline_agent: 'Baseline Agent',
+                correlation_agent: 'Correlation Agent',
+                explanation_agent: 'Explanation Agent',
+                playbook_agent: 'Playbook Agent',
+                threat_hunter_agent: 'Threat Hunter Agent'
               };
-              return mapping[r.agent_name] || `${name}: agent completed successfully.`;
+              const label = labelMap[agentName] || String(agentName).replaceAll('_', ' ');
+              const buckets = agentEvidenceBuckets(agentName);
+              let directText = buckets.direct[0] || '';
+              let inferredText = buckets.inferred[0] || '';
+              let contextualText = buckets.contextual[0] || '';
+              if(agentName === 'sender_auth_agent'){
+                directText = directText || 'Checked sender identity, reply behavior, and message hygiene against a normal supplier pattern.';
+                inferredText = inferredText || 'Suggested a spoof narrative only where sender trust signals were inconsistent.';
+              } else if(agentName === 'attachment_forensics_agent'){
+                directText = directText || 'Looked for direct payment changes, hidden content, and risky instructions in the attachments.';
+                inferredText = inferredText || 'Only widened the story when extracted content supported a payment or lure hypothesis.';
+              } else if(agentName === 'baseline_agent'){
+                directText = directText || 'Compared the files against known-good supplier layout, logo, and bank-reference expectations.';
+                inferredText = inferredText || 'Raised document-drift meaning only where baseline mismatch was actually observed.';
+              } else if(agentName === 'correlation_agent'){
+                directText = directText || 'Correlated observed sender and artifact signals against related incidents and infrastructure.';
+                inferredText = inferredText || 'Only widened campaign scope when overlap was supported by sender or infrastructure evidence.';
+              } else if(agentName === 'explanation_agent'){
+                directText = directText || 'Turned the strongest evidence into plain-English business outcomes and next steps.';
+                inferredText = inferredText || 'Separated direct evidence, inferred meaning, and contextual material to reduce noise.';
+              } else if(agentName === 'playbook_agent'){
+                directText = directText || 'Mapped the strongest findings to business actions, SOC actions, and gated downstream push steps.';
+                inferredText = inferredText || 'Only added hunting or response guidance when the evidence justified it.';
+              }
+              if(!contextualText) contextualText = 'No contextual-only material materially changed the verdict.';
+              const drilldownBody = [];
+              if(buckets.direct.length > 1) drilldownBody.push(`Additional direct evidence:${listHtml(buckets.direct.slice(1))}`);
+              if(buckets.inferred.length > 1) drilldownBody.push(`Additional inferred meaning:${listHtml(buckets.inferred.slice(1))}`);
+              if(buckets.contextual.length > 1) drilldownBody.push(`Additional context-only items:${listHtml(buckets.contextual.slice(1))}`);
+              return `<div class="finding-drilldown-body" style="margin-bottom:10px; border:1px solid rgba(148,163,184,0.16); border-radius:12px; padding:10px;">
+                <div style="font-weight:600; margin-bottom:6px;">${escHtml(label)}</div>
+                <div><strong>Direct:</strong> ${escHtml(directText)}</div>
+                <div><strong>Inferred:</strong> ${escHtml(inferredText || 'No extra inferred meaning was needed beyond the direct evidence.')}</div>
+                <div><strong>Context only:</strong> ${escHtml(contextualText)}</div>
+                ${drilldownBody.length ? `<details style="margin-top:8px;"><summary>Drill down</summary><div style="margin-top:8px;">${drilldownBody.join('')}</div></details>` : ''}
+              </div>`;
             });
-            const threatHunterSummary = hunterLeads.length
-              ? `Threat Hunter Agent: produced ${hunterLeads.length} evidence-backed lead${hunterLeads.length === 1 ? '' : 's'} for the most likely follow-on checks.`
-              : null;
-            if(threatHunterSummary) agentSummaries.push(threatHunterSummary);
-            sections.push(`<div class="evidence-block"><div class="section-label">What Agents Found</div>${listHtml(
-              agentSummaries.length ? Array.from(new Set(agentSummaries)) : ['5 agents completed successfully.']
-            )}${(gate.artifact_text_untrusted || gate.ocr_text_sanitized || agentRuns.length) ? `<details style="margin-top:8px;"><summary>Agent audit</summary><div style="margin-top:8px;">${listHtml([
+            if(hunterLeads.length){
+              const firstLead = hunterLeads[0] || {};
+              agentSummaryHtml.push(`<div class="finding-drilldown-body" style="margin-bottom:10px; border:1px solid rgba(148,163,184,0.16); border-radius:12px; padding:10px;">
+                <div style="font-weight:600; margin-bottom:6px;">Threat Hunter Agent</div>
+                <div><strong>Direct:</strong> ${escHtml(Array.isArray(firstLead.what_we_observed) && firstLead.what_we_observed.length ? firstLead.what_we_observed[0] : 'No direct artifact or infrastructure lead was strong enough to widen the hunt.')}</div>
+                <div><strong>Inferred:</strong> ${escHtml(firstLead.why_it_matters || 'Used only evidence-backed overlap to suggest likely next checks.')}</div>
+                <div><strong>Context only:</strong> ${escHtml('Did not widen the hunt based on contextual guides, specs, or generator files alone.')}</div>
+                <details style="margin-top:8px;"><summary>Drill down</summary><div style="margin-top:8px;">${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div></details>
+              </div>`);
+            }
+            sections.push(`<div class="evidence-block"><div class="section-label">What Agents Found</div>${agentSummaryHtml.length ? agentSummaryHtml.join('') : '<div class="small" style="color:#94a3b8;">5 agents completed successfully.</div>'}${(gate.artifact_text_untrusted || gate.ocr_text_sanitized || agentRuns.length) ? `<details style="margin-top:8px;"><summary>Agent audit</summary><div style="margin-top:8px;">${listHtml([
               gate.artifact_text_untrusted ? 'Attachment and OCR text were treated as untrusted before model-facing analysis.' : null,
               gate.ocr_text_sanitized ? 'OCR and extracted text were sanitized before explanation and reasoning.' : null,
               gate.blocked_attachment_count!=null ? `Blocked attachments before model access: ${gate.blocked_attachment_count}` : null,
@@ -1312,12 +1361,13 @@ def merchant_email_lab(request: Request):
             sections.push(`<div class="evidence-block"><div class="section-label">Attachments</div>${listHtml(
               atts.length ? atts.map(item => {
                 const labels = [];
+                if(item.attachment_class) labels.push(String(item.attachment_class).replaceAll('_',' '));
                 if(item.supports_sender_claim === false || (Array.isArray(item.brand_supplier_mismatch_signals) && item.brand_supplier_mismatch_signals.length)) labels.push('baseline drift');
                 if(item.bank_fields_present || (Array.isArray(item.suspicious_instructions) && item.suspicious_instructions.some(x => /bank|payment|remittance/i.test(String(x||''))))) labels.push('bank change');
                 if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) labels.push('QR or URL');
-                if(Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||'')))) labels.push('hidden payload');
+                if((item.steg && item.steg.suspicious) || (Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||''))))) labels.push('hidden payload');
                 if(!labels.length) labels.push('review required');
-                return `${item.file_name || 'attachment'}: ${labels.join(', ')}`;
+                return `${item.file_name || 'attachment'}: ${Array.from(new Set(labels)).join(', ')}`;
               }) : ['No attachment evidence was returned.']
             )}</div>`);
             const el = document.getElementById('evidence_sections');
@@ -1345,6 +1395,7 @@ def merchant_email_lab(request: Request):
             owner.push('Check whether finance, procurement, or accounts payable acted on the request.');
             recovery.push('Push indicators and verdict to SIEM or XDR for correlation and case tracking.');
             recovery.push('If a user interacted with the message, review account access and session controls.');
+            const hunterSummary = hunterLeads.slice(0, 3).map(lead => `${String(lead.title || 'Threat hunter lead')}: ${Array.isArray(lead.what_to_hunt_next) ? lead.what_to_hunt_next[0] : ''}`).filter(Boolean);
             const gating = [
               ap.lane ? `${String(ap.lane_label || ap.lane).replaceAll('_',' ')}` : null,
               hg.business_hold_message ? hg.business_hold_message : null,
@@ -1353,16 +1404,16 @@ def merchant_email_lab(request: Request):
             const html = [
               `<div class="evidence-block"><div class="section-label">Human Gate Thresholds</div>${listHtml(gating)}</div>`,
               `<div class="evidence-block"><div class="section-label">Do This Now</div>${listHtml(immediate)}</div>`,
-              hunterLeads.length ? `<details class="evidence-block" style="display:block;"><summary>Threat hunter leads</summary><div style="margin-top:8px;">${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div></details>` : '',
-              `<details class="evidence-block" style="display:block;"><summary>More response options</summary><div style="margin-top:8px;">${listHtml([
+              `<details class="evidence-block" style="display:block;"><summary>Finance and business actions</summary><div style="margin-top:8px;">${listHtml(owner)}</div></details>`,
+              `<details class="evidence-block" style="display:block;"><summary>SOC actions</summary><div style="margin-top:8px;">${listHtml([
                 ...Array.from(new Set(analyst)).slice(0,8),
-                ...owner,
                 ...recovery,
                 Array.isArray(ap.threshold_reasons) && ap.threshold_reasons.length ? `Threshold reasons: ${ap.threshold_reasons.join(' | ')}` : null,
                 Array.isArray(ap.auto_allowed_actions) && ap.auto_allowed_actions.length ? `Auto-allowed: ${ap.auto_allowed_actions.join(', ')}` : null,
                 Array.isArray(ap.human_approval_actions) && ap.human_approval_actions.length ? `Human approval required: ${ap.human_approval_actions.join(', ')}` : null,
                 Array.isArray(ap.blocked_actions) && ap.blocked_actions.length ? `Blocked by policy: ${ap.blocked_actions.join(', ')}` : null
-              ])}</div></details>`
+              ])}</div></details>`,
+              hunterLeads.length ? `<details class="evidence-block" style="display:block;"><summary>Threat hunter leads</summary><div style="margin-top:8px;">${listHtml(hunterSummary)}${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div></details>` : ''
             ];
             document.getElementById('actions_card').style.display = 'block';
             document.getElementById('actions_sections').innerHTML = html.join('');
@@ -1669,10 +1720,11 @@ def merchant_email_lab(request: Request):
               const pdf = item.pdf_forensics || {};
               const sim = item.baseline_similarity || {};
               const summaryTags = [];
+              if(item.attachment_class) summaryTags.push(String(item.attachment_class).replaceAll('_', ' '));
               if(item.supports_sender_claim === false || (Array.isArray(item.brand_supplier_mismatch_signals) && item.brand_supplier_mismatch_signals.length)) summaryTags.push('baseline drift');
               if(item.bank_fields_present || (Array.isArray(item.suspicious_instructions) && item.suspicious_instructions.some(x => /bank|payment|remittance/i.test(String(x||''))))) summaryTags.push('bank change');
               if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) summaryTags.push('QR or URL');
-              if(Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||'')))) summaryTags.push('hidden payload');
+              if((item.steg && item.steg.suspicious) || (Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||''))))) summaryTags.push('hidden payload');
               if(!summaryTags.length) summaryTags.push('review required');
               rows.push(
                 `<div class="attachment-row">
@@ -1680,8 +1732,10 @@ def merchant_email_lab(request: Request):
                     <div><strong>${escHtml(item.file_name || 'attachment')}</strong><div class="small">${escHtml(item.file_type || 'unknown')}</div><div style="margin-top:6px;">${attachmentProvenanceChips(item)}</div></div>
                     <div class="small mono">${escHtml((item.sha256 || '').slice(0,20))}${item.sha256 ? '…' : ''}</div>
                   </div>
-                  <div class="small" style="margin-top:6px;">${escHtml(summaryTags.join(', '))}</div>
+                  <div class="small" style="margin-top:6px;">${escHtml(Array.from(new Set(summaryTags)).join(', '))}</div>
                   <details style="margin-top:8px;"><summary>Attachment detail</summary><div style="margin-top:8px;" class="small">${escHtml(item.text_summary || 'No text extracted from this attachment.')}<div style="margin-top:6px;"><strong>Supports sender claim:</strong> ${escHtml(String(item.supports_sender_claim || 'neutral').replaceAll('_',' '))}</div>${listHtml([
+                    item.attachment_class ? `Attachment class: ${String(item.attachment_class).replaceAll('_',' ')}` : null,
+                    item.authority_level ? `Evidence authority: ${item.authority_level}` : null,
                     item.bank_fields_present ? 'Attachment contains bank or remittance fields.' : null,
                     item.embedded_urls && item.embedded_urls.length ? `Embedded URLs: ${item.embedded_urls.join(', ')}` : null,
                     item.suspicious_instructions && item.suspicious_instructions.length ? item.suspicious_instructions.join(' ') : null,
@@ -1691,7 +1745,9 @@ def merchant_email_lab(request: Request):
                     (pdf.embedded_files_count||0) > 0 ? `Embedded files: ${pdf.embedded_files_count}` : null,
                     (pdf.object_stream_count||0) > 0 ? `Object streams: ${pdf.object_stream_count}` : null,
                     sim.template_aligned === false ? 'Template similarity check failed against the baseline.' : null,
-                    sim.logo_layout_aligned === false ? 'Logo or layout similarity check failed against the baseline.' : null
+                    sim.logo_layout_aligned === false ? 'Logo or layout similarity check failed against the baseline.' : null,
+                    sim.known_good_template_hash ? `Known-good template hash: ${sim.known_good_template_hash}` : null,
+                    sim.known_good_bank_fingerprint ? `Known-good bank fingerprint: ${sim.known_good_bank_fingerprint}` : null
                   ])}</div></details>
                 </div>`
               );

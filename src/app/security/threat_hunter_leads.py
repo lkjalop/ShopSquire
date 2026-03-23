@@ -38,6 +38,7 @@ def _build_lead(
     llm_guidance: str | None = None,
     business_guidance: str | None = None,
     evidence_refs: List[str] | None = None,
+    target_checklists: Dict[str, List[str]] | None = None,
 ) -> Dict[str, Any]:
     confidence = round(float(confidence_score), 4)
     row: Dict[str, Any] = {
@@ -57,8 +58,25 @@ def _build_lead(
         "business_guidance": business_guidance or why_it_matters,
         "analyst_guidance": llm_guidance or "",
         "evidence_refs": _clean_lines(evidence_refs or [], limit=6),
+        "target_checklists": {str(k): _clean_lines(v) for k, v in (target_checklists or {}).items() if _clean_lines(v)},
     }
     return row
+
+
+def _is_contextual_category(category: str) -> bool:
+    return str(category or "").strip().lower() in {
+        "contextual_test_artifact",
+        "reference_spec_material",
+        "benign_reference_material",
+    }
+
+
+def _finding_is_direct_hunt_evidence(finding: Dict[str, Any]) -> bool:
+    if not isinstance(finding, dict):
+        return False
+    if _is_contextual_category(str(finding.get("finding_category") or "")):
+        return False
+    return str(finding.get("evidence_kind") or "").strip().lower() == "direct"
 
 
 def build_threat_hunter_leads(
@@ -104,6 +122,8 @@ def build_threat_hunter_leads(
         finding = by_type.get(ftype)
         if not finding:
             continue
+        if not _finding_is_direct_hunt_evidence(finding):
+            continue
         score = float(finding.get("confidence_score") or 0.0)
         evidence_lines = evidence_for(finding)
         if ftype == "c2_beacon_pattern":
@@ -133,6 +153,20 @@ def build_threat_hunter_leads(
                     llm_guidance=f"{llm_summary} Hunt for the same callback pattern only on hosts that interacted with the artifact." if llm_summary else "",
                     business_guidance="Use this as a focused hunting lead, not proof of compromise.",
                     evidence_refs=[str(finding.get("finding_id") or "")],
+                    target_checklists={
+                        "XDR": [
+                            "Search for repeated outbound connections from the same host or user after artifact interaction.",
+                            "Look for matching browser, parent process, JA3, SNI, or network session telemetry.",
+                        ],
+                        "DNS/proxy": [
+                            "Review repeated DNS lookups, proxy hits, or low-volume callbacks to the same destination.",
+                            "Check whether CDN or SWG logs show the same path or timing pattern.",
+                        ],
+                        "eBPF/network": [
+                            "Inspect socket-connect, DNS, and repeated beacon-like intervals on the affected endpoint.",
+                            "Correlate process-to-network events with the callback destination if endpoint telemetry exists.",
+                        ],
+                    },
                 )
             )
         elif ftype == "lolbin_command_sequence":
@@ -162,6 +196,18 @@ def build_threat_hunter_leads(
                     llm_guidance=f"{llm_summary} Focus on parent-child execution chains before broad containment." if llm_summary else "",
                     business_guidance="This lead is strongest when paired with endpoint process or network evidence.",
                     evidence_refs=[str(finding.get("finding_id") or "")],
+                    target_checklists={
+                        "XDR": [
+                            "Review parent-child process chains from Office, Outlook, browser, or image-handling apps into LOLBins.",
+                            "Check for encoded PowerShell, certutil, mshta, rundll32, regsvr32, bitsadmin, wscript, or cscript activity.",
+                        ],
+                        "DNS/proxy": [
+                            "Look for follow-on payload fetches or suspicious domains immediately after LOLBin execution.",
+                        ],
+                        "eBPF/network": [
+                            "Inspect exec, file-write, and outbound connect telemetry tied to LOLBin processes.",
+                        ],
+                    },
                 )
             )
         elif ftype == "data_exfiltration_instruction":
@@ -191,6 +237,22 @@ def build_threat_hunter_leads(
                     llm_guidance=f"{llm_summary} Treat this as a targeted hunt for staging and transfer signals, not a confirmed breach." if llm_summary else "",
                     business_guidance="Use confirmation signals to decide whether this stays a lead or becomes a breach investigation.",
                     evidence_refs=[str(finding.get("finding_id") or "")],
+                    target_checklists={
+                        "XDR": [
+                            "Check for archive creation, staging directories, browser uploads, curl, wget, scp, or rclone activity.",
+                            "Review endpoint file reads followed by network sends or sync-client activity.",
+                        ],
+                        "CASB/DLP": [
+                            "Look for unusual SaaS uploads, policy hits, data-loss alerts, or cloud-share activity tied to the same user.",
+                            "Review bulk read, download, or share events in cloud storage and collaboration platforms.",
+                        ],
+                        "DNS/proxy": [
+                            "Inspect uploads or unusual POST traffic to external destinations after the artifact was handled.",
+                        ],
+                        "eBPF/network": [
+                            "Correlate file access, archive creation, and outbound connections on the same host.",
+                        ],
+                    },
                 )
             )
         elif ftype == "prompt_injection_hidden":
@@ -220,6 +282,20 @@ def build_threat_hunter_leads(
                     llm_guidance=f"{llm_summary} Keep the hunt limited to workflows that actually ingested the artifact." if llm_summary else "",
                     business_guidance="This is a lead for AI workflow review, not proof that a model was compromised.",
                     evidence_refs=[str(finding.get("finding_id") or "")],
+                    target_checklists={
+                        "XDR": [
+                            "Only check endpoint telemetry if the artifact also triggered execution or network signals.",
+                        ],
+                        "CASB/DLP": [
+                            "Review agent outputs and connector actions for unexpected data movement or leakage.",
+                        ],
+                        "DNS/proxy": [
+                            "Check whether the artifact source or linked destination entered automated retrieval or connector flows.",
+                        ],
+                        "eBPF/network": [
+                            "Only inspect endpoint or service-level network telemetry if the workflow actually consumed the artifact.",
+                        ],
+                    },
                 )
             )
         elif ftype == "ssn_leakage_linked_qr":
@@ -249,6 +325,18 @@ def build_threat_hunter_leads(
                     llm_guidance=f"{llm_summary} Treat this as a privacy-scoping lead first, then escalate to incident response if access is confirmed." if llm_summary else "",
                     business_guidance="This is strongest as a privacy and exposure-scoping lead, not a claim about attacker identity.",
                     evidence_refs=[str(finding.get("finding_id") or "")],
+                    target_checklists={
+                        "CASB/DLP": [
+                            "Review privacy, DLP, and SaaS audit logs for downloads, shares, or public-link access tied to the QR destination.",
+                            "Check for policy gaps in RBAC, ABAC, object permissions, or public-link controls.",
+                        ],
+                        "DNS/proxy": [
+                            "Inspect browser and proxy logs for accesses to the QR-linked domain and downstream redirects.",
+                        ],
+                        "XDR": [
+                            "Correlate browser activity with identity and endpoint telemetry for the same user if the link was opened.",
+                        ],
+                    },
                 )
             )
 
@@ -291,6 +379,20 @@ def build_threat_hunter_leads(
                 llm_guidance=f"{llm_summary} Focus the hunt on overlapping sender, reply, URL, and supplier signals." if llm_summary else "",
                 business_guidance="Use this to decide whether to broaden the search to campaign scope.",
                 evidence_refs=[str(m.get("incident_id") or "") for m in (rel.get("matches") or []) if isinstance(m, dict)],
+                target_checklists={
+                    "XDR": [
+                        "Search for the same sender domain, reply domain, bank details, or URLs across endpoint and case telemetry.",
+                    ],
+                    "DNS/proxy": [
+                        "Look for repeated destination overlap, proxy hits, and DNS lookups tied to the same supplier context.",
+                    ],
+                    "CASB/DLP": [
+                        "Review whether the same identities or suppliers also triggered SaaS, sharing, or data-movement alerts.",
+                    ],
+                    "eBPF/network": [
+                        "Use host-level connect telemetry only on systems tied to the overlapped users or incidents.",
+                    ],
+                },
             )
         )
 
