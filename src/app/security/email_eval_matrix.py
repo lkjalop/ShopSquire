@@ -116,10 +116,21 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _load_redteam_matrix() -> Dict[str, Any]:
+    path = _repo_root() / "config" / "security" / "email_redteam_matrix.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def _default_fixture_paths() -> Dict[str, Path]:
     root = _repo_root()
     return {
         "email2_dir": root / "dump" / "email-2" / "files",
+        "email_dir": root / "dump" / "email",
         "ingram_fake_pdf": root / "dump" / "IngramFake_March2026_Catalog.pdf",
         "ingram_real_pdf": root / "dump" / "IngramTech_March_Catalog.pdf",
     }
@@ -211,6 +222,12 @@ def _file_result(verdict: Dict[str, Any], file_name: str) -> Dict[str, Any]:
         f for f in findings
         if str(((f.get("artifact_ref") or {}).get("file_name") or "")).lower() == file_name.lower()
     ]
+    if not per_file and str(file_name).lower().endswith(".eml"):
+        per_file = [
+            f for f in findings
+            if not str(((f.get("artifact_ref") or {}).get("file_name") or "")).strip()
+            and str(f.get("agent_origin") or "") in {"sender_auth_agent", "correlation_agent", "playbook_agent"}
+        ]
     categories = sorted({str(f.get("finding_category") or "") for f in per_file if str(f.get("finding_category") or "").strip()})
     return {
         "file_name": file_name,
@@ -245,9 +262,79 @@ def _case_report(case_id: str, verdict: Dict[str, Any], files: Iterable[str]) ->
     }
 
 
+def _resolve_matrix_root(matrix: Dict[str, Any], paths: Dict[str, Path]) -> Path | None:
+    roots = [Path(_repo_root() / str(p)) for p in (matrix.get("fixture_roots") or [])]
+    for root in roots:
+        if root.exists():
+            return root
+    for key in ("email_dir", "email2_dir"):
+        candidate = paths.get(key)
+        if candidate and candidate.exists():
+            return candidate
+    return None
+
+
+def _build_matrix_case(case_cfg: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
+    eml_name = str(case_cfg.get("eml") or "").strip()
+    if not eml_name:
+        raise ValueError("matrix_case_missing_eml")
+    email = _parse_eml_to_email_dict((base_dir / eml_name).read_bytes())
+    attachments = [a for a in (email.get("attachments") or []) if isinstance(a, dict)]
+    for name in case_cfg.get("attachments") or []:
+        p = base_dir / str(name)
+        if p.exists():
+            attachments.append(_load_attachment(p))
+    email["attachments"] = attachments
+    return email
+
+
+def _evaluate_matrix_expectations(case_cfg: Dict[str, Any], case_report: Dict[str, Any]) -> Dict[str, Any]:
+    expected = case_cfg.get("expected") if isinstance(case_cfg.get("expected"), dict) else {}
+    top = case_report.get("top_ranked_findings") or []
+    top_types = {str(row.get("finding_type") or "") for row in top if isinstance(row, dict)}
+    top_artifacts = {str(row.get("artifact") or "") for row in top if isinstance(row, dict)}
+    file_matrix = {str(row.get("file_name") or ""): row for row in (case_report.get("file_matrix") or []) if isinstance(row, dict)}
+    checks: List[Dict[str, Any]] = []
+
+    route_ok = not expected.get("route_in") or str(case_report.get("route") or "") in set(expected.get("route_in") or [])
+    checks.append({"check": "route_in", "status": "pass" if route_ok else "fail", "observed": case_report.get("route"), "expected": expected.get("route_in")})
+
+    sev_ok = not expected.get("severity_in") or str(case_report.get("severity") or "") in set(expected.get("severity_in") or [])
+    checks.append({"check": "severity_in", "status": "pass" if sev_ok else "fail", "observed": case_report.get("severity"), "expected": expected.get("severity_in")})
+
+    top_type_ok = not expected.get("top_finding_types_any") or bool(top_types.intersection(set(expected.get("top_finding_types_any") or [])))
+    checks.append({"check": "top_finding_types_any", "status": "pass" if top_type_ok else "fail", "observed": sorted(top_types), "expected": expected.get("top_finding_types_any")})
+
+    top_artifact_ok = not expected.get("top_artifacts_any") or bool(top_artifacts.intersection(set(expected.get("top_artifacts_any") or [])))
+    checks.append({"check": "top_artifacts_any", "status": "pass" if top_artifact_ok else "fail", "observed": sorted(top_artifacts), "expected": expected.get("top_artifacts_any")})
+
+    for row in expected.get("required_file_expectations") or []:
+        artifact = str(row.get("artifact") or "")
+        observed = file_matrix.get(artifact) or {}
+        status = "pass" if observed.get("status") == "pass" else "fail"
+        checks.append(
+            {
+                "check": f"artifact::{artifact}",
+                "status": status,
+                "observed": {
+                    "finding_count": observed.get("finding_count"),
+                    "categories": observed.get("categories"),
+                    "top_findings": observed.get("top_findings"),
+                },
+                "expected_detection": row.get("expected_detection"),
+                "inspect_ui": row.get("inspect_ui") or [],
+                "pass_if": row.get("pass_if") or [],
+            }
+        )
+
+    overall = "pass" if all(str(c.get("status")) == "pass" for c in checks) else "fail"
+    return {"status": overall, "checks": checks}
+
+
 def build_evaluation_report() -> Dict[str, Any]:
     paths = _default_fixture_paths()
     email2_dir = paths["email2_dir"]
+    email_dir = paths["email_dir"]
     ingram_real = paths["ingram_real_pdf"]
     ingram_fake = paths["ingram_fake_pdf"]
     cases: List[Dict[str, Any]] = []
@@ -266,6 +353,29 @@ def build_evaluation_report() -> Dict[str, Any]:
             geo_verdict = evaluate_email_security(geo_case, tenant_id="tenant-eval-geo")
             cases.append(_case_report(f"ingram_pdf_pair_geo_{ip.replace('.', '_')}", geo_verdict, [ingram_real.name, ingram_fake.name]))
 
+    redteam_matrix = _load_redteam_matrix()
+    matrix_reports: List[Dict[str, Any]] = []
+    matrix_root = _resolve_matrix_root(redteam_matrix, paths)
+    if matrix_root:
+        for case_cfg in redteam_matrix.get("cases") or []:
+            try:
+                email = _build_matrix_case(case_cfg, matrix_root)
+                verdict = evaluate_email_security(email, tenant_id=str(case_cfg.get("tenant_id") or "tenant-redteam-matrix"))
+                files = [str(case_cfg.get("eml") or "")] + [str(x) for x in (case_cfg.get("attachments") or [])]
+                report = _case_report(str(case_cfg.get("case_id") or "matrix_case"), verdict, files)
+                report["matrix_assertions"] = _evaluate_matrix_expectations(case_cfg, report)
+                matrix_reports.append(report)
+            except Exception as exc:
+                matrix_reports.append(
+                    {
+                        "case_id": str(case_cfg.get("case_id") or "matrix_case"),
+                        "matrix_assertions": {
+                            "status": "fail",
+                            "checks": [{"check": "case_build", "status": "fail", "observed": str(exc)}],
+                        },
+                    }
+                )
+
     summary = {
         "case_count": len(cases),
         "cases_with_errors": sum(1 for c in cases if c.get("severity") == "error"),
@@ -274,8 +384,10 @@ def build_evaluation_report() -> Dict[str, Any]:
             for c in cases
             if any(v.get("vector") == "payment_diversion" and v.get("status") == "pass" for v in (c.get("threat_vector_matrix") or []))
         ),
+        "redteam_case_count": len(matrix_reports),
+        "redteam_cases_passing": sum(1 for c in matrix_reports if str((c.get("matrix_assertions") or {}).get("status") or "") == "pass"),
     }
-    return {"summary": summary, "cases": cases}
+    return {"summary": summary, "cases": cases, "redteam_matrix": {"matrix_version": redteam_matrix.get("matrix_version"), "cases": matrix_reports}}
 
 
 def write_evaluation_report(report: Dict[str, Any], out_path: Path) -> Path:

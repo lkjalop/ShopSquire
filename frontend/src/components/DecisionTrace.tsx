@@ -878,6 +878,47 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return mapping[findingType] || `${formatDisplayText(findingType, 'Security finding detected')}.`;
   }
 
+  function buildSecurityAgentBriefs() {
+    const payloadFindings: any[] = triageItems.flatMap((item: any) => item?.security?.payload_findings || item?.payload_findings || []);
+    const threatHunterLeads: any[] = triageItems.flatMap((item: any) => item?.security?.threat_hunter_leads || item?.threat_hunter_leads || []);
+    const payloadAnalysis = triageItems[0]?.security?.payload_analysis || triageItems[0]?.payload_analysis || {};
+    const sigs = triageItems[0]?.security?.signals || triageItems[0]?.signals || security?.signals || {};
+    const primaryFinding = payloadFindings[0] || {};
+    const qrDestinationKnown = !isMissingValue(qrInfo?.destination_url) || !isMissingValue(qrInfo?.final_url);
+    const correlationSeen = !isMissingValue(qrInfo?.intel_risk) || !isMissingValue(qrInfo?.reputation_verdict) || qrDestinationKnown;
+    const agentRows = [
+      {
+        label: 'Payload Agent',
+        direct: sigs.qr_code_detected ? 'Decoded QR content or hidden payload content was inspected.' : 'No direct QR or hidden payload content was observed.',
+        inferred: payloadFindings.length ? summarizeSecurityFindingType(String(primaryFinding.finding_type || '')) : 'No stronger payload hypothesis was needed.',
+        contextual: 'Did not widen the verdict using narrative or contextual text alone.',
+        detail: payloadFindings.length > 1 ? payloadFindings.slice(1).map((finding: any) => summarizeSecurityFindingType(String(finding?.finding_type || ''))) : [],
+      },
+      {
+        label: 'Correlation Agent',
+        direct: correlationSeen ? 'Checked QR destination reputation and linked-artifact context against supporting telemetry.' : 'No stronger infrastructure overlap was observed.',
+        inferred: correlationSeen ? 'Only widened the incident story when destination or reputation overlap was present.' : 'No extra correlation lead was justified.',
+        contextual: 'Did not escalate based on missing or placeholder enrichment values.',
+        detail: [],
+      },
+      {
+        label: 'Threat Hunter Agent',
+        direct: threatHunterLeads.length ? formatDisplayText(threatHunterLeads[0]?.what_we_observed?.[0], 'Evidence-backed hunt lead available.') : 'No direct artifact or infrastructure lead was strong enough to widen the hunt.',
+        inferred: threatHunterLeads.length ? formatDisplayText(threatHunterLeads[0]?.why_it_matters, 'Used only evidence-backed overlap to suggest likely next checks.') : 'No hunt lead was emitted without direct evidence or real overlap.',
+        contextual: 'Did not widen the hunt using contextual guides, specs, or generator files alone.',
+        detail: [],
+      },
+      {
+        label: 'Playbook Agent',
+        direct: playbookPreview ? `Recommended ${formatDisplayText(playbookData?.title || playbookData?.id || 'response playbook')}.` : 'No response playbook was attached.',
+        inferred: 'Mapped the evidence to next steps only after policy and severity were known.',
+        contextual: 'Did not add response actions from low-authority context alone.',
+        detail: [],
+      },
+    ];
+    return agentRows;
+  }
+
   function getSecurityIncidentBrief() {
     const payloadFindings: any[] = triageItems.flatMap((item: any) => item?.security?.payload_findings || item?.payload_findings || []);
     const threatHunterLeads: any[] = triageItems.flatMap((item: any) => item?.security?.threat_hunter_leads || item?.threat_hunter_leads || []);
@@ -899,13 +940,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       qrInfo?.reputation_verdict && qrInfo.reputation_verdict !== 'benign' ? `QR reputation is ${formatDisplayText(qrInfo.reputation_verdict)}.` : null,
       primaryFinding.business_risk ? summarizeSecurityFindingType(primaryFinding.finding_type || '') : null,
     ].filter(Boolean) as string[];
-    const agentFindings = [
-      sigs.qr_code_detected ? 'Payload Agent: decoded QR content was inspected.' : null,
-      payloadFindings.length ? `Security Agent: ${summarizeSecurityFindingType(String(primaryFinding.finding_type || ''))}` : null,
-      !isMissingValue(qrInfo?.intel_risk) || !isMissingValue(qrInfo?.reputation_verdict) ? 'Correlation Agent: QR destination reputation and linked artifact context were checked.' : null,
-      threatHunterLeads.length ? `Threat Hunter Agent: ${formatDisplayText(threatHunterLeads[0]?.title, 'Evidence-backed hunting lead generated')}.` : null,
-      playbookPreview ? `Playbook Agent: ${formatDisplayText(playbookData?.title || playbookData?.id || 'response playbook')} is recommended.` : null,
-    ].filter(Boolean) as string[];
+    const agentBriefs = buildSecurityAgentBriefs();
     const businessImpact = primaryFinding.business_risk
       || (payloadAnalysis.attack_hypothesis === 'pii_data_exfil_via_qr'
         ? 'Sensitive identity data could be exposed or redirected outside approved channels.'
@@ -923,7 +958,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return {
       decision: `${decision} - ${severity} confidence`,
       triggers: Array.from(new Set(triggers)).slice(0, 3),
-      agentFindings: Array.from(new Set(agentFindings)).slice(0, 4),
+      agentBriefs,
       businessImpact,
       actions,
       pushRecommendation,
@@ -1948,9 +1983,24 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             </div>
                             <div className={styles.briefCard}>
                               <div className={styles.briefTitle}>What Agents Found</div>
-                              <ul className={styles.actionList}>
-                                {incident.agentFindings.map((item, idx) => <li key={`agent-${idx}`}>{item}</li>)}
-                              </ul>
+                              <div className={styles.agentBriefStack}>
+                                {(incident.agentBriefs || []).map((agent: any, idx: number) => (
+                                  <details key={`agent-${idx}`} className={styles.detailSection}>
+                                    <summary className={styles.detailToggle}>{formatDisplayText(agent?.label, 'Agent')}</summary>
+                                    <div className={styles.detailBody}>
+                                      <div className={styles.kvRow}><span>Direct</span><span>{formatDisplayText(agent?.direct, 'Not observed')}</span></div>
+                                      <div className={styles.kvRow}><span>Inferred</span><span>{formatDisplayText(agent?.inferred, 'Not available')}</span></div>
+                                      <div className={styles.kvRow}><span>Context only</span><span>{formatDisplayText(agent?.contextual, 'Not available')}</span></div>
+                                      {Array.isArray(agent?.detail) && agent.detail.length ? (
+                                        <>
+                                          <div className={styles.sectionTitle}>Drill Down</div>
+                                          <ul className={styles.playbookList}>{agent.detail.map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
+                                        </>
+                                      ) : null}
+                                    </div>
+                                  </details>
+                                ))}
+                              </div>
                             </div>
                             <div className={styles.briefCard}>
                               <div className={styles.briefTitle}>What To Do Now</div>
@@ -2077,6 +2127,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 <ul className={styles.playbookList}>{(lead?.what_to_hunt_next || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
                                 <div className={styles.sectionTitle}>Where To Check</div>
                                 <ul className={styles.playbookList}>{(lead?.where_to_check || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
+                                {lead?.target_checklists && Object.keys(lead.target_checklists).length > 0 ? (
+                                  <>
+                                    <div className={styles.sectionTitle}>Target-specific hunt checklist</div>
+                                    {Object.entries(lead.target_checklists).map(([target, checks]: any, i: number) => (
+                                      <div key={`target-${i}`}>
+                                        <div className={styles.kvRow}><span>{formatDisplayText(target, 'Target')}</span><span></span></div>
+                                        <ul className={styles.playbookList}>{(Array.isArray(checks) ? checks : []).map((item: string, j: number) => <li key={j}>{item}</li>)}</ul>
+                                      </div>
+                                    ))}
+                                  </>
+                                ) : null}
                                 <div className={styles.sectionTitle}>What Would Confirm It</div>
                                 <ul className={styles.playbookList}>{(lead?.confirmation_signals || []).map((item: string, i: number) => <li key={i}>{item}</li>)}</ul>
                                 <div className={styles.sectionTitle}>What Would Weaken It</div>

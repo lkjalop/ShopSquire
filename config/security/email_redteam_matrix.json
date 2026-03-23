@@ -1,0 +1,102 @@
+{
+  "matrix_version": "email_redteam_matrix.v1",
+  "fixture_roots": [
+    "dump/email",
+    "dump/email-2/files"
+  ],
+  "cases": [
+    {
+      "case_id": "supplier_invoice_mixed_pack",
+      "eml": "BEC-02_compromised_supplier_email.eml",
+      "tenant_id": "tenant-redteam-matrix",
+      "attachments": [
+        "BEC-04_macro_invoice_specification.md",
+        "EXECUTIVE_SUMMARY.md",
+        "generate_adversarial_invoices.py",
+        "invoice_adv_dct.png",
+        "invoice_adv_fgsm.png",
+        "invoice_adv_FULL_COMBO.png",
+        "invoice_adv_logo.png",
+        "invoice_adv_subtle.png",
+        "invoice_baseline.png",
+        "shopsquire_invoice_test_scenarios.md",
+        "shopsquire_testing_guide_comprehensive.md"
+      ],
+      "expected": {
+        "route_in": [
+          "security_review",
+          "block"
+        ],
+        "severity_in": [
+          "error",
+          "warning"
+        ],
+        "top_finding_types_any": [
+          "bank_detail_change",
+          "payment_change_request"
+        ],
+        "top_artifacts_any": [
+          "invoice_adv_FULL_COMBO.png",
+          "invoice_adv_dct.png",
+          "invoice_adv_fgsm.png",
+          "invoice_adv_logo.png",
+          "invoice_adv_subtle.png",
+          "invoice_baseline.png"
+        ],
+        "required_file_expectations": [
+          {
+            "artifact": "BEC-02_compromised_supplier_email.eml",
+            "inspect_ui": [
+              "Decision",
+              "What Triggered It",
+              "What Agents Found",
+              "Human Gate",
+              "Top Ranked Evidence"
+            ],
+            "pass_if": [
+              "route is security_review or stricter",
+              "payment-change reasoning is visible"
+            ]
+          },
+          {
+            "artifact": "invoice_adv_FULL_COMBO.png",
+            "expected_detection": "direct payment lure",
+            "inspect_ui": [
+              "Top Ranked Evidence",
+              "Attachment Forensics",
+              "Drill down"
+            ],
+            "pass_if": [
+              "top finding comes from this file or another invoice_adv_* image",
+              "finding category is active_payment_lure"
+            ]
+          },
+          {
+            "artifact": "BEC-04_macro_invoice_specification.md",
+            "expected_detection": "context only",
+            "inspect_ui": [
+              "Attachment detail",
+              "Top Ranked Evidence"
+            ],
+            "pass_if": [
+              "classified as reference_spec_material",
+              "not promoted above direct invoice findings"
+            ]
+          },
+          {
+            "artifact": "generate_adversarial_invoices.py",
+            "expected_detection": "context only",
+            "inspect_ui": [
+              "Attachment detail",
+              "Top Ranked Evidence"
+            ],
+            "pass_if": [
+              "classified as contextual_test_artifact",
+              "not promoted above direct invoice findings"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -5,7 +5,7 @@ from src.app.security.email_eval_matrix import build_evaluation_report
 
 def test_email_eval_matrix_builds_expected_cases_when_fixtures_present():
     root = Path(__file__).resolve().parents[2]
-    if not (root / "dump" / "email-2" / "files").exists():
+    if not ((root / "dump" / "email-2" / "files").exists() or (root / "dump" / "email").exists()):
         return
 
     report = build_evaluation_report()
@@ -34,3 +34,14 @@ def test_email_eval_matrix_builds_expected_cases_when_fixtures_present():
             for a in (ingram.get("agent_matrix") or [])
             if isinstance(a, dict)
         )
+
+    redteam = report.get("redteam_matrix") or {}
+    assert isinstance(redteam, dict)
+    assert redteam.get("matrix_version") in {"email_redteam_matrix.v1", None}
+    redteam_cases = redteam.get("cases") or []
+    if redteam_cases:
+        first = redteam_cases[0]
+        assertions = first.get("matrix_assertions") or {}
+        assert assertions.get("status") in {"pass", "fail"}
+        checks = assertions.get("checks") or []
+        assert isinstance(checks, list) and checks
