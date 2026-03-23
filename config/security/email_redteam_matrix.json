@@ -6,6 +6,51 @@
   ],
   "cases": [
     {
+      "case_id": "safe_supplier_demo_pack",
+      "eml": "BEC-02_compromised_supplier_email.eml",
+      "tenant_id": "tenant-safe-demo-matrix",
+      "artifact_roots": [
+        "dump/email",
+        "dump"
+      ],
+      "attachments": [
+        "invoice_adv_FULL_COMBO.png",
+        "IngramTech_March_Catalog.pdf"
+      ],
+      "expected": {
+        "route_in": [
+          "security_review",
+          "block"
+        ],
+        "severity_in": [
+          "error",
+          "warning"
+        ],
+        "top_finding_types_any": [
+          "bank_detail_change",
+          "payment_change_request"
+        ],
+        "top_artifacts_any": [
+          "invoice_adv_FULL_COMBO.png"
+        ],
+        "require_hunter_leads": true,
+        "required_file_expectations": [
+          {
+            "artifact": "IngramTech_March_Catalog.pdf",
+            "expected_detection": "benign baseline control",
+            "inspect_ui": [
+              "Attachment detail",
+              "Supplier Baseline Diff"
+            ],
+            "pass_if": [
+              "not promoted above the malicious invoice image",
+              "supports a cleaner demo baseline story"
+            ]
+          }
+        ]
+      }
+    },
+    {
       "case_id": "supplier_invoice_mixed_pack",
       "eml": "BEC-02_compromised_supplier_email.eml",
       "tenant_id": "tenant-redteam-matrix",
@@ -93,6 +138,153 @@
             "pass_if": [
               "classified as contextual_test_artifact",
               "not promoted above direct invoice findings"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "macro_fileless_context_lane",
+      "tenant_id": "tenant-redteam-macro-lane",
+      "artifact_roots": [
+        "dump/email"
+      ],
+      "email": {
+        "from_addr": "accounts@ingramfake.com.au",
+        "reply_to": "accounts@ingramfake.com.au",
+        "subject": "Macro specification review",
+        "body": "Please review the attached specification.",
+        "vendor_domain": "ingramfake.com.au"
+      },
+      "attachments": [
+        "BEC-04_macro_invoice_specification.md",
+        "generate_adversarial_invoices.py"
+      ],
+      "expected": {
+        "route_in": [
+          "review",
+          "security_review",
+          "block"
+        ],
+        "severity_in": [
+          "warning",
+          "error",
+          "info"
+        ],
+        "require_hunter_leads": true,
+        "required_file_expectations": [
+          {
+            "artifact": "BEC-04_macro_invoice_specification.md",
+            "expected_detection": "reference spec material",
+            "inspect_ui": [
+              "Attachment detail",
+              "Top Ranked Evidence"
+            ],
+            "pass_if": [
+              "classified as reference_spec_material"
+            ]
+          },
+          {
+            "artifact": "generate_adversarial_invoices.py",
+            "expected_detection": "contextual test artifact",
+            "inspect_ui": [
+              "Attachment detail",
+              "Top Ranked Evidence"
+            ],
+            "pass_if": [
+              "classified as contextual_test_artifact"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "qr_privacy_lane",
+      "tenant_id": "tenant-redteam-qr-lane",
+      "artifact_roots": [
+        "dump/test-sec"
+      ],
+      "email": {
+        "from_addr": "supplier@example.com",
+        "reply_to": "supplier@example.com",
+        "subject": "QR identity document",
+        "body": "Please review the attached artifact."
+      },
+      "attachments": [
+        "QR-SSN.png"
+      ],
+      "expected": {
+        "route_in": [
+          "security_review",
+          "block",
+          "review",
+          "human_review"
+        ],
+        "severity_in": [
+          "warning",
+          "error"
+        ],
+        "top_finding_types_any": [
+          "ssn_leakage_linked_qr"
+        ],
+        "require_hunter_leads": true,
+        "required_file_expectations": [
+          {
+            "artifact": "QR-SSN.png",
+            "expected_detection": "qr-linked privacy or regulated-data exposure",
+            "inspect_ui": [
+              "Decision",
+              "Threat Hunter Leads",
+              "Attachment detail"
+            ],
+            "pass_if": [
+              "top finding or lead references linked QR privacy exposure"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "hidden_payload_hunter_lane",
+      "tenant_id": "tenant-redteam-hidden-lane",
+      "artifact_roots": [
+        "dump/test-sec"
+      ],
+      "email": {
+        "from_addr": "supplier@example.com",
+        "reply_to": "supplier@example.com",
+        "subject": "Hidden payload artifact",
+        "body": "Please review the attached image."
+      },
+      "attachments": [
+        "steg-c2_beacon_simulation-apple-mac.png"
+      ],
+      "expected": {
+        "route_in": [
+          "security_review",
+          "block",
+          "review",
+          "human_review"
+        ],
+        "severity_in": [
+          "warning",
+          "error"
+        ],
+        "top_finding_types_any": [
+          "c2_beacon_pattern"
+        ],
+        "require_hunter_leads": true,
+        "required_file_expectations": [
+          {
+            "artifact": "steg-c2_beacon_simulation-apple-mac.png",
+            "expected_detection": "hidden command-and-control indicator",
+            "inspect_ui": [
+              "Threat Hunter Leads",
+              "Drill down",
+              "Target-specific hunt checklist"
+            ],
+            "pass_if": [
+              "lead includes network or XDR hunt guidance"
             ]
           }
         ]

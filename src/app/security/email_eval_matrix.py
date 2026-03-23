@@ -126,6 +126,23 @@ def _load_redteam_matrix() -> Dict[str, Any]:
         return {}
 
 
+def _artifact_roots_from_matrix(matrix: Dict[str, Any], paths: Dict[str, Path]) -> List[Path]:
+    roots = [Path(_repo_root() / str(p)) for p in (matrix.get("fixture_roots") or [])]
+    for key in ("email_dir", "email2_dir"):
+        candidate = paths.get(key)
+        if candidate and candidate.exists():
+            roots.append(candidate)
+    seen: set[str] = set()
+    out: List[Path] = []
+    for root in roots:
+        key = str(root.resolve()) if root.exists() else str(root)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(root)
+    return out
+
+
 def _default_fixture_paths() -> Dict[str, Path]:
     root = _repo_root()
     return {
@@ -256,33 +273,39 @@ def _case_report(case_id: str, verdict: Dict[str, Any], files: Iterable[str]) ->
             for f in (evidence.get("top_ranked_findings") or [])[:3]
             if isinstance(f, dict)
         ],
+        "threat_hunter_lead_count": len([x for x in (evidence.get("threat_hunter_leads") or []) if isinstance(x, dict)]),
         "agent_matrix": [_agent_result(verdict, agent) for agent in AGENTS],
         "threat_vector_matrix": [_vector_result(verdict, name, cfg) for name, cfg in THREAT_VECTORS.items()],
         "file_matrix": [_file_result(verdict, name) for name in files],
     }
 
 
-def _resolve_matrix_root(matrix: Dict[str, Any], paths: Dict[str, Path]) -> Path | None:
-    roots = [Path(_repo_root() / str(p)) for p in (matrix.get("fixture_roots") or [])]
+def _resolve_attachment_path(name: str, roots: Iterable[Path]) -> Path | None:
+    needle = str(name or "").strip()
+    if not needle:
+        return None
     for root in roots:
-        if root.exists():
-            return root
-    for key in ("email_dir", "email2_dir"):
-        candidate = paths.get(key)
-        if candidate and candidate.exists():
+        candidate = root / needle
+        if candidate.exists():
             return candidate
     return None
 
 
-def _build_matrix_case(case_cfg: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
+def _build_matrix_case(case_cfg: Dict[str, Any], roots: Iterable[Path]) -> Dict[str, Any]:
     eml_name = str(case_cfg.get("eml") or "").strip()
-    if not eml_name:
-        raise ValueError("matrix_case_missing_eml")
-    email = _parse_eml_to_email_dict((base_dir / eml_name).read_bytes())
+    if eml_name:
+        eml_path = _resolve_attachment_path(eml_name, roots)
+        if not eml_path:
+            raise ValueError(f"matrix_case_missing_eml::{eml_name}")
+        email = _parse_eml_to_email_dict(eml_path.read_bytes())
+    else:
+        email = dict(case_cfg.get("email") or {})
+        if not email:
+            raise ValueError("matrix_case_missing_email")
     attachments = [a for a in (email.get("attachments") or []) if isinstance(a, dict)]
     for name in case_cfg.get("attachments") or []:
-        p = base_dir / str(name)
-        if p.exists():
+        p = _resolve_attachment_path(str(name), roots)
+        if p and p.exists():
             attachments.append(_load_attachment(p))
     email["attachments"] = attachments
     return email
@@ -307,6 +330,12 @@ def _evaluate_matrix_expectations(case_cfg: Dict[str, Any], case_report: Dict[st
 
     top_artifact_ok = not expected.get("top_artifacts_any") or bool(top_artifacts.intersection(set(expected.get("top_artifacts_any") or [])))
     checks.append({"check": "top_artifacts_any", "status": "pass" if top_artifact_ok else "fail", "observed": sorted(top_artifacts), "expected": expected.get("top_artifacts_any")})
+
+    expected_hunter = expected.get("require_hunter_leads")
+    if expected_hunter is not None:
+        observed_hunter = int(case_report.get("threat_hunter_lead_count") or 0)
+        hunter_ok = (observed_hunter > 0) if bool(expected_hunter) else (observed_hunter == 0)
+        checks.append({"check": "require_hunter_leads", "status": "pass" if hunter_ok else "fail", "observed": observed_hunter, "expected": bool(expected_hunter)})
 
     for row in expected.get("required_file_expectations") or []:
         artifact = str(row.get("artifact") or "")
@@ -355,13 +384,15 @@ def build_evaluation_report() -> Dict[str, Any]:
 
     redteam_matrix = _load_redteam_matrix()
     matrix_reports: List[Dict[str, Any]] = []
-    matrix_root = _resolve_matrix_root(redteam_matrix, paths)
-    if matrix_root:
+    matrix_roots = _artifact_roots_from_matrix(redteam_matrix, paths)
+    if matrix_roots:
         for case_cfg in redteam_matrix.get("cases") or []:
             try:
-                email = _build_matrix_case(case_cfg, matrix_root)
+                case_roots = [Path(_repo_root() / str(p)) for p in (case_cfg.get("artifact_roots") or [])]
+                active_roots = [r for r in case_roots if r.exists()] or matrix_roots
+                email = _build_matrix_case(case_cfg, active_roots)
                 verdict = evaluate_email_security(email, tenant_id=str(case_cfg.get("tenant_id") or "tenant-redteam-matrix"))
-                files = [str(case_cfg.get("eml") or "")] + [str(x) for x in (case_cfg.get("attachments") or [])]
+                files = ([str(case_cfg.get("eml") or "")] if case_cfg.get("eml") else []) + [str(x) for x in (case_cfg.get("attachments") or [])]
                 report = _case_report(str(case_cfg.get("case_id") or "matrix_case"), verdict, files)
                 report["matrix_assertions"] = _evaluate_matrix_expectations(case_cfg, report)
                 matrix_reports.append(report)

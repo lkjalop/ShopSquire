@@ -40,8 +40,11 @@ def test_email_eval_matrix_builds_expected_cases_when_fixtures_present():
     assert redteam.get("matrix_version") in {"email_redteam_matrix.v1", None}
     redteam_cases = redteam.get("cases") or []
     if redteam_cases:
-        first = redteam_cases[0]
+        by_case = {str(c.get("case_id") or ""): c for c in redteam_cases if isinstance(c, dict)}
+        assert "supplier_invoice_mixed_pack" in by_case
+        first = by_case["supplier_invoice_mixed_pack"]
         assertions = first.get("matrix_assertions") or {}
         assert assertions.get("status") in {"pass", "fail"}
         checks = assertions.get("checks") or []
         assert isinstance(checks, list) and checks
+        assert any(case_id in by_case for case_id in {"safe_supplier_demo_pack", "qr_privacy_lane", "hidden_payload_hunter_lane", "macro_fileless_context_lane"})

@@ -1,0 +1,23 @@
+{
+  "pack_version": "email_demo_pack.v1",
+  "packs": [
+    {
+      "pack_id": "safe_supplier_demo_pack",
+      "description": "Safer live-demo pack: one suspicious supplier email, one malicious invoice image, and one true benign supplier baseline document.",
+      "eml": "BEC-02_compromised_supplier_email.eml",
+      "artifact_roots": [
+        "dump/email",
+        "dump"
+      ],
+      "attachments": [
+        "invoice_adv_FULL_COMBO.png",
+        "IngramTech_March_Catalog.pdf"
+      ],
+      "notes": [
+        "This pack avoids contextual guides, specs, and generator scripts.",
+        "Use IngramTech_March_Catalog.pdf as the benign supplier baseline control.",
+        "Do not use invoice_baseline.png as a benign control because it already contains updated payment details."
+      ]
+    }
+  ]
+}
