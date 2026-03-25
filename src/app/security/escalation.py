@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -10,12 +11,15 @@ from sqlalchemy import text as sql_text
 
 from src.app.models.db import get_engine
 from src.app.observability.metrics import record_incident_alert
+
+_log = logging.getLogger("shopsquire.security.escalation")
 from src.app.utils.webhook import send_webhook
 from src.app.services.ticketing import TicketingAgent
 from src.app.services.decision_log import log_decision
 from src.app.security.telemetry_emit import emit_security_telemetry
 from src.app.services.security_playbooks import select_playbook, build_evidence_snapshot
 from src.app.models.init_db import ensure_metadata
+from src.app.routers.escalation_room import create_incident_record
 
 
 def _load_webhooks() -> list[str]:
@@ -106,22 +110,59 @@ def _create_incident(event_id: str, severity: str, details: Dict, status: str, e
         desc = json.dumps(details or {}, ensure_ascii=False)
     except Exception:
         desc = str(details)
-    with eng.begin() as conn:
-        conn.execute(
-            sql_text(
-                "INSERT INTO incidents (id, event_id, created_by, severity, title, description, status) "
-                "VALUES (:id, :event_id, :created_by, :severity, :title, :description, :status)"
-            ),
-            {
-                "id": incident_id,
-                "event_id": event_id,
-                "created_by": "system",
-                "severity": severity,
-                "title": title,
-                "description": desc,
-                "status": status,
-            },
+    ticket_id = None
+    customer_tier = None
+    try:
+        if isinstance(details, dict):
+            customer_tier = details.get("customer_tier")
+    except Exception:
+        customer_tier = None
+    # ── Enrich context with DREAD evidence trail ──
+    _incident_context = details if isinstance(details, dict) else {"details": details}
+    try:
+        from src.app.security.dread_scorer import compute_dread
+        _sec_block = _incident_context.get("security") or _incident_context.get("security_analysis") or {}
+        _dread_signals: Dict = {}
+        _cv_signals: Dict = {}
+        if isinstance(_sec_block, dict):
+            _dread_signals = _sec_block.get("signals") or {}
+            _cv_signals = _sec_block.get("cv_signals") or {}
+        elif isinstance(_incident_context.get("signals"), dict):
+            _dread_signals = _incident_context["signals"]
+        if _dread_signals:
+            _dread = compute_dread(
+                signals=_dread_signals,
+                cv_signals=_cv_signals or None,
+                severity=severity,
+                actor_context=_incident_context.get("actor_context") or None,
+            )
+            _incident_context = {**_incident_context, "dread": _dread}
+    except Exception:
+        pass
+    try:
+        incident = create_incident_record(
+            case_id=None,
+            trace_id=event_id,
+            reason=f"security_{status}",
+            context=_incident_context,
+            created_by="system",
+            severity=severity,
+            title=title,
+            dedupe_by_event=True,
         )
+        incident_id = str(incident.get("incident_id") or incident_id)
+    except Exception as _inc_exc:
+        # Incident service is the single authoritative path — do not shadow-insert.
+        # Log the failure so operators can investigate; downstream webhooks/telemetry
+        # still fire so the event is not silently lost.
+        _log.warning(
+            "create_incident_record failed for event_id=%s severity=%s; "
+            "incident NOT persisted via legacy fallback. Error: %s",
+            event_id,
+            severity,
+            str(_inc_exc)[:300],
+        )
+    with eng.begin() as conn:
         if escalated:
             try:
                 conn.execute(
@@ -130,17 +171,8 @@ def _create_incident(event_id: str, severity: str, details: Dict, status: str, e
                 )
             except Exception:
                 pass
-    # Create a ticket (stub) when escalated or queued for review
-    ticket_id = None
-    customer_tier = None
-    try:
-        if isinstance(details, dict):
-            customer_tier = details.get("customer_tier")
-    except Exception:
-        customer_tier = None
     try:
         if escalated or status == "review":
-            # Attempt to pass tenant from details when available
             tenant = details.get("tenant_id") if isinstance(details, dict) else None
             signals = {}
             try:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+import os
+
 from fastapi import APIRouter, HTTPException
 
 from src.app.services.ollama_client import OllamaClient
@@ -11,8 +13,14 @@ from src.app.services.llm_guardrails import LLMGuardrails
 router = APIRouter(prefix="/api/v1/demo", tags=["demo"])
 
 
+def _ensure_demo_enabled() -> None:
+    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=404, detail="demo_routes_disabled")
+
+
 @router.get("/llm_guardrails")
 async def llm_guardrails_demo(prompt: str, expected_format: Optional[str] = "text") -> Dict:
+    _ensure_demo_enabled()
     """Run a simple Ollama generation and validate with guardrails.
 
     Returns blocked/allowed with reason to demonstrate safe-agent behavior.

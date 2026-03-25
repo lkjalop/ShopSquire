@@ -25,34 +25,115 @@ from typing import Any, Dict, List, Tuple
 
 
 # ── Signal → framework tag mappings (for evidence items) ──
+# MITRE ATT&CK + ATLAS (AML.*) mappings — expanded to cover fraud, agentic AI,
+# network-based, and insider-threat signal categories (Oct 2025 ATLAS additions included).
 _SIGNAL_MITRE: Dict[str, str] = {
+    # ── Prompt / Agentic AI (MITRE ATLAS) ──
     "prompt_injection": "AML.T0051",
     "jailbreak": "AML.T0054",
+    "agentic_tool_abuse": "AML.T0040",
+    "training_poisoning": "AML.T0020",
+    "embedding_weakness": "AML.T0043",
+    "context_poisoning": "AML.T0056",       # ATLAS Oct 2025: context window manipulation
+    "memory_manipulation": "AML.T0057",     # ATLAS Oct 2025: long-term memory injection
+    "rag_credential_harvesting": "AML.T0058", # ATLAS Oct 2025: RAG pipeline exfil
+    "agent_goal_hijacking": "AML.T0040",
+    "tool_output_spoofing": "AML.T0040",
+    "model_inversion": "AML.T0024",         # Reconstruct training data
+    "model_extraction": "AML.T0025",        # Steal model parameters via query API
+    "indirect_prompt_injection": "AML.T0051.001",  # Injected via retrieved doc/URL
+    # ── Code / Execution ──
+    "unexpected_code_exec": "T1059",
+    "supply_chain": "T1195",
+    "supply_chain_software": "T1195.002",
+    "supply_chain_dependency": "T1195.001",
+    "malicious_script_injection": "T1059.007",  # JavaScript injection
+    "file_format_abuse": "T1204.002",
+    # ── Credential / Identity ──
+    "identity_abuse": "T1078",
+    "account_takeover": "T1078.003",
+    "credential_stuffing": "T1110.004",
+    "brute_force": "T1110",
+    "social_engineering": "T1566",
+    "phishing": "T1566.001",
+    "spear_phishing_link": "T1566.002",
+    "session_hijack_indicators": "T1563",
+    "session_fixation": "T1563.001",
+    # ── Data / Exfiltration ──
     "data_exfiltration": "T1041",
     "pci": "T1005",
     "pii": "T1005",
-    "agentic_tool_abuse": "AML.T0040",
-    "unexpected_code_exec": "T1059",
-    "training_poisoning": "AML.T0020",
-    "supply_chain": "T1195",
-    "identity_abuse": "T1078",
-    "social_engineering": "T1566",
+    "sensitive_data_exposure": "T1005",
+    "api_data_scraping": "T1213",
+    "email_c2_beaconing": "T1071.003",
+    # ── Obfuscation / Evasion ──
     "unicode_obfuscation": "T1036",
-    "embedding_weakness": "AML.T0043",
+    "encoded_payload": "T1027",
+    "steganography": "T1027.003",
+    "log_tampering": "T1070",
+    "timestomping": "T1070.006",
+    # ── Network / Discovery ──
     "scanner_burst": "T1595",
+    "active_scanning": "T1595.001",
+    "ip_velocity_spike": "T1595.002",
+    "rate_anomaly": "T1595",
+    "port_scan": "T1046",
+    "ip_risk": "T1090",         # Proxy / anonymization
+    "asn_known_proxy_tor": "T1090.003",
+    "geoip_high_risk_country": "T1090.002",
+    # ── Fraud-specific (mapped to closest ATT&CK techniques) ──
+    "serial_mismatch": "T1036.001",     # Masquerading: invalid identifier
+    "image_hash_match_fraud_db": "T1036",
+    "return_pattern_abuse": "T1078.002",  # Valid accounts: abusing legitimate account
+    "chargeback_history": "T1657",      # Financial theft
+    "coupon_stacking_attempt": "T1657",
+    "price_manipulation_attempt": "T1565.001",  # Data manipulation
+    "product_category_mismatch": "T1036",
+    "geographic_anomaly": "T1090",
+    "gnn_ring_risk_high": "T1078.004",  # Cloud accounts / fraud ring
+    # ── Availability / DoS ──
     "cascading_failure": "T1499",
     "model_dos": "T1499",
+    "resource_exhaustion": "T1499.004",
+    # ── Insider Threat / Privilege ──
+    "insider_threat_signal": "T1078.001",
+    "privilege_escalation_attempt": "T1548",
+    "lateral_movement_indicator": "T1021",
 }
 
 _SIGNAL_OWASP: Dict[str, str] = {
+    # OWASP LLM Top 10 2025
     "prompt_injection": "LLM01:PromptInjection",
+    "indirect_prompt_injection": "LLM01:PromptInjection",
     "jailbreak": "LLM01:PromptInjection",
+    "context_poisoning": "LLM01:PromptInjection",
+    "memory_manipulation": "LLM01:PromptInjection",
+    "tool_output_spoofing": "LLM02:InsecureOutputHandling",
+    "unexpected_code_exec": "LLM02:InsecureOutputHandling",
+    "training_poisoning": "LLM03:TrainingDataPoisoning",
+    "model_inversion": "LLM03:TrainingDataPoisoning",
+    "supply_chain": "LLM05:SupplyChainVulnerabilities",
+    "supply_chain_dependency": "LLM05:SupplyChainVulnerabilities",
+    "rag_credential_harvesting": "LLM05:SupplyChainVulnerabilities",
     "data_exfiltration": "LLM06:SensitiveInfoDisclosure",
     "pci": "LLM06:SensitiveInfoDisclosure",
     "pii": "LLM06:SensitiveInfoDisclosure",
+    "sensitive_data_exposure": "LLM06:SensitiveInfoDisclosure",
+    "api_data_scraping": "LLM06:SensitiveInfoDisclosure",
+    "identity_abuse": "LLM07:InsecurePluginDesign",
     "agentic_tool_abuse": "LLM08:ExcessiveAgency",
-    "training_poisoning": "LLM03:TrainingDataPoisoning",
-    "supply_chain": "LLM05:SupplyChainVulnerabilities",
+    "agent_goal_hijacking": "LLM08:ExcessiveAgency",
+    "model_extraction": "LLM09:Overreliance",
+    "embedding_weakness": "LLM09:Overreliance",
+    # OWASP Agentic AI Top 10 Dec 2025
+    "agent_goal_hijacking": "AgentAI01:GoalHijacking",
+    "context_poisoning": "AgentAI02:ContextPoisoning",
+    "memory_manipulation": "AgentAI03:MemoryManipulation",
+    "rag_credential_harvesting": "AgentAI04:RAGDataExfil",
+    "cascading_failure": "AgentAI05:CascadingFailure",
+    "model_dos": "AgentAI05:CascadingFailure",
+    "insider_threat_signal": "AgentAI07:InsiderThreat",
+    "privilege_escalation_attempt": "AgentAI08:PrivilegeEscalation",
 }
 
 _CV_SIGNAL_MITRE: Dict[str, str] = {
@@ -168,8 +249,53 @@ _SIGNAL_KILL_CHAIN: Dict[str, str] = {
     "data_exfiltration": "ActionsOnObjectives",
     "pci": "ActionsOnObjectives",
     "pii": "ActionsOnObjectives",
+    "sensitive_data_exposure": "ActionsOnObjectives",
     "cascading_failure": "ActionsOnObjectives",
     "model_dos": "ActionsOnObjectives",
+    "resource_exhaustion": "ActionsOnObjectives",
+    # New Oct 2025 ATLAS additions
+    "context_poisoning": "Exploitation",
+    "memory_manipulation": "Exploitation",
+    "rag_credential_harvesting": "ActionsOnObjectives",
+    "agent_goal_hijacking": "Installation",
+    "tool_output_spoofing": "Exploitation",
+    "indirect_prompt_injection": "Exploitation",
+    "model_inversion": "ActionsOnObjectives",
+    "model_extraction": "Reconnaissance",
+    # Fraud signals
+    "serial_mismatch": "Delivery",
+    "image_hash_match_fraud_db": "Delivery",
+    "return_pattern_abuse": "ActionsOnObjectives",
+    "chargeback_history": "ActionsOnObjectives",
+    "coupon_stacking_attempt": "ActionsOnObjectives",
+    "price_manipulation_attempt": "Exploitation",
+    "product_category_mismatch": "Delivery",
+    "geographic_anomaly": "Reconnaissance",
+    "gnn_ring_risk_high": "ActionsOnObjectives",
+    "session_hijack_indicators": "Exploitation",
+    "session_fixation": "Exploitation",
+    # Insider / Privilege
+    "insider_threat_signal": "ActionsOnObjectives",
+    "privilege_escalation_attempt": "Exploitation",
+    "lateral_movement_indicator": "Installation",
+    # Network
+    "active_scanning": "Reconnaissance",
+    "ip_velocity_spike": "Reconnaissance",
+    "port_scan": "Reconnaissance",
+    "ip_risk": "Reconnaissance",
+    "asn_known_proxy_tor": "Reconnaissance",
+    "geoip_high_risk_country": "Reconnaissance",
+    "credential_stuffing": "Exploitation",
+    "brute_force": "Exploitation",
+    "account_takeover": "ActionsOnObjectives",
+    "phishing": "Delivery",
+    "spear_phishing_link": "Delivery",
+    "api_data_scraping": "ActionsOnObjectives",
+    # Evasion
+    "encoded_payload": "Weaponization",
+    "steganography": "Weaponization",
+    "log_tampering": "ActionsOnObjectives",
+    "timestomping": "ActionsOnObjectives",
 }
 
 # ── Stage-weighted DREAD component weights (D, R, E, A, Disc.) ──
@@ -421,3 +547,75 @@ def compute_dread(
         )),
         "evidence": evidence,
     }
+
+
+def score_vuln_report(report: Any) -> Dict[str, Any]:
+    """Map vulnerability findings into the DREAD model used elsewhere."""
+    findings: List[Any]
+    try:
+        findings = list(getattr(report, "findings", None) or report.get("findings") or [])
+    except Exception:
+        findings = []
+    try:
+        risk_score = float(getattr(report, "risk_score", None) or report.get("risk_score") or 0.0)
+    except Exception:
+        risk_score = 0.0
+
+    critical = 0
+    high = 0
+    kev_hits = 0
+    semgrep_hits = 0
+    exposure_hits = 0
+    for item in findings:
+        try:
+            severity = str(getattr(item, "severity", None) or item.get("severity") or "").lower()
+        except Exception:
+            severity = ""
+        if severity == "critical":
+            critical += 1
+        elif severity == "high":
+            high += 1
+        try:
+            source = str(getattr(item, "source", None) or item.get("source") or "").lower()
+            if source == "semgrep":
+                semgrep_hits += 1
+        except Exception:
+            pass
+        try:
+            title = str(getattr(item, "title", None) or item.get("title") or "").lower()
+            if "exposure" in title or "directory listing" in title:
+                exposure_hits += 1
+        except Exception:
+            pass
+        try:
+            plain = str(getattr(item, "plain_english", None) or item.get("plain_english") or "")
+            if "known exploited vulnerabilities" in plain.lower():
+                kev_hits += 1
+        except Exception:
+            pass
+
+    severity = "critical" if critical else ("high" if high else ("warn" if findings else "info"))
+    dread = compute_dread(
+        signals={
+            "supply_chain": bool(findings),
+            "unexpected_code_exec": semgrep_hits > 0,
+            "scanner_burst": len(findings) >= 10,
+            "cascading_failure": risk_score >= 7.5 or critical >= 3,
+            "data_exfiltration": exposure_hits > 0,
+        },
+        severity=severity,
+        actor_context={
+            "actor_role": "merchant",
+            "affected_user_fraction": min(1.0, 0.2 * high + 0.35 * critical),
+            "known_exploited": kev_hits > 0,
+            "internet_exposed": True,
+        },
+    )
+    dread["vulnerability_summary"] = {
+        "risk_score": round(risk_score, 2),
+        "finding_count": len(findings),
+        "critical_count": critical,
+        "high_count": high,
+        "kev_count": kev_hits,
+    }
+    return dread

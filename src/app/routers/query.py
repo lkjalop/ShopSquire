@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.services.conversational_query import ConversationalQueryService
-from src.app.services.faq_bank import match_faq
-from src.app.services.faq_v2 import semantic_match_faq
+from src.app.services.faq_v2 import resolve_faq_match
 from src.app.services.agentic_rag_pipeline import run_agentic_rag_pipeline
+from src.app.services.response_normalizer import ResponseNormalizer
 from src.app.models.db import get_db
 
 
@@ -36,22 +36,21 @@ def query(
         return out
 
     persona = str((payload or {}).get("persona") or ("admin" if role in (ROLE_OWNER, ROLE_DEVELOPER) else "buyer")).lower()
-    faq2, score2, intent = semantic_match_faq(q, role=persona)
-    if faq2 and score2 >= 0.2:
+    faq = resolve_faq_match(q, role=persona)
+    if faq:
         return {
             "status": "ok",
-            "source": "faq_v2",
-            "intent": intent,
-            "question": faq2.get("q"),
-            "answer": faq2.get("a"),
-            "confidence": score2,
+            "source": faq.get("source"),
+            "intent": faq.get("intent"),
+            "question": faq.get("question"),
+            "answer": ResponseNormalizer.polish_llm_text(str(faq.get("answer") or ""), query=q),
+            "confidence": faq.get("confidence"),
         }
-    faq, score = match_faq(q)
-    if faq and score >= 2:
-        return {"status": "ok", "source": "faq", "question": faq.get("q"), "answer": faq.get("a"), "confidence": min(1.0, score / 5.0)}
 
     tenant_id = (payload or {}).get("tenant_id")
     svc = ConversationalQueryService(db=db)
     result = svc.query(q, tenant_id=tenant_id)
     result["source"] = result.get("source") or "query_layer"
+    if isinstance(result.get("answer"), str):
+        result["answer"] = ResponseNormalizer.polish_llm_text(result["answer"], query=q)
     return result

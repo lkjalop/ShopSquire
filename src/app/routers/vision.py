@@ -244,23 +244,32 @@ async def triage(
             labels = (labels or []) + [fname_hint]
 
     triager = BasicCVTriage()
-    triage_result = triager.analyze(labels, extracted_text or "")
+    triage_result = triager.analyze(
+        labels,
+        extracted_text or "",
+        image_bytes=content,
+        mime=mime or "image/jpeg",
+    )
     if inspect.isawaitable(triage_result):
         analysis = await triage_result
     else:
         analysis = triage_result
 
+    from src.app.services.response_normalizer import ResponseNormalizer
+    _damage_score = _compute_damage_score(analysis)
     resp = {
         "query": _derive_query_from_analysis(analysis),
         "label": analysis.get("damage_type") or "unknown",
+        # Plain-English verdict for the UI — always present
+        "summary": ResponseNormalizer.cv_triage_to_english(analysis),
         "mime": mime,
         "filename": name,
         "provider": provider_name,
         "labels": labels[:20],
         "extracted_text": (extracted_text or "")[:500],
         "analysis": analysis,
-        "damage_score": _compute_damage_score(analysis),
-        "is_product_photo": _is_product_photo(labels, _compute_damage_score(analysis)),
+        "damage_score": _damage_score,
+        "is_product_photo": _is_product_photo(labels, _damage_score),
         "image_hash": _compute_image_hash(content),
         "ingest_gate": gate,
     }
@@ -644,6 +653,12 @@ async def triage(
 
     resp["security"] = {
         "clean": security_clean,
+        # Plain-English image authenticity verdict for merchant UI
+        "verdict": (
+            "This image contains security flags — see signals for details."
+            if not security_clean
+            else "Image passed security checks."
+        ),
         "signals": security_signals,
         "reupload_needed": not security_clean,
         # Surface the OCR/extracted text here so the UI Security Matrix can show it

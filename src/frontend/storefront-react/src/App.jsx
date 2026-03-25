@@ -3360,6 +3360,11 @@ const ShopSquireApp = () => {
         products: results,
         llm_model: data.llm_model,
         model_tier: data.model_tier,
+        agent_steps_readable: Array.isArray(data.agent_steps_readable)
+          ? data.agent_steps_readable
+          : Array.isArray(data.proposal?.agent_steps_readable)
+            ? data.proposal.agent_steps_readable
+            : [],
       };
       setMessages((prev) => [...prev, assistantMessage]);
       // Render clarifying questions when backend provides them
@@ -3576,6 +3581,18 @@ const ShopSquireApp = () => {
                         {message.llm_model && <span className="badge info">Model: {message.llm_model}</span>}
                         {message.model_tier && <span className="badge">Tier: {message.model_tier}</span>}
                       </div>
+                    )}
+                    {message.role === 'assistant' && Array.isArray(message.agent_steps_readable) && message.agent_steps_readable.length > 0 && (
+                      <details className="mt-2" style={{ fontSize: '12px' }}>
+                        <summary style={{ cursor: 'pointer', color: '#374151' }}>How I answered this</summary>
+                        <ul style={{ margin: '8px 0 0 16px', padding: 0 }}>
+                          {message.agent_steps_readable.map((step, stepIdx) => (
+                            <li key={`${index}-${stepIdx}`} style={{ marginBottom: '4px', color: '#4b5563' }}>
+                              {step}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
                     )}
                     {message.action === 'show_products' && (
                       <button

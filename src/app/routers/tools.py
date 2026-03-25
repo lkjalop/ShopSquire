@@ -39,7 +39,7 @@ def registry(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_D
 @router.post("/run")
 def run_tool(req: ToolRunRequest, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     runner = ToolRunner()
-    uid = req.uid or "demo-user"
+    uid = str(req.uid or "").strip() or "anonymous"
     return runner.run(req.tool, req.params or {}, source=uid, trace_id=req.trace_id)
 
 

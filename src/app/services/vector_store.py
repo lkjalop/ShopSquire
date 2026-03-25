@@ -17,11 +17,17 @@ def _safe_identifier(name: str, *, default: str = "vectors") -> str:
     return cand
 
 
-class PgVectorStore:
-    """Lightweight pgvector adapter scaffold.
+def _emb_to_pg(embedding: List[float]) -> str:
+    """Format a Python float list as a pgvector literal: '[1.0,2.0,...]'."""
+    return "[" + ",".join(str(float(x)) for x in embedding) + "]"
 
-    Expects a `vectors` table with columns: id TEXT PRIMARY KEY, embedding VECTOR, payload JSONB
-    This is a scaffold: if pgvector isn't available, methods return safe placeholders.
+
+class PgVectorStore:
+    """pgvector-backed vector store.
+
+    Expects a `vectors` table: id TEXT PRIMARY KEY, embedding VECTOR(N), payload JSONB.
+    Run the alembic migration (20260325_pgvector_hnsw_indexes) before using in production.
+    If the engine is unavailable the methods return {"ok": False, "reason": ...}.
     """
 
     def __init__(self, table_name: str = "vectors"):
@@ -37,26 +43,14 @@ class PgVectorStore:
             return {"ok": False, "reason": "no_engine"}
         try:
             with self.engine.begin() as conn:
-                # Best-effort: use parameterized SQL and cast to vector if available
-                try:
-                    conn.execute(
-                        text(
-                            f"INSERT INTO {self.table_name} (id, embedding, payload) "
-                            "VALUES (:id, :embedding, :payload) "
-                            "ON CONFLICT (id) DO UPDATE SET embedding = EXCLUDED.embedding, payload = EXCLUDED.payload"
-                        ),
-                        {"id": id, "embedding": embedding, "payload": json.dumps(payload or {})},
-                    )
-                except Exception:
-                    # Fallback: store embedding as JSON text in payload
-                    conn.execute(
-                        text(
-                            f"INSERT INTO {self.table_name} (id, embedding, payload) "
-                            "VALUES (:id, :embedding_text, :payload) "
-                            "ON CONFLICT (id) DO UPDATE SET embedding = EXCLUDED.embedding, payload = EXCLUDED.payload"
-                        ),
-                        {"id": id, "embedding_text": json.dumps(embedding), "payload": json.dumps(payload or {})},
-                    )
+                conn.execute(
+                    text(
+                        f"INSERT INTO {self.table_name} (id, embedding, payload) "
+                        "VALUES (:id, :emb::vector, :payload) "
+                        "ON CONFLICT (id) DO UPDATE SET embedding = EXCLUDED.embedding, payload = EXCLUDED.payload"
+                    ),
+                    {"id": id, "emb": _emb_to_pg(embedding), "payload": json.dumps(payload or {})},
+                )
             return {"ok": True}
         except Exception as e:
             return {"ok": False, "reason": str(e)}
@@ -66,46 +60,94 @@ class PgVectorStore:
             return {"ok": False, "reason": "no_engine", "results": []}
         try:
             with self.engine.connect() as conn:
-                # Try pgvector similarity SQL (fallback to naive payload scan if unavailable)
-                try:
-                    sql = f"SELECT id, payload, embedding <-> :vec AS distance FROM {self.table_name} ORDER BY distance ASC LIMIT :k"
-                    rows = conn.execute(text(sql), {"vec": embedding, "k": top_k}).fetchall()
-                    out = []
-                    for r in rows:
-                        try:
-                            payload = json.loads(r[1]) if isinstance(r[1], (str, bytes)) else r[1]
-                        except Exception:
-                            payload = r[1]
-                        out.append({"id": r[0], "payload": payload, "distance": float(r[2]) if r[2] is not None else None})
-                    return {"ok": True, "results": out}
-                except Exception:
-                    # Fallback: return empty or simple scan
-                    rows = conn.execute(
-                        text(f"SELECT id, payload FROM {self.table_name} LIMIT :k"),
-                        {"k": top_k},
-                    ).fetchall()
-                    out = []
-                    for r in rows:
-                        try:
-                            payload = json.loads(r[1]) if isinstance(r[1], (str, bytes)) else r[1]
-                        except Exception:
-                            payload = r[1]
-                        out.append({"id": r[0], "payload": payload, "distance": None})
-                    return {"ok": True, "results": out}
+                sql = (
+                    f"SELECT id, payload, embedding <-> :vec::vector AS distance "
+                    f"FROM {self.table_name} ORDER BY distance ASC LIMIT :k"
+                )
+                rows = conn.execute(text(sql), {"vec": _emb_to_pg(embedding), "k": top_k}).fetchall()
+                out = []
+                for r in rows:
+                    try:
+                        payload = json.loads(r[1]) if isinstance(r[1], (str, bytes)) else r[1]
+                    except Exception:
+                        payload = r[1]
+                    out.append({"id": r[0], "payload": payload, "distance": float(r[2]) if r[2] is not None else None})
+                return {"ok": True, "results": out}
         except Exception as e:
             return {"ok": False, "reason": str(e), "results": []}
+
+    def batch_index(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if self.engine is None:
+            return {"ok": False, "reason": "no_engine", "indexed": 0}
+        indexed = 0
+        errors = 0
+        with self.engine.begin() as conn:
+            for item in items or []:
+                item_id = str(item.get("id") or "").strip()
+                embedding = item.get("embedding")
+                payload = item.get("payload") or {}
+                if not item_id or not isinstance(embedding, list):
+                    continue
+                try:
+                    conn.execute(
+                        text(
+                            f"INSERT INTO {self.table_name} (id, embedding, payload) "
+                            "VALUES (:id, :emb::vector, :payload) "
+                            "ON CONFLICT (id) DO UPDATE SET embedding = EXCLUDED.embedding, payload = EXCLUDED.payload"
+                        ),
+                        {"id": item_id, "emb": _emb_to_pg(embedding), "payload": json.dumps(payload)},
+                    )
+                    indexed += 1
+                except Exception:
+                    errors += 1
+                    continue
+        result: Dict[str, Any] = {"ok": True, "indexed": indexed}
+        if errors:
+            result["errors"] = errors
+        return result
+
+    def query_with_filter(
+        self,
+        embedding: List[float],
+        *,
+        top_k: int = 5,
+        payload_filter: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        base = self.query(embedding, top_k=max(top_k * 4, top_k))
+        if not base.get("ok"):
+            return base
+        filt = payload_filter or {}
+        if not filt:
+            base["results"] = (base.get("results") or [])[:top_k]
+            return base
+        out = []
+        for row in base.get("results") or []:
+            payload = row.get("payload") or {}
+            if not isinstance(payload, dict):
+                continue
+            matched = True
+            for key, value in filt.items():
+                if payload.get(key) != value:
+                    matched = False
+                    break
+            if matched:
+                out.append(row)
+            if len(out) >= top_k:
+                break
+        return {"ok": True, "results": out}
 
 
 def get_default_vector_store() -> PgVectorStore:
     return PgVectorStore()
 
 
-def ensure_vectors_table():
-    """Best-effort ensure the `vectors` table exists.
+def ensure_vector_table(table_name: str, *, dim: int = 1536) -> None:
+    """Best-effort ensure a named vector table exists.
 
-    Creates a pgvector-backed table when running against Postgres and a
-    simple fallback table for SQLite dev environments.
+    Intended for non-critical startup/indexing paths where we want stable behavior
+    across Postgres and SQLite test environments.
     """
+    table = _safe_identifier(table_name, default="vectors")
     try:
         from src.app.models.db import get_engine
 
@@ -119,26 +161,35 @@ def ensure_vectors_table():
                     conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
                 except Exception:
                     logging.getLogger("shopsquire.db").warning("pgvector extension creation failed")
-                # default dimension 1536 (best-effort); migrations should customize
                 try:
                     conn.execute(
-                        text("CREATE TABLE IF NOT EXISTS vectors (id TEXT PRIMARY KEY, embedding vector(1536), payload JSONB)")
+                        text(
+                            f"CREATE TABLE IF NOT EXISTS {table} "
+                            f"(id TEXT PRIMARY KEY, embedding vector({int(dim)}), payload JSONB)"
+                        )
                     )
                 except Exception:
-                    # fallback: store embedding as JSONB text
                     try:
                         conn.execute(
-                            text("CREATE TABLE IF NOT EXISTS vectors (id TEXT PRIMARY KEY, embedding TEXT, payload JSONB)")
+                            text(f"CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, embedding TEXT, payload JSONB)")
                         )
                     except Exception:
-                        logging.getLogger("shopsquire.db").warning("vectors table creation fallback failed")
+                        logging.getLogger("shopsquire.db").warning("vector table creation fallback failed: %s", table)
             else:
-                # SQLite fallback
                 try:
                     conn.execute(
-                        text("CREATE TABLE IF NOT EXISTS vectors (id TEXT PRIMARY KEY, embedding TEXT, payload TEXT)")
+                        text(f"CREATE TABLE IF NOT EXISTS {table} (id TEXT PRIMARY KEY, embedding TEXT, payload TEXT)")
                     )
                 except Exception:
-                    logging.getLogger("shopsquire.db").warning("vectors table creation failed (sqlite)")
+                    logging.getLogger("shopsquire.db").warning("vector table creation failed (sqlite): %s", table)
     except Exception as e:
-        logging.getLogger("shopsquire.db").warning("ensure_vectors_table failed: %s", str(e))
+        logging.getLogger("shopsquire.db").warning("ensure_vector_table failed for %s: %s", table_name, str(e))
+
+
+def ensure_vectors_table():
+    """Best-effort ensure the `vectors` table exists.
+
+    Creates a pgvector-backed table when running against Postgres and a
+    simple fallback table for SQLite dev environments.
+    """
+    ensure_vector_table("vectors")

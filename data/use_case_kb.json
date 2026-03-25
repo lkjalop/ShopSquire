@@ -1,0 +1,193 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "description": "Use-case requirement profiles for NQE auto-resolve and product filtering.",
+    "updated": "2026-03-25"
+  },
+  "use_cases": {
+    "gaming_aaa_heavy": {
+      "label": "AAA / High-end Gaming",
+      "keywords": ["aaa", "cyberpunk", "call of duty", "battlefield", "red dead", "ultra settings", "4k gaming", "raytracing", "dlss", "frame rate"],
+      "min_gpu_tier": 4,
+      "min_gpu_examples": ["RTX 4070", "RTX 4080", "RTX 4090", "RX 7900 XT"],
+      "min_ram_gb": 16,
+      "recommended_ram_gb": 32,
+      "min_storage_gb": 512,
+      "recommended_storage_gb": 1000,
+      "min_refresh_hz": 144,
+      "recommended_refresh_hz": 240,
+      "min_budget_usd": 1200,
+      "recommended_budget_usd": 1800,
+      "budget_bracket": "high",
+      "nqe_auto_resolve": {
+        "ask_gaming_depth": "aaa_heavy",
+        "ask_use_case": "gaming"
+      }
+    },
+    "gaming_casual": {
+      "label": "Casual / Esports Gaming",
+      "keywords": ["minecraft", "roblox", "fortnite", "valorant", "league of legends", "overwatch", "esports", "casual gaming", "indie games"],
+      "min_gpu_tier": 2,
+      "min_gpu_examples": ["GTX 1650", "RTX 3050", "RTX 4050", "RX 6600"],
+      "min_ram_gb": 8,
+      "recommended_ram_gb": 16,
+      "min_storage_gb": 256,
+      "recommended_storage_gb": 512,
+      "min_refresh_hz": 60,
+      "recommended_refresh_hz": 144,
+      "min_budget_usd": 600,
+      "recommended_budget_usd": 900,
+      "budget_bracket": "mid",
+      "nqe_auto_resolve": {
+        "ask_gaming_depth": "casual",
+        "ask_use_case": "gaming"
+      }
+    },
+    "content_creator": {
+      "label": "Video Editing / Creative Production",
+      "keywords": ["premiere", "davinci resolve", "after effects", "video editing", "4k editing", "color grading", "motion graphics", "youtube", "creator"],
+      "min_gpu_tier": 3,
+      "min_gpu_examples": ["RTX 3060", "RTX 4060", "M2 Pro", "M3 Pro"],
+      "min_ram_gb": 16,
+      "recommended_ram_gb": 32,
+      "min_storage_gb": 512,
+      "recommended_storage_gb": 2000,
+      "min_display_resolution": "2K",
+      "recommended_display_resolution": "4K",
+      "min_budget_usd": 900,
+      "recommended_budget_usd": 1500,
+      "budget_bracket": "high",
+      "notes": "SSD speed critical for video scrubbing; prefer NVMe ≥ 3500 MB/s"
+    },
+    "ai_ml_workstation": {
+      "label": "AI / ML / Data Science Workstation",
+      "keywords": ["machine learning", "deep learning", "pytorch", "tensorflow", "cuda", "llm training", "stable diffusion", "data science", "jupyter", "pandas", "numpy", "gpu compute"],
+      "min_gpu_tier": 4,
+      "min_gpu_examples": ["RTX 4080", "RTX 4090", "A5000", "H100"],
+      "min_gpu_vram_gb": 12,
+      "recommended_gpu_vram_gb": 24,
+      "min_ram_gb": 32,
+      "recommended_ram_gb": 64,
+      "min_storage_gb": 1000,
+      "recommended_storage_gb": 2000,
+      "min_budget_usd": 2000,
+      "recommended_budget_usd": 3500,
+      "budget_bracket": "ultra",
+      "notes": "CUDA support required; Tensor cores highly recommended"
+    },
+    "office_general": {
+      "label": "Office / Business Productivity",
+      "keywords": ["excel", "word", "powerpoint", "outlook", "zoom", "teams", "office", "business", "work from home", "wfh", "corporate", "presentations"],
+      "min_gpu_tier": 0,
+      "min_ram_gb": 8,
+      "recommended_ram_gb": 16,
+      "min_storage_gb": 256,
+      "recommended_storage_gb": 512,
+      "min_battery_hours": 8,
+      "recommended_battery_hours": 12,
+      "min_budget_usd": 500,
+      "recommended_budget_usd": 900,
+      "budget_bracket": "mid",
+      "notes": "Battery life and keyboard quality prioritised over GPU"
+    },
+    "student_university": {
+      "label": "University Student",
+      "keywords": ["university", "uni", "college", "degree", "assignment", "research", "lecture notes", "engineering student", "science", "arts", "law", "medicine"],
+      "min_gpu_tier": 1,
+      "min_ram_gb": 8,
+      "recommended_ram_gb": 16,
+      "min_storage_gb": 256,
+      "recommended_storage_gb": 512,
+      "min_battery_hours": 8,
+      "min_budget_usd": 500,
+      "recommended_budget_usd": 800,
+      "budget_bracket": "entry",
+      "subject_overrides": {
+        "engineering": {"min_ram_gb": 16, "recommended_ram_gb": 32, "min_gpu_tier": 2, "keywords": ["autocad", "solidworks", "matlab", "simulation"]},
+        "architecture": {"min_ram_gb": 16, "recommended_ram_gb": 32, "min_gpu_tier": 2, "keywords": ["revit", "rhino", "blender", "rendering"]},
+        "data_science": {"min_ram_gb": 16, "recommended_ram_gb": 32, "min_gpu_tier": 2, "keywords": ["python", "r studio", "jupyter", "statistics", "data"]},
+        "arts_humanities": {"min_gpu_tier": 0, "min_ram_gb": 8, "keywords": ["writing", "research", "history", "philosophy", "literature"]}
+      }
+    },
+    "high_school": {
+      "label": "High School Student",
+      "keywords": ["high school", "year 11", "year 12", "hsc", "vce", "atar", "school", "homework", "study"],
+      "min_gpu_tier": 0,
+      "min_ram_gb": 8,
+      "recommended_ram_gb": 8,
+      "min_storage_gb": 256,
+      "recommended_storage_gb": 256,
+      "min_battery_hours": 8,
+      "min_budget_usd": 400,
+      "recommended_budget_usd": 600,
+      "budget_bracket": "entry"
+    },
+    "professional_developer": {
+      "label": "Software Developer / DevOps",
+      "keywords": ["coding", "programming", "development", "docker", "kubernetes", "vscode", "git", "backend", "frontend", "devops", "software engineer"],
+      "min_gpu_tier": 1,
+      "min_ram_gb": 16,
+      "recommended_ram_gb": 32,
+      "min_storage_gb": 512,
+      "recommended_storage_gb": 1000,
+      "min_budget_usd": 800,
+      "recommended_budget_usd": 1400,
+      "budget_bracket": "mid",
+      "notes": "RAM is primary bottleneck; SSD speed critical for Docker build times"
+    },
+    "travel_ultrabook": {
+      "label": "Travel / Ultraportable",
+      "keywords": ["travel", "lightweight", "thin", "portable", "backpacking", "frequent flyer", "commute", "ultrabook", "light laptop"],
+      "min_gpu_tier": 0,
+      "max_weight_kg": 1.5,
+      "min_ram_gb": 8,
+      "recommended_ram_gb": 16,
+      "min_storage_gb": 256,
+      "recommended_storage_gb": 512,
+      "min_battery_hours": 10,
+      "recommended_battery_hours": 14,
+      "min_budget_usd": 700,
+      "recommended_budget_usd": 1200,
+      "budget_bracket": "mid",
+      "notes": "Weight and battery trump specs; prefer ARM chips for efficiency"
+    },
+    "photo_editing": {
+      "label": "Photography / Photo Editing",
+      "keywords": ["lightroom", "photoshop", "photography", "raw editing", "capture one", "photo", "camera"],
+      "min_gpu_tier": 1,
+      "min_ram_gb": 16,
+      "recommended_ram_gb": 32,
+      "min_display_resolution": "1080p",
+      "recommended_display_resolution": "2K",
+      "display_color_accuracy": "sRGB ≥ 99%",
+      "min_storage_gb": 512,
+      "recommended_storage_gb": 1000,
+      "min_budget_usd": 800,
+      "recommended_budget_usd": 1400,
+      "budget_bracket": "mid"
+    }
+  },
+  "gpu_tier_map": {
+    "0": {"label": "Integrated only", "examples": ["Intel Iris Xe", "AMD Radeon 780M", "Apple M-series GPU"]},
+    "1": {"label": "Entry discrete", "examples": ["GTX 1650", "RTX 3050", "RX 6500 XT"]},
+    "2": {"label": "Mid discrete", "examples": ["RTX 3060", "RTX 4060", "RX 6700 XT"]},
+    "3": {"label": "High discrete", "examples": ["RTX 3070", "RTX 4070", "RX 6800 XT"]},
+    "4": {"label": "Ultra discrete", "examples": ["RTX 4080", "RTX 4090", "RX 7900 XTX", "A5000"]}
+  },
+  "game_title_to_use_case": {
+    "cyberpunk 2077": "gaming_aaa_heavy",
+    "red dead redemption": "gaming_aaa_heavy",
+    "call of duty": "gaming_aaa_heavy",
+    "battlefield": "gaming_aaa_heavy",
+    "star wars outlaws": "gaming_aaa_heavy",
+    "alan wake 2": "gaming_aaa_heavy",
+    "fortnite": "gaming_casual",
+    "valorant": "gaming_casual",
+    "league of legends": "gaming_casual",
+    "overwatch": "gaming_casual",
+    "minecraft": "gaming_casual",
+    "roblox": "gaming_casual",
+    "rocket league": "gaming_casual",
+    "apex legends": "gaming_casual"
+  }
+}

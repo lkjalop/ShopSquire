@@ -66,7 +66,7 @@ def simulate_attack(
     x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
-    tenant_id = x_tenant_id or "demo-tenant"
+    tenant_id = str(x_tenant_id or "").strip() or "default-tenant"
     s = (scenario or "").strip().lower()
     base = {
         "message_id": f"<sim-{s}@shopsquire.local>",

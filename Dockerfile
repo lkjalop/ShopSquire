@@ -13,6 +13,10 @@ RUN apt-get update \
         libgl1 \
         libglib2.0-0 \
         libgomp1 \
+        libffi-dev \
+        libssl-dev \
+        ca-certificates \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --retries 10 --timeout 120 poetry==${POETRY_VERSION}

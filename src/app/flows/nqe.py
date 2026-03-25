@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+from functools import lru_cache
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
 from src.app.rag.retrieve import Retriever
 from src.app.services.decision_log import log_trace_event
+
+
+@lru_cache(maxsize=1)
+def _load_use_case_kb() -> Dict[str, Any]:
+    """Load data/use_case_kb.json once. Returns {} on any error."""
+    _candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "use_case_kb.json"),
+        os.path.join(os.getcwd(), "data", "use_case_kb.json"),
+    ]
+    for _path in _candidates:
+        try:
+            with open(os.path.normpath(_path), "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            continue
+    return {}
 
 
 class NextQuestion(BaseModel):
@@ -128,6 +147,58 @@ def _detect_corporate_subtype(query: str) -> Optional[str]:
     if any(w in q for w in ["office", "corporate", "business", "admin", "clerical"]):
         return "office_general"
     return None
+
+
+def _personalize_q(template: str, query_text: str, context: Optional[Dict[str, Any]] = None) -> str:
+    """Inject query-derived context into a template question string.
+
+    Pure string manipulation — no LLM, no latency.
+    Returns the original template unchanged if no relevant context is found.
+    """
+    q = (query_text or "").lower()
+    ctx = context or {}
+
+    # Extract budget hint: "$1500", "$2,000", "2000 dollars", "under 1500"
+    budget_hint: Optional[str] = None
+    _budget_match = re.search(r"\$\s?(\d[\d,]+)", q)
+    if _budget_match:
+        try:
+            budget_hint = f"${int(_budget_match.group(1).replace(',', '')):,}"
+        except Exception:
+            pass
+
+    # Extract brand from query (common laptop brands)
+    _BRANDS = ["lenovo", "dell", "hp", "asus", "acer", "apple", "microsoft", "samsung", "razer", "msi", "lg"]
+    detected_brand: Optional[str] = next((b.title() for b in _BRANDS if b in q), None)
+    if not detected_brand:
+        detected_brand = str(ctx.get("brand") or "").strip().title() or None
+
+    # --- Personalize gaming depth question ---
+    if "what kind of games" in template.lower():
+        prefix = ""
+        if budget_hint:
+            prefix = f"For a {budget_hint} setup, "
+        elif detected_brand:
+            prefix = f"For your {detected_brand}, "
+        if prefix:
+            return prefix + template[0].lower() + template[1:]
+        return template
+
+    # --- Personalize university subject question ---
+    if "subject or field" in template.lower() or "field of study" in template.lower():
+        prefix = ""
+        if detected_brand:
+            prefix = f"To match your {detected_brand} to your degree, "
+            return prefix + "what field are you studying?"
+        return template
+
+    # --- Personalize corporate work type question ---
+    if "type of work" in template.lower():
+        if budget_hint:
+            return f"For your {budget_hint} work laptop, what type of work will you mainly use it for?"
+        return template
+
+    return template
 
 
 class NextQuestionEngine:
@@ -269,6 +340,54 @@ class NextQuestionEngine:
         touch_needed = _detect_touch_screen_need(query_text, inp.answered_fields)
         corporate_sub = _detect_corporate_subtype(query_text)
 
+        # ── Use-case KB auto-resolve: skip questions when game titles or software resolve specs ──
+        try:
+            _kb = _load_use_case_kb()
+            if _kb:
+                _title_map = _kb.get("game_title_to_use_case") or {}
+                # Resolve use_case and gaming_tier from detected game titles
+                if detected_games and "gaming_depth" not in inp.answered_fields:
+                    _resolved_uc: Optional[str] = None
+                    _resolved_tier: Optional[str] = None
+                    for _slug in detected_games:
+                        _slug_clean = _slug.replace("_", " ").lower()
+                        for _title_kw, _uc_key in _title_map.items():
+                            if _title_kw in _slug_clean or _slug_clean in _title_kw:
+                                _resolved_uc = _uc_key
+                                break
+                        if _resolved_uc:
+                            break
+                    if _resolved_uc:
+                        _uc_data = (_kb.get("use_cases") or {}).get(_resolved_uc) or {}
+                        if _uc_data:
+                            _resolved_tier = "aaa_heavy" if "aaa" in _resolved_uc else "casual"
+                            inp.answered_fields.setdefault("gaming_depth", _resolved_tier)
+                            inp.answered_fields.setdefault("use_case", "gaming")
+                            if _uc_data.get("min_budget_usd"):
+                                inp.answered_fields.setdefault("_kb_min_budget", _uc_data["min_budget_usd"])
+                            if _uc_data.get("min_gpu_examples"):
+                                inp.answered_fields.setdefault("_kb_min_gpu", _uc_data["min_gpu_examples"][0])
+                # Resolve use_case from detected software names
+                if detected_software and "use_case" not in inp.answered_fields:
+                    _sw_uc_map = {
+                        "autocad": "student_university", "solidworks": "student_university",
+                        "revit": "student_university", "matlab": "student_university",
+                        "adobe_premiere": "content_creator", "davinci_resolve": "content_creator",
+                        "blender": "content_creator", "photoshop": "photo_editing",
+                        "docker": "professional_developer", "android_studio": "professional_developer",
+                        "xcode": "professional_developer",
+                    }
+                    for _sw in detected_software:
+                        _sw_uc = _sw_uc_map.get(_sw)
+                        if _sw_uc:
+                            inp.answered_fields.setdefault("use_case", _sw_uc)
+                            _sw_uc_data = (_kb.get("use_cases") or {}).get(_sw_uc) or {}
+                            if _sw_uc_data.get("min_ram_gb"):
+                                inp.answered_fields.setdefault("_kb_min_ram_gb", _sw_uc_data["min_ram_gb"])
+                            break
+        except Exception:
+            pass
+
         # Optional slot unification via recommendation analyzer
         try:
             if (not inp.missing_fields) and inp.query:
@@ -342,7 +461,7 @@ class NextQuestionEngine:
             questions.append(
                 NextQuestion(
                     id="ask_university_subject",
-                    text="What subject or field are you studying? This helps me match specs to your workload.",
+                    text=_personalize_q("What subject or field are you studying? This helps me match specs to your workload.", query_text),
                     goal="refine_use_case",
                     evidence_needed=["academic_field"],
                     source="use_case_disambiguation",
@@ -371,7 +490,7 @@ class NextQuestionEngine:
             questions.append(
                 NextQuestion(
                     id="ask_gaming_depth",
-                    text="What kind of games will you play? This determines the GPU level needed.",
+                    text=_personalize_q("What kind of games will you play? This determines the GPU level needed.", query_text),
                     goal="refine_gaming_tier",
                     evidence_needed=["game_titles", "gaming_tier"],
                     source="use_case_disambiguation",
@@ -410,7 +529,7 @@ class NextQuestionEngine:
             questions.append(
                 NextQuestion(
                     id="ask_corporate_work_type",
-                    text="What type of work will you mainly do? This helps me match the right specs.",
+                    text=_personalize_q("What type of work will you mainly do? This helps me match the right specs.", query_text),
                     goal="refine_use_case",
                     evidence_needed=["work_type"],
                     source="use_case_disambiguation",
@@ -668,15 +787,44 @@ class NextQuestionEngine:
         # Keep guaranteed coverage even if > cap by trimming after ensuring at least one per missing field group
         out = list(deduped.values())
         if len(out) > cap:
-            # Prefer keeping coverage items first
-            _keep_set = {'ask_budget', 'ask_budget_tier', 'ask_use_case', 'ask_platform', 'ask_brand_pref'}
+            # ── Prioritised keep set — domain-specific context before generic budget ──
+            # Order matters: we prefer questions that narrow the use case first,
+            # because knowing the use case often determines the right budget tier.
+            _keep_set: set[str] = set()
+
+            # 1. Use-case disambiguation is always highest priority
             if inp.detected_use_case and 'university' in (inp.detected_use_case or '').lower():
                 _keep_set.add('ask_university_subject')
-            keep_ids = [q.id for q in out if q.id in _keep_set]
+            if _gaming_detected and not detected_games:
+                # Gaming detected in query but no specific game named → ask what kind of games first
+                _keep_set.add('ask_gaming_depth')
+            if detected_software:
+                _keep_set.add('ask_software_confirm')
+            if corporate_sub is None and any(
+                w in (inp.query or '').lower()
+                for w in ['office', 'corporate', 'work', 'business', 'professional']
+            ):
+                _keep_set.add('ask_corporate_work_type')
+            if touch_needed:
+                _keep_set.add('ask_touch_screen_type')
+            if inp.has_image and inp.image_identity_confidence < 0.6:
+                _keep_set.add('ask_image_model')
+
+            # 2. Generic slot coverage comes after domain-specific questions
+            _keep_set.update({'ask_budget', 'ask_budget_tier', 'ask_use_case', 'ask_platform', 'ask_brand_pref'})
+
+            # Build result in priority order: domain-specific first, then generic slots
+            _domain_priority = [
+                'ask_university_subject', 'ask_gaming_depth', 'ask_software_confirm',
+                'ask_corporate_work_type', 'ask_touch_screen_type', 'ask_image_model',
+            ]
+            _generic_priority = ['ask_budget_tier', 'ask_budget', 'ask_use_case', 'ask_platform', 'ask_brand_pref']
+            _ordered_priority = _domain_priority + _generic_priority
+            _out_by_id = {q.id: q for q in out}
             result: List[NextQuestion] = []
-            for q in out:
-                if q.id in keep_ids and q not in result:
-                    result.append(q)
+            for pid in _ordered_priority:
+                if pid in _keep_set and pid in _out_by_id and _out_by_id[pid] not in result:
+                    result.append(_out_by_id[pid])
                 if len(result) >= cap:
                     break
             if len(result) < cap:

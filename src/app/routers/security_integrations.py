@@ -41,6 +41,11 @@ import json
 router = APIRouter(prefix="/api/v1/security", tags=["security"])
 
 
+def _ensure_demo_routes_enabled() -> None:
+    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=404, detail="demo_routes_disabled")
+
+
 @router.get("/llm10/runtime-report")
 def llm10_runtime_report(
     uid: str | None = None,
@@ -233,6 +238,7 @@ async def security_demo_events(role: str = Depends(require_role([ROLE_MERCHANT, 
 
     Shoppers do not have access; protected by role guard.
     """
+    _ensure_demo_routes_enabled()
     events = [
         {
             "id": "ev-aml-t0043",
@@ -500,7 +506,7 @@ def vulnerability_scan(
         tenant_id=str(payload.get("tenant_id") or ""),
         targets=list(payload.get("targets") or []),
         profile=str(payload.get("profile") or "baseline"),
-        provider=str(payload.get("provider") or os.getenv("VULN_SCAN_PROVIDER", "mock")),
+        provider=str(payload.get("provider") or os.getenv("VULN_SCAN_PROVIDER", "service")),
         dry_run=bool(payload.get("dry_run", True)),
     )
     try:

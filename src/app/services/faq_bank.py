@@ -3,6 +3,12 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Tuple
 
+_FAQ_STOPWORDS = {
+    "a", "an", "and", "are", "can", "do", "does", "for", "how", "i", "if",
+    "is", "it", "my", "of", "on", "or", "the", "to", "what", "when", "with",
+    "you", "your",
+}
+
 
 FAQ_BANK: List[Dict[str, object]] = [
     {"q": "What is your return policy?", "a": "Returns are accepted within 14 days for unused items in original packaging.", "tags": ["return", "policy"]},
@@ -56,11 +62,90 @@ FAQ_BANK: List[Dict[str, object]] = [
     {"q": "Can I use multiple payment methods?", "a": "Split payments are not supported at this time.", "tags": ["payment"]},
     {"q": "Do you support gift cards?", "a": "Gift cards can be applied at checkout if available for your region.", "tags": ["gift", "payment"]},
     {"q": "How do I update my phone number?", "a": "Update your phone number in Account Settings.", "tags": ["account", "phone"]},
+
+    # ── Physical damage & repair ──────────────────────────────────────────────
+    {"q": "My laptop screen is cracked. What are my options?",
+     "a": "Upload a clear photo of the damage so we can assess it. If your device is within the warranty period and the damage qualifies, we'll arrange repair or replacement. For accidental damage, out-of-warranty repair pricing applies.",
+     "tags": ["repair", "screen", "cracked", "damage", "warranty"]},
+    {"q": "My laptop screen has a crack. Is it covered by warranty?",
+     "a": "Standard manufacturer warranties cover manufacturing defects, not accidental damage. If your screen cracked from a fall or impact, it is typically not covered unless you have an accidental damage protection plan.",
+     "tags": ["screen", "cracked", "warranty", "damage"]},
+    {"q": "My laptop won't turn on. What do I do?",
+     "a": "Try a hard reset: hold the power button for 10–15 seconds, then release and press again. If it still won't turn on, it may be a battery or motherboard fault. Contact support with your order number for a warranty or repair assessment.",
+     "tags": ["repair", "power", "wont turn on", "dead", "not starting"]},
+    {"q": "My laptop is physically damaged. Can I get it repaired?",
+     "a": "Upload photos of the damage and share your order details. We can assess whether it qualifies for warranty repair, paid repair, or a replacement recommendation.",
+     "tags": ["repair", "physical", "damage", "broken"]},
+    {"q": "My laptop hinge is broken. Is that covered?",
+     "a": "Hinge damage from normal use (not a drop) may be covered as a manufacturing defect. Upload a photo and your purchase date and we'll assess eligibility.",
+     "tags": ["repair", "hinge", "broken", "warranty"]},
+    {"q": "My laptop keyboard is not working. What should I do?",
+     "a": "If keys are stuck or unresponsive, first try cleaning with compressed air. If the issue persists and the laptop is under warranty, contact support — keyboard faults are commonly covered as manufacturing defects.",
+     "tags": ["repair", "keyboard", "not working", "keys", "broken"]},
+    {"q": "My laptop battery drains very fast. Is that covered by warranty?",
+     "a": "Battery degradation below 80% capacity within the warranty period is typically covered. Contact us with your purchase date and battery health reading (from Settings → System → Battery) for an assessment.",
+     "tags": ["battery", "drain", "warranty", "repair", "fast drain"]},
+    {"q": "My laptop is overheating. What should I do?",
+     "a": "Ensure vents are clear of dust and the laptop is on a hard surface. If it still overheats under light use, it may be a thermal paste or fan fault — both are typically covered under warranty.",
+     "tags": ["repair", "overheating", "hot", "fan", "thermal"]},
+    {"q": "My laptop got wet. Is liquid damage covered?",
+     "a": "Liquid damage is not covered by standard manufacturer warranties. However, contact support quickly — acting within 24 hours can sometimes save the device. Upload photos and describe what liquid it was.",
+     "tags": ["repair", "liquid", "water", "wet", "spill", "damage"]},
+
+    # ── Software failures & BSOD ─────────────────────────────────────────────
+    {"q": "My laptop shows a blue screen of death (BSOD). What do I do?",
+     "a": "A BSOD usually means a driver, RAM, or Windows system file issue. Note the error code shown on screen (e.g. WHEA_UNCORRECTABLE_ERROR, MEMORY_MANAGEMENT). Restart and check for Windows Updates. If it keeps happening, contact support with the error code — this may qualify for a warranty claim.",
+     "tags": ["bsod", "blue screen", "blue screen of death", "stop code", "repair", "software"]},
+    {"q": "My laptop keeps crashing with a blue screen. How do I fix it?",
+     "a": "Repeated BSODs often point to a driver conflict, failing RAM, or a corrupted Windows installation. Try: (1) Update all drivers, (2) Run Windows Memory Diagnostic, (3) Check Reliability History in Control Panel. If it persists, contact support with the BSOD stop code.",
+     "tags": ["bsod", "blue screen", "crashing", "stop code", "fix", "repair"]},
+    {"q": "My laptop shows WHEA_UNCORRECTABLE_ERROR. What does it mean?",
+     "a": "WHEA_UNCORRECTABLE_ERROR usually indicates a hardware fault — often the CPU, RAM, or storage. This is commonly covered under warranty. Contact support with your purchase date and we'll arrange a diagnostic.",
+     "tags": ["bsod", "whea", "stop code", "hardware fault", "repair", "warranty"]},
+    {"q": "My laptop shows MEMORY_MANAGEMENT blue screen. What do I do?",
+     "a": "MEMORY_MANAGEMENT BSODs often mean faulty or incompatible RAM. Run Windows Memory Diagnostic (search in Start Menu). If errors are found, this is a warranty-eligible hardware fault.",
+     "tags": ["bsod", "memory", "ram", "stop code", "repair", "blue screen"]},
+    {"q": "Windows won't load on my laptop. What can I do?",
+     "a": "If Windows won't boot, try Startup Repair: restart and hold Shift while clicking Restart → Troubleshoot → Advanced Options → Startup Repair. If that fails, contact support — we can guide you through a reinstall or arrange a warranty repair.",
+     "tags": ["windows", "boot", "repair", "software", "not loading", "startup"]},
+    {"q": "My laptop is stuck on the loading screen. What do I do?",
+     "a": "Hold the power button to force shutdown, then restart. If it keeps getting stuck, boot into Safe Mode (hold Shift + F8 on startup) and run a disk check. Contact support if the issue persists.",
+     "tags": ["loading", "stuck", "boot", "repair", "software"]},
+    {"q": "My laptop is running very slowly. How do I fix it?",
+     "a": "Slowness can be caused by a full storage drive, too many startup programs, or malware. Try: (1) Free up disk space, (2) Disable startup apps in Task Manager, (3) Run a malware scan. If it's still sluggish on a new laptop, it may be a hardware issue covered by warranty.",
+     "tags": ["slow", "performance", "repair", "sluggish", "freeze"]},
+    {"q": "How do I reinstall Windows on my laptop?",
+     "a": "You can reinstall Windows via Settings → System → Recovery → Reset this PC. Choose 'Keep my files' to reinstall without losing data. For a clean install, you'll need a USB bootable drive. Contact support if you need help.",
+     "tags": ["windows", "reinstall", "reset", "software", "repair"]},
+
+    # ── Extended warranty & protection ────────────────────────────────────────
+    {"q": "Does my warranty cover accidental damage?",
+     "a": "Standard manufacturer warranties cover manufacturing defects only, not accidental damage (drops, spills). Accidental Damage Protection is available as an optional add-on at checkout for select products.",
+     "tags": ["warranty", "accidental", "damage", "cover", "protection"]},
+    {"q": "How do I claim a warranty repair?",
+     "a": "Contact support with your order number, purchase date, and a description (or photo) of the fault. We'll assess eligibility and arrange repair, replacement, or a manufacturer RMA.",
+     "tags": ["warranty", "claim", "repair", "rma", "return"]},
+    {"q": "What is the warranty claim process?",
+     "a": "Start by contacting support with your order number, purchase date, photos if relevant, and the fault description. We'll confirm coverage and arrange repair, replacement, or a manufacturer RMA.",
+     "tags": ["warranty", "claim", "process", "repair", "rma", "support"]},
+    {"q": "My laptop is 6 months old and has a hardware fault. Am I covered?",
+     "a": "Yes — most laptops carry a minimum 12-month manufacturer warranty, so a fault at 6 months is almost certainly covered. Contact support with your order number.",
+     "tags": ["warranty", "hardware fault", "covered", "repair", "6 months"]},
+    {"q": "How long is the standard warranty on laptops?",
+     "a": "Most laptops include a 1-year manufacturer warranty. Some brands offer 2-year coverage. Extended warranty plans can add up to 3 additional years.",
+     "tags": ["warranty", "period", "length", "laptop", "how long"]},
+    {"q": "Can I extend my warranty after purchase?",
+     "a": "Extended warranty plans may be available for purchase after the original sale date, usually within 30–90 days of purchase. Contact support to check eligibility.",
+     "tags": ["warranty", "extended", "after purchase", "extend"]},
+    {"q": "My laptop has a dead pixel. Is it under warranty?",
+     "a": "Dead pixel policies vary by manufacturer. Most cover screens with 3+ dead pixels in the centre of the display. Contact support with a photo and your purchase date.",
+     "tags": ["dead pixel", "screen", "warranty", "repair", "display"]},
 ]
 
 
 def _tokenize(text: str) -> List[str]:
-    return [t for t in re.split(r"[^a-z0-9]+", text.lower()) if t]
+    tokens = [t for t in re.split(r"[^a-z0-9]+", text.lower()) if t]
+    return [t for t in tokens if t not in _FAQ_STOPWORDS]
 
 
 def match_faq(query: str) -> Tuple[Dict[str, object] | None, float]:

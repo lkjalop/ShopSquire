@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
 
-type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence' | 'persona';
+type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence' | 'persona' | 'security_scorecard';
 
 interface MetricCard {
   label: string;
@@ -45,6 +45,7 @@ const TAB_CONFIG: { id: TabId; label: string }[] = [
   { id: 'supply_chain', label: 'Supply Chain Health' },
   { id: 'intelligence', label: 'Agent Intelligence' },
   { id: 'persona', label: 'Persona Intelligence' },
+  { id: 'security_scorecard', label: '🛡 Security Scorecard' },
 ];
 
 function MetricCardComponent({ card }: { card: MetricCard }) {
@@ -482,6 +483,171 @@ function IntelligenceTab() {
   );
 }
 
+const GRADE_COLORS: Record<string, string> = {
+  A: '#22c55e', B: '#86efac', C: '#facc15', D: '#f97316', F: '#ef4444',
+};
+
+function SecurityScorecardTab() {
+  const [scorecard, setScorecard] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(30);
+  const [running, setRunning] = useState(false);
+  const [scanResult, setScanResult] = useState<any>(null);
+
+  const load = async (d: number) => {
+    setLoading(true);
+    try {
+      const r = await fetch(apiUrl(`/api/v1/security/scan/scorecard?days=${d}`), {
+        headers: { 'X-API-Key': localStorage.getItem('ss_owner_key') || '' },
+      });
+      setScorecard(await safeJson(r));
+    } catch { setScorecard(null); }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(days); }, [days]);
+
+  const triggerScan = async () => {
+    setRunning(true);
+    setScanResult(null);
+    try {
+      const r = await fetch(apiUrl('/api/v1/security/scan/full'), {
+        method: 'POST',
+        headers: { 'X-API-Key': localStorage.getItem('ss_owner_key') || '' },
+      });
+      setScanResult(await safeJson(r));
+    } catch (e: any) { setScanResult({ error: String(e) }); }
+    setRunning(false);
+    load(days);
+  };
+
+  const grade = scorecard?.posture_grade ?? '—';
+  const gradeColor = GRADE_COLORS[grade] ?? '#94a3b8';
+
+  if (loading) return <div style={{ padding: 16 }}>Loading scorecard...</div>;
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Security Posture Scorecard</h3>
+        <select value={days} onChange={e => setDays(Number(e.target.value))}
+          style={{ background: '#111827', color: '#e5e7eb', border: '1px solid rgba(148,163,184,0.25)', borderRadius: 8, padding: '4px 8px', fontSize: 13 }}>
+          {[7, 14, 30, 90].map(d => <option key={d} value={d}>Last {d} days</option>)}
+        </select>
+        <button onClick={triggerScan} disabled={running}
+          style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: running ? '#374151' : '#dc2626', color: '#fff', cursor: running ? 'not-allowed' : 'pointer', fontSize: 13 }}>
+          {running ? 'Scanning...' : 'Run Scan Now'}
+        </button>
+      </div>
+
+      {/* Grade badge */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div style={{ border: '1px solid rgba(148,163,184,0.18)', borderRadius: 12, padding: '14px 20px', background: 'rgba(15,23,42,0.45)', minWidth: 120, textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>Posture Grade</div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: gradeColor }}>{grade}</div>
+        </div>
+        <MetricCardComponent card={{ label: 'Total Incidents', value: scorecard?.incident_total ?? 0 }} />
+        <MetricCardComponent card={{ label: 'Open Critical/High', value: (scorecard?.open_critical_high ?? []).length }} />
+        <MetricCardComponent card={{ label: 'Recent Scans', value: (scorecard?.recent_scans ?? []).length }} />
+        <MetricCardComponent card={{
+          label: 'Scanner Status',
+          value: scorecard?.trivy_available ? 'Trivy ✓' : scorecard?.scanner_available ? 'Available' : 'No scanner',
+        }} />
+      </div>
+
+      {/* Summary */}
+      {scorecard?.posture_summary && (
+        <div style={{ border: '1px solid rgba(148,163,184,0.18)', borderRadius: 10, padding: '10px 14px', background: 'rgba(15,23,42,0.45)', marginBottom: 12, fontSize: 13, color: '#cbd5e1' }}>
+          {scorecard.posture_summary}
+        </div>
+      )}
+
+      {/* Incident breakdown */}
+      {scorecard?.incident_counts && Object.keys(scorecard.incident_counts).length > 0 && (
+        <div style={{ border: '1px solid rgba(148,163,184,0.18)', borderRadius: 12, padding: 14, background: 'rgba(15,23,42,0.45)', marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Incident Severity Breakdown</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {Object.entries(scorecard.incident_counts as Record<string, number>).map(([sev, cnt]) => (
+              <div key={sev} style={{ padding: '6px 12px', borderRadius: 8, background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(148,163,184,0.2)', fontSize: 13 }}>
+                <span style={{ color: GRADE_COLORS[sev === 'critical' ? 'F' : sev === 'high' ? 'D' : sev === 'medium' ? 'C' : 'A'] || '#94a3b8', fontWeight: 600, textTransform: 'capitalize' }}>{sev}</span>
+                <span style={{ color: '#e5e7eb', marginLeft: 6 }}>{cnt}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Open critical/high */}
+      {(scorecard?.open_critical_high ?? []).length > 0 && (
+        <div style={{ border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12, padding: 14, background: 'rgba(15,23,42,0.45)', marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#fca5a5' }}>Open Critical / High Incidents</div>
+          {scorecard.open_critical_high.map((inc: any) => (
+            <div key={inc.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(148,163,184,0.1)', fontSize: 12 }}>
+              <span style={{ color: inc.severity === 'critical' ? '#ef4444' : '#f97316', fontWeight: 700, minWidth: 56, textTransform: 'uppercase', fontSize: 10 }}>{inc.severity}</span>
+              <span style={{ color: '#e5e7eb', flex: 1 }}>{inc.title}</span>
+              <span style={{ color: '#64748b', minWidth: 100, textAlign: 'right' }}>{inc.created_at?.slice(0, 10)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Recent scans */}
+      {(scorecard?.recent_scans ?? []).length > 0 && (
+        <div style={{ border: '1px solid rgba(148,163,184,0.18)', borderRadius: 12, padding: 14, background: 'rgba(15,23,42,0.45)', marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Recent Scan Scorecards</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: '#94a3b8', textAlign: 'left' }}>
+                <th style={{ padding: '4px 8px' }}>Target</th>
+                <th style={{ padding: '4px 8px' }}>Risk Score</th>
+                <th style={{ padding: '4px 8px' }}>Total</th>
+                <th style={{ padding: '4px 8px' }}>Critical</th>
+                <th style={{ padding: '4px 8px' }}>High</th>
+                <th style={{ padding: '4px 8px' }}>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scorecard.recent_scans.map((s: any, i: number) => (
+                <tr key={i} style={{ borderTop: '1px solid rgba(148,163,184,0.1)', color: '#e5e7eb' }}>
+                  <td style={{ padding: '5px 8px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.target || '—'}</td>
+                  <td style={{ padding: '5px 8px', color: s.risk_score > 7 ? '#ef4444' : s.risk_score > 4 ? '#f97316' : '#22c55e' }}>{s.risk_score?.toFixed(1)}</td>
+                  <td style={{ padding: '5px 8px' }}>{s.total_findings}</td>
+                  <td style={{ padding: '5px 8px', color: s.critical > 0 ? '#ef4444' : '#e5e7eb' }}>{s.critical}</td>
+                  <td style={{ padding: '5px 8px', color: s.high > 0 ? '#f97316' : '#e5e7eb' }}>{s.high}</td>
+                  <td style={{ padding: '5px 8px', color: '#64748b' }}>{s.created_at?.slice(0, 10)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Live scan result */}
+      {scanResult && (
+        <div style={{ border: '1px solid rgba(148,163,184,0.18)', borderRadius: 12, padding: 14, background: 'rgba(15,23,42,0.45)', marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Last Scan Output</div>
+          {scanResult.error
+            ? <div style={{ color: '#ef4444', fontSize: 12 }}>{scanResult.error}</div>
+            : <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                {scanResult.vuln_scan_enabled === false
+                  ? 'Scanning is disabled (VULN_SCAN_ENABLED=0). Enable it and try again.'
+                  : `Findings: ${scanResult.total_findings ?? 0} · Critical: ${scanResult.critical_count ?? 0} · DREAD avg: ${scanResult.dread?.avg?.toFixed(1) ?? '—'}`
+                }
+              </div>
+          }
+        </div>
+      )}
+
+      {/* Scanner availability hints */}
+      <div style={{ border: '1px solid rgba(148,163,184,0.18)', borderRadius: 10, padding: '10px 14px', background: 'rgba(15,23,42,0.45)', fontSize: 12, color: '#64748b' }}>
+        <span style={{ marginRight: 12 }}>Trivy: {scorecard?.trivy_available ? '✓' : '✗'}</span>
+        <span style={{ marginRight: 12 }}>Semgrep: {scorecard?.semgrep_available ? '✓' : '✗'}</span>
+        <span>Nuclei: {scorecard?.nuclei_available ? '✓' : '✗'}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
 
@@ -494,6 +660,7 @@ export default function AdminDashboard() {
       case 'supply_chain': return <SupplyChainTab />;
       case 'intelligence': return <IntelligenceTab />;
       case 'persona': return <PersonaIntelligenceTab />;
+      case 'security_scorecard': return <SecurityScorecardTab />;
     }
   };
 

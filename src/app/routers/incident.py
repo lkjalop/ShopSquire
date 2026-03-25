@@ -12,6 +12,7 @@ from src.app.observability.tracing import get_tracer
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.services.incident_alert_adapters import dispatch_incident_alert
 from src.app.services.ticketing_connectors import create_jira_issue, create_servicenow_incident
+from src.app.routers.escalation_room import create_incident_record
 
 router = APIRouter(prefix="/api/v1/incident", tags=["incident"])
 tracer = get_tracer("incident-router")
@@ -81,11 +82,7 @@ def create_ticket(topic: str, title: str, description: str, priority: Optional[s
 
 @router.post("/block")
 def block_action(target: str, reason: str, severity: Optional[str] = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    """Hard-block endpoint for security incidents.
-
-    This is a stub for integrating with WAF/IAM/etc. It records an incident and
-    returns an acknowledgement payload for UI and automation.
-    """
+    """Hard-block endpoint for security incidents with real incident creation."""
     with tracer.start_as_current_span("incident.block") as span:
         span.set_attribute("incident.target", target or "unknown")
         flags = load_feature_flags(get_settings().feature_flags_path)
@@ -95,18 +92,38 @@ def block_action(target: str, reason: str, severity: Optional[str] = None, role:
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
         sev = severity or _route_threshold("security_block")
         record_incident_alert("security_block", sev)
+        incident = create_incident_record(
+            case_id=None,
+            trace_id=f"block-{int(time.time())}",
+            reason="security_block",
+            context={"target": target, "reason": reason, "source": "incident.block"},
+            created_by="system",
+            severity=sev,
+            title=f"Block: {target}",
+            dedupe_by_event=False,
+        )
         # Dispatch real alert + create ticket for block actions
         alert_result = dispatch_incident_alert(
             event_type="incident.block",
-            incident={"id": f"block-{int(time.time())}", "severity": sev, "title": f"Block: {target}", "status": "open", "description": reason},
+            incident={
+                "id": incident.get("incident_id") or f"block-{int(time.time())}",
+                "severity": sev,
+                "title": f"Block: {target}",
+                "status": "open",
+                "description": reason,
+            },
             details={"target": target, "reason": reason},
         )
-        create_jira_issue(f"Block: {target}", reason, sev)
+        ext_id = create_jira_issue(f"Block: {target}", reason, sev)
+        if not ext_id:
+            ext_id = create_servicenow_incident(f"Block: {target}", reason, sev)
         return {
             "blocked": True,
             "target": target,
             "reason": reason,
             "severity": sev,
             "timestamp": int(time.time()),
+            "incident_id": incident.get("incident_id"),
+            "ticket_key": ext_id,
             "dispatch": alert_result,
         }

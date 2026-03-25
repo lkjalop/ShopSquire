@@ -39,6 +39,11 @@ from urllib.parse import urlparse
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
+def _ensure_demo_routes_enabled() -> None:
+    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=404, detail="demo_routes_disabled")
+
+
 @router.get("/platform/regions/readiness")
 def platform_regions_readiness(role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER]))):
     return region_readiness()
@@ -1955,6 +1960,7 @@ def demo_readiness(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
     db=Depends(get_db),
 ) -> Dict[str, Any]:
+    _ensure_demo_routes_enabled()
     since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
     sec = {
         "blocked_attacks": 0,
@@ -3964,3 +3970,88 @@ def compliance_live_feed(
 
     items = sorted(items, key=lambda i: i.get("time") or "", reverse=True)[:limit]
     return {"items": items}
+
+
+# ---------------------------------------------------------------------------
+# Vuln scan schedule — tenant config admin endpoints
+# ---------------------------------------------------------------------------
+
+class _VulnScanScheduleIn(BaseModel):
+    cron: str = "0 4 * * *"          # cron expression (UTC)
+    targets: List[str] = []           # URLs / image refs / code paths
+    enabled: bool = True
+    tenant_id: str | None = None
+
+
+@router.get("/security/vuln-scan-schedule")
+def get_vuln_scan_schedule(
+    tenant_id: str = Query("global"),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+):
+    """Return the current vuln scan schedule config for a tenant (or global default)."""
+    from src.app.rules.tenant_config_store import TenantConfigStore
+    store = TenantConfigStore()
+    override = store.get_override("vuln_scan_schedule", tenant_id=tenant_id if tenant_id != "global" else None)
+    if override:
+        return {"tenant_id": tenant_id, "source": "override", "config": override}
+    import os
+    return {
+        "tenant_id": tenant_id,
+        "source": "env_defaults",
+        "config": {
+            "cron": os.getenv("VULN_SCAN_SCHEDULE", "0 4 * * *"),
+            "targets": [t.strip() for t in os.getenv("VULN_SCAN_TARGETS", "").split(",") if t.strip()],
+            "enabled": os.getenv("VULN_SCAN_SCHEDULE_ENABLED", "0").strip().lower() in ("1", "true", "yes"),
+        },
+    }
+
+
+@router.put("/security/vuln-scan-schedule")
+def set_vuln_scan_schedule(
+    body: _VulnScanScheduleIn,
+    role: str = Depends(require_role([ROLE_OWNER])),
+):
+    """Persist a vuln scan schedule override for a tenant.
+
+    The Celery beat task ``scheduled_vuln_scan_daily`` reads this config via
+    ``TenantConfigStore.get_override('vuln_scan_schedule')`` on each run,
+    so changes take effect on the next scheduled invocation without a restart.
+    """
+    import re
+    _CRON_RE = re.compile(r'^[\d*/,\-]{1,10}\s+[\d*/,\-]{1,10}\s+[\d*/,\-]{1,10}\s+[\d*/,\-]{1,10}\s+[\d*/,\-]{1,10}$')
+    if not _CRON_RE.match((body.cron or "").strip()):
+        raise HTTPException(status_code=422, detail="cron must be a valid 5-field cron expression")
+
+    from urllib.parse import urlparse as _urlparse
+    cleaned_targets: List[str] = []
+    for t in (body.targets or []):
+        t = str(t).strip()
+        if not t:
+            continue
+        parsed = _urlparse(t)
+        if parsed.scheme in ("http", "https") and not parsed.netloc:
+            raise HTTPException(status_code=422, detail=f"Invalid URL target: {t}")
+        cleaned_targets.append(t)
+
+    from src.app.rules.tenant_config_store import TenantConfigStore
+    store = TenantConfigStore()
+    ok = store.set_override(
+        "vuln_scan_schedule",
+        {"cron": body.cron.strip(), "targets": cleaned_targets, "enabled": bool(body.enabled)},
+        tenant_id=body.tenant_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to persist vuln scan schedule — check DB connectivity")
+    return {"status": "ok", "tenant_id": body.tenant_id or "global", "cron": body.cron, "targets": cleaned_targets}
+
+
+@router.delete("/security/vuln-scan-schedule")
+def delete_vuln_scan_schedule(
+    tenant_id: str = Query("global"),
+    role: str = Depends(require_role([ROLE_OWNER])),
+):
+    """Remove the tenant override so the env-var defaults apply again."""
+    from src.app.rules.tenant_config_store import TenantConfigStore
+    store = TenantConfigStore()
+    store.set_override("vuln_scan_schedule", {}, tenant_id=tenant_id if tenant_id != "global" else None)
+    return {"status": "cleared", "tenant_id": tenant_id}

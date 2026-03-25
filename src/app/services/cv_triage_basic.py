@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
 import re
+
+log = logging.getLogger(__name__)
 
 
 class BasicCVTriage:
     """
-    Managed API placeholder: label-based classification for laptops.
-    Replace label source with cloud CV (Google/Azure) when configured.
+    CV triage with two-tier analysis:
+      1. Vision LLM (GPT-4o / Gemini / LLaVA) when image_bytes supplied and provider configured.
+      2. Keyword/label fallback — always available, no external dependencies.
     """
 
     DAMAGE_KEYWORDS = {
         "physical": ["crack", "cracked", "broken", "dent", "scratch", "shattered", "hinge"],
         "cosmetic": ["scuff", "mark", "stain", "discolor"],
-        "functional": ["error", "screen", "display", "black", "dead", "boot", "keyboard"],
+        "functional": ["error", "screen", "display", "black", "dead", "boot", "keyboard", "bsod", "blue screen", "stop code", "crash"],
         "packaging": ["box", "package", "torn", "crushed", "wet"],
     }
 
@@ -29,8 +33,44 @@ class BasicCVTriage:
         labels: list[str],
         extracted_text: str,
         *,
+        image_bytes: bytes | None = None,
+        mime: str = "image/jpeg",
         cv_pipeline_result: Dict[str, Any] | None = None,
     ) -> dict:
+        # ── Tier 1: Vision LLM (when image_bytes available and provider configured) ──
+        if image_bytes:
+            try:
+                from src.app.services.vision_reasoning import VisionReasoningService
+                svc = VisionReasoningService()
+                if svc.available:
+                    vision = await svc.analyze_damage(image_bytes, mime)
+                    if vision.error is None:
+                        # Map VisionResult → triage dict shape expected by callers
+                        sev_map = {
+                            "critical": "critical",
+                            "major": "major",
+                            "minor": "minor",
+                            "none": "undetermined",
+                        }
+                        return {
+                            "status": "analyzed",
+                            "damage_type": vision.damage_type or "unknown",
+                            "component": vision.damaged_component,
+                            "severity": sev_map.get(vision.damage_severity or "", "undetermined"),
+                            "confidence": vision.visual_confidence,
+                            "serial_number": None,
+                            "extracted_text": (extracted_text or "")[:500],
+                            "raw_labels": (labels or [])[:10],
+                            "needs_human_review": vision.visual_confidence < 0.6,
+                            "ai_disclaimer": "vision_llm",
+                            "plain_english": vision.plain_english_summary,
+                            "provider": vision.provider_used,
+                        }
+                    log.debug("VisionReasoningService failed, falling back to keyword: %s", vision.error)
+            except Exception as exc:
+                log.debug("cv_triage vision LLM attempt failed: %s", exc)
+
+        # ── Tier 2: Keyword / label fallback ──────────────────────────────────────
         # Attempt to supplement empty labels/text from cv_pipeline output
         effective_labels = list(labels or [])
         effective_text = extracted_text or ""

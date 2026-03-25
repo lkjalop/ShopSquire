@@ -11,8 +11,8 @@ from src.app.services.degradation import cb_is_open, cb_record
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.safety.policies import get_policy, apply_post_policy
 from src.app.safety.redaction import redact_payload
-from src.app.services.faq_bank import match_faq
-from src.app.services.faq_v2 import semantic_match_faq
+from src.app.services.faq_v2 import resolve_faq_match
+from src.app.services.response_normalizer import ResponseNormalizer
 from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
 
 
@@ -21,19 +21,12 @@ tracer = get_tracer("support-router")
 
 
 def _answer_from_faq(question: str) -> Dict:
-    item2, score2, _intent = semantic_match_faq(question or "", role="buyer")
-    if item2 and score2 >= 0.2:
+    match = resolve_faq_match(question or "", role="buyer")
+    if match:
         return {
-            "answer": str(item2.get("a") or ""),
-            "source": "faq_v2",
-            "confidence": float(score2),
-        }
-    item, score = match_faq(question or "")
-    if item and score >= 1.0:
-        return {
-            "answer": str(item.get("a") or ""),
-            "source": "faq",
-            "confidence": min(1.0, 0.5 + 0.1 * score),
+            "answer": str(match.get("answer") or ""),
+            "source": str(match.get("source") or "faq"),
+            "confidence": float(match.get("confidence") or 0.0),
         }
     q = (question or "").lower()
     if any(k in q for k in ("refund", "return", "exchange")):
@@ -125,6 +118,10 @@ def answer(question: str, request: Request, redis=Depends(get_redis), role: str 
             resp["learn_more_url"] = "/ui/status"
             policy = get_policy("support")
             resp["policy_version"] = policy.get("version", "v1")
+            resp["answer"] = ResponseNormalizer.polish_llm_text(
+                str(resp.get("answer") or ""),
+                query=question or "",
+            )
             resp_policy, deltas = apply_post_policy("support", resp)
             redacted, _changes, _pci = redact_payload(resp_policy)
 

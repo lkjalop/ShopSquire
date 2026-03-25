@@ -26,6 +26,7 @@ from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.decision_log import log_trace_event
 from src.app.services.copywriting import maybe_apply_copywriting
 from src.app.services.answer_quality import apply_answer_quality
+from src.app.services.response_normalizer import ResponseNormalizer
 from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
@@ -35,6 +36,20 @@ router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 _CHAT_REPLAY_LOCAL: Dict[str, float] = {}
 _CHAT_REPLAY_LOCK = RLock()
+
+
+def _resolve_uid(payload: Dict[str, Any] | None, request: Request | None = None) -> str:
+    raw = str((payload or {}).get("uid") or "").strip()
+    if raw and raw.lower() != "demo-user":
+        return raw[:128]
+    session_id = str((payload or {}).get("session_id") or "").strip()
+    if session_id:
+        return f"anon:{session_id[:96]}"
+    if request and request.client and request.client.host:
+        safe_host = re.sub(r"[^a-zA-Z0-9:._-]", "", str(request.client.host))
+        if safe_host:
+            return f"anon:{safe_host[:96]}"
+    return f"anon:{uuid.uuid4().hex[:16]}"
 
 
 def _normalize_recent_messages(raw: Any, *, limit: int = 16) -> List[Dict[str, str]]:
@@ -154,7 +169,7 @@ def _store_chat_message(db, *, uid: str, role: str, content: str, trace_id: str 
         ),
         {
             "id": str(uuid.uuid4()),
-            "uid": str(uid or "demo-user"),
+            "uid": str(uid or "anonymous")[:128],
             "session_id": str(session_id or "")[:128] or None,
             "role": str(role or "assistant")[:32],
             "content": str(content or "")[:8000],
@@ -983,7 +998,7 @@ async def chat_query(
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
 
-    uid = str((payload or {}).get("uid") or "demo-user")
+    uid = _resolve_uid(payload, request)
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
     source_ip = request.client.host if request and request.client else ""
     turn_intent = _classify_turn_intent(q)
@@ -1169,7 +1184,7 @@ async def chat_query(
         "conversation_turn": int((payload or {}).get("conversation_turn") or 0),
     })
     try:
-        uid_for_cache = str((payload or {}).get("uid") or "demo-user")
+        uid_for_cache = _resolve_uid(payload, request)
         if uid_for_cache and isinstance(image_hash_in, str) and image_hash_in.strip() and image_blob_bytes:
             mem = Memory(redis)
             _stash_image_blob_for_recommend(mem, uid_for_cache, image_hash_in.strip()[:128], image_blob_bytes)
@@ -1390,7 +1405,7 @@ async def chat_query(
                     "security_route": str(image_security_posture.get("route") or "review"),
                 }
                 try:
-                    uid = str((payload or {}).get("uid") or "demo-user")
+                    uid = _resolve_uid(payload, request)
                     _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id)
                     _store_chat_message(
                         db,
@@ -1721,7 +1736,7 @@ async def chat_query(
     # Persist search event for chat route (UI-friendly shape)
     try:
         log_search_event(
-            uid=str(payload.get("uid") or "demo-user"),
+            uid=_resolve_uid(payload, request),
             query=q,
             filters=None,
             result_skus=[p.get("sku") for p in products],
@@ -1835,6 +1850,15 @@ async def chat_query(
         "needs_human_review": bool(image_security_posture.get("needs_human_review")),
         "security_route": str(image_security_posture.get("route") or "allow"),
     }
+    if isinstance(out.get("assistant_message"), str):
+        out["assistant_message"] = ResponseNormalizer.polish_llm_text(
+            str(out.get("assistant_message") or ""),
+            query=q,
+        )
+    if isinstance(data.get("agent_steps"), list):
+        out["agent_steps_readable"] = ResponseNormalizer.agent_steps_to_english(
+            data.get("agent_steps") or []
+        )
     try:
         _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id, session_id=session_id)
         _store_chat_message(

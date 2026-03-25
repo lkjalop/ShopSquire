@@ -50,6 +50,7 @@ type ChatMessage = {
   voiceUsed?: boolean;
   nqeSelection?: NqeInteraction;         // set on user msgs triggered by NQE option click
   nqeSelectionApplied?: Record<string, any>;  // echoed back from backend on assistant msgs
+  agentStepsReadable?: string[];         // human-readable agent step summaries from ResponseNormalizer
 };
 type PendingImageContext = {
   labels: string[];
@@ -1191,6 +1192,10 @@ export default function App() {
         const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
         const complexity = data.complexity || null;
         const backendApplied = data.nqe_selection_applied || null;
+        const agentStepsReadable: string[] | undefined = (() => {
+          const steps = data?.proposal?.agent_steps_readable || data?.agent_steps_readable;
+          return Array.isArray(steps) && steps.length > 0 ? steps : undefined;
+        })();
         const budgetViability = (data.budget_viability && typeof data.budget_viability === 'object') ? data.budget_viability : null;
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
@@ -1230,6 +1235,7 @@ export default function App() {
             disambiguationOptions: disambiguationOpts,
             complexity,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
+            ...(agentStepsReadable ? { agentStepsReadable } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else if (prods.length > 0) {
@@ -1253,6 +1259,7 @@ export default function App() {
             complexity,
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
+            ...(agentStepsReadable ? { agentStepsReadable } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
@@ -1269,6 +1276,7 @@ export default function App() {
             complexity,
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
+            ...(agentStepsReadable ? { agentStepsReadable } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         }
@@ -1502,6 +1510,16 @@ export default function App() {
                         <span className={styles.complexityBadge} title={`Tier: ${msg.complexity.tier} | Model: ${msg.complexity.model}`}>
                           ⚡ {msg.complexity.score}/10
                         </span>
+                      )}
+                      {msg.agentStepsReadable && msg.agentStepsReadable.length > 0 && (
+                        <details style={{ marginTop: 8, fontSize: '0.78em', opacity: 0.72 }}>
+                          <summary style={{ cursor: 'pointer', userSelect: 'none' }}>How I answered this</summary>
+                          <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                            {msg.agentStepsReadable.map((step, si) => (
+                              <li key={si} style={{ marginBottom: 2 }}>{step}</li>
+                            ))}
+                          </ul>
+                        </details>
                       )}
                       {msg.nextQuestions && msg.nextQuestions.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>

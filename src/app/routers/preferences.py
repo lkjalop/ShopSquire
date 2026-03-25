@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/v1/preferences", tags=["preferences"])
 
 @router.get("")
 def get_preferences(uid: str | None = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    user_id = uid or "demo-user"
+    user_id = str(uid or "").strip() or "anonymous"
     mem = Memory(get_redis())
     ctx = mem.get_context(user_id)
     return {"uid": user_id, "preferences": ctx.get("kv") or {}}

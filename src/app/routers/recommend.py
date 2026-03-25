@@ -318,6 +318,99 @@ def _decision_log_writes_enabled(flags: Dict[str, Any] | None) -> bool:
     return bool((flags or {}).get("DECISION_LOG_WRITES_ENABLED"))
 
 
+def _merged_search_rrf(
+    *,
+    service: Any,
+    db: Any,
+    query_text: str,
+    candidates: List[Dict[str, Any]],
+    limit: int,
+    constraints: Dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
+    """Reciprocal rank fusion between current keyword candidates and vector similarity."""
+    vector_enabled = str(os.getenv("VECTOR_SEARCH_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    if not vector_enabled or not str(query_text or "").strip():
+        return candidates
+    try:
+        from src.app.repositories.embeddings import search_products_by_embedding
+        from src.app.services.embeddings import VectorStoreEmbeddings
+    except Exception:
+        return candidates
+
+    try:
+        vec = VectorStoreEmbeddings()
+        qvec = vec.embed_text_vector(query_text)
+        allowed_product_ids = [
+            str((cand or {}).get("id") or "")
+            for cand in (candidates or [])
+            if str((cand or {}).get("id") or "").strip()
+        ]
+        rows = search_products_by_embedding(
+            db,
+            qvec,
+            top_k=max(limit * 2, 20),
+            allowed_product_ids=allowed_product_ids or None,
+        )
+    except Exception:
+        return candidates
+    if not rows:
+        return candidates
+
+    keyword_rank = {
+        str((cand or {}).get("id") or (cand or {}).get("sku") or ""): idx
+        for idx, cand in enumerate(candidates or [])
+        if str((cand or {}).get("id") or (cand or {}).get("sku") or "")
+    }
+    vector_rank = {
+        str(row.get("product_id") or ""): idx
+        for idx, row in enumerate(rows or [])
+        if str(row.get("product_id") or "")
+    }
+    if not vector_rank:
+        return candidates
+
+    by_key: Dict[str, Dict[str, Any]] = {}
+    for cand in candidates or []:
+        key = str((cand or {}).get("id") or (cand or {}).get("sku") or "")
+        if key:
+            by_key[key] = cand
+
+    missing_ids = [pid for pid in vector_rank if pid not in by_key]
+    if missing_ids:
+        try:
+            prods = service.catalog.get_products_by_ids(missing_ids)
+            try:
+                stock_map = service.catalog.get_stock_by_product_ids(missing_ids)
+            except Exception:
+                stock_map = {}
+            for p in prods or []:
+                by_key[str(p.id)] = {
+                    "id": p.id,
+                    "sku": p.sku,
+                    "name": p.name,
+                    "price_cents": p.price_cents,
+                    "currency": p.currency,
+                    "image_url": getattr(p, "image_url", None),
+                    "stock": stock_map.get(p.id, 0),
+                    "specs": p.specs or {},
+                }
+        except Exception:
+            pass
+
+    k = 60.0
+    fused: List[Tuple[float, Dict[str, Any]]] = []
+    for key, cand in by_key.items():
+        score = 0.0
+        if key in keyword_rank:
+            score += 1.0 / (k + keyword_rank[key] + 1.0)
+        if key in vector_rank:
+            score += 1.0 / (k + vector_rank[key] + 1.0)
+        if score > 0:
+            fused.append((score, cand))
+    fused.sort(key=lambda item: item[0], reverse=True)
+    return [cand for _, cand in fused[: max(limit * 2, len(candidates))]]
+
+
 def _trace_system_error(
     *,
     trace_id: str | None,
@@ -988,7 +1081,15 @@ def _is_followup_explain_query(query: str | None) -> bool:
             r"what does|how does|can you elaborate|walk me through|"
             r"why pick|why picked|why chose|why chosen|why recommend|"
             r"how is it|how are they|how are these|what.s the difference|"
-            r"break it down|rank them|score them|rate them|pros and cons)\b",
+            r"break it down|rank them|score them|rate them|pros and cons|"
+            # ── Extended patterns: common follow-up phrasings that don't need new slots ──
+            r"more about|what about|show me more|more info|more detail|"
+            r"more options|anything else|tell me about|what makes|"
+            r"give me more|i want more|show more|sounds good|"
+            r"go on|continue|keep going|what else|"
+            r"not sure|i'm confused|confused|don't understand|"
+            r"what do you mean|what does that mean|huh|"
+            r"can you explain|please explain|explain more)\b",
             q,
         )
     )
@@ -2538,6 +2639,10 @@ def _apply_nqe_selection_to_constraints(
                 if bmax is not None:
                     constraints["budget_max"] = bmax
                     applied["budget_max"] = bmax
+                    _bb = _classify_budget_bracket(bmax)
+                    if _bb:
+                        constraints["budget_bracket"] = _bb
+                        applied["budget_bracket"] = _bb
             except Exception:
                 pass
         return applied
@@ -2860,16 +2965,121 @@ def _summarize_results(
     if not results:
         return None, None
     try:
-        top = results[:5]
-        items = "; ".join([f"{r.get('name')} (${int(r.get('price_cents', 0))/100:.0f})" for r in top])
+        # ── Build rich product context (name + key specs + price) for top 3 ──
+        def _spec_summary_for_llm(r: dict) -> str:
+            specs = r.get("specs") if isinstance(r.get("specs"), dict) else {}
+            parts: list[str] = []
+            if specs.get("ram_gb"):
+                parts.append(f"{specs['ram_gb']}GB RAM")
+            if specs.get("gpu_model"):
+                parts.append(str(specs["gpu_model"]))
+            elif specs.get("gpu_vram_gb"):
+                parts.append(f"{specs['gpu_vram_gb']}GB GPU")
+            if specs.get("refresh_hz"):
+                parts.append(f"{specs['refresh_hz']}Hz display")
+            if specs.get("storage_gb"):
+                parts.append(f"{specs['storage_gb']}GB SSD")
+            if specs.get("cpu_model"):
+                parts.append(str(specs["cpu_model"]))
+            price_cents = r.get("price_cents") or 0
+            try:
+                price_str = f"${int(float(price_cents) / 100):,}" if float(price_cents) > 0 else ""
+            except Exception:
+                price_str = ""
+            spec_str = ", ".join(parts) if parts else "specs unavailable"
+            name = r.get("name") or "Unknown"
+            return f"- {name} ({price_str}): {spec_str}"
+
+        top = results[:3]
+        product_lines = "\n".join(_spec_summary_for_llm(r) for r in top)
+
+        # Pull the most useful constraint signals for the prompt
+        budget_min = constraints.get("budget_min")
+        budget_max = constraints.get("budget_max")
+        use_case = str(constraints.get("use_case") or constraints.get("buyer_persona") or "").replace("_", " ")
+        brands = constraints.get("brands") or []
+
+        budget_str = ""
+        if budget_min and budget_max:
+            budget_str = f"${int(budget_min):,}–${int(budget_max):,}"
+        elif budget_max:
+            budget_str = f"under ${int(budget_max):,}"
+        elif budget_min:
+            budget_str = f"above ${int(budget_min):,}"
+
+        # Budget bracket for LLM context (entry/mid/high/ultra)
+        _bracket = _classify_budget_bracket(budget_max)
+        if _bracket and _bracket not in ("high", "ultra"):
+            # Helps LLM calibrate value language for budget-conscious buyers
+            budget_str = f"{budget_str} ({_bracket}-range)" if budget_str else f"{_bracket}-range budget"
+
         prompt = (
-            "You are a concise shopping assistant. "
-            "Summarize the result set in 1-2 sentences, mention budget/spec constraints if present, "
-            "and suggest next step. Do not invent products.\n"
-            f"Query: {query}\n"
-            f"Constraints: {constraints}\n"
-            f"Top results: {items}\n"
+            "You are a warm, knowledgeable shopping assistant. "
+            "Speak like a helpful friend who knows tech — not like a search engine.\n\n"
+            f"The user asked: \"{query}\"\n\n"
+            "Instructions:\n"
+            "1. Answer the user's question DIRECTLY in the first sentence. "
+            "If it is a yes/no question (e.g. 'Is $1,800 enough?'), answer yes or no first.\n"
+            "2. Mention the top 1-2 products by name and say specifically WHY they fit "
+            "(reference the spec that matters for their use case, e.g. GPU for gaming, "
+            "battery for travel, RAM for engineering).\n"
+            "3. Use plain English. Explain specs in context: instead of '16GB DDR5', say "
+            "'16GB of memory — enough to run games and Chrome at the same time'.\n"
+            "4. Keep it under 65 words. Do not list every product. Do not invent specs.\n\n"
+            + (f"Budget: {budget_str}\n" if budget_str else "")
+            + (f"Use case: {use_case}\n" if use_case else "")
+            + (f"Preferred brands: {', '.join(brands)}\n" if brands else "")
+            + f"\nTop matching products:\n{product_lines}\n"
         )
+        # ── Semantic response cache — check before calling LLM ──
+        # Embeds the query+constraints fingerprint and looks up recent responses.
+        # Cache hit (cosine distance < 0.08) avoids the full LLM round-trip (~400-800ms).
+        _cached_response: str | None = None
+        _cache_key: str | None = None
+        _cache_enabled = os.getenv("SEMANTIC_CACHE_ENABLED", "1").strip().lower() in ("1", "true", "yes")
+        _cache_ttl_hours = max(1, int(os.getenv("SEMANTIC_CACHE_TTL_HOURS", "4") or 4))
+        if _cache_enabled:
+            try:
+                import hashlib
+                from datetime import datetime, timezone, timedelta
+                from src.app.services.embedding_pipeline import EmbeddingPipeline
+                from src.app.services.vector_store import PgVectorStore
+
+                # Build a stable fingerprint: query + budget + use_case + top skus
+                _fp_parts = [
+                    (query or "").lower().strip(),
+                    str(constraints.get("budget_max") or ""),
+                    str(constraints.get("use_case") or ""),
+                    ",".join(str(r.get("sku") or "") for r in (results or [])[:3]),
+                ]
+                _cache_key = hashlib.md5("|".join(_fp_parts).encode()).hexdigest()
+                _store = PgVectorStore("query_cache")
+                _pipe = EmbeddingPipeline(store=_store)
+                _emb = _pipe._embed_text(query or "")
+                if _emb:
+                    _hits = _store.query(_emb, top_k=1)
+                    if _hits:
+                        hit = _hits[0]
+                        distance = float(hit.get("distance") or 1.0)
+                        payload_hit = hit.get("payload") or {}
+                        cached_at_str = str(payload_hit.get("cached_at") or "")
+                        if distance < 0.08 and cached_at_str:
+                            try:
+                                cached_at = datetime.fromisoformat(cached_at_str)
+                                if datetime.now(timezone.utc) - cached_at < timedelta(hours=_cache_ttl_hours):
+                                    _cached_response = str(payload_hit.get("response") or "").strip()
+                            except Exception:
+                                pass
+                if _cached_response:
+                    try:
+                        log_trace_event(trace_id, "semantic_cache_hit", "cache", _cache_key or "query_cache",
+                                        "system", None, {"distance": distance, "ttl_hours": _cache_ttl_hours})
+                    except Exception:
+                        pass
+                    return _cached_response, None
+            except Exception:
+                pass
+
         if os.getenv("LLM_ASYNC_QUEUE_ENABLED", "0").strip().lower() in ("1", "true", "yes"):
             try:
                 from src.app.workers.rq_queue import enqueue_llm
@@ -2878,7 +3088,7 @@ def _summarize_results(
                     {
                         "model": model or os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
                         "prompt": prompt,
-                        "options": {"temperature": 0.2, "num_predict": 128},
+                        "options": {"temperature": 0.3, "num_predict": 220},
                         "trace_id": trace_id,
                     }
                 )
@@ -2890,7 +3100,7 @@ def _summarize_results(
             "model": model or os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.2, "num_predict": 128},
+            "options": {"temperature": 0.3, "num_predict": 220},
         }
         from src.app.services.dependency_resilience import call_with_resilience
 
@@ -2901,7 +3111,29 @@ def _summarize_results(
             retries=1,
         )
         if isinstance(data, dict):
-            return data.get("response"), None
+            llm_response = data.get("response")
+            # ── Write to semantic cache ──
+            if llm_response and _cache_enabled and not _cached_response:
+                try:
+                    from datetime import datetime, timezone as _tz
+                    from src.app.services.embedding_pipeline import EmbeddingPipeline
+                    from src.app.services.vector_store import PgVectorStore
+                    _store_w = PgVectorStore("query_cache")
+                    _pipe_w = EmbeddingPipeline(store=_store_w)
+                    _emb_w = _pipe_w._embed_text(query or "")
+                    if _emb_w and _cache_key:
+                        _store_w.add_document(
+                            doc_id=_cache_key,
+                            embedding=_emb_w,
+                            payload={
+                                "response": llm_response,
+                                "query": (query or "")[:200],
+                                "cached_at": datetime.now(_tz.utc).isoformat(),
+                            },
+                        )
+                except Exception:
+                    pass
+            return llm_response, None
         return None, None
     except Exception as e:
         # surface LLM/summary errors into trace for observability
@@ -2961,6 +3193,28 @@ def _humanize_spec_list(specs: list) -> str:
     return ", ".join(out) if out else ""
 
 
+_BUDGET_BRACKETS = [
+    (500,   "entry"),
+    (900,   "mid"),
+    (1500,  "high"),
+    (float("inf"), "ultra"),
+]
+
+
+def _classify_budget_bracket(budget_max: float | int | None) -> str | None:
+    """Map a numeric budget_max to a bracket label: entry / mid / high / ultra."""
+    if budget_max is None:
+        return None
+    try:
+        bmax = float(budget_max)
+    except (TypeError, ValueError):
+        return None
+    for threshold, label in _BUDGET_BRACKETS:
+        if bmax <= threshold:
+            return label
+    return "ultra"
+
+
 def _build_brand_budget_answer(query: str, results: list[dict], constraints: dict) -> str:
     q_low = str(query or "").lower()
     asks_budget = any(
@@ -2993,6 +3247,48 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
                     brand_hint = fallback_brand
                     break
     if brand_hint not in _SUPPORTED_IMAGE_BRAND_HINTS:
+        # ── Generic budget answer when no brand is identified ──
+        # e.g. "Is $1,800 enough for a gaming laptop?" → yes/no based on result prices
+        budget_max_generic = (
+            constraints.get("budget_max")
+            or constraints.get("_request_budget_max")
+            or ((constraints.get("_price_filter_meta") or {}).get("budget_max") if isinstance(constraints.get("_price_filter_meta"), dict) else None)
+        )
+        if budget_max_generic and results:
+            def _gp(row: dict) -> float:
+                try:
+                    c = float((row or {}).get("price_cents") or 0)
+                    return c / 100.0 if c > 0 else 0.0
+                except Exception:
+                    return 0.0
+            valid_prices = [_gp(r) for r in results if _gp(r) > 0]
+            if valid_prices:
+                cheapest = min(valid_prices)
+                cap = float(budget_max_generic)
+                price_meta = constraints.get("_price_filter_meta") if isinstance(constraints.get("_price_filter_meta"), dict) else {}
+                fallback = str(price_meta.get("fallback") or "").strip().lower()
+                over = cheapest > cap or "nearest_above_budget" in fallback
+                use_case_label = str(constraints.get("use_case") or "").replace("_", " ").strip()
+                category_label = use_case_label or "laptops"
+                if over:
+                    return (
+                        f"Your ${int(cap):,} budget is a little short — the closest options start around "
+                        f"${int(round(cheapest)):,}. I've shown you the nearest matches."
+                    )
+                return (
+                    f"Yes, ${int(cap):,} covers these {category_label} options, "
+                    f"with models starting from ${int(round(cheapest)):,}."
+                )
+            else:
+                # Products found but prices unavailable — still answer the budget question
+                cap = float(budget_max_generic)
+                use_case_label = str(constraints.get("use_case") or "").replace("_", " ").strip()
+                n = len(results)
+                plural = "s" if n != 1 else ""
+                return (
+                    f"Yes, ${int(cap):,} should cover these options. "
+                    f"I found {n} {use_case_label or 'laptop'}{plural} in that range."
+                )
         return ""
     budget_max = (
         constraints.get("budget_max")
@@ -5586,16 +5882,90 @@ def suggest(
     _id_result: Dict[str, Any] = {}
     _id_source = "none"
     try:
+        from src.app.services.vision_reasoning import VisionReasoningService
         from src.app.services.product_identity_agent import (
             identify_product_from_image,
             identify_product_from_text,
             specs_to_constraints as _id_to_constraints,
         )
         _image_blob = _decode_session_image_blob(kv if isinstance(kv, dict) else {}, image_context.get("hash"))
+        _vision_result = None
         _vision_min_conf = float(os.getenv("CV_IDENTITY_IMAGE_MIN_CONF", "0.6") or 0.6)
         _vision_brand_only_min_conf = float(os.getenv("CV_IDENTITY_BRAND_ONLY_MIN_CONF", "0.35") or 0.35)
         _low_conf_brand_candidate: Dict[str, Any] = {}
         if _image_blob:
+            try:
+                _vision = VisionReasoningService()
+                if _vision.available:
+                    import asyncio as _asyncio
+
+                    _vision_result = _asyncio.run(
+                        _vision.analyze_product(
+                            _image_blob,
+                            mime=str(image_context.get("mime") or "image/jpeg"),
+                        )
+                    )
+                    if _vision_result and not _vision_result.error:
+                        _vision_facts = _vision_result.to_nqe_facts()
+                        if _vision_facts:
+                            _state_answered = dict(structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {})
+                            for _fact_key, _fact_val in _vision_facts.items():
+                                if _fact_val is not None and _fact_key not in _state_answered:
+                                    _state_answered[_fact_key] = _fact_val
+                            structured_state["nqe_answered_fields"] = _state_answered
+                            kv["nqe_answered_fields"] = _state_answered
+                        if _vision_result.extracted_specs.brand and not constraints.get("brand"):
+                            constraints["brand"] = _vision_result.extracted_specs.brand
+                        if _vision_result.product_type and _vision_result.product_type != "unknown":
+                            constraints.setdefault("product_type", _vision_result.product_type)
+                        if _vision_result.extracted_specs.display_inches and not constraints.get("display_inches"):
+                            constraints["display_inches"] = _vision_result.extracted_specs.display_inches
+                        if _vision_result.extracted_specs.ram_gb:
+                            constraints.setdefault("specs", [])
+                            if not any("ram_gb_min:" in str(s).lower() for s in constraints["specs"]):
+                                constraints["specs"].append(f"ram_gb_min:{int(_vision_result.extracted_specs.ram_gb)}")
+                        if _vision_result.extracted_specs.storage_gb:
+                            constraints.setdefault("specs", [])
+                            if not any("storage_gb_min:" in str(s).lower() for s in constraints["specs"]):
+                                constraints["specs"].append(f"storage_gb_min:{int(_vision_result.extracted_specs.storage_gb)}")
+                        if _vision_result.extracted_specs.cpu:
+                            constraints.setdefault("specs", [])
+                            if not any("cpu:" in str(s).lower() for s in constraints["specs"]):
+                                constraints["specs"].append(f"cpu:{_vision_result.extracted_specs.cpu}")
+                        _vision_conf = float(_vision_result.visual_confidence or 0.0)
+                        if _vision_conf >= _vision_min_conf and _vision_result.extracted_specs.brand:
+                            _id_result = {
+                                "ok": True,
+                                "identified": True,
+                                "product_type": _vision_result.product_type or "unknown",
+                                "brand": _vision_result.extracted_specs.brand,
+                                "model": _vision_result.extracted_specs.model_name,
+                                "cpu_hint": _vision_result.extracted_specs.cpu,
+                                "ram_gb_hint": _vision_result.extracted_specs.ram_gb,
+                                "gpu_hint": _vision_result.extracted_specs.gpu,
+                                "display_inches_hint": _vision_result.extracted_specs.display_inches,
+                                "confidence": _vision_conf,
+                                "notes": _vision_result.plain_english_summary,
+                            }
+                            _id_source = "vision_reasoning"
+                        log_trace_event(
+                            trace_id=trace_id,
+                            event_type="vision_product_extraction",
+                            source_type="agent",
+                            source_id="VisionReasoningService",
+                            target_type="system",
+                            target_id=None,
+                            payload={
+                                "provider": _vision_result.provider_used,
+                                "confidence": _vision_conf,
+                                "product_type": _vision_result.product_type,
+                                "facts": _vision_facts if '_vision_facts' in locals() else {},
+                                "error": _vision_result.error,
+                            },
+                        )
+            except Exception:
+                pass
+        if _image_blob and not _id_result:
             _id_candidate = identify_product_from_image(
                 _image_blob,
                 user_query=query or "",
@@ -7598,6 +7968,14 @@ def suggest(
             and not (simple_request and cheap_request)
         )
         try:
+            candidates = _merged_search_rrf(
+                service=service,
+                db=db,
+                query_text=query_effective or query or "",
+                candidates=candidates,
+                limit=limit,
+                constraints=constraints,
+            )
             log_trace_event(
                 trace_id=trace_id,
                 event_type="agent_process",

@@ -67,7 +67,7 @@ def evaluate_scan_scope(*, targets: List[str] | None, tenant_id: str | None) -> 
     }
 
 
-def run_vulnerability_scan(
+def run_vulnerability_scan(  # noqa: C901  (kept for security_integrations.py caller; migrate to routers/vuln_scan.py POST /api/v1/security/scan/full)
     *,
     tenant_id: str | None,
     targets: List[str] | None,
@@ -84,7 +84,7 @@ def run_vulnerability_scan(
             "findings": [],
         }
 
-    provider_n = str(provider or os.getenv("VULN_SCAN_PROVIDER", "mock")).strip().lower()
+    provider_n = str(provider or os.getenv("VULN_SCAN_PROVIDER", "service")).strip().lower()
     profile_n = str(profile or "baseline").strip().lower()
     if dry_run:
         return {
@@ -98,20 +98,35 @@ def run_vulnerability_scan(
         }
 
     findings: list[dict[str, Any]] = []
-    if provider_n == "mock":
-        for t in scope["allowed_targets"]:
-            sev = "medium" if ("admin" in t or "api" in t) else "low"
-            findings.append(
-                {
-                    "target": t,
-                    "id": f"MOCK-{abs(hash((t, profile_n))) % 100000}",
-                    "severity": sev,
-                    "title": "Potential misconfiguration",
-                    "confidence": 0.62 if sev == "medium" else 0.44,
-                }
-            )
+    if provider_n in ("service", "vuln_scanner"):
+        import asyncio
+
+        from src.app.services.vuln_scanner import VulnScanService
+
+        async def _run() -> list[dict[str, Any]]:
+            svc = VulnScanService()
+            out: list[dict[str, Any]] = []
+            for target in scope["allowed_targets"]:
+                report = await svc.scan_all(target_url=f"https://{target}")
+                for finding in report.findings:
+                    out.append(
+                        {
+                            "target": target,
+                            "id": getattr(finding, "cve_id", None) or getattr(finding, "title", "finding"),
+                            "severity": getattr(finding, "severity", "info"),
+                            "title": getattr(finding, "title", "Vulnerability finding"),
+                            "confidence": round(float(getattr(finding, "cvss_score", 0.0) or 0.0) / 10.0, 4),
+                            "plain_english": getattr(finding, "plain_english", ""),
+                            "source": getattr(finding, "source", "service"),
+                        }
+                    )
+            return out
+
+        findings = asyncio.run(_run())
     elif provider_n in ("nuclei", "openvas"):
-        # Attempt real subprocess invocation (binary must be on PATH or VULN_SCAN_BINARY env var).
+        # DEPRECATED: direct subprocess invocation. Prefer provider="service" which delegates
+        # to VulnScanService (routers/vuln_scan.py). This path will be removed once
+        # security_integrations.py caller is updated to use the dedicated scan router.
         import shutil, subprocess, tempfile
         binary_name = os.getenv("VULN_SCAN_BINARY") or provider_n
         binary_path = shutil.which(binary_name)
@@ -245,4 +260,3 @@ def auto_create_incidents_from_findings(
         created.append(incident)
 
     return created
-

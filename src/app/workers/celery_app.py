@@ -173,6 +173,14 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     incident_sla_min = max(1, min(60, int(float(os.getenv("INCIDENT_SLA_CELERY_MINUTES", "1") or 1))))
     trace_recovery_enabled = str(os.getenv("TRACE_BROKER_RECOVERY_CELERY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
     trace_recovery_min = max(1, min(60, int(float(os.getenv("TRACE_BROKER_RECOVERY_CELERY_MINUTES", "5") or 5))))
+    catalog_reindex_enabled = str(os.getenv("CATALOG_REINDEX_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    catalog_reindex_hour = max(0, min(23, int(float(os.getenv("CATALOG_REINDEX_HOUR_UTC", "1") or 1))))
+    catalog_reindex_minute = max(0, min(59, int(float(os.getenv("CATALOG_REINDEX_MINUTE_UTC", "0") or 0))))
+    vuln_scan_sched_enabled = str(os.getenv("VULN_SCAN_SCHEDULED_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    vuln_scan_sched_hour = max(0, min(23, int(float(os.getenv("VULN_SCAN_SCHEDULED_HOUR_UTC", "4") or 4))))
+    vuln_scan_sched_minute = max(0, min(59, int(float(os.getenv("VULN_SCAN_SCHEDULED_MINUTE_UTC", "0") or 0))))
+    anomaly_snapshot_enabled = str(os.getenv("ANOMALY_SNAPSHOT_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    anomaly_snapshot_min = max(15, min(120, int(float(os.getenv("ANOMALY_SNAPSHOT_INTERVAL_MIN", "60") or 60))))
 
     beat_schedule = {}
     if poll_enabled:
@@ -217,6 +225,24 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{trace_recovery_min}"),
             "args": (),
         }
+    if catalog_reindex_enabled:
+        beat_schedule["catalog-reindex-nightly"] = {
+            "task": "catalog.reindex_new_products",
+            "schedule": crontab(minute=str(catalog_reindex_minute), hour=str(catalog_reindex_hour)),
+            "args": (),
+        }
+    if vuln_scan_sched_enabled:
+        beat_schedule["scheduled-vuln-scan-daily"] = {
+            "task": "src.app.tasks.incident_ops_tasks.scheduled_vuln_scan_daily",
+            "schedule": crontab(minute=str(vuln_scan_sched_minute), hour=str(vuln_scan_sched_hour)),
+            "args": (),
+        }
+    if anomaly_snapshot_enabled:
+        beat_schedule["anomaly-hourly-snapshot"] = {
+            "task": "src.app.tasks.anomaly_tasks.anomaly_hourly_snapshot",
+            "schedule": crontab(minute=f"*/{anomaly_snapshot_min}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -230,14 +256,19 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.model_ops_tasks.snapshot_forecast_governance": {"queue": default_q},
             "src.app.tasks.model_ops_tasks.refresh_visual_search_index": {"queue": default_q},
             "src.app.tasks.model_ops_tasks.snapshot_risk_register_daily": {"queue": default_q},
+            "src.app.tasks.model_ops_tasks.reindex_catalog_nightly": {"queue": default_q},
+            "catalog.reindex_new_products": {"queue": default_q},
             "src.app.tasks.incident_ops_tasks.check_incident_sla_breaches": {"queue": default_q},
             "src.app.tasks.incident_ops_tasks.trace_broker_recovery": {"queue": default_q},
+            "src.app.tasks.incident_ops_tasks.scheduled_vuln_scan_daily": {"queue": default_q},
+            "src.app.tasks.anomaly_tasks.anomaly_hourly_snapshot": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
             "src.app.tasks.security_poll_tasks",
             "src.app.tasks.model_ops_tasks",
             "src.app.tasks.incident_ops_tasks",
+            "src.app.tasks.anomaly_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

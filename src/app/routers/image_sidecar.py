@@ -405,7 +405,7 @@ async def route_image_with_sidecars(
     request: Request,
     image: UploadFile = File(...),
     query: str = Form(default=""),
-    uid: str = Form(default="demo-user"),
+    uid: str = Form(default="anonymous"),
     session_id: str | None = Form(default=None),
     captcha_token: str | None = Form(default=None),
     mfa_stepup_token: str | None = Form(default=None),
@@ -565,4 +565,3 @@ async def route_image_with_sidecars(
         "tenant_storage_policy": storage_policy,
         "session_id": str(session_id or ""),
     }
-

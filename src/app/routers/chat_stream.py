@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from src.app.deps import get_redis
 from src.app.models.db import get_db
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
+from src.app.services.response_normalizer import ResponseNormalizer
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat-stream"])
 
@@ -75,6 +76,22 @@ async def chat_stream(
                         "ts": time.time(),
                     })
 
+                # Polish the assistant message and translate agent steps
+                # before emitting — removes robotic preambles and raw JSON leakage
+                if isinstance(result, dict):
+                    proposal = result.get("proposal")
+                    if isinstance(proposal, dict):
+                        msg = proposal.get("assistant_message") or ""
+                        if msg:
+                            query_text = payload.get("query") or payload.get("message") or ""
+                            proposal["assistant_message"] = ResponseNormalizer.polish_llm_text(
+                                msg, query=query_text
+                            )
+                        agent_steps = proposal.get("agent_steps") or []
+                        if agent_steps:
+                            proposal["agent_steps_readable"] = ResponseNormalizer.agent_steps_to_english(
+                                agent_steps
+                            )
                 yield _sse_event("answer", result)
             else:
                 yield _sse_event("answer", {"raw": result})

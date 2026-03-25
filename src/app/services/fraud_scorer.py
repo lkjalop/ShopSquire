@@ -100,6 +100,8 @@ class FraudScorer:
         "geoip_lookup_unavailable": 0.12,
         "gnn_ring_risk_medium": 0.22,
         "gnn_ring_risk_high": 0.38,
+        "behavioral_anomaly_medium": 0.18,
+        "behavioral_anomaly_high": 0.32,
         # Behavioral biometrics
         "biometric_mouse_bot_pattern": 0.30,
         "biometric_typing_bot_pattern": 0.30,
@@ -148,6 +150,8 @@ class FraudScorer:
         "geoip_lookup_unavailable": "network",
         "gnn_ring_risk_medium": "graph",
         "gnn_ring_risk_high": "graph",
+        "behavioral_anomaly_medium": "behavior",
+        "behavioral_anomaly_high": "behavior",
         "cv_blur_score_low": "cv",
         "cv_histogram_anomaly": "cv",
         "cv_metadata_stripped": "cv",
@@ -302,7 +306,75 @@ class FraudScorer:
             pass
         score = self.calculate_score(signals)
         level = self.get_risk_level(score)
+        if session_data is not None:
+            session_data["fraud_summary"] = self.to_merchant_dict(score=score, risk_level=level, signals=signals)
         return score, level, signals
+
+    def get_top_evidence(
+        self,
+        signals: Dict[str, bool],
+        top_n: int = 3,
+    ) -> Dict[str, Any]:
+        """SHAP-style signal attribution: weight × active → top-N evidence strings + conformal interval.
+
+        Returns:
+            {
+                "top_evidence": ["serial_mismatch (0.40)", "image_hash_match_fraud_db (0.35)", ...],
+                "confidence_interval": [lo, hi],   # score ± 0.08 clamped [0, 1]
+                "attribution": {"signal_name": weight, ...}  # all active signals with weights
+            }
+        """
+        all_weights = {**self.WEIGHTS, **self.CV_WEIGHTS}
+        active = [(sig, all_weights.get(sig, 0.05)) for sig, active in (signals or {}).items() if active]
+        active.sort(key=lambda x: x[1], reverse=True)
+        top_evidence = [f"{sig} ({w:.2f})" for sig, w in active[:top_n]]
+        attribution = {sig: round(w, 3) for sig, w in active}
+        score = self.calculate_score(signals)
+        confidence_interval = [
+            round(max(0.0, score - 0.08), 3),
+            round(min(1.0, score + 0.08), 3),
+        ]
+        return {
+            "top_evidence": top_evidence,
+            "confidence_interval": confidence_interval,
+            "attribution": attribution,
+        }
+
+    def score_with_evidence(
+        self,
+        base_signals: Dict[str, bool],
+        expected_serial: Optional[str] = None,
+        observed_serial: Optional[str] = None,
+        image_phash: Optional[str] = None,
+        session_data: Optional[Dict] = None,
+        case_id: Optional[str] = None,
+        top_n: int = 3,
+    ) -> Tuple[float, str, Dict[str, bool], Dict[str, Any]]:
+        """Like score_with_enrichment but also returns evidence attribution.
+
+        Returns: (score, level, signals, evidence_dict)
+        evidence_dict has keys: top_evidence, confidence_interval, attribution
+        """
+        score, level, signals = self.score_with_enrichment(
+            base_signals=base_signals,
+            expected_serial=expected_serial,
+            observed_serial=observed_serial,
+            image_phash=image_phash,
+            session_data=session_data,
+            case_id=case_id,
+        )
+        evidence = self.get_top_evidence(signals, top_n=top_n)
+        return score, level, signals, evidence
+
+    def to_merchant_dict(self, *, score: float, risk_level: str, signals: Dict[str, bool]) -> Dict[str, Any]:
+        from src.app.services.response_normalizer import ResponseNormalizer
+
+        return {
+            "score": round(float(score), 4),
+            "risk_level": str(risk_level or "minimal"),
+            "summary": ResponseNormalizer.fraud_score_to_english(risk_level, score, signals),
+            "active_signals": [k for k, v in (signals or {}).items() if v],
+        }
 
     def pre_llm_cv_check(self, image_data: Dict[str, Any]) -> Dict[str, bool]:
         """Run cheap CV checks before any ML model. Returns a dict of boolean signals.
@@ -442,6 +514,37 @@ class BehavioralFraudDetector:
             except Exception:
                 pass
 
+        # Historical anomaly detection over merchant/session series.
+        try:
+            from src.app.services.anomaly_detector import AnomalyDetector
+
+            detector = AnomalyDetector()
+            histories = self._extract_histories(session_data)
+            latest_metrics = {
+                domain: float(values[-1])
+                for domain, values in histories.items()
+                if isinstance(values, list) and values
+            }
+            anomalies = detector.detect_metrics(latest_metrics, histories=histories)
+            if anomalies:
+                top = max(anomalies, key=lambda item: float(item.confidence))
+                if float(top.confidence) >= 0.7:
+                    signals["behavioral_anomaly_high"] = True
+                else:
+                    signals["behavioral_anomaly_medium"] = True
+                session_data["anomaly_summary"] = {
+                    "count": len(anomalies),
+                    "top_severity": top.severity,
+                    "summary": "; ".join(
+                        str(a.plain_english or "").strip()
+                        for a in anomalies[:3]
+                        if str(a.plain_english or "").strip()
+                    )[:600],
+                    "results": [a.to_dict() for a in anomalies[:5]],
+                }
+        except Exception:
+            pass
+
         # ── JA3/JA4 TLS fingerprint signals ──
         try:
             ja3_hash = str(session_data.get("ja3_hash") or "").strip()
@@ -511,3 +614,51 @@ class BehavioralFraudDetector:
             pass
 
         return signals
+
+    @staticmethod
+    def _extract_histories(session_data: Dict[str, Any]) -> Dict[str, List[float]]:
+        key_map = {
+            "purchase_velocity": [
+                "purchase_velocity_series",
+                "purchases_last_hour_series",
+            ],
+            "refund_rate": [
+                "refund_rate_series",
+                "returns_rate_series",
+            ],
+            "ip_velocity": [
+                "ip_velocity_series",
+                "ip_velocity_per_hour_series",
+            ],
+            "chargeback_rate": [
+                "chargeback_rate_series",
+            ],
+        }
+        out: Dict[str, List[float]] = {}
+        for domain, keys in key_map.items():
+            for key in keys:
+                raw = session_data.get(key)
+                if isinstance(raw, list):
+                    vals: List[float] = []
+                    for item in raw:
+                        try:
+                            vals.append(float(item))
+                        except Exception:
+                            continue
+                    if vals:
+                        out[domain] = vals
+                        break
+        # Promote current point into a short series when only a current value is available.
+        scalar_fallbacks = {
+            "purchase_velocity": session_data.get("purchases_last_hour"),
+            "ip_velocity": session_data.get("ip_velocity_per_hour"),
+        }
+        for domain, raw in scalar_fallbacks.items():
+            if domain in out:
+                continue
+            try:
+                if raw is not None:
+                    out[domain] = [float(raw)]
+            except Exception:
+                continue
+        return out

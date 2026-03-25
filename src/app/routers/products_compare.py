@@ -88,7 +88,7 @@ def compare(payload: Dict) -> Dict:
     rec = {"product_id": best.get("sku"), "reasoning": reasoning, "decision_trace_id": None}
     try:
         log_search_event(
-            uid=str(payload.get("uid") or "demo-user"),
+            uid=str(payload.get("uid") or "anonymous"),
             query=str(payload.get("user_query") or "compare"),
             filters={"compare": True, "product_ids": ids},
             result_skus=[p.get("sku") for p in selected],
@@ -99,4 +99,3 @@ def compare(payload: Dict) -> Dict:
     except Exception:
         pass
     return {"comparison_matrix": matrix, "recommendation": rec}
-

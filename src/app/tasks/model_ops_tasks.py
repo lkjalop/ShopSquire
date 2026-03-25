@@ -224,6 +224,35 @@ def refresh_visual_search_index(self) -> Dict[str, Any]:
         return out
 
 
+@celery_app.task(bind=True, name="src.app.tasks.model_ops_tasks.reindex_catalog_nightly")
+def reindex_catalog_nightly(self) -> Dict[str, Any]:
+    """Nightly catalog + FAQ vector reindex via EmbeddingPipeline → pgvector."""
+    enabled = str(os.getenv("CATALOG_REINDEX_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    if not enabled:
+        out = {"status": "disabled"}
+        _record_governance_run(run_type="catalog_reindex", status="disabled", metadata=out)
+        return out
+    try:
+        from scripts.index_catalog import run_index
+
+        batch_size = max(50, min(2000, int(float(os.getenv("CATALOG_REINDEX_BATCH_SIZE", "500") or 500))))
+        refresh_faq = str(os.getenv("FAQ_VECTOR_INDEX_ON_REINDEX", "1")).strip().lower() in ("1", "true", "yes", "on")
+        result = run_index(index_catalog=True, index_faq=refresh_faq, batch_size=batch_size, delta_only=True)
+        out = {"status": "ok", "result": result}
+        _record_governance_run(run_type="catalog_reindex", status="ok", metadata=out)
+        return out
+    except Exception as exc:
+        out = {"status": "failed", "error": str(exc)[:300]}
+        _record_governance_run(run_type="catalog_reindex", status="failed", metadata=out)
+        return out
+
+
+@celery_app.task(bind=True, name="catalog.reindex_new_products")
+def reindex_new_products(self) -> Dict[str, Any]:
+    """Explicit task alias for delta-based catalog reindexing."""
+    return reindex_catalog_nightly.run()
+
+
 @celery_app.task(bind=True, name="src.app.tasks.model_ops_tasks.snapshot_risk_register_daily")
 def snapshot_risk_register_daily(self) -> Dict[str, Any]:
     days = max(1, min(365, int(float(os.getenv("RISK_REGISTER_SNAPSHOT_WINDOW_DAYS", "30") or 30))))

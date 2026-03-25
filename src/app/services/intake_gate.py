@@ -65,6 +65,7 @@ _DEFAULT_ALLOWED_MIME = {
     "image/bmp",
     "image/tiff",
     "image/gif",
+    "image/avif",
 }
 _DEFAULT_ARCHIVE_EXT = {".zip", ".tar", ".gz", ".tgz", ".bz2", ".7z", ".rar"}
 _DEFAULT_QR_ALLOWLIST = {"localhost", "127.0.0.1"}
@@ -75,6 +76,7 @@ _DEFAULT_ALLOWED_IMAGE_MIME = {
     "image/bmp",
     "image/tiff",
     "image/gif",
+    "image/avif",
 }
 _EXT_MIME_EXPECTED = {
     ".jpg": {"image/jpeg"},
@@ -85,6 +87,7 @@ _EXT_MIME_EXPECTED = {
     ".tif": {"image/tiff"},
     ".tiff": {"image/tiff"},
     ".webp": {"image/webp"},
+    ".avif": {"image/avif"},
 }
 
 
@@ -131,6 +134,9 @@ def _sniff_mime(blob: bytes) -> str | None:
     # WebP: starts with RIFF + 4-byte size + WEBP signature at offset 8
     if len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
         return "image/webp"
+    # AVIF uses the ISO BMFF container with an `ftypavif`/`ftypavis` brand.
+    if len(blob) >= 16 and blob[4:8] == b"ftyp" and blob[8:12] in (b"avif", b"avis"):
+        return "image/avif"
     return None
 
 

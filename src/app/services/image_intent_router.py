@@ -116,11 +116,15 @@ def classify_image_intent(
     # -----------------------------------------------------------------------
     label_text = " ".join(labels).lower()
     damage_label_kw = ["crack", "broken", "dent", "scratch", "shatter", "damage", "defect"]
+    functional_issue_kw = ["bsod", "blue screen", "stop code", "crash", "error", "won't boot", "not working"]
     product_label_kw = ["laptop", "phone", "tablet", "monitor", "keyboard", "headphone",
                         "camera", "printer", "router", "speaker", "watch", "console"]
     if any(kw in label_text for kw in damage_label_kw):
         scores["cv_triage"] += 0.15
         signals["damage_labels"] = True
+    if any(kw in label_text for kw in functional_issue_kw):
+        scores["cv_triage"] += 0.35
+        signals["functional_issue_labels"] = True
     if any(kw in label_text for kw in product_label_kw):
         scores["visual_search"] += 0.10
         signals["product_labels"] = True
@@ -161,6 +165,7 @@ def classify_image_intent(
         abs(scores["visual_search"] - scores["cv_triage"]) < 0.10
         and not signals.get("query_visual_search")
         and not signals.get("query_cv_triage")
+        and not signals.get("functional_issue_labels")
     ):
         return {
             "intent": "disambiguate",

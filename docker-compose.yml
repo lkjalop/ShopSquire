@@ -32,7 +32,7 @@ services:
       - /tmp:size=256M
 
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: shopsquire_db
     environment:
       POSTGRES_PASSWORD: postgres
@@ -242,6 +242,54 @@ services:
     depends_on:
       - prometheus
 
+  graph-refresh:
+    build: .
+    container_name: shopsquire_graph_refresh
+    profiles: [graph-refresh]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/shopsquire
+      REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
+      CATALOG_REINDEX_ENABLED: "1"
+      CATALOG_REINDEX_BATCH_SIZE: "500"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "scripts/index_catalog.py"]
+    restart: "no"
+    user: "shopsquire"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=default
+
+  neo4j:
+    image: neo4j:5
+    container_name: shopsquire_neo4j
+    profiles: [neo4j]
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-neo4j-change-me}
+      NEO4J_PLUGINS: '["apoc", "graph-data-science"]'
+      NEO4J_dbms_memory_heap_initial__size: "512m"
+      NEO4J_dbms_memory_heap_max__size: "1G"
+    ports:
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      retries: 10
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   db-backup:
     image: postgres:16
     container_name: shopsquire_db_backup
@@ -282,3 +330,4 @@ services:
 volumes:
   pgdata:
   db-backups:
+  neo4j_data:

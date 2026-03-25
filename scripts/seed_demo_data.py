@@ -25,6 +25,17 @@ _BRACKET_STORAGE_RE = re.compile(r"\[(\d+)\s*(TB|GB)\]", re.IGNORECASE)
 _SCREEN_RE = re.compile(r"(\d{1,2}(?:\.\d)?)\"")
 
 
+def _default_product_source() -> str:
+    for candidate in (
+        "docs/laptop-products-new-short.txt",
+        "docs/laptop-products-new.txt",
+        "docs/laptop-products-exp.txt",
+    ):
+        if Path(candidate).exists():
+            return candidate
+    return "docs/laptop-products-new.txt"
+
+
 def _split_blocks(text: str) -> list[list[str]]:
     blocks: list[list[str]] = []
     current: list[str] = []
@@ -43,28 +54,38 @@ def _split_blocks(text: str) -> list[list[str]]:
     return blocks
 
 
-def parse_laptop_products(path: str = "docs/laptop-products-new.txt") -> list[dict]:
-    p = Path(path)
+def parse_laptop_products(path: str | None = None) -> list[dict]:
+    p = Path(path or _default_product_source())
     if not p.exists():
         return []
     text_data = p.read_text(encoding="utf-8", errors="ignore")
     products: list[dict] = []
     for block in _split_blocks(text_data):
-        name = next((l for l in block if l.strip()), "").strip()
-        if not name:
-            continue
+        title_lines: list[str] = []
         price = None
         spec_lines: list[str] = []
-        for line in block[1:]:
-            if _PRICE_RE.search(line):
-                m = _PRICE_RE.search(line)
+        in_title = True
+        for line in block:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if _PRICE_RE.search(stripped):
+                m = _PRICE_RE.search(stripped)
                 price = float(m.group(1)) if m else price
+                in_title = False
                 continue
-            if line.strip().lower().startswith("key features"):
+            if stripped.lower().startswith("key features"):
+                in_title = False
                 continue
-            spec_lines.append(line.strip())
-        if price is None:
+            if in_title:
+                title_lines.append(stripped)
+            else:
+                spec_lines.append(stripped)
+        name = " ".join([line.strip() for line in title_lines if line.strip()]).strip()
+        if not name or price is None:
             continue
+        display_name = title_lines[0].strip() if title_lines else name
+        subtitle = " ".join([line.strip() for line in title_lines[1:] if line.strip()]).strip() or None
         spec_text = " ".join(spec_lines)
         ram_gb = None
         ram_match = _RAM_RE.search(spec_text)
@@ -95,6 +116,8 @@ def parse_laptop_products(path: str = "docs/laptop-products-new.txt") -> list[di
                 "name": name.strip(),
                 "price_cents": int(round(float(price) * 100)),
                 "specs": {
+                    "display_name": display_name,
+                    "subtitle": subtitle,
                     "display": display,
                     "screen": screen,
                     "cpu": cpu,
@@ -234,6 +257,9 @@ def seed_products(db):
         static_root.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
+    default_source = _default_product_source()
+    source_path = os.getenv("PRODUCT_SOURCE_TXT", default_source)
+    parsed = parse_laptop_products(source_path)
     # If products already seeded, ensure any missing image_url values are populated
     if existing > 0:
         try:
@@ -262,11 +288,43 @@ def seed_products(db):
                     pass
         except Exception:
             pass
+        if parsed:
+            parsed_by_sku = {}
+            for idx, item in enumerate(parsed, start=1):
+                parsed_by_sku[f"LAP-{idx:04d}"] = item
+                parsed_by_sku[f"SYN-LAP-{idx:04d}"] = item
+            try:
+                rows = db.execute(text("SELECT sku, specs FROM products WHERE sku LIKE 'LAP-%' OR sku LIKE 'SYN-LAP-%'")).mappings().all()
+                for row in rows:
+                    sku = str(row.get("sku") or "").strip()
+                    parsed_item = parsed_by_sku.get(sku)
+                    if not parsed_item:
+                        continue
+                    merged_specs = {}
+                    raw_specs = row.get("specs")
+                    if isinstance(raw_specs, dict):
+                        merged_specs.update(raw_specs)
+                    elif isinstance(raw_specs, str):
+                        try:
+                            loaded = json.loads(raw_specs)
+                            if isinstance(loaded, dict):
+                                merged_specs.update(loaded)
+                        except Exception:
+                            pass
+                    merged_specs.update(parsed_item.get("specs") or {})
+                    db.execute(
+                        text("UPDATE products SET name = :name, specs = :specs, updated_at = :updated_at WHERE sku = :sku"),
+                        {
+                            "sku": sku,
+                            "name": parsed_item["name"],
+                            "specs": json.dumps(merged_specs),
+                            "updated_at": datetime.utcnow(),
+                        },
+                    )
+            except Exception:
+                pass
         _ensure_accessories(db, static_root)
         return
-    default_source = "docs/laptop-products-new.txt" if Path("docs/laptop-products-new.txt").exists() else "docs/laptop-products-exp.txt"
-    source_path = os.getenv("PRODUCT_SOURCE_TXT", default_source)
-    parsed = parse_laptop_products(source_path)
     if not parsed:
         parsed = [
             {"name": "Dell XPS 13 Plus Laptop", "price_cents": 129900, "specs": {"ram_gb": 16, "storage": "512GB"}},

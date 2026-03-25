@@ -61,6 +61,11 @@ router = APIRouter(prefix="/api/v1/admin/email_security", tags=["admin-email-sec
 _EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 
 
+def _ensure_demo_routes_enabled() -> None:
+    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() not in ("1", "true", "yes", "on"):
+        raise HTTPException(status_code=404, detail="demo_routes_disabled")
+
+
 def _json_load(s: str | None, default):
     if not s:
         return default
@@ -1399,6 +1404,7 @@ def demo_funnel(
     limit: int = 200,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _ensure_demo_routes_enabled()
     """Demo dashboard summary:
     detection -> quarantine/security_review -> trace -> ticket.
     """
@@ -1469,6 +1475,7 @@ def demo_runbook(
     tenant_id: Optional[str] = None,
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _ensure_demo_routes_enabled()
     """Runbook walkthrough for demo sequencing:
     detection -> route -> decision trace -> SIEM handoff -> ticket.
     """
@@ -1496,6 +1503,7 @@ def execute_demo_runbook(
     payload: Dict[str, Any] = Body(default_factory=dict),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    _ensure_demo_routes_enabled()
     tenant_id = str(payload.get("tenant_id") or "demo-tenant")
     scenarios = payload.get("scenarios") or ["bec", "prompt_injection", "canary", "supplier_bank_change"]
     if not isinstance(scenarios, list):

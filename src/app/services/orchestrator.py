@@ -992,6 +992,41 @@ class Orchestrator:
         t2 = time.time()
         timings["recommend"] = t2 - t1
 
+        # Trending boost: inject +0.05 to SKUs with high interaction velocity last 24h
+        try:
+            _result_skus = [r.get("sku") for r in results if r.get("sku")]
+            if _result_skus:
+                with db_session() as _tdb:
+                    _trend_rows = _tdb.execute(
+                        text(
+                            "SELECT sku, COUNT(*) AS cnt FROM recommend_interactions"
+                            " WHERE created_at > NOW() - INTERVAL '24 hours'"
+                            " AND sku = ANY(:skus)"
+                            " GROUP BY sku"
+                        ),
+                        {"skus": _result_skus},
+                    ).fetchall()
+                _trending_skus = {str(row[0]): int(row[1]) for row in (_trend_rows or [])}
+                if _trending_skus:
+                    _max_cnt = max(_trending_skus.values()) or 1
+                    for r in results:
+                        _cnt = _trending_skus.get(str(r.get("sku") or ""), 0)
+                        if _cnt > 0:
+                            _boost = round(0.05 * (_cnt / _max_cnt), 4)
+                            r["score"] = round((r.get("score") or 0.0) + _boost, 4)
+                            r["trending_boost"] = _boost
+                            r["trending_interactions_24h"] = _cnt
+                    results.sort(key=lambda x: x.get("score") or 0, reverse=True)
+                    self._trace_phase(
+                        trace_id,
+                        phase="phase1.trending",
+                        status="done",
+                        agents_planned=[],
+                        meta={"trending_skus": len(_trending_skus), "top_sku": max(_trending_skus, key=_trending_skus.get, default=None)},
+                    )
+        except Exception:
+            pass
+
         # Phase 2: Parallel Evaluation (recommendation, fraud score, inventory check)
         self._trace_phase(trace_id, phase="phase2", status="started", agents_planned=["Recommend", "Fraud Score", "Inventory Check"], meta={"results_planned": min(len(results), 10)})
         # Inventory checks + fraud scoring concurrently (latency-aware)
@@ -1043,6 +1078,7 @@ class Orchestrator:
                     return {"sku": sku_val, "skipped_due_budget": True}
                 res = await asyncio.to_thread(inv.evaluate_stock_rule, sku_val, {"stock": stock})
                 res["available_qty"] = stock
+                res["low_stock"] = stock > 0 and stock < 5
                 item = {"sku": sku_val, **res}
                 self._trace_agent_invocation(trace_id, phase="phase2", agent_name="Inventory_Agent", start_ms=t_agent_start, end_ms=time.time(), tags=["stock_rule"], tool_budget_remaining=tool_budget_remaining)
                 return item
@@ -1099,8 +1135,33 @@ class Orchestrator:
                     (payload.get("session") if isinstance(payload, dict) else None),
                     (payload.get("case_id") if isinstance(payload, dict) else None),
                 )
-                out = {"score": score, "level": level, "signals": signals}
-                self._trace_agent_invocation(trace_id, phase="phase2", agent_name="Fraud_Scoring_Agent", start_ms=t_agent_start, end_ms=time.time(), tags=["isolation_forest"], tool_budget_remaining=tool_budget_remaining)
+                # Compute top active signals for evidence trail (SHAP-style: weight × active)
+                top_evidence: list[str] = []
+                try:
+                    _weights = getattr(f, "WEIGHTS", {}) or {}
+                    _scored = sorted(
+                        [(sig, float(_weights.get(sig, 0.05))) for sig, active in (signals or {}).items() if active and sig in _weights],
+                        key=lambda x: x[1], reverse=True
+                    )
+                    top_evidence = [f"{s} ({w:.2f})" for s, w in _scored[:3]]
+                except Exception:
+                    top_evidence = [s for s, v in list((signals or {}).items())[:3] if v]
+                out = {
+                    "score": score,
+                    "level": level,
+                    "signals": signals,
+                    "top_evidence": top_evidence,
+                    "confidence_interval": [
+                        round(max(0.0, score - 0.08), 3),
+                        round(min(1.0, score + 0.08), 3),
+                    ],
+                }
+                self._trace_agent_invocation(
+                    trace_id, phase="phase2", agent_name="Fraud_Scoring_Agent",
+                    start_ms=t_agent_start, end_ms=time.time(),
+                    tags=["isolation_forest"] + top_evidence[:2],
+                    tool_budget_remaining=tool_budget_remaining,
+                )
                 return out
 
             async def _run_phase2():
@@ -1159,10 +1220,29 @@ class Orchestrator:
                     raise RuntimeError("cv_agent_isolated")
                 from src.app.services.cv_provider import ManagedCVProvider
                 from src.app.services.cv_triage_basic import BasicCVTriage
+                from src.app.services.vision_reasoning import VisionReasoningService
                 import asyncio as _asyncio
                 t_agent_start = time.time()
                 labels, text, *_ = _asyncio.run(ManagedCVProvider().get_labels_and_text(images[0]))
                 cv_analysis = _asyncio.run(BasicCVTriage().analyze(labels, text))
+                try:
+                    vision = VisionReasoningService()
+                    if vision.available:
+                        product_vision = _asyncio.run(vision.analyze_product(images[0]))
+                        if product_vision and not product_vision.error:
+                            if not isinstance(cv_analysis, dict):
+                                cv_analysis = {}
+                            cv_analysis["product_vision"] = product_vision.to_dict()
+                            cv_analysis["product_identity"] = {
+                                "brand": product_vision.extracted_specs.brand,
+                                "model": product_vision.extracted_specs.model_name,
+                                "category": product_vision.product_type,
+                                "confidence": float(product_vision.visual_confidence or 0.0),
+                                "summary": product_vision.plain_english_summary,
+                            }
+                            cv_analysis["nqe_facts"] = product_vision.to_nqe_facts()
+                except Exception:
+                    pass
                 log_trace_event(
                     trace_id=trace_id,
                     event_type="cv_analysis",
@@ -1175,6 +1255,53 @@ class Orchestrator:
                 self._trace_agent_invocation(trace_id, phase="phase1", agent_name="CV_Label_Agent", start_ms=t_agent_start, end_ms=time.time(), tags=["labels", "ocr"], tool_budget_remaining=tool_budget_remaining)
         except Exception:
             cv_analysis = cv_analysis or None
+
+        # Vision reranking — boost results that match brand/model from product_identity
+        try:
+            identity = (cv_analysis or {}).get("product_identity") if cv_analysis else None
+            if identity and results:
+                brand_id = str(identity.get("brand") or "").strip().lower()
+                model_id = str(identity.get("model") or "").strip().lower()
+                conf = float(identity.get("confidence") or 0.0)
+                if conf >= 0.5 and (brand_id or model_id):
+                    boosted = 0
+                    for item in results:
+                        name_lc = str(item.get("name") or "").lower()
+                        brand_lc = str(item.get("brand") or "").lower()
+                        sku_lc = str(item.get("sku") or "").lower()
+                        brand_match = brand_id and (brand_id in brand_lc or brand_id in name_lc)
+                        model_match = model_id and (model_id in name_lc or model_id in sku_lc)
+                        if brand_match and model_match:
+                            item["score"] = float(item.get("score") or 0.0) + 0.30
+                            item["vision_boost"] = "brand+model"
+                            boosted += 1
+                        elif brand_match:
+                            item["score"] = float(item.get("score") or 0.0) + 0.15
+                            item["vision_boost"] = "brand"
+                            boosted += 1
+                        elif model_match:
+                            item["score"] = float(item.get("score") or 0.0) + 0.10
+                            item["vision_boost"] = "model"
+                            boosted += 1
+                    if boosted:
+                        results.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+                        log_trace_event(
+                            trace_id=trace_id,
+                            event_type="vision_rerank",
+                            source_type="agent",
+                            source_id="CV_Label_Agent",
+                            target_type="results",
+                            target_id=None,
+                            payload={
+                                "brand": brand_id,
+                                "model": model_id,
+                                "confidence": conf,
+                                "boosted_count": boosted,
+                                "top_sku": results[0].get("sku") if results else None,
+                            },
+                        )
+        except Exception:
+            pass
 
         # Fraud scoring (best-effort, relevant for complaints/CV)
         fraud_summary: Dict[str, Any] | None = None
@@ -1389,6 +1516,17 @@ class Orchestrator:
                 "ts": int(time.time()),
             },
         )
+
+        # Merge low_stock + can_fulfill flags from inv_evals into results
+        if inv_evals and results:
+            _inv_map = {str(e.get("sku") or ""): e for e in inv_evals if e.get("sku")}
+            for r in results:
+                _ie = _inv_map.get(str(r.get("sku") or ""))
+                if _ie:
+                    r["low_stock"] = bool(_ie.get("low_stock", False))
+                    r["can_fulfill"] = bool(_ie.get("can_fulfill", True))
+                    if _ie.get("low_stock"):
+                        r["stock_urgency"] = "Only a few left"
 
         # Build proposal + policy gate
         proposal = {
