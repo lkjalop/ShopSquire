@@ -1669,6 +1669,41 @@ class Orchestrator:
             timings["total"] = max(0.0, time.time() - t0)
         except Exception:
             pass
+
+        # ── Autonomy tier + confidence gate ─────────────────────────────────
+        # Every response carries an autonomy_tier so the UI can render the right badge:
+        # [AUTO-RESOLVED] / [CAUTION] / [HOLD — LOW CONFIDENCE] / [ESCALATED] / [DENIED — FRAUD SIGNAL]
+        try:
+            _intent_conf = float(
+                (intent_result.get("confidence") if isinstance(intent_result, dict) else None)
+                or payload.get("intent_confidence")
+                or 1.0
+            )
+            _fraud_score = float(
+                (fraud_summary.get("score") or fraud_summary.get("fraud_score") or 0)
+                if isinstance(fraud_summary, dict) else 0
+            )
+            if _fraud_score >= 80:
+                proposal["autonomy_tier"] = "denied"
+                proposal["autonomy_badge"] = "DENIED — FRAUD SIGNAL"
+            elif policy.get("approval_required"):
+                proposal["autonomy_tier"] = "escalated"
+                proposal["autonomy_badge"] = "ESCALATED"
+            elif _intent_conf < 0.60:
+                proposal["autonomy_tier"] = "hold"
+                proposal["autonomy_badge"] = "HOLD — LOW CONFIDENCE"
+                proposal["confidence_gate_active"] = True
+                proposal["confidence_gate_prefix"] = "I need to verify this before confirming — "
+            elif _intent_conf < 0.85:
+                proposal["autonomy_tier"] = "caution"
+                proposal["autonomy_badge"] = "CAUTION"
+            else:
+                proposal["autonomy_tier"] = "auto"
+                proposal["autonomy_badge"] = "AUTO-RESOLVED"
+            proposal["intent_confidence"] = round(_intent_conf, 3)
+        except Exception:
+            pass
+
         executed = (not simulate_only) and (not bool(policy.get("approval_required", False)))
         return OrchestratorResult(
             proposal=proposal,

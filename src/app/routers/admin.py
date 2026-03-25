@@ -4055,3 +4055,14 @@ def delete_vuln_scan_schedule(
     store = TenantConfigStore()
     store.set_override("vuln_scan_schedule", {}, tenant_id=tenant_id if tenant_id != "global" else None)
     return {"status": "cleared", "tenant_id": tenant_id}
+
+
+
+@router.get("/integration-health")
+def get_integration_health(
+    force: bool = Query(False, description="Bypass cache and force a live probe"),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+):
+    """Live integration health snapshot: DB, Redis, Ollama, pgvector, CV provider."""
+    from src.app.observability.health import dependency_health_snapshot
+    return dependency_health_snapshot(force=force)

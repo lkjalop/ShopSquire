@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
 
-type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence' | 'persona' | 'security_scorecard';
+type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence' | 'persona' | 'security_scorecard' | 'integration_health';
 
 interface MetricCard {
   label: string;
@@ -46,6 +46,7 @@ const TAB_CONFIG: { id: TabId; label: string }[] = [
   { id: 'intelligence', label: 'Agent Intelligence' },
   { id: 'persona', label: 'Persona Intelligence' },
   { id: 'security_scorecard', label: '🛡 Security Scorecard' },
+  { id: 'integration_health', label: '⚡ Integration Health' },
 ];
 
 function MetricCardComponent({ card }: { card: MetricCard }) {
@@ -648,6 +649,140 @@ function SecurityScorecardTab() {
   );
 }
 
+// ── Integration Health panel ─────────────────────────────────────────────────
+const STATUS_COLORS: Record<string, string> = {
+  healthy: '#22c55e',
+  degraded: '#f59e0b',
+  unhealthy: '#ef4444',
+  not_configured: '#94a3b8',
+  not_migrated: '#f59e0b',
+};
+
+function HealthDot({ status }: { status: string }) {
+  const color = STATUS_COLORS[status] || '#94a3b8';
+  return (
+    <span style={{
+      display: 'inline-block', width: 10, height: 10,
+      borderRadius: '50%', background: color, marginRight: 6,
+      boxShadow: `0 0 6px ${color}88`,
+    }} />
+  );
+}
+
+function IntegrationHealthTab() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+
+  const refresh = useCallback(async (force = false) => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/v1/admin/integration-health${force ? '?force=true' : ''}`), {
+        headers: { 'X-API-Key': (window as any).getApiKey?.() || '' },
+      });
+      const json = await safeJson(res);
+      setData(json);
+      setLastRefresh(new Date());
+    } catch {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const deps = data?.dependencies || {};
+  const cards = [
+    { key: 'db', label: 'PostgreSQL', icon: '🗄' },
+    { key: 'redis', label: 'Redis', icon: '⚡' },
+    { key: 'ollama', label: 'Ollama LLM', icon: '🤖' },
+    { key: 'pgvector', label: 'pgvector', icon: '🔍' },
+    { key: 'cv_provider', label: 'CV Provider', icon: '👁' },
+  ];
+
+  if (loading && !data) return <div style={{ padding: 32, color: '#94a3b8' }}>Probing integrations…</div>;
+
+  return (
+    <div style={{ padding: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Integration Health</h2>
+          {lastRefresh && (
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+              Last probed: {lastRefresh.toLocaleTimeString()}
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <span style={{
+            padding: '4px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+            background: data?.overall === 'healthy' ? '#14532d' : '#451a03',
+            color: data?.overall === 'healthy' ? '#22c55e' : '#f59e0b',
+          }}>
+            {(data?.overall || 'unknown').toUpperCase()}
+          </span>
+          <button onClick={() => refresh(true)} style={{
+            padding: '4px 14px', borderRadius: 8, fontSize: 13, cursor: 'pointer',
+            background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc',
+          }}>
+            Force refresh
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+        {cards.map(({ key, label, icon }) => {
+          const dep = deps[key] || {};
+          const status: string = dep.status || 'unknown';
+          const color = STATUS_COLORS[status] || '#94a3b8';
+          return (
+            <div key={key} style={{
+              flex: '1 1 200px', minWidth: 200,
+              border: `1px solid ${color}44`,
+              borderRadius: 12, padding: '16px 18px',
+              background: 'rgba(15,23,42,0.5)',
+            }}>
+              <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{label}</div>
+              <div style={{ display: 'flex', alignItems: 'center', fontSize: 13, marginBottom: 8 }}>
+                <HealthDot status={status} />
+                <span style={{ color, fontWeight: 500 }}>{status}</span>
+              </div>
+              {dep.latency_ms != null && (
+                <div style={{ fontSize: 11, color: '#64748b' }}>Latency: {dep.latency_ms}ms</div>
+              )}
+              {dep.models && dep.models.length > 0 && (
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                  Models: {dep.models.slice(0, 3).join(', ')}
+                </div>
+              )}
+              {dep.provider && (
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                  Provider: {dep.provider}{dep.model ? ` / ${dep.model}` : ''}
+                </div>
+              )}
+              {dep.indexed_vectors != null && (
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                  Vectors indexed: {dep.indexed_vectors.toLocaleString()}
+                </div>
+              )}
+              {dep.error && (
+                <div style={{ fontSize: 11, color: '#f87171', marginTop: 4, wordBreak: 'break-word' }}>
+                  {dep.error}
+                </div>
+              )}
+              {dep.note && (
+                <div style={{ fontSize: 11, color: '#f59e0b', marginTop: 4 }}>{dep.note}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
 
@@ -661,6 +796,7 @@ export default function AdminDashboard() {
       case 'intelligence': return <IntelligenceTab />;
       case 'persona': return <PersonaIntelligenceTab />;
       case 'security_scorecard': return <SecurityScorecardTab />;
+      case 'integration_health': return <IntegrationHealthTab />;
     }
   };
 

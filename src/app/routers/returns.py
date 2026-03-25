@@ -19,6 +19,59 @@ from src.app.services.fusion_scorer import compute_and_persist as compute_and_pe
 router = APIRouter(prefix="/api/v1/returns", tags=["returns"])
 
 
+def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
+    """Check whether the submitted return matches an actual order for uid+sku.
+
+    Returns::
+
+        {
+            "order_found": bool,
+            "fraud_score_delta": int,   # 0 / 15 / 20
+            "mismatch": bool,
+            "detail": str,
+        }
+    """
+    if not uid:
+        return {"order_found": False, "fraud_score_delta": 15, "mismatch": True, "detail": "no_uid_provided"}
+    try:
+        with db_session() as db:
+            row = db.execute(
+                _text(
+                    "SELECT id, product_name, brand, sku FROM order_items "
+                    "WHERE user_id = :uid AND sku = :sku "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"uid": uid, "sku": sku},
+            ).fetchone()
+    except Exception:
+        # Table may not exist in all environments — treat as inconclusive
+        return {"order_found": False, "fraud_score_delta": 0, "mismatch": False, "detail": "db_unavailable"}
+
+    if not row:
+        return {"order_found": False, "fraud_score_delta": 15, "mismatch": True, "detail": "no_matching_order"}
+
+    # Order found — compare CV-identified brand/product type against order record
+    order_brand = str(row[2] or "").lower().strip() if len(row) > 2 else ""
+    order_product = str(row[1] or "").lower().strip() if len(row) > 1 else ""
+    cv_result = pkg.get("cv_result") or pkg.get("triage") or {}
+    cv_labels = " ".join(cv_result.get("raw_labels") or pkg.get("labels") or []).lower()
+    cv_text = (cv_result.get("extracted_text") or "").lower()
+    cv_plain = (cv_result.get("plain_english") or "").lower()
+    combined_cv = f"{cv_labels} {cv_text} {cv_plain}"
+
+    mismatch = False
+    delta = 0
+    detail = "order_matched"
+
+    if order_brand and order_brand not in combined_cv and len(combined_cv.strip()) > 10:
+        # CV content doesn't mention the expected brand
+        mismatch = True
+        delta = 20
+        detail = f"brand_mismatch: order_brand='{order_brand}' not found in cv_output"
+
+    return {"order_found": True, "fraud_score_delta": delta, "mismatch": mismatch, "detail": detail}
+
+
 @router.post("/submit")
 def submit_return(body: Dict[str, Any], request: Request = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
     """Submit a return/complaint with images.
@@ -115,6 +168,51 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
     except Exception:
         pass
     score = compute_return_score(pkg)
+
+    # ── Order corroboration: verify uid+sku exists in orders; CV brand check ──
+    try:
+        corroboration = _corroborate_order(uid, sku, pkg)
+        pkg["order_corroboration"] = corroboration
+        if corroboration.get("fraud_score_delta", 0) > 0:
+            score["score"] = float(score.get("score") or 0) + corroboration["fraud_score_delta"]
+            score.setdefault("signals", []).append(
+                {"signal": "order_corroboration", "delta": corroboration["fraud_score_delta"], "detail": corroboration["detail"]}
+            )
+    except Exception:
+        pass
+
+    # ── Multi-image mismatch detection ──
+    if images and len(images) >= 2:
+        try:
+            from src.app.services.cv_triage_basic import BasicCVTriage
+            import asyncio
+            triage = BasicCVTriage()
+            img_dicts = [
+                {"bytes": b, "mime": "image/jpeg", "labels": [], "text": "", "filename": fn}
+                for fn, b in images
+            ]
+            # Derive expected product type from pkg SKU metadata if available
+            _expected_pt = None
+            try:
+                _cat = str(pkg.get("category") or "").lower()
+                if "laptop" in _cat or "notebook" in _cat:
+                    _expected_pt = "laptop"
+                elif "phone" in _cat or "mobile" in _cat:
+                    _expected_pt = "phone"
+            except Exception:
+                pass
+            batch = asyncio.get_event_loop().run_until_complete(
+                triage.analyze_batch(img_dicts, expected_product_type=_expected_pt)
+            )
+            pkg["multi_image_analysis"] = batch
+            if batch.get("mismatch_detected"):
+                delta = int(batch.get("fraud_score_delta") or 0)
+                score["score"] = float(score.get("score") or 0) + delta
+                score.setdefault("signals", []).append(
+                    {"signal": "multi_image_mismatch", "delta": delta, "detail": batch.get("mismatch_detail", "")}
+                )
+        except Exception:
+            pass
     # Optional contract NLP assist on free-text description
     contract_nlp = None
     contract_quality = None

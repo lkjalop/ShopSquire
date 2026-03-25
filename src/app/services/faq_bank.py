@@ -143,6 +143,194 @@ FAQ_BANK: List[Dict[str, object]] = [
 ]
 
 
+# ── Policy overlay for the 20 most decision-critical FAQ entries ──────────────
+# Keys: substring of the FAQ question (lowercase match).
+# Fields injected:
+#   policy_rule          - governing policy name
+#   confidence_threshold - min orchestrator confidence to auto-resolve
+#   fraud_gate           - if True: block auto-resolve when fraud_score > 50
+#   nqe_required_fields  - fields NQE must collect before answer is sent
+#   autonomy_tier        - default tier: "auto" | "hold" | "escalate"
+#   escalate_if          - human-readable escalation condition
+_FAQ_POLICY_OVERLAY: Dict[str, Dict] = {
+    "return policy": {
+        "policy_rule": "return_policy_v1",
+        "confidence_threshold": 0.80,
+        "fraud_gate": True,
+        "nqe_required_fields": [],
+        "autonomy_tier": "auto",
+        "escalate_if": "item not in original packaging OR outside 14-day window",
+    },
+    "start a return": {
+        "policy_rule": "return_initiation_v1",
+        "confidence_threshold": 0.75,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id"],
+        "autonomy_tier": "auto",
+        "escalate_if": "no matching order found for uid+sku",
+    },
+    "exchange my item": {
+        "policy_rule": "exchange_policy_v1",
+        "confidence_threshold": 0.75,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id"],
+        "autonomy_tier": "auto",
+        "escalate_if": "outside 14-day window OR high-value item",
+    },
+    "arrived damaged": {
+        "policy_rule": "damage_claim_v1",
+        "confidence_threshold": 0.70,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id", "damage_photo"],
+        "autonomy_tier": "hold",
+        "escalate_if": "CV damage not detected OR fraud_score > 50",
+    },
+    "wrong item": {
+        "policy_rule": "wrong_item_v1",
+        "confidence_threshold": 0.75,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id", "photo"],
+        "autonomy_tier": "hold",
+        "escalate_if": "CV product type does not match order SKU",
+    },
+    "price match": {
+        "policy_rule": "price_match_v1",
+        "confidence_threshold": 0.80,
+        "fraud_gate": False,
+        "nqe_required_fields": ["competitor_url", "order_id"],
+        "autonomy_tier": "hold",
+        "escalate_if": "competitor price not verifiable OR outside 7-day window",
+    },
+    "cancel my order": {
+        "policy_rule": "order_cancel_v1",
+        "confidence_threshold": 0.85,
+        "fraud_gate": False,
+        "nqe_required_fields": ["order_id"],
+        "autonomy_tier": "auto",
+        "escalate_if": "order already shipped",
+    },
+    "claim a warranty repair": {
+        "policy_rule": "warranty_claim_v1",
+        "confidence_threshold": 0.70,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id", "purchase_date", "fault_description"],
+        "autonomy_tier": "hold",
+        "escalate_if": "outside warranty period OR liquid damage detected",
+    },
+    "warranty claim process": {
+        "policy_rule": "warranty_claim_v1",
+        "confidence_threshold": 0.70,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id", "purchase_date"],
+        "autonomy_tier": "hold",
+        "escalate_if": "outside warranty period",
+    },
+    "accidental damage": {
+        "policy_rule": "accidental_damage_v1",
+        "confidence_threshold": 0.65,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id", "damage_photo"],
+        "autonomy_tier": "escalate",
+        "escalate_if": "always requires human review for accidental damage claims",
+    },
+    "liquid damage": {
+        "policy_rule": "liquid_damage_v1",
+        "confidence_threshold": 0.60,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id", "damage_photo", "incident_time"],
+        "autonomy_tier": "escalate",
+        "escalate_if": "liquid damage always escalates to human review",
+    },
+    "screen is cracked": {
+        "policy_rule": "physical_damage_v1",
+        "confidence_threshold": 0.65,
+        "fraud_gate": True,
+        "nqe_required_fields": ["damage_photo", "order_id"],
+        "autonomy_tier": "hold",
+        "escalate_if": "CV confidence < 0.6 OR image does not match ordered SKU",
+    },
+    "won't turn on": {
+        "policy_rule": "hardware_fault_v1",
+        "confidence_threshold": 0.70,
+        "fraud_gate": False,
+        "nqe_required_fields": ["order_id", "purchase_date"],
+        "autonomy_tier": "hold",
+        "escalate_if": "outside warranty period",
+    },
+    "file a complaint": {
+        "policy_rule": "complaint_intake_v1",
+        "confidence_threshold": 0.75,
+        "fraud_gate": True,
+        "nqe_required_fields": ["order_id", "description"],
+        "autonomy_tier": "auto",
+        "escalate_if": "fraud_score > 70 OR repeat complaint for same SKU",
+    },
+    "request under review": {
+        "policy_rule": "human_review_policy_v1",
+        "confidence_threshold": 0.60,
+        "fraud_gate": False,
+        "nqe_required_fields": [],
+        "autonomy_tier": "hold",
+        "escalate_if": "SLA breach > 4h",
+    },
+    "chat with a human": {
+        "policy_rule": "human_escalation_v1",
+        "confidence_threshold": 0.50,
+        "fraud_gate": False,
+        "nqe_required_fields": [],
+        "autonomy_tier": "escalate",
+        "escalate_if": "user requests human agent explicitly",
+    },
+    "report fraud": {
+        "policy_rule": "fraud_report_v1",
+        "confidence_threshold": 0.50,
+        "fraud_gate": False,
+        "nqe_required_fields": ["description"],
+        "autonomy_tier": "escalate",
+        "escalate_if": "always escalates to security team",
+    },
+    "account locked": {
+        "policy_rule": "account_security_v1",
+        "confidence_threshold": 0.60,
+        "fraud_gate": False,
+        "nqe_required_fields": ["account_email"],
+        "autonomy_tier": "hold",
+        "escalate_if": "suspicious activity detected OR repeated lock events",
+    },
+    "blue screen": {
+        "policy_rule": "hardware_fault_v1",
+        "confidence_threshold": 0.70,
+        "fraud_gate": False,
+        "nqe_required_fields": ["stop_code", "order_id"],
+        "autonomy_tier": "auto",
+        "escalate_if": "hardware diagnostic required OR outside warranty period",
+    },
+    "bsod": {
+        "policy_rule": "hardware_fault_v1",
+        "confidence_threshold": 0.70,
+        "fraud_gate": False,
+        "nqe_required_fields": ["stop_code", "order_id"],
+        "autonomy_tier": "auto",
+        "escalate_if": "hardware diagnostic required",
+    },
+}
+
+
+def _apply_policy_overlay(bank: List[Dict]) -> List[Dict]:
+    """Inject policy metadata into FAQ entries via substring match on the question."""
+    for entry in bank:
+        q_lower = str(entry.get("q") or "").lower()
+        for q_fragment, policy in _FAQ_POLICY_OVERLAY.items():
+            if q_fragment in q_lower:
+                for k, v in policy.items():
+                    entry.setdefault(k, v)
+                break
+    return bank
+
+
+FAQ_BANK = _apply_policy_overlay(FAQ_BANK)
+
+
 def _tokenize(text: str) -> List[str]:
     tokens = [t for t in re.split(r"[^a-z0-9]+", text.lower()) if t]
     return [t for t in tokens if t not in _FAQ_STOPWORDS]
@@ -160,3 +348,19 @@ def match_faq(query: str) -> Tuple[Dict[str, object] | None, float]:
             best = item
             best_score = float(overlap)
     return best, best_score
+
+
+def export_policy_rules_json() -> Dict:
+    """Return a policy-rules dict keyed by FAQ question, suitable for orchestrator loading."""
+    rules = {}
+    for entry in FAQ_BANK:
+        if "policy_rule" in entry:
+            rules[str(entry["q"])] = {
+                "policy_rule": entry.get("policy_rule"),
+                "confidence_threshold": entry.get("confidence_threshold"),
+                "fraud_gate": entry.get("fraud_gate"),
+                "nqe_required_fields": entry.get("nqe_required_fields"),
+                "autonomy_tier": entry.get("autonomy_tier"),
+                "escalate_if": entry.get("escalate_if"),
+            }
+    return rules

@@ -444,6 +444,42 @@ class NextQuestionEngine:
                 )
             )
 
+        # ── Receipt / serial verification gate ──
+        # Triggers when fraud risk is elevated, item value is high, or CV can't identify the product.
+        _item_value = float(inp.answered_fields.get("item_value") or inp.answered_fields.get("price") or 0)
+        _needs_receipt = (
+            inp.risk_score > 50
+            or inp.image_identity_confidence < 0.6
+            or _item_value > 500
+        )
+        _receipt_not_yet_asked = (
+            "receipt_verification" not in inp.previously_asked_ids
+            and "receipt_uploaded" not in inp.answered_fields
+            and "serial_confirmed" not in inp.answered_fields
+        )
+        _is_return_or_support = str(inp.intent or "").lower() in (
+            "return_request", "warranty_claim", "damage_report", "support", "order_issue_report"
+        )
+        if _needs_receipt and _receipt_not_yet_asked and _is_return_or_support:
+            questions.append(
+                NextQuestion(
+                    id="receipt_verification",
+                    text=(
+                        "To process your claim, please upload your purchase receipt "
+                        "or a photo showing the device's serial number label "
+                        "(usually on the bottom of the unit or in Settings → About)."
+                    ),
+                    goal="verify_purchase",
+                    evidence_needed=["receipt_or_serial"],
+                    source="fraud_gate",
+                    options=[
+                        {"label": "Upload receipt photo", "value": "receipt_photo"},
+                        {"label": "Show serial number label", "value": "serial_label"},
+                        {"label": "I don't have these right now", "value": "no_proof"},
+                    ],
+                )
+            )
+
         # ── Image-aware questions ──
         if inp.has_image and inp.image_identity_confidence < 0.6:
             questions.append(

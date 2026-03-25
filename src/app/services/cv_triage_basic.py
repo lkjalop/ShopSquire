@@ -175,3 +175,102 @@ class BasicCVTriage:
         elif confidence > 0.5:
             return "minor"
         return "undetermined"
+
+    # ── Product-type classifier used for cross-image mismatch detection ──
+    _PRODUCT_TYPE_MAP: dict[str, list[str]] = {
+        "laptop": ["laptop", "notebook", "macbook", "thinkpad", "xps", "chromebook"],
+        "phone": ["phone", "smartphone", "iphone", "android", "mobile", "pixel"],
+        "tablet": ["tablet", "ipad", "surface"],
+        "monitor": ["monitor", "display", "screen"],
+        "desktop": ["desktop", "tower", "pc", "workstation"],
+        "accessory": ["mouse", "keyboard", "headset", "charger", "adapter", "cable"],
+        "food": ["apple", "banana", "fruit", "vegetable", "food", "snack"],
+        "clothing": ["shirt", "dress", "shoe", "clothing", "apparel"],
+    }
+
+    def _detect_product_type(self, labels: list[str], text: str, vision_result: dict | None = None) -> str:
+        """Classify product type from labels/text/vision output."""
+        # Prefer vision LLM product_type when available
+        if vision_result and vision_result.get("product_type"):
+            return str(vision_result["product_type"]).lower()
+        combined = (" ".join(labels) + " " + (text or "")).lower()
+        for ptype, keywords in self._PRODUCT_TYPE_MAP.items():
+            if any(kw in combined for kw in keywords):
+                return ptype
+        return "unknown"
+
+    async def analyze_batch(
+        self,
+        images: list[dict],
+        *,
+        expected_product_type: str | None = None,
+    ) -> dict:
+        """Analyze multiple evidence images; detect product-type mismatches as a fraud signal.
+
+        Each element of *images* must have:
+          ``bytes`` (bytes), ``mime`` (str), ``labels`` (list[str]), ``text`` (str), ``filename`` (str)
+
+        Returns::
+
+            {
+              "results": [...],                # per-image analyze() output + "product_type"
+              "mismatch_detected": bool,
+              "fraud_score_delta": int,        # 0 / 10 / 20
+              "mismatch_detail": str,
+              "product_types_found": list[str],
+            }
+        """
+        results: list[dict] = []
+        product_types: list[str] = []
+
+        for img in images or []:
+            r = await self.analyze(
+                img.get("labels") or [],
+                img.get("text") or "",
+                image_bytes=img.get("bytes"),
+                mime=img.get("mime", "image/jpeg"),
+            )
+            ptype = self._detect_product_type(
+                img.get("labels") or [],
+                img.get("text") or "",
+                vision_result=r,
+            )
+            r["product_type"] = ptype
+            r["filename"] = img.get("filename", "")
+            results.append(r)
+            if ptype and ptype != "unknown":
+                product_types.append(ptype)
+
+        mismatch_detected = False
+        fraud_score_delta = 0
+        mismatch_detail = ""
+
+        if product_types:
+            unique_types = list(dict.fromkeys(product_types))  # preserve order, dedupe
+            # Check against expected (e.g. SKU product type from order)
+            if expected_product_type:
+                foreign = [t for t in unique_types if t != expected_product_type and t not in ("unknown", "accessory")]
+                if foreign:
+                    mismatch_detected = True
+                    fraud_score_delta = 20
+                    mismatch_detail = (
+                        f"Expected '{expected_product_type}' but images contain: {', '.join(foreign)}"
+                    )
+            # Cross-image mismatch: multiple distinct product types in one submission
+            elif len(unique_types) >= 2:
+                # Ignore pairs where one is "accessory" (e.g. laptop + charger is fine)
+                non_accessory = [t for t in unique_types if t != "accessory"]
+                if len(non_accessory) >= 2:
+                    mismatch_detected = True
+                    fraud_score_delta = 10
+                    mismatch_detail = (
+                        f"Multiple product types in evidence rail: {', '.join(unique_types)}"
+                    )
+
+        return {
+            "results": results,
+            "mismatch_detected": mismatch_detected,
+            "fraud_score_delta": fraud_score_delta,
+            "mismatch_detail": mismatch_detail,
+            "product_types_found": product_types,
+        }
