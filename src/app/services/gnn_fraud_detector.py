@@ -41,6 +41,15 @@ try:
 except ImportError:
     _HAS_PYG = False
 
+import logging as _logging
+_gnn_log = _logging.getLogger(__name__)
+_gnn_log.info(
+    "[GNNFraudDetector] ML module inventory — numpy=%s torch=%s pyg=%s",
+    _HAS_NUMPY,
+    _HAS_TORCH,
+    _HAS_PYG,
+)
+
 
 @dataclass
 class SubgraphFeatures:
@@ -125,6 +134,60 @@ def extract_subgraph_features(account_id: str) -> SubgraphFeatures:
             features.avg_neighbor_degree = max(features.avg_neighbor_degree, avg_w * 10.0)
     except Exception:
         pass
+
+    # DB fallback — query orders table for shared device/IP signals when both
+    # Neo4j and graph_retrieval return zero features.
+    if features.degree == 0 and features.shared_device_count == 0 and features.shared_ip_count == 0:
+        try:
+            from src.app.models.db import db_session
+            from sqlalchemy import text as _sql
+
+            with db_session() as _db:
+                # Shared device fingerprint count
+                row_dev = _db.execute(
+                    _sql(
+                        "SELECT COUNT(DISTINCT o2.account_id) AS shared "
+                        "FROM orders o1 "
+                        "JOIN orders o2 ON o2.device_fingerprint = o1.device_fingerprint "
+                        "  AND o2.account_id <> o1.account_id "
+                        "WHERE o1.account_id = :aid AND o1.device_fingerprint IS NOT NULL "
+                        "LIMIT 1"
+                    ),
+                    {"aid": account_id},
+                ).fetchone()
+                if row_dev and row_dev[0]:
+                    features.shared_device_count = int(row_dev[0])
+                    features.degree = max(features.degree, features.shared_device_count)
+
+                # Shared IP count
+                row_ip = _db.execute(
+                    _sql(
+                        "SELECT COUNT(DISTINCT o2.account_id) AS shared "
+                        "FROM orders o1 "
+                        "JOIN orders o2 ON o2.ip_address = o1.ip_address "
+                        "  AND o2.account_id <> o1.account_id "
+                        "WHERE o1.account_id = :aid AND o1.ip_address IS NOT NULL "
+                        "LIMIT 1"
+                    ),
+                    {"aid": account_id},
+                ).fetchone()
+                if row_ip and row_ip[0]:
+                    features.shared_ip_count = int(row_ip[0])
+                    features.degree = max(features.degree, features.shared_ip_count)
+
+                # Transaction velocity last 24h
+                row_vel = _db.execute(
+                    _sql(
+                        "SELECT COUNT(*) FROM orders "
+                        "WHERE account_id = :aid "
+                        "AND created_at >= NOW() - INTERVAL '24 hours'"
+                    ),
+                    {"aid": account_id},
+                ).fetchone()
+                if row_vel and row_vel[0]:
+                    features.transaction_velocity_24h = float(row_vel[0])
+        except Exception:
+            pass
 
     return features
 

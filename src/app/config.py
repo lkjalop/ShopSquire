@@ -7,6 +7,13 @@ from functools import lru_cache
 from src.app.services.secrets_manager import get_secret
 from typing import Any
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:
+    pass
+
 
 @dataclass
 class Settings:
@@ -21,6 +28,14 @@ class Settings:
     llm_provider: str
     llm_model: str
     openai_api_key: str
+    google_ai_api_key: str
+    ollama_vision_model: str
+    vuln_scan_enabled: bool
+    vuln_scan_web_enabled: bool
+    nuclei_templates_path: str
+    fraud_graph_neo4j_enabled: bool
+    vector_search_enabled: bool
+    gnn_model_path: str
     feature_flags_path: str
 
 
@@ -59,6 +74,15 @@ def _settings_env_sig() -> tuple:
         os.getenv("LLM_MODEL"),
         os.getenv("OPENAI_API_KEY"),
         os.getenv("OPENAI_API_KEY_REF"),
+        os.getenv("GOOGLE_AI_API_KEY"),
+        os.getenv("GOOGLE_AI_API_KEY_REF"),
+        os.getenv("OLLAMA_VISION_MODEL"),
+        os.getenv("VULN_SCAN_ENABLED"),
+        os.getenv("VULN_SCAN_WEB_ENABLED"),
+        os.getenv("NUCLEI_TEMPLATES_PATH"),
+        os.getenv("FRAUD_GRAPH_NEO4J_ENABLED"),
+        os.getenv("VECTOR_SEARCH_ENABLED"),
+        os.getenv("GNN_MODEL_PATH"),
         os.getenv("SECRETS_PROVIDER"),
         os.getenv("VAULT_ADDR"),
         os.getenv("AWS_REGION"),
@@ -108,14 +132,27 @@ def _get_settings_cached(_sig: tuple) -> Settings:
         api_port=int(os.getenv("API_PORT", "8080")),
         database_url=_resolved_secret("DATABASE_URL", _default_database_url()),
         redis_url=_resolved_secret("REDIS_URL", "redis://localhost:6379/0"),
-        stripe_api_key=_resolved_secret("STRIPE_API_KEY", "sk_test_xxx"),
+        stripe_api_key=_resolved_secret("STRIPE_API_KEY", ""),
         paypal_client_id=_resolved_secret("PAYPAL_CLIENT_ID", ""),
         paypal_client_secret=_resolved_secret("PAYPAL_CLIENT_SECRET", ""),
         llm_provider=os.getenv("LLM_PROVIDER", "none"),
         llm_model=os.getenv("LLM_MODEL", ""),
         openai_api_key=_resolved_secret("OPENAI_API_KEY", ""),
+        google_ai_api_key=_resolved_secret("GOOGLE_AI_API_KEY", ""),
+        ollama_vision_model=os.getenv("OLLAMA_VISION_MODEL", "").strip(),
+        vuln_scan_enabled=_is_truthy_env("VULN_SCAN_ENABLED", "1"),
+        vuln_scan_web_enabled=_is_truthy_env("VULN_SCAN_WEB_ENABLED", "0"),
+        nuclei_templates_path=os.getenv("NUCLEI_TEMPLATES_PATH", "").strip(),
+        fraud_graph_neo4j_enabled=_is_truthy_env("FRAUD_GRAPH_NEO4J_ENABLED", "0"),
+        vector_search_enabled=_is_truthy_env("VECTOR_SEARCH_ENABLED", "0"),
+        gnn_model_path=os.getenv("GNN_MODEL_PATH", "config/gnn_model.pt").strip(),
         feature_flags_path=os.getenv("FEATURE_FLAGS_PATH", "config/feature_flags.json"),
     )
+    # Enforce Stripe live key in non-dev environments.
+    if _is_non_dev_env(s.app_env):
+        stripe_key = str(s.stripe_api_key or "").strip()
+        if not stripe_key or stripe_key.startswith("sk_test_"):
+            raise RuntimeError("insecure_runtime:STRIPE_API_KEY_must_be_live_key_in_production")
     # Enforce Redis auth/TLS in non-dev environments.
     if _is_non_dev_env(s.app_env):
         if not _redis_url_has_auth(s.redis_url):
@@ -163,6 +200,14 @@ def canonical_runtime_contract() -> dict[str, Any]:
         "DATABASE_URL": str(s.database_url or "").strip(),
         "REDIS_URL": str(s.redis_url or "").strip(),
         "FEATURE_FLAGS_PATH": str(s.feature_flags_path or "").strip(),
+        "GOOGLE_AI_API_KEY": str(s.google_ai_api_key or "").strip(),
+        "OLLAMA_VISION_MODEL": str(s.ollama_vision_model or "").strip(),
+        "VULN_SCAN_ENABLED": bool(s.vuln_scan_enabled),
+        "VULN_SCAN_WEB_ENABLED": bool(s.vuln_scan_web_enabled),
+        "NUCLEI_TEMPLATES_PATH": str(s.nuclei_templates_path or "").strip(),
+        "FRAUD_GRAPH_NEO4J_ENABLED": bool(s.fraud_graph_neo4j_enabled),
+        "VECTOR_SEARCH_ENABLED": bool(s.vector_search_enabled),
+        "GNN_MODEL_PATH": str(s.gnn_model_path or "").strip(),
         "MERCHANT_API_KEY": str(os.getenv("MERCHANT_API_KEY", "")).strip(),
         "OWNER_API_KEY": str(os.getenv("OWNER_API_KEY", "")).strip(),
         "DEVELOPER_API_KEY": str(os.getenv("DEVELOPER_API_KEY", "")).strip(),

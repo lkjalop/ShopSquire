@@ -137,13 +137,19 @@ def score_query_complexity(
 
     # 6. Multimodal (image + text)
     if ctx.get("has_image"):
-        signals["multimodal"] = 1
+        signals["multimodal"] = 2  # image alone warrants medium model minimum (was +1)
         explanations.append("Multimodal input (image + text)")
-        # BUG-2 fix: visual similarity intent with image → +2
         import re as _re
+        # Visual similarity: user wants "find me something like this"
         if _re.search(r"\b(similar|like this|alternatives?|compare|price range|same as|equivalent)\b", q):
             signals["visual_similarity_intent"] = 2
             explanations.append("Visual similarity intent with uploaded product image")
+        # Vision synthesis: image + open-ended reasoning question
+        if _re.search(
+            r"\b(compatible|enough|better|difference|good for|will it|can it|should i|recommend|justify|explain)\b", q
+        ):
+            signals["vision_synthesis"] = 2
+            explanations.append("Synthesis reasoning over uploaded image")
         # Use-case query with image → +1
         if _re.search(r"\b(university|school|work|gaming|editing|engineering|student|college|profession)\b", q):
             signals["image_use_case_query"] = 1
@@ -171,6 +177,14 @@ def score_query_complexity(
        _re2.search(r"[\$€£]\s*\d", q):
         signals["budget_constraint"] = 1
         explanations.append("Explicit budget/price constraint")
+
+    # 11. Budget yes/no question — needs medium model to answer directly
+    if _re2.search(
+        r"\b(is\s+\$|is\s+that\s+enough|is\s+my\s+budget|enough\s+for|can\s+i\s+(afford|get)|will\s+\$|how\s+much\s+does)\b",
+        q,
+    ):
+        signals["budget_question"] = 2
+        explanations.append("Direct budget yes/no question — medium model required")
 
     total = min(10, sum(signals.values()))
     tier_name, model = _tier_for_score(total)
@@ -221,10 +235,53 @@ def complexity_explain(query: str, *, context: Optional[Dict[str, Any]] = None) 
     }
 
 
+async def _openai_generate_fallback(prompt: str, options: Dict | None = None, trace_id: str | None = None) -> Dict | None:
+    """Attempt OpenAI chat completion as fallback when Ollama is unavailable.
+
+    Returns a response dict or None if OpenAI is not configured or also fails.
+    """
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None
+    base_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1").rstrip("/")
+    fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-4o-mini")
+    opts = options or {}
+    temperature = float(opts.get("temperature", 0.2))
+    max_tokens = int(opts.get("num_predict", 256))
+    payload: Dict = {
+        "model": fallback_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    t0 = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            r.raise_for_status()
+            data = r.json()
+        dt = (time.perf_counter() - t0) * 1000.0
+        text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        try:
+            log_trace_event(trace_id, "llm_fallback", "llm", fallback_model, "system", None, {"provider": "openai", "latency_ms": dt})
+        except Exception:
+            pass
+        return {"model": fallback_model, "response": text, "total_duration_ms": dt, "provider": "openai_fallback"}
+    except Exception:
+        return None
+
+
 async def ollama_generate(model: str, prompt: str, options: Dict | None = None, trace_id: str | None = None) -> Dict:
     if not OLLAMA_URL:
+        # Try OpenAI fallback before raising
+        fallback = await _openai_generate_fallback(prompt, options, trace_id)
+        if fallback is not None:
+            return fallback
         err = RuntimeError("OLLAMA_URL_missing")
-        # surface via trace if available
         try:
             log_trace_event(trace_id, "llm_error", "llm", model, "system", None, {"error": str(err)})
         except Exception:
@@ -254,9 +311,12 @@ async def ollama_generate(model: str, prompt: str, options: Dict | None = None, 
             "total_duration_ms": dt,
         }
     except Exception as e:
-        # best-effort: log trace event so UI/telemetry surface LLM failures
+        # Ollama failed — try OpenAI fallback before propagating
         try:
             log_trace_event(trace_id, "llm_error", "llm", model, "system", None, {"error": str(e), "payload": {"prompt_len": len(prompt) if prompt else 0}})
         except Exception:
             pass
+        fallback = await _openai_generate_fallback(prompt, options, trace_id)
+        if fallback is not None:
+            return fallback
         raise

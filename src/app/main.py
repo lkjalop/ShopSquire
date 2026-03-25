@@ -4,6 +4,14 @@ import re
 import shutil
 import subprocess
 from typing import Any
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except Exception:
+    pass
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,7 +45,6 @@ from src.app.routers.orchestrator_api import router as orchestrator_router
 from src.app.routers.orders import router as orders_router
 from src.app.routers.tools import router as tools_router
 from src.app.routers.preferences import router as preferences_router
-from src.app.routers.demo import router as demo_router
 from src.app.routers.graph import router as graph_router
 from src.app.routers.analytics import router as analytics_router
 from src.app.routers.query_clusters import router as clusters_router
@@ -81,6 +88,7 @@ from src.app.security.rate_limit import (
     acquire_concurrency_slot,
     release_concurrency_slot,
 )
+from src.app.config import get_settings
 from src.app.security.internal_mtls import InternalMTLSMiddleware
 from src.app.security.tls_fingerprint_middleware import TLSFingerprintMiddleware
 from src.app.security.request_shape import GlobalRequestShapeMiddleware
@@ -314,6 +322,46 @@ def create_app() -> FastAPI:
                 submit_task("vs_index_build", {})
         except Exception:
             pass
+        # Auto-index FAQ into faq_embeddings table if empty on startup
+        try:
+            if str(os.getenv("FAQ_VECTOR_INDEX_ON_START", "1")).lower() in ("1", "true", "yes"):
+                from src.app.workers.task_runner import submit_task as _submit, register_handler as _reg
+
+                def _faq_index_handler(payload):
+                    import logging
+                    _flog = logging.getLogger("shopsquire.startup")
+                    try:
+                        from src.app.services.vector_store import ensure_vector_table
+                        from src.app.models.db import db_session
+                        from sqlalchemy import text as _sql
+                        ensure_vector_table("faq_embeddings")
+                        with db_session() as _db:
+                            try:
+                                count = _db.execute(_sql("SELECT COUNT(*) FROM faq_embeddings")).scalar() or 0
+                            except Exception:
+                                count = 0
+                        if count > 0:
+                            _flog.info("FAQ embeddings already indexed (%d rows), skipping startup index.", count)
+                            return
+                    except Exception:
+                        pass
+                    try:
+                        from scripts.index_catalog import run_index
+                        result = run_index(index_catalog=False, index_faq=True, batch_size=200)
+                        import logging as _l2
+                        _l2.getLogger("shopsquire.startup").info(
+                            "FAQ embedding index built on startup: %s", result
+                        )
+                    except Exception as _exc:
+                        import logging as _l3
+                        _l3.getLogger("shopsquire.startup").warning(
+                            "FAQ vector index startup failed (non-fatal): %s", _exc
+                        )
+
+                _reg("faq_index_build", _faq_index_handler)
+                _submit("faq_index_build", {})
+        except Exception:
+            pass
         # Start task runner consumer (Redis Streams)
         try:
             from src.app.workers.task_runner import start_consumer
@@ -445,17 +493,30 @@ def create_app() -> FastAPI:
         pass
 
     # Allow frontend dev server access (Vite) for local demos/tests.
+    # In production, CORS_ORIGINS must be explicitly set — localhost origins are
+    # only included when APP_ENV is local/dev or CORS_ORIGINS explicitly lists them.
     try:
         origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
         if not origins:
-            origins = [
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://localhost:5174",
-                "http://127.0.0.1:5174",
-                "http://localhost:8080",
-                "http://127.0.0.1:8080",
-            ]
+            _app_env = os.getenv("APP_ENV", "local").strip().lower()
+            if _app_env in ("local", "dev", "development", "test"):
+                origins = [
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                    "http://localhost:5174",
+                    "http://127.0.0.1:5174",
+                    "http://localhost:8080",
+                    "http://127.0.0.1:8080",
+                ]
+            else:
+                # Production: no wildcard fallback — require explicit CORS_ORIGINS
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "CORS_ORIGINS not set in APP_ENV=%s — CORS will be restrictive (no allowed origins). "
+                    "Set CORS_ORIGINS env var to your frontend domain(s).",
+                    _app_env,
+                )
+                origins = []
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
@@ -1252,46 +1313,46 @@ def create_app() -> FastAPI:
         """Compatibility alias for frontend clients expecting /api/v1 prefix."""
         return ORJSONResponse(_status_summary_payload())
 
-    @app.get("/demo", response_class=HTMLResponse)
-    @app.get("/demo/links", response_class=HTMLResponse)
-    def demo_links():
-        """Lightweight landing page with useful links and live counts."""
-        # Gather quick counts for Email XDR + outbound anomalies
-        warn_count = 0
-        err_count = 0
-        outbound_count = 0
-        try:
-            eng = getattr(app.state, "engine", None)
-            if eng is not None:
-                with eng.connect() as conn:
-                    try:
-                        warn_count = int(
-                            conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'warning'"))
-                            .scalar()
-                            or 0
-                        )
-                    except Exception:
-                        warn_count = 0
-                    try:
-                        err_count = int(
-                            conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'error'"))
-                            .scalar()
-                            or 0
-                        )
-                    except Exception:
-                        err_count = 0
-                    try:
-                        outbound_count = int(
-                            conn.execute(sql_text("SELECT COUNT(1) FROM outbound_email_anomalies"))
-                            .scalar()
-                            or 0
-                        )
-                    except Exception:
-                        outbound_count = 0
-        except Exception:
-            pass
+    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        @app.get("/demo", response_class=HTMLResponse)
+        @app.get("/demo/links", response_class=HTMLResponse)
+        def demo_links():
+            """Dev-only demo landing page."""
+            warn_count = 0
+            err_count = 0
+            outbound_count = 0
+            try:
+                eng = getattr(app.state, "engine", None)
+                if eng is not None:
+                    with eng.connect() as conn:
+                        try:
+                            warn_count = int(
+                                conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'warning'"))
+                                .scalar()
+                                or 0
+                            )
+                        except Exception:
+                            warn_count = 0
+                        try:
+                            err_count = int(
+                                conn.execute(sql_text("SELECT COUNT(1) FROM email_security_incidents WHERE severity = 'error'"))
+                                .scalar()
+                                or 0
+                            )
+                        except Exception:
+                            err_count = 0
+                        try:
+                            outbound_count = int(
+                                conn.execute(sql_text("SELECT COUNT(1) FROM outbound_email_anomalies"))
+                                .scalar()
+                                or 0
+                            )
+                        except Exception:
+                            outbound_count = 0
+            except Exception:
+                pass
 
-        html = f"""
+            html = f"""
         <!doctype html>
         <html>
             <head>
@@ -1353,13 +1414,15 @@ def create_app() -> FastAPI:
                 </div>
             </body>
         </html>
-        """
-        return HTMLResponse(content=html)
+            """
+            return HTMLResponse(content=html)
 
     @app.get("/", response_class=RedirectResponse)
     def root_redirect():
-        """Convenience redirect to demo links."""
-        return RedirectResponse(url="/demo/links")
+        """Production-safe root redirect."""
+        if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() in ("1", "true", "yes", "on"):
+            return RedirectResponse(url="/demo/links")
+        return RedirectResponse(url="/health")
 
     # Conditionally import and include UI routes; prefer lightweight storefront
     ui_router = None
@@ -1487,7 +1550,10 @@ def create_app() -> FastAPI:
     app.include_router(orders_router)
     app.include_router(tools_router)
     app.include_router(preferences_router)
-    app.include_router(demo_router)
+    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        from src.app.routers.demo import router as demo_router
+
+        app.include_router(demo_router)
     app.include_router(graph_router)
     # Storage presign endpoint
     try:
@@ -1636,6 +1702,13 @@ def create_app() -> FastAPI:
         logging.getLogger("shopsquire.startup").exception("failed to include merchant_intelligence router: %s", e)
     app.include_router(security_integrations_router)
     app.include_router(shipping_security_router)
+    # Vulnerability scanning (Trivy / Nuclei / Semgrep / CISA KEV)
+    try:
+        from src.app.routers.vuln_scan import router as vuln_scan_router
+        app.include_router(vuln_scan_router)
+    except Exception as e:
+        import logging
+        logging.getLogger("shopsquire.startup").exception("failed to include vuln_scan router: %s", e)
     app.include_router(support_complaints_router)
     app.include_router(chat_router)
     # Chat streaming SSE endpoint

@@ -44,7 +44,7 @@ from src.app.security.siem_adapter import build_normalized_security_event, emit_
 from src.app.security.threat_enrichment import enrich_context, infer_kill_chain_stage
 from src.app.security.threat_hunter_leads import build_threat_hunter_leads
 from src.app.security.maestro_boundaries import validate_agent_action
-from src.app.security.email_dns_verify import run_dns_auth_checks
+from src.app.security.email_dns_verify import run_dns_auth_checks, run_dns_auth_checks_parallel
 import time
 from src.app.services.intake_gate import (
     normalize_email_intake,
@@ -60,8 +60,11 @@ logger = logging.getLogger("shopsquire.email_security")
 
 
 def _hash16(value: str | None) -> str | None:
+    """Return the first 16 hex chars of SHA-256(value), or None for empty input."""
     if not value:
         return None
+    import hashlib
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()[:16]
 
 
 def _record_runtime_error(
@@ -2648,7 +2651,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     # Live DNS verification of SPF/DMARC/DKIM — non-authoritative, adds discrepancy indicators.
     dns_auth_result: dict[str, Any] = {}
     try:
-        dns_auth_result = run_dns_auth_checks(email)
+        dns_auth_result = run_dns_auth_checks_parallel(email)
         dns_indicators = list(dns_auth_result.get("discrepancy_indicators") or [])
         if dns_indicators:
             logger.info(
@@ -2659,6 +2662,102 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     except Exception as _dns_exc:
         logger.debug("DNS auth check failed: %s", _dns_exc)
         dns_auth_result = {"skipped": True, "error": str(_dns_exc)[:120]}
+
+    # ── Lookalike domain detection (0ms — pure string math) ──
+    lookalike_result: dict[str, Any] = {}
+    try:
+        _from_domain = str(email.get("from_addr") or "").lower()
+        if "@" in _from_domain:
+            _from_domain = _from_domain.rsplit("@", 1)[-1].split(">")[0].strip()
+        _vendor_domain = str(email.get("vendor_domain") or "").lower().strip()
+        _known_domains = [d for d in [_vendor_domain] if d and "." in d]
+        # Also add domains from known brand list
+        _BRAND_DOMAINS = [
+            "amazon.com", "ebay.com", "paypal.com", "stripe.com", "shopify.com",
+            "microsoft.com", "google.com", "apple.com", "facebook.com",
+        ]
+        _known_domains += _BRAND_DOMAINS
+
+        _HOMOGLYPHS = {"rn": "m", "0": "o", "1": "l", "vv": "w", "ii": "u", "cl": "d"}
+
+        def _normalize_glyphs(s: str) -> str:
+            for glyph, normal in _HOMOGLYPHS.items():
+                s = s.replace(glyph, normal)
+            return s
+
+        def _levenshtein(a: str, b: str) -> int:
+            if a == b:
+                return 0
+            if not a:
+                return len(b)
+            if not b:
+                return len(a)
+            prev = list(range(len(b) + 1))
+            for i, ca in enumerate(a, 1):
+                curr = [i]
+                for j, cb in enumerate(b, 1):
+                    curr.append(min(prev[j] + 1, curr[-1] + 1, prev[j - 1] + (0 if ca == cb else 1)))
+                prev = curr
+            return prev[-1]
+
+        _lookalike_hits: list[dict[str, Any]] = []
+        if _from_domain:
+            _norm_from = _normalize_glyphs(_from_domain)
+            for known in _known_domains:
+                if not known or known == _from_domain:
+                    continue
+                # Strip TLD for comparison (amazon.com → amazon)
+                _from_base = _from_domain.rsplit(".", 1)[0] if "." in _from_domain else _from_domain
+                _known_base = known.rsplit(".", 1)[0] if "." in known else known
+                _norm_from_base = _normalize_glyphs(_from_base)
+                dist = _levenshtein(_norm_from_base, _known_base)
+                if 1 <= dist <= 2:
+                    _lookalike_hits.append({
+                        "from_domain": _from_domain,
+                        "resembles": known,
+                        "edit_distance": dist,
+                        "homoglyph_normalized": _norm_from != _from_domain,
+                    })
+        if _lookalike_hits:
+            lookalike_result = {
+                "detected": True,
+                "hits": _lookalike_hits,
+                "severity": "high" if any(h["edit_distance"] == 1 for h in _lookalike_hits) else "medium",
+            }
+            logger.warning(
+                "Lookalike domain detected: from=%s hits=%s",
+                _from_domain, [h["resembles"] for h in _lookalike_hits],
+            )
+    except Exception as _lk_exc:
+        logger.debug("Lookalike domain check failed: %s", _lk_exc)
+        lookalike_result = {}
+
+    # ── Thread hijacking detection (0ms — reply chain analysis) ──
+    thread_hijack_result: dict[str, Any] = {}
+    try:
+        _reply_chain_id = str(email.get("reply_chain_id") or "").strip()
+        _prior_reply_chain_id = str(email.get("prior_reply_chain_id") or "").strip()
+        _from_addr = str(email.get("from_addr") or "").lower()
+        if _reply_chain_id and _prior_reply_chain_id and _reply_chain_id == _prior_reply_chain_id:
+            # Same thread — check if sender domain changed since prior message
+            _from_domain_now = _from_addr.rsplit("@", 1)[-1].split(">")[0].strip() if "@" in _from_addr else ""
+            # We don't have prior sender stored, but vendor_domain acts as the expected domain
+            if _vendor_domain and _from_domain_now and _from_domain_now != _vendor_domain:
+                thread_hijack_result = {
+                    "detected": True,
+                    "from_domain": _from_domain_now,
+                    "expected_domain": _vendor_domain,
+                    "thread_id": _reply_chain_id,
+                    "reason": "Sender domain changed mid-thread — classic BEC thread hijack pattern",
+                    "severity": "high",
+                }
+                logger.warning(
+                    "Thread hijack suspected: thread=%s from_domain=%s expected=%s",
+                    _reply_chain_id, _from_domain_now, _vendor_domain,
+                )
+    except Exception as _th_exc:
+        logger.debug("Thread hijack check failed: %s", _th_exc)
+        thread_hijack_result = {}
 
     # Strict ingest controls before deep parsing: MIME/ext/size/archive/AV.
     try:
@@ -4204,5 +4303,22 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["coverage_limits"] = (ransomware_artifact or {}).get("coverage_limits") or ransomware_coverage_limits()
     except Exception:
         v["coverage_limits"] = ransomware_coverage_limits()
+
+    # Surface lookalike domain and thread hijacking findings.
+    if lookalike_result.get("detected"):
+        try:
+            v["lookalike_domain"] = lookalike_result
+            # Elevate risk if lookalike detected
+            if str(v.get("risk_label") or "").lower() not in ("critical", "high"):
+                v["risk_label"] = lookalike_result.get("severity", "high")
+        except Exception:
+            pass
+    if thread_hijack_result.get("detected"):
+        try:
+            v["thread_hijack"] = thread_hijack_result
+            if str(v.get("risk_label") or "").lower() not in ("critical",):
+                v["risk_label"] = "high"
+        except Exception:
+            pass
 
     return v

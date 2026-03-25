@@ -15,7 +15,7 @@ class ERPEDIConnector:
     def __init__(self) -> None:
         self.enabled = os.getenv("ERP_EDI_ENABLED", "0").lower() in ("1", "true", "yes")
         self.base_url = os.getenv("ERP_EDI_BASE_URL", "").strip()
-        self.mock_mode = os.getenv("ERP_EDI_MOCK_MODE", "1").lower() in ("1", "true", "yes")
+        self.mock_mode = os.getenv("ERP_EDI_MOCK_MODE", "0").lower() in ("1", "true", "yes")
         self.connector_type = os.getenv("ERP_CONNECTOR_TYPE", "mock").lower()
 
     def get_supplier_signals(self, order_id: str) -> Dict[str, Any]:
