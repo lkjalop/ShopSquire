@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+_log = logging.getLogger(__name__)
 
 from src.app.observability.metrics import record_ticket
 from src.app.services.decision_log import log_decision
@@ -24,9 +27,10 @@ class Ticket:
 
 
 class TicketingAgent:
-    """Minimal stub ticketing agent for demo purposes.
+    """Persistent ticketing agent — writes to the tickets DB table.
 
-    Creates an internal ticket object and records a metric.
+    Falls back to in-memory storage ONLY for rate-limited tickets that
+    should not persist. All real tickets are DB-primary.
     """
 
     def create_ticket(
@@ -111,12 +115,10 @@ class TicketingAgent:
                     db.commit()
                 except Exception:
                     pass
-        except Exception:
-            # best-effort fallback to in-memory store
-            try:
-                TicketingAgent._tickets[tid] = ticket
-            except Exception:
-                TicketingAgent._tickets = {tid: ticket}
+        except Exception as _db_exc:
+            # DB write failed — log so it shows up in service logs.
+            # Do NOT silently swallow: a ticket that wasn't persisted is a lost audit event.
+            _log.error("ticketing: DB persist failed for %s (%s): %s", tid, severity, _db_exc)
         try:
             record_ticket("security", "P1" if severity in ("critical", "high") else "P3")
         except Exception:
@@ -252,7 +254,7 @@ class TicketingAgent:
                     try:
                         import asyncio
                         from src.app.services.trace_broker import publish as _publish
-                        payload = {
+                        _evt = {
                             "id": f"evt-{int(time.time()*1000)}",
                             "trace_id": trace_id,
                             "event_type": "ticket_approved",
@@ -264,14 +266,15 @@ class TicketingAgent:
                             "created_at": int(time.time()),
                         }
                         try:
-                            loop = asyncio.get_event_loop()
-                            if loop.is_running():
-                                asyncio.create_task(_publish(trace_id, payload))
-                            else:
-                                loop.run_until_complete(_publish(trace_id, payload))
-                        except Exception:
-                            # fallback: ignore broker errors silently
-                            pass
+                            # asyncio.run() creates a fresh loop — safe from sync handlers.
+                            # create_task() if a loop is already running (async context).
+                            try:
+                                loop = asyncio.get_running_loop()
+                                loop.create_task(_publish(trace_id, _evt))
+                            except RuntimeError:
+                                asyncio.run(_publish(trace_id, _evt))
+                        except Exception as _broker_exc:
+                            _log.debug("ticketing: broker publish skipped: %s", _broker_exc)
                     except Exception:
                         pass
             except Exception:

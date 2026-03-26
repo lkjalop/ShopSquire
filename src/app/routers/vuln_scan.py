@@ -290,3 +290,40 @@ async def _auto_escalate_critical(report) -> None:
             )
     except Exception as exc:
         log.debug("auto-escalate critical CVE failed (non-fatal): %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Supply chain scan endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/supply-chain")
+async def supply_chain_scan(
+    repo_root: Optional[str] = Query(None, description="Absolute path to repo root; defaults to server CWD"),
+    create_tickets: bool = Query(True, description="Auto-create tickets for critical findings"),
+    _role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+):
+    """Run supply chain security scan.
+
+    Checks requirements*.txt for:
+    - Typosquatting (known misspelling patterns)
+    - CISA KEV matches (packages with actively exploited CVEs)
+    - Dependency confusion (internal package names found on PyPI)
+
+    Returns findings with severity, detail, and recommended mitigation for each.
+    """
+    if not _scan_enabled():
+        return {"status": "disabled", "message": "Set VULN_SCAN_ENABLED=1 to enable scanning"}
+
+    try:
+        from src.app.services.supply_chain_security import run_supply_chain_scan
+        root = repo_root or str(_WORKSPACE_ROOT)
+        report = await run_supply_chain_scan(
+            repo_root=root,
+            create_tickets=create_tickets,
+        )
+        result = report.to_dict()
+        result["status"] = "completed"
+        return result
+    except Exception as exc:
+        log.error("supply_chain_scan endpoint failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Supply chain scan failed: {exc}")
