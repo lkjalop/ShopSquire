@@ -196,3 +196,37 @@ def test_vision_triage_uses_offline_fixture_for_qr_linked_pii(monkeypatch, tmp_p
     payload_findings = sec.get("payload_findings") or []
     assert payload_findings
     assert payload_findings[0].get("finding_type") == "ssn_leakage_linked_qr"
+
+
+def test_vision_triage_keeps_benign_qr_clean(monkeypatch):
+    import src.app.routers.vision as vision
+
+    async def _fake_labels_and_text(self, _blob: bytes, mode: str = "visual_search"):
+        return ["laptop"], "", None
+
+    def _fake_analyze(self, _labels, _text):
+        return {"damage_type": "unknown", "severity": "undetermined", "confidence": 0.2}
+
+    class _FakeQR:
+        codes = [{
+            "data": "mailto:support@example.com",
+            "type": "QR_CODE",
+            "payload_type": "email_uri",
+            "risk_level": "benign",
+            "risk_reason": "QR content appears informational.",
+            "is_benign_qr": True,
+        }]
+
+    monkeypatch.setattr(vision.ManagedCVProvider, "get_labels_and_text", _fake_labels_and_text)
+    monkeypatch.setattr(vision.BasicCVTriage, "analyze", _fake_analyze)
+    monkeypatch.setattr("src.app.rules.barcode_decode.decode_barcodes", lambda *_args, **_kwargs: _FakeQR())
+
+    client = TestClient(create_app())
+    files = {"image": ("benign-qr.png", _PNG_1X1, "image/png")}
+    r = client.post("/api/v1/vision/triage", headers={"x-api-key": "local-merchant-key"}, files=files)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    sec = body.get("security") or {}
+    assert sec.get("clean") is True
+    assert sec.get("signals", {}).get("qr_benign_detected") is True
+    assert (body.get("qr_assessment") or {}).get("policy_action") == "allow"

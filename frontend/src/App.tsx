@@ -12,6 +12,15 @@ import CartPanel from './components/CartPanel';
 import LoginModal from './components/LoginModal';
 import AdminDashboard from './components/AdminDashboard';
 import { productShortLabel } from './lib/productDisplay';
+import { csrfHeaders } from './lib/csrf';
+import {
+  clearStoredAuthIdentity,
+  clearStoredRole,
+  clearStoredUid,
+  getStoredAuthIdentity,
+  getStoredUid,
+  setStoredAuthIdentity,
+} from './lib/browserSession';
 
 export type Product = {
   sku: string;
@@ -108,6 +117,11 @@ type OperatorMetricSnapshot = {
   catalogProfileMs?: number | null;
   routeTotalMs?: number | null;
   ollamaSummaryMs?: number | null;
+  qrDecodeSuccess?: boolean | null;
+  linkedArtifactFetch?: boolean | null;
+  securityReviewRequired?: boolean | null;
+  recommendationTimeout?: boolean | null;
+  recommendationFallbackUsed?: boolean | null;
   traceId?: string | null;
   source?: string | null;
   recordedAt?: string | null;
@@ -415,11 +429,13 @@ export default function App() {
   const [whyDrawerData, setWhyDrawerData] = useState<ProductWhyExplanation | null>(null);
   const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
-  const uid = (localStorage.getItem('uid') || 'demo-user');
+  const uid = (getStoredUid() || 'demo-user');
 
   const persistOperatorMetrics = useCallback((timing: any, nextTraceId?: string | null, source = 'chat') => {
     if (!timing || typeof timing !== 'object') return;
+    const prev = operatorMetrics && typeof operatorMetrics === 'object' ? operatorMetrics : {};
     const snapshot: OperatorMetricSnapshot = {
+      ...prev,
       catalogProfileCacheHit:
         typeof timing.catalog_profile_cache_hit === 'boolean'
           ? timing.catalog_profile_cache_hit
@@ -429,6 +445,26 @@ export default function App() {
       catalogProfileMs: timing.catalog_profile_ms == null ? null : Number(timing.catalog_profile_ms) || 0,
       routeTotalMs: timing.route_total_ms == null ? null : Number(timing.route_total_ms) || 0,
       ollamaSummaryMs: timing.ollama_summary_ms == null ? null : Number(timing.ollama_summary_ms) || 0,
+      qrDecodeSuccess:
+        typeof timing.qr_decode_success === 'boolean'
+          ? timing.qr_decode_success
+          : prev.qrDecodeSuccess ?? null,
+      linkedArtifactFetch:
+        typeof timing.linked_artifact_fetch === 'boolean'
+          ? timing.linked_artifact_fetch
+          : prev.linkedArtifactFetch ?? null,
+      securityReviewRequired:
+        typeof timing.security_review_required === 'boolean'
+          ? timing.security_review_required
+          : prev.securityReviewRequired ?? null,
+      recommendationTimeout:
+        typeof timing.recommendation_timeout === 'boolean'
+          ? timing.recommendation_timeout
+          : prev.recommendationTimeout ?? null,
+      recommendationFallbackUsed:
+        typeof timing.recommendation_fallback_used === 'boolean'
+          ? timing.recommendation_fallback_used
+          : prev.recommendationFallbackUsed ?? null,
       traceId: nextTraceId || null,
       source,
       recordedAt: new Date().toISOString(),
@@ -482,6 +518,7 @@ export default function App() {
       const triagePath = fast ? '/api/v1/vision/triage?fast=1' : '/api/v1/vision/triage';
       const r = await fetch(apiUrl(triagePath), {
         method: 'POST',
+        credentials: 'include',
         body: fd,
         headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
       });
@@ -504,12 +541,7 @@ export default function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [showAdminDash, setShowAdminDash] = useState(false);
   const [expandedLane, setExpandedLane] = useState<DeviceLane | null>(null);
-  const [authUser, setAuthUser] = useState<{ email: string; name: string } | null>(() => {
-    const t = localStorage.getItem('access_token');
-    const e = localStorage.getItem('auth_email');
-    const n = localStorage.getItem('auth_name');
-    return t && e ? { email: e, name: n || e } : null;
-  });
+  const [authUser, setAuthUser] = useState<{ email: string; name: string } | null>(() => getStoredAuthIdentity());
 
   // NQE history: tracks every question-option interaction for backend context
   const [nqeHistory, setNqeHistory] = useState<NqeInteraction[]>([]);
@@ -709,6 +741,16 @@ export default function App() {
     }
     return [] as NonNullable<ChatMessage['nextQuestions']>;
   }, [messages]);
+  const receiptRequested = useMemo(() => {
+    return latestAssistantQuestions.some((q) => {
+      const text = String(q?.text || '').toLowerCase();
+      const goal = String(q?.goal || '').toLowerCase();
+      return goal.includes('verify_purchase')
+        || text.includes('receipt')
+        || text.includes('order confirmation')
+        || text.includes('serial number');
+    });
+  }, [latestAssistantQuestions]);
 
   const normalizeNextQuestions = (items: any[]): { id: string; text: string; goal?: string; why_hint?: string; options?: { id: string; label: string; value?: string }[] }[] => {
     if (!Array.isArray(items)) return [];
@@ -856,6 +898,7 @@ export default function App() {
     try {
       const params = new URLSearchParams({ uid, sku, trace_id: traceId });
       const r = await fetch(apiUrl(`/api/v1/recommend/why_product?${params.toString()}`), {
+        credentials: 'include',
         headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
       });
       const data = await safeJson(r);
@@ -999,9 +1042,14 @@ export default function App() {
       if (routeToComplaint) {
         const r = await fetch(apiUrl('/api/v1/orchestrate'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...csrfHeaders(),
+            'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          },
           body: JSON.stringify({
-            uid: localStorage.getItem('uid') || 'demo-user',
+            uid: getStoredUid() || 'demo-user',
             cart_total_cents: 0,
             query: q,
             complaint_intent: true,
@@ -1108,6 +1156,7 @@ export default function App() {
 
         const apiHeaders = {
           'Content-Type': 'application/json',
+          ...csrfHeaders(),
           'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
         };
         const tryStreamChat = async (): Promise<any | null> => {
@@ -1117,6 +1166,7 @@ export default function App() {
           try {
             resp = await fetch(apiUrl('/api/v1/chat/stream'), {
               method: 'POST',
+              credentials: 'include',
               headers: apiHeaders,
               body: JSON.stringify(chatPayload),
               signal: ctl.signal,
@@ -1176,6 +1226,7 @@ export default function App() {
         if (!data) {
           const r = await fetch(apiUrl('/api/v1/chat/query'), {
             method: 'POST',
+            credentials: 'include',
             headers: apiHeaders,
             body: JSON.stringify(chatPayload),
           });
@@ -1396,13 +1447,15 @@ export default function App() {
               <>
                 <span style={{ fontSize: 13, color: '#555', marginRight: 4 }}>{authUser.name}</span>
                 <button className={styles.headerBtn} onClick={() => {
-                  localStorage.removeItem('access_token');
-                  localStorage.removeItem('refresh_token');
-                  localStorage.removeItem('auth_email');
-                  localStorage.removeItem('auth_name');
-                  localStorage.removeItem('role');
+                  clearStoredAuthIdentity();
+                  clearStoredRole();
+                  clearStoredUid();
                   setAuthUser(null);
-                  fetch(apiUrl('/api/v1/auth/logout'), { method: 'POST', credentials: 'include' }).catch(() => {});
+                  fetch(apiUrl('/api/v1/auth/logout'), {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: csrfHeaders(),
+                  }).catch(() => {});
                 }}>Logout</button>
                 <button className={styles.headerBtn} onClick={() => setShowAdminDash(true)}>Dashboard</button>
               </>
@@ -1620,6 +1673,11 @@ export default function App() {
                         {nq.text}
                       </button>
                     ))}
+                  </div>
+                )}
+                {receiptRequested && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: '#9a3412' }}>
+                    Proof requested: use the paperclip to upload a receipt, order confirmation, or a photo of the serial number label.
                   </div>
                 )}
               </div>
@@ -1991,8 +2049,7 @@ export default function App() {
         <LoginModal
           onClose={() => setShowLogin(false)}
           onLogin={(u) => {
-            localStorage.setItem('auth_email', u.email);
-            localStorage.setItem('auth_name', u.name);
+            setStoredAuthIdentity(u.email, u.name);
             setAuthUser({ email: u.email, name: u.name });
             setShowLogin(false);
           }}

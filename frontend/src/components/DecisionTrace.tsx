@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import styles from './DecisionTrace.module.css';
 import { apiUrl, getApiBase, safeJson, wsUrl } from '../lib/api';
+import { getOwnerApiKey } from '../lib/browserSession';
 
 type TraceEvent = {
   id?: string;
@@ -240,19 +241,7 @@ function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
 
 export default function DecisionTrace({ traceId, onClose, imageTriage }: { traceId: string | null; onClose: () => void; imageTriage?: any[] }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
-  const LOCAL_KEY = (() => {
-    try {
-      const k =
-        localStorage.getItem('x-api-key') ||
-        localStorage.getItem('shopsquire_api_key') ||
-        localStorage.getItem('api_key') ||
-        '';
-      return String(k || '').trim();
-    } catch {
-      return '';
-    }
-  })();
-  const effectiveApiKey = API_KEY || LOCAL_KEY || 'local-merchant-key';
+  const effectiveApiKey = API_KEY || getOwnerApiKey() || 'local-merchant-key';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
@@ -360,7 +349,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   </div>
   <script>
     const apiBase = ${JSON.stringify(apiBase)};
-    const apiKey = ${JSON.stringify(API_KEY)};
+    const apiKey = ${JSON.stringify(effectiveApiKey)};
     async function loadTrace() {
       try {
         const url = (apiBase ? apiBase : '') + '/api/v1/decisions/${traceId}';
@@ -1042,11 +1031,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
           const artifactType = String(analysis?.linked_artifact_type || 'unknown').replace(/_/g, ' ');
           const hypothesis = String(analysis?.linked_attack_hypothesis || 'unknown').replace(/_/g, ' ');
           const nextStep = String(analysis?.linked_suggested_next_step || 'review').replace(/_/g, ' ');
+          const reasonSummary = String(analysis?.linked_reason_summary || '').trim();
+          const policyAction = String(analysis?.linked_policy_action || 'review').replace(/_/g, ' ');
           const pii = analysis?.pii_detected ? ` | PII: ${(analysis?.pii_type || []).join(', ') || 'detected'}` : '';
           const ssn = Array.isArray(analysis?.ssn_hits) && analysis.ssn_hits.length > 0 ? ` | SSNs: ${analysis.ssn_hits.length}` : '';
           setPayloadActionStatus((prev) => ({
             ...prev,
-            [itemKey]: `Linked artifact analyzed (${data.incident_id}). Type: ${artifactType} | Hypothesis: ${hypothesis} | Next: ${nextStep}${pii}${ssn}.`,
+            [itemKey]: `Linked artifact analyzed (${data.incident_id}). Type: ${artifactType} | Hypothesis: ${hypothesis} | Policy: ${policyAction} | Next: ${nextStep}${reasonSummary ? ` | Why: ${reasonSummary}` : ''}${pii}${ssn}.`,
           }));
           return;
         }
@@ -2371,8 +2362,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 <div className={styles.payloadGrid}>
                                   <div className={styles.kvRow}><span>Linked artifact available</span><span>{renderValue(Boolean(linkedArtifact.linked_artifact_available))}</span></div>
                                   <div className={styles.kvRow}><span>Linked artifact type</span><span>{renderValue(linkedArtifact.linked_artifact_type || 'unknown')}</span></div>
+                                  <div className={styles.kvRow}><span>Verdict</span><span>{renderValue(linkedArtifact.linked_verdict_label || 'Needs Review')}</span></div>
+                                  <div className={styles.kvRow}><span>Confidence</span><span>{renderValue(linkedArtifact.linked_confidence_band || 'medium')}</span></div>
                                   <div className={styles.kvRow}><span>Linked owner scope</span><span>{(() => { const meta = getOwnerScopeMeta(linkedArtifact.linked_owner_scope); return meta ? <span className={meta.className}>{meta.label}</span> : renderValue('unknown'); })()}</span></div>
                                   <div className={styles.kvRow}><span>Exposure scope</span><span>{renderValue(linkedArtifact.linked_exposure_scope || 'unknown')}</span></div>
+                                  <div className={styles.kvRow}><span>Policy action</span><span>{renderValue(linkedArtifact.linked_policy_action || 'review')}</span></div>
                                   <div className={styles.kvRow}><span>Human verification required</span><span>{renderValue(Boolean(linkedArtifact.linked_human_verification_required))}</span></div>
                                   <div className={styles.kvRow}><span>PII detected</span><span>{renderValue(Boolean(linkedArtifact.pii_detected))}</span></div>
                                   <div className={styles.kvRow}><span>PII type</span><span>{renderValue(linkedArtifact.pii_type || [])}</span></div>
@@ -2381,6 +2375,20 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                   <div className={styles.kvRow}><span>Linked decode path</span><span>{renderValue(linkedArtifact.linked_decode_path || 'safe_passive_link_fetch_only')}</span></div>
                                   <div className={styles.kvRow}><span>Linked next step</span><span>{renderValue(linkedArtifact.linked_suggested_next_step || 'review')}</span></div>
                                 </div>
+                                {!isMissingValue(linkedArtifact.linked_reason_summary) && (
+                                  <>
+                                    <div className={styles.sectionSubTitle}>Why It Was Flagged</div>
+                                    <div className={styles.muted}>{formatDisplayText(linkedArtifact.linked_reason_summary, 'Not available')}</div>
+                                  </>
+                                )}
+                                {linkedArtifact.linked_user_summary && typeof linkedArtifact.linked_user_summary === 'object' && (
+                                  <>
+                                    <div className={styles.sectionSubTitle}>Operator Summary</div>
+                                    <div className={styles.kvRow}><span>What we saw</span><span>{renderValue(linkedArtifact.linked_user_summary.what_we_saw || 'Not available')}</span></div>
+                                    <div className={styles.kvRow}><span>Why it matters</span><span>{renderValue(linkedArtifact.linked_user_summary.why_it_matters || 'Not available')}</span></div>
+                                    <div className={styles.kvRow}><span>What happens next</span><span>{renderValue(linkedArtifact.linked_user_summary.what_happens_next || 'Not available')}</span></div>
+                                  </>
+                                )}
                                 {!isMissingValue(linkedArtifact.linked_owner_reason) && (
                                   <>
                                     <div className={styles.sectionSubTitle}>Owner Assessment</div>

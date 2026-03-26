@@ -1,4 +1,5 @@
 import styles from './CVResultsPanel.module.css';
+import { getStoredRole } from '../lib/browserSession';
 
 export type CVResult = {
   case_id?: string;
@@ -36,7 +37,7 @@ export default function CVResultsPanel({
   const tier2Summary = result.cv_tiered_analysis?.tier2_summary || tier2?.summary || {};
   const detectorSummary = tier2?.detector?.summary || {};
   const qualityScores = tier2?.quality?.scores || {};
-  const role = (localStorage.getItem('role') || '').toLowerCase();
+  const role = getStoredRole().toLowerCase();
   const isAdmin = role === 'admin' || role === 'merchant_admin' || role === 'security_admin';
   const showInternalCvDetails = isAdmin && (
     ((import.meta as any).env?.VITE_CV_ADVANCED_UI === '1')

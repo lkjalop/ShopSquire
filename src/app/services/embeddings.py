@@ -6,6 +6,8 @@ import os
 import logging
 import httpx
 
+from src.app.security.provider_boundary import sanitize_for_provider
+
 _log = logging.getLogger("shopsquire.embeddings")
 try:
     import faiss  # type: ignore
@@ -73,6 +75,7 @@ def embed_text_openai(
     key = api_key or os.getenv("OPENAI_API_KEY", "")
     if not key:
         return []
+    text, _, _ = sanitize_for_provider("openai", text, data_categories=["embedding_input"])
     base = (base_url or os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")).rstrip("/")
     mdl = model or os.getenv("OPENAI_EMBEDDINGS_MODEL", "text-embedding-3-small")
     url = f"{base}/embeddings"
@@ -186,6 +189,7 @@ class VectorStoreEmbeddings(SimpleEmbeddings):
         provider = (os.getenv("EMBEDDINGS_PROVIDER") or "bow").strip().lower()
         if provider == "openai":
             try:
+                text, _, _ = sanitize_for_provider("openai", text, data_categories=["embedding_input"])
                 api_key = os.getenv("OPENAI_API_KEY")
                 base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
                 model = os.getenv("OPENAI_EMBEDDINGS_MODEL", "text-embedding-3-small")

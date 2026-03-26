@@ -24,7 +24,9 @@ def require_scopes(required: List[str]):
 
 def optional_connector_read():
     async def _dep(creds: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
-        enforce = os.getenv("ENFORCE_CONNECTOR_SCOPES", "0").lower() in ("1", "true", "yes")
+        # Default fail-closed: enforce scopes in all envs unless explicitly disabled.
+        # Set ENFORCE_CONNECTOR_SCOPES=0 only for local dev where no IdP is available.
+        enforce = os.getenv("ENFORCE_CONNECTOR_SCOPES", "1").lower() not in ("0", "false", "no")
         if not enforce:
             return {"scope": ""}
         if creds is None or not creds.credentials:

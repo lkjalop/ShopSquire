@@ -71,6 +71,7 @@ from src.app.security.model_theft import (
 )
 from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
+from src.app.security.insider_threat_detector import check_session_context_integrity
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 import httpx
 from types import SimpleNamespace
@@ -4952,6 +4953,15 @@ def suggest(
     kv = ctx.get("kv") or {}
     structured_state = mem.get_structured_state(uid) or {}
     product_memory_bank = mem.get_product_memory_bank(uid) or {}
+    try:
+        _session_integrity = {
+            "kv": kv if isinstance(kv, dict) else {},
+            "structured_state": structured_state if isinstance(structured_state, dict) else {},
+            "product_memory_bank": product_memory_bank if isinstance(product_memory_bank, dict) else {},
+        }
+        check_session_context_integrity(actor=str(uid), session_data=_session_integrity)
+    except Exception:
+        pass
     if not isinstance(structured_state, dict):
         structured_state = {}
     if not isinstance(product_memory_bank, dict):

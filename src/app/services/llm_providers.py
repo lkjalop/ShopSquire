@@ -1,6 +1,8 @@
 import os
 from typing import Any, Dict
 
+from src.app.security.provider_boundary import require_provider_transfer, sanitize_for_provider
+
 
 class BaseLLMProvider:
     name = "base"
@@ -26,6 +28,7 @@ class AnthropicProvider(BaseLLMProvider):
             import requests
 
             model = kwargs.get("model", "claude-sonnet-4-20250514")
+            prompt, _, _ = sanitize_for_provider("anthropic", prompt, data_categories=["llm_prompt"])
             payload = {
                 "model": model,
                 "max_tokens": kwargs.get("max_tokens", 1024),
@@ -73,6 +76,7 @@ class OpenAIProvider(BaseLLMProvider):
             import requests
 
             model = kwargs.get("model", "gpt-4o-mini")
+            prompt, _, _ = sanitize_for_provider("openai", prompt, data_categories=["llm_prompt"])
             payload = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": kwargs.get("max_tokens", 512)}
             headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
             resp = requests.post(self.endpoint, json=payload, headers=headers, timeout=10)
@@ -113,6 +117,7 @@ class MistralProvider(BaseLLMProvider):
             import requests
 
             model = kwargs.get("model", "mistral-small-latest")
+            prompt, _, _ = sanitize_for_provider("mistral", prompt, data_categories=["llm_prompt"])
             payload = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
@@ -164,14 +169,18 @@ _PROVIDER_MAP: Dict[str, type] = {
 def get_provider(name: str | None = None) -> BaseLLMProvider:
     """Return a provider instance by name, or auto-select based on available keys."""
     if name and name.lower() in _PROVIDER_MAP:
+        require_provider_transfer(name.lower(), data_categories=["llm_prompt"])
         return _PROVIDER_MAP[name.lower()]()
 
     # Auto-select: prefer the first provider with an API key
     if os.getenv("ANTHROPIC_API_KEY"):
+        require_provider_transfer("anthropic", data_categories=["llm_prompt"])
         return AnthropicProvider()
     if os.getenv("OPENAI_API_KEY"):
+        require_provider_transfer("openai", data_categories=["llm_prompt"])
         return OpenAIProvider()
     if os.getenv("MISTRAL_API_KEY"):
+        require_provider_transfer("mistral", data_categories=["llm_prompt"])
         return MistralProvider()
 
     # No API key configured for any provider — fail closed rather than return stub text.

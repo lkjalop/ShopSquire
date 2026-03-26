@@ -1,9 +1,11 @@
 ﻿import { useEffect, useState } from 'react';
 import { apiUrl, safeJson, cvAnalyze, cvIssueNonce, cvUpload } from '../lib/api';
+import { apiFetch, csrfHeaders } from '../lib/csrf';
 import CVResultsPanel, { CVResult } from './CVResultsPanel';
 import { fileToBase64, buildSanitizedImages } from '../utils/imageProcessing';
 import CameraButton from './CameraButton';
 import ImageRecommendPanel, { ImageAnalysisContext, Props as ImageRecommendProps } from './ImageRecommendPanel';
+import { getStoredRole } from '../lib/browserSession';
 
 type FAQItem = {
   id: string;
@@ -100,7 +102,7 @@ export default function RightPanelExtras({
   const [error, setError] = useState<string | null>(null);
   const [imageRecommendCtxs, setImageRecommendCtxs] = useState<ImageAnalysisContext[]>([]);
   const [sessionSuspiciousCount, setSessionSuspiciousCount] = useState(0);
-  const role = (localStorage.getItem('role') || '').toLowerCase();
+  const role = getStoredRole().toLowerCase();
   const isAdmin = role === 'admin' || role === 'merchant_admin' || role === 'security_admin';
   const showAdvancedCvControls = isAdmin && (
     ((import.meta as any).env?.VITE_CV_ADVANCED_UI === '1')
@@ -245,6 +247,7 @@ export default function RightPanelExtras({
           credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
+            ...csrfHeaders(),
             ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
           },
           body: JSON.stringify({
@@ -278,7 +281,10 @@ export default function RightPanelExtras({
         method: 'POST',
         credentials: 'include',
         body: fd,
-        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
+        headers: {
+          ...csrfHeaders(),
+          ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
+        },
       });
       const j = await safeJson(r);
       if (!r.ok || !j) {
@@ -433,7 +439,7 @@ export default function RightPanelExtras({
     if (result?.case_id) {
       fetch(apiUrl(`/api/v1/support/complaints/${encodeURIComponent(result.case_id)}/return-label`), {
         credentials: 'include',
-        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
+        headers: { ...csrfHeaders(), ...(API_KEY ? { 'x-api-key': API_KEY } : {}) },
       }).then(() => {}).catch(() => {});
     }
   };
@@ -448,14 +454,12 @@ export default function RightPanelExtras({
         customer_request: 'human_review_requested',
         decision_context: { decision_id: result?.decision_id, trace_id: result?.trace_id, evidence_tags: result?.evidence_tags },
       };
-      const resp = await fetch(apiUrl('/api/v1/support/complaints'), {
+      const data = await apiFetch<any>('/api/v1/support/complaints', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'x-api-key': API_KEY } : {}) },
+        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
         body: JSON.stringify(payload),
       });
-      if (resp.ok) {
-        const data = await safeJson(resp);
+      if (data) {
         setError(`Your dispute has been submitted${data?.case_id ? ` (Case ${data.case_id})` : ''}. A human agent will review this decision.`);
       } else {
         setError('Dispute submitted. A human agent will review this decision.');
@@ -472,10 +476,9 @@ export default function RightPanelExtras({
       return;
     }
     try {
-      const resp = await fetch(apiUrl('/api/v1/incidents/escalate'), {
+      const data = await apiFetch<any>('/api/v1/incidents/escalate', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'x-api-key': API_KEY } : {}) },
+        headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
         body: JSON.stringify({
           case_id: result?.case_id,
           trace_id: result?.trace_id,
@@ -483,8 +486,7 @@ export default function RightPanelExtras({
           context: { decision_id: result?.decision_id, evidence_tags: result?.evidence_tags },
         }),
       });
-      const data = await safeJson(resp);
-      if (resp.ok && data?.ok && data?.incident_id) {
+      if (data?.ok && data?.incident_id) {
         onEscalate?.({
           case_id: result?.case_id,
           decision_id: result?.decision_id,
@@ -493,7 +495,7 @@ export default function RightPanelExtras({
         });
         return;
       }
-      const detail = (data && (data.detail || data.error)) ? (data.detail || data.error) : `http_${resp.status}`;
+      const detail = (data && (data.detail || data.error)) ? (data.detail || data.error) : 'incident_escalate_failed';
       setError(`Escalation failed: ${String(detail)}.`);
       return;
     } catch (e: any) {

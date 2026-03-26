@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.app.config import get_settings
+from src.app.security.provider_boundary import require_provider_transfer, sanitize_for_provider
 
 log = logging.getLogger(__name__)
 
@@ -212,6 +213,8 @@ class VisionReasoningService:
         except ImportError:
             return self._err("openai package not installed — pip install openai")
 
+        require_provider_transfer("openai", data_categories=["vision_image"])
+        prompt, _, _ = sanitize_for_provider("openai", prompt, data_categories=["vision_prompt"])
         b64 = base64.b64encode(image_bytes).decode()
         api_key = get_settings().openai_api_key
         client = openai.AsyncOpenAI(api_key=api_key)
@@ -255,6 +258,8 @@ class VisionReasoningService:
         except ImportError:
             return self._err("google-generativeai / Pillow not installed — pip install google-generativeai pillow")
 
+        require_provider_transfer("gemini", data_categories=["vision_image"])
+        prompt, _, _ = sanitize_for_provider("gemini", prompt, data_categories=["vision_prompt"])
         genai.configure(api_key=get_settings().google_ai_api_key)
         img = PIL.Image.open(io.BytesIO(image_bytes))
         model = genai.GenerativeModel("gemini-1.5-pro-latest")

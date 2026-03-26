@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
+import { setStoredRole, setStoredUid } from '../lib/browserSession';
 
 interface Props {
   onClose: () => void;
@@ -34,12 +35,10 @@ export default function LoginModal({ onClose, onLogin }: Props) {
         setError(j?.detail || `Error ${r.status}`);
         return;
       }
-      if (j?.access_token) localStorage.setItem('access_token', j.access_token);
-      if (j?.refresh_token) localStorage.setItem('refresh_token', j.refresh_token);
       // Role persisted for UI rendering only — server-side role enforcement via httpOnly cookie JWT
       const role = j?.role || 'buyer';
-      localStorage.setItem('role', role);
-      if (j?.user_id) localStorage.setItem('uid', String(j.user_id));
+      setStoredRole(role);
+      if (j?.user_id) setStoredUid(String(j.user_id));
       onLogin({ user_id: j?.user_id, email: j?.email || email, name: j?.name || name, role });
     } catch (e: any) {
       setError(e?.message || 'Network error');

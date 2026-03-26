@@ -7,9 +7,42 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from src.app.security.auth import ROLE_MERCHANT, require_role
+from src.app.security.csrf_middleware import CSRF_COOKIE_NAME, generate_csrf_token, set_csrf_cookie
 from src.app.services.nlp_query_clustering import QueryClusterer
 
 router = APIRouter(prefix="/merchant", tags=["merchant"])
+
+
+def _is_https_request(req: Request) -> bool:
+    try:
+        proto = str(req.headers.get("x-forwarded-proto") or req.url.scheme or "").lower()
+        return proto == "https"
+    except Exception:
+        return False
+
+
+def _merchant_html_response(request: Request, html: str) -> HTMLResponse:
+    response = HTMLResponse(content=html)
+    # Local merchant demo pages still rely on inline scripts and handlers.
+    response.headers["content-security-policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' ws: wss:; "
+        "media-src 'self' blob:; "
+        "worker-src blob:; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "report-uri /api/v1/security/csp-report"
+    )
+    try:
+        if not request.cookies.get(CSRF_COOKIE_NAME):
+            set_csrf_cookie(response.headers, generate_csrf_token(), secure=_is_https_request(request))
+    except Exception:
+        pass
+    return response
 
 
 def _is_loopback(req: Request) -> bool:
@@ -82,7 +115,7 @@ def merchant_dashboard(request: Request):
       </body>
     </html>
     """
-    return HTMLResponse(content=html)
+    return _merchant_html_response(request, html)
 
 
 @router.get("/dashboard-faq", response_class=HTMLResponse)
@@ -141,7 +174,7 @@ def merchant_dashboard_faq(
       </body>
     </html>
     """
-    return HTMLResponse(content=html)
+    return _merchant_html_response(request, html)
 
 
 @router.get("/bi", response_class=HTMLResponse)
@@ -217,6 +250,13 @@ def merchant_bi(request: Request):
             }} catch(e) {{ return ''; }}
           }}
           function getApiKey(){{ return getCookie('shopsquire_api_key') || ''; }}
+          function getCsrfToken(){{ return getCookie('ss_csrf') || ''; }}
+          function postHeaders(extra){{
+            const out = Object.assign({{}}, extra || {{}});
+            const csrf = getCsrfToken();
+            if(csrf) out['x-csrf-token'] = csrf;
+            return out;
+          }}
           const all = {json.dumps([uid for _, uid in dashboards])};
           function show(uid){{
             for(const u of all){{
@@ -251,7 +291,7 @@ def merchant_bi(request: Request):
       </body>
     </html>
     """
-    return HTMLResponse(content=html)
+    return _merchant_html_response(request, html)
 
 
 @router.get("/incident-room", response_class=HTMLResponse)
@@ -283,7 +323,7 @@ def merchant_incident_room(request: Request, incident_id: str | None = None):
       </body>
     </html>
     """.replace("__INCIDENT_JSON__", json.dumps(inc))
-    return HTMLResponse(content=html)
+    return _merchant_html_response(request, html)
 
 
 @router.get("/incident-room-lite", response_class=HTMLResponse)
@@ -408,7 +448,8 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
                     // Issue/rotate a staff token so EventSource can connect (no headers).
                     const tr = await fetch(`/api/v1/admin/incidents/${{encodeURIComponent(incId)}}/room/token`, {{
                       method: 'POST',
-                      headers: (getApiKey() ? {{ 'x-api-key': getApiKey() }} : undefined),
+                      credentials: 'include',
+                      headers: postHeaders(getApiKey() ? {{ 'x-api-key': getApiKey() }} : undefined),
                     }});
                     const tj = await tr.json();
                     if (tj && tj.staff_token) {{
@@ -449,7 +490,8 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
             try{{
               await fetch(`/api/v1/incidents/${{encodeURIComponent(inc)}}/room/message`, {{
                 method: 'POST',
-                headers: {{ 'Content-Type':'application/json', 'x-incident-token': tok }},
+                credentials: 'include',
+                headers: postHeaders({{ 'Content-Type':'application/json', 'x-incident-token': tok }}),
                 body: JSON.stringify({{ message: msg }})
               }});
             }}catch(e){{}}
@@ -467,7 +509,7 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
       </body>
     </html>
     """
-    return HTMLResponse(content=html)
+    return _merchant_html_response(request, html)
 
 
 @router.get("/email-lab", response_class=HTMLResponse)
@@ -904,6 +946,15 @@ def merchant_email_lab(request: Request):
           }
           function getApiKey(){
             try { return getCookie('shopsquire_api_key') || ''; } catch(e){ return ''; }
+          }
+          function getCsrfToken(){
+            try { return getCookie('ss_csrf') || ''; } catch(e){ return ''; }
+          }
+          function postHeaders(extra){
+            const out = Object.assign({}, extra || {});
+            const csrf = getCsrfToken();
+            if(csrf) out['x-csrf-token'] = csrf;
+            return out;
           }
           function getOwnerKey(){
             try {
@@ -1993,9 +2044,9 @@ def merchant_email_lab(request: Request):
 
           async function analyze(){ resetPlaybookRunCard(); document.getElementById('status').textContent='Analyzing…'; const to = document.getElementById('to').value.trim(); const subj = document.getElementById('subject').value.trim(); const body = document.getElementById('body').value.trim(); let atts = []; try { atts = await collectAllAttachments(); } catch(attErr){ const msg = 'Attachment encoding failed: ' + String(attErr && attErr.message ? attErr.message : attErr); document.getElementById('status').textContent = msg; pushTraceNotice('attachment_encoding_failed', { error: msg }); return; } const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
-              let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(payload) });
+              let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', credentials:'include', headers: postHeaders({ 'Content-Type':'application/json', 'x-api-key': getApiKey() }), body: JSON.stringify(payload) });
               if (r.status === 401 || r.status === 403) {
-                r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }, body: JSON.stringify(payload) });
+                r = await fetch('/api/v1/email_security/evaluate', { method:'POST', credentials:'include', headers: postHeaders({ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }), body: JSON.stringify(payload) });
               }
               const j = await r.json().catch(()=>null); if(!r.ok || !j){ const err=(j && (j.detail||j.error) ? (j.detail||j.error) : 'no details'); document.getElementById('status').textContent='Analyze failed ('+r.status+'): '+err; pushTraceNotice('analyze_failed', { status: r.status, error: err, endpoint: '/api/v1/email_security/evaluate' }); return; }
               const sevCls = {'error':'sev-error','warning':'sev-warning'}.hasOwnProperty(j.severity||'') ? 'sev-'+j.severity : 'sev-info';
@@ -2027,9 +2078,9 @@ def merchant_email_lab(request: Request):
             }
             const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
-              let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(payload) });
+              let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', credentials:'include', headers: postHeaders({ 'Content-Type':'application/json', 'x-api-key': getApiKey() }), body: JSON.stringify(payload) });
               if (r.status === 401 || r.status === 403) {
-                r = await fetch('/api/v1/email_security/evaluate', { method:'POST', headers: { 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }, body: JSON.stringify(payload) });
+                r = await fetch('/api/v1/email_security/evaluate', { method:'POST', credentials:'include', headers: postHeaders({ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }), body: JSON.stringify(payload) });
               }
               const j = await r.json().catch(()=>null);
               if(!r.ok || !j){ const err=(j && (j.detail||j.error) ? (j.detail||j.error) : 'no details'); document.getElementById('status').textContent='Analyze failed ('+r.status+')'; pushTraceNotice('submit_analyze_failed', { status: r.status, error: err, endpoint: '/api/v1/email_security/evaluate' }); return; }
@@ -2042,7 +2093,7 @@ def merchant_email_lab(request: Request):
               // Now escalate: create an incident via the public escalation endpoint
               try {
                 const escPayload = { case_id: j.decision_trace_id || j.decision_id || payload.message_id, trace_id: j.decision_trace_id, reason: 'email_lab_manual_escalation', context: { subject: subj, verdict: j.verdict_action, severity: j.severity, reasons: (j.reasons||[]).slice(0,6) } };
-                const escR = await fetch('/api/v1/incidents/escalate', { method:'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(escPayload) });
+                const escR = await fetch('/api/v1/incidents/escalate', { method:'POST', credentials:'include', headers: postHeaders({ 'Content-Type':'application/json' }), body: JSON.stringify(escPayload) });
                 const escJ = await escR.json();
                 if(escJ && escJ.ok && escJ.incident_id){
                   document.getElementById('status').textContent='Escalated: '+escJ.incident_id;
@@ -2119,7 +2170,7 @@ def merchant_email_lab(request: Request):
                     if(incR.ok && incJ && incJ.id){ roomIncidentId = incJ.id; }
                   }catch(e){}
                 }
-                const t = await fetch(`/api/v1/admin/incidents/${encodeURIComponent(roomIncidentId)}/room/token`, { method:'POST', headers:{ 'x-api-key': getOwnerKey() } });
+                const t = await fetch(`/api/v1/admin/incidents/${encodeURIComponent(roomIncidentId)}/room/token`, { method:'POST', credentials:'include', headers:postHeaders({ 'x-api-key': getOwnerKey() }) });
                 const tj = await t.json();
                 if(tj && tj.staff_token){
                   const tok = tj.staff_token;
@@ -2139,9 +2190,9 @@ def merchant_email_lab(request: Request):
               { trace_id: traceId, event_type: 'policy_gate', source_type: 'agent', source_id: 'Email_Policy_Gate_Agent', payload: { decision: 'review', reason: 'rule_first_gate' } },
             ];
             try{
-              let r = await fetch('/api/v1/trace/events', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': getApiKey() }, body: JSON.stringify(batch) });
+              let r = await fetch('/api/v1/trace/events', { method:'POST', credentials:'include', headers:postHeaders({ 'Content-Type':'application/json', 'x-api-key': getApiKey() }), body: JSON.stringify(batch) });
               if(r.status === 401 || r.status === 403){
-                r = await fetch('/api/v1/trace/events', { method:'POST', headers:{ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }, body: JSON.stringify(batch) });
+                r = await fetch('/api/v1/trace/events', { method:'POST', credentials:'include', headers:postHeaders({ 'Content-Type':'application/json', 'x-api-key': getOwnerKey() }), body: JSON.stringify(batch) });
               }
               if(!r.ok){ document.getElementById('status').textContent='Simulation failed ('+r.status+')'; pushTraceNotice('simulation_failed', { status: r.status }); return; }
               document.getElementById('status').textContent='Simulation events sent';
@@ -2163,6 +2214,6 @@ def merchant_email_lab(request: Request):
       </body>
     </html>
     """
-    resp = HTMLResponse(content=html)
-    resp.set_cookie("shopsquire_api_key", _owner_key, httponly=False, samesite="strict")
+    resp = _merchant_html_response(request, html)
+    resp.set_cookie("shopsquire_api_key", _owner_key, httponly=False, samesite="strict", secure=_is_https_request(request))
     return resp

@@ -6,6 +6,8 @@ from typing import Optional, Dict
 
 import httpx
 
+from src.app.security.provider_boundary import require_provider_transfer
+
 
 class ASRAdapter:
     """Base ASR adapter interface."""
@@ -33,6 +35,7 @@ class WhisperLocalASRAdapter(ASRAdapter):
     def _transcribe_openai(self, audio_bytes: bytes) -> Dict:
         if not (self.openai_api_key and audio_bytes):
             return {"text": "", "confidence": 0.0}
+        require_provider_transfer("openai", data_categories=["voice_audio"])
         files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
         data = {"model": self.openai_model}
         headers = {"authorization": f"Bearer {self.openai_api_key}"}

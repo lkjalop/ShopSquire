@@ -17,9 +17,27 @@ class SecurityHeadersMiddleware:
         return str(os.getenv(name, default) or default)
 
     def _build_headers(self) -> list[Tuple[bytes, bytes]]:
+        # CRIT-07: Removed 'unsafe-inline' from script-src — use nonces for
+        # any inline scripts.  Style 'unsafe-inline' retained until component
+        # CSS-in-JS is migrated; track as TECH-DEBT-01.
+        # frame-ancestors changed from 'self' → 'none' (clickjacking hardening).
+        # Added report-uri so CSP violations reach our security event bus.
         csp = self._env(
             "SECURITY_CSP",
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
+            (
+                "default-src 'self'; "
+                "script-src 'self'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob: https:; "
+                "connect-src 'self' ws: wss:; "
+                "media-src 'self' blob:; "
+                "worker-src blob:; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "frame-ancestors 'none'; "
+                "upgrade-insecure-requests; "
+                "report-uri /api/v1/security/csp-report"
+            ),
         )
         hsts_enabled = str(os.getenv("SECURITY_HSTS_ENABLED", "1")).lower() in ("1", "true", "yes")
         hsts = self._env("SECURITY_HSTS", "max-age=31536000; includeSubDomains")

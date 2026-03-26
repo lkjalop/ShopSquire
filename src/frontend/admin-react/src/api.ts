@@ -24,6 +24,16 @@ export type ApprovalItem = {
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
 const API_KEY_ENV = (import.meta.env.VITE_API_KEY as string) || '';
 let VOLATILE_API_KEY = '';
+const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function getCsrfToken(): string {
+  if (typeof document === 'undefined') return '';
+  const entry = document.cookie
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith('ss_csrf='));
+  return entry ? entry.slice('ss_csrf='.length) : '';
+}
 
 function getApiKey(): string {
   return API_KEY_ENV || VOLATILE_API_KEY || '';
@@ -39,6 +49,7 @@ export function clearClientApiKey() {
 
 async function http<T>(path: string, opts?: RequestInit): Promise<T> {
   const url = `${API_BASE.replace(/\/$/, '')}${path}`;
+  const method = String(opts?.method || 'GET').toUpperCase();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts?.headers) {
     if (opts.headers instanceof Headers) {
@@ -55,6 +66,10 @@ async function http<T>(path: string, opts?: RequestInit): Promise<T> {
   }
   const key = getApiKey();
   if (key) headers['x-api-key'] = key;
+  if (STATE_CHANGING.has(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  }
   const r = await fetch(url, { ...opts, headers, credentials: 'include' });
   if (!r.ok) {
     let detail = '';

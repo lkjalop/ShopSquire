@@ -6,6 +6,7 @@
  *   <OOBVerification vendorDomain="supplier.com" triggerSignal="bank_fingerprint_baseline_mismatch" />
  */
 import React, { useState, useCallback } from 'react';
+import { apiFetch } from '../lib/csrf';
 
 const API_BASE = '/api/v1/oob';
 
@@ -49,9 +50,8 @@ export default function OOBVerification({
   const createOOB = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const res = await fetch(`${API_BASE}/create`, {
+      const data = await apiFetch<any>(`${API_BASE}/create`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           vendor_domain: vendorDomain,
           trigger_signal: triggerSignal,
@@ -62,7 +62,6 @@ export default function OOBVerification({
           trace_id: traceId,
         }),
       });
-      const data = await res.json();
       setState({
         requestId: data.request_id,
         token: data.token,
@@ -79,12 +78,10 @@ export default function OOBVerification({
     if (!state.requestId) return;
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const res = await fetch(`${API_BASE}/confirm`, {
+      const data = await apiFetch<any>(`${API_BASE}/confirm`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ request_id: state.requestId, token: confirmToken }),
       });
-      const data = await res.json();
       setState((s) => ({
         ...s,
         status: data.status || (data.ok ? 'confirmed' : s.status),
@@ -100,7 +97,7 @@ export default function OOBVerification({
     if (!state.requestId) return;
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      await fetch(`${API_BASE}/deny?request_id=${encodeURIComponent(state.requestId)}`, {
+      await apiFetch(`${API_BASE}/deny?request_id=${encodeURIComponent(state.requestId)}`, {
         method: 'POST',
       });
       setState((s) => ({ ...s, status: 'denied', loading: false }));

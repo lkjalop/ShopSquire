@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import styles from './EscalationRoom.module.css';
 import { apiUrl, wsUrl, safeJson } from '../lib/api';
+import { apiFetch, csrfHeaders } from '../lib/csrf';
+import { clearIncidentTokenCookie, setIncidentTokenCookie } from '../lib/browserSession';
 
 type RoomEvent = {
   id?: string;
@@ -117,9 +119,11 @@ export default function EscalationRoom({
       try {
         if (buyerToken || staffToken) {
           const token = buyerToken || staffToken || '';
-          const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/summary/public`), window.location.href);
-          u.searchParams.set('token', token);
-          const r = await fetch(u.toString(), { credentials: 'include' });
+          setIncidentTokenCookie(incidentId, token);
+        const r = await fetch(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/summary/public`), {
+          credentials: 'include',
+          headers: { 'x-incident-token': token },
+          });
           const j = await safeJson(r);
           if (!r.ok) throw new Error(parseError(r.status, j, 'summary_status_failed'));
           const st = String(j?.status || '').toLowerCase();
@@ -210,7 +214,7 @@ export default function EscalationRoom({
             const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/token`), {
               method: 'POST',
               credentials: 'include',
-              headers: { 'x-api-key': key },
+              headers: { ...csrfHeaders(), 'x-api-key': key },
             });
             const j = await safeJson(r);
             if (!r.ok) {
@@ -221,9 +225,8 @@ export default function EscalationRoom({
         }
 
         if (useToken) {
-          const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream`), window.location.href);
-          u.searchParams.set('token', useToken);
-          es = new EventSource(u.toString());
+          setIncidentTokenCookie(incidentId, useToken);
+          es = new EventSource(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream`));
         } else {
           setConnectionError('No incident token available.');
           return;
@@ -257,6 +260,7 @@ export default function EscalationRoom({
 
     return () => {
       mounted = false;
+      clearIncidentTokenCookie(incidentId);
       try {
         ws && ws.close();
       } catch {
@@ -285,12 +289,11 @@ export default function EscalationRoom({
     try {
       const token = buyerToken || staffToken || null;
       if (token) {
-        const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/message`), window.location.href);
-        u.searchParams.set('token', token);
-        await fetch(u.toString(), {
+        setIncidentTokenCookie(incidentId, token);
+        await fetch(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/message`), {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...csrfHeaders(), 'x-incident-token': token },
           body: JSON.stringify({ event_type: 'typing', role: staffToken ? 'staff' : 'buyer' }),
         });
         return;
@@ -300,6 +303,7 @@ export default function EscalationRoom({
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
+          ...csrfHeaders(),
           ...(OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : {}),
         },
         body: JSON.stringify({ event_type: 'typing', role: 'staff' }),
@@ -314,16 +318,10 @@ export default function EscalationRoom({
     setResolving(true);
     setSendError(null);
     try {
-      const r = await fetch(
-        apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/status?status=resolved`),
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : undefined,
-        },
-      );
-      const j = await safeJson(r);
-      if (!r.ok) throw new Error(parseError(r.status, j, 'resolve_failed'));
+      await apiFetch(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/status?status=resolved`, {
+        method: 'POST',
+        headers: OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : undefined,
+      });
       setResolved(true);
       onResolve?.(incidentId);
     } catch (e: any) {
@@ -341,12 +339,11 @@ export default function EscalationRoom({
     try {
       const token = buyerToken || staffToken || null;
       if (token) {
-        const u = new URL(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/message`), window.location.href);
-        u.searchParams.set('token', token);
-        const r = await fetch(u.toString(), {
+        setIncidentTokenCookie(incidentId, token);
+        const r = await fetch(apiUrl(`/api/v1/incidents/${encodeURIComponent(incidentId)}/room/message`), {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...csrfHeaders(), 'x-incident-token': token },
           body: JSON.stringify({ message: msg, role: staffToken ? 'staff' : 'buyer' }),
         });
         const j = await safeJson(r);
@@ -355,10 +352,11 @@ export default function EscalationRoom({
         const r = await fetch(apiUrl(`/api/v1/admin/incidents/${encodeURIComponent(incidentId)}/room/message`), {
           method: 'POST',
           credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : {}),
-          },
+        headers: {
+          'Content-Type': 'application/json',
+          ...csrfHeaders(),
+          ...(OWNER_API_KEY ? { 'x-api-key': OWNER_API_KEY } : {}),
+        },
           body: JSON.stringify({ message: msg, role: 'staff' }),
         });
         const j = await safeJson(r);

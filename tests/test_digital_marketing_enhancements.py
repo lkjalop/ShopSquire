@@ -652,7 +652,7 @@ class TestDeterministicAssistantMessagePersona:
 
 
 class TestCheckoutInitiateEndpoint:
-    """POST /api/v1/payments/checkout-initiate — customer-facing, demo mode."""
+    """POST /api/v1/payments/checkout-initiate — fail-closed outside explicit demo mode."""
 
     def _get_app(self):
         """Import and return a minimal FastAPI test client for the payments router."""
@@ -663,47 +663,55 @@ class TestCheckoutInitiateEndpoint:
         app.include_router(router)
         return TestClient(app)
 
-    def test_demo_mode_returns_order_id(self):
+    def test_returns_503_when_provider_missing_and_demo_not_allowed(self):
+        from unittest.mock import patch
         client = self._get_app()
-        resp = client.post("/api/v1/payments/checkout-initiate", json={
-            "amount_cents": 99900,
-            "currency": "USD",
-            "customer_name": "Test User",
-            "customer_email": "test@example.com",
-        })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "order_id" in data
-        assert data["demo_mode"] is True
-        assert data["status"] == "demo_confirmed"
+        settings = type("S", (), {"stripe_api_key": "", "feature_flags_path": "unused", "app_env": "prod"})()
+        with patch("src.app.routers.payments.get_settings", return_value=settings):
+            with patch("src.app.routers.payments.load_feature_flags", return_value={"CAPABILITIES": {"payments": {"enabled": True}}}):
+                resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 99900, "currency": "USD"})
+        assert resp.status_code == 503
 
-    def test_demo_order_id_prefixed_demo(self):
+    def test_returns_real_intent_when_provider_configured(self):
+        from unittest.mock import patch
         client = self._get_app()
-        resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 0})
+        settings = type("S", (), {"stripe_api_key": "sk_live_123", "feature_flags_path": "unused", "app_env": "prod"})()
+        with patch("src.app.routers.payments.get_settings", return_value=settings):
+            with patch("src.app.routers.payments.load_feature_flags", return_value={"CAPABILITIES": {"payments": {"enabled": True}}}):
+                with patch("src.app.routers.payments.StripeClient") as mock_client:
+                    mock_client.return_value.create_payment_intent.return_value = {
+                        "id": "pi_live_123",
+                        "client_secret": "cs_live_123",
+                    }
+                    resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 5000, "currency": "AUD"})
         assert resp.status_code == 200
-        assert resp.json()["order_id"].startswith("DEMO-")
+        body = resp.json()
+        assert body["currency"] == "AUD"
+        assert body["demo_mode"] is False
+        assert body["status"] == "requires_payment"
+        assert body["client_secret"] == "cs_live_123"
 
-    def test_currency_returned(self):
+    def test_demo_mode_requires_explicit_override(self):
+        from unittest.mock import patch
         client = self._get_app()
-        resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 5000, "currency": "AUD"})
+        settings = type("S", (), {"stripe_api_key": "", "feature_flags_path": "unused", "app_env": "prod"})()
+        with patch.dict(os.environ, {"ALLOW_DEMO_CHECKOUT": "1"}, clear=False):
+            with patch("src.app.routers.payments.get_settings", return_value=settings):
+                with patch("src.app.routers.payments.load_feature_flags", return_value={"CAPABILITIES": {"payments": {"enabled": True}}}):
+                    resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 12345})
         assert resp.status_code == 200
-        assert resp.json()["currency"] == "AUD"
-
-    def test_amount_cents_echoed(self):
-        client = self._get_app()
-        resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 12345})
-        assert resp.status_code == 200
-        assert resp.json()["amount_cents"] == 12345
-
-    def test_client_secret_none_in_demo_mode(self):
-        client = self._get_app()
-        resp = client.post("/api/v1/payments/checkout-initiate", json={"amount_cents": 0})
-        assert resp.status_code == 200
-        assert resp.json()["client_secret"] is None
+        body = resp.json()
+        assert body["amount_cents"] == 12345
+        assert body["demo_mode"] is True
+        assert body["order_id"].startswith("DEMO-")
 
     def test_does_not_require_auth_header(self):
         """No x-api-key or Authorization header needed — customer-accessible."""
+        from unittest.mock import patch
         client = self._get_app()
-        resp = client.post("/api/v1/payments/checkout-initiate", json={})
-        assert resp.status_code == 200
+        settings = type("S", (), {"stripe_api_key": "", "feature_flags_path": "unused", "app_env": "prod"})()
+        with patch("src.app.routers.payments.get_settings", return_value=settings):
+            with patch("src.app.routers.payments.load_feature_flags", return_value={"CAPABILITIES": {"payments": {"enabled": True}}}):
+                resp = client.post("/api/v1/payments/checkout-initiate", json={})
+        assert resp.status_code == 503
 

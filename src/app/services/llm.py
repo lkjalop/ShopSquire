@@ -14,6 +14,7 @@ from src.app.config import get_settings
 from src.app.services.token_budget import TokenBudget, estimate_tokens
 from src.app.deps import get_redis
 from src.app.security.agent_events import AgentInteractionType, log_agent_security_event
+from src.app.security.provider_boundary import normalize_provider_key, sanitize_for_provider
 from src.app.security.supply_chain import SupplyChainMonitor
 from src.app.observability.metrics import record_llm_usage, record_llm_fallback
 from src.app.services.secrets_manager import get_secret
@@ -352,6 +353,10 @@ class LLMProviderClient:
         provider = str(provider_override or self.provider or "openai").lower()
         if provider == "anthropic":
             return self._call_anthropic_provider(prompt_obj, system=system, uid=uid, model_override=model_override, tenant_id=tenant_id, tier=tier)
+        provider_key = normalize_provider_key(provider)
+        prompt_obj, _, _ = sanitize_for_provider(provider_key, prompt_obj, data_categories=["llm_prompt"])
+        if system:
+            system, _, _ = sanitize_for_provider(provider_key, system, data_categories=["llm_system"])
         api_key = get_secret("OPENAI_API_KEY") or self.api_key or get_secret("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
         if not api_key:
             return None
@@ -494,6 +499,7 @@ class LLMProviderClient:
             "anthropic-version": os.getenv("ANTHROPIC_VERSION", "2023-06-01"),
             "content-type": "application/json",
         }
+        prompt_obj, _, _ = sanitize_for_provider("anthropic", prompt_obj, data_categories=["llm_prompt"])
         user_content = json.dumps(prompt_obj, ensure_ascii=False)
         payload = {
             "model": model_override or os.getenv("ANTHROPIC_MODEL") or self.model or "claude-3-5-sonnet-latest",
@@ -501,6 +507,7 @@ class LLMProviderClient:
             "messages": [{"role": "user", "content": user_content}],
         }
         if system:
+            system, _, _ = sanitize_for_provider("anthropic", system, data_categories=["llm_system"])
             payload["system"] = system
         try:
             est = estimate_tokens(user_content, response_tokens=payload.get("max_tokens", 512))

@@ -58,6 +58,7 @@ class EmailEvaluateRequest(BaseModel):
 class EmailEvaluateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     severity: str
+    risk_label: Optional[str] = None
     verdict_action: Optional[str] = None
     route: Optional[str] = None
     escalation: Optional[str] = None
@@ -83,6 +84,8 @@ class EmailEvaluateResponse(BaseModel):
     threat_correlation: Optional[Dict[str, Any]] = None
     latency: Optional[Dict[str, Any]] = None
     sender_trust: Optional[Dict[str, Any]] = None
+    content_mode: Optional[str] = None
+    content_classification: Optional[Dict[str, Any]] = None
     applied_thresholds: Optional[Dict[str, Any]] = None
     bec_kill_chain: Optional[Dict[str, Any]] = None
     bec_kill_chain_stage: Optional[str] = None
@@ -96,3 +99,4 @@ class EmailEvaluateResponse(BaseModel):
     coverage_limits: Optional[Dict[str, Any]] = None
     explainability_card: Optional[Dict[str, Any]] = None
     threat_hunter_leads: Optional[List[Dict[str, Any]]] = None
+    lookalike_domain: Optional[Dict[str, Any]] = None

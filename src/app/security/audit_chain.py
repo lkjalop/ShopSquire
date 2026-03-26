@@ -9,6 +9,19 @@ tampering of the row *or* a preceding row.  An external anchor (daily digest)
 can be published to an immutable store (S3 Object Lock, blockchain, etc.)
 to detect bulk rewrite attacks.
 """
+"""C01 — Cryptographic hash chain for audit log tamper-evidence (extended).
+
+IT-PREV-04 additions
+--------------------
+WORM archive: every new audit record is appended (O_APPEND) to a local
+append-only file whose path is set by ``AUDIT_CHAIN_WORM_ARCHIVE_PATH``.
+Mount that path on immutable / WORM-capable storage in production
+(e.g. AWS S3 Object Lock via a sidecar, a WORM NAS mount, or GCS bucket
+with retention policy).
+
+The append-only nature means even a DBA who can DELETE from the DB table
+cannot retroactively remove the WORM entry — creating detectable divergence.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -22,11 +35,46 @@ logger = logging.getLogger(__name__)
 
 _CHAIN_SECRET = None
 
+_WEAK_DEFAULTS = frozenset({
+    "shopsquire-audit-chain-hmac-key",
+    "dev-only-do-not-use-in-prod",
+    "",
+})
+
 
 def _get_chain_secret() -> str:
+    """Return the HMAC secret used for audit-chain integrity.
+
+    Fails closed (raises) in non-local environments when the secret is absent
+    or matches a known weak default — preserving tamper-evidence guarantees.
+    """
     global _CHAIN_SECRET
     if _CHAIN_SECRET is None:
-        _CHAIN_SECRET = os.getenv("AUDIT_CHAIN_SECRET", "shopsquire-audit-chain-hmac-key")
+        raw = str(os.getenv("AUDIT_CHAIN_SECRET") or "")
+        env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+        is_prod_like = env not in ("local", "dev", "development", "test", "testing")
+
+        if not raw or raw in _WEAK_DEFAULTS:
+            if is_prod_like:
+                raise RuntimeError(
+                    "AUDIT_CHAIN_SECRET is not set or uses a known weak default. "
+                    "Set a strong random secret (≥32 bytes) in your environment before starting. "
+                    "Without this the audit chain HMAC is meaningless and any attacker "
+                    "with source access can forge audit records."
+                )
+            logger.warning(
+                "AUDIT_CHAIN_SECRET not set — using insecure dev placeholder. "
+                "This is only acceptable in local/dev/test environments."
+            )
+            raw = "dev-only-do-not-use-in-prod"
+
+        if len(raw) < 32 and is_prod_like:
+            raise RuntimeError(
+                f"AUDIT_CHAIN_SECRET is only {len(raw)} characters. "
+                "Use at least 32 random bytes (e.g. openssl rand -hex 32)."
+            )
+
+        _CHAIN_SECRET = raw
     return _CHAIN_SECRET
 
 
@@ -67,6 +115,32 @@ def get_latest_hash(db_session_ctx) -> str | None:
     return None
 
 
+def _worm_append(entry: Dict[str, Any]) -> None:
+    """IT-PREV-04 — Append a JSON line to the WORM archive file.
+
+    Uses ``os.O_APPEND`` which is atomic on POSIX for writes ≤ PIPE_BUF
+    (~4 KB).  The file handle is opened and closed on every call to avoid
+    holding file descriptors across long-lived processes.
+
+    If the path is unset or the write fails, we log a warning but never
+    raise — the DB record is the primary store; the WORM file is a secondary
+    tamper-evidence layer.
+    """
+    worm_path = str(os.getenv("AUDIT_CHAIN_WORM_ARCHIVE_PATH", "") or "").strip()
+    if not worm_path:
+        return
+    try:
+        line = json.dumps(entry, separators=(",", ":"), default=str) + "\n"
+        # O_CREAT | O_APPEND | O_WRONLY — never truncates, always appends
+        fd = os.open(worm_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600)
+        try:
+            os.write(fd, line.encode("utf-8"))
+        finally:
+            os.close(fd)
+    except Exception as exc:
+        logger.warning("audit_chain worm_append_failed path=%s: %s", worm_path, exc)
+
+
 def chain_new_record(
     db_session_ctx,
     *,
@@ -79,7 +153,8 @@ def chain_new_record(
 ) -> Dict[str, str]:
     """Compute prev_hash + record_hash for a new audit row.
 
-    Returns dict with keys ``prev_hash`` and ``record_hash`` to be stored on the row.
+    Returns dict with keys ``prev_hash`` and ``record_hash`` to be stored on
+    the row.  Also appends to the WORM archive (IT-PREV-04).
     """
     prev = get_latest_hash(db_session_ctx)
     rh = compute_record_hash(
@@ -91,7 +166,20 @@ def chain_new_record(
         created_at=created_at,
         prev_hash=prev,
     )
-    return {"prev_hash": prev or "genesis", "record_hash": rh}
+    result = {"prev_hash": prev or "genesis", "record_hash": rh}
+
+    # IT-PREV-04: append to WORM archive (non-blocking, never raises)
+    _worm_append({
+        "id":          record_id,
+        "decision_id": decision_id,
+        "action":      action,
+        "actor":       actor,
+        "prev_hash":   prev or "genesis",
+        "record_hash": rh,
+        "created_at":  created_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+
+    return result
 
 
 def verify_chain(db_session_ctx, *, limit: int = 1000) -> Dict[str, Any]:

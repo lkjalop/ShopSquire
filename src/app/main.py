@@ -82,6 +82,7 @@ from src.app.security.admin_mfa import AdminMfaMiddleware
 from src.app.security.pci_boundary import PciBoundaryMiddleware
 from src.app.security.compliance import ComplianceMiddleware
 from src.app.security.headers import SecurityHeadersMiddleware
+from src.app.security.csrf_middleware import CSRFMiddleware
 from src.app.security.rate_limit import (
     RateLimitMiddleware,
     consume_fixed_window_limit,
@@ -527,9 +528,14 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
-    # Enforce webhook signature + replay protection on inbound webhooks
+    # Security response headers (CSP, HSTS, X-Frame-Options, etc.)
     try:
         app.add_middleware(SecurityHeadersMiddleware)
+    except Exception:
+        pass
+    # CRIT-08: CSRF double-submit protection on all state-changing API routes
+    try:
+        app.add_middleware(CSRFMiddleware)
     except Exception:
         pass
     # API version deprecation headers (RFC-8594 Deprecation / Sunset)
@@ -687,6 +693,9 @@ def create_app() -> FastAPI:
             cfg = _write_allowlist_for(path, method)
             if not cfg:
                 return None
+            ct = (request.headers.get("content-type") or "").lower()
+            if "multipart/form-data" in ct:
+                return None
             try:
                 body = await request.body()
             except Exception:
@@ -695,7 +704,6 @@ def create_app() -> FastAPI:
                 return None
             if len(body) > int(app.state.max_write_json_bytes or 262144):
                 return ORJSONResponse({"detail": "payload too large"}, status_code=413)
-            ct = (request.headers.get("content-type") or "").lower()
             if ct and ("application/json" not in ct):
                 return ORJSONResponse({"detail": "content-type must be application/json"}, status_code=415)
             try:
@@ -1008,8 +1016,12 @@ def create_app() -> FastAPI:
                 return await call_next(request)
         # Capture request data for observer (best-effort, sanitized downstream)
         try:
-            body = await request.body()
-            body_text = body.decode("utf-8", errors="ignore") if body else ""
+            ct = (request.headers.get("content-type") or "").lower()
+            if "multipart/form-data" in ct:
+                body_text = "[multipart omitted]"
+            else:
+                body = await request.body()
+                body_text = body.decode("utf-8", errors="ignore") if body else ""
         except Exception:
             body_text = ""
         if len(body_text) > 4096:

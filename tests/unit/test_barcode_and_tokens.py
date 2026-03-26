@@ -22,6 +22,24 @@ def test_decode_uses_opencv_when_pyzbar_fails(monkeypatch):
     assert "opencv_decoded" in res.reasons
 
 
+def test_decode_classifies_benign_qr_payload(monkeypatch):
+    monkeypatch.setattr(barcode_decode, "_normalize_image_bytes", lambda b: (b, ["avif_normalized"]))
+    monkeypatch.setattr(
+        barcode_decode,
+        "_try_decode_pyzbar",
+        lambda b: [{"type": "QR_CODE", "data": "mailto:support@example.com"}],
+    )
+    monkeypatch.setattr(barcode_decode, "_try_decode_opencv", lambda b: [])
+
+    res = barcode_decode.decode_barcodes([("img1.avif", b"fake-bytes")])
+    assert res.ok is True
+    assert "avif_normalized" in res.reasons
+    code = res.codes[0]
+    assert code["payload_type"] == "email_uri"
+    assert code["risk_level"] == "benign"
+    assert code["is_benign_qr"] is True
+
+
 def test_file_backed_tokens_written_and_role_resolves(monkeypatch, tmp_path):
     # Force file-backed tokens by ensuring get_redis returns DummyRedis
     # Reset lazy redis and monkeypatch to DummyRedis instance

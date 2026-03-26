@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { apiUrl, safeJson } from '../lib/api';
+import { apiFetch } from '../lib/csrf';
+import { getOwnerApiKey } from '../lib/browserSession';
 
 type TabId = 'overview' | 'nqe' | 'recommendations' | 'fraud' | 'supply_chain' | 'intelligence' | 'persona' | 'security_scorecard' | 'integration_health';
 
@@ -49,6 +51,26 @@ const TAB_CONFIG: { id: TabId; label: string }[] = [
   { id: 'integration_health', label: '⚡ Integration Health' },
 ];
 
+function ownerHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const key = getOwnerApiKey();
+  return {
+    ...(key ? { 'x-api-key': key } : {}),
+    ...extra,
+  };
+}
+
+async function adminGet(path: string): Promise<any | null> {
+  try {
+    const r = await fetch(apiUrl(path), {
+      credentials: 'include',
+      headers: ownerHeaders(),
+    });
+    return await safeJson(r);
+  } catch {
+    return null;
+  }
+}
+
 function MetricCardComponent({ card }: { card: MetricCard }) {
   const trendIcon = card.trend === 'up' ? '▲' : card.trend === 'down' ? '▼' : '—';
   const trendColor = card.trend === 'up' ? '#22c55e' : card.trend === 'down' ? '#ef4444' : '#94a3b8';
@@ -79,8 +101,7 @@ function OverviewTab() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(apiUrl('/status/summary'));
-        const j = await safeJson(r);
+        const j = await adminGet('/status/summary');
         setStatus(j);
       } catch { setStatus(null); }
       setLoading(false);
@@ -134,8 +155,7 @@ function NQEAnalyticsTab() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(apiUrl('/api/v1/analytics/query_clusters/latest?limit=15'));
-        const j = await safeJson(r);
+        const j = await adminGet('/api/v1/analytics/query_clusters/latest?limit=15');
         setClusters(j?.items || []);
       } catch { setClusters([]); }
       setLoading(false);
@@ -182,21 +202,45 @@ function NQEAnalyticsTab() {
 }
 
 function RecommendationTab() {
+  const [snapshot, setSnapshot] = useState<any>(null);
+
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        const raw = localStorage.getItem('shopsquire_operator_metrics');
+        setSnapshot(raw ? JSON.parse(raw) : null);
+      } catch {
+        setSnapshot(null);
+      }
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
   return (
     <div>
       <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>Recommendation Performance</h3>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-        <MetricCardComponent card={{ label: 'Recommendations (24h)', value: '-', trend: 'flat' }} />
-        <MetricCardComponent card={{ label: 'Avg Confidence', value: '-', trend: 'flat' }} />
-        <MetricCardComponent card={{ label: 'Debate Triggers', value: '-', trend: 'flat' }} />
+        <MetricCardComponent card={{ label: 'Latest Route', value: snapshot?.routeTotalMs != null ? `${Math.round(Number(snapshot.routeTotalMs))} ms` : 'No data', trend: 'flat', detail: 'latest route latency' }} />
+        <MetricCardComponent card={{ label: 'Catalog Profile', value: snapshot?.catalogProfileMs != null ? `${Math.round(Number(snapshot.catalogProfileMs))} ms` : 'No data', trend: 'flat' }} />
+        <MetricCardComponent card={{ label: 'Fallback Used', value: snapshot?.recommendationFallbackUsed ? 'Yes' : 'No', trend: snapshot?.recommendationFallbackUsed ? 'down' : 'flat', detail: 'latest session' }} />
+        <MetricCardComponent card={{ label: 'Timeout Seen', value: snapshot?.recommendationTimeout ? 'Yes' : 'No', trend: snapshot?.recommendationTimeout ? 'down' : 'flat', detail: 'latest session' }} />
       </div>
       <div style={{
         border: '1px solid rgba(148,163,184,0.18)',
         borderRadius: 12, background: 'rgba(15,23,42,0.45)', padding: 14,
       }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Recommendation Acceptance (coming soon)</div>
-        <div style={{ color: '#94a3b8', fontSize: 13 }}>
-          CTR per product, "why" code breakdown, and debate outcomes will appear here when data flows through the pipeline.
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Latest Recommendation Telemetry</div>
+        <div style={{ color: '#94a3b8', fontSize: 13, display: 'grid', gap: 6 }}>
+          <div>QR decode observed: {snapshot?.qrDecodeSuccess == null ? 'No data' : snapshot.qrDecodeSuccess ? 'Yes' : 'No'}</div>
+          <div>Linked artifact fetch observed: {snapshot?.linkedArtifactFetch == null ? 'No data' : snapshot.linkedArtifactFetch ? 'Yes' : 'No'}</div>
+          <div>Security review required: {snapshot?.securityReviewRequired == null ? 'No data' : snapshot.securityReviewRequired ? 'Yes' : 'No'}</div>
+          <div>Source: {snapshot?.source || 'unknown'}{snapshot?.recordedAt ? ` • ${snapshot.recordedAt}` : ''}</div>
         </div>
       </div>
     </div>
@@ -209,8 +253,7 @@ function FraudSecurityTab() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(apiUrl('/api/v1/merchant/intelligence/citation_memory/stats'));
-        const j = await safeJson(r);
+        const j = await adminGet('/api/v1/merchant/intelligence/citation_memory/stats');
         setCitationStats(j);
       } catch { setCitationStats(null); }
     })();
@@ -246,24 +289,46 @@ function FraudSecurityTab() {
 }
 
 function SupplyChainTab() {
+  const [snapshot, setSnapshot] = useState<any>(null);
+
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        const raw = localStorage.getItem('shopsquire_operator_metrics');
+        setSnapshot(raw ? JSON.parse(raw) : null);
+      } catch {
+        setSnapshot(null);
+      }
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
   return (
     <div>
       <h3 style={{ margin: '0 0 12px', fontSize: 16, fontWeight: 600 }}>Supply Chain Health</h3>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
-        <MetricCardComponent card={{ label: 'Provider Health', value: '-', trend: 'flat' }} />
-        <MetricCardComponent card={{ label: 'Schema Errors', value: '-', trend: 'flat' }} />
-        <MetricCardComponent card={{ label: 'Anomaly Flags', value: '-', trend: 'flat' }} />
+        <MetricCardComponent card={{ label: 'QR Decode Success', value: snapshot?.qrDecodeSuccess == null ? 'No data' : snapshot.qrDecodeSuccess ? 'Yes' : 'No', trend: snapshot?.qrDecodeSuccess ? 'up' : 'flat' }} />
+        <MetricCardComponent card={{ label: 'Linked Fetch Seen', value: snapshot?.linkedArtifactFetch == null ? 'No data' : snapshot.linkedArtifactFetch ? 'Yes' : 'No', trend: snapshot?.linkedArtifactFetch ? 'up' : 'flat' }} />
+        <MetricCardComponent card={{ label: 'Security Review', value: snapshot?.securityReviewRequired == null ? 'No data' : snapshot.securityReviewRequired ? 'Yes' : 'No', trend: snapshot?.securityReviewRequired ? 'down' : 'flat' }} />
       </div>
       <div style={{
         border: '1px solid rgba(148,163,184,0.18)',
         borderRadius: 12, background: 'rgba(15,23,42,0.45)', padding: 14,
       }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Provider Anomaly Detection</div>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Live Security Telemetry</div>
         <div style={{ color: '#94a3b8', fontSize: 13 }}>
-          Supply chain monitoring dashboard with real-time provider telemetry.
+          This tab now reflects live storefront operator metrics instead of placeholder cards.
           Use <a href="/api/v1/admin/supply_chain/anomalies/default" target="_blank" style={{ color: '#60a5fa' }}>
-            API endpoint
-          </a> for live data.
+            the anomaly API
+          </a> and <a href="/metrics" target="_blank" style={{ color: '#60a5fa' }}>
+            runtime metrics
+          </a> for backend detail.
         </div>
       </div>
     </div>
@@ -277,8 +342,7 @@ function PersonaIntelligenceTab() {
 
   useEffect(() => {
     setLoading(true);
-    fetch(apiUrl(`/api/v1/admin/bi/persona-success?days=${days}`))
-      .then(r => safeJson(r))
+    adminGet(`/api/v1/admin/bi/persona-success?days=${days}`)
       .then(j => setData(j))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
@@ -382,11 +446,9 @@ function IntelligenceTab() {
   const loadProfile = useCallback(async () => {
     if (!profileId.trim()) return;
     try {
-      const r = await fetch(apiUrl(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(profileId)}`));
-      const j = await safeJson(r);
+      const j = await adminGet(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(profileId)}`);
       setProfile(j);
-      const r2 = await fetch(apiUrl(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(profileId)}/behavioral_model`));
-      const j2 = await safeJson(r2);
+      const j2 = await adminGet(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(profileId)}/behavioral_model`);
       setBehavioral(j2);
     } catch { setProfile(null); setBehavioral(null); }
   }, [profileId]);
@@ -394,8 +456,7 @@ function IntelligenceTab() {
   const loadObservation = useCallback(async () => {
     if (!obsSessionId.trim()) return;
     try {
-      const r = await fetch(apiUrl(`/api/v1/merchant/intelligence/observation_summary/${encodeURIComponent(obsSessionId)}`));
-      const j = await safeJson(r);
+      const j = await adminGet(`/api/v1/merchant/intelligence/observation_summary/${encodeURIComponent(obsSessionId)}`);
       setObsSummary(j?.summary || null);
     } catch { setObsSummary(null); }
   }, [obsSessionId]);
@@ -498,10 +559,7 @@ function SecurityScorecardTab() {
   const load = async (d: number) => {
     setLoading(true);
     try {
-      const r = await fetch(apiUrl(`/api/v1/security/scan/scorecard?days=${d}`), {
-        headers: { 'X-API-Key': localStorage.getItem('ss_owner_key') || '' },
-      });
-      setScorecard(await safeJson(r));
+      setScorecard(await adminGet(`/api/v1/security/scan/scorecard?days=${d}`));
     } catch { setScorecard(null); }
     setLoading(false);
   };
@@ -512,11 +570,11 @@ function SecurityScorecardTab() {
     setRunning(true);
     setScanResult(null);
     try {
-      const r = await fetch(apiUrl('/api/v1/security/scan/full'), {
+      const data = await apiFetch<any>('/api/v1/security/scan/full', {
         method: 'POST',
-        headers: { 'X-API-Key': localStorage.getItem('ss_owner_key') || '' },
+        headers: ownerHeaders(),
       });
-      setScanResult(await safeJson(r));
+      setScanResult(data);
     } catch (e: any) { setScanResult({ error: String(e) }); }
     setRunning(false);
     load(days);
@@ -677,10 +735,7 @@ function IntegrationHealthTab() {
   const refresh = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl(`/api/v1/admin/integration-health${force ? '?force=true' : ''}`), {
-        headers: { 'X-API-Key': (window as any).getApiKey?.() || '' },
-      });
-      const json = await safeJson(res);
+      const json = await adminGet(`/api/v1/admin/integration-health${force ? '?force=true' : ''}`);
       setData(json);
       setLastRefresh(new Date());
     } catch {
@@ -785,6 +840,47 @@ function IntegrationHealthTab() {
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [idleLocked, setIdleLocked] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authorized, setAuthorized] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const j = await adminGet('/api/v1/admin/me');
+        if (!mounted) return;
+        setAuthorized(Boolean(j?.role));
+      } catch {
+        if (!mounted) return;
+        setAuthorized(false);
+      } finally {
+        if (mounted) setAuthChecked(true);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let lastActivity = Date.now();
+    const timeoutMs = 10 * 60 * 1000;
+    const markActive = () => {
+      lastActivity = Date.now();
+      setIdleLocked(false);
+    };
+    const checkIdle = () => {
+      if (Date.now() - lastActivity >= timeoutMs) setIdleLocked(true);
+    };
+    const events: Array<keyof WindowEventMap> = ['mousemove', 'keydown', 'click', 'scroll'];
+    events.forEach((eventName) => window.addEventListener(eventName, markActive, { passive: true }));
+    const timer = window.setInterval(checkIdle, 15000);
+    return () => {
+      window.clearInterval(timer);
+      events.forEach((eventName) => window.removeEventListener(eventName, markActive));
+    };
+  }, []);
 
   const renderTab = () => {
     switch (activeTab) {
@@ -807,6 +903,17 @@ export default function AdminDashboard() {
       color: '#e5e7eb',
       fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif',
     }}>
+      {!authChecked ? (
+        <div style={{ padding: 24 }}>Authorizing admin session...</div>
+      ) : !authorized ? (
+        <div style={{ padding: 24, maxWidth: 560 }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>Admin Session Not Authorized</div>
+          <div style={{ color: '#94a3b8', fontSize: 13 }}>
+            This dashboard now requires a valid server-side admin session or owner key. Browser state alone is not enough.
+          </div>
+        </div>
+      ) : (
+      <>
       <header style={{
         padding: '12px 16px',
         display: 'flex',
@@ -858,8 +965,36 @@ export default function AdminDashboard() {
       </div>
 
       <div style={{ padding: 16 }}>
-        {renderTab()}
+        {idleLocked ? (
+          <div style={{
+            border: '1px solid rgba(248,113,113,0.3)',
+            borderRadius: 14,
+            padding: 18,
+            background: 'rgba(15,23,42,0.72)',
+            maxWidth: 520,
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Admin Session Locked</div>
+            <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 12 }}>
+              Inactivity paused live polling and hid privileged dashboards. Interact with the page to resume.
+            </div>
+            <button
+              onClick={() => setIdleLocked(false)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 10,
+                cursor: 'pointer',
+                border: '1px solid rgba(148,163,184,0.25)',
+                background: 'rgba(15,23,42,0.85)',
+                color: '#e5e7eb',
+              }}
+            >
+              Resume Session
+            </button>
+          </div>
+        ) : renderTab()}
       </div>
+      </>
+      )}
     </div>
   );
 }

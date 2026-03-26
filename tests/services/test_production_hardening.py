@@ -70,8 +70,8 @@ def test_ticketing_persists_to_db():
     assert row[2] == "high"
 
 
-def test_ticketing_logs_on_db_failure(caplog):
-    """create_ticket should log an error when DB write fails (not swallow silently)."""
+def test_ticketing_raises_on_db_failure_in_strict_mode(caplog):
+    """create_ticket should raise when DB write fails in production-like mode."""
     import logging
 
     @contextmanager
@@ -81,11 +81,10 @@ def test_ticketing_logs_on_db_failure(caplog):
 
     agent = TicketingAgent()
     with patch("src.app.services.ticketing.db_session", _bad_db):
-        with caplog.at_level(logging.ERROR, logger="src.app.services.ticketing"):
-            t = agent.create_ticket(title="Failed ticket", description="d", severity="critical")
-    # The ticket object is still returned (caller gets the id for tracing)
-    assert t.id.startswith("TKT-")
-    # But the error is logged, not swallowed
+        with patch.dict(os.environ, {"APP_ENV": "prod"}, clear=False):
+            with caplog.at_level(logging.ERROR, logger="src.app.services.ticketing"):
+                with pytest.raises(RuntimeError, match="ticket_persistence_failed"):
+                    agent.create_ticket(title="Failed ticket", description="d", severity="critical")
     assert any("DB persist failed" in r.message for r in caplog.records)
 
 

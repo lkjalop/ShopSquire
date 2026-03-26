@@ -165,6 +165,29 @@ webhook_delivery_latency_seconds = Histogram(
     labelnames=["url", "tenant"],
 )
 
+# ---------------------------------------------------------------------------
+# IT-MON-02 — Insider threat observability counters
+# ---------------------------------------------------------------------------
+
+insider_threat_signals_total = Counter(
+    "shopsquire_insider_threat_signals_total",
+    "Insider threat signals emitted by the detection engine",
+    labelnames=["signal_type", "severity", "actor_hash"],
+)
+
+audit_chain_verifications_total = Counter(
+    "shopsquire_audit_chain_verifications_total",
+    "Audit chain integrity verification results",
+    labelnames=["result"],   # valid | tampered | error
+)
+
+privileged_actions_total = Counter(
+    "shopsquire_privileged_actions_total",
+    "Privileged (owner/developer/admin) actions recorded",
+    labelnames=["role", "path", "off_hours"],   # off_hours: true | false
+)
+
+
 email_security_verdict_total = Counter(
     "shopsquire_email_security_verdict_total",
     "Email security verdicts by severity",
@@ -211,6 +234,24 @@ email_security_false_positives_total = Counter(
     "shopsquire_email_security_false_positives_total",
     "Posthoc false-positive outcomes for security decisions",
     labelnames=["tenant_id", "outcome"],
+)
+
+linked_artifact_fetch_total = Counter(
+    "shopsquire_linked_artifact_fetch_total",
+    "Linked artifact fetch outcomes for QR and attachment destinations",
+    labelnames=["tenant_id", "status", "source"],
+)
+
+linked_artifact_verdict_total = Counter(
+    "shopsquire_linked_artifact_verdict_total",
+    "Linked artifact branded verdict outcomes",
+    labelnames=["tenant_id", "verdict"],
+)
+
+linked_artifact_unresolved_total = Counter(
+    "shopsquire_linked_artifact_unresolved_total",
+    "Linked artifact destinations that remained unresolved",
+    labelnames=["tenant_id", "reason"],
 )
 
 security_handoff_total = Counter(
@@ -374,6 +415,28 @@ def record_email_security_false_positive(tenant_id: str | None, outcome: str | N
     ).inc()
 
 
+def record_linked_artifact_fetch(tenant_id: str | None, status: str | None, source: str | None):
+    linked_artifact_fetch_total.labels(
+        tenant_id=str(tenant_id or "global"),
+        status=str(status or "unknown"),
+        source=str(source or "unknown"),
+    ).inc()
+
+
+def record_linked_artifact_verdict(tenant_id: str | None, verdict: str | None):
+    linked_artifact_verdict_total.labels(
+        tenant_id=str(tenant_id or "global"),
+        verdict=str(verdict or "Needs Review"),
+    ).inc()
+
+
+def record_linked_artifact_unresolved(tenant_id: str | None, reason: str | None):
+    linked_artifact_unresolved_total.labels(
+        tenant_id=str(tenant_id or "global"),
+        reason=str(reason or "unknown"),
+    ).inc()
+
+
 def record_security_handoff(target: str | None, status: str | None):
     security_handoff_total.labels(
         target=str(target or "unknown"),
@@ -519,13 +582,40 @@ def _ip_allowed(ip_text: str) -> bool:
 
 @router.get("/metrics")
 def metrics(request: Request) -> Response:
-    # H07: Enforce auth and IP restriction by default in non-local envs
+    # CRIT-09: Enforce auth and IP restriction.
+    # Defaults to secure in all non-local environments.
+    # Three auth paths (checked in order):
+    #   1. IP allowlist — for Prometheus scrapers on trusted internal networks
+    #   2. METRICS_BEARER_TOKEN env — for Prometheus scrape jobs that send a
+    #      bearer token (set scrape_config.bearer_token in prometheus.yml)
+    #   3. ShopSquire API role (owner/developer) via x-api-key or Authorization
     default_secure = "1" if _is_non_local_env() else "0"
     require_auth = str(os.getenv("METRICS_REQUIRE_AUTH", default_secure)).lower() in ("1", "true", "yes")
-    restrict_ip = str(os.getenv("METRICS_INTERNAL_ONLY", default_secure)).lower() in ("1", "true", "yes")
+    restrict_ip  = str(os.getenv("METRICS_INTERNAL_ONLY", default_secure)).lower() in ("1", "true", "yes")
     client_ip = _client_ip(request)
+
+    # Path 1: IP allowlist
+    if restrict_ip and _ip_allowed(client_ip):
+        # Trusted internal IP — serve full metrics without further checks
+        raw = generate_latest(REGISTRY)
+        return Response(raw, media_type="text/plain; version=0.0.4; charset=utf-8")
+
     if restrict_ip and not _ip_allowed(client_ip):
-        return Response(b"forbidden\n", status_code=403, media_type="text/plain")
+        # IP restriction active, client not on allowlist — check other auth paths
+        # Path 2: dedicated bearer token for Prometheus scraper
+        metrics_token = str(os.getenv("METRICS_BEARER_TOKEN", "") or "").strip()
+        if metrics_token:
+            auth_header = str(request.headers.get("Authorization", "") or "").strip()
+            import hmac as _hmac
+            expected = f"Bearer {metrics_token}"
+            if _hmac.compare_digest(auth_header.encode(), expected.encode()):
+                raw = generate_latest(REGISTRY)
+                return Response(raw, media_type="text/plain; version=0.0.4; charset=utf-8")
+        # Fall through to role-based auth below
+        if require_auth:
+            pass  # role check will handle 401 below
+        else:
+            return Response(b"forbidden\n", status_code=403, media_type="text/plain")
 
     raw = generate_latest(REGISTRY).decode("utf-8", errors="ignore")
     # Determine role from API key or Authorization header (best-effort)

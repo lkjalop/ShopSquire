@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from src.app.deps import get_redis, hash_uid
 from src.app.models.db import db_session
+from src.app.policy.route_enforcement import enforce_action_authority
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.security.dlp_export import dlp_sanitize_export_value
 from src.app.services.memory import Memory
@@ -310,6 +311,10 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
 @router.get("/export/{uid}")
 def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, role: str = Depends(require_role([ROLE_OWNER, ROLE_MERCHANT]))) -> Dict:
     """GDPR Article 20: Right to Data Portability."""
+    enforce_action_authority(
+        "pii_export",
+        context={"uid": uid, "requested_by_role": role, "redact": bool(redact)},
+    )
     uid_hash = hash_uid(uid)
     export = {
         "uid": uid,

@@ -1,9 +1,9 @@
 {
-  "title": "Accuracy Dashboard (Placeholder)",
+  "title": "Accuracy Dashboard",
+  "production_hidden": true,
   "widgets": [
     { "id": "auto_approve_rate", "type": "timeseries", "metric": "shopsquire_returns_auto_approve_rate" },
     { "id": "human_review_rate", "type": "timeseries", "metric": "shopsquire_returns_human_review_rate" }
   ],
-  "notes": "Roadmap-referenced placeholder; intended for offline eval + production monitoring later."
+  "notes": "Development-only scaffold. Hide from production surfaces until backed by live evaluation metrics."
 }
-

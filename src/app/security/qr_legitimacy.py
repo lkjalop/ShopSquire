@@ -34,10 +34,15 @@ def derive_qr_legitimacy_details(
     qr_external = bool(s.get("qr_external_url_detected") or s.get("qr_external_url"))
     qr_injection = bool(s.get("qr_prompt_injection"))
     qr_detected = bool(s.get("qr_code_detected"))
+    qr_benign = bool(s.get("qr_benign_detected"))
 
     if policy_route == "lockdown" or qr_injection:
         verdict = "malicious"
-    elif qr_external or qr_detected:
+    elif qr_external:
+        verdict = "suspicious"
+    elif qr_detected and qr_benign:
+        verdict = "benign"
+    elif qr_detected:
         verdict = "suspicious"
     else:
         verdict = "benign"
@@ -85,4 +90,3 @@ def derive_qr_legitimacy_details(
         "intel_risk": round(float(intel_risk), 3) if isinstance(intel_risk, float) else None,
         "intel_sources": [x for x in intel_sources if x][:5],
     }
-

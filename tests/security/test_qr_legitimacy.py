@@ -45,3 +45,16 @@ def test_qr_legitimacy_async_pending_when_no_cache(monkeypatch):
     )
     assert out["intel_pending"] is True
     assert out["intel_risk"] is None
+
+
+def test_qr_legitimacy_treats_benign_qr_as_benign(monkeypatch):
+    monkeypatch.setenv("QR_THREAT_INTEL_ENABLED", "0")
+    out = mod.derive_qr_legitimacy_details(
+        {
+            "qr_code_detected": True,
+            "qr_benign_detected": True,
+            "qr_payloads": [{"data": "mailto:support@example.com", "type": "QRCODE"}],
+        },
+        policy_route="allow",
+    )
+    assert out["reputation_verdict"] == "benign"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, List
 import base64
 import json
 import xml.etree.ElementTree as ET
@@ -57,6 +57,25 @@ from src.app.services.trust_routing import fuse_security_trust_score
 
 _RATE_BUCKETS: dict[str, list[float]] = {}
 logger = logging.getLogger("shopsquire.email_security")
+_REFERENCE_NAME_TOKENS = ("guide", "summary", "matrix", "taxonomy", "playbook", "spec", "report", "runbook")
+_TRAINING_NAME_TOKENS = ("testing_guide", "detection_playbook_summary", "email_threat_taxonomy")
+_THREAT_SAMPLE_NAME_TOKENS = ("sample_", "homoglyph", "thread_hijacking", "ceo_fraud", "email_c2_beaconing")
+_REFERENCE_TEXT_PATTERNS = (
+    "detection playbook summary",
+    "email threat taxonomy",
+    "testing guide",
+    "security training",
+    "analyst workflow",
+    "recommended detections",
+)
+_THREAT_SAMPLE_TEXT_PATTERNS = (
+    "threat type:",
+    "detection focus:",
+    "scenario context:",
+    "sample id:",
+    "attack chain",
+    "expected detection",
+)
 
 
 def _hash16(value: str | None) -> str | None:
@@ -85,6 +104,133 @@ def _record_runtime_error(
         return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
     except Exception:
         return None
+
+
+def _classify_email_content_mode(email: Dict[str, Any]) -> Dict[str, Any]:
+    attachments = [dict(a or {}) for a in (email.get("attachments") or []) if isinstance(a, dict)]
+    attachment_names = [str(a.get("name") or "").strip().lower() for a in attachments]
+    subject = str(email.get("subject") or "").strip().lower()
+    body = str(email.get("body") or "").strip().lower()
+    combined = " ".join([subject, body] + attachment_names)
+
+    reasons: List[str] = []
+    mode = "real_email"
+    confidence = 0.35
+
+    reference_hits = [tok for tok in _REFERENCE_NAME_TOKENS if tok in combined]
+    training_hits = [tok for tok in _TRAINING_NAME_TOKENS if tok in combined]
+    sample_hits = [tok for tok in _THREAT_SAMPLE_NAME_TOKENS if tok in combined]
+    reference_text_hits = [tok for tok in _REFERENCE_TEXT_PATTERNS if tok in body or tok in subject]
+    sample_text_hits = [tok for tok in _THREAT_SAMPLE_TEXT_PATTERNS if tok in body or tok in subject]
+
+    markdown_like = any(name.endswith((".md", ".txt")) for name in attachment_names)
+    only_reference_extensions = bool(attachment_names) and all(
+        (name.endswith((".md", ".txt", ".json")) or any(tok in name for tok in _REFERENCE_NAME_TOKENS + _THREAT_SAMPLE_NAME_TOKENS))
+        for name in attachment_names
+    )
+
+    if training_hits or (reference_text_hits and only_reference_extensions):
+        mode = "security_training_material"
+        reasons.extend(training_hits or reference_text_hits)
+        confidence = 0.96 if training_hits else 0.88
+    elif sample_hits or (sample_text_hits and markdown_like):
+        mode = "threat_sample"
+        reasons.extend(sample_hits or sample_text_hits)
+        confidence = 0.91 if sample_hits else 0.82
+    elif reference_hits or (reference_text_hits and markdown_like):
+        mode = "reference_content"
+        reasons.extend(reference_hits or reference_text_hits)
+        confidence = 0.86 if reference_hits else 0.8
+
+    return {
+        "mode": mode,
+        "confidence": round(confidence, 3),
+        "reasons": list(dict.fromkeys([r for r in reasons if r]))[:8],
+        "only_reference_attachments": only_reference_extensions,
+        "attachment_names": attachment_names[:8],
+        "suppress_keyword_only_escalation": mode in {"reference_content", "security_training_material"},
+    }
+
+
+def _has_direct_attachment_risk(email: Dict[str, Any]) -> bool:
+    for att in (email.get("attachments") or []):
+        if not isinstance(att, dict):
+            continue
+        if att.get("linked_artifact") or att.get("ssn_detected") or att.get("pii_detected"):
+            return True
+        if bool(att.get("steg_suspicious")):
+            return True
+        if bool(att.get("bank_fields")) and str(att.get("name") or "").lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
+            return True
+        if bool(att.get("qr_external_url_detected")):
+            return True
+    return False
+
+
+def _apply_reference_material_suppression(
+    verdict: Dict[str, Any],
+    *,
+    email: Dict[str, Any],
+    extracted: Dict[str, Any],
+    content_classification: Dict[str, Any],
+    dmarc_fail: bool,
+    enrichment: Dict[str, Any] | None = None,
+    detonation: Dict[str, Any] | None = None,
+) -> None:
+    if str(content_classification.get("mode") or "real_email") not in {"reference_content", "security_training_material"}:
+        return
+    indicator_types = {str((i or {}).get("type") or "") for i in (extracted.get("indicators") or [])}
+    hard_indicator_types = {
+        "confusable_homoglyph_domain",
+        "vendor_homoglyph_impersonation",
+        "lookalike_domain",
+        "reply_chain_hijack",
+        "thread_hijack",
+        "bimi_visual_brand_mismatch",
+    }
+    if dmarc_fail or (indicator_types & hard_indicator_types):
+        return
+    if _has_direct_attachment_risk(email):
+        return
+    previous = {
+        "severity": verdict.get("severity"),
+        "route": verdict.get("route"),
+        "verdict_action": verdict.get("verdict_action"),
+        "escalation": verdict.get("escalation"),
+        "reasons": list(verdict.get("reasons") or []),
+    }
+    verdict["severity"] = "info"
+    verdict["route"] = "auto_resolve"
+    verdict["verdict_action"] = "allow"
+    verdict["escalation"] = "none"
+    verdict["reasons"] = list(
+        dict.fromkeys(
+            [
+                x for x in (verdict.get("reasons") or [])
+                if x not in {
+                    "urgent_payment_language",
+                    "payment_change_request",
+                    "c2_beacon_pattern",
+                    "oob_verification_required",
+                    "mandatory_oob_verification_pending",
+                    "forced_reauth_required",
+                    "llm_policy_gate_denied",
+                    "qr_url_not_allowlisted",
+                    "ingest_gate_blocked_attachment",
+                    "yara_rule_match_detected",
+                    "multi-signal threshold met",
+                }
+            ]
+            + ["reference_material_context"]
+        )
+    )
+    verdict["tags"] = list(dict.fromkeys(list(verdict.get("tags") or []) + ["content_mode:reference_material"]))
+    if isinstance(verdict.get("evidence_snapshot"), dict):
+        verdict["evidence_snapshot"]["suppressed_keyword_only_escalation"] = {
+            "applied": True,
+            "previous": previous,
+            "content_mode": content_classification.get("mode"),
+        }
 
 
 def _llm_control_policy(extracted: Dict[str, Any], *, ff: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -544,8 +690,11 @@ def _attachment_forensics_snapshot(
                 "evidence_excerpt_lines": _evidence_excerpt_lines(extracted_text),
                 "ocr_hit_count": len(re.findall(r"[A-Za-z0-9]", extracted_text)),
                 "embedded_urls": urls,
+                "qr_code_detected": bool(att.get("qr_code_detected")),
+                "qr_external_url_detected": bool(att.get("qr_external_url_detected")),
                 "qr_redirect_findings": list(att.get("qr_redirect_findings") or []) if isinstance(att.get("qr_redirect_findings"), list) else [],
                 "qr_payloads": list(att.get("qr_payloads") or []) if isinstance(att.get("qr_payloads"), list) else [],
+                "qr_assessments": list(att.get("qr_assessments") or []) if isinstance(att.get("qr_assessments"), list) else [],
                 "suspicious_instructions": suspicious_instructions,
                 "brand_supplier_mismatch_signals": mismatch_signals,
                 "baseline_similarity": {
@@ -581,6 +730,13 @@ def _attachment_forensics_snapshot(
                 "pii_type": list(att.get("pii_type") or []) if isinstance(att.get("pii_type"), list) else [],
                 "ssn_count": int(att.get("ssn_count") or 0),
                 "linked_artifact": dict(att.get("linked_artifact") or {}) if isinstance(att.get("linked_artifact"), dict) else {},
+                "linked_reason_summary": str(((att.get("linked_artifact") or {}).get("linked_reason_summary") if isinstance(att.get("linked_artifact"), dict) else "") or ""),
+                "linked_policy_action": str(((att.get("linked_artifact") or {}).get("linked_policy_action") if isinstance(att.get("linked_artifact"), dict) else "") or ""),
+                "linked_verdict_label": str(((att.get("linked_artifact") or {}).get("linked_verdict_label") if isinstance(att.get("linked_artifact"), dict) else "") or ""),
+                "linked_confidence_band": str(((att.get("linked_artifact") or {}).get("linked_confidence_band") if isinstance(att.get("linked_artifact"), dict) else "") or ""),
+                "linked_user_summary": dict(((att.get("linked_artifact") or {}).get("linked_user_summary") if isinstance(att.get("linked_artifact"), dict) else {}) or {}),
+                "linked_host_enrichment": dict(((att.get("linked_artifact") or {}).get("linked_host_enrichment") if isinstance(att.get("linked_artifact"), dict) else {}) or {}),
+                "linked_supplier_verification": dict(((att.get("linked_artifact") or {}).get("linked_supplier_verification") if isinstance(att.get("linked_artifact"), dict) else {}) or {}),
                 "steg": {
                     "score": att.get("steg_score"),
                     "suspicious": bool(att.get("steg_suspicious")),
@@ -2711,11 +2867,12 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 _known_base = known.rsplit(".", 1)[0] if "." in known else known
                 _norm_from_base = _normalize_glyphs(_from_base)
                 dist = _levenshtein(_norm_from_base, _known_base)
-                if 1 <= dist <= 2:
+                homoglyph_exact_match = (_norm_from_base == _known_base and _from_base != _known_base)
+                if homoglyph_exact_match or 1 <= dist <= 2:
                     _lookalike_hits.append({
                         "from_domain": _from_domain,
                         "resembles": known,
-                        "edit_distance": dist,
+                        "edit_distance": (1 if homoglyph_exact_match and dist == 0 else dist),
                         "homoglyph_normalized": _norm_from != _from_domain,
                     })
         if _lookalike_hits:
@@ -2777,7 +2934,13 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     except Exception:
         ocr_sanitization_meta = {"gate": "ocr_qr_sanitization", "blocked_qr_url_count": 0, "error": "ocr_sanitize_failed"}
 
+    content_classification = _classify_email_content_mode(email)
+
     extracted = extract_indicators(email, tenant_id=tenant_id)
+    try:
+        extracted.setdefault("meta", {})["content_classification"] = content_classification
+    except Exception:
+        pass
     # Fold steg signals from hydrated attachments into extracted indicators so
     # they propagate into verdict, framework_correlation, DREAD, and playbook.
     try:
@@ -3363,6 +3526,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["evidence_snapshot"]["intake_gate"] = intake_meta
         v["evidence_snapshot"]["attachment_ingest_gate"] = ingest_gate_meta
         v["evidence_snapshot"]["ocr_qr_sanitization"] = ocr_sanitization_meta
+        v["evidence_snapshot"]["content_classification"] = content_classification
     try:
         sig = ((artifact_intel or {}).get("signal_scores") or {})
         band = str(sig.get("band") or "auto-allow")
@@ -3597,6 +3761,16 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         v["escalation"] = "security_middleware"
         v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["llm_policy_gate_denied"]))
 
+    _apply_reference_material_suppression(
+        v,
+        email=email,
+        extracted=extracted,
+        content_classification=content_classification,
+        dmarc_fail=bool(dmarc_fail),
+        enrichment=enrichment if isinstance(enrichment, dict) else {},
+        detonation=detonation if isinstance(detonation, dict) else {},
+    )
+
     # Map severity to risk band for playbook selection
     risk_band = {
         "info": "low",
@@ -3610,6 +3784,8 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
     try:
         v["risk_band"] = risk_band
         v["playbook"] = pb_info
+        v["content_mode"] = content_classification.get("mode")
+        v["content_classification"] = content_classification
         v["llm_controls"] = llm_controls
         v["llm_assist"] = llm_assist
         v["applied_thresholds"] = {
@@ -3638,6 +3814,14 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             "phish_cluster_key": (_hash16(f"{extracted.get('meta', {}).get('from_domain') or 'na'}:{simhash or 'na'}") or str(simhash or "na")),
             "canary_triggered": bool(canary_triggered),
         }
+        if isinstance(pb_info, dict) and pb_info.get("id"):
+            v["playbook_run"] = {
+                "status": "selected",
+                "run_id": None,
+                "playbook_id": pb_info.get("id"),
+                "title": pb_info.get("title"),
+                "lane": None,
+            }
     except Exception:
         pass
     try:
@@ -3645,6 +3829,7 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             v["evidence_snapshot"]["intake_gate"] = intake_meta
             v["evidence_snapshot"]["attachment_ingest_gate"] = ingest_gate_meta
             v["evidence_snapshot"]["ocr_qr_sanitization"] = ocr_sanitization_meta
+            v["evidence_snapshot"]["content_classification"] = content_classification
     except Exception:
         pass
     try:
@@ -4189,8 +4374,12 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 v["playbook_run"] = {"run_id": run_id, "actions": action_exec, "governance": governance, "lane": action_policy.get("lane")}
                 if isinstance(v.get("evidence_snapshot"), dict):
                     v["evidence_snapshot"]["playbook_run"] = v["playbook_run"]
-    except Exception:
-        pass
+    except Exception as exc:
+        if isinstance(v.get("playbook_run"), dict):
+            v["playbook_run"]["status"] = "selected_but_not_started"
+            v["playbook_run"]["error"] = str(exc)[:180]
+        if isinstance(v.get("evidence_snapshot"), dict):
+            v["evidence_snapshot"]["playbook_run"] = v.get("playbook_run")
 
     # Persist incident (redacted) for admin drilldown/grouping
     try:

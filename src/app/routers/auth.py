@@ -19,6 +19,8 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy import text as sql_text
 
 from src.app.models.db import db_session
+from src.app.policy.action_authority_matrix import AuthDecision, evaluate as evaluate_action_authority
+from src.app.security.csrf_middleware import generate_csrf_token, set_csrf_cookie
 from src.app.security.iam import log_iam_event, check_bruteforce, check_impossible_travel, emit_iam_anomaly
 from src.app.observability.tracing import get_tracer
 from src.app.services.pii_crypto import encrypt_pii, pii_hash
@@ -52,7 +54,7 @@ def _set_session_cookie(resp: Response, token: str, request: Request | None) -> 
             value=str(token or ""),
             httponly=True,
             secure=secure,
-            samesite="lax",
+            samesite="strict",
             max_age=7 * 24 * 60 * 60,
             path="/",
         )
@@ -75,7 +77,7 @@ def _set_api_key_cookie(resp: Response, key: str, request: Request | None) -> No
             value=str(key or ""),
             httponly=True,
             secure=secure,
-            samesite="lax",
+            samesite="strict",
             max_age=24 * 60 * 60,
             path="/",
         )
@@ -115,6 +117,18 @@ def _ensure_auth_tables():
                   expires_at TEXT,
                   revoked_at TEXT,
                   rotated_from TEXT
+                )
+                """
+            )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS security_forced_reauth_flags (
+                  id TEXT PRIMARY KEY,
+                  target_type TEXT NOT NULL,
+                  target_value TEXT NOT NULL,
+                  reason TEXT,
+                  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE(target_type, target_value)
                 )
                 """
             )
@@ -193,6 +207,18 @@ def _ensure_auth_tables():
               code_verifier TEXT,
               nonce TEXT,
               created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS security_forced_reauth_flags (
+              id TEXT PRIMARY KEY,
+              target_type TEXT NOT NULL,
+              target_value TEXT NOT NULL,
+              reason TEXT,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(target_type, target_value)
             )
             """
         )
@@ -529,6 +555,11 @@ class RefreshPayload(BaseModel):
     refresh_token: str
 
 
+class AccountRecoveryRequestPayload(BaseModel):
+    email: EmailStr
+    reason: str | None = None
+
+
 @router.post("/register")
 def register(payload: RegisterPayload, request: Request, response: Response) -> Dict:
     with tracer.start_as_current_span("auth.register") as span:
@@ -566,6 +597,10 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
         token = _issue_token(user_id)
         jwt_pair = _issue_jwt_pair(user_id=user_id, email=email, role=_jwt_default_role())
         _set_session_cookie(response, str(token.get("token") or ""), request)
+        try:
+            set_csrf_cookie(response.headers, generate_csrf_token(), secure=_is_https_request(request))
+        except Exception:
+            pass
         return {"user_id": user_id, "email": email, "name": payload.name, **token, **jwt_pair}
 
 
@@ -617,7 +652,7 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                 value=str(jwt_pair["access_token"]),
                 httponly=True,
                 secure=_secure,
-                samesite="lax",
+                samesite="strict",
                 max_age=int(jwt_pair.get("access_expires_in", 900)),
                 path="/",
             )
@@ -627,10 +662,14 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                 value=str(jwt_pair["refresh_token"]),
                 httponly=True,
                 secure=_secure,
-                samesite="lax",
+                samesite="strict",
                 max_age=int(jwt_pair.get("refresh_expires_in", 86400)),
                 path="/api/v1/auth",
             )
+        try:
+            set_csrf_cookie(response.headers, generate_csrf_token(), secure=_secure)
+        except Exception:
+            pass
         try:
             log_iam_event("login_success", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), True, {"user_id": user_id})
             reason = check_impossible_travel(email, request.client.host if request.client else "unknown")
@@ -673,6 +712,77 @@ def logout(
             db.commit()
         _clear_session_cookie(response)
         return {"logged_out": True}
+
+
+@router.post("/account-recovery/request")
+def request_account_recovery(payload: AccountRecoveryRequestPayload) -> Dict:
+    _ensure_auth_tables()
+    email = str(payload.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="email_required")
+
+    verdict = evaluate_action_authority(
+        "account_recovery",
+        value_aud_cents=0,
+        context={"email_domain": email.split("@")[-1] if "@" in email else "unknown"},
+    )
+    if verdict.decision == AuthDecision.BLOCK:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "policy_gate_denied",
+                "action": "account_recovery",
+                "decision": verdict.decision.value,
+                "reason": verdict.reason,
+                "rule_id": verdict.rule_id,
+            },
+        )
+
+    known_user_id = None
+    try:
+        with db_session() as db:
+            row = db.execute(
+                "SELECT id FROM user_accounts WHERE lower(email) = :email LIMIT 1",
+                {"email": email},
+            ).fetchone()
+            if row and row[0]:
+                known_user_id = str(row[0]).strip()
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO security_forced_reauth_flags
+                    (id, target_type, target_value, reason, created_at)
+                    VALUES (:id, 'email', :target_value, :reason, CURRENT_TIMESTAMP)
+                    """,
+                    {
+                        "id": f"fr-{secrets.token_hex(12)}",
+                        "target_value": email,
+                        "reason": str(payload.reason or "account_recovery_requested").strip()[:255],
+                    },
+                )
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO security_forced_reauth_flags
+                    (id, target_type, target_value, reason, created_at)
+                    VALUES (:id, 'user_id', :target_value, :reason, CURRENT_TIMESTAMP)
+                    """,
+                    {
+                        "id": f"fr-{secrets.token_hex(12)}",
+                        "target_value": known_user_id,
+                        "reason": str(payload.reason or "account_recovery_requested").strip()[:255],
+                    },
+                )
+                db.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"account_recovery_request_failed: {exc}")
+
+    return {
+        "status": "pending_review",
+        "decision": verdict.decision.value,
+        "reason": verdict.reason,
+        "rule_id": verdict.rule_id,
+        "ticket_priority": verdict.ticket_priority,
+        "known_account": bool(known_user_id),
+    }
 
 
 @router.get("/me")

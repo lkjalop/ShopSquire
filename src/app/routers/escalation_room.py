@@ -57,6 +57,11 @@ _EVIDENCE_DIR = _CHAT_DIR / "evidence"
 _EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _incident_cookie_name(incident_id: str) -> str:
+    safe = "".join(ch for ch in str(incident_id or "") if ch.isalnum())[:48]
+    return f"ss_incident_token_{safe or 'default'}"
+
+
 def _is_local_demo_host(req: Request) -> bool:
     try:
         host = str((req.headers.get("host") or "")).lower()
@@ -250,6 +255,25 @@ def _require_public_token(incident_id: str, token: str | None) -> str:
     if not role:
         raise HTTPException(status_code=401, detail="invalid_or_missing_incident_token")
     return role
+
+
+def _extract_public_incident_token(
+    incident_id: str,
+    *,
+    request: Request | None = None,
+    token: str | None = None,
+    x_incident_token: str | None = None,
+) -> str | None:
+    if token:
+        return token
+    if x_incident_token:
+        return x_incident_token
+    try:
+        if request is not None:
+            return request.cookies.get(_incident_cookie_name(incident_id))
+    except Exception:
+        pass
+    return None
 
 
 def _log_path(incident_id: str) -> Path:
@@ -1529,8 +1553,10 @@ async def public_sse_room(
     token: str | None = Query(default=None),
     x_incident_token: str | None = Header(default=None, alias="x-incident-token"),
 ):
-    _ = request  # reserved for future ABAC/telemetry
-    _require_public_token(incident_id, token or x_incident_token)
+    _require_public_token(
+        incident_id,
+        _extract_public_incident_token(incident_id, request=request, token=token, x_incident_token=x_incident_token),
+    )
 
     q: asyncio.Queue = asyncio.Queue()
     _ROOM_SUBSCRIBERS.setdefault(incident_id, []).append(q)
@@ -1568,10 +1594,14 @@ async def public_sse_room(
 def public_send_message(
     incident_id: str,
     body: PublicChatMessage,
+    request: Request,
     token: str | None = Query(default=None),
     x_incident_token: str | None = Header(default=None, alias="x-incident-token"),
 ) -> Dict:
-    token_role = _require_public_token(incident_id, token or x_incident_token)
+    token_role = _require_public_token(
+        incident_id,
+        _extract_public_incident_token(incident_id, request=request, token=token, x_incident_token=x_incident_token),
+    )
     requested_role = str(getattr(body, "role", "") or "").strip().lower()
     role = "staff" if requested_role == "staff" and token_role in (ROLE_MERCHANT, "staff") else token_role
     event_type = str(getattr(body, "event_type", "") or "").strip().lower() or "message"
@@ -1600,10 +1630,14 @@ def public_send_message(
 @public_router.get("/{incident_id}/summary/public")
 def public_incident_summary(
     incident_id: str,
+    request: Request,
     token: str | None = Query(default=None),
     x_incident_token: str | None = Header(default=None, alias="x-incident-token"),
 ) -> Dict:
-    _require_public_token(incident_id, token or x_incident_token)
+    _require_public_token(
+        incident_id,
+        _extract_public_incident_token(incident_id, request=request, token=token, x_incident_token=x_incident_token),
+    )
     eng = get_engine()
     with eng.begin() as conn:
         row = conn.execute(

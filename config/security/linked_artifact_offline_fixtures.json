@@ -11,6 +11,15 @@
       "content_type": "application/pdf",
       "filename": "SSN-numberz - Sheet1.pdf",
       "tag": "qr_ssn_offline_fixture"
+    },
+    {
+      "urls": [
+        "https://ingram-verify-test.com/payment/verify?inv=INV-2026-00847"
+      ],
+      "local_path": "dump/linked_artifacts/ingram_verify_invoice_fixture.html",
+      "content_type": "text/html",
+      "filename": "ingram_verify_invoice_fixture.html",
+      "tag": "invoice_qr_payment_lure_fixture"
     }
   ]
 }

@@ -181,6 +181,12 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     vuln_scan_sched_minute = max(0, min(59, int(float(os.getenv("VULN_SCAN_SCHEDULED_MINUTE_UTC", "0") or 0))))
     anomaly_snapshot_enabled = str(os.getenv("ANOMALY_SNAPSHOT_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
     anomaly_snapshot_min = max(15, min(120, int(float(os.getenv("ANOMALY_SNAPSHOT_INTERVAL_MIN", "60") or 60))))
+    config_integrity_enabled = str(os.getenv("CONFIG_INTEGRITY_CHECK_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    config_integrity_min = max(1, min(60, int(float(os.getenv("CONFIG_INTEGRITY_CHECK_MINUTES", "5") or 5))))
+    prompt_verify_enabled = str(os.getenv("PROMPT_HASH_VERIFY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    prompt_verify_min = max(1, min(60, int(float(os.getenv("PROMPT_HASH_VERIFY_MINUTES", "5") or 5))))
+    audit_chain_verify_enabled = str(os.getenv("AUDIT_CHAIN_VERIFY_ENABLED", "1")).strip().lower() in ("1", "true", "yes", "on")
+    audit_chain_verify_min = max(1, min(60, int(float(os.getenv("AUDIT_CHAIN_VERIFY_MINUTES", "5") or 5))))
 
     beat_schedule = {}
     if poll_enabled:
@@ -243,6 +249,27 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{anomaly_snapshot_min}"),
             "args": (),
         }
+    # IT-DET-03 — Config file integrity monitoring (default: every 5 min)
+    if config_integrity_enabled:
+        beat_schedule["config-integrity-check"] = {
+            "task": "src.app.tasks.security_poll_tasks.check_config_integrity",
+            "schedule": crontab(minute=f"*/{config_integrity_min}"),
+            "args": (),
+        }
+    # IT-DET-05 — Prompt hash verification (default: every 5 min)
+    if prompt_verify_enabled:
+        beat_schedule["prompt-hash-verify"] = {
+            "task": "src.app.tasks.security_poll_tasks.verify_prompt_hashes",
+            "schedule": crontab(minute=f"*/{prompt_verify_min}"),
+            "args": (),
+        }
+    # IT-DET-03b — Audit chain integrity verification (default: every 5 min)
+    if audit_chain_verify_enabled:
+        beat_schedule["audit-chain-verify"] = {
+            "task": "src.app.tasks.security_poll_tasks.verify_audit_chain",
+            "schedule": crontab(minute=f"*/{audit_chain_verify_min}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -262,6 +289,9 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.incident_ops_tasks.trace_broker_recovery": {"queue": default_q},
             "src.app.tasks.incident_ops_tasks.scheduled_vuln_scan_daily": {"queue": default_q},
             "src.app.tasks.anomaly_tasks.anomaly_hourly_snapshot": {"queue": default_q},
+            "src.app.tasks.security_poll_tasks.check_config_integrity": {"queue": default_q},
+            "src.app.tasks.security_poll_tasks.verify_prompt_hashes": {"queue": default_q},
+            "src.app.tasks.security_poll_tasks.verify_audit_chain": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",

@@ -11,12 +11,33 @@ from src.app.policy.vertical_pack import load_vertical_pack, resolve_pack_id
 from src.app.rules.tier0_gate import run_tier0_gate
 from src.app.services.cases import create_case
 from src.app.models.db import db_session
+from src.app.policy.route_enforcement import enforce_action_authority
 from sqlalchemy import text as _text
 from src.app.cv.evidence_writer import EvidenceWriter
 from src.app.rules.config_defaults import escalation_triggers_defaults
 from src.app.services.fusion_scorer import compute_and_persist as compute_and_persist_fusion
 
 router = APIRouter(prefix="/api/v1/returns", tags=["returns"])
+
+
+def _value_cents_from_body(body: Dict[str, Any]) -> int:
+    for key in ("item_value_cents", "amount_cents", "refund_amount_cents", "item_price_cents"):
+        value = body.get(key)
+        if value is None:
+            continue
+        try:
+            return max(0, int(value))
+        except Exception:
+            continue
+    for key in ("item_value", "amount", "refund_amount", "item_price"):
+        value = body.get(key)
+        if value is None:
+            continue
+        try:
+            return max(0, int(round(float(value) * 100)))
+        except Exception:
+            continue
+    return 0
 
 
 def _corroborate_order(uid: str | None, sku: str, pkg: dict) -> dict:
@@ -280,6 +301,18 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
         mode = "require_human"
     else:
         mode = "escalate_security"
+    if mode == "auto_approve":
+        enforce_action_authority(
+            "refund",
+            value_aud_cents=_value_cents_from_body(body),
+            context={
+                "sku": sku,
+                "uid": uid,
+                "tenant_id": tenant_id,
+                "fraud_score": score.get("score"),
+                "decision_mode": mode,
+            },
+        )
 
     # Persist decision log for audit
     customer_tier = None

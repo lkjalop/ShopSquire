@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
+from src.app.policy.route_enforcement import enforce_action_authority
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_OWNER, ROLE_MERCHANT
 from src.app.services.billing import (
     link_tenant_stripe,
@@ -21,6 +22,21 @@ from src.app.security.oob_verification import get_verification
 router = APIRouter(prefix="/api/v1/billing", tags=["billing"])
 
 
+def _money_cents(payload: Dict[str, Any], *keys: str) -> int:
+    p = payload or {}
+    for key in keys:
+        value = p.get(key)
+        if value is None:
+            continue
+        try:
+            if str(key).endswith("_cents"):
+                return max(0, int(value))
+            return max(0, int(round(float(value) * 100)))
+        except Exception:
+            continue
+    return 0
+
+
 def _enforce_oob_for_beneficiary_change(payload: Dict[str, Any]) -> None:
     """§14: require out-of-band verification for any beneficiary bank change."""
     p = payload or {}
@@ -33,6 +49,14 @@ def _enforce_oob_for_beneficiary_change(payload: Dict[str, Any]) -> None:
     )
     if not beneficiary_changed:
         return
+    enforce_action_authority(
+        "bank_change",
+        context={
+            "beneficiary_changed": True,
+            "bank_fingerprint": old_fp,
+            "proposed_bank_fingerprint": new_fp,
+        },
+    )
     # Explicit OOB boolean short-circuit for trusted internal callers.
     if bool(p.get("oob_verified")):
         return
@@ -151,6 +175,11 @@ def xero_credit_note(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    enforce_action_authority(
+        "refund",
+        value_aud_cents=_money_cents(payload, "amount_cents", "amount", "total_cents", "total"),
+        context={"connector": "xero", "operation": "credit_note", "requested_by_role": role},
+    )
     _enforce_oob_for_beneficiary_change(payload)
     connector = XeroConnector()
     return connector.push_credit_note(
@@ -165,6 +194,11 @@ def xero_invoice(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    enforce_action_authority(
+        "supplier_pay",
+        value_aud_cents=_money_cents(payload, "amount_cents", "amount", "total_cents", "total"),
+        context={"connector": "xero", "operation": "invoice", "requested_by_role": role},
+    )
     _enforce_oob_for_beneficiary_change(payload)
     connector = XeroConnector()
     return connector.push_invoice(dict(payload or {}))
@@ -175,6 +209,11 @@ def xero_purchase_order(
     payload: Dict[str, Any] = Body(default={}),
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
+    enforce_action_authority(
+        "supplier_pay",
+        value_aud_cents=_money_cents(payload, "amount_cents", "amount", "total_cents", "total"),
+        context={"connector": "xero", "operation": "purchase_order", "requested_by_role": role},
+    )
     _enforce_oob_for_beneficiary_change(payload)
     connector = XeroConnector()
     return connector.push_purchase_order(dict(payload or {}))

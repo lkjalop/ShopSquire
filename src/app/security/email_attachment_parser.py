@@ -5,6 +5,7 @@ import hashlib
 import io
 import re
 import zipfile
+import logging
 from typing import Any, Dict, List
 from xml.etree import ElementTree as ET
 from urllib.parse import urlparse
@@ -35,6 +36,7 @@ _PAYMENT_HINT_PAT = re.compile(
     r"|bank(?:ing)?\s+details?\s+have\s+changed"
     r")\b"
 )
+logger = logging.getLogger(__name__)
 
 
 def _decode_b64(raw: str) -> bytes:
@@ -260,6 +262,28 @@ def _preview_png_b64(blob: bytes, *, content_type: str, filename: str, max_side:
         return None
 
 
+def _render_pdf_page_images(blob: bytes, *, max_pages: int = 3, scale: float = 2.0) -> List[bytes]:
+    rendered: List[bytes] = []
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+
+        pdf = pdfium.PdfDocument(blob)
+        page_count = min(len(pdf), max_pages)
+        for idx in range(page_count):
+            try:
+                page = pdf[idx]
+                bitmap = page.render(scale=scale)
+                pil_image = bitmap.to_pil()
+                out = io.BytesIO()
+                pil_image.save(out, format="PNG")
+                rendered.append(out.getvalue())
+            except Exception:
+                continue
+    except Exception:
+        return []
+    return rendered
+
+
 def _ocr_pdf_pages(blob: bytes, *, max_pages: int = 3, scale: float = 2.0) -> str:
     """Rasterize PDF pages and OCR them.
 
@@ -291,6 +315,120 @@ def _ocr_pdf_pages(blob: bytes, *, max_pages: int = 3, scale: float = 2.0) -> st
         pass
 
     return ""
+
+
+def _hydrate_qr_signals(
+    row: Dict[str, Any],
+    *,
+    decode_inputs: List[tuple[str, bytes]],
+    linked_timeout: float = 2.5,
+    tenant_id: str | None = None,
+    vendor_domain: str | None = None,
+    supplier_key: str | None = None,
+    known_bank_fingerprint: str | None = None,
+) -> None:
+    if not decode_inputs:
+        return
+    try:
+        from src.app.rules.barcode_decode import decode_barcodes  # type: ignore
+        from src.app.security.linked_artifact_analysis import analyze_linked_artifact  # type: ignore
+
+        qr_codes = decode_barcodes(decode_inputs)
+        qr_payloads: List[str] = []
+        qr_findings: List[str] = list(row.get("qr_redirect_findings") or []) if isinstance(row.get("qr_redirect_findings"), list) else []
+        qr_assessments: List[Dict[str, Any]] = list(row.get("qr_assessments") or []) if isinstance(row.get("qr_assessments"), list) else []
+        linked_artifact: Dict[str, Any] | None = dict(row.get("linked_artifact") or {}) if isinstance(row.get("linked_artifact"), dict) else None
+        external_detected = bool(row.get("qr_external_url_detected"))
+        for item in (getattr(qr_codes, "codes", None) or []):
+            data = str((item or {}).get("data") or "").strip()
+            if not data:
+                continue
+            qr_payloads.append(data[:500])
+            host = str((item or {}).get("host") or "").strip().lower()
+            is_external = bool((item or {}).get("is_external_url")) or (host not in {"", "127.0.0.1", "localhost"} and data.lower().startswith(("http://", "https://")))
+            if is_external:
+                external_detected = True
+                qr_findings.append(f"QR code points to external URL: {data[:180]}")
+            assessment = {
+                "payload": data[:240],
+                "payload_type": str((item or {}).get("payload_type") or "other"),
+                "risk_level": str((item or {}).get("risk_level") or ("review" if is_external else "benign")),
+                "risk_reason": str((item or {}).get("risk_reason") or ("QR points to external destination." if is_external else "QR content decoded.")),
+                "policy_action": str((item or {}).get("policy_action") or ("review" if is_external else "allow")),
+                "is_benign_qr": bool((item or {}).get("is_benign_qr")) if "is_benign_qr" in (item or {}) else (not is_external),
+                "host": host or None,
+            }
+            qr_assessments.append(assessment)
+            if is_external and linked_artifact is None:
+                try:
+                    linked = analyze_linked_artifact(
+                        url=data,
+                        timeout=linked_timeout,
+                        tenant_id=tenant_id,
+                        vendor_domain=vendor_domain,
+                        supplier_key=supplier_key,
+                        known_bank_fingerprint=known_bank_fingerprint,
+                    )
+                    linked_artifact = linked if isinstance(linked, dict) else None
+                except Exception as exc:
+                    logger.debug("linked artifact analysis failed during attachment hydration: %s", exc)
+        if qr_payloads:
+            row["qr_payloads"] = list(dict.fromkeys(qr_payloads))[:8]
+            row["qr_code_detected"] = True
+        if external_detected:
+            row["qr_external_url_detected"] = True
+        if qr_findings:
+            row["qr_redirect_findings"] = list(dict.fromkeys(qr_findings))[:6]
+        if qr_assessments:
+            deduped: List[Dict[str, Any]] = []
+            seen = set()
+            for assessment in qr_assessments:
+                key = (str(assessment.get("payload") or ""), str(assessment.get("risk_level") or ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(assessment)
+            row["qr_assessments"] = deduped[:8]
+        if linked_artifact:
+            row["linked_artifact"] = {
+                "linked_final_url": linked_artifact.get("linked_final_url"),
+                "linked_artifact_type": linked_artifact.get("linked_artifact_type"),
+                "linked_attack_hypothesis": linked_artifact.get("linked_attack_hypothesis"),
+                "linked_verdict_state": linked_artifact.get("linked_verdict_state"),
+                "linked_verdict_label": linked_artifact.get("linked_verdict_label"),
+                "linked_confidence_score": linked_artifact.get("linked_confidence_score"),
+                "linked_confidence_band": linked_artifact.get("linked_confidence_band"),
+                "linked_confidence_reasons": list(linked_artifact.get("linked_confidence_reasons") or [])[:8] if isinstance(linked_artifact.get("linked_confidence_reasons"), list) else [],
+                "linked_owner_scope": linked_artifact.get("linked_owner_scope"),
+                "linked_owner_reason": linked_artifact.get("linked_owner_reason"),
+                "linked_exposure_scope": linked_artifact.get("linked_exposure_scope"),
+                "linked_breach_severity_hint": linked_artifact.get("linked_breach_severity_hint"),
+                "linked_human_verification_required": linked_artifact.get("linked_human_verification_required"),
+                "linked_crisis_management_required": linked_artifact.get("linked_crisis_management_required"),
+                "linked_offline_fixture": linked_artifact.get("linked_offline_fixture"),
+                "linked_offline_fixture_tag": linked_artifact.get("linked_offline_fixture_tag"),
+                "linked_reason_summary": linked_artifact.get("linked_reason_summary"),
+                "linked_policy_action": linked_artifact.get("linked_policy_action"),
+                "linked_user_summary": dict(linked_artifact.get("linked_user_summary") or {}) if isinstance(linked_artifact.get("linked_user_summary"), dict) else {},
+                "linked_host_enrichment": dict(linked_artifact.get("linked_host_enrichment") or {}) if isinstance(linked_artifact.get("linked_host_enrichment"), dict) else {},
+                "linked_supplier_verification": dict(linked_artifact.get("linked_supplier_verification") or {}) if isinstance(linked_artifact.get("linked_supplier_verification"), dict) else {},
+                "pii_detected": linked_artifact.get("pii_detected"),
+                "pii_type": list(linked_artifact.get("pii_type") or [])[:4] if isinstance(linked_artifact.get("pii_type"), list) else [],
+                "ssn_hits": list(linked_artifact.get("ssn_hits") or [])[:5] if isinstance(linked_artifact.get("ssn_hits"), list) else [],
+                "linked_text_excerpt": str(linked_artifact.get("linked_text_excerpt") or "")[:240],
+            }
+            if linked_artifact.get("linked_attack_hypothesis") == "linked_pii_exposure":
+                qr_findings.append("Linked artifact appears to expose SSNs or other regulated identity data.")
+            if linked_artifact.get("pii_detected"):
+                row["pii_detected"] = True
+                row["pii_type"] = list(linked_artifact.get("pii_type") or [])[:4] if isinstance(linked_artifact.get("pii_type"), list) else []
+            if linked_artifact.get("ssn_hits"):
+                row["ssn_detected"] = True
+                row["ssn_count"] = len(list(linked_artifact.get("ssn_hits") or []))
+            if qr_findings:
+                row["qr_redirect_findings"] = list(dict.fromkeys(qr_findings))[:6]
+    except Exception as exc:
+        logger.debug("qr hydration failed: %s", exc, exc_info=True)
 
 
 def _extract_bank_fields(text: str) -> Dict[str, Any]:
@@ -416,6 +554,9 @@ def hydrate_attachments_from_bytes(
 ) -> Dict[str, Any]:
     atts = list(email.get("attachments") or [])
     hydrated: List[Dict[str, Any]] = []
+    vendor_domain = str(email.get("vendor_domain") or "").strip().lower() or None
+    supplier_key = vendor_domain
+    known_bank_fingerprint = str(email.get("bank_fingerprint") or "").strip() or None
     for a in atts:
         row = dict(a or {})
         b64 = row.get("content_b64")
@@ -528,65 +669,28 @@ def hydrate_attachments_from_bytes(
                         }
             except Exception:
                 pass
-            # QR-linked artifact enrichment for image attachments.
+            # QR-linked artifact enrichment for image attachments and rendered PDF pages.
             try:
                 _ctype = str(row.get("content_type") or "").lower()
                 _name = str(row.get("name") or "").lower()
                 _is_img = _ctype.startswith("image/") or _name.endswith(
                     (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
                 )
+                decode_inputs: List[tuple[str, bytes]] = []
                 if _is_img:
-                    from src.app.rules.barcode_decode import decode_barcodes  # type: ignore
-                    from src.app.security.linked_artifact_analysis import analyze_linked_artifact  # type: ignore
-
-                    qr_codes = decode_barcodes([("email_attachment", blob)])
-                    qr_payloads: List[str] = []
-                    qr_findings: List[str] = list(row.get("qr_redirect_findings") or []) if isinstance(row.get("qr_redirect_findings"), list) else []
-                    linked_artifact: Dict[str, Any] | None = None
-                    for item in (getattr(qr_codes, "codes", None) or []):
-                        data = str((item or {}).get("data") or "").strip()
-                        if not data:
-                            continue
-                        qr_payloads.append(data[:500])
-                        if data.lower().startswith(("http://", "https://")):
-                            host = str(urlparse(data).hostname or "").strip().lower()
-                            if host and host not in {"127.0.0.1", "localhost"}:
-                                qr_findings.append(f"QR code points to external URL: {data[:180]}")
-                                if linked_artifact is None:
-                                    linked = analyze_linked_artifact(url=data, timeout=2.5)
-                                    linked_artifact = linked if isinstance(linked, dict) else None
-                    if qr_payloads:
-                        row["qr_payloads"] = qr_payloads[:8]
-                    if qr_findings:
-                        row["qr_redirect_findings"] = list(dict.fromkeys(qr_findings))[:6]
-                    if linked_artifact:
-                        row["linked_artifact"] = {
-                            "linked_final_url": linked_artifact.get("linked_final_url"),
-                            "linked_artifact_type": linked_artifact.get("linked_artifact_type"),
-                            "linked_attack_hypothesis": linked_artifact.get("linked_attack_hypothesis"),
-                            "linked_owner_scope": linked_artifact.get("linked_owner_scope"),
-                            "linked_owner_reason": linked_artifact.get("linked_owner_reason"),
-                            "linked_exposure_scope": linked_artifact.get("linked_exposure_scope"),
-                            "linked_breach_severity_hint": linked_artifact.get("linked_breach_severity_hint"),
-                            "linked_human_verification_required": linked_artifact.get("linked_human_verification_required"),
-                            "linked_crisis_management_required": linked_artifact.get("linked_crisis_management_required"),
-                            "linked_offline_fixture": linked_artifact.get("linked_offline_fixture"),
-                            "linked_offline_fixture_tag": linked_artifact.get("linked_offline_fixture_tag"),
-                            "pii_detected": linked_artifact.get("pii_detected"),
-                            "pii_type": list(linked_artifact.get("pii_type") or [])[:4] if isinstance(linked_artifact.get("pii_type"), list) else [],
-                            "ssn_hits": list(linked_artifact.get("ssn_hits") or [])[:5] if isinstance(linked_artifact.get("ssn_hits"), list) else [],
-                            "linked_text_excerpt": str(linked_artifact.get("linked_text_excerpt") or "")[:240],
-                        }
-                        if linked_artifact.get("linked_attack_hypothesis") == "linked_pii_exposure":
-                            qr_findings.append("Linked artifact appears to expose SSNs or other regulated identity data.")
-                        if linked_artifact.get("pii_detected"):
-                            row["pii_detected"] = True
-                            row["pii_type"] = list(linked_artifact.get("pii_type") or [])[:4] if isinstance(linked_artifact.get("pii_type"), list) else []
-                        if linked_artifact.get("ssn_hits"):
-                            row["ssn_detected"] = True
-                            row["ssn_count"] = len(list(linked_artifact.get("ssn_hits") or []))
-                        if qr_findings:
-                            row["qr_redirect_findings"] = list(dict.fromkeys(qr_findings))[:6]
+                    decode_inputs.append(("email_attachment", blob))
+                elif "pdf" in _ctype or _name.endswith(".pdf"):
+                    for idx, rendered in enumerate(_render_pdf_page_images(blob, max_pages=4, scale=2.2)):
+                        decode_inputs.append((f"email_attachment_pdf_page_{idx + 1}", rendered))
+                if decode_inputs:
+                    _hydrate_qr_signals(
+                        row,
+                        decode_inputs=decode_inputs,
+                        tenant_id=tenant_id,
+                        vendor_domain=vendor_domain,
+                        supplier_key=supplier_key,
+                        known_bank_fingerprint=known_bank_fingerprint,
+                    )
             except Exception:
                 pass
             # ── Steganographic analysis — PDF embedded images ──

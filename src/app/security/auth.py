@@ -672,6 +672,38 @@ def require_role_or_oidc(allowed_roles: Iterable[str]) -> Callable[[Optional[str
                 )
         except Exception:
             pass
+
+        # IT-PREV-05 / IT-DET-01 — Admin IP allowlist + off-hours detection.
+        _privileged_roles = {ROLE_OWNER, ROLE_DEVELOPER, "admin"}
+        if role in _privileged_roles:
+            _allowlist_raw = str(os.getenv("ADMIN_IP_ALLOWLIST", "") or "").strip()
+            if _allowlist_raw:
+                _allowed_ips = {ip.strip() for ip in _allowlist_raw.split(",") if ip.strip()}
+                if source_ip not in _allowed_ips:
+                    try:
+                        from src.app.security.insider_threat_detector import InsiderThreatSignal, _emit as _it_emit
+                        _it_emit(InsiderThreatSignal(
+                            signal_type="admin_access_from_unlisted_ip",
+                            actor=effective_key or "unknown",
+                            resource=getattr(request.url, "path", "unknown") if request else "unknown",
+                            severity="critical",
+                            context={"role": role, "source_ip": source_ip, "allowlist_size": len(_allowed_ips)},
+                        ))
+                    except Exception:
+                        pass
+                    _record_failed_auth(source_ip)
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_ip_not_in_allowlist")
+            try:
+                from src.app.security.insider_threat_detector import detect_off_hours_admin
+                detect_off_hours_admin(
+                    actor=effective_key or "unknown",
+                    action=getattr(request.url, "path", "unknown") if request else "unknown",
+                    ip=source_ip,
+                    role=role,
+                )
+            except Exception:
+                pass
+
         _clear_failed_auth(source_ip)
         return role
 
@@ -855,6 +887,38 @@ def require_role(allowed_roles: Iterable[str]):
                 )
         except Exception:
             pass
+
+        # IT-PREV-05 / IT-DET-01 — Admin IP allowlist + off-hours detection.
+        _privileged_roles = {ROLE_OWNER, ROLE_DEVELOPER, "admin"}
+        if role in _privileged_roles:
+            _allowlist_raw = str(os.getenv("ADMIN_IP_ALLOWLIST", "") or "").strip()
+            if _allowlist_raw:
+                _allowed_ips = {ip.strip() for ip in _allowlist_raw.split(",") if ip.strip()}
+                if source_ip not in _allowed_ips:
+                    try:
+                        from src.app.security.insider_threat_detector import InsiderThreatSignal, _emit as _it_emit
+                        _it_emit(InsiderThreatSignal(
+                            signal_type="admin_access_from_unlisted_ip",
+                            actor=effective_key or "unknown",
+                            resource=getattr(request.url, "path", "unknown") if request else "unknown",
+                            severity="critical",
+                            context={"role": role, "source_ip": source_ip, "allowlist_size": len(_allowed_ips)},
+                        ))
+                    except Exception:
+                        pass
+                    _record_failed_auth(source_ip)
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_ip_not_in_allowlist")
+            try:
+                from src.app.security.insider_threat_detector import detect_off_hours_admin
+                detect_off_hours_admin(
+                    actor=effective_key or "unknown",
+                    action=getattr(request.url, "path", "unknown") if request else "unknown",
+                    ip=source_ip,
+                    role=role,
+                )
+            except Exception:
+                pass
+
         _clear_failed_auth(source_ip)
         return role
 

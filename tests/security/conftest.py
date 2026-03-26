@@ -1,12 +1,11 @@
 import os
 import time
-import threading
 import socket
-from urllib.parse import urlparse
+import subprocess
+import sys
 
 import pytest
 import requests
-import uvicorn
 
 
 def _find_free_port(start: int = 8082) -> int:
@@ -28,12 +27,13 @@ def _is_port_open(host: str, port: int) -> bool:
 def _wait_ready(base_url: str, timeout: int = 30) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        try:
-            r = requests.get(base_url.rstrip("/") + "/health", timeout=1)
-            if r.status_code == 200:
-                return True
-        except Exception:
-            pass
+        for path in ("/healthz", "/health", "/readyz"):
+            try:
+                r = requests.get(base_url.rstrip("/") + path, timeout=1)
+                if r.status_code == 200:
+                    return True
+            except Exception:
+                pass
         time.sleep(0.5)
     return False
 
@@ -68,21 +68,49 @@ def security_test_server():
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
     os.environ.setdefault("DISABLE_TRACING", "1")
 
-    from src.app.main import create_app
+    env = os.environ.copy()
+    env.setdefault("SECURITY_TEST_MODE", "1")
+    env.setdefault("DISABLE_TRACING", "1")
+    env.setdefault("FAQ_INDEX_ON_STARTUP", "0")
+    env.setdefault("VISUAL_SEARCH_INDEX_ON_STARTUP", "0")
+    env.setdefault("OLLAMA_PREWARM_DISABLED", "1")
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "src.app.main:create_app",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--factory",
+            "--log-level",
+            "error",
+        ],
+        cwd=os.getcwd(),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
-    app = create_app()
-    config = uvicorn.Config(app=app, host=host, port=port, log_level="error")
-    server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-
-    if not _wait_ready(base_url, timeout=60):
+    if not _wait_ready(base_url, timeout=90):
+        try:
+            proc.terminate()
+        except Exception:
+            pass
         raise RuntimeError("Security test server did not become ready")
 
     os.environ["E2E_BASE_URL"] = base_url
     yield {"base_url": base_url}
     try:
-        server.should_exit = True
+        proc.terminate()
     except Exception:
         pass
-    thread.join(timeout=10)
+    try:
+        proc.wait(timeout=10)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass

@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from src.app.services.decision_log import log_trace_event
+from src.app.security.provider_boundary import sanitize_for_provider
 
 import httpx
 
@@ -249,6 +250,7 @@ async def _openai_generate_fallback(prompt: str, options: Dict | None = None, tr
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None
+    prompt, _, _ = sanitize_for_provider("openai", prompt, data_categories=["llm_prompt"])
     base_url = os.getenv("OPENAI_API_URL", "https://api.openai.com/v1").rstrip("/")
     fallback_model = os.getenv("OPENAI_FALLBACK_MODEL", "gpt-4o-mini")
     opts = options or {}

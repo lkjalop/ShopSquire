@@ -13,6 +13,10 @@ services:
       DB_MIGRATION_GUARD: "1"
       INTERNAL_MTLS_REQUIRED: "1"
       CHAT_REPLAY_REQUIRE_NONCE: "1"
+      ENFORCE_CONNECTOR_SCOPES: "1"
+      SECURITY_HEADERS_ENABLED: "1"
+      METRICS_REQUIRE_AUTH: "1"
+      METRICS_INTERNAL_ONLY: "1"
     ports:
       - "8080:8080"
     depends_on:
@@ -153,6 +157,10 @@ services:
       REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
       CELERY_BROKER_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/1
+      CELERY_TASK_SIGNING_ENABLED: "1"
+      CELERY_SECURITY_KEY: /etc/shopsquire/certs/celery-private.key
+      CELERY_SECURITY_CERTIFICATE: /etc/shopsquire/certs/celery-cert.pem
+      CELERY_SECURITY_CERT_STORE: /etc/shopsquire/certs/ca.pem
       SECURITY_CROWDSTRIKE_POLL_ENABLED: "1"
       SECURITY_CROWDSTRIKE_POLL_MINUTES: "5"
       SECURITY_CROWDSTRIKE_POLL_TENANT_ID: "default"
@@ -181,6 +189,10 @@ services:
       REDIS_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
       CELERY_BROKER_URL: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/0
       CELERY_RESULT_BACKEND: redis://default:${REDIS_PASSWORD:-redis-change-me}@redis:6379/1
+      CELERY_TASK_SIGNING_ENABLED: "1"
+      CELERY_SECURITY_KEY: /etc/shopsquire/certs/celery-private.key
+      CELERY_SECURITY_CERTIFICATE: /etc/shopsquire/certs/celery-cert.pem
+      CELERY_SECURITY_CERT_STORE: /etc/shopsquire/certs/ca.pem
       SECURITY_CROWDSTRIKE_POLL_ENABLED: "1"
       SECURITY_CROWDSTRIKE_POLL_MINUTES: "5"
       SECURITY_CROWDSTRIKE_POLL_TENANT_ID: "default"

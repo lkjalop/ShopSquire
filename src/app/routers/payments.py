@@ -14,9 +14,21 @@ from src.app.security.transaction_firewall import evaluate_transaction_firewall
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
 tracer = get_tracer("payments-router")
 
-# In-memory idempotency cache used for tests/local runs when DB-backed idempotency
-# may not be desirable or reliable.
-_idempotency_cache: set[str] = set()
+
+def _is_non_dev_env(app_env: str | None) -> bool:
+    env = str(app_env or "local").strip().lower()
+    return env not in ("local", "dev", "development", "test", "testing")
+
+
+def _demo_checkout_allowed(settings, capability: Dict | None) -> bool:
+    explicit = str(__import__("os").environ.get("ALLOW_DEMO_CHECKOUT", "") or "").strip().lower()
+    if explicit in ("1", "true", "yes", "on"):
+        return True
+    if explicit in ("0", "false", "no", "off"):
+        return False
+    if isinstance(capability, dict) and capability.get("demo_checkout") is True:
+        return True
+    return not _is_non_dev_env(getattr(settings, "app_env", None))
 
 
 def _idempotent(path: str, key: str | None) -> bool:
@@ -35,17 +47,6 @@ def _idempotent(path: str, key: str | None) -> bool:
             # If table creation fails (e.g., transient DB), treat as idempotent to avoid false conflicts
             return True
         try:
-            # Short-circuit to an in-memory cache when UI routes disabled (test mode)
-            try:
-                if str(__import__("os").environ.get("DISABLE_UI_ROUTES", "0")).strip().lower() in ("1", "true", "yes"):
-                    k = f"{path}:{key}"
-                    if k in _idempotency_cache:
-                        return False
-                    _idempotency_cache.add(k)
-                    return True
-            except Exception:
-                pass
-
             # Attempt atomic insert and detect whether it was newly inserted.
             k = f"{path}:{key}"
             try:
@@ -198,9 +199,9 @@ def checkout_initiate(
 ) -> Dict:
     """Customer-facing checkout initiation.
 
-    Creates a Stripe PaymentIntent when Stripe is fully configured, otherwise
-    returns a demo order confirmation so the UI can still complete the flow.
-    Does not require elevated merchant/owner role.
+    Creates a Stripe PaymentIntent when Stripe is fully configured.
+    Demo checkout is only allowed in local/dev/test or when explicitly enabled.
+    Production runtimes fail closed instead of silently switching to demo mode.
     """
     import secrets
 
@@ -210,6 +211,7 @@ def checkout_initiate(
 
     amount_cents = max(0, int(body.amount_cents or 0))
     currency = str(body.currency or "USD").upper()[:3]
+    allow_demo_checkout = _demo_checkout_allowed(settings, cap)
 
     stripe_live = (
         settings.stripe_api_key
@@ -231,8 +233,15 @@ def checkout_initiate(
                     "currency": currency,
                     "demo_mode": False,
                 }
-        except Exception:
-            pass  # fall through to demo mode
+        except Exception as exc:
+            if not allow_demo_checkout:
+                raise HTTPException(status_code=503, detail=f"Stripe checkout unavailable: {exc}")
+
+    if not allow_demo_checkout:
+        raise HTTPException(
+            status_code=503,
+            detail="Checkout provider unavailable. Configure Stripe or explicitly enable demo checkout in non-production environments.",
+        )
 
     demo_order_id = f"DEMO-{secrets.token_urlsafe(6).upper()}"
     return {

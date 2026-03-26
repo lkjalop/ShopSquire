@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Header, Depends
 from src.app.models.schemas import MedusaEvent
 from src.app.models.db import db_session
+from src.app.policy.route_enforcement import enforce_action_authority
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 
 
@@ -64,4 +65,16 @@ def cart_updated(evt: MedusaEvent, idempotency_key: str | None = Header(None), r
 def refund_requested(evt: MedusaEvent, idempotency_key: str | None = Header(None), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
     if not _idempotent("refund_requested", idempotency_key):
         return {"received": True, "duplicate": True}
+    data = evt.data if isinstance(evt.data, dict) else {}
+    amount_cents = int(data.get("amount_cents") or round(float(data.get("amount") or 0.0) * 100))
+    enforce_action_authority(
+        "refund",
+        value_aud_cents=max(0, amount_cents),
+        context={
+            "event_type": evt.type,
+            "order_id": data.get("order_id"),
+            "refund_reason": data.get("reason"),
+            "requested_by_role": role,
+        },
+    )
     return {"received": True}

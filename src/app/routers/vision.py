@@ -15,7 +15,7 @@ from src.app.services.image_intent_router import classify_image_intent
 from src.app.services.intake_gate import strict_image_ingest_gate
 from src.app.services.image_intake import sanitize_image
 from src.app.routers.support_complaints import _normalize_ocr_and_detect, _probe_redirect_chain
-from src.app.security.linked_artifact_analysis import analyze_linked_artifact
+from src.app.security import linked_artifact_analysis
 from src.app.security.passive_payload_analysis import classify_passive_payload
 from src.app.security.threat_hunter_leads import build_threat_hunter_leads
 
@@ -43,6 +43,8 @@ _BRAND_HINT_KW = {
     "microsoft": ("microsoft", "surface"),
     "acer": ("acer", "aspire", "nitro", "predator", "swift"),
 }
+
+_MIN_STAGE_B_OCR_BYTES = max(1024, int(os.getenv("CV_STAGE_B_OCR_MIN_BYTES", "4096") or 4096))
 
 
 def _vision_payload_drilldown(
@@ -244,12 +246,17 @@ async def triage(
             labels = (labels or []) + [fname_hint]
 
     triager = BasicCVTriage()
-    triage_result = triager.analyze(
-        labels,
-        extracted_text or "",
-        image_bytes=content,
-        mime=mime or "image/jpeg",
-    )
+    try:
+        triage_result = triager.analyze(
+            labels,
+            extracted_text or "",
+            image_bytes=content,
+            mime=mime or "image/jpeg",
+        )
+    except TypeError:
+        # Test doubles and older triage implementations may still expose the
+        # legacy two-argument signature.
+        triage_result = triager.analyze(labels, extracted_text or "")
     if inspect.isawaitable(triage_result):
         analysis = await triage_result
     else:
@@ -318,19 +325,40 @@ async def triage(
     qr_product_data: Dict[str, Any] = {}
     linked_artifact_result: Dict[str, Any] | None = None
     qr_redirect_probe: Dict[str, Any] = {"enabled": False, "checked": False, "chain": []}
+    qr_risk_levels: List[str] = []
+    qr_reason_summaries: List[str] = []
     try:
         from src.app.rules.barcode_decode import decode_barcodes
         qr = decode_barcodes([(str(name or "image.jpg"), content)])
         qr_codes = qr.codes if hasattr(qr, "codes") else (qr if isinstance(qr, list) else [])
         if qr_codes:
             security_signals["qr_code_detected"] = True
-            security_clean = False
+            qr_risk_levels = [
+                str(c.get("risk_level") or "benign").strip().lower()
+                for c in qr_codes
+                if isinstance(c, dict)
+            ]
+            qr_reason_summaries = [
+                str(c.get("risk_reason") or "").strip()
+                for c in qr_codes
+                if isinstance(c, dict) and str(c.get("risk_reason") or "").strip()
+            ][:3]
+            security_signals["qr_benign_detected"] = all(level == "benign" for level in qr_risk_levels) if qr_risk_levels else True
+            security_signals["qr_policy_action"] = (
+                "allow"
+                if security_signals["qr_benign_detected"]
+                else ("review" if any(level == "review" for level in qr_risk_levels) else "block")
+            )
+            if qr_reason_summaries:
+                security_signals["qr_reason_summary"] = qr_reason_summaries[0]
             # Surface decoded QR payloads (first 5, truncated to 300 chars each)
             security_signals["qr_payloads"] = [
                 {
                     "data": str(c.get("data") or "")[:300],
                     "type": str(c.get("type") or "QR_CODE"),
                     "payload_type": str(c.get("payload_type") or "other"),
+                    "risk_level": str(c.get("risk_level") or "benign"),
+                    "risk_reason": str(c.get("risk_reason") or "")[:180],
                 }
                 for c in qr_codes[:5]
                 if str(c.get("data") or "").strip()
@@ -346,6 +374,9 @@ async def triage(
                 for c in qr_codes:
                     if _detect_ocr_prompt_injection(str(c.get("data") or "")):
                         security_signals["qr_prompt_injection"] = True
+                        security_signals["qr_policy_action"] = "block"
+                        security_signals["qr_reason_summary"] = "QR payload contains instruction-like content targeting the assistant."
+                        security_clean = False
                         break
             except Exception:
                 pass
@@ -359,6 +390,10 @@ async def triage(
                         if host and host not in ("127.0.0.1", "localhost"):
                             security_signals["qr_external_url"] = True
                             security_signals["qr_external_url_detected"] = True
+                            if not bool(security_signals.get("qr_prompt_injection")):
+                                security_signals["qr_policy_action"] = "review"
+                                security_signals["qr_reason_summary"] = f"QR points to external host {host}."
+                            security_clean = False
                             if not fast:
                                 try:
                                     qr_redirect_probe = await _probe_redirect_chain(data, timeout_s=1.25, max_hops=3)
@@ -366,9 +401,15 @@ async def triage(
                                     qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
                                 # ── Auto-analyze linked artifact (SSN / PII / payload scan) ──
                                 try:
-                                    linked = analyze_linked_artifact(url=data, timeout=6.0)
+                                    linked = linked_artifact_analysis.analyze_linked_artifact(url=data, timeout=6.0)
                                     linked_artifact_result = linked if isinstance(linked, dict) else None
                                     resp["linked_artifact"] = linked
+                                    if linked_artifact_result:
+                                        linked_summary = str(linked_artifact_result.get("linked_reason_summary") or "").strip()
+                                        linked_action = str(linked_artifact_result.get("linked_policy_action") or "review").strip()
+                                        if linked_summary:
+                                            security_signals["linked_artifact_reason_summary"] = linked_summary
+                                        security_signals["linked_artifact_policy_action"] = linked_action
                                     if linked.get("pii_detected"):
                                         security_signals["pii_detected"] = True
                                         security_signals["pii_types"] = linked.get("pii_type", [])
@@ -432,6 +473,15 @@ async def triage(
     except Exception:
         pass
 
+    if qr_codes := security_signals.get("qr_payloads"):
+        resp["qr_assessment"] = {
+            "risk_levels": qr_risk_levels[:5],
+            "reason_summary": security_signals.get("qr_reason_summary")
+            or ("Detected benign QR content." if security_signals.get("qr_benign_detected") else "QR content requires review."),
+            "policy_action": security_signals.get("qr_policy_action") or "allow",
+            "decoded_count": len(qr_codes) if isinstance(qr_codes, list) else 0,
+        }
+
     if not fast:
         try:
             from src.app.security.adversarial_image_detector import detect_adversarial
@@ -487,7 +537,7 @@ async def triage(
             or (len(stage_a_text) < 12 and bool(security_signals.get("qr_code_detected")))
             or (not stage_a_text and any(tok in filename_hint_for_ocr for tok in ("ms texti", "ms-texti")))
         )
-        if deep_trigger and not fast:
+        if deep_trigger and not fast and len(content) >= _MIN_STAGE_B_OCR_BYTES:
             # Risk-triggered deep OCR for low-evidence or overlay-heavy images.
             from src.app.cv.cv_pipeline import run_risk_triggered_multicontrast_ocr
             deep = run_risk_triggered_multicontrast_ocr(content, ocr_provider=None, enabled=True)
@@ -504,6 +554,11 @@ async def triage(
             if (not deep_text) or deep_conf < deep_min_conf:
                 security_signals["ocr_low_confidence_uncertain"] = True
                 security_clean = False
+        elif deep_trigger and not fast:
+            # Tiny synthetic or low-information images are not good candidates
+            # for expensive OCR rescue. Skip the deep pass and let later
+            # identity rescue / security logic operate on the lighter signals.
+            security_signals["ocr_low_confidence_uncertain"] = True
 
         if bool(ocr_det.get("payment_social_engineering")):
             security_signals["payment_social_engineering"] = True
@@ -632,16 +687,30 @@ async def triage(
     }
     mapped = payload_map.get(hypothesis)
     if mapped:
+        evidence_lines = list(security_signals.get("steg_explanations") or [])[:3] or [
+            str(x) for x in (payload_analysis.get("lolbin_hits") or [])[:3]
+        ]
+        suggested_next_step = str(payload_analysis.get("suggested_next_step") or "review").strip().lower() or "review"
+        confidence_score = 0.78 if suggested_next_step in {"review", "block"} else 0.62
         payload_findings.append(
             {
+                "finding_id": f"vision_{mapped['finding_type']}",
                 "finding_type": mapped["finding_type"],
                 "headline": mapped["headline"],
                 "business_risk": mapped["business_risk"],
+                "summary": mapped["headline"],
+                "source_type": "vision_image_payload",
+                "evidence_kind": "direct",
+                "confidence_score": confidence_score,
                 "mitre_attack": payload_analysis.get("mitre_attack") or [],
                 "pasta_stage": payload_analysis.get("pasta_stage"),
                 "decode_path": payload_analysis.get("decode_path"),
-                "suggested_next_step": payload_analysis.get("suggested_next_step"),
-                "evidence": list(security_signals.get("steg_explanations") or [])[:3] or [str(x) for x in (payload_analysis.get("lolbin_hits") or [])[:3]],
+                "suggested_next_step": suggested_next_step,
+                "evidence": evidence_lines,
+                "threat_context": {
+                    "pasta_stage": payload_analysis.get("pasta_stage"),
+                    "mitre_attack": payload_analysis.get("mitre_attack") or [],
+                },
                 "drilldown": _vision_payload_drilldown(
                     mapped["finding_type"],
                     payload_analysis=payload_analysis,
@@ -700,19 +769,15 @@ async def triage(
         ev_id = str(uuid.uuid4())
         payload = json.dumps(resp, ensure_ascii=False)
 
-        def _persist_event():
-            with db_session() as db:
-                db.execute(
-                    "INSERT INTO event_log (id, type, payload, status) VALUES (:id, :type, :payload, 'pending')",
-                    {"id": ev_id, "type": "vision.triage", "payload": payload},
-                )
-                try:
-                    db.commit()
-                except Exception:
-                    pass
-
-        import asyncio
-        await asyncio.to_thread(_persist_event)
+        with db_session() as db:
+            db.execute(
+                "INSERT INTO event_log (id, type, payload, status) VALUES (:id, :type, :payload, 'pending')",
+                {"id": ev_id, "type": "vision.triage", "payload": payload},
+            )
+            try:
+                db.commit()
+            except Exception:
+                pass
         resp["event_id"] = ev_id
     except Exception:
         pass

@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-_log = logging.getLogger(__name__)
+from sqlalchemy import text
 
+from src.app.config import get_settings, load_feature_flags
+from src.app.models.db import db_session
 from src.app.observability.metrics import record_ticket
 from src.app.services.decision_log import log_decision
-from src.app.models.db import db_session
-from sqlalchemy import text
-import json
 from src.app.services.ticketing_connectors import create_jira_issue, create_servicenow_incident
-from src.app.config import load_feature_flags, get_settings
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,11 +29,51 @@ class Ticket:
 
 
 class TicketingAgent:
-    """Persistent ticketing agent — writes to the tickets DB table.
+    """Persistent ticketing agent.
 
-    Falls back to in-memory storage ONLY for rate-limited tickets that
-    should not persist. All real tickets are DB-primary.
+    Real tickets are DB-primary. In-memory fallback is reserved for rate-limited
+    suppression tickets in local/dev-style environments only.
     """
+
+    @staticmethod
+    def _strict_persistence_required() -> bool:
+        explicit = str(os.getenv("STRICT_TICKETING_PERSISTENCE", "") or "").strip().lower()
+        if explicit in ("1", "true", "yes", "on"):
+            return True
+        if explicit in ("0", "false", "no", "off"):
+            return False
+        env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+        return env not in ("local", "dev", "development", "test", "testing")
+
+    @staticmethod
+    def _ensure_ticket_tables(db) -> None:
+        try:
+            if getattr(getattr(db, "bind", None), "dialect", None) is None:
+                return
+            if db.bind.dialect.name != "sqlite":
+                return
+            db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS tickets (
+                        id TEXT PRIMARY KEY,
+                        external_id TEXT,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        severity TEXT DEFAULT 'medium',
+                        status TEXT DEFAULT 'open',
+                        approval_required INTEGER DEFAULT 0,
+                        trace_id TEXT,
+                        tenant_id TEXT,
+                        evidence TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+        except Exception:
+            pass
 
     def create_ticket(
         self,
@@ -48,14 +90,12 @@ class TicketingAgent:
         evidence_snapshot: Dict | None = None,
         approval_required: bool = False,
     ) -> Ticket:
-        # Rate limit per tenant to avoid floods (feature-flagged)
         try:
             flags = load_feature_flags(get_settings().feature_flags_path)
             rl = (flags or {}).get("TICKET_RATE_LIMIT", {"enabled": False, "per_min": 5})
             if rl.get("enabled"):
                 tenant_key = tenant_id or "default"
-                import time as _t
-                now = _t.time()
+                now = time.time()
                 window = 60.0
                 max_per_min = int(rl.get("per_min") or 5)
                 try:
@@ -66,18 +106,28 @@ class TicketingAgent:
                 if not bucket:
                     bucket = {"start": now, "count": 0}
                     store[tenant_key] = bucket
-                # reset window
                 if now - float(bucket.get("start", now)) >= window:
                     bucket["start"] = now
                     bucket["count"] = 0
                 if int(bucket.get("count", 0)) >= max_per_min:
                     try:
                         from src.app.observability.telemetry import telemetry_emit
-                        telemetry_emit({"type": "ticket_rate_limited", "tenant": tenant_key, "reason": "per_min_limit"}, severity="warning", sourcetype="shopsquire:security")
+
+                        telemetry_emit(
+                            {"type": "ticket_rate_limited", "tenant": tenant_key, "reason": "per_min_limit"},
+                            severity="warning",
+                            sourcetype="shopsquire:security",
+                        )
                     except Exception:
                         pass
-                    # return a stub without persisting to avoid floods
-                    return Ticket(id=f"RL-{int(time.time()*1000)}", external_id=None, title=title, description=description, severity=severity, status="rate_limited")
+                    return Ticket(
+                        id=f"RL-{int(time.time() * 1000)}",
+                        external_id=None,
+                        title=title,
+                        description=description,
+                        severity=severity,
+                        status="rate_limited",
+                    )
                 bucket["count"] = int(bucket.get("count", 0)) + 1
                 try:
                     setattr(TicketingAgent, "_tenant_rl", store)
@@ -85,12 +135,15 @@ class TicketingAgent:
                     pass
         except Exception:
             pass
+
         tid = f"TKT-{int(time.time() * 1000)}"
         status = "pending_approval" if approval_required else "open"
         ticket = Ticket(id=tid, external_id=None, title=title, description=description, severity=severity, status=status)
+        strict_persistence = self._strict_persistence_required()
+
         try:
-            # Attempt DB persistence; fall back to in-memory registry
             with db_session() as db:
+                self._ensure_ticket_tables(db)
                 db.execute(
                     text(
                         """
@@ -115,15 +168,16 @@ class TicketingAgent:
                     db.commit()
                 except Exception:
                     pass
-        except Exception as _db_exc:
-            # DB write failed — log so it shows up in service logs.
-            # Do NOT silently swallow: a ticket that wasn't persisted is a lost audit event.
-            _log.error("ticketing: DB persist failed for %s (%s): %s", tid, severity, _db_exc)
+        except Exception as db_exc:
+            _log.error("ticketing: DB persist failed for %s (%s): %s", tid, severity, db_exc)
+            if strict_persistence:
+                raise RuntimeError(f"ticket_persistence_failed:{tid}") from db_exc
+
         try:
             record_ticket("security", "P1" if severity in ("critical", "high") else "P3")
         except Exception:
             pass
-        # Optional: create external ticket in Jira/ServiceNow (env-gated, summary-only)
+
         try:
             ext_id = None
             ext_id = ext_id or create_jira_issue(title, description, severity)
@@ -137,7 +191,7 @@ class TicketingAgent:
                     pass
         except Exception:
             pass
-        # Bitemporal decision trace for ticket creation
+
         try:
             log_decision(
                 agent_name="ticketing_agent",
@@ -168,13 +222,17 @@ class TicketingAgent:
 
     def get_ticket(self, ticket_id: str) -> Optional[Ticket]:
         try:
-            # prefer DB-backed lookup
             with db_session() as db:
-                row = db.execute(text("SELECT id, external_id, title, description, severity, status FROM tickets WHERE id = :id"), {"id": ticket_id}).fetchone()
+                self._ensure_ticket_tables(db)
+                row = db.execute(
+                    text("SELECT id, external_id, title, description, severity, status FROM tickets WHERE id = :id"),
+                    {"id": ticket_id},
+                ).fetchone()
                 if row:
                     return Ticket(id=row[0], external_id=row[1], title=row[2], description=row[3], severity=row[4], status=row[5])
         except Exception:
-            pass
+            if self._strict_persistence_required():
+                return None
         try:
             return TicketingAgent._tickets.get(ticket_id)
         except Exception:
@@ -184,29 +242,36 @@ class TicketingAgent:
         results: List[Ticket] = []
         try:
             with db_session() as db:
+                self._ensure_ticket_tables(db)
                 if status:
-                    rows = db.execute(text("SELECT id, external_id, title, description, severity, status FROM tickets WHERE status = :st ORDER BY created_at DESC LIMIT 100"), {"st": status}).fetchall()
+                    rows = db.execute(
+                        text("SELECT id, external_id, title, description, severity, status FROM tickets WHERE status = :st ORDER BY created_at DESC LIMIT 100"),
+                        {"st": status},
+                    ).fetchall()
                 else:
-                    rows = db.execute(text("SELECT id, external_id, title, description, severity, status FROM tickets ORDER BY created_at DESC LIMIT 200")).fetchall()
-                for r in rows:
-                    results.append(Ticket(id=r[0], external_id=r[1], title=r[2], description=r[3], severity=r[4], status=r[5]))
+                    rows = db.execute(
+                        text("SELECT id, external_id, title, description, severity, status FROM tickets ORDER BY created_at DESC LIMIT 200")
+                    ).fetchall()
+                for row in rows:
+                    results.append(Ticket(id=row[0], external_id=row[1], title=row[2], description=row[3], severity=row[4], status=row[5]))
                 return results
         except Exception:
-            # fallback to in-memory store
+            if self._strict_persistence_required():
+                return results
             try:
-                for t in list(getattr(TicketingAgent, "_tickets", {}).values()):
-                    if status is None or t.status == status:
-                        results.append(t)
+                for ticket in list(getattr(TicketingAgent, "_tickets", {}).values()):
+                    if status is None or ticket.status == status:
+                        results.append(ticket)
             except Exception:
                 pass
         return results
 
     def approve_ticket(self, ticket_id: str) -> bool:
         try:
-            # try to update DB record
             updated = False
             try:
                 with db_session() as db:
+                    self._ensure_ticket_tables(db)
                     res = db.execute(text("UPDATE tickets SET status = :st WHERE id = :id"), {"st": "approved", "id": ticket_id})
                     try:
                         db.commit()
@@ -216,12 +281,15 @@ class TicketingAgent:
                         updated = True
             except Exception:
                 updated = False
+
+            if not updated and self._strict_persistence_required():
+                return False
             if not updated:
                 t = TicketingAgent._tickets.get(ticket_id)
                 if not t:
                     return False
                 t.status = "approved"
-            # record an audit decision for the approval
+
             try:
                 log_decision(
                     agent_name="ticketing_agent",
@@ -235,27 +303,30 @@ class TicketingAgent:
                 )
             except Exception:
                 pass
-            # Bridge: update decision logs (best-effort) and notify trace stream
+
             try:
                 trace_id = None
                 with db_session() as db:
+                    self._ensure_ticket_tables(db)
                     row = db.execute(text("SELECT trace_id FROM tickets WHERE id = :id"), {"id": ticket_id}).fetchone()
                     if row:
                         trace_id = row[0]
                 if trace_id:
-                    # Mark decision approved if present
                     try:
                         with db_session() as db:
-                            db.execute(text("UPDATE decision_logs SET approved_at = CURRENT_TIMESTAMP, execution_status = 'approved' WHERE id = :id"), {"id": trace_id})
+                            db.execute(
+                                text("UPDATE decision_logs SET approved_at = CURRENT_TIMESTAMP, execution_status = 'approved' WHERE id = :id"),
+                                {"id": trace_id},
+                            )
                             db.commit()
                     except Exception:
                         pass
-                    # Emit a real-time event via broker
                     try:
                         import asyncio
-                        from src.app.services.trace_broker import publish as _publish
-                        _evt = {
-                            "id": f"evt-{int(time.time()*1000)}",
+                        from src.app.services.trace_broker import publish as publish_trace
+
+                        evt = {
+                            "id": f"evt-{int(time.time() * 1000)}",
                             "trace_id": trace_id,
                             "event_type": "ticket_approved",
                             "source_type": "human",
@@ -266,17 +337,12 @@ class TicketingAgent:
                             "created_at": int(time.time()),
                         }
                         try:
-                            # asyncio.run() creates a fresh loop — safe from sync handlers.
-                            # create_task() if a loop is already running (async context).
-                            try:
-                                loop = asyncio.get_running_loop()
-                                loop.create_task(_publish(trace_id, _evt))
-                            except RuntimeError:
-                                asyncio.run(_publish(trace_id, _evt))
-                        except Exception as _broker_exc:
-                            _log.debug("ticketing: broker publish skipped: %s", _broker_exc)
-                    except Exception:
-                        pass
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(publish_trace(trace_id, evt))
+                        except RuntimeError:
+                            asyncio.run(publish_trace(trace_id, evt))
+                    except Exception as broker_exc:
+                        _log.debug("ticketing: broker publish skipped: %s", broker_exc)
             except Exception:
                 pass
             return True
@@ -285,10 +351,10 @@ class TicketingAgent:
 
     def close_ticket(self, ticket_id: str) -> bool:
         try:
-            # try to update DB record
             updated = False
             try:
                 with db_session() as db:
+                    self._ensure_ticket_tables(db)
                     res = db.execute(text("UPDATE tickets SET status = :st WHERE id = :id"), {"st": "closed", "id": ticket_id})
                     try:
                         db.commit()
@@ -298,6 +364,9 @@ class TicketingAgent:
                         updated = True
             except Exception:
                 updated = False
+
+            if not updated and self._strict_persistence_required():
+                return False
             if not updated:
                 try:
                     t = TicketingAgent._tickets.get(ticket_id)
@@ -306,7 +375,7 @@ class TicketingAgent:
                     t.status = "closed"
                 except Exception:
                     return False
-            # audit trace for closure
+
             try:
                 log_decision(
                     agent_name="ticketing_agent",

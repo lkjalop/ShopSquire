@@ -59,6 +59,23 @@ router = APIRouter(prefix="/api/v1/support/complaints", tags=["support"])
 _QR_REDIRECT_TASKS: Dict[str, asyncio.Task] = {}
 
 
+async def _dispatch_case_created_notification(case_id: str | None, customer_email: str | None = None) -> None:
+    try:
+        ns = NotificationService()
+        target_case_id = str(case_id or "unknown")
+        await ns.send_notification(
+            event="case_created",
+            context={
+                "case_id": target_case_id,
+                "customer_email": customer_email,
+                "track_url": f"/cases/{target_case_id}",
+            },
+            channels=["email"],
+        )
+    except Exception:
+        pass
+
+
 def _get_support_thresholds() -> Dict[str, Any]:
     try:
         flags = get_flags()
@@ -1514,13 +1531,14 @@ async def submit_complaint(
 ) -> Dict:
     """Submit a complaint with images; returns case id + preliminary CV analysis.
 
-    MVP: sanitize images, extract minimal labels/text (placeholder), map to laptop damage.
+    Sanitizes uploads, runs CV/OCR triage, persists case state, and returns a
+    preliminary routing decision with evidence metadata.
     """
     from src.app.services.image_intake import sanitize_image
     from src.app.services.cv_triage_basic import BasicCVTriage
     from src.app.services.cv_provider import ManagedCVProvider
 
-    # Sanitize and store minimal metadata; actual storage path omitted in MVP
+    # Sanitize uploads before CV/OCR processing and case persistence.
     sanitize_t0 = None
     try:
         import time as _t
@@ -1658,6 +1676,8 @@ async def submit_complaint(
     qr_external_url = False
     qr_payload_types: set[str] = set()
     qr_multi_mismatch = False
+    qr_review_required = False
+    qr_benign_detected = False
     qr_redirect_probe: Dict[str, Any] = {"enabled": False, "checked": False, "chain": []}
     try:
         from src.app.rules.barcode_decode import decode_barcodes
@@ -1691,11 +1711,16 @@ async def submit_complaint(
         try:
             qr_payload_types = {str(c.get("payload_type") or "").strip() for c in qr_decode_hits if c}
             qr_payload_types.discard("")
+            qr_risk_levels = {str(c.get("risk_level") or "benign").strip().lower() for c in qr_decode_hits if c}
+            qr_benign_detected = bool(qr_decode_hits) and qr_risk_levels == {"benign"}
+            qr_review_required = any(level in {"review", "malicious"} for level in qr_risk_levels)
             if len(qr_payload_types) > 1:
                 qr_multi_mismatch = True
         except Exception:
             qr_payload_types = set()
             qr_multi_mismatch = False
+            qr_review_required = False
+            qr_benign_detected = False
         # External URL indirection (common for indirect prompt injection / phishing).
         try:
             from urllib.parse import urlparse
@@ -1719,6 +1744,8 @@ async def submit_complaint(
         qr_external_url = False
         qr_payload_types = set()
         qr_multi_mismatch = False
+        qr_review_required = False
+        qr_benign_detected = False
         qr_redirect_probe = {"enabled": False, "checked": False, "chain": []}
 
     # Fold QR findings into image-consistency UX (soft verification) so the user is prompted
@@ -1760,8 +1787,8 @@ async def submit_complaint(
                 if qr_prompt_injection and "qr_prompt_injection" not in reasons:
                     reasons.append("qr_prompt_injection")
                 im["reasons"] = reasons[:6]
-                # Elevate status for security review of the evidence itself.
-                if str(im.get("status") or "match") == "match":
+                # Only elevate the evidence when the QR actually requires review.
+                if qr_review_required and str(im.get("status") or "match") == "match":
                     im["status"] = "suspicious"
                 tagged_any = True
             if not tagged_any and images_out:
@@ -1777,7 +1804,7 @@ async def submit_complaint(
                     if qr_prompt_injection and "qr_prompt_injection" not in reasons:
                         reasons.append("qr_prompt_injection")
                     im["reasons"] = reasons[:6]
-                    if str(im.get("status") or "match") == "match":
+                    if qr_review_required and str(im.get("status") or "match") == "match":
                         im["status"] = "suspicious"
                 except Exception:
                     pass
@@ -1799,12 +1826,21 @@ async def submit_complaint(
             image_consistency["status"] = "mismatch" if mismatch_count > 0 else ("needs_better_image" if needs_better_count > 0 else "match")
             image_consistency["soft_verify_required"] = bool(image_consistency["status"] in ("mismatch", "needs_better_image"))
             # Stronger (but still polite) user prompt when codes are present.
-            image_consistency["prompt"] = (
-                "For your security, we can't accept photos that include QR codes or external links. "
-                "Please upload a new, unedited photo of the item and the damaged area (no stickers, text overlays, or QR codes)."
-                if qr_external_url
-                else "For your security, we can't accept photos that include QR codes. Please upload a new, unedited photo (no overlays)."
-            )
+            if qr_external_url or qr_prompt_injection:
+                image_consistency["prompt"] = (
+                    "For your security, we can't accept photos that include QR codes or external links. "
+                    "Please upload a new, unedited photo of the item and the damaged area (no stickers, text overlays, or QR codes)."
+                )
+            elif qr_benign_detected:
+                image_consistency["prompt"] = (
+                    "I detected a QR code in one of the photos. You can continue, but a clean photo without the QR will verify faster. "
+                    "If you have proof of purchase, upload the receipt, order confirmation, or serial label with your next message."
+                )
+            else:
+                image_consistency["prompt"] = (
+                    "I detected a QR code in one of the photos. If you can, upload a cleaner photo of the item and damaged area. "
+                    "You can also upload a receipt, order confirmation, or serial label to continue."
+                )
     except Exception:
         pass
 
@@ -1904,23 +1940,12 @@ async def submit_complaint(
             cvt = TieredCV()
             # run tiered pipeline (no trace_id yet)
             try:
-                # `submit_complaint` is async; prefer awaiting the coroutine
                 cv_tiered_analysis = await cvt.process(
                     sanitized[0].get("bytes") or b"",
                     meta={"phash": sanitized[0].get("phash"), "force_tier2": bool(force_tier2)},
                 )
             except Exception:
-                try:
-                    import asyncio as _asyncio
-
-                    cv_tiered_analysis = _asyncio.get_event_loop().run_until_complete(
-                        cvt.process(
-                            sanitized[0].get("bytes") or b"",
-                            meta={"phash": sanitized[0].get("phash"), "force_tier2": bool(force_tier2)},
-                        )
-                    )
-                except Exception:
-                    cv_tiered_analysis = {}
+                cv_tiered_analysis = {}
     except Exception:
         cv_tiered_analysis = {}
     # Extract tier2 summary for decision trace visibility
@@ -1934,7 +1959,7 @@ async def submit_complaint(
             )
     except Exception:
         tier2_summary = None
-    # Compute trust + fraud signals (MVP placeholders)
+    # Compute trust + fraud signals for routing and escalation.
     history = {"account_age_days": 0, "loyalty_tier": None, "total_orders": 0, "email_verified": False, "phone_verified": False, "return_rate": 0.0, "fraud_flags": 0, "returns_last_30_days": 0}
     try:
         tls_fp = extract_tls_fingerprints_from_request(request) if request is not None else {}
@@ -2067,6 +2092,7 @@ async def submit_complaint(
         rule_eval["signals"]["ocr_prompt_injection"] = True
     if qr_decode_hits:
         rule_eval["signals"]["qr_code_detected"] = True
+        rule_eval["signals"]["qr_benign_detected"] = qr_benign_detected
     if qr_external_url:
         rule_eval["signals"]["qr_external_url_detected"] = True
     if qr_prompt_injection:
@@ -2718,7 +2744,7 @@ async def submit_complaint_guest(
     db=Depends(get_db),
     request: Request = None,
 ) -> Dict:
-    """Guest submission using receipt OCR (MVP placeholder) and optional damage photos."""
+    """Guest submission using receipt OCR and optional damage photos."""
     from src.app.services.image_intake import sanitize_image
     from src.app.services.cv_triage_basic import BasicCVTriage
     from src.app.services.cv_provider import ManagedCVProvider
@@ -2813,16 +2839,12 @@ async def submit_complaint_guest(
 
             cvt = TieredCV()
             try:
-                cv_tiered_analysis = await cvt.process(dmg_sanitized[0].get("bytes") or b"", meta={"phash": dmg_sanitized[0].get("phash")})
+                cv_tiered_analysis = await cvt.process(
+                    dmg_sanitized[0].get("bytes") or b"",
+                    meta={"phash": dmg_sanitized[0].get("phash")},
+                )
             except Exception:
-                try:
-                    import asyncio as _asyncio
-
-                    cv_tiered_analysis = _asyncio.get_event_loop().run_until_complete(
-                        cvt.process(dmg_sanitized[0].get("bytes") or b"", meta={"phash": dmg_sanitized[0].get("phash")})
-                    )
-                except Exception:
-                    cv_tiered_analysis = {}
+                cv_tiered_analysis = {}
     except Exception:
         cv_tiered_analysis = {}
     # Reverse image search on damage image
@@ -3207,7 +3229,7 @@ async def submit_complaint_guest(
             "geoip_trace": geoip_trace,
         },
         proposed_action={"analysis": analysis, "suggested_routing": recommended_route},
-        agent_reasoning="guest_flow_placeholder",
+        agent_reasoning="guest_complaint_triage",
         policy_version="v1",
         approval_required=needs_human,
         execution_status="queued",
@@ -3283,16 +3305,7 @@ async def submit_complaint_guest(
     except Exception:
         pass
 
-    # Send case_created notification placeholder (no persistence of cases yet)
-    try:
-        ns = NotificationService()
-        await ns.send_notification(
-            event="case_created",
-            context={"case_id": decision_id or "temp", "customer_email": None, "track_url": f"/cases/{decision_id}"},
-            channels=["email"],
-        )
-    except Exception:
-        pass
+    await _dispatch_case_created_notification(case_id)
 
     ticket_id = None
     if needs_human:

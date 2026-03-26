@@ -53,6 +53,8 @@ interface ImageGroup {
   fillBadge?: string | null;
   /** One-line "why this fired" for the analyst header */
   detectionReason?: string | null;
+  verdictLabel?: string | null;
+  confidenceBand?: string | null;
   /** True when the image was classified as a damaged device — show repair card instead of products */
   isRepairIntent?: boolean;
   repairContext?: { brand: string; damage_score: number } | null;
@@ -83,7 +85,10 @@ const RECOMMEND_TIMEOUT_MS = 15000;
 function persistOperatorMetrics(timing: any, traceId: string | null, source = 'visual_search') {
   if (!timing || typeof timing !== 'object') return;
   try {
+    const prevRaw = localStorage.getItem('shopsquire_operator_metrics');
+    const prev = prevRaw ? JSON.parse(prevRaw) : {};
     localStorage.setItem('shopsquire_operator_metrics', JSON.stringify({
+      ...prev,
       catalogProfileCacheHit:
         typeof timing.catalog_profile_cache_hit === 'boolean'
           ? timing.catalog_profile_cache_hit
@@ -135,6 +140,9 @@ function buildLaneDetectionReason(signals: ImageAnalysisContext['cv_signals']): 
 
 function buildBuyerSecurityNotice(signals: ImageAnalysisContext['cv_signals']): string {
   const s = signals as Record<string, any>;
+  if (signals.qr_code_detected && s.qr_benign_detected) {
+    return 'QR detected and decoded successfully. The visible content looks benign, so recommendations can continue.';
+  }
   if (s.payment_social_engineering || signals.qr_external_url_detected || signals.qr_code_detected) {
     return 'Suspicious QR-linked document detected. Admin notified. Recommendations remain available while this image is under review.';
   }
@@ -148,6 +156,15 @@ function buildBuyerSecurityNotice(signals: ImageAnalysisContext['cv_signals']): 
     return 'Image integrity warning detected. Admin notified. Recommendations remain available while this image is under review.';
   }
   return 'Suspicious signals detected. Admin notified. Recommendations remain available while this image is under review.';
+}
+
+function buildSafeFallbackQuery(query: string, brandLabel: string): string {
+  const cleanBase = stripBudgetHints(query);
+  const useCase = inferSummaryUseCase(query);
+  if (useCase === 'gaming') return `${cleanBase} gaming laptop show nearest safe in-stock options`.trim();
+  if (isWindowsLikeBrand(brandLabel)) return `${cleanBase} windows laptop show nearest in-stock options`.trim();
+  if (isAppleLikeBrand(brandLabel)) return `${cleanBase} macbook show nearest in-stock options`.trim();
+  return `${cleanBase} laptop show nearest in-stock options`.trim();
 }
 
 const TRUST_LABELS: Record<TrustLevel, string> = {
@@ -474,7 +491,7 @@ async function fetchSuggest(
   query: string,
   ctx: ImageAnalysisContext | null,
   budgetMax?: number,
-): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[]; traceId: string | null; offDomain: boolean; lowSupport: boolean; domainBadge: string | null; fillBadge: string | null }> {
+): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[]; traceId: string | null; offDomain: boolean; lowSupport: boolean; domainBadge: string | null; fillBadge: string | null; linkedArtifactSummary?: string | null; linkedArtifactPolicyAction?: string | null; linkedArtifactVerdictLabel?: string | null; linkedArtifactConfidenceBand?: string | null }> {
   const params = new URLSearchParams({ uid: DEFAULT_UID, query: query || 'show me laptops' });
   if (ctx) {
     const labels = [...(ctx.labels || [])];
@@ -529,6 +546,10 @@ async function fetchSuggest(
       fillBadge: data?.image_lane_fill?.applied
         ? `Filled to 3 using in-catalog ${String(data?.image_lane_fill?.image_category || 'catalog')} alternatives`
         : null,
+      linkedArtifactSummary: typeof data?.linked_artifact?.linked_reason_summary === 'string' ? data.linked_artifact.linked_reason_summary : null,
+      linkedArtifactPolicyAction: typeof data?.linked_artifact?.linked_policy_action === 'string' ? data.linked_artifact.linked_policy_action : null,
+      linkedArtifactVerdictLabel: typeof data?.linked_artifact?.linked_verdict_label === 'string' ? data.linked_artifact.linked_verdict_label : null,
+      linkedArtifactConfidenceBand: typeof data?.linked_artifact?.linked_confidence_band === 'string' ? data.linked_artifact.linked_confidence_band : null,
     };
   } catch (err: any) {
     if (err?.name === 'AbortError') {
@@ -693,6 +714,15 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           let safeSummary = sanitizeSummary(result.summary, products.length, `Top ${brand} picks matching your image.`);
           let trustLevel = trust;
           let securityNote = trust === 'green' ? note : buildBuyerSecurityNotice(ctx.cv_signals || {});
+          if (result.linkedArtifactSummary && result.linkedArtifactPolicyAction !== 'allow') {
+            securityNote = `${securityNote} ${result.linkedArtifactSummary}`.trim();
+          }
+          persistOperatorMetrics({
+            recommendation_latency_ms: result.traceId ? null : null,
+            qr_decode_success: Boolean(ctx.cv_signals?.qr_code_detected),
+            linked_artifact_fetch: Boolean(result.linkedArtifactSummary),
+            security_review_required: Boolean(ctx.cv_signals?.qr_external_url_detected || ctx.cv_signals?.qr_prompt_injection || result.linkedArtifactPolicyAction === 'review' || result.linkedArtifactPolicyAction === 'privacy_hold'),
+          }, pickedTraceId, 'visual_search');
           if (products.length === 0 && !result.offDomain) {
             const chain = await runBrandFallbackChain(userQuery, brand, ctx, parsedBudgetMax);
             if (chain) {
@@ -728,6 +758,8 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               lowSupport: result.lowSupport || forcedOffDomain,
               domainBadge: forcedOffDomain ? 'Off-domain image' : result.domainBadge,
               fillBadge: result.fillBadge,
+              verdictLabel: result.linkedArtifactVerdictLabel || null,
+              confidenceBand: result.linkedArtifactConfidenceBand || null,
               detectionReason: trust === 'green' ? null : buildLaneDetectionReason(ctx.cv_signals || {}),
             } as ImageGroup,
             traceId: pickedTraceId,
@@ -736,6 +768,30 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           const timeoutMsg = String(e?.message || '').includes('recommend_timeout_')
             ? `Timed out loading ${brand} recommendations.`
             : `Could not load ${brand} recommendations.`;
+          let fallbackProducts: ProductCard[] = [];
+          let fallbackSummary = timeoutMsg;
+          let fallbackTraceId: string | null = null;
+          if (!forcedOffDomain) {
+            try {
+              const fallback = await fetchSuggest(buildSafeFallbackQuery(userQuery, brand), ctx, parsedBudgetMax ? parsedBudgetMax + 400 : undefined);
+              fallbackProducts = fallback.products.slice(0, 3);
+              fallbackTraceId = fallback.traceId || null;
+              if (fallbackProducts.length > 0) {
+                fallbackSummary = String(e?.message || '').includes('recommend_timeout_')
+                  ? `Brand-specific recommendations timed out, so I’m showing the nearest safe ${inferSummaryUseCase(userQuery)} laptops instead.`
+                  : 'Brand-specific recommendations were unavailable, so I’m showing the nearest safe in-stock laptops instead.';
+              }
+              persistOperatorMetrics({
+                recommendation_timeout: String(e?.message || '').includes('recommend_timeout_'),
+                recommendation_fallback_used: fallbackProducts.length > 0,
+                qr_decode_success: Boolean(ctx.cv_signals?.qr_code_detected),
+                linked_artifact_fetch: Boolean(fallback.linkedArtifactSummary),
+                security_review_required: Boolean(ctx.cv_signals?.qr_external_url_detected || ctx.cv_signals?.qr_prompt_injection),
+              }, fallbackTraceId, 'visual_search_fallback');
+            } catch {
+              // Preserve the original timeout path if the fallback also fails.
+            }
+          }
           return {
             group: {
               source: ctx.source_name || `Image ${i + 1}: ${brand}`,
@@ -745,17 +801,19 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               securityNote: forcedOffDomain
                 ? 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.'
                 : (trust === 'green' ? note : buildBuyerSecurityNotice(ctx.cv_signals || {})),
-              products: [],
-              summary: forcedOffDomain ? lockedOffDomainSummary(userQuery) : timeoutMsg,
-              widenState: forcedOffDomain ? undefined : { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true },
+              products: fallbackProducts,
+              summary: forcedOffDomain ? lockedOffDomainSummary(userQuery) : fallbackSummary,
+              widenState: forcedOffDomain || fallbackProducts.length > 0 ? undefined : { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true },
               context: ctx,
               offDomain: forcedOffDomain,
               lowSupport: forcedOffDomain,
               domainBadge: forcedOffDomain ? 'Off-domain image' : null,
-              fillBadge: null,
+              fillBadge: fallbackProducts.length > 0 ? 'Fallback recommendations applied' : null,
+              verdictLabel: null,
+              confidenceBand: null,
               detectionReason: forcedOffDomain ? null : (trust === 'green' ? null : buildLaneDetectionReason(ctx.cv_signals || {})),
             } as ImageGroup,
-            traceId: null as string | null,
+            traceId: fallbackTraceId,
           };
         }
       }),
@@ -917,12 +975,24 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               <span className={`${styles.trustBadge} ${trustClass}`}>{TRUST_LABELS[group.trustLevel]}</span>
               {group.domainBadge && <span className={styles.domainBadge}>{group.domainBadge}</span>}
               {group.fillBadge && <span className={styles.fillBadge}>{group.fillBadge}</span>}
+              {group.verdictLabel && <span className={styles.domainBadge}>{group.verdictLabel}{group.confidenceBand ? ` • ${group.confidenceBand}` : ''}</span>}
             </div>
 
             {/* Security note — friendly, non-scary */}
             {group.securityNote && (
               <div className={group.trustLevel === 'green' ? styles.securityNoteBenign : styles.securityNote}>
                 {group.securityNote}
+                <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my receipt now')}>
+                    Upload receipt
+                  </button>
+                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my order confirmation screenshot now')}>
+                    Upload order confirmation
+                  </button>
+                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading a photo of the serial number label now')}>
+                    Upload serial label
+                  </button>
+                </div>
               </div>
             )}
 

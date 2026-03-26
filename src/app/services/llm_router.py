@@ -1,5 +1,6 @@
 from typing import Dict, Optional
 from src.app.services.llm_providers import AnthropicProvider, OpenAIProvider, MistralProvider, BaseLLMProvider
+from src.app.security.provider_boundary import require_provider_transfer
 import os
 
 
@@ -43,25 +44,32 @@ class ProviderRouter:
             1: os.getenv("LLM_PROVIDER_TIER_CHEAP"),
         }
         if prefer and prefer in self.providers:
+            require_provider_transfer(prefer, data_categories=["llm_prompt"])
             return self.providers.get(prefer)
 
         # Tier mapping
         override = tier_map.get(tier)
         if override and override in self.providers:
+            require_provider_transfer(override, data_categories=["llm_prompt"])
             return self.providers[override]
         if tier >= 3 and 'anthropic' in self.providers:
+            require_provider_transfer('anthropic', data_categories=["llm_prompt"])
             return self.providers['anthropic']
         if tier == 2 and 'openai' in self.providers:
+            require_provider_transfer('openai', data_categories=["llm_prompt"])
             return self.providers['openai']
         if tier == 1:
             if 'mistral' in self.providers:
+                require_provider_transfer('mistral', data_categories=["llm_prompt"])
                 return self.providers['mistral']
             if 'openai' in self.providers:
+                require_provider_transfer('openai', data_categories=["llm_prompt"])
                 return self.providers['openai']
 
         # fallback to any available
         for p in (chain or ['openai', 'anthropic', 'mistral']):
             if p in self.providers:
+                require_provider_transfer(p, data_categories=["llm_prompt"])
                 return self.providers[p]
 
         # last resort: return first registered

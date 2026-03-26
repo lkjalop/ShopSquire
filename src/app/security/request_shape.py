@@ -68,10 +68,18 @@ class GlobalRequestShapeMiddleware(BaseHTTPMiddleware):
         if max_bytes <= 0:
             return await call_next(request)
 
+        ctype = str(request.headers.get("content-type") or "").lower()
+
         # Fast reject when Content-Length is clearly too large.
         cl_hdr = str(request.headers.get("content-length") or "").strip()
         if cl_hdr.isdigit() and int(cl_hdr) > max_bytes:
             return JSONResponse(status_code=413, content={"detail": "request_body_too_large", "max_bytes": max_bytes})
+
+        # Do not eagerly buffer multipart streams. UploadFile handlers depend on
+        # consuming the request body themselves, and reading it here can stall
+        # file-upload routes under TestClient and production ASGI servers.
+        if "multipart/form-data" in ctype:
+            return await call_next(request)
 
         body = await request.body()
         if len(body) > max_bytes:
@@ -79,7 +87,6 @@ class GlobalRequestShapeMiddleware(BaseHTTPMiddleware):
 
         # Enforce JSON shape caps for state-changing methods.
         method = str(request.method or "").upper()
-        ctype = str(request.headers.get("content-type") or "").lower()
         if method in ("POST", "PUT", "PATCH") and "application/json" in ctype and body:
             try:
                 import json

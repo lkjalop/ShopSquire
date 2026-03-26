@@ -1,9 +1,9 @@
 {
-  "title": "Cost Dashboard (Placeholder)",
+  "title": "Cost Dashboard",
+  "production_hidden": true,
   "widgets": [
     { "id": "llm_tokens_total", "type": "timeseries", "metric": "shopsquire_llm_tokens_total" },
     { "id": "cv_ms_p95", "type": "timeseries", "metric": "shopsquire_cv_latency_ms_p95" }
   ],
-  "notes": "Roadmap-referenced placeholder; Grafana dashboards live under config/observability/grafana/*."
+  "notes": "Development-only scaffold. Hide from production surfaces until backed by live cost and latency metrics."
 }
-

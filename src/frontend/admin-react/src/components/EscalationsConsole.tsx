@@ -14,6 +14,15 @@ type Props = { role: 'merchant' | 'owner' | 'developer'; initialIncidentId?: str
 
 type ChatRec = { incident_id?: string; role?: string; message?: string; ts?: number; meta?: any };
 
+function getCsrfToken(): string {
+  if (typeof document === 'undefined') return '';
+  const entry = document.cookie
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith('ss_csrf='));
+  return entry ? entry.slice('ss_csrf='.length) : '';
+}
+
 function safeJson(v: any) {
   try {
     return JSON.stringify(v, null, 2);
@@ -125,10 +134,11 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
     try {
       const tok = await issueIncidentStaffToken(incidentId);
       setStaffToken(tok.staff_token);
+      document.cookie = `ss_incident_token_${String(incidentId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 48) || 'default'}=${encodeURIComponent(tok.staff_token)}; Path=/; SameSite=Strict`;
       if (esRef.current) {
         try { esRef.current.close(); } catch {}
       }
-      const url = `${window.location.origin}/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream?token=${encodeURIComponent(tok.staff_token)}`;
+      const url = `${window.location.origin}/api/v1/incidents/${encodeURIComponent(incidentId)}/room/stream`;
       const es = new EventSource(url);
       esRef.current = es;
       es.onmessage = (ev) => {
@@ -202,7 +212,12 @@ export function EscalationsConsole({ role, initialIncidentId }: Props) {
     try {
       const r = await fetch(`/api/v1/incidents/${encodeURIComponent(selected.id)}/room/message`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-incident-token': staffToken },
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-incident-token': staffToken,
+          ...(getCsrfToken() ? { 'X-CSRF-Token': getCsrfToken() } : {}),
+        },
         body: JSON.stringify({ message: text }),
       });
       if (!r.ok) throw new Error('send_failed');
