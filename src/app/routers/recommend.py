@@ -2953,12 +2953,188 @@ def _apply_image_security_response_fields(
     return payload
 
 
+def _build_context_preamble(
+    kv: dict,
+    structured_state: dict,
+    constraints: dict,
+) -> str:
+    """Build a structured memory preamble injected into the LLM prompt.
+
+    Mirrors the <memory> injection used by frontier models (Kimi K2, Claude extended context)
+    to prevent context rot across multi-turn conversations.
+
+    Returns a plain-English block like::
+
+        Prior conversation context:
+        - Use case: gaming laptop
+        - Budget: $1,800 max
+        - Preference: RTX 4070 or above
+        - Excluded brands: HP
+        - Previously confirmed: budget, use_case (turn 6)
+
+    Returns "" when no useful context is available.
+    """
+    lines: list[str] = []
+
+    # Merge answered_fields from structured state + kv (prefer structured_state)
+    answered: dict = {}
+    try:
+        answered.update(kv.get("nqe_answered_fields") or {})
+        answered.update(structured_state.get("nqe_answered_fields") or {})
+        answered.update(structured_state.get("confirmed_slots") or {})
+    except Exception:
+        pass
+
+    # Also pull direct constraint values (budget, use_case, brands)
+    for ck in ("budget_max", "budget_min", "use_case", "brands", "gpu_preference"):
+        if ck in constraints and ck not in answered:
+            answered[ck] = constraints[ck]
+
+    if not answered:
+        return ""
+
+    # Format the most useful slots into plain English (max 6 lines)
+    _USE_CASE_LABELS: dict = {
+        "gaming": "gaming laptop",
+        "gaming_aaa_heavy": "AAA gaming laptop (ultra settings)",
+        "gaming_casual": "casual gaming laptop",
+        "gaming_competitive": "competitive esports laptop",
+        "student_university": "university student laptop",
+        "professional_developer": "developer / software engineering",
+        "content_creator": "content creation / video editing",
+        "office_general": "general office work",
+        "office_finance": "finance / data analysis",
+        "office_executive": "executive travel laptop",
+        "photo_editing": "photo editing",
+        "architecture_student": "architecture / CAD",
+    }
+
+    budget_max = answered.get("budget_max") or constraints.get("budget_max")
+    budget_min = answered.get("budget_min") or constraints.get("budget_min")
+    use_case = str(answered.get("use_case") or constraints.get("use_case") or "").strip()
+    brands = answered.get("brands") or constraints.get("brands") or []
+    excluded = answered.get("excluded_brands") or constraints.get("excluded_brands") or []
+    gpu_pref = answered.get("gpu_preference") or constraints.get("gpu_preference") or ""
+    turn = int(answered.get("conversation_turn") or kv.get("conversation_turn") or 0)
+
+    if use_case:
+        label = _USE_CASE_LABELS.get(use_case, use_case.replace("_", " "))
+        lines.append(f"- Use case: {label}")
+    if budget_max and budget_min:
+        lines.append(f"- Budget: ${int(budget_min):,}–${int(budget_max):,}")
+    elif budget_max:
+        lines.append(f"- Budget: ${int(budget_max):,} max")
+    elif budget_min:
+        lines.append(f"- Budget: above ${int(budget_min):,}")
+    if brands:
+        lines.append(f"- Preferred brands: {', '.join(str(b) for b in brands[:3])}")
+    if excluded:
+        lines.append(f"- Excluded brands: {', '.join(str(b) for b in excluded[:3])}")
+    if gpu_pref:
+        lines.append(f"- GPU preference: {gpu_pref}")
+
+    # Confirmed high-signal slots (shows agent what it already knows)
+    confirmed_keys = [
+        k for k in answered
+        if k not in ("budget_max", "budget_min", "use_case", "brands",
+                     "excluded_brands", "gpu_preference", "conversation_turn")
+        and answered[k] is not None
+    ]
+    if confirmed_keys[:3]:
+        lines.append(f"- Also confirmed: {', '.join(confirmed_keys[:3])}")
+    if turn > 1:
+        lines.append(f"- Conversation turn: {turn}")
+
+    if not lines:
+        return ""
+    return "Prior conversation context:\n" + "\n".join(lines)
+
+
+def _trace_to_context_summary(
+    trace_id: str | None,
+    mem,
+    uid: str,
+) -> str:
+    """Distil the last turn's agent_steps from Redis into a 3-5 bullet context block.
+
+    This is ShopSquire's equivalent of Claude 4.6 / GPT-4o's scratchpad reflection —
+    the agent sees its own prior reasoning before answering the next question.
+
+    Returns "" when trace unavailable or no useful steps found.
+    """
+    if not trace_id or not uid:
+        return ""
+    try:
+        redis_client = getattr(mem, "redis", None)
+        if redis_client is None:
+            return ""
+        # agent_steps key stores a list of step dicts [{event_type, source_id, payload}, ...]
+        raw = redis_client.get(f"session:{uid}:agent_steps")
+        if not raw:
+            return ""
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        import json as _json
+        steps = _json.loads(raw)
+        if not isinstance(steps, list) or not steps:
+            return ""
+
+        bullets: list[str] = []
+        seen_types: set = set()
+        priority_types = ("security_scan", "fraud_score", "intent_analysis",
+                          "nqe_convergence", "commerce_outcome", "nqe_option_applied")
+
+        for step in reversed(steps[-20:]):  # scan most recent 20 steps, newest first
+            etype = str(step.get("event_type") or "")
+            if etype in seen_types:
+                continue
+            seen_types.add(etype)
+            payload = step.get("payload") or {}
+
+            if etype == "intent_analysis":
+                intent = str(payload.get("intent") or payload.get("primary_intent") or "")
+                conf = float(payload.get("confidence") or 0)
+                if intent:
+                    bullets.append(f"- Last intent detected: {intent} (confidence {conf:.0%})")
+            elif etype == "security_scan":
+                sev = str(payload.get("severity") or "info")
+                risk = float(payload.get("risk_adj") or 0)
+                if risk > 10 or sev not in ("info", "low"):
+                    bullets.append(f"- Security: severity={sev}, risk_adj={risk:.0f}")
+            elif etype == "fraud_score":
+                score = float(payload.get("score") or payload.get("fraud_score") or 0)
+                if score > 20:
+                    bullets.append(f"- Fraud signal: score={score:.0f}")
+            elif etype == "nqe_convergence":
+                filled = int(payload.get("high_signal_slots_filled") or 0)
+                bullets.append(f"- NQE converged: {filled} high-signal slots confirmed")
+            elif etype == "nqe_option_applied":
+                qid = str(payload.get("question_id") or "")
+                applied = payload.get("applied_constraints") or {}
+                if qid and applied:
+                    bullets.append(f"- User answered '{qid}': {list(applied.items())[:2]}")
+            elif etype == "commerce_outcome":
+                outcome = str(payload.get("outcome") or "")
+                if outcome:
+                    bullets.append(f"- Last outcome: {outcome}")
+
+            if len(bullets) >= 4:
+                break
+
+        if not bullets:
+            return ""
+        return "Agent context from prior turn:\n" + "\n".join(bullets)
+    except Exception:
+        return ""
+
+
 def _summarize_results(
     query: str,
     results: list[dict],
     constraints: dict,
     model: str | None,
     trace_id: str | None = None,
+    context_preamble: str | None = None,
 ) -> tuple[str | None, str | None]:
     if not os.getenv("USE_LLM_SUMMARY", "1").lower() in ("1", "true", "yes"):
         return None, None
@@ -3013,19 +3189,35 @@ def _summarize_results(
             # Helps LLM calibrate value language for budget-conscious buyers
             budget_str = f"{budget_str} ({_bracket}-range)" if budget_str else f"{_bracket}-range budget"
 
+        # Gaming tier calibration hint — tells LLM what the budget tier can actually do
+        _gaming_hint = ""
+        _uc_lower = use_case.lower()
+        if "gaming" in _uc_lower and _bracket:
+            _gaming_tier_map = {
+                "entry": "entry-level gaming (1080p/medium settings, older or indie titles)",
+                "mid": "solid 1080p/1440p gaming (high settings on most modern titles)",
+                "high": "high-end 1440p/4K gaming (ultra settings on most titles)",
+                "ultra": "enthusiast/4K gaming (max settings, ray tracing, high refresh rate)",
+            }
+            _gaming_hint = f"Gaming context: at this budget ({_bracket}-range), expect {_gaming_tier_map.get(_bracket, 'mid-range gaming')}.\n"
+
         prompt = (
             "You are a warm, knowledgeable shopping assistant. "
             "Speak like a helpful friend who knows tech — not like a search engine.\n\n"
-            f"The user asked: \"{query}\"\n\n"
+            + (f"{context_preamble}\n\n" if context_preamble else "")
+            + f"The user asked: \"{query}\"\n\n"
             "Instructions:\n"
             "1. Answer the user's question DIRECTLY in the first sentence. "
-            "If it is a yes/no question (e.g. 'Is $1,800 enough?'), answer yes or no first.\n"
+            "If it is a yes/no question (e.g. 'Is $1,800 enough?'), start with YES or NO. "
+            "If the answer depends on settings/use-case, say 'It depends — ' and explain in one sentence.\n"
             "2. Mention the top 1-2 products by name and say specifically WHY they fit "
             "(reference the spec that matters for their use case, e.g. GPU for gaming, "
             "battery for travel, RAM for engineering).\n"
             "3. Use plain English. Explain specs in context: instead of '16GB DDR5', say "
             "'16GB of memory — enough to run games and Chrome at the same time'.\n"
-            "4. Keep it under 65 words. Do not list every product. Do not invent specs.\n\n"
+            "4. Keep it under 70 words. Do not list every product. Do not invent specs. "
+            "Do NOT repeat what you already know from the prior context above.\n\n"
+            + (_gaming_hint if _gaming_hint else "")
             + (f"Budget: {budget_str}\n" if budget_str else "")
             + (f"Use case: {use_case}\n" if use_case else "")
             + (f"Preferred brands: {', '.join(brands)}\n" if brands else "")
@@ -3216,6 +3408,7 @@ def _classify_budget_bracket(budget_max: float | int | None) -> str | None:
 
 
 def _build_brand_budget_answer(query: str, results: list[dict], constraints: dict) -> str:
+    import re as _re_bba
     q_low = str(query or "").lower()
     asks_budget = any(
         tok in q_low for tok in (
@@ -3225,6 +3418,56 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
     )
     if not asks_budget:
         return ""
+
+    # ── Extract budget from query text when not already in constraints ──────
+    # Handles "Is $1800 enough?" when budget_max is not yet set in constraints.
+    if not constraints.get("budget_max") and not constraints.get("_request_budget_max"):
+        _m = _re_bba.search(r"[\$€£]\s*(\d[\d,]+)", q_low)
+        if _m:
+            try:
+                _extracted = float(_m.group(1).replace(",", ""))
+                if _extracted > 100:  # sanity: ignore $10 etc
+                    constraints = dict(constraints)  # local copy, don't mutate caller
+                    constraints["budget_max"] = _extracted
+            except Exception:
+                pass
+
+    # ── Corporate / business use case deterministic answer ──────────────────
+    _is_corporate = any(
+        tok in q_low for tok in (
+            "corporate", "business", "office", "work laptop", "work use",
+            "enterprise", "professional use", "company",
+        )
+    )
+    _use_case = str(constraints.get("use_case") or "").lower()
+    if not _is_corporate and "office" in _use_case or "corporate" in _use_case:
+        _is_corporate = True
+    if _is_corporate:
+        _bmax = float(constraints.get("budget_max") or constraints.get("_request_budget_max") or 0)
+        if _bmax > 0 and results:
+            def _cp(r: dict) -> float:
+                try:
+                    return float((r or {}).get("price_cents") or 0) / 100.0
+                except Exception:
+                    return 0.0
+            _prices = [_cp(r) for r in results if _cp(r) > 0]
+            if _prices:
+                _cheapest = min(_prices)
+                _brands_seen = list(dict.fromkeys(
+                    str((r or {}).get("brand") or "").title()
+                    for r in results[:3] if (r or {}).get("brand")
+                ))
+                _brand_str = " and ".join(_brands_seen[:2]) if _brands_seen else "business-class"
+                if _cheapest > _bmax:
+                    return (
+                        f"For ${int(_bmax):,} in business use, the nearest options start around "
+                        f"${int(round(_cheapest)):,} — here are the closest matches."
+                    )
+                return (
+                    f"For ${int(_bmax):,} in corporate use, you're in {_brand_str} territory — "
+                    "solid build quality, business warranty, and good port selection. "
+                    f"Here are your top {min(len(results), 3)} options."
+                )
     brand_hint = str(
         constraints.get("_strict_image_brand_hint")
         or constraints.get("_inferred_image_brand")
@@ -9165,7 +9408,30 @@ def suggest(
     llm_summary_job_id = None
     llm_summary_requested = (not fast_path_enabled) and bool(nlp.get("llm_fallback") or explanation_request)
     if llm_summary_requested and rule_eval.get("recommend_llm", True):
-        assistant_message, llm_summary_job_id = _summarize_results(query, results, constraints, llm_model, trace_id)
+        # ── Build frontier-style memory injection for LLM prompt ──────────────
+        # Mirrors Kimi K2 / Claude extended context: structured slot state prepended
+        # to each turn so the LLM never loses conversation context.
+        _ctx_preamble: str | None = None
+        _trace_ctx: str | None = None
+        try:
+            _ctx_preamble = _build_context_preamble(
+                kv=kv if isinstance(kv, dict) else {},
+                structured_state=structured_state if isinstance(structured_state, dict) else {},
+                constraints=constraints,
+            ) or None
+        except Exception:
+            pass
+        try:
+            _trace_ctx = _trace_to_context_summary(trace_id, mem, uid) or None
+        except Exception:
+            pass
+        # Combine: conversation memory first, then trace context
+        _combined_preamble_parts = [p for p in (_ctx_preamble, _trace_ctx) if p]
+        _combined_preamble = "\n\n".join(_combined_preamble_parts) if _combined_preamble_parts else None
+        assistant_message, llm_summary_job_id = _summarize_results(
+            query, results, constraints, llm_model, trace_id,
+            context_preamble=_combined_preamble,
+        )
     if explanation_request:
         payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
         try:
@@ -9539,6 +9805,35 @@ def suggest(
                     "I couldn't find in-stock products in that exact window yet. "
                     "Use widen/search-nearest to see the closest viable options."
                 )
+        # ── Confidence gate prefix (Fix 6) ─────────────────────────────────────
+        # Mirror orchestrator autonomy_tier logic: prepend a hold/caution notice
+        # to the visible assistant_message so the UI badge and text stay in sync.
+        try:
+            _intent_conf_gate = float(nlp.get("intent_confidence") or 0.0) if isinstance(nlp, dict) else 0.0
+            _fraud_score_gate = float((fraud_summary or {}).get("score") or 0.0)
+            _policy_approval_gate = gate_requires_review and getattr(gate, "approval_required", False)
+            if _fraud_score_gate >= 80:
+                payload["autonomy_tier"] = "denied"
+                payload["autonomy_badge"] = "DENIED — FRAUD SIGNAL"
+            elif _policy_approval_gate:
+                payload["autonomy_tier"] = "escalated"
+                payload["autonomy_badge"] = "ESCALATED"
+            elif _intent_conf_gate < 0.60:
+                _gate_prefix = "I need to verify this before confirming — "
+                if assistant_message and not assistant_message.startswith(_gate_prefix):
+                    assistant_message = _gate_prefix + assistant_message
+                payload["autonomy_tier"] = "hold"
+                payload["autonomy_badge"] = "HOLD — LOW CONFIDENCE"
+                payload["confidence_gate_active"] = True
+            elif _intent_conf_gate < 0.85:
+                payload["autonomy_tier"] = "caution"
+                payload["autonomy_badge"] = "CAUTION"
+            else:
+                payload["autonomy_tier"] = "auto"
+                payload["autonomy_badge"] = "AUTO-RESOLVED"
+            payload["intent_confidence"] = round(_intent_conf_gate, 3)
+        except Exception:
+            pass
         payload["assistant_message"] = assistant_message
         payload["catalog_profile"] = catalog_profile
         payload["catalog_relevance"] = catalog_relevance

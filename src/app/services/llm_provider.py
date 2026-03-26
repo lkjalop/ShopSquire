@@ -187,6 +187,12 @@ def score_query_complexity(
         explanations.append("Direct budget yes/no question — medium model required")
 
     total = min(10, sum(signals.values()))
+    # Budget yes/no questions require at least the medium tier regardless of other signals.
+    # llama3:8b (<= score 4) does not reliably follow multi-step prompt instructions,
+    # so even a short "Is $1800 enough for gaming?" must route to mixtral (score_min 5).
+    if signals.get("budget_question") and total < 5:
+        total = 5
+        explanations.append("Budget question floor: score raised to 5 → medium model")
     tier_name, model = _tier_for_score(total)
 
     return {
