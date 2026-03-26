@@ -114,6 +114,21 @@ def upgrade():
     )
 
     _create_table_if_missing(
+        "order_items",
+        sa.Column("id", sa.Text(), primary_key=True),
+        sa.Column("order_id", sa.Text(), nullable=False),
+        sa.Column("user_id", sa.Text(), nullable=False),
+        sa.Column("sku", sa.Text(), nullable=False),
+        sa.Column("product_name", sa.Text(), nullable=True),
+        sa.Column("brand", sa.Text(), nullable=True),
+        sa.Column("quantity", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("unit_price_cents", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.Text(), nullable=True),
+        sa.Column("updated_at", sa.Text(), nullable=True),
+        schema=schema,
+    )
+
+    _create_table_if_missing(
         "cases",
         sa.Column("id", sa.Text(), primary_key=True),
         sa.Column("tenant_id", sa.Text(), nullable=True),

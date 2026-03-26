@@ -417,6 +417,39 @@ def seed_orders(db):
             {"id": _uuid(), "uid": "vip-user-42", "order_id": oid},
         )
 
+    # Seed order_items so _corroborate_order() finds real purchase history.
+    # Without this the fraud check silently returns db_unavailable in demo env.
+    _demo_items = [
+        ("LAPTOP-LENOVO-001", "Lenovo ThinkPad X1 Carbon", "lenovo", 149900),
+        ("LAPTOP-DELL-001",   "Dell XPS 15",               "dell",   179900),
+        ("LAPTOP-APPLE-001",  "Apple MacBook Pro 14",       "apple",  199900),
+    ]
+    try:
+        for idx, (oid, (sku, product_name, brand, unit_price)) in enumerate(
+            zip(order_ids, _demo_items)
+        ):
+            db.execute(
+                text(
+                    "INSERT INTO order_items "
+                    "(id, order_id, user_id, sku, product_name, brand, quantity, unit_price_cents, created_at, updated_at) "
+                    "VALUES (:id, :order_id, :user_id, :sku, :product_name, :brand, 1, :unit_price, :created_at, :updated_at) "
+                    "ON CONFLICT (id) DO NOTHING"
+                ),
+                {
+                    "id": _uuid(),
+                    "order_id": oid,
+                    "user_id": cid,
+                    "sku": sku,
+                    "product_name": product_name,
+                    "brand": brand,
+                    "unit_price": unit_price,
+                    "created_at": (datetime.utcnow() - timedelta(days=idx + 1)).isoformat(),
+                    "updated_at": (datetime.utcnow() - timedelta(days=idx + 1)).isoformat(),
+                },
+            )
+    except Exception:
+        pass  # Table may not exist yet in older envs; migration handles it
+
 
 def seed_decisions(db):
     existing = db.execute(text("SELECT COUNT(*) FROM decision_logs")).scalar() or 0

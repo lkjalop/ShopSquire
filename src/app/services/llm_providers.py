@@ -18,7 +18,10 @@ class AnthropicProvider(BaseLLMProvider):
 
     def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
         if not self.api_key:
-            return {"provider": self.name, "text": "[anthropic stub response]", "raw": None}
+            raise RuntimeError(
+                "AnthropicProvider: ANTHROPIC_API_KEY not configured. "
+                "Set the environment variable or choose a different provider."
+            )
         try:
             import requests
 
@@ -62,7 +65,10 @@ class OpenAIProvider(BaseLLMProvider):
 
     def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
         if not self.api_key:
-            return {"provider": self.name, "text": "[openai stub response]", "raw": None}
+            raise RuntimeError(
+                "OpenAIProvider: OPENAI_API_KEY not configured. "
+                "Set the environment variable or choose a different provider."
+            )
         try:
             import requests
 
@@ -99,7 +105,10 @@ class MistralProvider(BaseLLMProvider):
 
     def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
         if not self.api_key:
-            return {"provider": self.name, "text": "[mistral stub response]", "raw": None}
+            raise RuntimeError(
+                "MistralProvider: MISTRAL_API_KEY not configured. "
+                "Set the environment variable or choose a different provider."
+            )
         try:
             import requests
 
@@ -165,9 +174,16 @@ def get_provider(name: str | None = None) -> BaseLLMProvider:
     if os.getenv("MISTRAL_API_KEY"):
         return MistralProvider()
 
-    # Default fallback (will return stub responses)
-    default = os.getenv("LLM_PROVIDER", "openai").lower()
-    return _PROVIDER_MAP.get(default, OpenAIProvider)()
+    # No API key configured for any provider — fail closed rather than return stub text.
+    # Callers should catch RuntimeError and degrade gracefully (e.g., skip LLM enrichment).
+    configured = os.getenv("LLM_PROVIDER", "").lower()
+    if configured and configured in _PROVIDER_MAP:
+        # Caller explicitly requested a provider — let it raise on first use
+        return _PROVIDER_MAP[configured]()
+    raise RuntimeError(
+        "No LLM provider API key is configured. "
+        "Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or MISTRAL_API_KEY."
+    )
 
 
 def list_providers() -> list[Dict[str, Any]]:

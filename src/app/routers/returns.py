@@ -182,16 +182,19 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
         pass
 
     # ── Multi-image mismatch detection ──
+    # submit_return is a sync def; asyncio.run() creates a fresh event loop
+    # in the thread-pool worker — safe for sync FastAPI handlers under uvicorn.
     if images and len(images) >= 2:
+        import asyncio
+        import logging as _logging
+        _mim_log = _logging.getLogger(__name__)
         try:
             from src.app.services.cv_triage_basic import BasicCVTriage
-            import asyncio
             triage = BasicCVTriage()
             img_dicts = [
                 {"bytes": b, "mime": "image/jpeg", "labels": [], "text": "", "filename": fn}
                 for fn, b in images
             ]
-            # Derive expected product type from pkg SKU metadata if available
             _expected_pt = None
             try:
                 _cat = str(pkg.get("category") or "").lower()
@@ -201,7 +204,7 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
                     _expected_pt = "phone"
             except Exception:
                 pass
-            batch = asyncio.get_event_loop().run_until_complete(
+            batch = asyncio.run(
                 triage.analyze_batch(img_dicts, expected_product_type=_expected_pt)
             )
             pkg["multi_image_analysis"] = batch
@@ -211,8 +214,15 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
                 score.setdefault("signals", []).append(
                     {"signal": "multi_image_mismatch", "delta": delta, "detail": batch.get("mismatch_detail", "")}
                 )
-        except Exception:
-            pass
+        except RuntimeError as exc:
+            # asyncio.run() can raise if a loop is already running (rare in sync handlers).
+            # Log and continue — do not silently discard fraud signal opportunity.
+            _mim_log.warning("multi_image_mismatch: asyncio.run failed: %s", exc)
+            score.setdefault("signals", []).append(
+                {"signal": "multi_image_mismatch_skipped", "delta": 0, "detail": str(exc)}
+            )
+        except Exception as exc:
+            _mim_log.warning("multi_image_mismatch: unexpected error: %s", exc)
     # Optional contract NLP assist on free-text description
     contract_nlp = None
     contract_quality = None
