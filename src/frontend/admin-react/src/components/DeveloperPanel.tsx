@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchMe, fetchToolInvocations, fetchDbReadiness, ensureTimescale, fetchCVReadiness, fetchTenantConfig, putTenantConfig, setApiKeyCookie, clearApiKeyCookie, setClientApiKey } from '../api';
+import { fetchMe, fetchToolInvocations, fetchDbReadiness, ensureTimescale, fetchCVReadiness, fetchTenantConfig, putTenantConfig, setApiKeyCookie, clearApiKeyCookie, setClientApiKey, fetchPreferences } from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
 
@@ -57,11 +57,7 @@ export function DeveloperPanel({ role }: Props) {
 
   useEffect(() => {
     if (!showPrefs) return;
-    fetch(`${(import.meta.env.VITE_API_BASE as string) || window.location.origin}/api/v1/preferences?uid=demo-user`, {
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-    })
-      .then((r) => (r.ok ? r.json() : null))
+    fetchPreferences('demo-user')
       .then((data) => setPrefs(data?.preferences || {}))
       .catch(() => setPrefs({}));
   }, [showPrefs]);

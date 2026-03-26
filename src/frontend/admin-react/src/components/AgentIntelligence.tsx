@@ -1,19 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import {
+  fetchAgentTrust,
+  fetchCitationMemoryStats,
+  fetchObservationSummary,
+  fetchTrustedClaims,
+  fetchUserBehavioralModel,
+  fetchUserProfile,
+} from '../api';
 
-/* ─── helpers ─── */
-const API_BASE = ((import.meta as any).env?.VITE_API_BASE as string) || window.location.origin;
-const API_KEY_ENV = ((import.meta as any).env?.VITE_API_KEY as string) || '';
-
-async function http<T>(path: string): Promise<T> {
-  const url = `${API_BASE.replace(/\/$/, '')}${path}`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (API_KEY_ENV) headers['x-api-key'] = API_KEY_ENV;
-  const r = await fetch(url, { headers, credentials: 'include' });
-  if (!r.ok) throw Object.assign(new Error(`${r.status}`), { status: r.status });
-  return r.json();
-}
-
-/* ─── types ─── */
 interface CitationStats {
   total_claims: number;
   verified_claims: number;
@@ -46,7 +40,6 @@ interface ObservationSummary {
   event_types?: Record<string, any>;
 }
 
-/* ─── sub-sections ─── */
 function CitationMemorySection() {
   const [stats, setStats] = useState<CitationStats | null>(null);
   const [claims, setClaims] = useState<TrustedClaim[]>([]);
@@ -54,8 +47,8 @@ function CitationMemorySection() {
 
   useEffect(() => {
     Promise.allSettled([
-      http<CitationStats>('/api/v1/merchant/intelligence/citation_memory/stats'),
-      http<TrustedClaim[]>('/api/v1/merchant/intelligence/citation_memory/trusted_claims?min_trust=0.6&limit=20'),
+      fetchCitationMemoryStats(),
+      fetchTrustedClaims({ minTrust: 0.6, limit: 20 }),
     ]).then(([s, c]) => {
       if (s.status === 'fulfilled') setStats(s.value);
       if (c.status === 'fulfilled') setClaims(Array.isArray(c.value) ? c.value : []);
@@ -67,29 +60,29 @@ function CitationMemorySection() {
 
   return (
     <>
-      <h3 className="section-title">Citation Memory — Layer 4</h3>
+      <h3 className="section-title">Citation Memory - Layer 4</h3>
       <div className="card-row">
         <div className="stat-card">
           <div className="stat-label">Total Claims</div>
-          <div className="stat-value">{stats?.total_claims ?? '—'}</div>
+          <div className="stat-value">{stats?.total_claims ?? '-'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Verified</div>
-          <div className="stat-value">{stats?.verified_claims ?? '—'}</div>
+          <div className="stat-value">{stats?.verified_claims ?? '-'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Accuracy Rate</div>
           <div className="stat-value">
-            {stats ? `${(stats.accuracy_rate * 100).toFixed(1)}%` : '—'}
+            {stats ? `${(stats.accuracy_rate * 100).toFixed(1)}%` : '-'}
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Avg Trust Score</div>
-          <div className="stat-value">{stats?.avg_trust_score?.toFixed(3) ?? '—'}</div>
+          <div className="stat-value">{stats?.avg_trust_score?.toFixed(3) ?? '-'}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Pending</div>
-          <div className="stat-value">{stats?.pending_claims ?? '—'}</div>
+          <div className="stat-value">{stats?.pending_claims ?? '-'}</div>
         </div>
       </div>
 
@@ -107,13 +100,13 @@ function CitationMemorySection() {
               </tr>
             </thead>
             <tbody>
-              {claims.map((c, i) => (
+              {claims.map((claim, i) => (
                 <tr key={i}>
-                  <td>{c.agent_name}</td>
-                  <td><span className="pill">{c.claim_type}</span></td>
-                  <td>{c.claim_key}</td>
-                  <td>{c.trust_score.toFixed(3)}</td>
-                  <td>{c.confidence.toFixed(2)}</td>
+                  <td>{claim.agent_name}</td>
+                  <td><span className="pill">{claim.claim_type}</span></td>
+                  <td>{claim.claim_key}</td>
+                  <td>{claim.trust_score.toFixed(3)}</td>
+                  <td>{claim.confidence.toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -136,12 +129,12 @@ function UserProfileLookup() {
     setLoading(true);
     setError('');
     try {
-      const [p, b] = await Promise.all([
-        http<any>(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(userId)}`),
-        http<BehavioralModel>(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(userId)}/behavioral_model`),
+      const [profileData, behavioralData] = await Promise.all([
+        fetchUserProfile(userId),
+        fetchUserBehavioralModel(userId),
       ]);
-      setProfile(p);
-      setBehavioral(b);
+      setProfile(profileData);
+      setBehavioral(behavioralData);
     } catch (e: any) {
       setError(e?.message || 'Not found');
       setProfile(null);
@@ -173,15 +166,15 @@ function UserProfileLookup() {
           <div className="card-row" style={{ flexWrap: 'wrap' }}>
             <div className="stat-card">
               <div className="stat-label">Budget Tier</div>
-              <div className="stat-value">{profile.budget_tier || '—'}</div>
+              <div className="stat-value">{profile.budget_tier || '-'}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Preferred Brands</div>
-              <div className="stat-value" style={{ fontSize: 13 }}>{(profile.preferred_brands || []).join(', ') || '—'}</div>
+              <div className="stat-value" style={{ fontSize: 13 }}>{(profile.preferred_brands || []).join(', ') || '-'}</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Avoided Brands</div>
-              <div className="stat-value" style={{ fontSize: 13 }}>{(profile.avoided_brands || []).join(', ') || '—'}</div>
+              <div className="stat-value" style={{ fontSize: 13 }}>{(profile.avoided_brands || []).join(', ') || '-'}</div>
             </div>
           </div>
           {behavioral && (
@@ -198,11 +191,11 @@ function UserProfileLookup() {
                 </div>
                 <div className="stat-card">
                   <div className="stat-label">Avg Turns</div>
-                  <div className="stat-value">{behavioral.avg_turns_per_session?.toFixed(1) || '—'}</div>
+                  <div className="stat-value">{behavioral.avg_turns_per_session?.toFixed(1) || '-'}</div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-label">Avg Products</div>
-                  <div className="stat-value">{behavioral.avg_products_compared?.toFixed(1) || '—'}</div>
+                  <div className="stat-value">{behavioral.avg_products_compared?.toFixed(1) || '-'}</div>
                 </div>
               </div>
               {behavioral.recurring_constraints && Object.keys(behavioral.recurring_constraints).length > 0 && (
@@ -232,7 +225,7 @@ function ObservationSummarySection() {
     if (!sessionId.trim()) return;
     setError('');
     try {
-      const data = await http<{ summary: ObservationSummary }>(`/api/v1/merchant/intelligence/observation_summary/${encodeURIComponent(sessionId)}`);
+      const data = await fetchObservationSummary(sessionId);
       setSummary(data?.summary || null);
     } catch (e: any) {
       setError(e?.message || 'Not found');
@@ -242,7 +235,7 @@ function ObservationSummarySection() {
 
   return (
     <>
-      <h3 className="section-title">Observation Summary — Layer 2</h3>
+      <h3 className="section-title">Observation Summary - Layer 2</h3>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <input
           className="modal-input"
@@ -286,9 +279,11 @@ function AgentTrustSection() {
   const load = useCallback(async () => {
     if (!agentName.trim()) return;
     try {
-      const data = await http<{ agent_name: string; trust_score: number }>(`/api/v1/merchant/intelligence/citation_memory/agent_trust/${encodeURIComponent(agentName)}`);
+      const data = await fetchAgentTrust(agentName);
       setTrust(data?.trust_score ?? null);
-    } catch { setTrust(null); }
+    } catch {
+      setTrust(null);
+    }
   }, [agentName]);
 
   return (
@@ -317,7 +312,6 @@ function AgentTrustSection() {
   );
 }
 
-/* ─── main component ─── */
 export function AgentIntelligence({ role }: { role: string }) {
   return (
     <div>

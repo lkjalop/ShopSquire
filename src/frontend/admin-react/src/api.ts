@@ -87,6 +87,46 @@ async function http<T>(path: string, opts?: RequestInit): Promise<T> {
   return r.json();
 }
 
+async function httpResponse(path: string, opts?: RequestInit): Promise<Response> {
+  const url = `${API_BASE.replace(/\/$/, '')}${path}`;
+  const method = String(opts?.method || 'GET').toUpperCase();
+  const headers: Record<string, string> = {};
+  if (opts?.headers) {
+    if (opts.headers instanceof Headers) {
+      opts.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+    } else if (Array.isArray(opts.headers)) {
+      opts.headers.forEach(([key, value]) => {
+        headers[key] = value;
+      });
+    } else {
+      Object.assign(headers, opts.headers as Record<string, string>);
+    }
+  }
+  const key = getApiKey();
+  if (key) headers['x-api-key'] = key;
+  if (STATE_CHANGING.has(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  }
+  const r = await fetch(url, { ...opts, headers, credentials: 'include' });
+  if (!r.ok) {
+    let detail = '';
+    try {
+      const body = await r.json();
+      detail = body?.detail ? String(body.detail) : (body?.error ? String(body.error) : '');
+    } catch {
+      detail = '';
+    }
+    const err: any = new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ''}`);
+    err.status = r.status;
+    err.detail = detail;
+    throw err;
+  }
+  return r;
+}
+
 export async function setApiKeyCookie(apiKey: string): Promise<{ ok: boolean }> {
   return http(`/api/v1/auth/api-key-cookie`, {
     method: 'POST',
@@ -96,6 +136,42 @@ export async function setApiKeyCookie(apiKey: string): Promise<{ ok: boolean }> 
 
 export async function clearApiKeyCookie(): Promise<{ ok: boolean }> {
   return http(`/api/v1/auth/api-key-cookie`, { method: 'DELETE' });
+}
+
+export async function fetchPreferences(uid: string): Promise<{ preferences?: any }> {
+  return http(`/api/v1/preferences?uid=${encodeURIComponent(uid)}`);
+}
+
+export async function fetchCitationMemoryStats(): Promise<any> {
+  return http(`/api/v1/merchant/intelligence/citation_memory/stats`);
+}
+
+export async function fetchTrustedClaims(params?: { minTrust?: number; limit?: number }): Promise<any[]> {
+  const q = new URLSearchParams();
+  q.set('min_trust', String(params?.minTrust ?? 0.6));
+  q.set('limit', String(params?.limit ?? 20));
+  return http(`/api/v1/merchant/intelligence/citation_memory/trusted_claims?${q.toString()}`);
+}
+
+export async function fetchUserProfile(userId: string): Promise<any> {
+  return http(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(userId)}`);
+}
+
+export async function fetchUserBehavioralModel(userId: string): Promise<any> {
+  return http(`/api/v1/merchant/intelligence/user_profiles/${encodeURIComponent(userId)}/behavioral_model`);
+}
+
+export async function fetchObservationSummary(sessionId: string): Promise<{ summary: any }> {
+  return http(`/api/v1/merchant/intelligence/observation_summary/${encodeURIComponent(sessionId)}`);
+}
+
+export async function fetchAgentTrust(agentName: string): Promise<{ agent_name: string; trust_score: number }> {
+  return http(`/api/v1/merchant/intelligence/citation_memory/agent_trust/${encodeURIComponent(agentName)}`);
+}
+
+export async function downloadAuthenticated(path: string): Promise<Blob> {
+  const r = await httpResponse(path);
+  return r.blob();
 }
 
 export async function fetchMe(): Promise<{ role: 'merchant' | 'owner' | 'developer'; allowed_roles: string[] }> {

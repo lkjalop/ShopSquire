@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  downloadAuthenticated,
   fetchGrcFingerprintAlerts,
   fetchGrcReport,
   fetchGrcRiskRegister,
@@ -9,12 +10,6 @@ import {
 } from '../api';
 
 type Props = { role: 'merchant' | 'owner' | 'developer' };
-
-const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
-
-function apiKey(): string {
-  return (import.meta.env.VITE_API_KEY as string) || '';
-}
 
 export function GRC({ role }: Props) {
   const [days, setDays] = useState(30);
@@ -63,13 +58,7 @@ export function GRC({ role }: Props) {
   }, [trends]);
 
   const exportReport = async (ext: 'csv' | 'md' | 'pdf') => {
-    const url = `${API_BASE.replace(/\/$/, '')}/api/v1/admin/grc/report/export.${ext}?days=${days}`;
-    const headers: Record<string, string> = {};
-    const k = apiKey();
-    if (k) headers['x-api-key'] = k;
-    const r = await fetch(url, { headers, credentials: 'include' });
-    if (!r.ok) return;
-    const blob = await r.blob();
+    const blob = await downloadAuthenticated(`/api/v1/admin/grc/report/export.${ext}?days=${days}`);
     const dl = document.createElement('a');
     dl.href = URL.createObjectURL(blob);
     dl.download = `shopsquire-grc-report-${days}d.${ext}`;
