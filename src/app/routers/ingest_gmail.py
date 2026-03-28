@@ -6,13 +6,10 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request, Depends
+from fastapi import APIRouter, Header, HTTPException, Request
 
 from src.app.observability.metrics import record_email_security_connector_event, record_email_security_connector_failure
 from src.app.security.email_security import evaluate_email_security
-from src.app.security.scope_enforcement import optional_connector_read
-
-
 router = APIRouter(prefix="/api/v1/ingest/gmail", tags=["ingest-gmail"])
 
 
@@ -29,7 +26,6 @@ def _check_secret(secret: str | None) -> None:
 async def pubsub_push(
     request: Request,
     x_ingest_secret: Optional[str] = Header(default=None, alias="X-Ingest-Secret"),
-    _scopes=Depends(optional_connector_read()),
 ):
     """Receive Gmail push notifications (typically via Google Pub/Sub push).
 

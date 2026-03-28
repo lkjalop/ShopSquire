@@ -4,14 +4,11 @@ import hmac
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request, Depends
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from src.app.observability.metrics import record_email_security_connector_event, record_email_security_connector_failure
 from src.app.security.email_security import evaluate_email_security
-from src.app.security.scope_enforcement import optional_connector_read
-
-
 router = APIRouter(prefix="/api/v1/ingest/m365", tags=["ingest-m365"])
 
 
@@ -28,7 +25,6 @@ async def notifications(
     request: Request,
     validationToken: Optional[str] = None,  # Microsoft uses this exact casing
     x_ingest_secret: Optional[str] = Header(default=None, alias="X-Ingest-Secret"),
-    _scopes=Depends(optional_connector_read()),
 ):
     """Receive Microsoft Graph subscription notifications.
 

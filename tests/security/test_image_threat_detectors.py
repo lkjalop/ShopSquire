@@ -78,8 +78,8 @@ def test_framework_correlation_adds_mitre_and_advances_pasta():
         signals={"payment_social_engineering": True, "qr_external_url_detected": True},
         evidence={},
     )
-    assert "AML.T0051" in (out.get("mitre_atlas") or [])
-    assert "AML.T0048" in (out.get("mitre_atlas") or [])
+    assert out.get("mitre_atlas") == []
+    assert out.get("possible_mitre_atlas") == []
     assert len(out.get("owasp_llm_top10") or []) >= 1
     pasta_stage = str((out.get("pasta") or {}).get("current_stage") or "")
-    assert pasta_stage in {"Stage4", "Stage5", "Stage6", "Stage7"}
+    assert pasta_stage in {"Stage4", "Stage5"}

@@ -73,6 +73,35 @@ def _extract_zip_xml_text(blob: bytes) -> str:
     return " ".join(out)[:20000]
 
 
+def _extract_vba_strings(blob: bytes) -> str:
+    out: List[str] = []
+    if not blob:
+        return ""
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            vba_names = [
+                name
+                for name in zf.namelist()
+                if "vbaproject" in name.lower() or name.lower().endswith((".bas", ".cls", ".frm"))
+            ][:8]
+            for name in vba_names:
+                try:
+                    raw = zf.read(name)
+                except Exception:
+                    continue
+                try:
+                    strings = re.findall(rb"[ -~]{6,}", raw)
+                    for item in strings:
+                        decoded = item.decode("ascii", errors="ignore").strip()
+                        if decoded:
+                            out.append(decoded)
+                except Exception:
+                    continue
+    except Exception:
+        return ""
+    return " ".join(out)[:10000]
+
+
 def _dedupe_text_blocks(parts: List[str]) -> str:
     out: List[str] = []
     seen: set[str] = set()
@@ -345,6 +374,11 @@ def _hydrate_qr_signals(
                 continue
             qr_payloads.append(data[:500])
             host = str((item or {}).get("host") or "").strip().lower()
+            if not host and data.lower().startswith(("http://", "https://")):
+                try:
+                    host = str((urlparse(data).hostname or "")).strip().lower()
+                except Exception:
+                    host = ""
             is_external = bool((item or {}).get("is_external_url")) or (host not in {"", "127.0.0.1", "localhost"} and data.lower().startswith(("http://", "https://")))
             if is_external:
                 external_detected = True
@@ -530,11 +564,9 @@ def _extract_text(blob: bytes, *, content_type: str, filename: str) -> str:
         "officedocument" in ctype
         or "msword" in ctype
         or "spreadsheet" in ctype
-        or name.endswith(".docx")
-        or name.endswith(".xlsx")
-        or name.endswith(".pptx")
+        or name.endswith((".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"))
     ):
-        return _extract_zip_xml_text(blob)
+        return _dedupe_text_blocks([_extract_zip_xml_text(blob), _extract_vba_strings(blob)])
     if ctype.startswith("text/") or name.endswith(".txt") or name.endswith(".csv") or name.endswith(".md"):
         return blob.decode("utf-8", errors="ignore")[:20000]
     if ctype.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")):

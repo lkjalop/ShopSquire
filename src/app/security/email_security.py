@@ -181,6 +181,7 @@ def _apply_reference_material_suppression(
     if str(content_classification.get("mode") or "real_email") not in {"reference_content", "security_training_material"}:
         return
     indicator_types = {str((i or {}).get("type") or "") for i in (extracted.get("indicators") or [])}
+    reason_types = {str(x or "") for x in (verdict.get("reasons") or [])}
     hard_indicator_types = {
         "confusable_homoglyph_domain",
         "vendor_homoglyph_impersonation",
@@ -188,8 +189,23 @@ def _apply_reference_material_suppression(
         "reply_chain_hijack",
         "thread_hijack",
         "bimi_visual_brand_mismatch",
+        "dangerous_tool_intent",
+        "prompt_injection",
+        "lolbin_command",
+        "c2_beacon_pattern",
+        "data_exfil_intent",
     }
-    if dmarc_fail or (indicator_types & hard_indicator_types):
+    if bool(content_classification.get("only_reference_attachments")):
+        hard_indicator_types = {
+            "confusable_homoglyph_domain",
+            "vendor_homoglyph_impersonation",
+            "lookalike_domain",
+            "reply_chain_hijack",
+            "thread_hijack",
+            "bimi_visual_brand_mismatch",
+        }
+    hard_reason_types = {"yara_high_confidence_match", "forced_reauth_required"}
+    if dmarc_fail or (indicator_types & hard_indicator_types) or (reason_types & hard_reason_types):
         return
     if _has_direct_attachment_risk(email):
         return
@@ -1294,6 +1310,27 @@ def _artifact_evidence_refs(filename: str, evidence: list[str] | None) -> list[s
             refs.append("vba.comments.lolbin_pattern")
         if "balashnikovai-cdn.com" in low or "balashnikovai-analytics.com" in low:
             refs.append("vba.comments.c2_domain")
+    elif name.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")):
+        if "lsb content extraction succeeded" in low or "\"decoded_content\"" in low:
+            refs.append("image.steg.decoded_content")
+        if "certutil" in low:
+            refs.append("image.steg.certutil_indicator")
+        if "powershell" in low:
+            refs.append("image.steg.powershell_indicator")
+        if "bitsadmin" in low:
+            refs.append("image.steg.bitsadmin_indicator")
+        if "schtasks" in low:
+            refs.append("image.steg.schtasks_indicator")
+        if "callback" in low or "beacon" in low or "interval" in low or "test-c2.example.invalid" in low:
+            refs.append("image.steg.c2_callback_pattern")
+        if "exfiltrate" in low or "test-exfil.example.invalid" in low or "api_keys" in low or "user_data" in low:
+            refs.append("image.steg.data_exfil_pattern")
+        if "ignore previous" in low or "prompt injection" in low or "system prompt" in low:
+            refs.append("image.steg.prompt_injection_text")
+        if "ssn pattern count" in low or "ssn 123-45-6789" in low:
+            refs.append("image.linked_artifact.ssn_hits")
+        if "linked destination:" in low or "scanned.page/" in low:
+            refs.append("image.qr.linked_destination")
     seen: set[str] = set()
     return [x for x in refs if x and not (x in seen or seen.add(x))]
 
@@ -1315,6 +1352,8 @@ def _artifact_provenance_rows(
         method = "PDF byte scan / embedded URL extraction"
     elif low.endswith(".bas"):
         method = "VBA source inspection"
+    elif low.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")):
+        method = "image OCR / steganography decode / linked artifact analysis"
     rows: list[dict[str, Any]] = []
     for ref in refs:
         rows.append(
@@ -1520,7 +1559,7 @@ def _finding_compliance_mapping(
                 _row("HIPAA", ["Security Rule review"], "If regulated personal or healthcare data is implicated, regulated-data exposure review may be required."),
             ]
         )
-    if any(tok in ftype for tok in ("c2_beacon_pattern", "lolbin_command_sequence")) and status != "possible":
+    if any(tok in ftype for tok in ("c2_beacon_pattern", "lolbin_command_sequence")):
         mappings.extend(
             [
                 _row("ISO27001", ["A.8.7", "A.8.16"], "Malware defense, monitoring, and detection controls are implicated."),
@@ -3790,9 +3829,18 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         from_domain = str((extracted.get("meta") or {}).get("from_domain") or "")
         trusted_domains = set([str(x).lower() for x in ((ff.get("SECURITY_THRESHOLDS") or {}).get("TRUSTED_SENDER_DOMAINS", []))])
         ind_types_set = {str((x or {}).get("type") or "") for x in (v.get("indicators") or [])}
-        critical = {"dangerous_tool_intent", "prompt_injection", "lolbin_command", "c2_beacon_pattern", "data_exfil_intent"}
+        reason_types_set = {str(x or "") for x in (v.get("reasons") or [])}
+        critical = {
+            "dangerous_tool_intent",
+            "prompt_injection",
+            "lolbin_command",
+            "c2_beacon_pattern",
+            "data_exfil_intent",
+            "yara_high_confidence_match",
+            "yara_rule_match_detected",
+        }
         if auth_all_pass and ((from_domain.lower() in trusted_domains) or (external_sender is False)):
-            if not (ind_types_set & critical) and v.get("route") in ("human_review", None):
+            if not ((ind_types_set & critical) or (reason_types_set & critical)) and v.get("route") in ("human_review", None, "auto_resolve", "security_review"):
                 auth_pass_trusted_preferred = True
                 v["severity"] = "info"
                 v["route"] = "auto_resolve"

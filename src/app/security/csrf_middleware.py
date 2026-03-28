@@ -68,6 +68,8 @@ CSRF_EXEMPT_PREFIXES: FrozenSet[str] = frozenset({
     "/api/v1/auth/logout",
     "/api/v1/auth/callback",
     "/api/v1/auth/refresh",
+    "/api/v1/ingest/gmail/",
+    "/api/v1/ingest/m365/",
     "/api/v1/webhooks/",
     "/api/v1/shopify/webhooks",
     "/api/v1/security/csp-report",

@@ -62,8 +62,12 @@ _EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 
 
 def _ensure_demo_routes_enabled() -> None:
-    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() not in ("1", "true", "yes", "on"):
-        raise HTTPException(status_code=404, detail="demo_routes_disabled")
+    if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        return
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    if env in ("local", "dev", "development", "test", "testing"):
+        return
+    raise HTTPException(status_code=404, detail="demo_routes_disabled")
 
 
 def _json_load(s: str | None, default):

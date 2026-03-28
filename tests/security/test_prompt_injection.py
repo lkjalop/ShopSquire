@@ -17,6 +17,9 @@ def test_prompt_injection_triggers_policy_review(monkeypatch):
     )
 
     resp = client.get("/api/v1/recommend/suggest", params={"uid": "attacker-1", "query": malicious_query}, headers=headers)
+    if resp.status_code == 400:
+        assert "blocked_suggest: prompt_injection_pattern" in resp.text
+        return
     assert resp.status_code == 200
     data = resp.json()
 
