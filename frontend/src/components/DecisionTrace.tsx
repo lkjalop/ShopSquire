@@ -258,6 +258,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const traceIdText = typeof traceId === 'string' ? traceId : '';
   const [payloadActionStatus, setPayloadActionStatus] = useState<Record<string, string>>({});
   const [linkedArtifactResults, setLinkedArtifactResults] = useState<Record<string, any>>({});
+  const [runtimeSecurityResults, setRuntimeSecurityResults] = useState<Record<string, any>>({});
   const [posthocType, setPosthocType] = useState<string>('fraud_confirmed');
   const [posthocValue, setPosthocValue] = useState<string>('true');
   const [posthocNote, setPosthocNote] = useState<string>('');
@@ -1051,10 +1052,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         const _payloadType = String(payloadAnalysis?.payload_type || 'unknown').replace(/_/g, ' ');
         const _nextStep = String(payloadAnalysis?.suggested_next_step || 'allow').replace(/_/g, ' ');
         const _triage = `Hypothesis: ${_hypothesis} | Payload: ${_payloadType} | Next: ${_nextStep}.`;
+        const _runtimeResult = data?.runtime_security_result || data?.context?.runtime_security_result || null;
+        if (_runtimeResult && typeof _runtimeResult === 'object') {
+          setRuntimeSecurityResults((prev) => ({ ...prev, [itemKey]: _runtimeResult }));
+        }
         setPayloadActionStatus((prev) => ({
           ...prev,
           [itemKey]: action === 'queue_sandbox_detonation'
-            ? `Sandbox detonation queued (${data.incident_id}). ${_triage}${_profileSummary}${_ransomwareWarning}`
+            ? `Sandbox detonation queued (${data.incident_id}). ${_triage}${_profileSummary}${_ransomwareWarning}${_runtimeResult?.summary ? ` ${String(_runtimeResult.summary)}` : ''}`
             : `Analyst follow-up queued (${data.incident_id}). ${_triage}${_profileSummary}${_ransomwareWarning}`,
         }));
         return;
@@ -1247,7 +1252,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                     <div className={styles.detailLabel}>Timestamp</div>
                                     <div className={styles.detailValue}>{evt.timestamp || evt.created_at || '?'}</div>
                                     <div className={styles.detailLabel}>Latency</div>
-                                    <div className={styles.detailValue}>{evt.latency_ms != null ? `${evt.latency_ms}ms` : '?'}</div>
+                                    <div className={styles.detailValue}>{evt.latency_ms != null ? `${evt.latency_ms}ms` : 'not recorded'}</div>
+                                    <div className={styles.detailLabel}>Bitemporal</div>
+                                    <div className={styles.detailValue}>
+                                      {evt.payload?.bitemporal
+                                        ? `valid_from=${evt.payload.bitemporal.valid_from || '?'} | system_from=${evt.payload.bitemporal.system_from || '?'}`
+                                        : 'not recorded'}
+                                    </div>
                                   </div>
                                   <div className={styles.detailHeader}>Payload</div>
                                   {evt.payload && typeof evt.payload === 'object' ? (
@@ -2294,14 +2305,81 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                     <>
                       <div className={styles.sectionTitle}>Image Triage Signals</div>
                       {triageItems.map((t: any, idx: number) => {
+                        const runtimeResult = runtimeSecurityResults[`${traceId || 'trace'}:${idx}:${t?._filename || `Image ${idx + 1}`}`] || {};
+                        const runtimeOverride = (runtimeResult?.payload_analysis_override && typeof runtimeResult.payload_analysis_override === 'object')
+                          ? runtimeResult.payload_analysis_override
+                          : {};
                         const sigs = t?.security?.signals || t?.signals || {};
                         const ocrText = (t?.security?.extracted_text || t?.security?.ocr_text || t?.extracted_text || t?.ocr_text || t?.ocr?.best_text || '').trim();
                         const payloads: any[] = sigs.qr_payloads || t?.qr_payloads || [];
-                        const payloadAnalysis = t?.security?.payload_analysis || t?.payload_analysis || {};
-                        const mitreAttack: string[] = Array.isArray(t?.security?.mitre_attack)
-                          ? t.security.mitre_attack
-                          : Array.isArray(payloadAnalysis?.mitre_attack)
-                            ? payloadAnalysis.mitre_attack
+                        const payloadAnalysis = { ...(t?.security?.payload_analysis || t?.payload_analysis || {}), ...runtimeOverride };
+                        const evidence = (t?.security?.evidence && typeof t.security.evidence === 'object') ? t.security.evidence : {};
+                        const mitreAttack: string[] = Array.isArray(runtimeResult?.mitre_attack)
+                          ? runtimeResult.mitre_attack
+                          : Array.isArray(t?.security?.mitre_attack)
+                            ? t.security.mitre_attack
+                            : Array.isArray(payloadAnalysis?.mitre_attack)
+                              ? payloadAnalysis.mitre_attack
+                              : [];
+                        const mitreAtlas: string[] = Array.isArray(runtimeResult?.mitre_atlas)
+                          ? runtimeResult.mitre_atlas
+                          : Array.isArray(t?.security?.mitre_atlas)
+                            ? t.security.mitre_atlas
+                            : Array.isArray(payloadAnalysis?.mitre_atlas)
+                              ? payloadAnalysis.mitre_atlas
+                              : [];
+                        const possibleMitre: string[] = Array.from(new Set([
+                          ...(Array.isArray(t?.security?.possible_mitre_attack) ? t.security.possible_mitre_attack : []),
+                          ...(Array.isArray(payloadAnalysis?.possible_mitre_attack) ? payloadAnalysis.possible_mitre_attack : []),
+                          ...(Array.isArray(t?.security?.possible_mitre_atlas) ? t.security.possible_mitre_atlas : []),
+                          ...(Array.isArray(payloadAnalysis?.possible_mitre_atlas) ? payloadAnalysis.possible_mitre_atlas : []),
+                        ]));
+                        const claimStatus = String(runtimeResult?.claim_status || t?.security?.claim_status || payloadAnalysis?.claim_status || evidence?.claim_status || 'unknown');
+                        const findingGroup = String(runtimeResult?.finding_group || t?.security?.finding_group || payloadAnalysis?.finding_group || evidence?.finding_group || 'unknown');
+                        const evidenceLane = String(runtimeResult?.evidence_lane || t?.security?.evidence_lane || payloadAnalysis?.evidence_lane || evidence?.evidence_lane || 'unknown');
+                        const runtimeEvidenceRequired: string[] = Array.isArray(runtimeResult?.runtime_evidence_missing)
+                          ? runtimeResult.runtime_evidence_missing
+                          : Array.isArray(t?.security?.runtime_evidence_required)
+                          ? t.security.runtime_evidence_required
+                          : Array.isArray(payloadAnalysis?.runtime_evidence_required)
+                            ? payloadAnalysis.runtime_evidence_required
+                            : Array.isArray(evidence?.runtime_evidence_required)
+                              ? evidence.runtime_evidence_required
+                              : [];
+                        const runtimeEvidencePresent: string[] = Array.isArray(runtimeResult?.runtime_evidence_present)
+                          ? runtimeResult.runtime_evidence_present
+                          : Array.isArray(t?.security?.runtime_evidence_present)
+                          ? t.security.runtime_evidence_present
+                          : Array.isArray(payloadAnalysis?.runtime_evidence_present)
+                            ? payloadAnalysis.runtime_evidence_present
+                            : Array.isArray(evidence?.runtime_evidence_present)
+                              ? evidence.runtime_evidence_present
+                              : [];
+                        const findingGroups = (t?.security?.finding_groups && typeof t.security.finding_groups === 'object') ? t.security.finding_groups : {};
+                        const payloadFindings: any[] = Array.isArray(t?.security?.payload_findings) ? t.security.payload_findings : [];
+                        const runtimePromotedFinding = runtimeResult?.supported ? [{
+                          headline: runtimeResult?.summary || `${formatDisplayText(payloadAnalysis?.attack_hypothesis || 'runtime finding')} confirmed by runtime lab`,
+                          finding_group: 'active_findings',
+                        }] : [];
+                        const activeFindings: any[] = Array.isArray(findingGroups?.active_findings)
+                          ? findingGroups.active_findings
+                          : payloadFindings.filter((f: any) => String(f?.finding_group || '') === 'active_findings');
+                        const effectiveActiveFindings = runtimePromotedFinding.length > 0 ? runtimePromotedFinding : activeFindings;
+                        const detectionArtifactPatterns: any[] = Array.isArray(findingGroups?.detection_artifact_patterns)
+                          ? findingGroups.detection_artifact_patterns
+                          : payloadFindings.filter((f: any) => String(f?.finding_group || '') === 'detection_artifact_patterns');
+                        const unconfirmedHypotheses: any[] = Array.isArray(findingGroups?.unconfirmed_higher_order_hypotheses)
+                          ? findingGroups.unconfirmed_higher_order_hypotheses
+                          : payloadFindings.filter((f: any) => String(f?.finding_group || '') === 'unconfirmed_higher_order_hypotheses');
+                        const suppressedFindings: any[] = payloadFindings.filter((f: any) => String(f?.claim_status || '').toLowerCase() === 'suppressed');
+                        const runtimeRequiredFindings: any[] = payloadFindings.filter((f: any) =>
+                          Boolean(f?.runtime_confirmation_required) ||
+                          (Array.isArray(f?.runtime_evidence_required) && f.runtime_evidence_required.length > 0)
+                        );
+                        const artifactProvenance: any[] = Array.isArray(runtimeResult?.artifact_provenance)
+                          ? runtimeResult.artifact_provenance
+                          : Array.isArray(evidence?.artifact_provenance)
+                            ? evidence.artifact_provenance
                             : [];
                         const filename = t?._filename || `Image ${idx + 1}`;
                         const itemKey = `${traceId || 'trace'}:${idx}:${filename}`;
@@ -2344,6 +2422,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               <div className={styles.kvRow}><span>Decoded artifact available</span><span>{renderValue(Boolean(payloadAnalysis.decoded_artifact_available))}</span></div>
                               <div className={styles.kvRow}><span>Payload type</span><span>{renderValue(payloadAnalysis.payload_type || 'unknown')}</span></div>
                               <div className={styles.kvRow}><span>Attack hypothesis</span><span>{renderValue(payloadAnalysis.attack_hypothesis || 'unknown')}</span></div>
+                              <div className={styles.kvRow}><span>Claim status</span><span>{renderValue(claimStatus)}</span></div>
+                              <div className={styles.kvRow}><span>Finding group</span><span>{renderValue(findingGroup)}</span></div>
+                              <div className={styles.kvRow}><span>Evidence lane</span><span>{renderValue(evidenceLane)}</span></div>
+                              <div className={styles.kvRow}><span>Runtime confirmation required</span><span>{renderValue(Boolean(runtimeRequiredFindings.length > 0 || payloadAnalysis.runtime_confirmation_required))}</span></div>
                               {payloadAnalysis.pasta_stage && (
                                 <div className={styles.kvRow}><span>PASTA stage</span><span className={styles.tagWarn}>{payloadAnalysis.pasta_stage}</span></div>
                               )}
@@ -2356,6 +2438,49 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               )}>{renderValue(payloadAnalysis.decode_path || 'safe_passive_decode_only')}</span></div>
                               <div className={styles.kvRow}><span>Suggested next step</span><span>{renderValue(payloadAnalysis.suggested_next_step || 'allow')}</span></div>
                             </div>
+                            <div className={styles.sectionSubTitle}>Claim Lanes</div>
+                            <div className={styles.payloadGrid}>
+                              <div className={styles.kvRow}><span>Observed</span><span>{effectiveActiveFindings.length}</span></div>
+                              <div className={styles.kvRow}><span>Possible</span><span>{unconfirmedHypotheses.length}</span></div>
+                              <div className={styles.kvRow}><span>Suppressed</span><span>{suppressedFindings.length}</span></div>
+                              <div className={styles.kvRow}><span>Runtime required</span><span>{runtimeRequiredFindings.length}</span></div>
+                            </div>
+                            {(activeFindings.length > 0 || detectionArtifactPatterns.length > 0 || unconfirmedHypotheses.length > 0 || runtimeRequiredFindings.length > 0 || suppressedFindings.length > 0) && (
+                              <>
+                                <div className={styles.sectionSubTitle}>Evidence-backed Findings</div>
+                                {effectiveActiveFindings.length > 0 && (
+                                  <>
+                                    <div className={styles.kvRow}><span>Observed findings</span><span>{effectiveActiveFindings.length}</span></div>
+                                    <ul className={styles.playbookList}>{effectiveActiveFindings.slice(0, 4).map((finding: any, fi: number) => <li key={`af-${fi}`}>{formatDisplayText(finding?.headline || finding?.summary || finding?.finding_type, 'Observed finding')}</li>)}</ul>
+                                  </>
+                                )}
+                                {detectionArtifactPatterns.length > 0 && (
+                                  <>
+                                    <div className={styles.kvRow}><span>Detection artifact patterns</span><span>{detectionArtifactPatterns.length}</span></div>
+                                    <ul className={styles.playbookList}>{detectionArtifactPatterns.slice(0, 3).map((finding: any, fi: number) => <li key={`df-${fi}`}>{formatDisplayText(finding?.headline || finding?.summary || finding?.finding_type, 'Artifact pattern')}</li>)}</ul>
+                                  </>
+                                )}
+                                {unconfirmedHypotheses.length > 0 && (
+                                  <>
+                                    <div className={styles.kvRow}><span>Hypotheses pending runtime telemetry</span><span>{unconfirmedHypotheses.length}</span></div>
+                                    <ul className={styles.playbookList}>{unconfirmedHypotheses.slice(0, 4).map((finding: any, fi: number) => <li key={`uh-${fi}`}>{formatDisplayText(finding?.headline || finding?.summary || finding?.finding_type, 'Unconfirmed hypothesis')}</li>)}</ul>
+                                  </>
+                                )}
+                                {runtimeRequiredFindings.length > 0 && (
+                                  <>
+                                    <div className={styles.kvRow}><span>Runtime required</span><span>{runtimeRequiredFindings.length}</span></div>
+                                    <ul className={styles.playbookList}>{runtimeRequiredFindings.slice(0, 4).map((finding: any, fi: number) => <li key={`rr-${fi}`}>{formatDisplayText(finding?.headline || finding?.summary || finding?.finding_type, 'Runtime confirmation required')}</li>)}</ul>
+                                    <div className={styles.muted}>Passive evidence only. Runtime confirmation is still required, and no process-tree or network telemetry has been observed yet for these claims.</div>
+                                  </>
+                                )}
+                                {suppressedFindings.length > 0 && (
+                                  <>
+                                    <div className={styles.kvRow}><span>Suppressed claims</span><span>{suppressedFindings.length}</span></div>
+                                    <ul className={styles.playbookList}>{suppressedFindings.slice(0, 3).map((finding: any, fi: number) => <li key={`sf-${fi}`}>{formatDisplayText(finding?.headline || finding?.summary || finding?.finding_type, 'Suppressed claim')}</li>)}</ul>
+                                  </>
+                                )}
+                              </>
+                            )}
                             {linkedArtifact?.linked_artifact_available && (
                               <>
                                 <div className={styles.sectionSubTitle}>Linked Artifact Analysis</div>
@@ -2395,6 +2520,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                     <div className={styles.muted}>{formatDisplayText(linkedArtifact.linked_owner_reason, 'Not available')}</div>
                                   </>
                                 )}
+                                {Array.isArray(linkedArtifact.linked_artifact_provenance) && linkedArtifact.linked_artifact_provenance.length > 0 && (
+                                  <>
+                                    <div className={styles.sectionSubTitle}>Linked Artifact Provenance</div>
+                                    <ul className={styles.playbookList}>
+                                      {linkedArtifact.linked_artifact_provenance.map((row: any, pi: number) => (
+                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} • ${row?.extraction_method || 'extract'} • ${row?.match_ref || 'match'} • ${row?.confidence || 'unknown'}${row?.reason ? ` • ${row.reason}` : ''}`}</li>
+                                      ))}
+                                    </ul>
+                                  </>
+                                )}
                                 {linkedArtifact.linked_text_excerpt && (
                                   <>
                                     <div className={styles.sectionSubTitle}>Linked Artifact Text Excerpt</div>
@@ -2424,11 +2559,74 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             )}
                             <div className={styles.sectionSubTitle}>MITRE Attack</div>
                             <div className={styles.tagRow}>
-                              {mitreAttack.map((tag: string) => (
+                              {[...mitreAtlas, ...mitreAttack].map((tag: string) => (
                                 <span key={tag} className={styles.tagWarn}>{tag}</span>
                               ))}
-                              {mitreAttack.length === 0 && <span className={styles.muted}>None</span>}
+                              {[...mitreAtlas, ...mitreAttack].length === 0 && <span className={styles.muted}>No active ATT&amp;CK / ATLAS mappings.</span>}
                             </div>
+                            {possibleMitre.length > 0 && (
+                              <>
+                                <div className={styles.sectionSubTitle}>Possible Runtime-only Mappings</div>
+                                <div className={styles.tagRow}>
+                                  {possibleMitre.map((tag: string) => (
+                                    <span key={tag} className={styles.tag}>{tag}</span>
+                                  ))}
+                                </div>
+                                <div className={styles.muted}>Passive evidence only. Execution, C2, and similar mappings stay in this lane until runtime confirmation is available. No process-tree or network telemetry has been observed yet for these claims.</div>
+                              </>
+                            )}
+                            {(runtimeEvidenceRequired.length > 0 || runtimeEvidencePresent.length > 0) && (
+                              <>
+                                <div className={styles.sectionSubTitle}>Runtime Evidence</div>
+                                {runtimeResult?.runtime_label && (
+                                  <div className={styles.muted}>{formatDisplayText(runtimeResult.runtime_label, 'Not available')}</div>
+                                )}
+                                {runtimeEvidenceRequired.length > 0 && (
+                                  <>
+                                    <div className={styles.kvRow}><span>Still required</span><span>{runtimeEvidenceRequired.length}</span></div>
+                                    <ul className={styles.playbookList}>{runtimeEvidenceRequired.map((item: string, ri: number) => <li key={`rr-${ri}`}>{item}</li>)}</ul>
+                                  </>
+                                )}
+                                {runtimeEvidencePresent.length > 0 && (
+                                  <>
+                                    <div className={styles.kvRow}><span>Already present</span><span>{runtimeEvidencePresent.length}</span></div>
+                                    <ul className={styles.playbookList}>{runtimeEvidencePresent.map((item: string, ri: number) => <li key={`rp-${ri}`}>{item}</li>)}</ul>
+                                  </>
+                                )}
+                                {Array.isArray(runtimeResult?.parallel_swarm) && runtimeResult.parallel_swarm.length > 0 && (
+                                  <>
+                                    <div className={styles.sectionSubTitle}>Parallel Runtime Swarm</div>
+                                    {runtimeResult.parallel_swarm.map((agent: any, ai: number) => (
+                                      <div key={`rsa-${ai}`} className={styles.behaviorCard}>
+                                        <div className={styles.kvRow}>
+                                          <span><strong>{formatDisplayText(agent?.agent || `Agent ${ai + 1}`)}</strong></span>
+                                          <span className={styles.tagWarn}>{formatDisplayText(agent?.verdict_impact || 'supporting')}</span>
+                                        </div>
+                                        <div className={styles.triageNarrative}>{formatDisplayText(agent?.inspected || 'Not available')}</div>
+                                        {Array.isArray(agent?.findings) && agent.findings.length > 0 && (
+                                          <ul className={styles.playbookList}>
+                                            {agent.findings.map((finding: string, fi: number) => <li key={`rsf-${ai}-${fi}`}>{finding}</li>)}
+                                          </ul>
+                                        )}
+                                        {Array.isArray(agent?.evidence_refs) && agent.evidence_refs.length > 0 && (
+                                          <div className={styles.muted}>Evidence refs: {agent.evidence_refs.join(', ')}</div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </>
+                                )}
+                              </>
+                            )}
+                            {artifactProvenance.length > 0 && (
+                              <>
+                                <div className={styles.sectionSubTitle}>Artifact Provenance</div>
+                                <ul className={styles.playbookList}>
+                                  {artifactProvenance.map((row: any, pi: number) => (
+                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} • ${row?.extraction_method || 'extract'} • ${row?.match_ref || 'match'} • ${row?.confidence || 'unknown'}${row?.reason ? ` • ${row.reason}` : ''}`}</li>
+                                  ))}
+                                </ul>
+                              </>
+                            )}
                             {/* Decoded QR payloads */}
                             {payloads.length > 0 && (
                               <>
@@ -2611,5 +2809,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     </div>
   );
 }
+
 
 

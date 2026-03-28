@@ -40,6 +40,30 @@ class ManagedCVProvider:
     def __init__(self):
         self.provider = os.getenv("CV_PROVIDER", "none").lower()
         self.model = os.getenv("CV_MODEL", "llava")
+        self.last_ocr_meta: Dict[str, Any] = {
+            "ocr_confidence": None,
+            "ocr_engine": None,
+            "ocr_word_count": None,
+            "cv_model_confidence": None,
+            "cv_extraction_method": None,
+        }
+
+    def _set_last_ocr_meta(
+        self,
+        *,
+        ocr_confidence: float | None = None,
+        ocr_engine: str | None = None,
+        ocr_word_count: int | None = None,
+        cv_model_confidence: float | None = None,
+        cv_extraction_method: str | None = None,
+    ) -> None:
+        self.last_ocr_meta = {
+            "ocr_confidence": ocr_confidence,
+            "ocr_engine": ocr_engine,
+            "ocr_word_count": ocr_word_count,
+            "cv_model_confidence": cv_model_confidence,
+            "cv_extraction_method": cv_extraction_method,
+        }
 
     async def get_labels_and_text(
         self,
@@ -73,12 +97,27 @@ class ManagedCVProvider:
                 )
                 labels = [l.description.lower() for l in response.label_annotations or []]
                 text = response.text_annotations[0].description if response.text_annotations else ""
+                self._set_last_ocr_meta(
+                    ocr_confidence=None,
+                    ocr_engine="google_vision",
+                    ocr_word_count=len([tok for tok in str(text or "").split() if tok.strip()]),
+                    cv_model_confidence=None,
+                    cv_extraction_method="managed_google_vision",
+                )
                 return labels, text, None
             except Exception:
                 pass
         if self.provider == "ollama":
             try:
-                return self._ollama_labels_and_text(image_bytes, mode=mode)
+                labels, text, product_identity = self._ollama_labels_and_text(image_bytes, mode=mode)
+                self._set_last_ocr_meta(
+                    ocr_confidence=None,
+                    ocr_engine="ollama_vision",
+                    ocr_word_count=len([tok for tok in str(text or "").split() if tok.strip()]),
+                    cv_model_confidence=None,
+                    cv_extraction_method="managed_ollama_vision",
+                )
+                return labels, text, product_identity
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.
                 logging.getLogger(__name__).exception("cv_provider.ollama_failed")
@@ -90,6 +129,13 @@ class ManagedCVProvider:
         except Exception:
             logging.getLogger(__name__).exception("cv_provider.tesseract_failed")
         # Fallback: no provider
+        self._set_last_ocr_meta(
+            ocr_confidence=0.0,
+            ocr_engine=None,
+            ocr_word_count=0,
+            cv_model_confidence=None,
+            cv_extraction_method="no_provider",
+        )
         return [], "", None
 
     def _ollama_labels_and_text(self, image_bytes: bytes, *, mode: str = "triage") -> Tuple[List[str], str, Optional[Dict]]:
@@ -237,11 +283,26 @@ class ManagedCVProvider:
             )
             stage_a_text = " ".join(str(out.get("text") or "").split())[:2000]
             stage_a_conf = float(out.get("confidence") or 0.0)
+            stage_a_engine = str(out.get("provider") or _ocr_provider or "").strip() or None
             # Skip Stage B when OCR is intentionally disabled — it would also return
             # empty text, so the deep multi-contrast pass adds no value and only wastes time.
             if _ocr_provider in ("disabled", "none", "off"):
+                self._set_last_ocr_meta(
+                    ocr_confidence=stage_a_conf,
+                    ocr_engine=stage_a_engine,
+                    ocr_word_count=len([tok for tok in stage_a_text.split() if tok.strip()]),
+                    cv_model_confidence=None,
+                    cv_extraction_method="ocr_stage_a",
+                )
                 return stage_a_text
             if not self._needs_stage_b(stage_a_text, stage_a_conf):
+                self._set_last_ocr_meta(
+                    ocr_confidence=stage_a_conf,
+                    ocr_engine=stage_a_engine,
+                    ocr_word_count=len([tok for tok in stage_a_text.split() if tok.strip()]),
+                    cv_model_confidence=None,
+                    cv_extraction_method="ocr_stage_a",
+                )
                 return stage_a_text
 
             # Stage B: triggered fallback (multi-contrast + bottom-band ROI passes).
@@ -253,9 +314,31 @@ class ManagedCVProvider:
                 enabled=True,
             )
             stage_b_text = " ".join(str(deep.get("best_text") or "").split())[:2000]
+            stage_b_conf = float(deep.get("best_confidence") or 0.0)
             if len(stage_b_text) > len(stage_a_text):
+                self._set_last_ocr_meta(
+                    ocr_confidence=stage_b_conf if stage_b_conf > 0 else stage_a_conf,
+                    ocr_engine=stage_a_engine,
+                    ocr_word_count=len([tok for tok in stage_b_text.split() if tok.strip()]),
+                    cv_model_confidence=None,
+                    cv_extraction_method="ocr_stage_b_multicontrast",
+                )
                 return stage_b_text
+            self._set_last_ocr_meta(
+                ocr_confidence=stage_a_conf,
+                ocr_engine=stage_a_engine,
+                ocr_word_count=len([tok for tok in stage_a_text.split() if tok.strip()]),
+                cv_model_confidence=None,
+                cv_extraction_method="ocr_stage_a",
+            )
             return stage_a_text
         except Exception:
             logging.getLogger(__name__).exception("tesseract OCR failed")
+            self._set_last_ocr_meta(
+                ocr_confidence=0.0,
+                ocr_engine=str(os.getenv("CV_OCR_PROVIDER") or "tesseract"),
+                ocr_word_count=0,
+                cv_model_confidence=None,
+                cv_extraction_method="ocr_failed",
+            )
             return ""

@@ -1,0 +1,16 @@
+{
+  "id": "runtime_confirmation_gap_placeholder",
+  "label": "fn",
+  "description": "Placeholder known-gap case for runtime-confirmed execution/C2 until live telemetry fixtures exist.",
+  "subject": "Runtime confirmation gap",
+  "from_addr": "lab@example.test",
+  "reply_to": "lab@example.test",
+  "body": "This corpus entry reserves a known-gap slot for execution/C2 cases that need real sandbox and telemetry.",
+  "attachments": [
+    "dump/Sec/Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm"
+  ],
+  "expected": {
+    "runtime_confirmation_required": true,
+    "production_confirmed_forbidden": true
+  }
+}

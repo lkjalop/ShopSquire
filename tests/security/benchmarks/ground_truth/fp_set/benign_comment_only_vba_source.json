@@ -1,0 +1,19 @@
+{
+  "id": "benign_comment_only_vba_source",
+  "label": "fp",
+  "description": "Comment-only benign VBA source should not surface active execution findings.",
+  "subject": "Benign VBA sample",
+  "from_addr": "lab@example.test",
+  "reply_to": "lab@example.test",
+  "body": "Comment-only benign VBA sample for regression coverage.",
+  "attachments": [
+    "dump/Sec/VBA_SOURCE_SecurityModule.bas"
+  ],
+  "expected": {
+    "verdict_action_not": ["block"],
+    "severity_not_in": ["critical"],
+    "mitre_attack_empty": true,
+    "mitre_atlas_empty": true,
+    "suppressed_required": true
+  }
+}

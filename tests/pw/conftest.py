@@ -61,6 +61,8 @@ def test_server():
     os.environ["FEATURE_FLAGS_PATH"] = flags_path
     os.environ.setdefault("TEST_BYPASS_POLICY_GATE", "1")
     os.environ.setdefault("TEST_TOLERANT_GET_ERRORS", "1")
+    os.environ["TEST_FAST_HEALTH"] = "1"
+    os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     os.environ.setdefault("CV_PROVIDER", "basic")
     os.environ["DISABLE_UI_ROUTES"] = "0"
     os.environ["RATE_LIMIT_PER_IP_PER_MIN"] = "0"

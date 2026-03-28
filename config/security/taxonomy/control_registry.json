@@ -1,0 +1,99 @@
+{
+  "version": "2026.03.28.1",
+  "frameworks": {
+    "ISO42001": {
+      "Human oversight": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "merchant.email_lab.human_gate",
+          "src/app/routers/merchant_dashboard.py",
+          "tests/pw/test_email_lab_security_matrix_flow.py"
+        ],
+        "control_description": "Human approval gates are surfaced before consequential email-security and threat-hunt actions."
+      },
+      "Outcome monitoring": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "src/app/routers/decisions.py",
+          "src/app/services/trace_contracts.py",
+          "tests/security/test_email_attachment_evidence_contract.py"
+        ],
+        "control_description": "Decision traces and evidence contracts are retained for post-hoc review and monitoring."
+      },
+      "Risk treatment": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "src/app/security/framework_correlation.py",
+          "src/app/security/email_security.py"
+        ],
+        "control_description": "Evidence-backed route decisions and downgraded heuristic handling reduce overclaim and route risky cases to review."
+      },
+      "Model governance": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "config/cv/model_registry.json",
+          "src/app/services/cv_provider.py"
+        ],
+        "control_description": "Model/provider selection is registry-backed, but governance evidence is not yet full audit-grade."
+      },
+      "Prompt handling": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "src/app/services/intake_gate.py",
+          "src/app/security/prompt_registry.py"
+        ],
+        "control_description": "Prompt-like OCR and payload content is sanitized and policy-gated before model-facing handling."
+      }
+    },
+    "EU AI Act": {
+      "Article 9": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "src/app/security/framework_correlation.py",
+          "src/app/security/dread_scorer.py"
+        ],
+        "control_description": "Risk treatment is partially implemented through evidence-quality gating, but a full AI risk-management system is not yet evidenced."
+      },
+      "Article 14": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "merchant.email_lab.human_gate",
+          "src/app/routers/merchant_dashboard.py"
+        ],
+        "control_description": "Human oversight is enforced in the demo workflow before consequential security actions."
+      },
+      "Article 15": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "src/app/services/cv_provider.py",
+          "src/app/security/framework_correlation.py"
+        ],
+        "control_description": "Robustness controls are partially implemented through OCR-confidence downgrades and evidence-quality banners."
+      }
+    },
+    "GDPR": {
+      "Article 5": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "src/app/routers/privacy.py",
+          "src/app/security/email_security.py"
+        ],
+        "control_description": "Integrity and minimisation controls exist in parts of the privacy pipeline, but they are not universally benchmarked."
+      },
+      "Article 32": {
+        "control_implemented": "partial",
+        "evidence_of_control": [
+          "src/app/security/headers.py",
+          "src/app/security/rate_limit.py",
+          "src/app/routers/privacy.py"
+        ],
+        "control_description": "Technical security measures exist, but artifact-driven GDPR relevance should still be treated as possible unless a breach is evidenced."
+      },
+      "Article 33": {
+        "control_implemented": "untested",
+        "evidence_of_control": [],
+        "control_description": "Breach-notification handling is not auto-confirmed from heuristic exfiltration indicators and remains analyst-driven."
+      }
+    }
+  }
+}

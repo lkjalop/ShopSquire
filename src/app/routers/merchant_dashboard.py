@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import html
 import json
 import os
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -72,6 +77,296 @@ def _allow_unauth_dashboard(req: Request) -> bool:
     if explicit in ("0", "false", "no", "off"):
         return False
     return env in ("local", "dev", "development") and (_is_loopback(req) or _is_local_demo_host(req))
+
+
+def _decode_demo_hunt_context(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        padded = str(raw).strip()
+        padded += "=" * (-len(padded) % 4)
+        decoded = base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8", errors="ignore")
+        parsed = json.loads(decoded)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _stable_demo_int(seed: str, modulo: int, *, offset: int = 0) -> int:
+    digest = hashlib.sha256(str(seed).encode("utf-8", errors="ignore")).hexdigest()
+    return offset + (int(digest[:8], 16) % max(modulo, 1))
+
+
+def _build_demo_hunt_report(ctx: dict[str, Any]) -> dict[str, Any]:
+    subject = str(ctx.get("subject") or "Updated Payment Details").strip() or "Updated Payment Details"
+    sender = str(ctx.get("sender") or "accounts@balashnikovai.com.au").strip() or "accounts@balashnikovai.com.au"
+    reply_to = str(ctx.get("reply_to") or sender).strip() or sender
+    trace_id = str(ctx.get("trace_id") or "trace-demo-email-hunt").strip() or "trace-demo-email-hunt"
+    severity = str(ctx.get("severity") or "warning").strip() or "warning"
+    verdict = str(ctx.get("verdict_action") or "security_review").strip() or "security_review"
+    route = str(ctx.get("route") or "security_review").strip() or "security_review"
+    reasons = [str(x).strip() for x in (ctx.get("reasons") or []) if str(x).strip()]
+    mitre = [str(x).strip() for x in (ctx.get("mitre_attack") or []) if str(x).strip()]
+    attachments = [str(x).strip() for x in (ctx.get("attachments") or []) if str(x).strip()]
+    geo_country = str(ctx.get("geo_country") or "AU").strip() or "AU"
+    asn = str(ctx.get("asn") or "AS13335").strip() or "AS13335"
+    asn_org = str(ctx.get("asn_org") or "Cloudflare").strip() or "Cloudflare"
+    reply_mismatch = bool(ctx.get("reply_domain_mismatch"))
+    related_incidents = int(ctx.get("related_incident_count") or 0)
+    confidence = str(ctx.get("risk_band") or "high").strip() or "high"
+    seed = "|".join([trace_id, subject, sender, reply_to, ",".join(reasons), ",".join(mitre), asn, geo_country])
+
+    corpus_messages = _stable_demo_int(seed + ":messages", 120, offset=205)
+    corpus_identities = _stable_demo_int(seed + ":ids", 18, offset=26)
+    corpus_suppliers = _stable_demo_int(seed + ":suppliers", 8, offset=9)
+    corpus_days = _stable_demo_int(seed + ":days", 90, offset=275)
+    matched_messages = _stable_demo_int(seed + ":matched", 7, offset=5)
+    impacted_users = _stable_demo_int(seed + ":users", 5, offset=2)
+    impacted_suppliers = _stable_demo_int(seed + ":vendors", 4, offset=1)
+    estimated_minutes = _stable_demo_int(seed + ":minutes", 7, offset=3)
+    estimated_queries = _stable_demo_int(seed + ":queries", 12, offset=14)
+    approval_level = "tier-1 analyst approval" if confidence in ("low", "medium") else "tier-1 analyst plus owner review for sensitive pivots"
+    domain = sender.split("@", 1)[-1] if "@" in sender else sender
+    reply_domain = reply_to.split("@", 1)[-1] if "@" in reply_to else reply_to
+    shared_domains = [domain]
+    if reply_domain and reply_domain not in shared_domains:
+        shared_domains.append(reply_domain)
+    url_domain = f"portal.{domain}" if domain else "portal.example.com"
+    bank_ref = f"BSB 012-4{_stable_demo_int(seed + ':bsb', 10)}6 / Acct 8877{_stable_demo_int(seed + ':acct', 9000, offset=1000)}"
+    supplier_key = f"supplier::{domain}"
+    account_key = f"identity::{sender}"
+    attachment_hashes = [
+        hashlib.sha256(f"{seed}:{name}".encode("utf-8", errors="ignore")).hexdigest()[:16]
+        for name in attachments[:3]
+    ]
+    pivots = [
+        {"label": "Sender", "value": sender, "why": "Primary identity asserted by the message.", "included": True},
+        {"label": "Reply-To", "value": reply_to, "why": "Used to detect reply-path drift or impersonation.", "included": True},
+        {"label": "Return-Path", "value": f"bounce@{reply_domain or domain}", "why": "Checked for delivery-path consistency.", "included": True},
+        {"label": "Subject lineage", "value": subject, "why": "Used to correlate repeated payment or urgency themes.", "included": True},
+        {"label": "Domains", "value": ", ".join(shared_domains), "why": "Domain overlap is a reliable clustering pivot.", "included": True},
+        {"label": "URLs", "value": f"https://{url_domain}/payment-update", "why": "Synthetic hunt pivots on linked infrastructure and portals.", "included": True},
+        {"label": "Attachment hashes/names", "value": ", ".join([f"{name} [{digest}]" for name, digest in zip(attachments[:3], attachment_hashes)] or ["No attachment in scope"]), "why": "Attachments often recur across supplier-fraud campaigns.", "included": True},
+        {"label": "Bank details / remittance strings", "value": bank_ref, "why": "Payment-change fraud often reuses beneficiary details or BSB/account fragments.", "included": True},
+        {"label": "ASN / GeoIP", "value": f"{asn} / {asn_org} / {geo_country}", "why": "Infrastructure reuse is useful when domains rotate.", "included": True},
+        {"label": "Related supplier / account IDs", "value": f"{supplier_key}, {account_key}", "why": "Separates impersonation from compromised-account hypotheses.", "included": True},
+        {"label": "Full packet telemetry", "value": "Not connected in this demo tenant", "why": "Deeper network hunts stay disabled unless the connector and approvals exist.", "included": False},
+    ]
+    selected_sources = [
+        {"name": "Email telemetry", "scope": "Synthetic seeded corpus", "query_count": 5, "why": "Primary source for sender, subject, attachment, and delivery-path correlation."},
+        {"name": "Secure email gateway", "scope": "Synthetic SEG events", "query_count": 3, "why": "Used for verdict history, header anomalies, and click telemetry."},
+        {"name": "SIEM/XDR", "scope": "Synthetic correlation records", "query_count": 2, "why": "Used to detect incident overlap and downstream touchpoints."},
+        {"name": "Identity / IAM", "scope": "Synthetic user and supplier identities", "query_count": 2, "why": "Used to compare approved contacts, compromised-account hints, and trust relationships."},
+        {"name": "Supplier trust / internal case history", "scope": "Synthetic governance records", "query_count": 2, "why": "Used to compare supplier baselines and prior incidents."},
+    ]
+    optional_sources = [
+        {"name": "DNS / proxy", "status": "available if connected", "why": "Useful for shared destination or click overlap."},
+        {"name": "CASB / DLP", "status": "available if connected", "why": "Useful for SaaS identity overlap or sensitive sharing signals."},
+        {"name": "EDR", "status": "available if connected", "why": "Useful for host-level execution or user interaction evidence."},
+        {"name": "Packet / full host telemetry", "status": "not enabled in demo", "why": "High-friction telemetry should stay role-gated and connector-bounded."},
+    ]
+    excluded_pivots = [
+        "No broad internet reconnaissance was performed.",
+        "No unrestricted tenant-wide search was performed.",
+        "No host or packet pivots were used because those connectors are not enabled in this synthetic demo.",
+    ]
+    hunt_plan = {
+        "time_window": f"Last {corpus_days} days of seeded synthetic telemetry",
+        "sources_selected": selected_sources,
+        "sources_optional": optional_sources,
+        "estimated_cost": f"{estimated_queries} bounded queries / about {estimated_minutes} minutes",
+        "approval_level": approval_level,
+        "why_generated": "The current email contains payment-change and supplier-trust signals that justify a bounded correlation hunt.",
+        "excluded_pivots": excluded_pivots,
+    }
+    confidence_model = {
+        "evidence_confidence": {"score": _stable_demo_int(seed + ":ev_conf", 16, offset=80), "label": "high", "why": "The seed email contains strong direct indicators such as payment-change language, supplier-trust drift, and attachment context."},
+        "correlation_confidence": {"score": _stable_demo_int(seed + ":corr_conf", 22, offset=68), "label": "medium-high", "why": "Multiple synthetic records overlap on sender infrastructure, wording, and supplier context."},
+        "operational_confidence": {"score": _stable_demo_int(seed + ":op_conf", 20, offset=62), "label": "medium", "why": "Correlation is strong enough to investigate, but downstream containment still requires human verification."},
+    }
+    query_provenance = [
+        {
+            "finding": "Sender infrastructure overlap",
+            "source": "Email telemetry",
+            "query": f"sender:{sender} OR reply_to:{reply_to} OR return_path:bounce@{reply_domain or domain}",
+            "matched_fields": ["sender", "reply_to", "return_path", "received_asn"],
+            "time_range": hunt_plan["time_window"],
+            "result_count": matched_messages,
+        },
+        {
+            "finding": "Supplier payment-change cluster",
+            "source": "Secure email gateway",
+            "query": f"subject:\"{subject}\" OR attachment:{attachments[0] if attachments else 'payment_form'} OR bank_ref:\"{bank_ref}\"",
+            "matched_fields": ["subject", "attachment_name", "body_bank_details", "policy_route"],
+            "time_range": hunt_plan["time_window"],
+            "result_count": max(matched_messages - 1, 2),
+        },
+        {
+            "finding": "Identity and trust relationship review",
+            "source": "Identity / IAM + supplier history",
+            "query": f"supplier_key:{supplier_key} OR account:{account_key}",
+            "matched_fields": ["supplier_key", "approved_contact_path", "identity_status", "incident_refs"],
+            "time_range": hunt_plan["time_window"],
+            "result_count": impacted_users + impacted_suppliers,
+        },
+    ]
+    negative_evidence = [
+        "No repeated delivery overlap was found outside the sender / reply / ASN cluster.",
+        "No confirmed benign approved-contact path explains the new remittance request in the seeded corpus.",
+        "No broad identity anomaly was found across unrelated suppliers; the signals stay narrow to this supplier lane.",
+    ]
+    guardrails = {
+        "would_weaken": [
+            "Approved supplier contact path matches the new banking request out of band.",
+            "No repeat bank details, attachment fingerprints, or sender infrastructure overlap is found in connected sources.",
+            "A known benign supplier template update explains the wording drift.",
+        ],
+        "would_confirm": [
+            "The same bank details or reply domain appear in other supplier-fraud cases.",
+            "Connected SIEM/XDR shows the same sender infrastructure touching other users or suppliers.",
+            "Approved-contact records show the sender identity is not authorized to request trust or remittance changes.",
+        ],
+        "requires_human": [
+            "Verify supplier details using an existing trusted contact path.",
+            "Approve any downstream containment or external push.",
+            "Review whether the message reflects impersonation, compromised account, or a legitimate business exception.",
+        ],
+    }
+    audit_trail = [
+        f"Input evidence captured from trace {trace_id}.",
+        f"Generated {len([p for p in pivots if p['included']])} evidence-scoped pivots and excluded unrestricted searches.",
+        f"Executed {estimated_queries} bounded synthetic queries across {len(selected_sources)} approved source groups.",
+        "Clustered results into infrastructure, payment-lure, and identity-impact hypotheses.",
+        "Returned structured findings, negative evidence, and guardrails before narrative summary.",
+        "Awaits analyst decision for any downstream action outside the synthetic corpus.",
+    ]
+
+    base_date = datetime.now(timezone.utc) - timedelta(days=corpus_days)
+    chronology = []
+    for idx in range(6):
+        days = _stable_demo_int(f"{seed}:day:{idx}", max(corpus_days - 5, 10), offset=idx * 3)
+        chronology.append(
+            {
+                "ts": (base_date + timedelta(days=days)).strftime("%Y-%m-%d"),
+                "event": [
+                    "Synthetic supplier-remittance lure observed",
+                    "Reply-domain mismatch clustered with supplier lane",
+                    "Shared ASN / hosting footprint linked to message set",
+                    "Payment-detail change request matched prior wording",
+                    "Synthetic identity review flagged possible impersonation path",
+                    "Analyst-approved hunt package prepared for downstream systems",
+                ][idx],
+            }
+        )
+
+    clusters = [
+        {
+            "title": "Sender infrastructure overlap",
+            "confidence": "high" if related_incidents or reply_mismatch else "medium",
+            "summary": f"{matched_messages} synthetic messages share {asn} / {asn_org} hosting or adjacent mail-routing infrastructure with this email.",
+            "evidence": [
+                f"Shared infrastructure pivot: {asn} ({asn_org})",
+                f"Originating geo cluster: {geo_country}",
+                f"Observed sender domains: {', '.join(shared_domains)}",
+            ],
+            "analyst_checks": [
+                "Pivot on sender, reply, and return-path domains across the mail corpus.",
+                "Group by ASN, hosting footprint, and GeoIP to identify repeated infrastructure reuse.",
+                "Check whether the same supplier path or trust record was touched by earlier incidents.",
+            ],
+        },
+        {
+            "title": "Payment-change lure cluster",
+            "confidence": "high" if any("bank" in r.lower() or "verification" in r.lower() for r in reasons) else "medium",
+            "summary": f"Synthetic corpus shows repeated payment-detail / urgency wording across {matched_messages - 1 if matched_messages > 1 else 2} related messages over {corpus_days} days.",
+            "evidence": [
+                f"Subject lineage includes: {subject}",
+                "Repeated urgency and trusted-supplier framing detected",
+                "Attachment / bank-change themes cluster with supplier impersonation scenarios",
+            ],
+            "analyst_checks": [
+                "Search for the same bank details, beneficiary names, or payment instructions across the synthetic email set.",
+                "Check whether similar language preceded account-trust or supplier-change requests.",
+                "Bundle matching subjects, reply domains, and attachment classes into one review package.",
+            ],
+        },
+        {
+            "title": "Account / identity impact review",
+            "confidence": "medium",
+            "summary": f"Hunt narrowed to {impacted_users} synthetic identities and {impacted_suppliers} supplier records for compromised-vs-impersonated account review.",
+            "evidence": [
+                f"Route at analysis time: {route}",
+                f"Verdict at analysis time: {verdict}",
+                f"Risk band at analysis time: {confidence}",
+            ],
+            "analyst_checks": [
+                "Separate likely impersonation from likely compromised-account scenarios before containment.",
+                "Check legitimate approved contacts versus newly observed identities or reply paths.",
+                "Only escalate to stronger downstream response if overlap exists beyond this single message.",
+            ],
+        },
+    ]
+
+    if mitre:
+        clusters.append(
+            {
+                "title": "Technique-driven hunt package",
+                "confidence": "medium",
+                "summary": "The synthetic hunt uses current MITRE tags to scope where to pivot next instead of running an unconstrained broad search.",
+                "evidence": [f"Exact MITRE tags from current evidence: {', '.join(mitre)}"],
+                "analyst_checks": [
+                    "Use tag-aligned hunts in SIEM/XDR first.",
+                    "Keep deeper host or network hunts gated behind explicit approval and telemetry availability.",
+                ],
+            }
+        )
+
+    downstream = [
+        "Mail telemetry: sender, reply-to, return-path, subject, attachment class, beneficiary strings",
+        "Identity / IAM: legitimate vs impersonated account review, supplier contact path verification",
+        "SIEM / XDR: correlated incidents, user touchpoints, shared domains, ASN / GeoIP reuse",
+        "Optional deeper sources if connected: eBPF, host triage, packet, DLP / CASB",
+    ]
+    production = [
+        "Keep the hunt human-gated before any downstream containment or push.",
+        "Use deterministic search packs generated from the evidence, not free-form autonomous scope creep.",
+        "Start with mail, identity, and SIEM telemetry. Add host/network telemetry only if a tenant actually has it.",
+        "Persist hunt runs, evidence pivots, and analyst outcomes for feedback and tuning.",
+    ]
+
+    return {
+        "subject": subject,
+        "sender": sender,
+        "reply_to": reply_to,
+        "trace_id": trace_id,
+        "severity": severity,
+        "verdict_action": verdict,
+        "route": route,
+        "reasons": reasons,
+        "mitre_attack": mitre,
+        "attachments": attachments,
+        "geo_country": geo_country,
+        "asn": asn,
+        "asn_org": asn_org,
+        "related_incidents": related_incidents,
+        "corpus_messages": corpus_messages,
+        "corpus_identities": corpus_identities,
+        "corpus_suppliers": corpus_suppliers,
+        "corpus_days": corpus_days,
+        "estimated_minutes": estimated_minutes,
+        "estimated_queries": estimated_queries,
+        "pivots": pivots,
+        "hunt_plan": hunt_plan,
+        "query_provenance": query_provenance,
+        "confidence_model": confidence_model,
+        "negative_evidence": negative_evidence,
+        "guardrails": guardrails,
+        "audit_trail": audit_trail,
+        "clusters": clusters,
+        "chronology": chronology,
+        "downstream": downstream,
+        "production": production,
+    }
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -512,6 +807,352 @@ def merchant_incident_room_lite(request: Request, incident_id: str | None = None
     return _merchant_html_response(request, html)
 
 
+@router.get("/email-lab/threat-hunt", response_class=HTMLResponse)
+def merchant_email_lab_threat_hunt(request: Request, ctx: str | None = None):
+    if not (_is_loopback(request) or _is_local_demo_host(request)):
+        raise HTTPException(status_code=403, detail="email_lab_local_only")
+
+    report = _build_demo_hunt_report(_decode_demo_hunt_context(ctx))
+
+    def esc(value: Any) -> str:
+        return html.escape(str(value if value is not None else ""))
+
+    def bullets(values: list[str]) -> str:
+        rows = [f"<li>{esc(v)}</li>" for v in values if str(v or "").strip()]
+        return "<ul>" + "".join(rows) + "</ul>" if rows else "<div class='muted'>No additional detail.</div>"
+
+    def pill(text: str, tone: str = "") -> str:
+        klass = f"pill {tone}".strip()
+        return f"<span class=\"{klass}\">{esc(text)}</span>"
+
+    pivot_rows = "".join(
+        f"""
+        <tr>
+          <td>{esc(item.get("label"))}</td>
+          <td>{esc(item.get("value"))}</td>
+          <td>{'Included' if item.get("included") else 'Excluded'}</td>
+          <td>{esc(item.get("why"))}</td>
+        </tr>
+        """
+        for item in (report.get("pivots") or [])
+    )
+
+    source_rows = "".join(
+        f"""
+        <tr>
+          <td>{esc(item.get("name"))}</td>
+          <td>{esc(item.get("scope"))}</td>
+          <td>{esc(item.get("query_count"))}</td>
+          <td>{esc(item.get("why"))}</td>
+        </tr>
+        """
+        for item in ((report.get("hunt_plan") or {}).get("sources_selected") or [])
+    )
+
+    optional_rows = "".join(
+        f"""
+        <tr>
+          <td>{esc(item.get("name"))}</td>
+          <td>{esc(item.get("status"))}</td>
+          <td>{esc(item.get("why"))}</td>
+        </tr>
+        """
+        for item in ((report.get("hunt_plan") or {}).get("sources_optional") or [])
+    )
+
+    matched_rows = "".join(
+        f"""
+        <tr>
+          <td>{esc(cluster.get("title"))}</td>
+          <td>{esc(cluster.get("confidence"))}</td>
+          <td>{esc(cluster.get("summary"))}</td>
+          <td>{esc(' | '.join(list(cluster.get("evidence") or [])[:3]))}</td>
+        </tr>
+        """
+        for cluster in (report.get("clusters") or [])
+    )
+
+    cluster_html = "".join(
+        f"""
+        <section class="card">
+          <h3>{esc(cluster.get("title"))} {pill(f"{cluster.get('confidence')} confidence", "info")}</h3>
+          <p class="summary">{esc(cluster.get("summary"))}</p>
+          <div class="grid two">
+            <div>
+              <div class="label">What The Hunt Found</div>
+              {bullets(list(cluster.get("evidence") or []))}
+            </div>
+            <div>
+              <div class="label">What The Agent Looked For</div>
+              {bullets(list(cluster.get("analyst_checks") or []))}
+            </div>
+          </div>
+        </section>
+        """
+        for cluster in report.get("clusters") or []
+    )
+
+    chronology_html = "".join(
+        f"<tr><td>{esc(item.get('ts'))}</td><td>{esc(item.get('event'))}</td></tr>"
+        for item in (report.get("chronology") or [])
+    )
+
+    provenance_rows = "".join(
+        f"""
+        <tr>
+          <td>{esc(item.get("finding"))}</td>
+          <td>{esc(item.get("source"))}</td>
+          <td class="mono">{esc(item.get("query"))}</td>
+          <td>{esc(', '.join(item.get("matched_fields") or []))}</td>
+          <td>{esc(item.get("time_range"))}</td>
+          <td>{esc(item.get("result_count"))}</td>
+        </tr>
+        """
+        for item in (report.get("query_provenance") or [])
+    )
+
+    confidence_cards = "".join(
+        f"""
+        <section class="subcard">
+          <div class="row" style="justify-content:space-between; align-items:center;">
+            <strong>{esc(key.replace('_', ' ').title())}</strong>
+            {pill(f"{value.get('score')}/100", 'accent')}
+          </div>
+          <div class="small" style="margin-top:4px;">{esc(value.get("label"))}</div>
+          <p class="summary" style="margin-top:8px;">{esc(value.get("why"))}</p>
+        </section>
+        """
+        for key, value in (report.get("confidence_model") or {}).items()
+    )
+
+    ascii_flow = r"""
++---------------------+     +-------------------------+     +-----------------------+
+| Current Email Case  | --> | Evidence Pack Builder   | --> | Human Approval Gate   |
+| subject/sender/urls |     | exact pivots only       |     | run bounded hunt      |
++---------------------+     +-------------------------+     +-----------------------+
+             |                            |                              |
+             v                            v                              v
+   +------------------+        +----------------------+       +-----------------------+
+   | Lone Event Check |        | Correlation Plan     |       | Approved Sources Only |
+   | no overlap yet   |        | what to query + why  |       | mail/SEG/SIEM/IAM     |
+   +------------------+        +----------------------+       +-----------------------+
+             |                            |                              |
+             +------------+---------------+------------------------------+
+                          |
+                          v
+              +-----------------------------+
+              | Cluster + Negative Evidence |
+              | matched + not matched       |
+              +-----------------------------+
+                          |
+                          v
+              +-----------------------------+
+              | Analyst Decision            |
+              | monitor / escalate / push   |
+              +-----------------------------+
+
+Agentic defense ethos:
+- each agent scopes itself to approved telemetry
+- each agent emits provenance and confidence
+- each agent can be challenged by negative evidence
+- each agent stops at human gates for consequential actions
+""".strip()
+
+    html_body = f"""
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Threat Hunt Report</title>
+        <style>
+          :root {{
+            --bg:#eef4ff; --surface:#ffffff; --surface2:#f8fbff; --border:#cfd9ea;
+            --fg:#142033; --fg2:#495a74; --muted:#70829a; --accent:#2c5fe6; --accent2:#e8501a;
+          }}
+          * {{ box-sizing:border-box; }}
+          body {{ margin:0; font-family:Inter,"Segoe UI",system-ui,sans-serif; background:linear-gradient(180deg,#f5f9ff 0%, var(--bg) 100%); color:var(--fg); }}
+          header {{ padding:18px 22px; background:#1c2948; color:#eef1f7; }}
+          header h1 {{ margin:0; font-size:20px; }}
+          header p {{ margin:6px 0 0; color:rgba(238,241,247,0.76); }}
+          .wrap {{ padding:18px; max-width:1400px; margin:0 auto; }}
+          .banner {{ border:1px solid #f59e0b; background:#fff7ed; color:#9a3412; border-radius:14px; padding:12px 14px; margin-bottom:16px; font-weight:700; }}
+          .grid {{ display:grid; gap:14px; }}
+          .grid.top {{ grid-template-columns:repeat(3, minmax(0, 1fr)); }}
+          .grid.two {{ grid-template-columns:repeat(2, minmax(0, 1fr)); }}
+          .grid.three {{ grid-template-columns:repeat(3, minmax(0, 1fr)); }}
+          .card {{ border:1px solid var(--border); border-radius:14px; background:linear-gradient(180deg,var(--surface),var(--surface2)); padding:14px; box-shadow:0 10px 24px rgba(28,41,72,0.06); margin-bottom:14px; }}
+          .subcard {{ border:1px solid var(--border); border-radius:12px; background:#fff; padding:12px; }}
+          .card h2,.card h3 {{ margin:0 0 8px; }}
+          .label {{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; margin-bottom:6px; }}
+          .pill {{ display:inline-flex; padding:4px 10px; border-radius:999px; border:1px solid #b9c8e3; background:#eef4ff; color:#36517e; font-size:11px; font-weight:700; }}
+          .pill.accent {{ background:#dbeafe; color:#1d4ed8; border-color:#93c5fd; }}
+          .pill.warn {{ background:#fff7ed; color:#c2410c; border-color:#fdba74; }}
+          .pill.info {{ background:#ecfeff; color:#0f766e; border-color:#99f6e4; }}
+          .summary {{ margin:0 0 10px; color:var(--fg2); }}
+          .kv {{ display:grid; grid-template-columns:150px 1fr; gap:8px; margin:6px 0; }}
+          .muted {{ color:var(--muted); }}
+          ul {{ margin:0; padding-left:18px; }}
+          li {{ margin:4px 0; }}
+          table {{ width:100%; border-collapse:collapse; }}
+          th,td {{ text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }}
+          th {{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }}
+          .toolbar {{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }}
+          .btn {{ display:inline-block; padding:9px 13px; border-radius:10px; border:1px solid #9bb1d1; background:#fff; color:var(--fg); text-decoration:none; font-weight:700; }}
+          .btn.primary {{ background:var(--accent); border-color:var(--accent); color:#fff; }}
+          .mono {{ font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }}
+          pre.ascii {{ margin:0; white-space:pre-wrap; overflow:auto; background:#0f172a; color:#dbeafe; border-radius:12px; padding:14px; border:1px solid #334155; }}
+          @media (max-width: 980px) {{
+            .grid.top, .grid.two, .grid.three {{ grid-template-columns:1fr; }}
+            .kv {{ grid-template-columns:1fr; }}
+          }}
+        </style>
+      </head>
+      <body>
+        <header>
+          <h1>Evidence-Scoped Threat Hunt</h1>
+          <p>Human-gated bounded hunt plan generated from current email evidence. Synthetic demo telemetry only.</p>
+        </header>
+        <div class="wrap">
+          <div class="banner">Synthetic telemetry corpus. Deterministic seeded demo data. No live tenant data used. The point is to show how an agent can plan, scope, defend, and audit its own investigation.</div>
+          <div class="toolbar">
+            <a class="btn" href="/merchant/email-lab">Back To Email Lab</a>
+            {pill(f"Seeded from trace {report.get('trace_id')}")}
+            {pill(f"Corpus: {report.get('corpus_messages')} messages / {report.get('corpus_days')} days")}
+            {pill(f"Estimated run: {report.get('estimated_queries')} bounded queries / {report.get('estimated_minutes')} min", "warn")}
+          </div>
+          <div class="grid top">
+            <section class="card">
+              <h2>Seed Evidence</h2>
+              <div class="kv"><div class="label">Subject</div><div>{esc(report.get("subject"))}</div></div>
+              <div class="kv"><div class="label">Sender</div><div>{esc(report.get("sender"))}</div></div>
+              <div class="kv"><div class="label">Reply-To</div><div>{esc(report.get("reply_to"))}</div></div>
+              <div class="kv"><div class="label">Route</div><div>{esc(report.get("route"))} / {esc(report.get("verdict_action"))}</div></div>
+              <div class="kv"><div class="label">Reasons</div><div>{esc(", ".join(report.get("reasons") or []))}</div></div>
+              <div class="kv"><div class="label">MITRE</div><div>{esc(", ".join(report.get("mitre_attack") or [])) or "No tags"}</div></div>
+            </section>
+            <section class="card">
+              <h2>Human Gate</h2>
+              <div class="kv"><div class="label">Approval</div><div>{esc((report.get("hunt_plan") or {}).get("approval_level"))}</div></div>
+              <div class="kv"><div class="label">Time window</div><div>{esc((report.get("hunt_plan") or {}).get("time_window"))}</div></div>
+              <div class="kv"><div class="label">Estimated cost</div><div>{esc((report.get("hunt_plan") or {}).get("estimated_cost"))}</div></div>
+              <div class="kv"><div class="label">Why generated</div><div>{esc((report.get("hunt_plan") or {}).get("why_generated"))}</div></div>
+            </section>
+            <section class="card">
+              <h2>Corpus Scope</h2>
+              <div class="kv"><div class="label">Messages</div><div>{esc(report.get("corpus_messages"))}</div></div>
+              <div class="kv"><div class="label">Identities</div><div>{esc(report.get("corpus_identities"))}</div></div>
+              <div class="kv"><div class="label">Suppliers</div><div>{esc(report.get("corpus_suppliers"))}</div></div>
+              <div class="kv"><div class="label">Geo / ASN</div><div>{esc(report.get("geo_country"))} / {esc(report.get("asn"))} ({esc(report.get("asn_org"))})</div></div>
+              <div class="kv"><div class="label">Related incidents</div><div>{esc(report.get("related_incidents"))}</div></div>
+            </section>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <h2>Deterministic Hunt Plan</h2>
+              <div class="label">Exact pivots generated from current evidence</div>
+              <table>
+                <thead><tr><th>Pivot</th><th>Value</th><th>Status</th><th>Why included</th></tr></thead>
+                <tbody>{pivot_rows}</tbody>
+              </table>
+              <div class="label" style="margin-top:12px;">Excluded pivots</div>
+              {bullets(list((report.get("hunt_plan") or {}).get("excluded_pivots") or []))}
+            </section>
+            <section class="card">
+              <h2>Source-Bounded Execution</h2>
+              <div class="label">Approved sources selected</div>
+              <table>
+                <thead><tr><th>Source</th><th>Scope</th><th>Queries</th><th>Why touched</th></tr></thead>
+                <tbody>{source_rows}</tbody>
+              </table>
+              <div class="label" style="margin-top:12px;">Optional sources only if connected</div>
+              <table>
+                <thead><tr><th>Source</th><th>Status</th><th>Use</th></tr></thead>
+                <tbody>{optional_rows}</tbody>
+              </table>
+            </section>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <h2>Matched Signals</h2>
+              <p class="summary">These are the strongest bounded correlations found in the synthetic corpus before any narrative interpretation.</p>
+              <table>
+                <thead><tr><th>Cluster</th><th>Confidence</th><th>What matched</th><th>Evidence highlights</th></tr></thead>
+                <tbody>{matched_rows}</tbody>
+              </table>
+            </section>
+            <section class="card">
+              <h2>Negative Evidence</h2>
+              {bullets(list(report.get("negative_evidence") or []))}
+            </section>
+          </div>
+          <div class="grid three">
+            <section class="card">
+              <h2>Confidence Model</h2>
+              <div class="grid">{confidence_cards}</div>
+            </section>
+            <section class="card">
+              <h2>False-Positive Guardrails</h2>
+              <div class="label">Would weaken the hypothesis</div>
+              {bullets(list(((report.get("guardrails") or {}).get("would_weaken")) or []))}
+              <div class="label" style="margin-top:12px;">Would confirm it</div>
+              {bullets(list(((report.get("guardrails") or {}).get("would_confirm")) or []))}
+              <div class="label" style="margin-top:12px;">Requires human verification</div>
+              {bullets(list(((report.get("guardrails") or {}).get("requires_human")) or []))}
+            </section>
+            <section class="card">
+              <h2>Analyst Narrative</h2>
+              <p class="summary">The current email justifies a bounded hunt because the evidence suggests payment-change fraud or supplier impersonation. The agent scoped the hunt to approved synthetic sources, looked for repeated sender infrastructure, payment details, and trust-relationship drift, and found enough overlap to warrant further analyst attention.</p>
+              <p class="summary">The hunt did not claim unrestricted tenant-wide visibility, and it surfaced both matching and non-matching signals so the analyst can decide whether this is an isolated event, a correlated campaign, or a legitimate business exception.</p>
+            </section>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <h2>Structured Hunt Output</h2>
+              <p class="summary">Long-form evidence summaries and analyst guidance follow the bounded results above.</p>
+              {cluster_html}
+            </section>
+            <section class="card">
+              <h2>Query Provenance</h2>
+              <table>
+                <thead><tr><th>Finding</th><th>Source</th><th>Query used</th><th>Matched fields</th><th>Window</th><th>Results</th></tr></thead>
+                <tbody>{provenance_rows}</tbody>
+              </table>
+            </section>
+          </div>
+          <div class="grid two">
+            <section class="card">
+              <h2>Audit Trail</h2>
+              {bullets(list(report.get("audit_trail") or []))}
+            </section>
+            <section class="card">
+              <h2>Timeline</h2>
+              <table>
+                <thead><tr><th>Date</th><th>Synthetic Event</th></tr></thead>
+                <tbody>{chronology_html}</tbody>
+              </table>
+            </section>
+            <section class="card">
+              <h2>Recommended Next Checks</h2>
+              <div class="label">Where the agent would look next</div>
+              {bullets(list(report.get("downstream") or []))}
+              <div class="label" style="margin-top:12px;">Production-quality shape</div>
+              {bullets(list(report.get("production") or []))}
+              <div class="label" style="margin-top:12px;">Attachments in scope</div>
+              {bullets(list(report.get("attachments") or []))}
+            </section>
+          </div>
+          <section class="card">
+            <h2>Agentic Investigation Flow</h2>
+            <pre class="ascii">{esc(ascii_flow)}</pre>
+          </section>
+        </div>
+      </body>
+    </html>
+    """
+    return _merchant_html_response(request, html_body)
+
+
 @router.get("/email-lab", response_class=HTMLResponse)
 def merchant_email_lab(request: Request):
     """Email Security Triage Lab (local demo).
@@ -535,36 +1176,39 @@ def merchant_email_lab(request: Request):
         <style>
           /* ── ShopSquire Enterprise Theme ── off-white / warm-slate palette ── */
           :root {
-            --bg:       #f5f6f8;    /* warm off-white page background */
-            --surface:  #ffffff;    /* card white */
-            --surface2: #f0f2f5;    /* alternating surface */
-            --border:   #dde1e8;    /* subtle divider */
-            --fg:       #1a1f2e;    /* near-black text */
-            --fg2:      #4a5568;    /* secondary text */
-            --muted:    #8a95a8;    /* muted / hints */
-            --accent:   #2c5fe6;    /* primary action blue */
-            --accent2:  #e8501a;    /* warning / escalate orange */
-            --success:  #0f8a5e;    /* success green */
-            --header-bg:#1e2d4d;    /* deep navy header — single dark element */
+            --bg: #f4f7fb;
+            --surface: #ffffff;
+            --surface2: #f7faff;
+            --surface3: #eef4ff;
+            --border: #cfd9ea;
+            --border-strong: #9bb1d1;
+            --fg: #142033;
+            --fg2: #43536d;
+            --muted: #6f8098;
+            --accent: #2c5fe6;
+            --accent2: #e8501a;
+            --success: #0f8a5e;
+            --header-bg: #1c2948;
             --header-fg:#eef1f7;
-            --radius:   10px;
+            --card-shadow: 0 10px 28px rgba(28, 41, 72, 0.08);
+            --radius: 12px;
           }
           *, *::before, *::after { box-sizing: border-box; }
-          body { margin:0; font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif; background: var(--bg); color: var(--fg); font-size: 13px; line-height: 1.5; }
+          body { margin:0; font-family: Inter, "Segoe UI", system-ui, -apple-system, Arial, sans-serif; background: radial-gradient(circle at top right, rgba(44,95,230,0.08), transparent 22%), linear-gradient(180deg, #f7faff 0%, var(--bg) 100%); color: var(--fg); font-size: 13px; line-height: 1.5; }
           /* Header */
           header { padding: 0 18px; height: 52px; display:flex; justify-content:space-between; align-items:center; background: var(--header-bg); box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
           .brand { font-weight: 700; font-size: 14px; color: var(--header-fg); letter-spacing: 0.2px; }
           .sub { color: rgba(238,241,247,0.6); font-size: 11px; margin-top: 2px; }
           /* Layout */
           .wrap { display:grid; grid-template-columns: 310px 1fr 390px; gap:0; height: calc(100vh - 52px); overflow: hidden; }
-          .col { border-right: 1px solid var(--border); overflow-y: auto; }
+          .col { border-right: 1px solid rgba(155,177,209,0.35); overflow-y: auto; }
           .pane { padding: 12px 14px; }
           /* Cards */
-          .card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.06); margin-bottom: 10px; }
-          .card h4 { margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--fg2); text-transform: uppercase; letter-spacing: 0.5px; background: var(--surface2); border-radius: var(--radius) var(--radius) 0 0; }
+          .card { border: 1px solid var(--border); border-radius: 14px; background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,255,0.98)); box-shadow: var(--card-shadow); margin-bottom: 12px; overflow: hidden; }
+          .card h4 { margin: 0; padding: 11px 14px; border-bottom: 1px solid rgba(155,177,209,0.28); font-size: 12px; font-weight: 700; color: #54657f; text-transform: uppercase; letter-spacing: 0.5px; background: linear-gradient(180deg, var(--surface3), var(--surface2)); border-radius: var(--radius) var(--radius) 0 0; }
           .card .body { padding: 12px 14px; }
           /* Form controls */
-          input, textarea, select { width: 100%; padding: 7px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); font-size: 12px; outline: none; transition: border-color 0.15s; }
+          input, textarea, select { width: 100%; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--border); background: rgba(255,255,255,0.98); color: var(--fg); font-size: 12px; outline: none; transition: border-color 0.15s; }
           input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(44,95,230,0.12); }
           textarea { min-height: 160px; resize: vertical; }
           input[type=file] { border-style: dashed; padding: 10px; cursor: pointer; }
@@ -573,18 +1217,18 @@ def merchant_email_lab(request: Request):
           /* Rows */
           .row { display:flex; gap:8px; align-items:center; }
           /* Buttons */
-          .btn { padding: 7px 13px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; transition: all 0.15s; }
+          .btn { padding: 7px 13px; border-radius: 9px; border: 1px solid var(--border-strong); background: linear-gradient(180deg, #ffffff, #f5f8ff); color: var(--fg); cursor: pointer; font-size: 12px; font-weight: 600; white-space: nowrap; transition: all 0.15s; box-shadow: 0 2px 8px rgba(28,41,72,0.05); }
           .btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
           .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
           .btn-primary:hover { background: #1e4ac8; border-color: #1e4ac8; }
           .btn-danger { background: var(--accent2); color: #fff; border-color: var(--accent2); }
           .btn-danger:hover { background: #c43c10; border-color: #c43c10; }
           /* Pills / badges */
-          .pill { display:inline-flex; align-items:center; gap:4px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface2); font-size: 11px; color: var(--fg2); font-weight: 500; }
+          .pill { display:inline-flex; align-items:center; gap:4px; padding: 3px 9px; border: 1px solid rgba(155,177,209,0.45); border-radius: 999px; background: linear-gradient(180deg, #ffffff, #eef4ff); font-size: 11px; color: var(--fg2); font-weight: 600; }
           /* Inbox items */
           .list { display:flex; flex-direction:column; gap:6px; max-height: 220px; overflow:auto; }
-          .item { display:flex; flex-direction:column; gap:4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor:pointer; background: var(--surface); transition: all 0.12s; }
-          .item:hover { border-color: var(--accent); background: rgba(44,95,230,0.04); }
+          .item { display:flex; flex-direction:column; gap:4px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; cursor:pointer; background: linear-gradient(180deg, #ffffff, #f8fbff); transition: all 0.12s; }
+          .item:hover { border-color: var(--accent); background: rgba(44,95,230,0.05); box-shadow: 0 8px 20px rgba(44,95,230,0.08); }
           .item .item-from { font-weight: 600; font-size: 12px; color: var(--fg); }
           .item .item-sub { font-size: 11px; color: var(--fg2); }
           .item .item-preview { font-size: 11px; color: var(--muted); }
@@ -594,18 +1238,20 @@ def merchant_email_lab(request: Request):
           .small { font-size: 11px; color: var(--muted); }
           .mono { font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace; font-size: 11px; }
           /* Trace / SSE stream */
-          .trace { overflow:auto; padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: #f8f9fb; }
-          .ev { margin-bottom: 6px; padding: 7px 10px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 6px 6px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+          .trace { overflow:auto; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: linear-gradient(180deg, #fbfdff, #f4f8ff); }
+          .ev { margin-bottom: 6px; padding: 7px 10px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
           .ev .meta { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
           /* Severity verdict bar states */
           .sev-error   { background: #fff1f0; border-left: 4px solid #ef4444; color: #b91c1c; }
           .sev-warning { background: #fffbeb; border-left: 4px solid #f59e0b; color: #92400e; }
           .sev-info    { background: #eff6ff; border-left: 4px solid #3b82f6; color: #1d4ed8; }
+          .right-rail { overflow-y: auto; overflow-x: auto; max-height: calc(100vh - 60px); background: linear-gradient(180deg, rgba(247,250,255,0.92), rgba(241,246,255,0.96)); }
           .right-rail.detached {
             position: fixed;
             top: 72px;
             right: 16px;
-            width: min(560px, 44vw);
+            width: min(860px, 72vw);
+            min-width: 560px;
             max-height: calc(100vh - 88px);
             z-index: 1000;
             background: rgba(243, 246, 251, 0.98);
@@ -613,6 +1259,8 @@ def merchant_email_lab(request: Request):
             border-radius: 14px;
             box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
             padding: 10px;
+            resize: horizontal;
+            overflow: auto;
           }
           .rail-toolbar { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
           .card-grid { display:grid; grid-template-columns:1fr; gap:10px; }
@@ -620,12 +1268,26 @@ def merchant_email_lab(request: Request):
           .finding-list { margin:0; padding-left:16px; }
           .finding-list li { margin:4px 0; }
           .section-label { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#64748b; margin-bottom:4px; font-weight:700; }
-          .evidence-block { padding:10px; border:1px solid var(--border); border-radius:10px; background:#fff; margin-top:8px; }
-          .attachment-row { padding:10px; border:1px solid var(--border); border-radius:10px; background:#fff; margin-top:8px; }
+          .evidence-block { padding:12px; border:1px solid rgba(155,177,209,0.42); border-left:4px solid #5b7ee5; border-radius:12px; background:linear-gradient(180deg, #ffffff, #f8fbff); margin-top:8px; box-shadow: 0 8px 20px rgba(28,41,72,0.05); }
+          .attachment-row { padding:12px; border:1px solid rgba(155,177,209,0.42); border-left:4px solid #f59e0b; border-radius:12px; background:linear-gradient(180deg, #ffffff, #fffaf1); margin-top:8px; box-shadow: 0 8px 20px rgba(28,41,72,0.05); }
           .thumb-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px; }
           .thumb-grid img { width:100%; border:1px solid var(--border); border-radius:8px; background:#fff; }
           .trace-toggle { display:flex; gap:6px; margin:8px 0; }
           .trace-toggle button.active { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+          .finding-drilldown { margin-top: 8px; border: 1px solid rgba(155,177,209,0.34); border-radius: 12px; background: linear-gradient(180deg, #ffffff, #f8fbff); }
+          .finding-drilldown > summary { cursor: pointer; padding: 10px 12px; font-weight: 700; color: #334155; }
+          .finding-drilldown-body { padding: 0 12px 12px; color: var(--fg2); }
+          #evidence_sections, #actions_sections, #integrations_sections, #gov_sections, #graph_sections, #tones_sections, #attach_forensics, #pdf_diff_sections, #visual_diff_sections, #qr_findings, #infra_sections { display:grid; grid-template-columns:minmax(0, 1fr); gap:12px; }
+          .right-rail.wide #evidence_sections, .right-rail.wide #actions_sections, .right-rail.wide #integrations_sections, .right-rail.wide #gov_sections, .right-rail.wide #graph_sections, .right-rail.wide #tones_sections, .right-rail.wide #attach_forensics, .right-rail.wide #pdf_diff_sections, .right-rail.wide #visual_diff_sections, .right-rail.wide #qr_findings, .right-rail.wide #infra_sections { grid-template-columns:repeat(2, minmax(0, 1fr)); align-items:start; }
+          .right-rail.detached .card { min-width: 680px; }
+          .right-rail.detached.wide .card { min-width: 0; }
+          @media (max-width: 1200px) { .wrap { grid-template-columns: 270px 1fr 360px; } }
+          @media (max-width: 980px) {
+            .wrap { grid-template-columns: 1fr; height: auto; overflow: auto; }
+            .col { border-right: 0; }
+            .right-rail { max-height: none; }
+            .summary-grid { grid-template-columns: 1fr; }
+          }
           /* Scrollbar */
           ::-webkit-scrollbar { width: 5px; height: 5px; }
           ::-webkit-scrollbar-track { background: transparent; }
@@ -639,7 +1301,7 @@ def merchant_email_lab(request: Request):
             <div class="sub">Compose · Attach · Analyze · Decision Trace · Escalate</div>
           </div>
           <div class="row">
-            <span class="pill" style="background:rgba(238,241,247,0.1);color:#eef1f7;border-color:rgba(238,241,247,0.2);">API <span id="api_health" style="font-weight:700;">checking…</span></span>
+            <span class="pill" id="api_health_badge" style="background:rgba(238,241,247,0.1);color:#eef1f7;border-color:rgba(238,241,247,0.2);" title="Checking backend status">API <span id="api_health" style="font-weight:700;">checking…</span></span>
             <button class="btn btn-primary" style="font-size:12px;" onclick="window.open('/merchant/dashboard','_blank')">Merchant BI</button>
             <button class="btn" style="background:rgba(238,241,247,0.1);color:#eef1f7;border-color:rgba(238,241,247,0.2);font-size:12px;" onclick="window.open('/merchant/incident-room','_blank')">Escalations</button>
           </div>
@@ -671,8 +1333,10 @@ def merchant_email_lab(request: Request):
                 <div class="row" style="margin-top:12px; flex-wrap:wrap; gap:6px;">
                   <button class="btn btn-primary" aria-label="Analyze email and populate security matrix" onclick="analyze()">&#128269; Analyze</button>
                   <button class="btn btn-danger" aria-label="Analyze email and escalate to incident room" onclick="submitEscalate()">&#9888; Escalate</button>
+                  <button class="btn" aria-label="Run a human-gated synthetic threat hunt in a new tab" onclick="runThreatHunt()" style="border-color:#f59e0b;background:linear-gradient(180deg,#fff7ed,#ffedd5);color:#9a3412;font-weight:700;">&#128270; Run Threat Hunt</button>
                   <button class="btn" aria-label="Load email lab demo assets" onclick="loadDemoAssets()">&#128196; Demo</button>
                   <button class="btn" aria-label="Simulate agent events in decision trace" onclick="simulateAgents()">&#129302; Agents</button>
+                  <span class="small" style="color:#9a3412;">Human-gated new tab: bounded synthetic correlation hunt</span>
                   <span class="small" id="status" style="flex:1; padding-left:4px;"></span>
                 </div>
                 <div style="margin-top:12px; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface2);">
@@ -723,6 +1387,30 @@ def merchant_email_lab(request: Request):
                 <div class="row" style="flex-wrap:wrap; gap:6px; margin-bottom:8px;" id="sec_badges"></div>
                 <div id="sec_verdict_bar" style="padding:8px 10px; border-radius:8px; margin-bottom:8px; font-weight:600;"></div>
                 <div class="small" id="sec_reasons_list"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="playbook_card">
+              <h4>Parallel Agents Reasoning</h4>
+              <div class="body">
+                <div class="row" style="gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                  <span class="pill" id="pb_name">-</span>
+                  <span class="pill" id="pb_status" style="background:#22c55e22;color:#166534;">-</span>
+                </div>
+                <div class="small" style="margin-bottom:4px; font-weight:600;">Actions completed:</div>
+                <div id="pb_actions" class="small" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
+                <div class="small" style="margin-top:6px; color:#94a3b8;" id="pb_next_steps"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="evidence_card">
+              <h4>Top Evidence</h4>
+              <div class="body">
+                <div id="evidence_sections" class="small"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px; display:none;" id="actions_card">
+              <h4>What To Do Now</h4>
+              <div class="body">
+                <div id="actions_sections" class="small"></div>
               </div>
             </div>
             <!-- BEC Kill Chain -->
@@ -829,31 +1517,6 @@ def merchant_email_lab(request: Request):
                 <div id="qr_findings" class="small"></div>
                 </div>
               </details>
-            </div>
-            <!-- Playbook Run -->
-            <div class="card" style="margin-top:10px; display:none;" id="playbook_card">
-              <h4>What Agents Found</h4>
-              <div class="body">
-                <div class="row" style="gap:6px; flex-wrap:wrap; margin-bottom:6px;">
-                  <span class="pill" id="pb_name">-</span>
-                  <span class="pill" id="pb_status" style="background:#22c55e22;color:#166534;">-</span>
-                </div>
-                <div class="small" style="margin-bottom:4px; font-weight:600;">Actions completed:</div>
-                <div id="pb_actions" class="small" style="display:flex; flex-wrap:wrap; gap:4px;"></div>
-                <div class="small" style="margin-top:6px; color:#94a3b8;" id="pb_next_steps"></div>
-              </div>
-            </div>
-            <div class="card" style="margin-top:10px; display:none;" id="evidence_card">
-              <h4>Top Evidence</h4>
-              <div class="body">
-                <div id="evidence_sections" class="small"></div>
-              </div>
-            </div>
-            <div class="card" style="margin-top:10px; display:none;" id="actions_card">
-              <h4>What To Do Now</h4>
-              <div class="body">
-                <div id="actions_sections" class="small"></div>
-              </div>
             </div>
             <div class="card" style="margin-top:10px; display:none;" id="integrations_card">
               <h4>Notifications / Push</h4>
@@ -965,10 +1628,113 @@ def merchant_email_lab(request: Request):
               return 'local-owner-key';
             } catch(e){ return 'local-owner-key'; }
           }
+          function setApiHealthBadge(label, palette, titleText){
+            const textEl = document.getElementById('api_health');
+            const badgeEl = document.getElementById('api_health_badge');
+            if(textEl) textEl.textContent = label;
+            if(badgeEl){
+              if(palette && palette.bg) badgeEl.style.background = palette.bg;
+              if(palette && palette.color) badgeEl.style.color = palette.color;
+              if(palette && palette.border) badgeEl.style.borderColor = palette.border;
+              if(titleText) badgeEl.title = titleText;
+            }
+          }
+          function collectHealthIssues(snapshot){
+            try{
+              const deps = snapshot && snapshot.dependencies && typeof snapshot.dependencies === 'object' ? snapshot.dependencies : {};
+              return Object.entries(deps)
+                .filter(([, info]) => info && typeof info === 'object' && !['healthy','ok','ready'].includes(String(info.status || '').toLowerCase()))
+                .map(([name, info]) => `${name}: ${String(info.status || 'unknown')}`);
+            }catch(e){
+              return [];
+            }
+          }
           async function ping(){
-            try { const r = await fetch('/health'); const j = await r.json(); document.getElementById('api_health').textContent = (j && j.status) ? j.status : 'unknown'; } catch(e){ document.getElementById('api_health').textContent = 'down'; }
+            try {
+              const live = await fetch('/healthz');
+              if(!live.ok) throw new Error('healthz_failed');
+              let detailed = null;
+              try {
+                const detailResp = await fetch('/health');
+                if(detailResp.ok) detailed = await detailResp.json();
+              } catch(e) {}
+              const issues = collectHealthIssues(detailed);
+              if(detailed && String(detailed.status || '').toLowerCase() === 'degraded'){
+                setApiHealthBadge(
+                  'live (limited)',
+                  { bg:'rgba(245,158,11,0.18)', color:'#fde68a', border:'rgba(245,158,11,0.35)' },
+                  issues.length ? `Backend is live with limited dependencies: ${issues.join(' | ')}` : 'Backend is live with some optional dependencies unavailable.'
+                );
+                return;
+              }
+              setApiHealthBadge(
+                'live',
+                { bg:'rgba(34,197,94,0.18)', color:'#dcfce7', border:'rgba(34,197,94,0.35)' },
+                'Backend is live and core dependencies are healthy.'
+              );
+            } catch(e){
+              setApiHealthBadge(
+                'down',
+                { bg:'rgba(220,38,38,0.18)', color:'#fecaca', border:'rgba(220,38,38,0.35)' },
+                'Backend did not respond to liveness checks.'
+              );
+            }
           }
           ping();
+          window.addEventListener('resize', updateRailLayout);
+          window.addEventListener('load', updateRailLayout);
+          function toUrlSafeBase64(payload){
+            try{
+              const json = JSON.stringify(payload || {});
+              const utf8 = unescape(encodeURIComponent(json));
+              return btoa(utf8).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+            }catch(e){
+              return '';
+            }
+          }
+          function buildThreatHuntContext(){
+            const j = currentSecurityResult || {};
+            const ev = j.evidence_snapshot || {};
+            const thr = ev.threat_correlation || j.threat_correlation || {};
+            const sa = ev.security_analysis || {};
+            const infra = ev.sender_infrastructure || {};
+            const geo = infra.originating_geo || {};
+            const rel = infra.related_incidents || {};
+            const atts = Array.isArray(ev.attachment_forensics) ? ev.attachment_forensics : [];
+            return {
+              trace_id: j.decision_trace_id || j.decision_id || currentDecisionId || 'trace-demo-email-hunt',
+              subject: document.getElementById('subject')?.value || '',
+              sender: document.getElementById('to')?.value || '',
+              reply_to: j.reply_to || document.getElementById('to')?.value || '',
+              severity: j.severity || '',
+              verdict_action: j.verdict_action || '',
+              route: j.route || '',
+              risk_band: j.risk_band || '',
+              reasons: Array.isArray(j.reasons) ? j.reasons.slice(0, 8) : [],
+              mitre_attack: Array.isArray(sa.mitre_attack) && sa.mitre_attack.length ? sa.mitre_attack.slice(0, 8) : (Array.isArray(thr.mitre_attack) ? thr.mitre_attack.slice(0, 8) : []),
+              geo_country: geo.country || '',
+              asn: geo.asn || infra.originating_asn || '',
+              asn_org: geo.asn_org || '',
+              related_incident_count: rel.count || 0,
+              reply_domain_mismatch: Boolean(infra.reply_domain_mismatch),
+              attachments: atts.slice(0, 6).map(item => String(item.file_name || 'attachment')).filter(Boolean),
+            };
+          }
+          function runThreatHunt(){
+            if(!currentSecurityResult){
+              document.getElementById('status').textContent = 'Analyze the email first to seed the hunt.';
+              return;
+            }
+            const huntWindow = window.open('about:blank', '_blank', 'noopener');
+            if(!huntWindow){
+              document.getElementById('status').textContent = 'Popup blocked. Allow popups to open the threat hunt report.';
+              return;
+            }
+            const token = toUrlSafeBase64(buildThreatHuntContext());
+            huntWindow.location = `/merchant/email-lab/threat-hunt?ctx=${encodeURIComponent(token)}`;
+            document.getElementById('status').textContent = 'Opened human-gated threat hunt report (synthetic demo telemetry).';
+            pushTraceNotice('threat_hunt_opened', { trace_id: currentDecisionId || null, synthetic_demo: true });
+          }
           function newEmailPreset(){ document.getElementById('to').value='accounts@ingramfаke.com.au'; document.getElementById('subject').value='Updated Payment Details'; document.getElementById('body').value='We are changing our payment procedures in the next couple of weeks. Disregard any previous remittance instructions.'; }
           function renderInbox(){ const list = document.getElementById('inbox'); list.innerHTML=''; for(const p of presets){ const d=document.createElement('div'); d.className='item'; d.innerHTML=`<div class='item-from'>${p.label}</div><div class='item-sub'>${p.subject}</div><div class='item-preview'>${p.body.slice(0,72)}…</div>`; d.onclick=()=>{ document.getElementById('subject').value=p.subject; document.getElementById('body').value=p.body; }; list.appendChild(d);} }
           renderInbox();
@@ -1113,6 +1879,12 @@ def merchant_email_lab(request: Request):
               .replaceAll('>', '&gt;')
               .replaceAll('"', '&quot;');
           }
+          function stripInlineMarkup(value){
+            return String(value == null ? '' : value)
+              .replace(/<[^>]*>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
           function listHtml(items){
             const rows = (Array.isArray(items) ? items : []).filter(Boolean);
             if(!rows.length) return '<div class="small" style="color:#94a3b8;">No additional details.</div>';
@@ -1144,7 +1916,8 @@ def merchant_email_lab(request: Request):
             const dreadAvg = parseFloat((((thr||{}).dread||{}).avg ?? (thr||{}).dread_avg ?? 0) || 0);
             const cvss = parseFloat((((thr||{}).cvss||{}).score ?? 0) || 0);
             const band = String(j.risk_band || '').toLowerCase();
-            const stage = String((thr||{}).pasta_stage || (thr||{}).kill_chain_stage || '').trim();
+            const sa = ((j||{}).evidence_snapshot || {}).security_analysis || {};
+            const stage = String(sa.validated_pasta_stage || sa.pasta_stage || (thr||{}).pasta_stage || '').trim();
             if(band === 'high' || dreadAvg >= 7 || cvss >= 8){
               return `High business risk. This email could lead to payment fraud, supplier impersonation, or account misuse if staff act on it. ${stage ? `Threat modeling places it at ${stage}.` : ''}`.trim();
             }
@@ -1155,12 +1928,12 @@ def merchant_email_lab(request: Request):
           }
           function findingToPlainEnglish(f){
             if(!f || typeof f !== 'object') return '';
-            const biz = String(f.business_meaning || '').trim();
+            const biz = stripInlineMarkup(f.business_meaning || '');
             if(biz) return biz;
-            const summary = String(f.summary || '').trim();
+            const summary = stripInlineMarkup(f.summary || '');
             if(summary) return summary;
             const kind = String(f.finding_type || 'finding').replaceAll('_', ' ');
-            const ev = Array.isArray(f.evidence) ? f.evidence.filter(Boolean) : [];
+            const ev = Array.isArray(f.evidence) ? f.evidence.map(v => stripInlineMarkup(v)).filter(Boolean) : [];
             return ev.length ? `${kind}: ${ev.slice(0,2).join(' | ')}` : kind;
           }
           function findingContextLine(f){
@@ -1200,6 +1973,374 @@ def merchant_email_lab(request: Request):
             if(normalized === 'external_redirect_service') return '<span class="pill" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">Owner: redirect / unknown</span>';
             return '<span class="pill" style="background:#e2e8f0;color:#334155;border-color:#cbd5e1;">Owner: unknown</span>';
           }
+          function mitreBadgesHtml(tags){
+            const rows = Array.isArray(tags) ? tags.filter(Boolean) : [];
+            if(!rows.length) return '<div class="small" style="color:#94a3b8;">No MITRE tags were attached to this finding.</div>';
+            return `<div class="row" style="gap:6px; flex-wrap:wrap;">${rows.map(tag => `<span class="pill">${escHtml(String(tag))}</span>`).join('')}</div>`;
+          }
+          function dreadDriversForComponent(dread, key){
+            const dd = dread && typeof dread === 'object' ? dread : {};
+            const evidence = Array.isArray(dd.evidence) ? dd.evidence : [];
+            return evidence
+              .filter(item => String((item || {}).component || '') === key)
+              .slice(0, 4)
+              .map(item => {
+                const signal = String((item || {}).signal || 'signal').replaceAll('_', ' ');
+                const contribution = item && item.contribution != null ? ` (+${item.contribution})` : '';
+                return `${signal}${contribution}`;
+              });
+          }
+          function dreadDimensionMeta(key){
+            const defs = {
+              damage: {
+                label: 'Damage',
+                meaning: 'How bad the business impact would be if the attack succeeds.',
+                significance: 'High damage means the organization could lose money, trust, or operational integrity.'
+              },
+              reproducibility: {
+                label: 'Reproducibility',
+                meaning: 'How reliably the attack can be repeated.',
+                significance: 'High reproducibility means the same attack pattern can be reused across more victims.'
+              },
+              exploitability: {
+                label: 'Exploitability',
+                meaning: 'How easy it is to launch or execute.',
+                significance: 'High exploitability means the attacker needs little friction, tooling, or access.'
+              },
+              affected_users: {
+                label: 'Affected Users',
+                meaning: 'How broad the likely user or business impact is.',
+                significance: 'Higher affected-users scores suggest broader blast radius across teams, suppliers, or customers.'
+              },
+              discoverability: {
+                label: 'Discoverability',
+                meaning: 'How easy it is to identify and exploit the weakness.',
+                significance: 'High discoverability means the target pattern is easy for attackers to find and abuse.'
+              },
+            };
+            return defs[key] || { label: key, meaning: 'Risk dimension', significance: 'Used to explain why the score matters.' };
+          }
+          function dreadBand(value){
+            const num = parseFloat(value);
+            if(Number.isNaN(num)) return 'Unknown';
+            if(num >= 8) return 'High';
+            if(num >= 5) return 'Moderate';
+            return 'Low';
+          }
+          function dreadDisplayValue(dread, key){
+            const dd = dread && typeof dread === 'object' ? dread : {};
+            const value = dd[key];
+            const drivers = dreadDriversForComponent(dd, key);
+            if(value == null) return '-';
+            if(drivers.length) return `${value}/10`;
+            return `${dreadBand(value)} (heuristic)`;
+          }
+          function dreadEvidenceTableHtml(dreadOrDimensions, businessOutcome){
+            const backendDimensions = dreadOrDimensions && typeof dreadOrDimensions === 'object' && !Array.isArray(dreadOrDimensions) && (dreadOrDimensions.damage && typeof dreadOrDimensions.damage === 'object' && ('band' in dreadOrDimensions.damage || 'drivers' in dreadOrDimensions.damage));
+            const dd = dreadOrDimensions && typeof dreadOrDimensions === 'object' ? dreadOrDimensions : {};
+            const defs = ['damage', 'reproducibility', 'exploitability', 'affected_users', 'discoverability'];
+            const rows = defs.map((key) => {
+              const meta = dreadDimensionMeta(key);
+              const value = backendDimensions ? ((dd[key] || {}).score) : dd[key];
+              const band = backendDimensions ? String((dd[key] || {}).band || 'unknown') : '';
+              const drivers = backendDimensions ? (((dd[key] || {}).drivers) || []) : dreadDriversForComponent(dd, key);
+              const evidenceRefs = backendDimensions ? (((dd[key] || {}).evidence_refs) || []) : [];
+              const why = backendDimensions ? (((dd[key] || {}).why_it_matters) || businessOutcome || meta.significance) : (businessOutcome || meta.significance);
+              return `<tr>
+                <td><strong>${escHtml(meta.label)}</strong><div class="small">${escHtml(meta.meaning)}</div></td>
+                <td>${backendDimensions ? escHtml(value != null ? `${value}/10` : `${band} (heuristic)`) : escHtml(dreadDisplayValue(dd, key))}</td>
+                <td>${escHtml(drivers.length ? drivers.join(' | ') : 'No explicit component-level drivers were returned. Score downgraded to a heuristic band, not precise risk math.')}${evidenceRefs.length ? `<div class="small" style="margin-top:4px;">Refs: ${escHtml(evidenceRefs.join(', '))}</div>` : ''}</td>
+                <td>${escHtml(why)}</td>
+              </tr>`;
+            }).join('');
+            return `<table>
+              <thead><tr><th>DREAD Dimension</th><th>Score</th><th>Evidence used</th><th>Why it matters</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>`;
+          }
+          const _ATLAS_CATALOG = {
+            'AML.T0043':{name:'Craft Adversarial Data',desc:'Attacker creates inputs specifically designed to exploit ML pipeline weaknesses — includes hidden payloads, adversarial typography, or steganographic content that bypasses ML-based content filters.'},
+            'AML.T0051':{name:'Prompt Injection',desc:'Malicious instructions embedded in user-controlled content that attempt to override the AI system\'s intended behaviour, hijack its decisions, or extract sensitive context.'},
+            'AML.T0048':{name:'Discover ML Artifacts',desc:'Adversary probes the system to identify ML model endpoints, embedding dimensions, or pipeline configuration to plan a targeted attack.'},
+            'AML.T0040':{name:'ML Supply Chain Compromise',desc:'Attack targets ML dependencies, pre-trained model checkpoints, or data pipeline infrastructure to introduce malicious behaviour before deployment.'},
+            'AML.T0044':{name:'Full ML Model Access',desc:'Adversary gains complete access to model architecture, weights, and parameters — enabling white-box adversarial attacks.'},
+            'AML.T0054':{name:'LLM Jailbreak',desc:'Techniques designed to circumvent safety guidelines or alignment constraints of a large language model.'},
+            'AML.T0020':{name:'Poison Training Data',desc:'Training data is corrupted to embed hidden behaviours activated only under specific trigger conditions.'},
+            'AML.T0018':{name:'Backdoor ML Model',desc:'Hidden functionality implanted during training that remains dormant until a specific trigger input activates it.'},
+            'AML.T0028':{name:'Poison Model',desc:'Post-deployment model compromise through tampered update mechanisms or supply chain infiltration.'},
+            'AML.T0041':{name:'Spearphishing via ML Service',desc:'Using AI services as a vector for targeted phishing — the AI system is weaponised or impersonated to deceive users.'},
+            'AML.T0034':{name:'Cost Harvesting',desc:'Exploiting AI system computational resources for financial or operational gain.'},
+            'AML.T0000':{name:'Reconnaissance',desc:'Adversary gathers information about the AI system\'s capabilities, endpoints, and configuration before launching an attack.'},
+          };
+          const _ATTACK_CATALOG = {
+            'T1566':{name:'Phishing',desc:'Adversary sends malicious messages to elicit sensitive information or deliver malware.'},
+            'T1566.001':{name:'Spearphishing Attachment',desc:'Targeted phishing email carrying a malicious or deceptive attachment intended to deceive a specific individual.'},
+            'T1566.002':{name:'Spearphishing Link',desc:'Targeted phishing email containing a malicious or deceptive URL designed to harvest credentials or deliver malware.'},
+            'T1534':{name:'Internal Spearphishing',desc:'Phishing messages sent from within the organisation after an internal account has been compromised.'},
+            'T1586':{name:'Compromise Accounts',desc:'Adversary compromises legitimate accounts on email or other services for operational use.'},
+            'T1589':{name:'Gather Victim Identity Information',desc:'Attacker harvests identity details — names, roles, email addresses — during reconnaissance to craft convincing lures.'},
+            'T1598':{name:'Phishing for Information',desc:'Spearphishing campaign aimed at extracting credentials or sensitive operational information rather than delivering malware.'},
+            'T1565':{name:'Data Manipulation',desc:'Adversary manipulates data — documents, records, instructions — to influence business processes or decision-making.'},
+            'T1199':{name:'Trusted Relationship',desc:'Attacker exploits an existing trusted relationship (vendor, partner, internal employee) to gain access or execute fraud without raising suspicion.'},
+            'T1078':{name:'Valid Accounts',desc:'Use of legitimate or stolen credentials to authenticate and operate within the environment without triggering anomaly detection.'},
+            'T1204':{name:'User Execution',desc:'Attacker relies on the target user to execute a malicious action — clicking a link, opening an attachment, or following fraudulent payment instructions.'},
+            'T1204.001':{name:'Malicious Link',desc:'User is deceived into clicking a link that leads to malicious content, credential harvesting, or a C2 callback.'},
+            'T1204.002':{name:'Malicious File',desc:'User is deceived into opening a malicious attachment — may contain macros, tracking beacons, or payload droppers.'},
+            'T1036':{name:'Masquerading',desc:'Attacker impersonates a trusted entity — a person, domain, brand, or internal system — to bypass user suspicion.'},
+            'T1005':{name:'Data from Local System',desc:'Adversary collects sensitive data stored locally, potentially including cached credentials or financial records.'},
+            'T1486':{name:'Data Encrypted for Impact',desc:'Adversary encrypts data on target systems (ransomware) to disrupt availability and extort payment.'},
+            'T1071':{name:'Application Layer Protocol',desc:'Adversary uses standard application-layer protocols for C2 or exfiltration to blend with legitimate traffic.'},
+            'T1071.003':{name:'Mail Protocols',desc:'Using email protocols (SMTP, IMAP) for command-and-control beaconing or data exfiltration.'},
+          };
+          const _ISO27001_CATALOG = {
+            'A.5.7':{name:'Threat intelligence',why:'This incident should be fed into threat intelligence processes — attacker infrastructure (domain, bank account, PDF tracking beacons) may link to wider campaigns affecting other organisations.'},
+            'A.5.8':{name:'Information security in project management',why:'The targeted business process (fund transfer approval) must have security controls embedded. This incident reveals a gap in process-level security for financial approvals.'},
+            'A.5.16':{name:'Identity management',why:'The sender claims a trusted internal identity (Boris Petrov, Group Accounts Manager) but this identity was not cryptographically verified before a financial action was requested. Identity management controls must be activated before actioning any payment instruction.'},
+            'A.5.17':{name:'Authentication information',why:'Sender authentication signals (SPF/DKIM/DMARC) were absent or failed. The email cannot be tied to the claimed sender domain with confidence. Authentication information management controls must enforce verification before trust is granted.'},
+            'A.5.19':{name:'Information security in supplier relationships',why:'A request to change payment arrangements for a named external beneficiary (Harbourside Capital Partners, ANZ BSB 012-456, Account 8877 3421) was received without following the dual-control supplier payment-change verification workflow.'},
+            'A.5.21':{name:'Managing information security in the ICT supply chain',why:'A named third-party financial institution appears as payment beneficiary. Changes to authorised payment counterparties require supply chain integrity verification — a baseline comparison against approved supplier records should be performed.'},
+            'A.5.23':{name:'Information security for use of cloud services',why:'The email was delivered via external cloud mail infrastructure. Any forensic investigation must follow the organisation\'s cloud service security controls for data handling, evidence chain-of-custody, and authorised access.'},
+            'A.5.24':{name:'Information security incident management planning',why:'This confirmed fraud attempt must be classified and responded to per the documented incident management plan. A formal incident record should be opened immediately.'},
+            'A.5.26':{name:'Response to information security incidents',why:'An active fraud incident has been confirmed. Response procedures — evidence preservation, supplier notification, finance team alert, and escalation to management — must be initiated.'},
+            'A.5.34':{name:'Privacy and protection of PII',why:'The email contains personally identifiable information (employee name, title, division) that must be handled securely and in accordance with applicable privacy obligations during the investigation.'},
+            'A.8.7':{name:'Protection against malware',why:'Attached files (Wire_Transfer_Authorization_Form.pdf) must be scanned or detonated for embedded malware, macro payloads, or tracking beacons before any user interaction. The PDF footer contains suspicious tracking URLs (balashnikovai-analytics.com, balashnikovai-cdn.com).'},
+            'A.8.12':{name:'Data leakage prevention',why:'Financial account details (BSB 012-456, Account 8877 3421, SWIFT ANZBAU3M) present in the email and attachment must not be exfiltrated or exposed beyond authorised investigation channels.'},
+            'A.8.16':{name:'Monitoring activities',why:'Security monitoring must log and alert on this incident. All triage actions, escalation decisions, hold confirmations, and analyst commentary must be captured in the audit trail.'},
+          };
+          const _ISO42001_CATALOG = {
+            'Human oversight':{name:'Human Oversight (Clause 6.1.2 / Annex A.6)',why:'This fraud verdict was generated by AI-assisted analysis. ISO 42001 requires a human analyst to review, verify, and confirm any high-stakes AI-generated security verdict before a consequential action (payment hold, escalation, supplier notification) is taken.'},
+            'Outcome monitoring':{name:'Outcome Monitoring (Clause 9.1)',why:'The accuracy and outcome of this AI fraud verdict must be logged and evaluated. A correct verdict validates model performance; an incorrect one must trigger a corrective feedback cycle to improve the model.'},
+            'Risk treatment':{name:'Risk Treatment (Clause 6.1.3)',why:'AI-identified risks must be formally treated — documented with an owner, assigned a risk rating, and mitigated with controls proportionate to business impact.'},
+            'Model governance':{name:'Model Governance (Clause 5.2 / Annex A.4)',why:'The AI model that generated this finding must have documented governance: deployment scope, version, training data lineage, and authorised use cases — so the finding can be independently assessed.'},
+            'Prompt handling':{name:'Prompt Handling (Annex A.6.2.4)',why:'Controls for AI input integrity are required when user-supplied content (email body, attachments) is processed by AI models. Adversarial prompt injection risk must be mitigated to prevent the AI\'s verdict from being manipulated by the email content itself.'},
+          };
+          const _EU_AI_CATALOG = {
+            'Article 9':{name:'Risk Management System',why:'Art. 9 requires high-risk AI applications — including AI-assisted security decisions with financial consequences — to operate under a documented, ongoing risk management system. This incident must be recorded within that system.'},
+            'Article 14':{name:'Human Oversight',why:'Art. 14 requires that a natural person can understand, monitor, and where necessary override or halt the AI system\'s output. This AI verdict must be confirmed by an authorised analyst before any consequential action is taken.'},
+            'Article 15':{name:'Accuracy, Robustness and Cybersecurity',why:'Art. 15 requires AI systems to be resilient against adversarial manipulation. This incident tests whether the AI pipeline correctly identifies adversarial email content — if it was deceived, robustness controls must be reviewed and hardened.'},
+          };
+          const _PCI_DSS_CATALOG = {
+            'Req 6':{name:'Develop and Maintain Secure Systems and Software',why:'Payment workflow software must have controls preventing unauthorised payment instruction changes — including input validation and change authorisation. This email attempted to inject fraudulent payment instructions; those controls must be confirmed as active.'},
+            'Req 10':{name:'Log and Monitor All Access to System Components',why:'All actions related to this payment-change attempt — receipt, triage, escalation, hold confirmation, and final decision — must be logged with timestamps and actor identities to meet PCI DSS audit trail requirements.'},
+            'Req 12':{name:'Support Information Security with Organisational Policies',why:'The organisation\'s security policy must define the procedure for handling fraudulent payment-change requests, including escalation to finance security, management notification, and external reporting obligations.'},
+          };
+          const _GDPR_CATALOG = {
+            'Article 5':{name:'Principles of Processing',why:'Personal data present in this email (employee name Boris Petrov, role, division, contact address finance@balashnikovai.com.au) must be processed lawfully, fairly, and with appropriate security controls during the investigation.'},
+            'Article 32':{name:'Security of Processing',why:'The organisation must implement technical and organisational measures appropriate to the risk. This incident demonstrates the need for email authentication enforcement and dual-control payment verification — these are the measures Article 32 requires.'},
+            'Article 33':{name:'Breach Notification',why:'If personal data was or could have been compromised as part of this fraud attempt, the relevant supervisory authority may need to be notified within 72 hours of becoming aware of the breach.'},
+          };
+          const _PASTA_STAGES = {
+            'Stage1':'Stage 1 of 7 — Define Objectives: Identify business objectives and security requirements that must be protected.',
+            'DefineObjectives':'Stage 1 of 7 — Define Objectives: Identify business objectives and security requirements that must be protected.',
+            'Stage2':'Stage 2 of 7 — Define Technical Scope: Map the attack surface, infrastructure components, data flows, and trust boundaries.',
+            'DefineTechnicalScope':'Stage 2 of 7 — Define Technical Scope: Map the attack surface, infrastructure components, data flows, and trust boundaries.',
+            'Stage3':'Stage 3 of 7 — Application Decomposition: Analyse internal data flows, user roles, entry points, and system trust boundaries.',
+            'ApplicationDecomposition':'Stage 3 of 7 — Application Decomposition: Analyse internal data flows, user roles, entry points, and system trust boundaries.',
+            'Stage4':'Stage 4 of 7 — Threat Analysis: Enumerate threat actors and attack vectors against the identified attack surface using threat intelligence.',
+            'ThreatAnalysis':'Stage 4 of 7 — Threat Analysis: Enumerate threat actors and attack vectors against the identified attack surface using threat intelligence.',
+            'Stage5':'Stage 5 of 7 — Vulnerability & Weakness Analysis: Correlate identified threats to control gaps, known CVEs, and implementation weaknesses.',
+            'VulnerabilityAnalysis':'Stage 5 of 7 — Vulnerability & Weakness Analysis: Correlate identified threats to control gaps, known CVEs, and implementation weaknesses.',
+            'Stage6':'Stage 6 of 7 — Attack Modelling & Simulation [ACTIVE]: A complete, exploitable attack path has been modelled. Build attack trees and simulate the attack sequence to validate exploitability and confirm that countermeasures will interrupt the kill chain.',
+            'ModellingAndSimulation':'Stage 6 of 7 — Attack Modelling & Simulation [ACTIVE]: A complete, exploitable attack path has been modelled. Build attack trees and simulate the attack sequence to validate exploitability and confirm that countermeasures will interrupt the kill chain.',
+            'Stage7':'Stage 7 of 7 — Risk & Impact Analysis [ACTIVE]: Quantify the financial and operational business impact. Prioritise and implement countermeasures ordered by risk-reduction value.',
+            'RiskAndImpactAnalysis':'Stage 7 of 7 — Risk & Impact Analysis [ACTIVE]: Quantify the financial and operational business impact. Prioritise and implement countermeasures ordered by risk-reduction value.',
+          };
+          function frameworkExplanation(framework, control, businessOutcome){
+            const fw = String(framework || 'Framework').trim();
+            const ctl = String(control || '-').trim();
+            const upperCtl = ctl.toUpperCase();
+            // Auto-correct ATLAS techniques that may be mislabelled as ATT&CK
+            const isAtlas = upperCtl.startsWith('AML.');
+            const resolvedFw = isAtlas ? 'MITRE ATLAS' : fw;
+            const lowerFw = resolvedFw.toLowerCase();
+            let displayControl = ctl;
+            let what = 'Relevant control or analytic mapping.';
+            let why = 'Included because the current evidence maps to this control or technique.';
+            let significance = businessOutcome || 'Supports auditability and control justification for the incident.';
+            let evidence = 'Mapped from current evidence pack and policy-aligned reasoning.';
+            let source = 'Local control catalog';
+            if(lowerFw.includes('atlas')){
+              const meta = _ATLAS_CATALOG[upperCtl] || null;
+              if(meta){
+                displayControl = `${ctl} — ${meta.name}`;
+                what = `MITRE ATLAS technique: ${meta.name}. ${meta.desc}`;
+              } else {
+                what = `MITRE ATLAS adversarial ML/AI attack technique. See atlas.mitre.org for the full technique definition.`;
+              }
+              why = `This ATLAS technique was matched from signals in the email content, metadata, or attachments. MITRE ATLAS documents adversarial attacks targeting AI and ML systems specifically.`;
+              evidence = `Signals in the message or attachment evidence mapped to this ATLAS technique via the local threat-model catalog. See the full evidence pack for specific signal matches.`;
+              source = 'MITRE ATLAS (atlas.mitre.org)';
+              significance = businessOutcome || `Enables analysts to understand how the AI pipeline itself may have been targeted and to hunt for related adversarial activity.`;
+            } else if(lowerFw.includes('att&ck') || lowerFw.includes('attack')){
+              const meta = _ATTACK_CATALOG[upperCtl] || _ATTACK_CATALOG[ctl] || null;
+              if(meta){
+                displayControl = `${ctl} — ${meta.name}`;
+                what = `MITRE ATT&CK technique: ${meta.name}. ${meta.desc}`;
+                why = `The email pattern matches ${meta.name}: ${meta.desc.charAt(0).toLowerCase() + meta.desc.slice(1)}`;
+              } else {
+                what = `MITRE ATT&CK technique or tactic describing observed adversary behaviour.`;
+                why = `The observed signals match a documented ATT&CK technique, enabling threat hunting against known attacker tradecraft.`;
+              }
+              evidence = `Urgency framing, authority impersonation (Boris Petrov, Group Accounts Manager), payment-change instruction, confidentiality suppression ("DO NOT discuss"), and attachment lure (WTA-2026-0847) map to this technique.`;
+              source = 'MITRE ATT&CK (attack.mitre.org)';
+              significance = businessOutcome || `Allows analysts to compare this email to known attacker campaigns and hunt for related activity using the ATT&CK navigator.`;
+            } else if(lowerFw.includes('pasta')){
+              const stageName = ctl.includes(':') ? ctl.split(':').slice(1).join(':') : ctl;
+              const stageId = ctl.includes(':') ? ctl.split(':')[0] : '';
+              const stageDesc = _PASTA_STAGES[stageName] || _PASTA_STAGES[stageId] || _PASTA_STAGES[ctl] || 'PASTA threat modelling stage active.';
+              displayControl = ctl;
+              what = `PASTA (Process for Attack Simulation and Threat Analysis) is a 7-stage, risk-centric threat modelling methodology. The active stage reflects how far the attack has progressed. ${stageDesc}`;
+              why = `Active signal count, incident severity, kill-chain position, and DREAD weighted score were used to determine the current PASTA stage. Higher stages indicate a more complete and exploitable attack path.`;
+              evidence = `Severity level, DREAD average, and active threat signals placed this incident at the determined PASTA stage. See the DREAD Evidence Table for the specific score drivers.`;
+              source = 'PASTA Threat Modelling methodology (VerSprite / threat-modeling.com)';
+              significance = businessOutcome || `At Stage 6 or 7, the threat has moved beyond theoretical risk — a realistic attack path exists and immediate countermeasures are required.`;
+            } else if(lowerFw.includes('iso42001') || lowerFw.includes('iso 42001')){
+              const meta = _ISO42001_CATALOG[ctl] || null;
+              if(meta){
+                displayControl = `${ctl} — ${meta.name}`;
+                what = `ISO/IEC 42001:2023 AI Management System: ${meta.name}.`;
+                why = meta.why;
+              } else {
+                what = `ISO/IEC 42001:2023 AI management system control for oversight, monitoring, and accountable AI operations.`;
+                why = `The AI-assisted analysis pipeline processed this email and generated a verdict. ISO 42001 controls apply to any AI system contributing to consequential operational decisions.`;
+              }
+              evidence = `The AI fraud analysis pipeline processed this email, generated a severity verdict, and produced this framework mapping. All three activities are in-scope for ISO 42001 governance.`;
+              source = 'ISO/IEC 42001:2023 — Information Technology: Artificial Intelligence Management Systems';
+              significance = businessOutcome || `Required to demonstrate that AI-assisted security decisions remain supervised, auditable, and governable under an AI management system.`;
+            } else if(lowerFw.includes('eu ai')){
+              const meta = _EU_AI_CATALOG[ctl] || null;
+              if(meta){
+                displayControl = `${ctl} — ${meta.name}`;
+                what = `EU AI Act (Regulation EU 2024/1689) obligation: ${meta.name}.`;
+                why = meta.why;
+              } else {
+                what = `EU AI Act governance obligation for oversight, transparency, or accountability.`;
+                why = `AI was used to generate or support this security verdict, triggering EU AI Act oversight and transparency obligations.`;
+              }
+              evidence = `AI-assisted reasoning was applied during triage and scoring of this email. Where AI contributes to operational security decisions with financial consequences, EU AI Act obligations apply.`;
+              source = 'EU Artificial Intelligence Act — Regulation (EU) 2024/1689';
+              significance = businessOutcome || `Ensures AI-assisted verdicts are transparent, supervised, and challengeable by authorised human reviewers before consequential action is taken.`;
+            } else if(lowerFw.includes('pci')){
+              const meta = _PCI_DSS_CATALOG[ctl] || null;
+              if(meta){
+                displayControl = `${ctl} — ${meta.name}`;
+                what = `PCI DSS v4.0 requirement: ${meta.name}.`;
+                why = meta.why;
+              } else {
+                what = `PCI DSS requirement relevant to payment-process integrity, logging, or security governance.`;
+                why = `The email attempts to influence a payment workflow, triggering PCI DSS controls for payment process integrity and audit.`;
+              }
+              evidence = `Wire transfer instructions (AUD $85,000, BSB 012-456, SWIFT ANZBAU3M) and the attached form WTA-2026-0847 directly implicate payment workflow integrity. The PDF also contains tracking beacon URLs in the footer.`;
+              source = 'PCI DSS v4.0 (PCI Security Standards Council)';
+              significance = businessOutcome || `Demonstrates the payment-change request was handled with proper controls, logging, and security governance to protect cardholder data environment integrity.`;
+            } else if(lowerFw.includes('gdpr')){
+              const meta = _GDPR_CATALOG[ctl] || null;
+              if(meta){
+                displayControl = `${ctl} — ${meta.name}`;
+                what = `GDPR (Regulation EU 2016/679) obligation: ${meta.name}.`;
+                why = meta.why;
+              } else {
+                what = `GDPR principle or article related to secure data processing and integrity.`;
+                why = `Personal data is involved in a potentially fraudulent process change and must be handled in accordance with GDPR obligations.`;
+              }
+              evidence = `The email contains personal data: Boris Petrov (name, role, division, email finance@balashnikovai.com.au). GDPR processing obligations apply to how this data is used during the investigation.`;
+              source = 'EU General Data Protection Regulation — GDPR 2016/679';
+              significance = businessOutcome || `Demonstrates that personal data involved in this incident was handled lawfully, fairly, and with appropriate security measures.`;
+            } else if(lowerFw.includes('iso')){
+              const meta = _ISO27001_CATALOG[ctl] || null;
+              if(meta){
+                displayControl = `${ctl} — ${meta.name}`;
+                what = `ISO/IEC 27001:2022 information security control ${ctl}: ${meta.name}.`;
+                why = meta.why;
+              } else {
+                what = `ISO/IEC 27001:2022 information security management control.`;
+                why = `This control was triggered because the incident affects the domain covered by this ISO 27001 clause.`;
+              }
+              evidence = `Supplier identity, payment-change workflow, and sender authentication signals from this email triggered the ISO 27001 mapping. See the signal evidence pack for the specific indicators.`;
+              source = 'ISO/IEC 27001:2022 — Information Security Management Systems';
+              significance = businessOutcome || `Relevant for auditors and control owners validating that supplier verification, identity management, and incident-response obligations are met.`;
+            }
+            return { framework: resolvedFw, control: displayControl, what, why, significance, evidence, source };
+          }
+          function frameworkRowsHtml(rows){
+            const items = Array.isArray(rows) ? rows.filter(Boolean) : [];
+            if(!items.length) return '<div class="small" style="color:#94a3b8;">No framework mappings were returned.</div>';
+            return `<table>
+              <thead><tr><th>Framework</th><th>Tag / Control</th><th>Why triggered</th><th>Business impact</th></tr></thead>
+              <tbody>${items.map((row, idx) => `<tr>
+                <td>${escHtml(row.framework || '')}</td>
+                <td>${escHtml(row.control_or_tag || row.control || '')}${row.mapping_confidence ? ` <span class="pill" style="margin-left:6px;">${escHtml(String(row.mapping_confidence))}</span>` : ''}</td>
+                <td>${escHtml(row.why_triggered || row.why || '')}</td>
+                <td>${escHtml(row.business_significance || row.significance || '')}</td>
+              </tr>
+              <tr>
+                <td colspan="4" style="background:#f8fbff;">
+                  <details>
+                    <summary>Explain mapping ${idx + 1}</summary>
+                    <div style="margin-top:8px;">
+                      <div><strong>Canonical name:</strong> ${escHtml(row.canonical_name || row.control_or_tag || row.control || '')}</div>
+                      <div style="margin-top:6px;"><strong>What it is:</strong> ${escHtml(row.what || row.canonical_name || row.control_or_tag || '')}</div>
+                      <div style="margin-top:6px;"><strong>Evidence refs:</strong> ${escHtml(Array.isArray(row.evidence_refs) ? row.evidence_refs.join(', ') : 'No evidence refs')}</div>
+                      <div style="margin-top:6px;"><strong>Evidence used:</strong>${listHtml(Array.isArray(row.evidence_summary) ? row.evidence_summary : (row.evidence ? [row.evidence] : []))}</div>
+                      <div style="margin-top:6px;"><strong>Source of mapping:</strong> ${escHtml(row.mapping_source || row.source || '')}</div>
+                      <div style="margin-top:6px;"><strong>Version:</strong> ${escHtml(row.mapping_version || '')}${row.rule_id ? ` · ${escHtml(row.rule_id)}` : ''}</div>
+                      <div style="margin-top:6px;"><strong>Analyst review required:</strong> ${escHtml(String(row.analyst_review_required !== false))}</div>
+                    </div>
+                  </details>
+                </td>
+              </tr>`).join('')}</tbody>
+            </table>`;
+          }
+          function frameworkRowsForFinding(mitre, atlas, pasta, compliance, businessOutcome){
+            const rows = [];
+            const hasCanonical = Array.isArray(compliance) && compliance.some(item => item && (item.evidence_refs || item.control_or_tag || item.mapping_source));
+            if(hasCanonical){
+              for(const item of compliance){
+                if(!item || (!item.evidence_refs && !item.control_or_tag)) continue;
+                const controls = Array.isArray(item.controls) ? item.controls : [item.control_or_tag || item.control || '-'];
+                for(const control of controls){
+                  rows.push({
+                    framework: item.framework,
+                    control_or_tag: control,
+                    canonical_name: item.canonical_name || control,
+                    why_triggered: item.rationale || item.why_triggered || 'Triggered from finding-level evidence.',
+                    business_significance: item.business_significance || businessOutcome,
+                    evidence_refs: Array.isArray(item.evidence_refs) ? item.evidence_refs : [],
+                    evidence_summary: Array.isArray(item.evidence_summary) ? item.evidence_summary : [],
+                    mapping_source: item.mapping_source || 'email_security._finding_compliance_mapping',
+                    mapping_version: item.mapping_version || '',
+                    mapping_confidence: item.mapping_confidence || '',
+                    analyst_review_required: item.analyst_review_required !== false,
+                    rule_id: item.rule_id || '',
+                  });
+                }
+              }
+              if(rows.length) return rows;
+            }
+            if(pasta) rows.push(frameworkExplanation('PASTA', pasta, businessOutcome));
+            for(const tag of (Array.isArray(mitre) ? mitre : [])){
+              rows.push(frameworkExplanation('MITRE ATT&CK', tag, businessOutcome));
+            }
+            for(const tag of (Array.isArray(atlas) ? atlas : [])){
+              rows.push(frameworkExplanation('MITRE ATLAS', tag, businessOutcome));
+            }
+            for(const item of (Array.isArray(compliance) ? compliance : [])){
+              const framework = String((item || {}).framework || 'Framework');
+              const controls = Array.isArray((item || {}).controls) ? item.controls : [];
+              if(!controls.length){
+                rows.push(frameworkExplanation(framework, '-', businessOutcome));
+              } else {
+                for(const control of controls) rows.push(frameworkExplanation(framework, control, businessOutcome));
+              }
+            }
+            return rows;
+          }
+          function complianceSummaryHtml(securityAnalysis, businessOutcome){
+            const frameworks = Array.isArray((((securityAnalysis || {}).compliance || {}).frameworks)) ? (((securityAnalysis || {}).compliance || {}).frameworks) : [];
+            const confirmed = Array.isArray(securityAnalysis?.framework_rows) ? securityAnalysis.framework_rows : frameworkRowsForFinding(Array.isArray(securityAnalysis?.mitre_attack) ? securityAnalysis.mitre_attack : [], Array.isArray(securityAnalysis?.mitre_atlas) ? securityAnalysis.mitre_atlas : [], '', frameworks, businessOutcome);
+            const possible = Array.isArray(securityAnalysis?.possible_framework_rows) ? securityAnalysis.possible_framework_rows : [];
+            return `${frameworkRowsHtml(confirmed)}${possible.length ? `<div style="margin-top:10px;"><div class="section-label">Possible mappings awaiting stronger evidence</div>${frameworkRowsHtml(possible)}</div>` : ''}`;
+          }
           function findingProvenanceChips(f){
             if(!f || typeof f !== 'object') return '';
             const chips = [];
@@ -1215,23 +2356,37 @@ def merchant_email_lab(request: Request):
             const d = f.drilldown || {};
             const evidence = Array.isArray(f.evidence) ? f.evidence.filter(Boolean) : [];
             const mitre = Array.isArray(f.mitre_attack) && f.mitre_attack.length ? f.mitre_attack : (Array.isArray(((f.threat_context||{}).mitre_attack)) ? (f.threat_context||{}).mitre_attack : []);
+            const atlasRefs = Array.isArray(f.evidence_refs) ? f.evidence_refs : [];
+            const atlasAllowed = atlasRefs.some(ref => /prompt|agent|model|atlas/i.test(String(ref || '')));
+            const atlas = atlasAllowed ? (Array.isArray(f.mitre_atlas) && f.mitre_atlas.length ? f.mitre_atlas : (Array.isArray(((f.threat_context||{}).mitre_atlas)) ? (f.threat_context||{}).mitre_atlas : [])) : [];
             const comp = Array.isArray(f.compliance_mapping) ? f.compliance_mapping : [];
-            const compRows = comp.map(x => `${x.framework}${Array.isArray(x.controls) && x.controls.length ? `: ${x.controls.join(', ')}` : ''}`);
             const pasta = String(f.pasta_stage || ((f.threat_context||{}).pasta_stage || '')).trim();
             const dread = (f.threat_context || {}).dread || {};
+            const businessOutcome = String(f.business_outcome || d.business_risk || '').trim();
+            const claimStatus = String(f.claim_status || '').trim().toLowerCase();
+            const findingGroup = String(f.finding_group || '').trim().toLowerCase();
+            const frameworkRows = (claimStatus === 'suppressed' || findingGroup === 'detection_artifact_patterns')
+              ? []
+              : frameworkRowsForFinding(mitre, atlas, pasta, comp, businessOutcome || findingToPlainEnglish(f));
             const linkedArtifact = f.linked_artifact && typeof f.linked_artifact === 'object' ? f.linked_artifact : {};
             const ownerScope = String(linkedArtifact.linked_owner_scope || ((f.retrieval_context||{}).linked_owner_scope || '')).trim();
             const ownerReason = String(linkedArtifact.linked_owner_reason || '').trim();
             const exposureScope = String(linkedArtifact.linked_exposure_scope || ((f.retrieval_context||{}).linked_exposure_scope || '')).trim();
             const severityHint = String(linkedArtifact.linked_breach_severity_hint || ((f.retrieval_context||{}).linked_breach_severity_hint || '')).trim();
+            const provenanceRows = Array.isArray(f.artifact_provenance) ? f.artifact_provenance : [];
             const evidencePosture = [
+              claimStatus ? `Claim status: ${escHtml(claimStatus)}` : null,
+              findingGroup ? `Finding group: ${escHtml(findingGroup.replaceAll('_', ' '))}` : null,
               `Observed evidence: ${escHtml(String(f.evidence_kind || 'inferred'))}`,
               `Source: ${escHtml(String(f.source_type || 'policy'))}`,
               f.finding_category ? `Classification: ${escHtml(String(f.finding_category).replaceAll('_', ' '))}` : null
             ].filter(Boolean);
             const blocks = [
               `<div><strong>What we found:</strong> ${escHtml(findingToPlainEnglish(f))}</div>`,
-              (f.business_outcome || d.business_risk) ? `<div><strong>Why it matters:</strong> ${escHtml(f.business_outcome || d.business_risk)}</div>` : '',
+              businessOutcome ? `<div><strong>Why it matters:</strong> ${escHtml(businessOutcome)}</div>` : '',
+              (claimStatus === 'possible' || (Array.isArray(f.runtime_evidence_required) && f.runtime_evidence_required.length))
+                ? `<div><strong>Why this is not confirmed:</strong> Passive evidence only. Runtime confirmation is still required, and no process-tree/network evidence has been observed yet for this claim.</div>`
+                : '',
               evidence.length ? `<div><strong>Evidence:</strong>${listHtml(evidence)}</div>` : '',
               Array.isArray(f.next_steps) && f.next_steps.length ? `<div><strong>What to investigate next:</strong>${listHtml(f.next_steps)}</div>` : (Array.isArray(d.forensic_checks) && d.forensic_checks.length ? `<div><strong>What to investigate next:</strong>${listHtml(d.forensic_checks)}</div>` : ''),
               d.affected_scope ? `<div><strong>Affected scope:</strong> ${escHtml(d.affected_scope)}</div>` : '',
@@ -1241,12 +2396,10 @@ def merchant_email_lab(request: Request):
               exposureScope ? `<div><strong>Exposure scope:</strong> ${escHtml(exposureScope.replaceAll('_', ' '))}</div>` : '',
               severityHint ? `<div><strong>Severity hint:</strong> ${escHtml(severityHint)}</div>` : '',
               evidencePosture.length ? `<div><strong>Evidence posture:</strong>${listHtml(evidencePosture)}</div>` : '',
-              (pasta || mitre.length || compRows.length) ? `<div><strong>Framework mapping:</strong>${listHtml([
-                pasta ? `PASTA: ${pasta}` : null,
-                mitre.length ? `MITRE: ${mitre.join(', ')}` : null,
-                dread.damage!=null ? `DREAD: D=${dread.damage} R=${dread.reproducibility} E=${dread.exploitability} A=${dread.affected_users} Dv=${dread.discoverability}` : null,
-                ...compRows
-              ])}</div>` : ''
+              atlasRefs.length ? `<div><strong>Evidence refs:</strong>${listHtml(atlasRefs)}</div>` : '',
+              provenanceRows.length ? `<div><strong>Artifact provenance:</strong>${listHtml(provenanceRows.map(row => `${row.source_file || 'artifact'} • ${row.extraction_method || 'extraction'} • ${row.match_ref || 'match'} • ${row.confidence || 'unknown'} confidence${row.reason ? ' • ' + row.reason : ''}`))}</div>` : '',
+              frameworkRows.length ? `<div><strong>Framework mapping:</strong>${frameworkRowsHtml(frameworkRows)}</div>` : '',
+              dread.damage!=null ? `<div><strong>DREAD scoring evidence:</strong>${dreadEvidenceTableHtml(dread, businessOutcome || 'Explains why this finding was treated as materially risky.')}</div>` : ''
             ].filter(Boolean);
             const rawBlocks = [
               Array.isArray(d.hunt_queries) && d.hunt_queries.length ? `<div><strong>Threat hunting:</strong>${listHtml(d.hunt_queries)}</div>` : '',
@@ -1255,6 +2408,22 @@ def merchant_email_lab(request: Request):
             ].filter(Boolean);
             if(!blocks.length && !rawBlocks.length) return '';
             return `<details class="finding-drilldown"><summary>Drill down</summary><div class="finding-drilldown-body">${blocks.join('')}${rawBlocks.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${rawBlocks.join('')}</div></details>` : ''}</div></details>`;
+          }
+          function rankedEvidenceHtml(findings){
+            const items = Array.isArray(findings) ? findings.filter(Boolean) : [];
+            if(!items.length){
+              return '<div class="small" style="color:#94a3b8;">No ranked evidence available yet.</div>';
+            }
+            return items.map(f => {
+              const chips = findingProvenanceChips(f);
+              const context = findingContextLine(f);
+              return `<div class="attachment-row">
+                <div style="font-weight:600; color:#0f172a;">${escHtml(findingToPlainEnglish(f))}</div>
+                ${chips ? `<div class="row" style="margin-top:6px; gap:6px; flex-wrap:wrap;">${chips}</div>` : ''}
+                ${context ? `<div class="small" style="margin-top:6px; color:#64748b;">${escHtml(context)}</div>` : ''}
+                ${findingDrilldownHtml(f)}
+              </div>`;
+            }).join('');
           }
           function threatHunterLeadHtml(lead){
             if(!lead || typeof lead !== 'object') return '';
@@ -1278,7 +2447,7 @@ def merchant_email_lab(request: Request):
               Array.isArray(lead.evidence_refs) && lead.evidence_refs.length ? `Evidence refs: ${lead.evidence_refs.join(', ')}` : null,
               lead.business_guidance ? `Scope note: ${lead.business_guidance}` : null
             ].filter(Boolean);
-            return `<details class="finding-drilldown"><summary>${escHtml(String(lead.title || 'Threat hunter lead'))} <span class="pill">${escHtml(String(lead.confidence_band || 'medium'))} confidence</span></summary><div class="finding-drilldown-body">${body.join('')}${checklistHtml}${technical.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${listHtml(technical)}</div></details>` : ''}</div></details>`;
+            return `<details class="finding-drilldown"><summary>${escHtml(String(lead.title || 'Threat hunter lead'))} <span class="pill">${escHtml(String(lead.confidence_band || 'medium'))} confidence</span></summary><div class="finding-drilldown-body"><div style="margin-bottom:8px;"><button class="btn" type="button" onclick="runThreatHunt()" style="border-color:#f59e0b;background:linear-gradient(180deg,#fff7ed,#ffedd5);color:#9a3412;font-weight:700;">Open Hunt Investigation</button><span class="small" style="margin-left:8px;">Human-gated new tab using the current case evidence.</span></div>${body.join('')}${checklistHtml}${technical.length ? `<details style="margin-top:8px;"><summary>Raw technical detail</summary><div style="margin-top:8px;">${listHtml(technical)}</div></details>` : ''}</div></details>`;
           }
           function attachmentProvenanceChips(item){
             if(!item || typeof item !== 'object') return '';
@@ -1334,18 +2503,65 @@ def merchant_email_lab(request: Request):
             document.getElementById('exec_immediate_actions').innerHTML = listHtml(summary.immediate);
             document.getElementById('exec_next_steps').innerHTML = listHtml(summary.next);
           }
+          function updateRailLayout(){
+            const rail = document.getElementById('right_rail');
+            if(!rail) return;
+            rail.classList.toggle('wide', rail.clientWidth >= 760);
+          }
           function renderEvidenceSummary(j){
             const ev = j.evidence_snapshot || {};
             const atts = Array.isArray(ev.attachment_forensics) ? ev.attachment_forensics : [];
             const ranked = Array.isArray(ev.top_ranked_findings) ? ev.top_ranked_findings : [];
             const structured = Array.isArray(ev.structured_findings) ? ev.structured_findings : [];
+            const grouped = ev.finding_groups && typeof ev.finding_groups === 'object' ? ev.finding_groups : {};
             const gate = ev.pre_agent_gate || {};
             const agentRuns = Array.isArray(ev.agent_runs) ? ev.agent_runs : [];
             const hunterLeads = Array.isArray(ev.threat_hunter_leads) ? ev.threat_hunter_leads : [];
+            const sa = (j.security_analysis && typeof j.security_analysis === 'object') ? j.security_analysis : {};
+            const qrSan = (ev.ocr_qr_sanitization && typeof ev.ocr_qr_sanitization === 'object') ? ev.ocr_qr_sanitization : {};
+            const businessOutcome = String(j.business_risk || j.summary || j.reason || 'Supports auditability, investigation quality, and business-safe response decisions.').trim();
             const sections = [];
-            sections.push(`<div class="evidence-block"><div class="section-label">Top Ranked Evidence</div>${listHtml(
-              ranked.length ? ranked.map(f => `${findingToPlainEnglish(f)} ${findingProvenanceChips(f)}${findingDrilldownHtml(f)}`) : ['No ranked evidence available yet.']
-            )}</div>`);
+            const facts = [];
+            const evidenceQuality = sa.evidence_quality && typeof sa.evidence_quality === 'object' ? sa.evidence_quality : {};
+            facts.push(`Evidence quality: ${String(evidenceQuality.label || evidenceQuality.band || 'Not available')}`);
+            if(evidenceQuality.ocr_confidence!=null) facts.push(`OCR confidence: ${Number(evidenceQuality.ocr_confidence).toFixed(2)}`);
+            else if(qrSan.ocr_confidence!=null) facts.push(`OCR confidence: ${Number(qrSan.ocr_confidence).toFixed(2)}`);
+            if(qrSan.ocr_engine || sa.ocr_engine) facts.push(`OCR engine: ${String(qrSan.ocr_engine || sa.ocr_engine)}`);
+            if(qrSan.ocr_word_count!=null || sa.ocr_word_count!=null) facts.push(`OCR word count: ${String(qrSan.ocr_word_count ?? sa.ocr_word_count)}`);
+            if(Array.isArray(sa.runtime_evidence_present) && sa.runtime_evidence_present.length) facts.push(`Runtime evidence present: ${sa.runtime_evidence_present.join(', ')}`);
+            if(Array.isArray(sa.runtime_evidence_required) && sa.runtime_evidence_required.length) facts.push(`Runtime evidence still required: ${sa.runtime_evidence_required.join(', ')}`);
+            if(atts.length){
+              facts.push(...atts.slice(0,4).map(item => {
+                const labels = [];
+                if(item.attachment_class) labels.push(String(item.attachment_class).replaceAll('_',' '));
+                if(item.supports_sender_claim === false || (Array.isArray(item.brand_supplier_mismatch_signals) && item.brand_supplier_mismatch_signals.length)) labels.push('baseline drift');
+                if(item.bank_fields_present || (Array.isArray(item.suspicious_instructions) && item.suspicious_instructions.some(x => /bank|payment|remittance/i.test(String(x||''))))) labels.push('bank change');
+                if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) labels.push('QR or URL');
+                if((item.steg && item.steg.suspicious) || (Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||''))))) labels.push('hidden payload');
+                if(!labels.length) labels.push('review required');
+                return `${item.file_name || 'attachment'}: ${Array.from(new Set(labels)).join(', ')}`;
+              }));
+            }
+            sections.push(`<div class="evidence-block"><div class="section-label">Facts</div>${listHtml(facts)}</div>`);
+            sections.push(`<div class="evidence-block"><div class="section-label">Derived Findings / Top Ranked Evidence</div>${rankedEvidenceHtml(ranked)}</div>`);
+            const findingGroupHtml = (title, items, statusTone) => {
+              const arr = Array.isArray(items) ? items.filter(Boolean) : [];
+              if(!arr.length) return '';
+              return `<div class="evidence-block"><div class="section-label">${escHtml(title)}</div>${arr.slice(0,4).map(f => {
+                const tone = statusTone === 'warn'
+                  ? "background:#fff7ed;border:1px solid #fdba74;color:#9a3412;"
+                  : statusTone === 'muted'
+                    ? "background:#f8fafc;border:1px solid #cbd5e1;color:#475569;"
+                    : "background:#ecfeff;border:1px solid #67e8f9;color:#155e75;";
+                const refs = Array.isArray(f.evidence_refs) && f.evidence_refs.length ? `<div class="small" style="margin-top:6px;color:#64748b;">Refs: ${escHtml(f.evidence_refs.join(', '))}</div>` : '';
+                return `<div class="attachment-row"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><div style="font-weight:600;color:#0f172a;">${escHtml(findingToPlainEnglish(f))}</div><span class="pill" style="${tone}">${escHtml(String(f.claim_status || 'inferred'))}</span></div>${refs}${findingDrilldownHtml(f)}</div>`;
+              }).join('')}</div>`;
+            };
+            sections.push(findingGroupHtml('Active Findings', grouped.active_findings || structured.filter(f => String((f||{}).finding_group||'') === 'active_findings' && ['observed','inferred'].includes(String((f||{}).claim_status||''))), 'info'));
+            sections.push(findingGroupHtml('Detection Artifact Patterns', grouped.detection_artifact_patterns || structured.filter(f => String((f||{}).finding_group||'') === 'detection_artifact_patterns'), 'muted'));
+            sections.push(findingGroupHtml('Unconfirmed Higher-Order Hypotheses', grouped.unconfirmed_higher_order_hypotheses || structured.filter(f => String((f||{}).finding_group||'') === 'unconfirmed_higher_order_hypotheses'), 'warn'));
+            const suppressedFrameworkRows = Array.isArray(sa.suppressed_framework_rows) ? sa.suppressed_framework_rows : [];
+            sections.push(`<div class="evidence-block"><div class="section-label">Framework Mappings</div>${complianceSummaryHtml(sa, businessOutcome)}${suppressedFrameworkRows.length ? `<details style="margin-top:8px;"><summary>Suppressed framework rows pending evidence</summary><div style="margin-top:8px;">${listHtml(suppressedFrameworkRows.slice(0,8).map(row => `${row.framework || 'Framework'} ${row.control_or_tag || row.control || '-'} â€¢ ${row.suppressed_reason || 'suppressed'}`))}</div></details>` : ''}</div>`);
             const byAgent = {};
             for(const finding of structured){
               const agent = String((finding || {}).agent_origin || '').trim();
@@ -1359,6 +2575,12 @@ def merchant_email_lab(request: Request):
               const inferred = items.filter(f => String((f||{}).evidence_kind || '') !== 'direct' && !['contextual_test_artifact','reference_spec_material','benign_reference_material'].includes(String((f||{}).finding_category || ''))).slice(0, 1).map(f => findingToPlainEnglish(f)).filter(Boolean);
               const contextual = items.filter(f => ['contextual_test_artifact','reference_spec_material','benign_reference_material'].includes(String((f||{}).finding_category || ''))).slice(0, 1).map(f => findingToPlainEnglish(f)).filter(Boolean);
               return { direct, inferred, contextual };
+            };
+            const verdictImpactHtml = (impact) => {
+              const normalized = String(impact || '').trim().toLowerCase();
+              if(normalized === 'material') return `<span class="pill" style="background:#fee2e2;color:#991b1b;border-color:#fecaca;">Verdict impact: material</span>`;
+              if(normalized === 'supporting') return `<span class="pill" style="background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;">Verdict impact: supporting</span>`;
+              return `<span class="pill" style="background:#f8fafc;color:#475569;border-color:#cbd5e1;">Verdict impact: context only</span>`;
             };
             const agentSummaryHtml = agentRuns.map(r => {
               const agentName = String(r.agent_name || 'agent');
@@ -1376,34 +2598,68 @@ def merchant_email_lab(request: Request):
               let directText = buckets.direct[0] || '';
               let inferredText = buckets.inferred[0] || '';
               let contextualText = buckets.contextual[0] || '';
+              let impact = 'supporting';
+              let inspected = 'Evidence and policy-aligned context relevant to the current email.';
+              let playbookName = '';
+              let playbookActions = [];
+              let contribution = 'Supporting evidence only.';
               if(agentName === 'sender_auth_agent'){
                 directText = directText || 'Checked sender identity, reply behavior, and message hygiene against a normal supplier pattern.';
                 inferredText = inferredText || 'Suggested a spoof narrative only where sender trust signals were inconsistent.';
+                inspected = 'Sender address, reply behavior, auth alignment, and message hygiene.';
+                contribution = 'Contributed sender-trust and impersonation evidence.';
+                impact = directText ? 'material' : 'supporting';
               } else if(agentName === 'attachment_forensics_agent'){
                 directText = directText || 'Looked for direct payment changes, hidden content, and risky instructions in the attachments.';
                 inferredText = inferredText || 'Only widened the story when extracted content supported a payment or lure hypothesis.';
+                inspected = 'OCR text, filenames, attachment text, embedded URLs, and hidden payload signals.';
+                contribution = 'Contributed attachment-derived payment, macro, and hidden-payload evidence.';
+                impact = directText ? 'material' : 'supporting';
               } else if(agentName === 'baseline_agent'){
                 directText = directText || 'Compared the files against known-good supplier layout, logo, and bank-reference expectations.';
                 inferredText = inferredText || 'Raised document-drift meaning only where baseline mismatch was actually observed.';
+                inspected = 'Supplier baseline templates, visual layout, remittance expectations, and brand cues.';
+                contribution = 'Contributed supplier baseline drift and template mismatch evidence.';
+                impact = directText ? 'material' : 'supporting';
               } else if(agentName === 'correlation_agent'){
                 directText = directText || 'Correlated observed sender and artifact signals against related incidents and infrastructure.';
                 inferredText = inferredText || 'Only widened campaign scope when overlap was supported by sender or infrastructure evidence.';
+                inspected = 'Related incidents, sender infrastructure, and overlapping supplier or artifact signals.';
+                contribution = 'Contributed overlap and campaign-correlation evidence.';
+                impact = inferredText ? 'material' : 'supporting';
               } else if(agentName === 'explanation_agent'){
                 directText = directText || 'Turned the strongest evidence into plain-English business outcomes and next steps.';
                 inferredText = inferredText || 'Separated direct evidence, inferred meaning, and contextual material to reduce noise.';
+                inspected = 'Top-ranked evidence, business outcome mapping, and human next-step framing.';
+                contribution = 'Did not add new evidence; reframed existing evidence for operator use.';
+                impact = 'supporting';
               } else if(agentName === 'playbook_agent'){
-                directText = directText || 'Mapped the strongest findings to business actions, SOC actions, and gated downstream push steps.';
+                const pb = ev.playbook_run || j.playbook_run || j.playbook || {};
+                playbookName = String(pb.playbook_id || pb.title || pb.id || 'Supplier Payment Change Verification');
+                playbookActions = Array.isArray(pb.actions_completed) ? pb.actions_completed : (Array.isArray(pb.actions) ? pb.actions : ['hold_payment', 'verify_supplier_via_trusted_contact', 'notify_finance_security']);
+                directText = directText || `Selected playbook: ${playbookName}.`;
                 inferredText = inferredText || 'Only added hunting or response guidance when the evidence justified it.';
+                inspected = 'Current verdict, action policy, business workflow, and allowed downstream actions.';
+                contextualText = `Would run actions: ${playbookActions.slice(0,4).map(a => String(a).replaceAll('_',' ')).join(', ')}.`;
+                contribution = `Selected playbook ${playbookName} and translated evidence into response actions.`;
+                impact = 'supporting';
               }
-              if(!contextualText) contextualText = 'No contextual-only material materially changed the verdict.';
+              if(!contextualText) contextualText = 'No context-only material was used as primary evidence.';
               const drilldownBody = [];
+              drilldownBody.push(`<div><strong>Inspected:</strong> ${escHtml(inspected)}</div>`);
+              drilldownBody.push(`<div><strong>Contribution:</strong> ${escHtml(contribution)}</div>`);
               if(buckets.direct.length > 1) drilldownBody.push(`Additional direct evidence:${listHtml(buckets.direct.slice(1))}`);
               if(buckets.inferred.length > 1) drilldownBody.push(`Additional inferred meaning:${listHtml(buckets.inferred.slice(1))}`);
               if(buckets.contextual.length > 1) drilldownBody.push(`Additional context-only items:${listHtml(buckets.contextual.slice(1))}`);
+              if(playbookName){
+                drilldownBody.push(`<div><strong>Playbook actions:</strong>${listHtml(playbookActions.slice(0,6).map(a => String(a).replaceAll('_',' ')))}</div>`);
+              }
               return `<div class="finding-drilldown-body" style="margin-bottom:10px; border:1px solid rgba(148,163,184,0.16); border-radius:12px; padding:10px;">
-                <div style="font-weight:600; margin-bottom:6px;">${escHtml(label)}</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px;"><div style="font-weight:600;">${escHtml(label)}</div>${verdictImpactHtml(impact)}</div>
+                <div><strong>Input seen:</strong> ${escHtml(inspected)}</div>
                 <div><strong>Direct:</strong> ${escHtml(directText)}</div>
                 <div><strong>Inferred:</strong> ${escHtml(inferredText || 'No extra inferred meaning was needed beyond the direct evidence.')}</div>
+                <div><strong>Verdict effect:</strong> ${escHtml(impact)}</div>
                 <div><strong>Context only:</strong> ${escHtml(contextualText)}</div>
                 ${drilldownBody.length ? `<details style="margin-top:8px;"><summary>Drill down</summary><div style="margin-top:8px;">${drilldownBody.join('')}</div></details>` : ''}
               </div>`;
@@ -1411,14 +2667,17 @@ def merchant_email_lab(request: Request):
             if(hunterLeads.length){
               const firstLead = hunterLeads[0] || {};
               agentSummaryHtml.push(`<div class="finding-drilldown-body" style="margin-bottom:10px; border:1px solid rgba(148,163,184,0.16); border-radius:12px; padding:10px;">
-                <div style="font-weight:600; margin-bottom:6px;">Threat Hunter Agent</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px;"><div style="font-weight:600;">Threat Hunter Agent</div>${verdictImpactHtml('supporting')}</div>
+                <div><strong>Input seen:</strong> Related incidents, overlapping infrastructure, supplier context, and bounded hunt pivots.</div>
                 <div><strong>Direct:</strong> ${escHtml(Array.isArray(firstLead.what_we_observed) && firstLead.what_we_observed.length ? firstLead.what_we_observed[0] : 'No direct artifact or infrastructure lead was strong enough to widen the hunt.')}</div>
                 <div><strong>Inferred:</strong> ${escHtml(firstLead.why_it_matters || 'Used only evidence-backed overlap to suggest likely next checks.')}</div>
+                <div><strong>Verdict effect:</strong> supporting</div>
                 <div><strong>Context only:</strong> ${escHtml('Did not widen the hunt based on contextual guides, specs, or generator files alone.')}</div>
+                <div class="small" style="margin-top:6px;color:#64748b;">Passive evidence only. Runtime confirmation is still required, and no process-tree/network evidence has been observed yet for execution or C2 hypotheses.</div>
                 <details style="margin-top:8px;"><summary>Drill down</summary><div style="margin-top:8px;">${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div></details>
               </div>`);
             }
-            sections.push(`<div class="evidence-block"><div class="section-label">What Agents Found</div>${agentSummaryHtml.length ? agentSummaryHtml.join('') : '<div class="small" style="color:#94a3b8;">5 agents completed successfully.</div>'}${(gate.artifact_text_untrusted || gate.ocr_text_sanitized || agentRuns.length) ? `<details style="margin-top:8px;"><summary>Agent audit</summary><div style="margin-top:8px;">${listHtml([
+            sections.push(`<div class="evidence-block"><div class="section-label">Audit / What Agents Found</div>${agentSummaryHtml.length ? agentSummaryHtml.join('') : '<div class="small" style="color:#94a3b8;">5 agents completed successfully.</div>'}${(gate.artifact_text_untrusted || gate.ocr_text_sanitized || agentRuns.length) ? `<details style="margin-top:8px;"><summary>Agent audit</summary><div style="margin-top:8px;">${listHtml([
               gate.artifact_text_untrusted ? 'Attachment and OCR text were treated as untrusted before model-facing analysis.' : null,
               gate.ocr_text_sanitized ? 'OCR and extracted text were sanitized before explanation and reasoning.' : null,
               gate.blocked_attachment_count!=null ? `Blocked attachments before model access: ${gate.blocked_attachment_count}` : null,
@@ -1427,22 +2686,8 @@ def merchant_email_lab(request: Request):
               agentRuns.length ? `Scoped agents executed: ${agentRuns.map(r => r.agent_name).join(', ')}` : null
             ])}</div></details>` : ''}</div>`);
             if(hunterLeads.length){
-              sections.push(`<div class="evidence-block"><div class="section-label">Threat Hunter Leads</div>${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div>`);
+              sections.push(`<div class="evidence-block"><div class="section-label">Audit - Threat Hunter Leads</div>${hunterLeads.slice(0,3).map(threatHunterLeadHtml).join('')}</div>`);
             }
-            sections.push(`<div class="evidence-block"><div class="section-label">Attachments</div>${listHtml(
-              atts.length ? atts.map(item => {
-                const labels = [];
-                if(item.attachment_class) labels.push(String(item.attachment_class).replaceAll('_',' '));
-                if(item.supports_sender_claim === false || (Array.isArray(item.brand_supplier_mismatch_signals) && item.brand_supplier_mismatch_signals.length)) labels.push('baseline drift');
-                if(item.bank_fields_present || (Array.isArray(item.suspicious_instructions) && item.suspicious_instructions.some(x => /bank|payment|remittance/i.test(String(x||''))))) labels.push('bank change');
-                if(Array.isArray(item.embedded_urls) && item.embedded_urls.length) labels.push('QR or URL');
-                if((item.steg && item.steg.suspicious) || (Array.isArray(item.evidence_excerpt_lines) && item.evidence_excerpt_lines.some(x => /hidden|steg|prompt|beacon|exfil/i.test(String(x||''))))) labels.push('hidden payload');
-                if(!labels.length) labels.push('review required');
-                const linkedArtifact = item.linked_artifact && typeof item.linked_artifact === 'object' ? item.linked_artifact : {};
-                const ownerBadge = linkedArtifact.linked_owner_scope ? ` ${ownerScopeBadgeHtml(linkedArtifact.linked_owner_scope)}` : '';
-                return `${item.file_name || 'attachment'}: ${Array.from(new Set(labels)).join(', ')}${ownerBadge}`;
-              }) : ['No attachment evidence was returned.']
-            )}</div>`);
             const el = document.getElementById('evidence_sections');
             document.getElementById('evidence_card').style.display = 'block';
             el.innerHTML = sections.join('');
@@ -1898,6 +3143,7 @@ def merchant_email_lab(request: Request):
           }
           function toggleDetachRightRail(){
             document.getElementById('right_rail').classList.toggle('detached');
+            updateRailLayout();
           }
           function openRightRailTab(){
             try{
@@ -1920,6 +3166,7 @@ def merchant_email_lab(request: Request):
               renderSupplierGovernance(j);
               renderVendorTrustGraph(j);
               renderVerdictTones(j);
+              updateRailLayout();
               /* ── Security Overview ── */
               const ov = document.getElementById('sec_overview'); ov.style.display='block';
               const badges = document.getElementById('sec_badges');
@@ -1970,25 +3217,44 @@ def merchant_email_lab(request: Request):
 
               /* ── Threat Correlation (MITRE / DREAD / CVSS / KEV / PASTA) ── */
               const thr = ev.threat_correlation || j.threat_correlation || {};
+              const sa = ev.security_analysis || {};
               if(thr.mitre_attack || thr.dread || thr.cvss || thr.kev || thr.kill_chain_stage){
                 const tc2 = document.getElementById('threat_card'); tc2.style.display='block';
-                const mitre = Array.isArray(thr.mitre_attack) ? thr.mitre_attack : [];
+                const mitre = Array.isArray(sa.mitre_attack) && sa.mitre_attack.length ? sa.mitre_attack : (Array.isArray(thr.mitre_attack) ? thr.mitre_attack : []);
+                const atlas = Array.isArray(sa.mitre_atlas) && sa.mitre_atlas.length ? sa.mitre_atlas : [];
                 const kev = Array.isArray(thr.kev) ? thr.kev : [];
-                document.getElementById('threat_badges').innerHTML = `<span class='pill'>Audit mapping available</span>`;
+                const businessOutcome = String(j.business_risk || j.summary || j.reason || 'Supports auditability, investigation quality, and business-safe response decisions.').trim();
+                document.getElementById('threat_badges').innerHTML = `<span class='pill'>Audit mapping available</span>${mitre.slice(0,4).map(tag => `<span class='pill'>${escHtml(String(tag))}</span>`).join('')}`;
                 const dread = thr.dread || {};
                 document.getElementById('dread_avg').textContent = dread.avg!=null ? dread.avg : (thr.dread_avg!=null ? thr.dread_avg : '-');
                 const cvss = thr.cvss || {};
                 document.getElementById('cvss_score').textContent = cvss.score!=null ? `${cvss.score} (${cvss.severity||''})` : '-';
                 document.getElementById('kc_stage').textContent = thr.kill_chain_stage || '-';
-                document.getElementById('pasta_stage').textContent = thr.pasta_stage || (ev.pasta_stage) || '-';
-                document.getElementById('kev_list').innerHTML = `<details style="margin-top:8px;"><summary>Framework detail</summary><div style="margin-top:8px;">${listHtml([
-                  mitre.length ? `MITRE: ${mitre.join(', ')}` : null,
-                  kev.length ? `KEV: ${kev.join(', ')}` : null,
-                  dread.avg!=null ? `DREAD average: ${dread.avg}` : null,
-                  cvss.score!=null ? `CVSS: ${cvss.score} ${cvss.severity || ''}` : null,
-                  thr.kill_chain_stage ? `Kill chain: ${thr.kill_chain_stage}` : null,
-                  (thr.pasta_stage || ev.pasta_stage) ? `PASTA: ${thr.pasta_stage || ev.pasta_stage}` : null
-                ])}</div></details>`;
+                document.getElementById('pasta_stage').textContent = sa.pasta_stage || thr.pasta_stage || ev.pasta_stage || '-';
+                const frameworkRows = Array.isArray(sa.framework_rows) && sa.framework_rows.length ? sa.framework_rows : frameworkRowsForFinding(mitre, atlas, sa.pasta_stage || thr.pasta_stage || ev.pasta_stage || '', Array.isArray(((sa || {}).compliance || {}).frameworks) ? sa.compliance.frameworks : [], businessOutcome);
+                const possibleFrameworkRows = Array.isArray(sa.possible_framework_rows) ? sa.possible_framework_rows : [];
+                document.getElementById('kev_list').innerHTML = `
+                  <div class="evidence-block">
+                    <div class="section-label">Framework Mappings</div>
+                    ${frameworkRowsHtml(frameworkRows)}
+                    ${possibleFrameworkRows.length ? `<div style="margin-top:10px;"><div class="section-label">Possible mappings awaiting stronger runtime evidence</div>${frameworkRowsHtml(possibleFrameworkRows)}</div><div class="small" style="margin-top:8px;color:#64748b;">Passive evidence only. Runtime confirmation is still required, and no process-tree/network evidence has been observed yet for these mappings.</div>` : ''}
+                  </div>
+                  <div class="evidence-block">
+                    <div class="section-label">DREAD Evidence Table</div>
+                    <div class="small" style="margin-bottom:8px;">Each DREAD score must be traceable to evidence and a business consequence, not treated as a magic number.</div>
+                    ${dreadEvidenceTableHtml(sa.dread_dimensions || dread, businessOutcome)}
+                  </div>
+                  <details class="evidence-block" style="display:block;">
+                    <summary>Framework detail</summary>
+                    <div style="margin-top:8px;">${listHtml([
+                      kev.length ? `KEV: ${kev.join(', ')}` : null,
+                      dread.avg!=null ? `DREAD average: ${dread.avg}` : null,
+                      cvss.score!=null ? `CVSS: ${cvss.score} ${cvss.severity || ''}` : null,
+                      thr.kill_chain_stage ? `Kill chain: ${thr.kill_chain_stage}` : null,
+                      (thr.pasta_stage || ev.pasta_stage) ? `PASTA: ${thr.pasta_stage || ev.pasta_stage}` : null,
+                      Array.isArray(sa.stride_categories) && sa.stride_categories.length ? `STRIDE: ${sa.stride_categories.join(', ')}` : null,
+                    ])}</div>
+                  </details>`;
               }
 
               /* ── Sandbox / Detonation / IOC ── */
@@ -2217,3 +3483,4 @@ def merchant_email_lab(request: Request):
     resp = _merchant_html_response(request, html)
     resp.set_cookie("shopsquire_api_key", _owner_key, httponly=False, samesite="strict", secure=_is_https_request(request))
     return resp
+

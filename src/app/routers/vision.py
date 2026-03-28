@@ -58,33 +58,45 @@ def _vision_payload_drilldown(
     qr_probe = security_signals.get("qr_redirect_probe") if isinstance(security_signals.get("qr_redirect_probe"), dict) else {}
     if finding_type == "lolbin_command_sequence":
         return {
-            "headline": "Hidden LOLBin command sequence detected",
+            "headline": "Hidden LOLBin command-sequence pattern observed",
             "what_to_look_for": [
                 "PowerShell, certutil, mshta, regsvr32, rundll32, bitsadmin, wscript, or cscript launches",
                 "Encoded commands, download-and-execute chains, or suspicious child processes",
                 "Outbound requests to fetch payloads immediately after artifact handling",
+            ],
+            "forensic_checks": list(payload_analysis.get("runtime_evidence_required") or []),
+            "human_verification": [
+                "Treat this as a passive artifact hypothesis until sandbox and endpoint telemetry confirm execution.",
             ],
             "affected_scope": "Any endpoint or user session that opened or processed the image may be affected.",
             "potential_damage": "Payload staging, malware execution, or follow-on compromise using trusted tools.",
         }
     if finding_type == "c2_beacon_pattern":
         return {
-            "headline": "Hidden C2 beacon pattern detected",
+            "headline": "Hidden C2 beacon pattern observed",
             "what_to_look_for": [
                 "Repeated low-volume callback traffic or beacon intervals",
                 "Proxy, DNS, firewall, or XDR telemetry showing check-ins after the image was handled",
                 "Small recurring packets, jitter, or unusual periodic requests",
+            ],
+            "forensic_checks": list(payload_analysis.get("runtime_evidence_required") or []),
+            "human_verification": [
+                "Do not treat this as confirmed command-and-control until runtime telemetry shows callback behavior.",
             ],
             "affected_scope": "Any host that opened the artifact or shows the same callback behavior in telemetry.",
             "potential_damage": "Persistence and remote tasking if the hidden pattern was operationalized.",
         }
     if finding_type == "data_exfiltration_instruction":
         return {
-            "headline": "Hidden data exfiltration instructions detected",
+            "headline": "Hidden data-exfiltration instructions observed",
             "what_to_look_for": [
                 "Archive creation, compression, browser uploads, curl/wget/scp/rclone activity",
                 "Cloud bucket access, unusual file access, or outbound transfers after artifact interaction",
                 "Endpoint, eBPF, EDR, proxy, and identity evidence tied to the same user or host",
+            ],
+            "forensic_checks": list(payload_analysis.get("runtime_evidence_required") or []),
+            "human_verification": [
+                "Treat this as unconfirmed until endpoint, CASB/DLP, or proxy telemetry shows actual transfer activity.",
             ],
             "affected_scope": "Potentially affected users are those who opened the artifact or had access to targeted data sources.",
             "potential_damage": "Sensitive files, credentials, or business data may have been staged or targeted for theft.",
@@ -103,6 +115,9 @@ def _vision_payload_drilldown(
                 "Any workflow that ingested the artifact before sanitization",
                 "Prompt text attempting to override instructions or reveal protected context",
             ],
+            "human_verification": [
+                "Confirm whether the artifact was ingested by any agent, OCR pipeline, or tool-enabled model before allowing automation.",
+            ],
             "business_risk": "AI decision quality, tool safety, and downstream automation integrity may be affected.",
         }
     if finding_type == "ssn_leakage_linked_qr":
@@ -116,9 +131,110 @@ def _vision_payload_drilldown(
                 "Access logs, referrers, GeoIP, and hosting ASN traffic to the exposed artifact",
                 "Whether the exposure came from insider misuse, supplier publication, or external access",
             ],
+            "privacy_scope": [
+                "Assess whether the linked destination exposed regulated identity data to unauthorised parties.",
+            ],
+            "human_verification": [
+                "Validate destination ownership, access controls, and whether the linked artifact was publicly reachable.",
+            ],
             "business_risk": "Potential privacy-reporting, reputational, and legal exposure if the linked content was publicly accessible.",
         }
     return {}
+
+
+def _vision_artifact_evidence_refs(
+    *,
+    payload_analysis: Dict[str, Any],
+    security_signals: Dict[str, Any],
+    linked_artifact: Dict[str, Any] | None,
+    extracted_text: str,
+) -> List[str]:
+    refs: List[str] = []
+    if payload_analysis.get("payload_type") == "qr":
+        refs.append("image.qr_payloads[0].data")
+    if payload_analysis.get("payload_type") == "embedded_text" and str(extracted_text or "").strip():
+        refs.append("image.ocr_text")
+    steg_details = security_signals.get("steg_details") if isinstance(security_signals.get("steg_details"), dict) else {}
+    if str(steg_details.get("decoded_content") or "").strip():
+        refs.append("image.steg_details.decoded_content")
+    elif bool(security_signals.get("steg_suspicious")):
+        refs.append("image.steg_signal")
+    if bool(security_signals.get("qr_code_detected")):
+        refs.append("image.qr_code_detected")
+    linked = linked_artifact if isinstance(linked_artifact, dict) else {}
+    if linked.get("linked_artifact_available"):
+        refs.append("linked_artifact.fetch")
+    if linked.get("ssn_hits"):
+        refs.append("linked_artifact.ssn_hits")
+    if linked.get("pii_type"):
+        refs.append("linked_artifact.pii_type")
+    if linked.get("linked_final_url"):
+        refs.append("linked_artifact.final_url")
+    return list(dict.fromkeys([ref for ref in refs if ref]))[:8]
+
+
+def _vision_artifact_provenance(
+    *,
+    source_name: str,
+    payload_analysis: Dict[str, Any],
+    security_signals: Dict[str, Any],
+    linked_artifact: Dict[str, Any] | None,
+    extracted_text: str,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    payload_type = str(payload_analysis.get("payload_type") or "").strip().lower()
+    if payload_type == "qr":
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "qr_decode",
+                "match_ref": "image.qr_payloads[0].data",
+                "confidence": "high",
+            }
+        )
+    elif payload_type == "embedded_text" and str(extracted_text or "").strip():
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "ocr_text_extract",
+                "match_ref": "image.ocr_text",
+                "confidence": "medium",
+            }
+        )
+    steg_details = security_signals.get("steg_details") if isinstance(security_signals.get("steg_details"), dict) else {}
+    if str(steg_details.get("decoded_content") or "").strip():
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "steg_lsb_extract",
+                "match_ref": "image.steg_details.decoded_content",
+                "confidence": "medium",
+            }
+        )
+    elif bool(security_signals.get("steg_suspicious")):
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "steg_detector",
+                "match_ref": "image.steg_signal",
+                "confidence": "medium",
+            }
+        )
+    linked = linked_artifact if isinstance(linked_artifact, dict) else {}
+    if linked.get("linked_artifact_available"):
+        linked_rows = linked.get("linked_artifact_provenance")
+        if isinstance(linked_rows, list) and linked_rows:
+            rows.extend([row for row in linked_rows if isinstance(row, dict)])
+        else:
+            rows.append(
+                {
+                    "source_file": str(linked.get("linked_filename") or linked.get("linked_final_url") or "linked_artifact"),
+                    "extraction_method": "passive_link_fetch",
+                    "match_ref": "linked_artifact.fetch",
+                    "confidence": "medium",
+                }
+            )
+    return rows[:8]
 
 
 def _compute_damage_score(analysis: Dict) -> float:
@@ -228,6 +344,7 @@ async def triage(
     labels = []
     extracted_text = ""
     product_identity = None
+    ocr_meta: Dict[str, Any] = {}
     provider_name = "fast_local" if fast else "none"
     if not fast:
         try:
@@ -236,8 +353,10 @@ async def triage(
             labels, extracted_text, product_identity = await provider.get_labels_and_text(
                 content, mode="visual_search",
             )
+            ocr_meta = dict(getattr(provider, "last_ocr_meta", {}) or {})
         except Exception:
             labels, extracted_text, product_identity = [], "", None
+            ocr_meta = {}
 
     # P3: Always append sanitized filename as a weak hint (not just when labels empty)
     if name:
@@ -274,6 +393,10 @@ async def triage(
         "provider": provider_name,
         "labels": labels[:20],
         "extracted_text": (extracted_text or "")[:500],
+        "ocr_confidence": ocr_meta.get("ocr_confidence"),
+        "ocr_engine": ocr_meta.get("ocr_engine"),
+        "ocr_word_count": ocr_meta.get("ocr_word_count"),
+        "cv_extraction_method": ocr_meta.get("cv_extraction_method"),
         "analysis": analysis,
         "damage_score": _damage_score,
         "is_product_photo": _is_product_photo(labels, _damage_score),
@@ -690,6 +813,19 @@ async def triage(
         evidence_lines = list(security_signals.get("steg_explanations") or [])[:3] or [
             str(x) for x in (payload_analysis.get("lolbin_hits") or [])[:3]
         ]
+        evidence_refs = _vision_artifact_evidence_refs(
+            payload_analysis=payload_analysis,
+            security_signals=security_signals,
+            linked_artifact=linked_artifact_result,
+            extracted_text=extracted_text or "",
+        )
+        artifact_provenance = _vision_artifact_provenance(
+            source_name=str(name or "image"),
+            payload_analysis=payload_analysis,
+            security_signals=security_signals,
+            linked_artifact=linked_artifact_result,
+            extracted_text=extracted_text or "",
+        )
         suggested_next_step = str(payload_analysis.get("suggested_next_step") or "review").strip().lower() or "review"
         confidence_score = 0.78 if suggested_next_step in {"review", "block"} else 0.62
         payload_findings.append(
@@ -698,18 +834,38 @@ async def triage(
                 "finding_type": mapped["finding_type"],
                 "headline": mapped["headline"],
                 "business_risk": mapped["business_risk"],
+                "business_outcome": mapped["business_risk"],
                 "summary": mapped["headline"],
                 "source_type": "vision_image_payload",
-                "evidence_kind": "direct",
+                "evidence_kind": "direct" if str(payload_analysis.get("claim_status") or "") == "observed" else "inferred",
                 "confidence_score": confidence_score,
+                "ocr_confidence": ocr_meta.get("ocr_confidence"),
                 "mitre_attack": payload_analysis.get("mitre_attack") or [],
+                "possible_mitre_attack": payload_analysis.get("possible_mitre_attack") or [],
+                "mitre_atlas": payload_analysis.get("mitre_atlas") or [],
+                "possible_mitre_atlas": payload_analysis.get("possible_mitre_atlas") or [],
                 "pasta_stage": payload_analysis.get("pasta_stage"),
                 "decode_path": payload_analysis.get("decode_path"),
                 "suggested_next_step": suggested_next_step,
                 "evidence": evidence_lines,
+                "evidence_refs": evidence_refs,
+                "artifact_provenance": artifact_provenance,
+                "claim_status": payload_analysis.get("claim_status") or "possible",
+                "finding_group": payload_analysis.get("finding_group") or "unconfirmed_higher_order_hypotheses",
+                "confidence_band": "medium" if suggested_next_step in {"review", "allow"} else "high",
+                "evidence_lane": payload_analysis.get("evidence_lane") or "passive_artifact_observation",
+                "next_steps": list(payload_analysis.get("runtime_evidence_required") or []),
+                "linked_artifact": linked_artifact_result if isinstance(linked_artifact_result, dict) else None,
                 "threat_context": {
                     "pasta_stage": payload_analysis.get("pasta_stage"),
                     "mitre_attack": payload_analysis.get("mitre_attack") or [],
+                    "possible_mitre_attack": payload_analysis.get("possible_mitre_attack") or [],
+                    "mitre_atlas": payload_analysis.get("mitre_atlas") or [],
+                    "possible_mitre_atlas": payload_analysis.get("possible_mitre_atlas") or [],
+                    "claim_status": payload_analysis.get("claim_status") or "possible",
+                    "evidence_lane": payload_analysis.get("evidence_lane") or "passive_artifact_observation",
+                    "runtime_confirmation_required": bool(payload_analysis.get("runtime_confirmation_required")),
+                    "runtime_evidence_required": list(payload_analysis.get("runtime_evidence_required") or []),
                 },
                 "drilldown": _vision_payload_drilldown(
                     mapped["finding_type"],
@@ -732,6 +888,10 @@ async def triage(
         "reupload_needed": not security_clean,
         # Surface the OCR/extracted text here so the UI Security Matrix can show it
         "extracted_text": (extracted_text or "")[:500],
+        "ocr_confidence": ocr_meta.get("ocr_confidence"),
+        "ocr_engine": ocr_meta.get("ocr_engine"),
+        "ocr_word_count": ocr_meta.get("ocr_word_count"),
+        "cv_extraction_method": ocr_meta.get("cv_extraction_method"),
         "qr_redirect_probe": qr_redirect_probe,
         "analysis_stage": "fast" if fast else "full",
         "deferred_deep_analysis": bool(fast),
@@ -740,12 +900,51 @@ async def triage(
         "payload_type": payload_analysis.get("payload_type"),
         "attack_hypothesis": payload_analysis.get("attack_hypothesis"),
         "mitre_attack": payload_analysis.get("mitre_attack") or [],
+        "possible_mitre_attack": payload_analysis.get("possible_mitre_attack") or [],
+        "mitre_atlas": payload_analysis.get("mitre_atlas") or [],
+        "possible_mitre_atlas": payload_analysis.get("possible_mitre_atlas") or [],
         "pasta_stage": payload_analysis.get("pasta_stage"),
         "decode_path": payload_analysis.get("decode_path"),
         "suggested_next_step": payload_analysis.get("suggested_next_step"),
+        "claim_status": payload_analysis.get("claim_status") or "suppressed",
+        "finding_group": payload_analysis.get("finding_group") or "suppressed_findings",
+        "evidence_lane": payload_analysis.get("evidence_lane") or "passive_artifact_signal_only",
+        "runtime_confirmation_required": bool(payload_analysis.get("runtime_confirmation_required")),
+        "runtime_evidence_required": list(payload_analysis.get("runtime_evidence_required") or []),
+        "runtime_evidence_present": list(payload_analysis.get("runtime_evidence_present") or []),
         "lolbin_behavioral_profiles": payload_analysis.get("lolbin_behavioral_profiles") or [],
         "signal_labels": payload_analysis.get("signal_labels") or {},
         "payload_findings": payload_findings,
+        "finding_groups": {
+            "active_findings": [f for f in payload_findings if str(f.get("finding_group") or "") == "active_findings"],
+            "detection_artifact_patterns": [f for f in payload_findings if str(f.get("finding_group") or "") == "detection_artifact_patterns"],
+            "unconfirmed_higher_order_hypotheses": [f for f in payload_findings if str(f.get("finding_group") or "") == "unconfirmed_higher_order_hypotheses"],
+        },
+        "evidence": {
+            "source": "vision.triage",
+            "evidence_lane": payload_analysis.get("evidence_lane") or "passive_artifact_signal_only",
+            "claim_status": payload_analysis.get("claim_status") or "suppressed",
+            "payload_hypothesis": payload_analysis.get("attack_hypothesis") or "unknown",
+            "ocr_confidence": ocr_meta.get("ocr_confidence"),
+            "ocr_engine": ocr_meta.get("ocr_engine"),
+            "ocr_word_count": ocr_meta.get("ocr_word_count"),
+            "cv_extraction_method": ocr_meta.get("cv_extraction_method"),
+            "possible_mitre_attack": payload_analysis.get("possible_mitre_attack") or [],
+            "possible_mitre_atlas": payload_analysis.get("possible_mitre_atlas") or [],
+            "runtime_confirmation_required": bool(payload_analysis.get("runtime_confirmation_required")),
+            "runtime_evidence_required": list(payload_analysis.get("runtime_evidence_required") or []),
+            "runtime_evidence_present": list(payload_analysis.get("runtime_evidence_present") or []),
+            "artifact_provenance": _vision_artifact_provenance(
+                source_name=str(name or "image"),
+                payload_analysis=payload_analysis,
+                security_signals=security_signals,
+                linked_artifact=linked_artifact_result,
+                extracted_text=extracted_text or "",
+            ),
+            "active_findings": [f for f in payload_findings if str(f.get("finding_group") or "") == "active_findings"],
+            "detection_artifact_patterns": [f for f in payload_findings if str(f.get("finding_group") or "") == "detection_artifact_patterns"],
+            "unconfirmed_higher_order_hypotheses": [f for f in payload_findings if str(f.get("finding_group") or "") == "unconfirmed_higher_order_hypotheses"],
+        },
     }
     try:
         resp["security"]["threat_hunter_leads"] = build_threat_hunter_leads(

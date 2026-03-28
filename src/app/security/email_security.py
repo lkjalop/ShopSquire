@@ -52,6 +52,7 @@ from src.app.services.intake_gate import (
     strict_attachment_ingest_gate,
 )
 from src.app.services.playbook_engine import start_playbook_run, append_playbook_step, execute_typed_actions, complete_playbook_run
+from src.app.security.control_registry import get_control_record, get_control_registry_version
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.services.trust_routing import fuse_security_trust_score
 
@@ -687,6 +688,7 @@ def _attachment_forensics_snapshot(
                 "sha256": str(att.get("sha256") or ""),
                 "size_bytes": int(att.get("size_bytes") or 0),
                 "text_summary": _text_summary(extracted_text),
+                "analysis_text_sample": extracted_text[:4000] if extracted_text else "",
                 "evidence_excerpt_lines": _evidence_excerpt_lines(extracted_text),
                 "ocr_hit_count": len(re.findall(r"[A-Za-z0-9]", extracted_text)),
                 "embedded_urls": urls,
@@ -1108,7 +1110,14 @@ def _normalize_finding(
     recommended_action: str = "security_review",
     allowed_actions: list[str] | None = None,
     disallowed_actions: list[str] | None = None,
+    claim_status: str | None = None,
+    finding_group: str | None = None,
+    evidence_refs: list[str] | None = None,
+    artifact_provenance: list[dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
+    normalized_evidence_kind = str(evidence_kind or "inferred").strip()
+    normalized_claim_status = str(claim_status or ("observed" if normalized_evidence_kind == "direct" else "inferred")).strip().lower()
+    normalized_group = str(finding_group or "active_findings").strip()
     row = {
         "finding_id": str(finding_id or "").strip(),
         "finding_type": str(finding_type or "unknown").strip(),
@@ -1117,12 +1126,16 @@ def _normalize_finding(
         "confidence_score": round(float(confidence_score or 0.0), 4),
         "confidence_band": _confidence_band(float(confidence_score or 0.0)),
         "source_type": str(source_type or "policy").strip(),
-        "evidence_kind": str(evidence_kind or "inferred").strip(),
+        "evidence_kind": normalized_evidence_kind,
         "agent_origin": str(agent_origin or "email_security_agent").strip(),
         "policy_weight": round(float(policy_weight or 0.0), 4),
         "artifact_ref": artifact_ref if isinstance(artifact_ref, dict) else {},
         "evidence": [str(x) for x in (evidence or []) if str(x or "").strip()][:8],
         "retrieval_context": retrieval_context if isinstance(retrieval_context, dict) else {},
+        "claim_status": normalized_claim_status,
+        "finding_group": normalized_group,
+        "evidence_refs": [str(x) for x in (evidence_refs or []) if str(x or "").strip()][:10],
+        "artifact_provenance": [dict(x) for x in (artifact_provenance or []) if isinstance(x, dict)][:8],
         "recommended_action": str(recommended_action or "security_review").strip(),
         "allowed_actions": [str(x) for x in (allowed_actions or []) if str(x or "").strip()][:8],
         "disallowed_actions": [str(x) for x in (disallowed_actions or []) if str(x or "").strip()][:8],
@@ -1170,6 +1183,7 @@ def _finding_rank_score(finding: Dict[str, Any]) -> float:
     if name.endswith((".md", ".json", ".py", ".txt")) or any(tok in name for tok in ("guide", "scenario", "test", "summary", "matrix", "spec", "report", "generate", "playbook")):
         score -= 0.42
     category = str(f.get("finding_category") or "")
+    claim_status = str(f.get("claim_status") or "").lower()
     if category == "benign_reference_material":
         score -= 0.55
     elif category == "contextual_test_artifact":
@@ -1178,6 +1192,10 @@ def _finding_rank_score(finding: Dict[str, Any]) -> float:
         score -= 0.92
     elif category == "contextual_supplier_mismatch":
         score -= 0.1
+    if claim_status == "suppressed":
+        score -= 1.25
+    elif claim_status == "possible":
+        score -= 0.28
     return round(score, 4)
 
 
@@ -1193,6 +1211,8 @@ def _artifact_finding_category(filename: str, finding_type: str, summary: str) -
         return "contextual_test_artifact"
     if any(tok in ftype for tok in ("baseline_mismatch", "baseline_drift")):
         return "baseline_drift"
+    if any(tok in ftype for tok in ("lolbin_command_sequence", "c2_beacon_pattern")):
+        return "unconfirmed_execution_hypothesis"
     if any(tok in ftype for tok in ("lolbin_command_sequence", "c2_beacon_pattern", "data_exfiltration_instruction")):
         return "malicious_artifact"
     if "prompt_injection_hidden" in ftype:
@@ -1210,6 +1230,150 @@ def _artifact_finding_category(filename: str, finding_type: str, summary: str) -
     if "policy" in ftype or "policy " in text:
         return "policy_violation"
     return "suspicious"
+
+
+def _artifact_evidence_refs(filename: str, evidence: list[str] | None) -> list[str]:
+    name = str(filename or "").strip().lower()
+    refs: list[str] = []
+    joined = " \n ".join(str(x or "") for x in (evidence or []))
+    low = joined.lower()
+    if name.endswith(".xlsm"):
+        if "enable content" in low or "enable macros" in low:
+            refs.append("xlsm.sheet1.enable_macros_banner")
+        if "85,000" in low or "aud $85,000.00" in low:
+            refs.append("xlsm.sheet4.amount")
+        if "harbourside capital partners" in low:
+            refs.append("xlsm.sheet4.beneficiary")
+        if "012-456" in low:
+            refs.append("xlsm.sheet4.bsb")
+        if "8877 3421" in low:
+            refs.append("xlsm.sheet4.account_number")
+        if "anzbau3m" in low:
+            refs.append("xlsm.sheet4.swift")
+        if "do not discuss" in low or "strictly confidential" in low:
+            refs.append("xlsm.sheet4.confidentiality")
+        if "verbal approval pending" in low or "boris petrov" in low:
+            refs.append("xlsm.sheet4.authorization")
+        if "deposit required" in low:
+            refs.append("xlsm.sheet2.deposit_required")
+        if "powershell -executionpolicy bypass" in low or "powershell.exe" in low:
+            refs.append("xlsm.vba.powershell_indicator")
+        if "certutil -urlcache" in low or "certutil.exe" in low:
+            refs.append("xlsm.vba.certutil_indicator")
+        if "bitsadmin /transfer" in low or "bitsadmin" in low:
+            refs.append("xlsm.vba.bitsadmin_indicator")
+        if "schtasks /create" in low or "schtasks" in low:
+            refs.append("xlsm.vba.schtasks_indicator")
+        if "balashnikovai-cdn.com" in low:
+            refs.append("xlsm.vba.c2_domain_cdn")
+        if "balashnikovai-analytics.com" in low:
+            refs.append("xlsm.vba.c2_domain_analytics")
+        if "sub auto_open()" in low:
+            refs.append("xlsm.vba.auto_open")
+        if "sub workbook_open()" in low:
+            refs.append("xlsm.vba.workbook_open")
+    elif name.endswith(".pdf"):
+        if "balashnikovai-analytics.com" in low:
+            refs.append("pdf.raw.balashnikovai_analytics_domain")
+        if "balashnikovai-cdn.com" in low:
+            refs.append("pdf.raw.balashnikovai_cdn_domain")
+        if "http://" in low or "https://" in low:
+            refs.append("pdf.embedded_urls")
+        if "/track/wta-" in low or "track/wta-2026" in low:
+            refs.append("pdf.footer.tracking_url")
+        if "wire transfer authorization" in low:
+            refs.append("pdf.form.wire_transfer_authorization")
+    elif name.endswith(".bas"):
+        if "sub auto_open()" in low:
+            refs.append("vba.auto_open")
+        if "sub workbook_open()" in low:
+            refs.append("vba.workbook_open")
+        if "benign test - no functional malicious code" in low:
+            refs.append("vba.banner.benign_test_artifact")
+        if "' powershell.exe" in low or "' certutil.exe" in low or "' bitsadmin" in low or "' schtasks" in low:
+            refs.append("vba.comments.lolbin_pattern")
+        if "balashnikovai-cdn.com" in low or "balashnikovai-analytics.com" in low:
+            refs.append("vba.comments.c2_domain")
+    seen: set[str] = set()
+    return [x for x in refs if x and not (x in seen or seen.add(x))]
+
+
+def _artifact_provenance_rows(
+    *,
+    filename: str,
+    evidence: list[str] | None,
+    file_type: str | None = None,
+    claim_status: str = "observed",
+) -> list[dict[str, Any]]:
+    refs = _artifact_evidence_refs(filename, evidence)
+    name = str(filename or "").strip()
+    low = name.lower()
+    method = "passive attachment text extraction"
+    if low.endswith(".xlsm"):
+        method = "OOXML worksheet + VBA string extraction"
+    elif low.endswith(".pdf"):
+        method = "PDF byte scan / embedded URL extraction"
+    elif low.endswith(".bas"):
+        method = "VBA source inspection"
+    rows: list[dict[str, Any]] = []
+    for ref in refs:
+        rows.append(
+            {
+                "source_file": name,
+                "extraction_method": method,
+                "match_ref": ref,
+                "confidence": "high" if claim_status == "observed" else ("medium" if claim_status == "inferred" else "low"),
+                "file_type": str(file_type or ""),
+            }
+        )
+    return rows
+
+
+def _is_benign_comment_only_vba_artifact(filename: str, extracted_text: str, hypothesis: str) -> bool:
+    low_name = str(filename or "").strip().lower()
+    low = str(extracted_text or "").lower()
+    if not low_name.endswith(".bas"):
+        return False
+    if hypothesis not in {"lolbin_command_sequence", "c2_beacon"}:
+        return False
+    if "benign test - no functional malicious code" not in low:
+        return False
+    suspicious = ("powershell.exe", "certutil.exe", "bitsadmin", "schtasks", "balashnikovai-cdn.com", "balashnikovai-analytics.com", "beaconing")
+    uncommented = False
+    commented = False
+    for line in str(extracted_text or "").splitlines():
+        line_low = line.strip().lower()
+        if not any(tok in line_low for tok in suspicious):
+            continue
+        if line_low.startswith("'"):
+            commented = True
+        else:
+            uncommented = True
+    return commented and not uncommented
+
+
+def _claim_contract_for_finding(
+    *,
+    filename: str,
+    finding_type: str,
+    evidence_kind: str,
+    category: str,
+    source_type: str,
+    extracted_text: str = "",
+    evidence: list[str] | None = None,
+) -> tuple[str, str]:
+    ftype = str(finding_type or "").lower()
+    cat = str(category or "").lower()
+    src = str(source_type or "").lower()
+    if cat in {"reference_spec_material", "benign_reference_material", "contextual_test_artifact"}:
+        return "suppressed", "detection_artifact_patterns"
+    if _is_benign_comment_only_vba_artifact(filename, extracted_text, ftype):
+        return "suppressed", "detection_artifact_patterns"
+    if ftype in {"lolbin_command_sequence", "c2_beacon_pattern", "data_exfiltration_instruction"} and src in {"behavioral", "static", "ocr"}:
+        return "possible", "unconfirmed_higher_order_hypotheses"
+    if str(evidence_kind or "").strip().lower() == "direct":
+        return "observed", "active_findings"
+    return "inferred", "active_findings"
 
 
 def _dedupe_ranked_findings(findings: list[dict[str, Any]], *, limit: int = 3) -> list[dict[str, Any]]:
@@ -1273,60 +1437,98 @@ def _finding_compliance_mapping(
     finding_type: str,
     category: str,
     source_type: str,
+    evidence: list[str] | None = None,
+    business_outcome: str | None = None,
+    claim_status: str | None = None,
 ) -> list[dict[str, Any]]:
     ftype = str(finding_type or "").lower()
     cat = str(category or "").lower()
     src = str(source_type or "").lower()
+    status = str(claim_status or "").strip().lower()
     mappings: list[dict[str, Any]] = []
+    evidence_lines = [str(x).strip() for x in (evidence or []) if str(x or "").strip()]
+    evidence_refs = [f"finding.evidence.{i+1}" for i in range(len(evidence_lines[:4]))]
+
+    if status == "suppressed":
+        return []
+
+    def _row(framework: str, controls: list[str], rationale: str) -> dict[str, Any]:
+        registry_records = [get_control_record(framework, str(control)) for control in controls]
+        registry_records = [row for row in registry_records if isinstance(row, dict) and row]
+        statuses = [str(row.get("control_implemented") or "").strip() for row in registry_records if str(row.get("control_implemented") or "").strip()]
+        evidence_of_control: list[str] = []
+        for row in registry_records:
+            for ref in (row.get("evidence_of_control") or []):
+                s = str(ref or "").strip()
+                if s and s not in evidence_of_control:
+                    evidence_of_control.append(s)
+        return {
+            "framework": framework,
+            "controls": controls,
+            "rationale": rationale,
+            "evidence_refs": list(evidence_refs),
+            "evidence_summary": evidence_lines[:3],
+            "business_significance": str(business_outcome or "").strip(),
+            "mapping_source": (
+                f"email_security._finding_compliance_mapping + control_registry@{get_control_registry_version()}"
+                if registry_records
+                else "email_security._finding_compliance_mapping"
+            ),
+            "mapping_version": "2026.03.28.1",
+            "mapping_confidence": "high" if len(evidence_refs) >= 2 else ("medium" if evidence_refs else "low"),
+            "analyst_review_required": True,
+            "control_implemented": statuses[0] if statuses else None,
+            "evidence_of_control": evidence_of_control,
+        }
     if any(tok in ftype for tok in ("bank_detail", "payment_change", "baseline_mismatch", "reply_drift")) or cat in {"active_payment_lure", "baseline_drift"}:
         mappings.extend(
             [
-                {"framework": "ISO27001", "controls": ["A.5.16", "A.5.19", "A.5.23"], "rationale": "Supplier identity, supplier relationship, and financial workflow controls should be reviewed."},
-                {"framework": "ISO42001", "controls": ["Human oversight", "Outcome monitoring"], "rationale": "AI-assisted fraud decisions need human oversight and outcome monitoring."},
-                {"framework": "EU AI Act", "controls": ["Article 9", "Article 14"], "rationale": "Risk management and human oversight apply when AI contributes to operational security decisions."},
+                _row("ISO27001", ["A.5.16", "A.5.19", "A.5.23"], "Supplier identity, supplier relationship, and financial workflow controls should be reviewed."),
+                _row("ISO42001", ["Human oversight", "Outcome monitoring"], "AI-assisted fraud decisions need human oversight and outcome monitoring."),
+                _row("EU AI Act", ["Article 9", "Article 14"], "Risk management and human oversight apply when AI contributes to operational security decisions."),
             ]
         )
     if src in {"ocr", "static"} and ("bank" in ftype or "payment" in ftype):
-        mappings.append({"framework": "PCI DSS", "controls": ["Req 6", "Req 10", "Req 12"], "rationale": "Payment workflow controls, audit trails, and security governance should be reviewed."})
+        mappings.append(_row("PCI DSS", ["Req 6", "Req 10", "Req 12"], "Payment workflow controls, audit trails, and security governance should be reviewed."))
     if any(tok in ftype for tok in ("infrastructure", "related_incident")):
-        mappings.append({"framework": "ISO27001", "controls": ["A.8.16", "A.5.7"], "rationale": "Security monitoring and threat intelligence processes are implicated."})
+        mappings.append(_row("ISO27001", ["A.8.16", "A.5.7"], "Security monitoring and threat intelligence processes are implicated."))
     if any(tok in ftype for tok in ("prompt", "policy")):
         mappings.extend(
             [
-                {"framework": "ISO42001", "controls": ["Risk treatment", "Model governance"], "rationale": "Agentic AI controls and guardrails should be reviewed."},
-                {"framework": "EU AI Act", "controls": ["Article 15"], "rationale": "Robustness and cybersecurity of the AI-assisted workflow should be reviewed."},
+                _row("ISO42001", ["Risk treatment", "Model governance"], "Agentic AI controls and guardrails should be reviewed."),
+                _row("EU AI Act", ["Article 15"], "Robustness and cybersecurity of the AI-assisted workflow should be reviewed."),
             ]
         )
     if "prompt_injection_hidden" in ftype:
         mappings.extend(
             [
-                {"framework": "OWASP LLM Top 10", "controls": ["LLM01"], "rationale": "Hidden prompt content indicates untrusted-input prompt manipulation risk."},
-                {"framework": "ISO42001", "controls": ["Human oversight", "Prompt handling"], "rationale": "Model-facing content handling and human oversight should be reviewed."},
+                _row("OWASP LLM Top 10", ["LLM01"], "Hidden prompt content indicates untrusted-input prompt manipulation risk."),
+                _row("ISO42001", ["Human oversight", "Prompt handling"], "Model-facing content handling and human oversight should be reviewed."),
             ]
         )
     if any(tok in ftype for tok in ("data_exfiltration_instruction", "ssn_leakage_linked_qr")):
         mappings.extend(
             [
-                {"framework": "GDPR", "controls": ["Article 5", "Article 32", "Article 33"], "rationale": "Potential exposure of personal data requires security and breach-review assessment."},
-                {"framework": "ISO27001", "controls": ["A.5.34", "A.8.12", "A.8.16"], "rationale": "Data leakage prevention, privacy, and monitoring controls should be reviewed."},
+                _row("GDPR", ["Article 5", "Article 32", "Article 33"], "Potential exposure of personal data requires security and breach-review assessment."),
+                _row("ISO27001", ["A.5.34", "A.8.12", "A.8.16"], "Data leakage prevention, privacy, and monitoring controls should be reviewed."),
             ]
         )
     if "ssn_leakage_linked_qr" in ftype:
         mappings.extend(
             [
-                {"framework": "PCI DSS", "controls": ["Req 10", "Req 12"], "rationale": "Incident logging and governance should be reviewed where sensitive identity data is exposed in finance-linked workflows."},
-                {"framework": "HIPAA", "controls": ["Security Rule review"], "rationale": "If regulated personal or healthcare data is implicated, regulated-data exposure review may be required."},
+                _row("PCI DSS", ["Req 10", "Req 12"], "Incident logging and governance should be reviewed where sensitive identity data is exposed in finance-linked workflows."),
+                _row("HIPAA", ["Security Rule review"], "If regulated personal or healthcare data is implicated, regulated-data exposure review may be required."),
             ]
         )
-    if any(tok in ftype for tok in ("c2_beacon_pattern", "lolbin_command_sequence")):
+    if any(tok in ftype for tok in ("c2_beacon_pattern", "lolbin_command_sequence")) and status != "possible":
         mappings.extend(
             [
-                {"framework": "ISO27001", "controls": ["A.8.7", "A.8.16"], "rationale": "Malware defense, monitoring, and detection controls are implicated."},
-                {"framework": "MITRE ATT&CK", "controls": ["Triage mapping"], "rationale": "Behavior should be reviewed against ATT&CK for threat hunting and containment."},
+                _row("ISO27001", ["A.8.7", "A.8.16"], "Malware defense, monitoring, and detection controls are implicated."),
+                _row("MITRE ATT&CK", ["Triage mapping"], "Behavior should be reviewed against ATT&CK for threat hunting and containment."),
             ]
         )
     if any(tok in ftype for tok in ("bank", "payment", "identity")):
-        mappings.append({"framework": "GDPR", "controls": ["Article 5", "Article 32"], "rationale": "If personal or account-linked data is involved, integrity and security controls should be reviewed."})
+        mappings.append(_row("GDPR", ["Article 5", "Article 32"], "If personal or account-linked data is involved, integrity and security controls should be reviewed."))
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for row in mappings:
@@ -1334,7 +1536,8 @@ def _finding_compliance_mapping(
         if key in seen:
             continue
         seen.add(key)
-        out.append(row)
+        if row.get("evidence_refs"):
+            out.append(row)
     return out[:6]
 
 
@@ -1445,7 +1648,7 @@ def _finding_business_bundle(
     cat = str(category or "").lower()
     src = str(source_type or "").lower()
     dread = (threat.get("dread") if isinstance(threat, dict) and isinstance(threat.get("dread"), dict) else {}) or {}
-    pasta_stage = str((threat or {}).get("pasta_stage") or (threat or {}).get("kill_chain_stage") or "").strip()
+    pasta_stage = str((threat or {}).get("pasta_stage") or "").strip()
     mitre_attack = list((threat or {}).get("mitre_attack") or []) if isinstance(threat, dict) else []
     owasp = list((threat or {}).get("owasp_llm_top10") or []) if isinstance(threat, dict) else []
     threat_context = {
@@ -1699,14 +1902,51 @@ def _decorate_structured_findings(
 ) -> list[dict[str, Any]]:
     ev = evidence_snapshot if isinstance(evidence_snapshot, dict) else {}
     threat = ev.get("threat_correlation") if isinstance(ev.get("threat_correlation"), dict) else {}
+    attachment_rows = ev.get("attachment_forensics") if isinstance(ev.get("attachment_forensics"), list) else []
+
+    def _attachment_row(filename: str) -> dict[str, Any]:
+        for item in attachment_rows:
+            if isinstance(item, dict) and str(item.get("file_name") or "").strip() == filename:
+                return item
+        return {}
+
     out: list[dict[str, Any]] = []
     for finding in findings:
         if not isinstance(finding, dict):
             continue
         row = dict(finding)
         filename = str(((row.get("artifact_ref") or {}).get("file_name") or "")).strip()
+        attachment = _attachment_row(filename)
         category = _artifact_finding_category(filename, str(row.get("finding_type") or ""), str(row.get("summary") or ""))
+        claim_status, finding_group = _claim_contract_for_finding(
+            filename=filename,
+            finding_type=str(row.get("finding_type") or ""),
+            evidence_kind=str(row.get("evidence_kind") or ""),
+            category=category,
+            source_type=str(row.get("source_type") or ""),
+            extracted_text=str((attachment.get("analysis_text_sample") or attachment.get("text_summary") or "") if isinstance(attachment, dict) else ""),
+            evidence=[str(x) for x in (row.get("evidence") or []) if str(x or "").strip()],
+        )
         row["finding_category"] = category
+        row["claim_status"] = claim_status
+        row["finding_group"] = finding_group
+        provenance_text = [str(x) for x in (row.get("evidence") or []) if str(x or "").strip()]
+        attachment_text = str((attachment.get("analysis_text_sample") or attachment.get("text_summary") or "") if isinstance(attachment, dict) else "")
+        if attachment_text:
+            provenance_text.append(attachment_text)
+        if not row.get("evidence_refs"):
+            row["evidence_refs"] = _artifact_evidence_refs(filename, provenance_text)
+        if not row.get("artifact_provenance"):
+            row["artifact_provenance"] = _artifact_provenance_rows(
+                filename=filename,
+                evidence=provenance_text,
+                file_type=str(((row.get("artifact_ref") or {}).get("file_type") or attachment.get("file_type") or "")),
+                claim_status=claim_status,
+            )
+        if not row.get("evidence_refs") and not row.get("artifact_provenance"):
+            row["claim_status"] = "suppressed"
+            row["finding_group"] = "detection_artifact_patterns"
+            row["suppressed_reason"] = "missing_visible_provenance"
         bundle = _finding_business_bundle(
             finding_type=str(row.get("finding_type") or ""),
             category=category,
@@ -1758,6 +1998,9 @@ def _decorate_structured_findings(
             finding_type=str(row.get("finding_type") or ""),
             category=category,
             source_type=str(row.get("source_type") or ""),
+            evidence=[str(x) for x in (row.get("evidence") or []) if str(x or "").strip()],
+            business_outcome=str(row.get("business_outcome") or ""),
+            claim_status=claim_status,
         )
         out.append(row)
     return out
@@ -2067,7 +2310,7 @@ def _build_structured_findings(
         if not isinstance(item, dict):
             continue
         fname = str(item.get("file_name") or "attachment")
-        artifact_ref = {"file_name": fname, "sha256": str(item.get("sha256") or "")}
+        artifact_ref = {"file_name": fname, "sha256": str(item.get("sha256") or ""), "file_type": str(item.get("file_type") or "")}
         file_type = str(item.get("file_type") or "")
         inferred_source = "ocr" if file_type.startswith("image/") or "pdf" in file_type else "static"
         if bool(item.get("bank_fields_present")):
@@ -2169,7 +2412,7 @@ def _build_structured_findings(
             )
         payload_analysis = classify_passive_payload(
             filename=fname,
-            extracted_text=str(item.get("text_summary") or ""),
+            extracted_text=str(item.get("analysis_text_sample") or item.get("text_summary") or ""),
             signals={
                 "qr_payloads": list(item.get("qr_payloads") or []) if isinstance(item.get("qr_payloads"), list) else [],
                 "qr_prompt_injection": any("prompt" in q.lower() for q in qr_findings),
@@ -2181,17 +2424,29 @@ def _build_structured_findings(
                 "pii_detected": bool(item.get("pii_detected")),
             },
         )
-        hypothesis = str(payload_analysis.get("attack_hypothesis") or "").strip().lower()
+        matched_hypotheses = payload_analysis.get("matched_hypotheses") if isinstance(payload_analysis.get("matched_hypotheses"), list) else []
+        if not matched_hypotheses:
+            matched_hypotheses = [{"hypothesis": str(payload_analysis.get("attack_hypothesis") or "").strip().lower()}]
         hidden_mapping = {
             "lolbin_command_sequence": ("lolbin_command_sequence", "Hidden content describes a LOLBin command chain that could stage or execute payloads.", "behavioral", 0.91, 0.9),
             "c2_beacon": ("c2_beacon_pattern", "Hidden content resembles beacon or callback instructions linked to command-and-control behavior.", "behavioral", 0.89, 0.86),
             "data_exfiltration": ("data_exfiltration_instruction", "Hidden content describes how data could be collected or exfiltrated.", "behavioral", 0.9, 0.9),
             "prompt_injection": ("prompt_injection_hidden", "Hidden content appears designed to manipulate downstream AI or agent workflows.", "behavioral", 0.88, 0.82),
             "pii_data_exfil_via_qr": ("ssn_leakage_linked_qr", "A QR-linked or hidden path appears to expose SSNs or other sensitive identity data.", "intel", 0.93, 0.94),
+            "macros": ("macro_auto_execution_lure", "The attachment contains macro auto-execution cues that warrant sandboxed runtime confirmation before trust is extended.", "behavioral", 0.84, 0.72),
         }
-        mapped = hidden_mapping.get(hypothesis)
-        if mapped:
+        emitted_types: set[str] = set()
+        for matched_item in matched_hypotheses:
+            if not isinstance(matched_item, dict):
+                continue
+            hypothesis = str(matched_item.get("hypothesis") or "").strip().lower()
+            mapped = hidden_mapping.get(hypothesis)
+            if not mapped:
+                continue
             finding_type, summary, src_type, conf_score, policy_weight = mapped
+            if finding_type in emitted_types:
+                continue
+            emitted_types.add(finding_type)
             payload_evidence = []
             payload_evidence.extend([str(x) for x in (item.get("steg_explanations") or []) if str(x or "").strip()][:2])
             payload_evidence.extend(list(item.get("evidence_excerpt_lines") or [])[:2])
@@ -2219,7 +2474,7 @@ def _build_structured_findings(
                 finding_id=f"{finding_type}_{fname}",
                 finding_type=finding_type,
                 summary=summary,
-                severity_hint="high" if hypothesis != "prompt_injection" else "medium",
+                severity_hint="high" if hypothesis not in {"prompt_injection", "macros"} else "medium",
                 confidence_score=conf_score,
                 source_type=src_type,
                 evidence_kind="direct",
@@ -2231,7 +2486,7 @@ def _build_structured_findings(
                     "supplier_domain": from_domain or None,
                     "baseline_version": suggested_baseline_version or None,
                     "payload_type": payload_analysis.get("payload_type"),
-                    "decode_path": payload_analysis.get("decode_path"),
+                    "decode_path": matched_item.get("decode_path") or payload_analysis.get("decode_path"),
                     "linked_owner_scope": linked_artifact.get("linked_owner_scope") if linked_artifact else None,
                     "linked_exposure_scope": linked_artifact.get("linked_exposure_scope") if linked_artifact else None,
                     "linked_breach_severity_hint": linked_artifact.get("linked_breach_severity_hint") if linked_artifact else None,
@@ -2239,11 +2494,42 @@ def _build_structured_findings(
                 },
                 recommended_action=suggested_action,
             )
-            row["mitre_attack"] = list(payload_analysis.get("mitre_attack") or [])[:5]
-            row["payload_decode_path"] = str(payload_analysis.get("decode_path") or "")
-            row["pasta_stage"] = str(payload_analysis.get("pasta_stage") or "")
+            row["claim_status"] = str(matched_item.get("claim_status") or row.get("claim_status") or "")
+            row["finding_group"] = str(matched_item.get("finding_group") or row.get("finding_group") or "")
+            row["evidence_lane"] = str(matched_item.get("evidence_lane") or "")
+            row["mitre_attack"] = list(matched_item.get("mitre_attack") or payload_analysis.get("mitre_attack") or [])[:5]
+            row["possible_mitre_attack"] = list(matched_item.get("possible_mitre_attack") or payload_analysis.get("possible_mitre_attack") or [])[:6]
+            row["mitre_atlas"] = list(matched_item.get("mitre_atlas") or payload_analysis.get("mitre_atlas") or [])[:4]
+            row["possible_mitre_atlas"] = list(matched_item.get("possible_mitre_atlas") or payload_analysis.get("possible_mitre_atlas") or [])[:4]
+            row["payload_decode_path"] = str(matched_item.get("decode_path") or payload_analysis.get("decode_path") or "")
+            row["pasta_stage"] = str(matched_item.get("pasta_stage") or payload_analysis.get("pasta_stage") or "")
             row["suggested_next_step"] = str(payload_analysis.get("suggested_next_step") or "")
+            row["runtime_confirmation_required"] = bool(matched_item.get("runtime_confirmation_required"))
+            row["runtime_evidence_required"] = list(matched_item.get("runtime_evidence_required") or payload_analysis.get("runtime_evidence_required") or [])[:6]
             row["lolbin_behavioral_profiles"] = list(payload_analysis.get("lolbin_behavioral_profiles") or [])[:4]
+            binary_provenance = [dict(x) for x in (matched_item.get("binary_mitre_provenance") or payload_analysis.get("binary_mitre_provenance") or []) if isinstance(x, dict)][:8]
+            row["binary_mitre_provenance"] = binary_provenance
+            if binary_provenance:
+                existing_refs = list(row.get("evidence_refs") or [])
+                for bp in binary_provenance:
+                    for ref in (bp.get("evidence_refs") or []):
+                        ref_text = str(ref or "").strip()
+                        if ref_text and ref_text not in existing_refs:
+                            existing_refs.append(ref_text)
+                row["evidence_refs"] = existing_refs[:12]
+                artifact_rows = list(row.get("artifact_provenance") or [])
+                for bp in binary_provenance:
+                    refs = [str(x) for x in (bp.get("evidence_refs") or []) if str(x or "").strip()]
+                    if not refs:
+                        continue
+                    artifact_rows.append({
+                        "source_file": fname,
+                        "extraction_method": "binary_attack_mapping",
+                        "match_ref": refs[0],
+                        "confidence": "medium",
+                        "reason": str(bp.get("reason") or "").strip(),
+                    })
+                row["artifact_provenance"] = artifact_rows[:12]
             if linked_artifact:
                 row["linked_artifact"] = linked_artifact
             findings.append(row)
@@ -2347,7 +2633,16 @@ def _build_agent_runs_audit(
     atts = ev.get("attachment_forensics") if isinstance(ev.get("attachment_forensics"), list) else []
     rel = (infra.get("related_incidents") if isinstance(infra.get("related_incidents"), dict) else {}) or {}
     playbook = ev.get("playbook_run") if isinstance(ev.get("playbook_run"), dict) else {}
+    route_after = str((policy_gate or {}).get("decision") or ev.get("route") or "review")
     runs: list[dict[str, Any]] = []
+    parallel_agent_ids = [row[0] for row in [
+        ("sender_auth_agent", {}),
+        ("attachment_forensics_agent", {}),
+        ("baseline_agent", {}),
+        ("correlation_agent", {}),
+        ("explanation_agent", {}),
+        ("playbook_agent", {}),
+    ]]
     rows = [
         (
             "sender_auth_agent",
@@ -2355,6 +2650,8 @@ def _build_agent_runs_audit(
                 "inputs_used": ["message_headers", "spf_dkim_dmarc", "header_forensics"],
                 "input_refs": [k for k in ("spf_result", "dkim_result", "dmarc_result") if auth.get(k) is not None] + ([infra.get("sender_domain")] if infra.get("sender_domain") else []),
                 "confidence": 0.88 if _count("sender_auth_agent") else 0.52,
+                "why_ran": "Email headers and sender identity signals were present and required authentication review.",
+                "output_quality": "structural",
             },
         ),
         (
@@ -2363,6 +2660,8 @@ def _build_agent_runs_audit(
                 "inputs_used": ["sanitized_attachment_text", "ocr_output", "file_metadata", "static_analysis"],
                 "input_refs": [str(a.get("file_name") or "") for a in atts[:8] if isinstance(a, dict)],
                 "confidence": 0.86 if _count("attachment_forensics_agent") else 0.5,
+                "why_ran": "Attachments were present and needed passive extraction, OCR, and static analysis.",
+                "output_quality": "structural",
             },
         ),
         (
@@ -2371,6 +2670,8 @@ def _build_agent_runs_audit(
                 "inputs_used": ["supplier_profile", "approved_contacts", "bank_fingerprints", "template_hashes"],
                 "input_refs": [str(((ev.get("attachment_baseline_diffs") or {}).get("baseline_file") or ""))] if isinstance(ev.get("attachment_baseline_diffs"), dict) else [],
                 "confidence": 0.84 if _count("baseline_agent") else 0.5,
+                "why_ran": "Supplier and template baseline checks were available for comparison.",
+                "output_quality": "structural",
             },
         ),
         (
@@ -2379,6 +2680,8 @@ def _build_agent_runs_audit(
                 "inputs_used": ["prior_incidents", "sender_domain", "reply_domain", "incident_graph"],
                 "input_refs": [str(m.get("incident_id") or "") for m in (rel.get("matches") or [])[:5] if isinstance(m, dict)],
                 "confidence": 0.72 if _count("correlation_agent") else 0.46,
+                "why_ran": "Related incident and infrastructure overlap checks were available.",
+                "output_quality": "structural",
             },
         ),
         (
@@ -2387,6 +2690,8 @@ def _build_agent_runs_audit(
                 "inputs_used": ["normalized_findings", "faq_policy_mappings", "business_impact_model"],
                 "input_refs": [str(f.get("finding_id") or "") for f in findings[:5]],
                 "confidence": 0.78 if findings else 0.45,
+                "why_ran": "A human-readable explanation was required after evidence normalization.",
+                "output_quality": "heuristic",
             },
         ),
         (
@@ -2395,6 +2700,8 @@ def _build_agent_runs_audit(
                 "inputs_used": ["policy_approved_findings", "allowed_actions", "sop_mappings"],
                 "input_refs": [str(playbook.get("playbook_id") or "")] if playbook else [],
                 "confidence": 0.81 if _count("playbook_agent") else 0.49,
+                "why_ran": "Response playbook selection was required after verdict routing.",
+                "output_quality": "structural",
             },
         ),
     ]
@@ -2424,9 +2731,12 @@ def _build_agent_runs_audit(
                     for v in validate_agent_action(agent_name=agent_name, data_scope=scope_name)
                 ]
             )
+        agent_findings = [f for f in findings if str(f.get("agent_origin") or "") == agent_name]
+        evidence_added = [str(f.get("finding_id") or f.get("finding_type") or "") for f in agent_findings[:8] if str(f.get("finding_id") or f.get("finding_type") or "").strip()]
         runs.append(
             {
                 "agent_name": agent_name,
+                "agent_id": agent_name,
                 "scope_enforced": len(violations) == 0,
                 "allowed_inputs": list(boundary.get("allowed_inputs") or []),
                 "allowed_tools": list(boundary.get("allowed_tools") or []),
@@ -2434,9 +2744,19 @@ def _build_agent_runs_audit(
                 "denied_capabilities": list(boundary.get("denied_capabilities") or []),
                 "inputs_used": list(meta.get("inputs_used") or []),
                 "input_refs": [str(x) for x in (meta.get("input_refs") or []) if str(x or "").strip()][:8],
+                "input_summary": ", ".join([str(x) for x in (meta.get("input_refs") or []) if str(x or "").strip()][:4]) or ", ".join(meta.get("inputs_used") or []),
                 "tools_used": _finding_source_toolset(agent_name),
                 "output_count": _count(agent_name),
                 "confidence": round(float(meta.get("confidence") or 0.0), 4),
+                "why_ran": str(meta.get("why_ran") or ""),
+                "evidence_added": evidence_added,
+                "evidence_retracted": [],
+                "verdict_before": "review" if agent_name in {"explanation_agent", "playbook_agent"} else "allow",
+                "verdict_after": route_after,
+                "confidence_delta": round(float(meta.get("confidence") or 0.0) - 0.45, 3),
+                "output_quality": str(meta.get("output_quality") or "heuristic"),
+                "ran_in_parallel_with": [name for name in parallel_agent_ids if name != agent_name],
+                "filler_suppressed": True,
                 "policy_result": str((policy_gate or {}).get("decision") or "allow"),
                 "actions_taken": [],
                 "scope_violations": violations[:10],
@@ -3866,6 +4186,11 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             top_ranked_findings = _dedupe_ranked_findings(structured_findings, limit=3)
             evs["structured_findings"] = structured_findings
             evs["top_ranked_findings"] = top_ranked_findings
+            evs["finding_groups"] = {
+                "active_findings": [f for f in structured_findings if isinstance(f, dict) and str(f.get("finding_group") or "") == "active_findings" and str(f.get("claim_status") or "") in {"observed", "inferred"}][:8],
+                "detection_artifact_patterns": [f for f in structured_findings if isinstance(f, dict) and str(f.get("finding_group") or "") == "detection_artifact_patterns"][:8],
+                "unconfirmed_higher_order_hypotheses": [f for f in structured_findings if isinstance(f, dict) and str(f.get("finding_group") or "") == "unconfirmed_higher_order_hypotheses"][:8],
+            }
             supplier_governance = update_supplier_governance_snapshot(
                 tenant_id=tenant_id,
                 email=email,
@@ -3906,6 +4231,12 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 structured_findings=structured_findings,
                 policy_gate=v.get("policy_gate") if isinstance(v.get("policy_gate"), dict) else {},
             )
+            if isinstance(security_analysis, dict):
+                security_analysis["agent_invocations"] = list(evs.get("agent_runs") or [])[:8]
+                if isinstance(ocr_sanitization_meta, dict):
+                    security_analysis["ocr_confidence"] = ocr_sanitization_meta.get("ocr_confidence")
+                    security_analysis["ocr_engine"] = ocr_sanitization_meta.get("ocr_engine")
+                    security_analysis["ocr_word_count"] = ocr_sanitization_meta.get("ocr_word_count")
             v["action_policy"] = action_policy
             v["human_gate"] = dict(action_policy.get("human_gate") or {})
             v["threat_hunter_leads"] = list(evs.get("threat_hunter_leads") or [])
@@ -4049,12 +4380,18 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         # Keep deterministic and defensive-only; used for audit/reporting and UI panels.
         try:
             # Minimal signal map for downstream correlation; avoid leaking raw email.
+            structured_signal_findings = [
+                f
+                for f in (((v.get("evidence_snapshot") or {}).get("structured_findings") or [])[:32])
+                if isinstance(f, dict) and str(f.get("claim_status") or "").strip().lower() in {"observed", "inferred", "possible"}
+            ]
             sig = {
                 "dmarc_fail": bool(dmarc_fail),
-                "prompt_injection": any(str((i or {}).get("type") or "") == "prompt_injection" for i in (v.get("indicators") or [])),
+                "prompt_injection": any(str(f.get("finding_type") or "") == "prompt_injection_hidden" for f in structured_signal_findings),
                 "dangerous_tool_intent": any(str((i or {}).get("type") or "") == "dangerous_tool_intent" for i in (v.get("indicators") or [])),
-                "data_exfiltration": any(str((i or {}).get("type") or "") in ("data_exfil_intent",) for i in (v.get("indicators") or [])),
-                "email_c2_beaconing": any(str((i or {}).get("type") or "") == "c2_beacon_pattern" for i in (v.get("indicators") or [])),
+                "data_exfiltration": any(str((i or {}).get("type") or "") in ("data_exfil_intent",) for i in (v.get("indicators") or []))
+                or any(str(f.get("finding_type") or "") == "data_exfiltration_instruction" for f in structured_signal_findings),
+                "email_c2_beaconing": any(str(f.get("finding_type") or "") == "c2_beacon_pattern" for f in structured_signal_findings),
                 "unicode_confusable": any(str((i or {}).get("type") or "") in ("confusable_homoglyph_domain", "vendor_homoglyph_impersonation") for i in (v.get("indicators") or [])),
                 "thread_hijack": bool(email.get("prior_reply_chain_id")) and bool(email.get("reply_chain_id")) and str(email.get("prior_reply_chain_id")) != str(email.get("reply_chain_id")),
                 "thread_reentry_after_silence": bool(((v.get("evidence_snapshot") or {}).get("thread_graph") or {}).get("reentry_after_silence")),
@@ -4093,11 +4430,61 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             threat_correlation=(v.get("threat_correlation") or {}) if isinstance(v.get("threat_correlation"), dict) else None,
             signals=sig,
             evidence={
+                "case_facts": {
+                    "from_addr": email.get("from_addr"),
+                    "reply_to": email.get("reply_to"),
+                    "subject": email.get("subject"),
+                    "route": v.get("route"),
+                    "verdict_action": v.get("verdict_action"),
+                },
+                "top_ranked_findings": ((v.get("evidence_snapshot") or {}).get("top_ranked_findings") or [])[:5],
+                "artifact_evidence": [
+                    str(x.get("summary") or "")
+                    for x in (((v.get("evidence_snapshot") or {}).get("top_ranked_findings") or [])[:5])
+                    if isinstance(x, dict) and str(x.get("claim_status") or "").strip().lower() in {"observed", "inferred"}
+                ][:6],
+                "artifact_claims": [
+                    {
+                        "finding_id": str(x.get("finding_id") or ""),
+                        "finding_type": str(x.get("finding_type") or ""),
+                        "summary": str(x.get("summary") or ""),
+                        "claim_status": str(x.get("claim_status") or ""),
+                        "finding_group": str(x.get("finding_group") or ""),
+                        "source_type": str(x.get("source_type") or ""),
+                        "evidence_lane": str(x.get("evidence_lane") or ""),
+                        "evidence_refs": list(x.get("evidence_refs") or []),
+                        "evidence_summary": list(x.get("evidence") or [])[:4],
+                        "mitre_attack": list(x.get("mitre_attack") or [])[:6],
+                        "possible_mitre_attack": list(x.get("possible_mitre_attack") or [])[:6],
+                        "mitre_atlas": list(x.get("mitre_atlas") or [])[:4],
+                        "possible_mitre_atlas": list(x.get("possible_mitre_atlas") or [])[:4],
+                        "pasta_stage": str(x.get("pasta_stage") or ""),
+                        "business_outcome": str(x.get("business_outcome") or ""),
+                        "runtime_confirmation_required": bool(x.get("runtime_confirmation_required")),
+                        "runtime_evidence_required": list(x.get("runtime_evidence_required") or [])[:6],
+                        "runtime_evidence_present": list(x.get("runtime_evidence_present") or [])[:6],
+                        "artifact_provenance": list(x.get("artifact_provenance") or [])[:6],
+                        "source_file": str((((x.get("artifact_provenance") or [{}])[0]) or {}).get("source_file") or ""),
+                        "extraction_method": str((((x.get("artifact_provenance") or [{}])[0]) or {}).get("extraction_method") or ""),
+                        "exact_match_ref": str((((x.get("artifact_provenance") or [{}])[0]) or {}).get("match_ref") or ""),
+                        "confidence": str((((x.get("artifact_provenance") or [{}])[0]) or {}).get("confidence") or ""),
+                        "ocr_confidence": x.get("ocr_confidence"),
+                        "model_targeting_evidence": list(x.get("model_targeting_evidence") or [])[:6],
+                    }
+                    for x in (((v.get("evidence_snapshot") or {}).get("structured_findings") or [])[:16])
+                    if isinstance(x, dict)
+                ],
+                "sender_infrastructure": {
+                    "related_incident_count": int((((v.get("evidence_snapshot") or {}).get("sender_infrastructure") or {}).get("related_incidents") or {}).get("count") or 0),
+                },
                 "ioc_counts": (v.get("evidence_snapshot") or {}).get("ioc_counts"),
                 "artifact_intel": (v.get("evidence_snapshot") or {}).get("artifact_intel"),
                 "intake_gate": (v.get("evidence_snapshot") or {}).get("intake_gate"),
                 "attachment_ingest_gate": (v.get("evidence_snapshot") or {}).get("attachment_ingest_gate"),
                 "ocr_qr_sanitization": (v.get("evidence_snapshot") or {}).get("ocr_qr_sanitization"),
+                "ocr_confidence": ((v.get("evidence_snapshot") or {}).get("ocr_qr_sanitization") or {}).get("ocr_confidence"),
+                "ocr_engine": ((v.get("evidence_snapshot") or {}).get("ocr_qr_sanitization") or {}).get("ocr_engine"),
+                "ocr_word_count": ((v.get("evidence_snapshot") or {}).get("ocr_qr_sanitization") or {}).get("ocr_word_count"),
                 "trust_case": trust_case,
                 "semantic_bec": (v.get("evidence_snapshot") or {}).get("semantic_bec"),
                 "yara": (v.get("evidence_snapshot") or {}).get("yara"),

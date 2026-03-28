@@ -314,7 +314,14 @@ def _clamp(v: float, lo: float = 0.0, hi: float = 10.0) -> float:
     return max(lo, min(hi, v))
 
 
-def _evidence_item(signal: str, component: str, contribution: float, *, cv: bool = False) -> Dict[str, Any]:
+def _evidence_item(
+    signal: str,
+    component: str,
+    contribution: float,
+    *,
+    cv: bool = False,
+    signal_quality: str | None = None,
+) -> Dict[str, Any]:
     mitre_map = _CV_SIGNAL_MITRE if cv else _SIGNAL_MITRE
     owasp_map = _CV_SIGNAL_OWASP if cv else _SIGNAL_OWASP
     kc = _SIGNAL_KILL_CHAIN.get(signal, "")
@@ -326,6 +333,7 @@ def _evidence_item(signal: str, component: str, contribution: float, *, cv: bool
         "owasp": owasp_map.get(signal, ""),
         "kill_chain": kc,
         "source": "cv" if cv else "text",
+        "signal_quality": signal_quality or ("structural_parse" if cv else "keyword_match"),
     }
 
 
@@ -390,7 +398,7 @@ def compute_dread(
 
     # ── Damage ──
     damage_base = {"critical": 9.5, "error": 9.0, "high": 7.5, "warn": 4.5, "info": 2.0}.get(sev, 2.0)
-    evidence.append({"signal": f"severity:{sev}", "component": "damage", "contribution": damage_base, "mitre": "", "owasp": "", "kill_chain": "", "source": "severity"})
+    evidence.append({"signal": f"severity:{sev}", "component": "damage", "contribution": damage_base, "mitre": "", "owasp": "", "kill_chain": "", "source": "severity", "signal_quality": "heuristic"})
     if signals.get("data_exfiltration") or signals.get("pci"):
         bump = 2.0
         damage_base = _clamp(damage_base + bump)
@@ -417,7 +425,7 @@ def compute_dread(
         repro_base = 7.0
     elif total_fired >= 1:
         repro_base = 5.0
-    evidence.append({"signal": f"signal_count:{total_fired}", "component": "reproducibility", "contribution": repro_base, "mitre": "", "owasp": "", "kill_chain": "", "source": "heuristic"})
+    evidence.append({"signal": f"signal_count:{total_fired}", "component": "reproducibility", "contribution": repro_base, "mitre": "", "owasp": "", "kill_chain": "", "source": "heuristic", "signal_quality": "heuristic"})
     if signals.get("prompt_injection") or signals.get("jailbreak"):
         bump = 2.0
         repro_base = _clamp(repro_base + bump)
@@ -476,10 +484,10 @@ def compute_dread(
     role = str(actor.get("actor_role") or "").lower()
     if role in ("admin", "superuser", "owner"):
         affected_base = 8.0
-        evidence.append({"signal": f"actor_role:{role}", "component": "affected_users", "contribution": 8.0, "mitre": "T1078", "owasp": "", "kill_chain": "", "source": "context"})
+        evidence.append({"signal": f"actor_role:{role}", "component": "affected_users", "contribution": 8.0, "mitre": "T1078", "owasp": "", "kill_chain": "", "source": "context", "signal_quality": "structural_parse"})
     elif role in ("merchant",):
         affected_base = 6.0
-        evidence.append({"signal": f"actor_role:{role}", "component": "affected_users", "contribution": 6.0, "mitre": "", "owasp": "", "kill_chain": "", "source": "context"})
+        evidence.append({"signal": f"actor_role:{role}", "component": "affected_users", "contribution": 6.0, "mitre": "", "owasp": "", "kill_chain": "", "source": "context", "signal_quality": "structural_parse"})
     if signals.get("data_exfiltration") or signals.get("pci"):
         bump = 2.0
         affected_base = _clamp(affected_base + bump)

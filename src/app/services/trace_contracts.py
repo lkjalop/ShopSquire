@@ -105,6 +105,20 @@ class BitemporalWindow(BaseModel):
     system_to: str | None = "infinity"
 
 
+class AgentInvocationRecord(BaseModel):
+    agent_id: str
+    why_ran: str
+    input_summary: str
+    evidence_added: List[str] = Field(default_factory=list)
+    evidence_retracted: List[str] = Field(default_factory=list)
+    verdict_before: str | None = None
+    verdict_after: str | None = None
+    confidence_delta: float | None = None
+    output_quality: str | None = None
+    ran_in_parallel_with: List[str] = Field(default_factory=list)
+    filler_suppressed: bool = False
+
+
 class SecurityScanContract(BaseModel):
     severity: str = "info"
     route: str = "allow"
@@ -117,10 +131,26 @@ class SecurityScanContract(BaseModel):
     owasp_agentic_top10: List[str] = Field(default_factory=list)
     owasp_api_top10: List[str] = Field(default_factory=list)
     stride_categories: List[str] = Field(default_factory=list)
+    claim_status: str | None = None
+    finding_group: str | None = None
+    evidence_lane: str | None = None
+    mitre_attack_possible: List[str] = Field(default_factory=list)
+    mitre_atlas_possible: List[str] = Field(default_factory=list)
     dread: Dict[str, Any] | None = None
     pasta: Dict[str, Any] | None = None
     evidence: Dict[str, Any] = Field(default_factory=dict)
     containment_actions: List[str] = Field(default_factory=list)
+    payload_findings: List[Dict[str, Any]] = Field(default_factory=list)
+    finding_groups: Dict[str, Any] = Field(default_factory=dict)
+    runtime_evidence_required: List[str] = Field(default_factory=list)
+    runtime_evidence_present: List[str] = Field(default_factory=list)
+    ocr_confidence: float | None = None
+    ocr_engine: str | None = None
+    ocr_word_count: int | None = None
+    cv_model_confidence: float | None = None
+    cv_extraction_method: str | None = None
+    evidence_quality: Dict[str, Any] = Field(default_factory=dict)
+    agent_invocations: List[AgentInvocationRecord] = Field(default_factory=list)
     input_hash: str | None = None
     ocr_text_hash: str | None = None
     entities: Dict[str, Any] = Field(default_factory=dict)
@@ -207,10 +237,42 @@ def normalize_security_scan_payload(
         owasp_agentic_top10=_coerce_str_list(sec.get("owasp_agentic_top10") or sec.get("owasp_agentic")),
         owasp_api_top10=_coerce_str_list(sec.get("owasp_api_top10") or sec.get("owasp_api")),
         stride_categories=_coerce_str_list(sec.get("stride_categories") or sec.get("stride")),
+        claim_status=(str(sec.get("claim_status")) if sec.get("claim_status") is not None else None),
+        finding_group=(str(sec.get("finding_group")) if sec.get("finding_group") is not None else None),
+        evidence_lane=(str(sec.get("evidence_lane")) if sec.get("evidence_lane") is not None else None),
+        mitre_attack_possible=_coerce_str_list(sec.get("possible_mitre_attack") or sec.get("mitre_attack_possible")),
+        mitre_atlas_possible=_coerce_str_list(sec.get("possible_mitre_atlas") or sec.get("mitre_atlas_possible")),
         dread=(dread if isinstance(dread, dict) else None),
         pasta=(pasta if isinstance(pasta, dict) else None),
         evidence=evidence,
         containment_actions=_coerce_str_list(sec.get("containment_actions") or sec.get("actions")),
+        payload_findings=(sec.get("payload_findings") if isinstance(sec.get("payload_findings"), list) else []),
+        finding_groups=(sec.get("finding_groups") if isinstance(sec.get("finding_groups"), dict) else {}),
+        runtime_evidence_required=_coerce_str_list(sec.get("runtime_evidence_required")),
+        runtime_evidence_present=_coerce_str_list(sec.get("runtime_evidence_present")),
+        ocr_confidence=(
+            float(payload.get("ocr_confidence"))
+            if payload.get("ocr_confidence") is not None
+            else (float(sec.get("ocr_confidence")) if sec.get("ocr_confidence") is not None else None)
+        ),
+        ocr_engine=(str(payload.get("ocr_engine") or sec.get("ocr_engine")).strip() or None),
+        ocr_word_count=(
+            int(payload.get("ocr_word_count"))
+            if payload.get("ocr_word_count") is not None
+            else (int(sec.get("ocr_word_count")) if sec.get("ocr_word_count") is not None else None)
+        ),
+        cv_model_confidence=(
+            float(payload.get("cv_model_confidence"))
+            if payload.get("cv_model_confidence") is not None
+            else (float(sec.get("cv_model_confidence")) if sec.get("cv_model_confidence") is not None else None)
+        ),
+        cv_extraction_method=(str(payload.get("cv_extraction_method") or sec.get("cv_extraction_method")).strip() or None),
+        evidence_quality=(sec.get("evidence_quality") if isinstance(sec.get("evidence_quality"), dict) else {}),
+        agent_invocations=(
+            [AgentInvocationRecord(**item) for item in (sec.get("agent_invocations") or []) if isinstance(item, dict)]
+            if isinstance(sec.get("agent_invocations"), list)
+            else []
+        ),
         input_hash=str(input_hash),
         ocr_text_hash=(str(ocr_text_hash) if ocr_text_hash else None),
         entities=entities,
@@ -423,4 +485,3 @@ def validate_incident_matrix_gate(db, incident_id: str) -> Dict[str, Any]:
         }
 
     return best_failure or {"ok": False, "reason": "security_scan_missing", "incident_id": incident_id}
-

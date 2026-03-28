@@ -1,0 +1,21 @@
+{
+  "id": "payment_fraud_attachment_triplet",
+  "label": "tp",
+  "description": "Supplier payment-fraud lure with macro-enabled workbook and supporting PDF.",
+  "subject": "Updated Payment Details",
+  "from_addr": "accounts@balashnikovai.com.au",
+  "reply_to": "accounts@balashnikovai.com.au",
+  "body": "Please process the urgent wire transfer. Updated beneficiary details are attached.",
+  "attachments": [
+    "dump/Sec/Harbourside_Acquisition_Details_CONFIDENTIAL.xlsm",
+    "dump/Sec/Wire_Transfer_Authorization_Form.pdf"
+  ],
+  "expected": {
+    "verdict_action": "security_review",
+    "severity_in": ["warning", "error", "high"],
+    "observed_hypotheses": ["payment_change_request", "bank_detail_change"],
+    "possible_mitre_attack_any": ["T1566.001", "T1566.002", "T1059.001", "T1105"],
+    "mitre_atlas_empty": true,
+    "pasta_not_in": ["Stage6:ModellingAndSimulation", "Stage7:RiskAndImpactAnalysis"]
+  }
+}

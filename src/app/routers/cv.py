@@ -230,6 +230,7 @@ async def analyze(
         tier2_security: Dict[str, Any] = {}
         labels = list(req.labels or [])
         extracted_text = (req.extracted_text or "") if req.extracted_text is not None else ""
+        ocr_meta: Dict[str, Any] = {}
 
         if req.images_b64:
             try:
@@ -278,9 +279,11 @@ async def analyze(
                 if sanitized_images and str(sanitized_images[0].get("status") or "") == "sanitized":
                     from src.app.services.cv_provider import ManagedCVProvider
 
-                    labels, extracted_text, *_ = await ManagedCVProvider().get_labels_and_text(
+                    _provider = ManagedCVProvider()
+                    labels, extracted_text, *_ = await _provider.get_labels_and_text(
                         sanitized_images[0].get("bytes") or b""
                     )
+                    ocr_meta = dict(getattr(_provider, "last_ocr_meta", {}) or {})
             except Exception as _cv_exc:
                 import logging as _lg
                 _lg.getLogger("cv.analyze").warning("ManagedCVProvider failed: %s", _cv_exc, exc_info=True)
@@ -292,6 +295,7 @@ async def analyze(
                     from src.app.services.cv_provider import ManagedCVProvider as _MCP
                     _prov = _MCP()
                     extracted_text = _prov._tesseract_text(sanitized_images[0].get("bytes") or b"")
+                    ocr_meta = dict(getattr(_prov, "last_ocr_meta", {}) or {}) or ocr_meta
                 except Exception as _exc:
                     _log.debug("tesseract fallback failed: %s", _exc)
 
@@ -533,6 +537,10 @@ async def analyze(
                 "description": req.description,
                 "issue_type": req.issue_type,
                 "ocr_text": extracted_text,
+                "ocr_confidence": ocr_meta.get("ocr_confidence"),
+                "ocr_engine": ocr_meta.get("ocr_engine"),
+                "ocr_word_count": ocr_meta.get("ocr_word_count"),
+                "cv_extraction_method": ocr_meta.get("cv_extraction_method"),
                 "labels": labels,
                 "image_consistency": image_consistency,
                 "qr_codes": qr_decode_hits,
@@ -676,6 +684,10 @@ async def analyze(
                 "route": route,
                 "threshold_version": os.getenv("SECURITY_THRESHOLD_VERSION", "security-v1"),
                 "ocr_text": (extracted_text or "")[:2000],
+                "ocr_confidence": ocr_meta.get("ocr_confidence"),
+                "ocr_engine": ocr_meta.get("ocr_engine"),
+                "ocr_word_count": ocr_meta.get("ocr_word_count"),
+                "cv_extraction_method": ocr_meta.get("cv_extraction_method"),
                 "entities": {
                     "labels": (labels or [])[:20],
                     "qr_code_count": max(0, len(qr_decode_hits or []) - int(diagnostic_qr_count or 0)),
@@ -901,6 +913,10 @@ async def analyze(
                 "details": security_details if isinstance(security_details, dict) and security_details else {"severity": "info", "signals": {}},
                 "severity": security_sev or "info",
                 "signals": {k: v for k, v in (security_details.get("signals") or {}).items() if isinstance(v, bool)} if isinstance(security_details, dict) else {},
+                "ocr_confidence": ocr_meta.get("ocr_confidence"),
+                "ocr_engine": ocr_meta.get("ocr_engine"),
+                "ocr_word_count": ocr_meta.get("ocr_word_count"),
+                "cv_extraction_method": ocr_meta.get("cv_extraction_method"),
             },
             "cv_runtime": runtime,
             "ui_actions": {"chat_with_admin": _needs_chat},
@@ -909,6 +925,8 @@ async def analyze(
             "image_recommend_context": {
                 "labels": (labels or [])[:12],
                 "ocr_text": (extracted_text or "")[:500],
+                "ocr_confidence": ocr_meta.get("ocr_confidence"),
+                "ocr_engine": ocr_meta.get("ocr_engine"),
                 "cv_signals": {
                     "qr_code_detected": bool(qr_decode_hits),
                     "qr_prompt_injection": bool(qr_prompt_injection),
