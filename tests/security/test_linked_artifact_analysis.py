@@ -137,3 +137,30 @@ def test_linked_artifact_analysis_uses_offline_fixture_when_live_fetch_unavailab
     assert out["linked_attack_hypothesis"] == "linked_pii_exposure"
     assert out["pii_detected"] is True
     assert "ssn" in out["pii_type"]
+
+
+def test_linked_artifact_analysis_sanitizes_html_excerpt(monkeypatch):
+    from src.app.security import linked_artifact_analysis as mod
+
+    html = (
+        b'<!doctype html><html><head><title>What is scanned.page?</title></head>'
+        b'<body><h1>What is scanned.page?</h1><p>Create, manage and statistically track your QR codes.</p></body></html>'
+    )
+
+    def _fake_safe_request(method: str, url: str, **_: object):
+        return SimpleNamespace(
+            status_code=200,
+            url=url,
+            headers={"content-type": "text/html"},
+            content=html,
+        )
+
+    monkeypatch.setattr(mod, "safe_request", _fake_safe_request)
+    out = mod.analyze_linked_artifact(url="https://scanned.page/p/R2g2Jb")
+
+    assert out["linked_artifact_available"] is True
+    excerpt = str(out.get("linked_text_excerpt") or "")
+    lowered = excerpt.lower()
+    assert "<html" not in lowered
+    assert "what is scanned.page" not in lowered
+    assert "create, manage and statistically track your qr codes" not in lowered

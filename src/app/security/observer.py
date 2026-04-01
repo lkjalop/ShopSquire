@@ -717,8 +717,8 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
             {"id": "Stage3", "name": "ApplicationDecomposition"},
             {"id": "Stage4", "name": "ThreatAnalysis"},
             {"id": "Stage5", "name": "VulnerabilityAnalysis"},
-            {"id": "Stage6", "name": "RiskResponse"},
-            {"id": "Stage7", "name": "MitigationVerification"},
+            {"id": "Stage6", "name": "ModellingAndSimulation"},
+            {"id": "Stage7", "name": "RiskAndImpactAnalysis"},
         ]
         current = "Stage1"
         if any(signals.values()):
@@ -732,7 +732,7 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         if severity in ("high", "critical"):
             current = "Stage6"
         # DREAD-driven PASTA floor: if weighted DREAD is severe at advanced kill-chain
-        # stages, ensure PASTA reflects the urgency (minimum Stage6: Risk Response).
+        # stages, ensure PASTA reflects the urgency (minimum Stage6: modelling/simulation).
         try:
             _dw_avg = float(dread_dynamic.get("weighted_avg") or 0)
             _dw_kc = str(dread_dynamic.get("kill_chain_stage") or "")

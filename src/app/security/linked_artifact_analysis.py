@@ -707,6 +707,38 @@ def _decode_html_blob(blob: bytes) -> str:
     return ""
 
 
+def _html_visible_text(html: str) -> str:
+    raw = str(html or "")
+    if not raw.strip():
+        return ""
+    raw = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", raw)
+    raw = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", raw)
+    raw = re.sub(r"(?is)<noscript[^>]*>.*?</noscript>", " ", raw)
+    raw = re.sub(r"(?is)<[^>]+>", " ", raw)
+    raw = unescape(raw)
+    raw = re.sub(r"\s+", " ", raw).strip()
+    return raw
+
+
+def _sanitize_excerpt(*, text: str, artifact_type: str, max_chars: int = 500) -> str:
+    clean = str(text or "").strip()
+    if not clean:
+        return ""
+    if artifact_type == "html":
+        htmlish = clean if "<" in clean and ">" in clean else ""
+        if htmlish:
+            clean = _html_visible_text(htmlish)
+        boilerplate_hits = (
+            "what is scanned.page" in clean.lower()
+            or "create, manage and statistically track your qr codes" in clean.lower()
+            or clean.lower().startswith("html lang=")
+        )
+        if boilerplate_hits and not any(tok in clean.lower() for tok in ("ssn", "social security", "payment", "invoice", "beneficiary", "bank", "card")):
+            return ""
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean[:max_chars]
+
+
 def _ocr_pdf_text(blob: bytes) -> str:
     return _ocr_pdf_pages(blob, max_pages=3, scale=2.0)
 
@@ -784,7 +816,7 @@ def _extract_artifact_text(*, artifact_type: str, blob: bytes, content_type: str
     if artifact_type == "html" and len(combined_text) < 48:
         html_text = _decode_html_blob(blob)
         if html_text.strip():
-            combined_text = html_text
+            combined_text = _html_visible_text(html_text)
 
     if artifact_type == "pdf" and (len(combined_text) < 48 or _pdf_text_looks_unusable(combined_text)):
         ocr_text = _ocr_pdf_text(blob)
@@ -798,6 +830,64 @@ def _extract_artifact_text(*, artifact_type: str, blob: bytes, content_type: str
         "ocr_used": ocr_used,
         "ocr_text": ocr_text[:20000],
     }
+
+
+def _linked_artifact_provenance(
+    *,
+    final_url: str,
+    filename: str,
+    artifact_type: str,
+    ocr_used: bool,
+    ssn_hits: List[str],
+    pii_types: List[str],
+    attack_hypothesis: str,
+) -> List[Dict[str, Any]]:
+    source_name = filename or final_url or "linked_artifact"
+    rows: List[Dict[str, Any]] = [
+        {
+            "source_file": source_name,
+            "extraction_method": "passive_link_fetch",
+            "match_ref": f"linked_artifact.{artifact_type or 'unknown'}",
+            "confidence": "medium",
+        }
+    ]
+    if ocr_used:
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "pdf_ocr",
+                "match_ref": "linked_artifact.ocr_text",
+                "confidence": "medium",
+            }
+        )
+    if ssn_hits:
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "pattern_match",
+                "match_ref": "linked_artifact.ssn_hits",
+                "confidence": "high",
+            }
+        )
+    elif pii_types:
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "pattern_match",
+                "match_ref": "linked_artifact.pii_type",
+                "confidence": "high",
+            }
+        )
+    elif attack_hypothesis == "linked_payment_fraud":
+        rows.append(
+            {
+                "source_file": source_name,
+                "extraction_method": "passive_text_extract",
+                "match_ref": "linked_artifact.payment_lure_terms",
+                "confidence": "medium",
+            }
+        )
+    return rows[:6]
 
 
 def analyze_linked_artifact(
@@ -985,7 +1075,7 @@ def analyze_linked_artifact(
                     artifact_type_2 = _guess_artifact_type(content_type_2, filename_2, blob2)
                     if artifact_type_2 != "html":
                         out["linked_landing_page_url"] = final_url
-                        out["linked_landing_page_excerpt"] = combined_text[:500]
+                        out["linked_landing_page_excerpt"] = _sanitize_excerpt(text=combined_text, artifact_type="html")
                         final_url = final_url_2
                         content_type = content_type_2
                         filename = filename_2
@@ -1088,7 +1178,7 @@ def analyze_linked_artifact(
         "pii_type": pii_types,
         "ssn_hits": ssn_hits,
         "embedded_urls": embedded_urls,
-        "linked_text_excerpt": combined_text[:500],
+        "linked_text_excerpt": _sanitize_excerpt(text=combined_text, artifact_type=artifact_type),
         "linked_pdf_forensics": pdf_forensics,
         "linked_ocr_used": ocr_used,
         "linked_reason_summary": linked_reason_summary,
@@ -1096,6 +1186,15 @@ def analyze_linked_artifact(
         "linked_bank_fields": linked_bank_fields,
         "linked_bank_fingerprint": linked_bank_fingerprint,
         "linked_supplier_verification": supplier_verification,
+        "linked_artifact_provenance": _linked_artifact_provenance(
+            final_url=final_url,
+            filename=filename,
+            artifact_type=artifact_type,
+            ocr_used=ocr_used,
+            ssn_hits=ssn_hits,
+            pii_types=pii_types,
+            attack_hypothesis=attack_hypothesis,
+        ),
     })
     out["linked_host_enrichment"] = host_enrichment
     out["linked_content_type_validated"] = bool(content_type)

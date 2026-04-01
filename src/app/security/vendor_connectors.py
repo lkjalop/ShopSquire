@@ -67,6 +67,161 @@ def ingest_firewall_syslog_lines(
     }
 
 
+def parse_process_tree_event(
+    payload: Dict[str, Any],
+    *,
+    tenant_id: str = "default",
+    trace_id: str | None = None,
+) -> Dict[str, Any]:
+    data = dict(payload or {})
+    process_name = str(data.get("process_name") or data.get("name") or "").strip()
+    parent_process = str(data.get("parent_process") or data.get("parent_name") or "").strip()
+    command_line = str(data.get("command_line") or data.get("cmdline") or "").strip()
+    event_id = str(data.get("event_id") or data.get("id") or f"proc-{abs(hash((process_name, command_line, parent_process))) % 10_000_000}")
+    lowered = " ".join([process_name.lower(), parent_process.lower(), command_line.lower()])
+    confidence = 0.55
+    if any(tok in lowered for tok in ("powershell", "mshta", "regsvr32", "rundll32", "certutil", "wscript", "cscript")):
+        confidence = 0.85
+    return {
+        "event_id": event_id,
+        "trace_id": trace_id or str(data.get("trace_id") or "").strip() or None,
+        "tenant_id": tenant_id,
+        "timestamp": str(data.get("timestamp") or data.get("event_time") or ""),
+        "event_time": str(data.get("event_time") or data.get("timestamp") or ""),
+        "severity": str(data.get("severity") or ("high" if confidence >= 0.8 else "medium")).lower(),
+        "confidence": confidence,
+        "event_type": "other",
+        "type": "other",
+        "device_id": data.get("device_id"),
+        "user_id": data.get("user_id"),
+        "process_name": process_name,
+        "parent_process": parent_process,
+        "command_line": command_line,
+        "raw": data,
+    }
+
+
+def ingest_process_tree_events(
+    *,
+    events: List[Dict[str, Any]],
+    tenant_id: str = "default",
+    trace_id: str | None = None,
+) -> Dict[str, Any]:
+    results: List[Dict[str, Any]] = []
+    for event in events or []:
+        evt = parse_process_tree_event(event or {}, tenant_id=tenant_id, trace_id=trace_id)
+        results.append(ingest_security_event(vendor="process_tree", payload=evt))
+    return {
+        "ok": True,
+        "vendor": "process_tree",
+        "ingested": len(results),
+        "results": results,
+    }
+
+
+def parse_edr_memory_event(
+    payload: Dict[str, Any],
+    *,
+    tenant_id: str = "default",
+    trace_id: str | None = None,
+) -> Dict[str, Any]:
+    data = dict(payload or {})
+    event_id = str(data.get("event_id") or data.get("id") or f"edrmem-{abs(hash(str(sorted(data.items())))) % 10_000_000}")
+    process_name = str(data.get("process_name") or data.get("name") or "").strip()
+    detection = str(data.get("detection_name") or data.get("detection") or "").strip()
+    lowered = " ".join(
+        [
+            process_name.lower(),
+            detection.lower(),
+            str(data.get("memory_strings") or "").lower(),
+            str(data.get("module") or "").lower(),
+        ]
+    )
+    confidence = 0.6
+    if any(tok in lowered for tok in ("amsi", "scriptblock", "createremotethread", "processtampering", "hollow", "reflective", "shellcode", "virtualalloc")):
+        confidence = 0.9
+    return {
+        "event_id": event_id,
+        "trace_id": trace_id or str(data.get("trace_id") or "").strip() or None,
+        "tenant_id": tenant_id,
+        "timestamp": str(data.get("timestamp") or data.get("event_time") or ""),
+        "event_time": str(data.get("event_time") or data.get("timestamp") or ""),
+        "severity": str(data.get("severity") or ("high" if confidence >= 0.85 else "medium")).lower(),
+        "confidence": confidence,
+        "event_type": "other",
+        "type": "other",
+        "device_id": data.get("device_id"),
+        "user_id": data.get("user_id"),
+        "process_name": process_name,
+        "detection_name": detection,
+        "raw": data,
+    }
+
+
+def ingest_edr_memory_events(
+    *,
+    events: List[Dict[str, Any]],
+    tenant_id: str = "default",
+    trace_id: str | None = None,
+) -> Dict[str, Any]:
+    results: List[Dict[str, Any]] = []
+    for event in events or []:
+        evt = parse_edr_memory_event(event or {}, tenant_id=tenant_id, trace_id=trace_id)
+        results.append(ingest_security_event(vendor="edr_memory", payload=evt))
+    return {
+        "ok": True,
+        "vendor": "edr_memory",
+        "ingested": len(results),
+        "results": results,
+    }
+
+
+def parse_dns_proxy_line(line: str, *, tenant_id: str = "default", trace_id: str | None = None) -> Dict[str, Any]:
+    raw = str(line or "").strip()
+    kv = dict(re.findall(r"([A-Za-z0-9_.-]+)=([^\s]+)", raw))
+    event_id = kv.get("event_id") or kv.get("id") or f"dns-{abs(hash(raw)) % 10_000_000}"
+    domain = kv.get("domain") or kv.get("host") or kv.get("query") or kv.get("dst_host")
+    dst = kv.get("dst") or kv.get("dst_ip") or kv.get("dstip")
+    action = str(kv.get("action") or kv.get("act") or "observe").lower()
+    severity = str(kv.get("severity") or kv.get("sev") or "medium").lower()
+    confidence = 0.75 if domain or dst else 0.5
+    return {
+        "event_id": event_id,
+        "trace_id": trace_id or kv.get("trace_id") or kv.get("correlation_id"),
+        "tenant_id": tenant_id,
+        "timestamp": _parse_ts_from_syslog(raw),
+        "event_time": _parse_ts_from_syslog(raw),
+        "severity": severity,
+        "confidence": confidence,
+        "event_type": "network",
+        "type": "network",
+        "src_ip": kv.get("src") or kv.get("src_ip") or kv.get("srcip"),
+        "dst_ip": dst,
+        "dst_host": domain,
+        "action": action,
+        "device_id": kv.get("device") or kv.get("host"),
+        "raw_syslog": raw,
+    }
+
+
+def ingest_dns_proxy_lines(
+    *,
+    lines: List[str],
+    tenant_id: str = "default",
+    trace_id: str | None = None,
+) -> Dict[str, Any]:
+    results: List[Dict[str, Any]] = []
+    for line in lines or []:
+        evt = parse_dns_proxy_line(str(line or ""), tenant_id=tenant_id, trace_id=trace_id)
+        results.append(ingest_security_event(vendor="dns_proxy", payload=evt))
+    return {
+        "ok": True,
+        "vendor": "dns_proxy",
+        "ingested": len(results),
+        "results": results,
+    }
+
+
 def pull_crowdstrike_and_ingest(
     *,
     tenant_id: str = "default",

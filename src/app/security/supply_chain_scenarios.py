@@ -242,7 +242,7 @@ def sc05_lolbin_abuse() -> Dict[str, Any]:
     return {
         "scenario_id": "SC-05",
         "name": "LOLBin / Living-off-the-Land Abuse",
-        "mitre_attack": ["T1218.005", "T1218.011", "T1140"],
+        "mitre_attack": ["T1105", "T1059.001", "T1218.005", "T1218.011", "T1140"],
         "owasp_tags": ["ASI05:UnexpectedCodeExecution"],
         "kill_chain": ["execution", "defense_evasion"],
         "payload": {

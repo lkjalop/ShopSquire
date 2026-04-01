@@ -4631,7 +4631,17 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                     "mailbox_compromise": mailbox_compromise,
                     "phishing_page_stage": phishing_page_stage,
                     "bec_kill_chain": bec_kill_chain,
+                    "autonomy_governance": email.get("autonomy_governance") or {},
                 },
+            )
+            log_trace_event(
+                trace_id=decision_id,
+                event_type="autonomy_governance",
+                source_type="policy",
+                source_id="Email_Autonomy_Governance_Agent",
+                target_type="system",
+                target_id=None,
+                payload=email.get("autonomy_governance") or {},
             )
             log_trace_event(
                 trace_id=decision_id,

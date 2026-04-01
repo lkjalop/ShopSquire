@@ -5,6 +5,7 @@ import io
 import re
 from typing import Any, Dict, List
 
+from src.app.security.runtime_detection_policy import DNS_LABEL_HIGH_ENTROPY_THRESHOLD
 
 _DNS_NAME_RE = re.compile(r"(?:[a-z0-9-]+\.)+[a-z]{2,}", re.IGNORECASE)
 _TUNNEL_LABEL_RE = re.compile(r"^[a-z0-9+/=_-]{18,}$", re.IGNORECASE)
@@ -100,7 +101,7 @@ def analyze_pcap_payload(
         first = labels[0]
         if len(first) >= 24:
             long_labels += 1
-        if _shannon_entropy(first) >= 4.0:
+        if _shannon_entropy(first) >= DNS_LABEL_HIGH_ENTROPY_THRESHOLD:
             high_entropy_labels += 1
         if _TUNNEL_LABEL_RE.match(first):
             tunnel_like += 1

