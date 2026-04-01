@@ -287,6 +287,7 @@ async def _run_security_sidecar(
 
     if bool(img_sec.get("adversarial_detected")) or bool(img_sec.get("steg_suspicious")):
         verdict = _raise_verdict(verdict, "challenge")
+        actions["reupload_needed"] = True
         reasons.append("image_adversarial_or_steg")
         if bool(img_sec.get("adversarial_detected")) and bool(img_sec.get("steg_suspicious")):
             verdict = _raise_verdict(verdict, "escalate")
@@ -377,6 +378,8 @@ def _merge_sidecars(security: Dict[str, Any], intent: Dict[str, Any]) -> Dict[st
         merged_route = "reupload"
     elif sec_verdict in {"escalate", "block"}:
         merged_route = "security_escalation"
+    elif sec_verdict == "challenge" and "image_adversarial_or_steg" in str(security.get("reason") or ""):
+        merged_route = "reupload"
     elif sec_verdict == "challenge" and (bool(actions.get("captcha_required")) or bool(actions.get("auth_stepup_required"))):
         merged_route = "security_challenge"
 

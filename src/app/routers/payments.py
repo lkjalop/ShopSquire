@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Dict
 from sqlalchemy import text
+import sqlite3
 
 from src.app.config import get_settings, load_feature_flags
 from src.app.observability.tracing import get_tracer
@@ -9,6 +10,7 @@ from src.app.services.payments import StripeClient
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.transaction_firewall import evaluate_transaction_firewall
+from src.app.policy.kill_switch import assert_autonomy_allowed
 
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
@@ -34,23 +36,57 @@ def _demo_checkout_allowed(settings, capability: Dict | None) -> bool:
 def _idempotent(path: str, key: str | None) -> bool:
     if not key:
         return True
+    settings = get_settings()
+    db_url = str(getattr(settings, "database_url", "") or "")
+    if db_url.startswith("sqlite"):
+        try:
+            sqlite_path = db_url.split("///", 1)[1]
+            con = sqlite3.connect(sqlite_path)
+            try:
+                cur = con.cursor()
+                cur.execute(
+                    "CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+                )
+                cur.execute("INSERT INTO idempotency_keys (key) VALUES (?)", (f"{path}:{key}",))
+                con.commit()
+                return True
+            except Exception:
+                con.rollback()
+                cur = con.cursor()
+                cur.execute("SELECT 1 FROM idempotency_keys WHERE key = ?", (f"{path}:{key}",))
+                return cur.fetchone() is None
+            finally:
+                con.close()
+        except Exception:
+            return True
     with db_session() as db:
         # Ensure idempotency table exists (supports SQLite-based tests)
         try:
             if getattr(db.bind, "dialect", None) is not None and db.bind.dialect.name == "sqlite":
-                db.execute(
-                    text(
-                        "CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
-                    )
+                raw = db.connection().connection
+                cur = raw.cursor()
+                cur.execute(
+                    "CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
                 )
+                k = f"{path}:{key}"
+                try:
+                    cur.execute("INSERT INTO idempotency_keys (key) VALUES (?)", (k,))
+                    raw.commit()
+                    return True
+                except Exception:
+                    raw.rollback()
+                    try:
+                        cur.execute("SELECT 1 FROM idempotency_keys WHERE key = ?", (k,))
+                        return cur.fetchone() is None
+                    except Exception:
+                        return True
         except Exception:
             # If table creation fails (e.g., transient DB), treat as idempotent to avoid false conflicts
             return True
         try:
-            # Attempt atomic insert and detect whether it was newly inserted.
             k = f"{path}:{key}"
             try:
-                res = db.execute(text("INSERT OR IGNORE INTO idempotency_keys (key) VALUES (:k)"), {"k": k})
+                db.execute(text("INSERT INTO idempotency_keys (key) VALUES (:k)"), {"k": k})
                 try:
                     db.commit()
                 except Exception:
@@ -58,23 +94,19 @@ def _idempotent(path: str, key: str | None) -> bool:
                         db.rollback()
                     except Exception:
                         pass
-                # SQLite-specific check: changes() returns 1 when insert occured, 0 when ignored
-                try:
-                    ch = db.execute(text("SELECT changes() as c")).fetchone()
-                    if ch and len(ch) > 0:
-                        return int(ch[0]) == 1
-                except Exception:
-                    pass
-                # Fallback: check existence; if present and we didn't detect changes, treat as duplicate
-                row = db.execute(text("SELECT 1 FROM idempotency_keys WHERE key = :k"), {"k": k}).fetchone()
-                return not (row is None)
+                    return False
+                return True
             except Exception:
-                # On any DB error, allow the request rather than incorrectly signaling conflict
+                # On duplicate insert, fail idempotency. If DB access itself is broken, fail open.
                 try:
                     db.rollback()
                 except Exception:
                     pass
-                return True
+                try:
+                    row = db.execute(text("SELECT 1 FROM idempotency_keys WHERE key = :k"), {"k": k}).fetchone()
+                    return row is None
+                except Exception:
+                    return True
         except Exception:
             # On any DB error, allow the request rather than incorrectly signaling conflict
             try:
@@ -144,6 +176,12 @@ def create_intent(
 ) -> Dict:
     with tracer.start_as_current_span("payments.create_intent"):
         flags = load_feature_flags(get_settings().feature_flags_path)
+        assert_autonomy_allowed(
+            "payments",
+            flags=flags,
+            source_id="Payments_Autonomy_Governance_Agent",
+            context={"amount_cents": int(amount_cents or 0), "currency": currency},
+        )
         cap = flags.get("CAPABILITIES", {}).get("stripe") or flags.get("CAPABILITIES", {}).get("payments")
         if isinstance(cap, dict) and cap.get("enabled") is False:
             raise HTTPException(status_code=503, detail="Payments disabled by feature flags")
@@ -207,6 +245,12 @@ def checkout_initiate(
 
     settings = get_settings()
     flags = load_feature_flags(settings.feature_flags_path)
+    assert_autonomy_allowed(
+        "payments",
+        flags=flags,
+        source_id="Payments_Autonomy_Governance_Agent",
+        context={"amount_cents": amount_cents, "currency": currency},
+    )
     cap = flags.get("CAPABILITIES", {}).get("stripe") or flags.get("CAPABILITIES", {}).get("payments") or {}
 
     amount_cents = max(0, int(body.amount_cents or 0))

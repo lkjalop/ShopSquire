@@ -8,6 +8,7 @@ from src.app.security.firewall import TransactionFirewall
 from src.app.config import load_feature_flags, get_settings
 from src.app.services.orchestrator import Orchestrator
 from src.app.services.decision_log import log_trace_event
+from src.app.policy.kill_switch import assert_autonomy_allowed
 
 
 router = APIRouter(prefix="/api/v1", tags=["orchestrator"])
@@ -39,6 +40,12 @@ def orchestrate(req: OrchestrateRequest, role: str = Depends(require_role([ROLE_
         flags = load_feature_flags(get_settings().feature_flags_path)
     except Exception:
         flags = {}
+    assert_autonomy_allowed(
+        "orchestrator",
+        flags=flags,
+        source_id="Orchestrator_Autonomy_Governance_Agent",
+        context={"uid": req.uid, "simulate_only": bool(req.simulate_only)},
+    )
     try:
         # Create a Memory instance; if Redis isn't available, use a noop shim
         try:

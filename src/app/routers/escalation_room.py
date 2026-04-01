@@ -836,6 +836,9 @@ class IncidentRunbookRequest(BaseModel):
     tenant_id: str | None = None
     trace_id: str | None = None
     owner: str | None = None
+    human_approved: bool = False
+    approved_by: str | None = None
+    approval_note: str | None = None
 
 
 class IncidentEvidenceRequest(BaseModel):
@@ -1096,6 +1099,25 @@ def execute_incident_runbook(
     playbook = get_playbook_by_id(body.playbook_id)
     if not playbook:
         raise HTTPException(status_code=404, detail="playbook_not_found")
+    approval_required = str(os.getenv("INCIDENT_RUNBOOK_APPROVAL_REQUIRED", "1")).lower() in ("1", "true", "yes")
+    if approval_required and not body.human_approved:
+        _append_chat(
+            incident_id,
+            "system",
+            "Runbook execution blocked pending human approval.",
+            meta={"playbook_id": body.playbook_id, "approval_required": True},
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "human_approval_required",
+                "incident_id": incident_id,
+                "playbook_id": body.playbook_id,
+                "message": "A human must approve this runbook before actions can execute.",
+            },
+        )
+    if approval_required and not str(body.approved_by or "").strip():
+        raise HTTPException(status_code=422, detail="approved_by_required")
     trace_id = body.trace_id or f"incident:{incident_id}"
     run_id = start_playbook_run(
         trace_id=trace_id,
@@ -1103,12 +1125,28 @@ def execute_incident_runbook(
         tenant_id=body.tenant_id,
         playbook=playbook,
         owner=body.owner or "Escalation_Room",
-        metadata={"incident_id": incident_id, "trigger": "manual_incident_runbook"},
+        metadata={
+            "incident_id": incident_id,
+            "trigger": "manual_incident_runbook",
+            "human_approved": bool(body.human_approved),
+            "approved_by": body.approved_by,
+            "approval_note": body.approval_note,
+        },
     )
     if not run_id:
         raise HTTPException(status_code=500, detail="runbook_start_failed")
     actions = playbook.get("actions") if isinstance(playbook.get("actions"), list) else []
-    append_playbook_step(run_id=run_id, event_type="incident_runbook_start", status="completed", evidence={"incident_id": incident_id})
+    append_playbook_step(
+        run_id=run_id,
+        event_type="incident_runbook_start",
+        status="completed",
+        evidence={
+            "incident_id": incident_id,
+            "human_approved": bool(body.human_approved),
+            "approved_by": body.approved_by,
+            "approval_note": body.approval_note,
+        },
+    )
     runbook_error = None
     try:
         result = execute_typed_actions(run_id=run_id, actions=actions, context=body.context or {"incident_id": incident_id})
@@ -1494,7 +1532,21 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
                 )
     except Exception:
         pass
-    return create_incident_record(
+    runtime_security_result = None
+    if str(body.reason or "").strip().lower() == "queue_sandbox_detonation":
+        try:
+            from src.app.security.runtime_confirmation import confirm_runtime_evidence
+
+            runtime_security_result = confirm_runtime_evidence(
+                attack_hypothesis=str((enriched_context.get("security_payload") or {}).get("attack_hypothesis") or ""),
+                context=enriched_context,
+            )
+            if isinstance(runtime_security_result, dict) and runtime_security_result.get("supported"):
+                enriched_context["runtime_security_result"] = runtime_security_result
+        except Exception:
+            runtime_security_result = None
+
+    result = create_incident_record(
         case_id=body.case_id,
         trace_id=body.trace_id,
         reason=body.reason,
@@ -1504,6 +1556,47 @@ def public_escalate(body: EscalateRequest, request: Request) -> Dict:
         title="Buyer escalation: human review requested",
         dedupe_by_event=True,
     )
+    if isinstance(runtime_security_result, dict) and runtime_security_result.get("supported"):
+        try:
+            security_payload = dict(enriched_context.get("security_payload") or {})
+            override = dict(runtime_security_result.get("payload_analysis_override") or {})
+            merged_payload = {**security_payload, **override}
+            log_trace_event(
+                trace_id=body.trace_id,
+                event_type="security_scan",
+                source_type="security",
+                source_id="runtime_swarm_lab",
+                target_type="incident",
+                target_id=str(result.get("incident_id") or ""),
+                payload={
+                    "security": {
+                        "severity": "high",
+                        "route": "review",
+                        "threshold_version": "security-v1",
+                        "payload_analysis": merged_payload,
+                        "attack_hypothesis": merged_payload.get("attack_hypothesis"),
+                        "mitre_attack": runtime_security_result.get("mitre_attack") or [],
+                        "mitre_atlas": runtime_security_result.get("mitre_atlas") or [],
+                        "possible_mitre_attack": [],
+                        "possible_mitre_atlas": [],
+                        "claim_status": runtime_security_result.get("claim_status") or "observed",
+                        "finding_group": runtime_security_result.get("finding_group") or "active_findings",
+                        "evidence_lane": runtime_security_result.get("evidence_lane") or "runtime_confirmed_detonation",
+                        "runtime_evidence_required": runtime_security_result.get("runtime_evidence_missing") or [],
+                        "runtime_evidence_present": runtime_security_result.get("runtime_evidence_present") or [],
+                        "evidence": {
+                            "source": "runtime_swarm_lab",
+                            "artifact_provenance": runtime_security_result.get("artifact_provenance") or [],
+                            "parallel_swarm": runtime_security_result.get("parallel_swarm") or [],
+                            "summary": runtime_security_result.get("summary"),
+                            "runtime_label": runtime_security_result.get("runtime_label"),
+                        },
+                    },
+                },
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("runtime_swarm_lab_trace_emit_failed")
+    return result
 
 
 @public_router.post("/analyze-linked-artifact")

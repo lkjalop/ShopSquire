@@ -13,6 +13,7 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, R
 from src.app.services.incident_alert_adapters import dispatch_incident_alert
 from src.app.services.ticketing_connectors import create_jira_issue, create_servicenow_incident
 from src.app.routers.escalation_room import create_incident_record
+from src.app.policy.kill_switch import assert_autonomy_allowed
 
 router = APIRouter(prefix="/api/v1/incident", tags=["incident"])
 tracer = get_tracer("incident-router")
@@ -34,8 +35,7 @@ def send_alert(topic: str, message: str, severity: Optional[str] = None, role: s
     with tracer.start_as_current_span("incident.alert") as span:
         span.set_attribute("incident.topic", topic or "unknown")
         flags = load_feature_flags(get_settings().feature_flags_path)
-        if flags.get("KILL_SWITCH"):
-            raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
+        assert_autonomy_allowed("incident", flags=flags, source_id="Incident_Autonomy_Governance_Agent", context={"topic": topic})
         if contains_pci_data(message):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
         severity_val = severity or _route_threshold(topic)
@@ -61,8 +61,7 @@ def create_ticket(topic: str, title: str, description: str, priority: Optional[s
     with tracer.start_as_current_span("incident.ticket") as span:
         span.set_attribute("incident.topic", topic or "unknown")
         flags = load_feature_flags(get_settings().feature_flags_path)
-        if flags.get("KILL_SWITCH"):
-            raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
+        assert_autonomy_allowed("incident", flags=flags, source_id="Incident_Autonomy_Governance_Agent", context={"topic": topic})
         if contains_pci_data(description):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
         priority_val = priority or _route_threshold(topic)
@@ -86,8 +85,7 @@ def block_action(target: str, reason: str, severity: Optional[str] = None, role:
     with tracer.start_as_current_span("incident.block") as span:
         span.set_attribute("incident.target", target or "unknown")
         flags = load_feature_flags(get_settings().feature_flags_path)
-        if flags.get("KILL_SWITCH"):
-            raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
+        assert_autonomy_allowed("incident", flags=flags, source_id="Incident_Autonomy_Governance_Agent", context={"target": target})
         if contains_pci_data(reason):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
         sev = severity or _route_threshold("security_block")

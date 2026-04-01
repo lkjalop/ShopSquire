@@ -2060,7 +2060,7 @@ def merchant_email_lab(request: Request):
           }
           const _ATLAS_CATALOG = {
             'AML.T0043':{name:'Craft Adversarial Data',desc:'Attacker creates inputs specifically designed to exploit ML pipeline weaknesses — includes hidden payloads, adversarial typography, or steganographic content that bypasses ML-based content filters.'},
-            'AML.T0051':{name:'Prompt Injection',desc:'Malicious instructions embedded in user-controlled content that attempt to override the AI system\'s intended behaviour, hijack its decisions, or extract sensitive context.'},
+            'AML.T0051':{name:'Prompt Injection',desc:'Malicious instructions embedded in user-controlled content that attempt to override the AI system\\'s intended behaviour, hijack its decisions, or extract sensitive context.'},
             'AML.T0048':{name:'Discover ML Artifacts',desc:'Adversary probes the system to identify ML model endpoints, embedding dimensions, or pipeline configuration to plan a targeted attack.'},
             'AML.T0040':{name:'ML Supply Chain Compromise',desc:'Attack targets ML dependencies, pre-trained model checkpoints, or data pipeline infrastructure to introduce malicious behaviour before deployment.'},
             'AML.T0044':{name:'Full ML Model Access',desc:'Adversary gains complete access to model architecture, weights, and parameters — enabling white-box adversarial attacks.'},
@@ -2070,7 +2070,7 @@ def merchant_email_lab(request: Request):
             'AML.T0028':{name:'Poison Model',desc:'Post-deployment model compromise through tampered update mechanisms or supply chain infiltration.'},
             'AML.T0041':{name:'Spearphishing via ML Service',desc:'Using AI services as a vector for targeted phishing — the AI system is weaponised or impersonated to deceive users.'},
             'AML.T0034':{name:'Cost Harvesting',desc:'Exploiting AI system computational resources for financial or operational gain.'},
-            'AML.T0000':{name:'Reconnaissance',desc:'Adversary gathers information about the AI system\'s capabilities, endpoints, and configuration before launching an attack.'},
+            'AML.T0000':{name:'Reconnaissance',desc:'Adversary gathers information about the AI system\\'s capabilities, endpoints, and configuration before launching an attack.'},
           };
           const _ATTACK_CATALOG = {
             'T1566':{name:'Phishing',desc:'Adversary sends malicious messages to elicit sensitive information or deliver malware.'},
@@ -2099,7 +2099,7 @@ def merchant_email_lab(request: Request):
             'A.5.17':{name:'Authentication information',why:'Sender authentication signals (SPF/DKIM/DMARC) were absent or failed. The email cannot be tied to the claimed sender domain with confidence. Authentication information management controls must enforce verification before trust is granted.'},
             'A.5.19':{name:'Information security in supplier relationships',why:'A request to change payment arrangements for a named external beneficiary (Harbourside Capital Partners, ANZ BSB 012-456, Account 8877 3421) was received without following the dual-control supplier payment-change verification workflow.'},
             'A.5.21':{name:'Managing information security in the ICT supply chain',why:'A named third-party financial institution appears as payment beneficiary. Changes to authorised payment counterparties require supply chain integrity verification — a baseline comparison against approved supplier records should be performed.'},
-            'A.5.23':{name:'Information security for use of cloud services',why:'The email was delivered via external cloud mail infrastructure. Any forensic investigation must follow the organisation\'s cloud service security controls for data handling, evidence chain-of-custody, and authorised access.'},
+            'A.5.23':{name:'Information security for use of cloud services',why:'The email was delivered via external cloud mail infrastructure. Any forensic investigation must follow the organisation\\'s cloud service security controls for data handling, evidence chain-of-custody, and authorised access.'},
             'A.5.24':{name:'Information security incident management planning',why:'This confirmed fraud attempt must be classified and responded to per the documented incident management plan. A formal incident record should be opened immediately.'},
             'A.5.26':{name:'Response to information security incidents',why:'An active fraud incident has been confirmed. Response procedures — evidence preservation, supplier notification, finance team alert, and escalation to management — must be initiated.'},
             'A.5.34':{name:'Privacy and protection of PII',why:'The email contains personally identifiable information (employee name, title, division) that must be handled securely and in accordance with applicable privacy obligations during the investigation.'},
@@ -2112,17 +2112,17 @@ def merchant_email_lab(request: Request):
             'Outcome monitoring':{name:'Outcome Monitoring (Clause 9.1)',why:'The accuracy and outcome of this AI fraud verdict must be logged and evaluated. A correct verdict validates model performance; an incorrect one must trigger a corrective feedback cycle to improve the model.'},
             'Risk treatment':{name:'Risk Treatment (Clause 6.1.3)',why:'AI-identified risks must be formally treated — documented with an owner, assigned a risk rating, and mitigated with controls proportionate to business impact.'},
             'Model governance':{name:'Model Governance (Clause 5.2 / Annex A.4)',why:'The AI model that generated this finding must have documented governance: deployment scope, version, training data lineage, and authorised use cases — so the finding can be independently assessed.'},
-            'Prompt handling':{name:'Prompt Handling (Annex A.6.2.4)',why:'Controls for AI input integrity are required when user-supplied content (email body, attachments) is processed by AI models. Adversarial prompt injection risk must be mitigated to prevent the AI\'s verdict from being manipulated by the email content itself.'},
+            'Prompt handling':{name:'Prompt Handling (Annex A.6.2.4)',why:'Controls for AI input integrity are required when user-supplied content (email body, attachments) is processed by AI models. Adversarial prompt injection risk must be mitigated to prevent the AI system\\'s verdict from being manipulated by the email content itself.'},
           };
           const _EU_AI_CATALOG = {
             'Article 9':{name:'Risk Management System',why:'Art. 9 requires high-risk AI applications — including AI-assisted security decisions with financial consequences — to operate under a documented, ongoing risk management system. This incident must be recorded within that system.'},
-            'Article 14':{name:'Human Oversight',why:'Art. 14 requires that a natural person can understand, monitor, and where necessary override or halt the AI system\'s output. This AI verdict must be confirmed by an authorised analyst before any consequential action is taken.'},
+            'Article 14':{name:'Human Oversight',why:'Art. 14 requires that a natural person can understand, monitor, and where necessary override or halt the AI system\\'s output. This AI verdict must be confirmed by an authorised analyst before any consequential action is taken.'},
             'Article 15':{name:'Accuracy, Robustness and Cybersecurity',why:'Art. 15 requires AI systems to be resilient against adversarial manipulation. This incident tests whether the AI pipeline correctly identifies adversarial email content — if it was deceived, robustness controls must be reviewed and hardened.'},
           };
           const _PCI_DSS_CATALOG = {
             'Req 6':{name:'Develop and Maintain Secure Systems and Software',why:'Payment workflow software must have controls preventing unauthorised payment instruction changes — including input validation and change authorisation. This email attempted to inject fraudulent payment instructions; those controls must be confirmed as active.'},
             'Req 10':{name:'Log and Monitor All Access to System Components',why:'All actions related to this payment-change attempt — receipt, triage, escalation, hold confirmation, and final decision — must be logged with timestamps and actor identities to meet PCI DSS audit trail requirements.'},
-            'Req 12':{name:'Support Information Security with Organisational Policies',why:'The organisation\'s security policy must define the procedure for handling fraudulent payment-change requests, including escalation to finance security, management notification, and external reporting obligations.'},
+            'Req 12':{name:'Support Information Security with Organisational Policies',why:'The organisation\\'s security policy must define the procedure for handling fraudulent payment-change requests, including escalation to finance security, management notification, and external reporting obligations.'},
           };
           const _GDPR_CATALOG = {
             'Article 5':{name:'Principles of Processing',why:'Personal data present in this email (employee name Boris Petrov, role, division, contact address finance@balashnikovai.com.au) must be processed lawfully, fairly, and with appropriate security controls during the investigation.'},

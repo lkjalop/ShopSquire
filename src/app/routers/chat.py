@@ -196,6 +196,35 @@ def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
     return {"budget_min": None, "budget_max": None}
 
 
+def _is_budget_query_text(query: str | None) -> bool:
+    q = str(query or "").strip().lower()
+    if not q:
+        return False
+    if any(
+        tok in q
+        for tok in (
+            "budget",
+            "under",
+            "below",
+            "up to",
+            "between",
+            "only have",
+            "is that enough",
+            "is this enough",
+            "for high school",
+            "for school",
+            "for university",
+            "for work",
+            "for gaming",
+        )
+    ):
+        return True
+    bounds = _extract_budget_bounds(q)
+    return bounds.get("budget_min") is not None or bounds.get("budget_max") is not None or bool(
+        re.search(r"\$\s*\d{3,5}\b", q)
+    )
+
+
 def _classify_turn_intent(query: str) -> str:
     q = str(query or "").strip().lower()
     if not q:
@@ -1381,6 +1410,54 @@ async def chat_query(
                     or blocked.get("decision_id")
                     or blocked.get("approval_id")
                 )
+                if _is_budget_query_text(q):
+                    budget_hint = _budget_range_from_slots(confirmed_slots, q)
+                    budget_phrase = None
+                    if budget_hint.get("budget_min") is not None and budget_hint.get("budget_max") is not None:
+                        budget_phrase = f"${int(budget_hint['budget_min']):,}-${int(budget_hint['budget_max']):,}"
+                    elif budget_hint.get("budget_max") is not None:
+                        budget_phrase = f"under ${int(budget_hint['budget_max']):,}"
+                    elif budget_hint.get("budget_min") is not None:
+                        budget_phrase = f"from ${int(budget_hint['budget_min']):,}"
+                    msg = (
+                        f"I treated this as a shopping budget request{f' for {budget_phrase}' if budget_phrase else ''}, "
+                        "not sensitive data. I couldn't complete the recommendation on that pass, so try the same question once more or add the main use-case in one line."
+                    )
+                    followups = [
+                        {"id": "retry_budget_search", "text": "Retry this as a budget shopping search", "goal": "retry_search"},
+                        {"id": "clarify_use_case", "text": "Add the main use-case, for example 'for school' or 'for gaming'.", "goal": "clarify_details"},
+                    ]
+                    out = {
+                        "products": [],
+                        "view_mode": "cards",
+                        "confidence": None,
+                        "decision_trace_id": decision_trace_id,
+                        "trace_id": decision_trace_id,
+                        "assistant_message": msg,
+                        "next_questions": followups,
+                        "llm_model": blocked.get("llm_model"),
+                        "model_tier": blocked.get("model_tier") or blocked.get("tier"),
+                        "blocked": False,
+                        "blocked_detail": blocked,
+                        "image_untrusted": bool(image_security_posture.get("image_untrusted")),
+                        "image_degraded_mode": bool(image_security_posture.get("image_degraded_mode")),
+                        "chat_lockdown": bool(image_security_posture.get("chat_lockdown")),
+                        "needs_human_review": False,
+                        "security_route": str(image_security_posture.get("route") or "allow"),
+                    }
+                    try:
+                        uid = _resolve_uid(payload, request)
+                        _store_chat_message(db, uid=uid, role="user", content=q, trace_id=decision_trace_id)
+                        _store_chat_message(
+                            db,
+                            uid=uid,
+                            role="assistant",
+                            content=str(out.get("assistant_message") or ""),
+                            trace_id=decision_trace_id,
+                        )
+                    except Exception:
+                        pass
+                    return out
                 msg = blocked.get("message") or "This request was blocked due to safety checks. A human will review it."
                 followups = [
                     {"id": "remove_sensitive", "text": "Can you rephrase without any personal info, order numbers, or long digit strings?", "goal": "safety_rephrase"},

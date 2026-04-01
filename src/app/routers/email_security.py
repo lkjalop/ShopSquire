@@ -15,6 +15,7 @@ from src.app.security.prompt_injection_eval import (
     run_prompt_injection_eval,
     write_prompt_injection_report,
 )
+from src.app.policy.kill_switch import evaluate_autonomy
 
 _ALLOWED_UPLOAD_EXTENSIONS = {".eml", ".pdf", ".msg"}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -31,6 +32,10 @@ def evaluate(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ):
     tenant_id = payload.tenant_id or x_tenant_id
+    autonomy = evaluate_autonomy(
+        "email_security",
+        context={"tenant_id": tenant_id or "default-tenant", "message_id": payload.message_id},
+    )
     email = {
         "message_id": payload.message_id,
         "from_addr": payload.from_addr,
@@ -54,6 +59,7 @@ def evaluate(
         "reply_chain_id": payload.reply_chain_id,
         "prior_reply_chain_id": payload.prior_reply_chain_id,
         "oob_verified": bool(payload.oob_verified),
+        "autonomy_governance": autonomy.to_trace_payload(),
     }
     verdict = evaluate_email_security(email, tenant_id=tenant_id)
     return verdict

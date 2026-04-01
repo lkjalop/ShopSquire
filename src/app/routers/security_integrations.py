@@ -26,10 +26,21 @@ from src.app.security.pcap_analyzer import analyze_pcap_payload
 from src.app.security.pcap_analyzer import correlate_network_findings
 from src.app.security.bimi_verifier import verify_bimi_provider_backed
 from src.app.security.email_security import evaluate_email_security
+from src.app.security.email_enrichment import detonate_targets
 from src.app.security.vuln_scan import run_vulnerability_scan
 from src.app.security.pentest_bounds import run_pentest_simulation
-from src.app.security.security_event_ingest import ingest_security_event, replay_event_policy
-from src.app.security.vendor_connectors import pull_crowdstrike_and_ingest, ingest_firewall_syslog_lines
+from src.app.security.security_event_ingest import (
+    ensure_security_event_ingest_table,
+    ingest_security_event,
+    replay_event_policy,
+)
+from src.app.security.vendor_connectors import (
+    pull_crowdstrike_and_ingest,
+    ingest_firewall_syslog_lines,
+    ingest_process_tree_events,
+    ingest_dns_proxy_lines,
+    ingest_edr_memory_events,
+)
 from src.app.security.model_theft import model_theft_runtime_report
 from src.app.services.decision_log import log_trace_event
 from src.app.models.compliance_registry import ensure_compliance_registry_table, insert_artifact
@@ -44,6 +55,293 @@ router = APIRouter(prefix="/api/v1/security", tags=["security"])
 def _ensure_demo_routes_enabled() -> None:
     if str(os.getenv("ENABLE_DEMO_ROUTES", "0")).strip().lower() not in ("1", "true", "yes", "on"):
         raise HTTPException(status_code=404, detail="demo_routes_disabled")
+
+
+def _http_health_probe(url: str) -> Dict[str, Any]:
+    target = str(url or "").strip()
+    if not target:
+        return {"configured": False, "basic_connectivity": False, "health_endpoint": None}
+    health_url = f"{target.rstrip('/')}/health"
+    codes: list[int] = []
+    try:
+        with httpx.Client(timeout=5.0, follow_redirects=True) as client:
+            try:
+                resp = client.get(health_url)
+                codes.append(int(resp.status_code))
+            except Exception:
+                resp = client.head(target)
+                codes.append(int(resp.status_code))
+        code = codes[-1] if codes else None
+        ok = code in (200, 201, 202, 401, 403, 404, 405)
+        return {"configured": True, "basic_connectivity": ok, "health_endpoint": health_url, "status_code": code}
+    except Exception as exc:
+        return {
+            "configured": True,
+            "basic_connectivity": False,
+            "health_endpoint": health_url,
+            "error": str(exc),
+        }
+
+
+def _private_sandbox_health() -> Dict[str, Any]:
+    url = str(os.getenv("PRIVATE_SANDBOX_URL") or "").strip()
+    token_present = bool(str(os.getenv("PRIVATE_SANDBOX_TOKEN") or "").strip())
+    probe = _http_health_probe(url)
+    return {
+        "provider": "private_sandbox",
+        "configured": bool(url),
+        "token_present": token_present,
+        "url_present": bool(url),
+        "mode": "production_provider" if url else "local_heuristic_only",
+        **probe,
+    }
+
+
+def _recent_ingests_by_vendor(*, tenant_id: str | None, vendor: str, limit: int) -> list[Dict[str, Any]]:
+    ensure_security_event_ingest_table()
+    rows: list[tuple[Any, ...]] = []
+    with db_session() as db:
+        try:
+            if tenant_id:
+                rows = list(
+                    db.execute(
+                        sql_text(
+                            """
+                            SELECT id, trace_id, event_time, severity, confidence, src_ip, dst_ip, user_id, device_id,
+                                   canonical_json, created_at
+                            FROM security_event_ingest
+                            WHERE vendor = :vendor AND tenant_id = :tenant_id
+                            ORDER BY COALESCE(event_time, created_at) DESC, created_at DESC
+                            LIMIT :limit
+                            """
+                        ),
+                        {"vendor": vendor, "tenant_id": tenant_id, "limit": limit},
+                    ).fetchall()
+                )
+            else:
+                rows = list(
+                    db.execute(
+                        sql_text(
+                            """
+                            SELECT id, trace_id, event_time, severity, confidence, src_ip, dst_ip, user_id, device_id,
+                                   canonical_json, created_at
+                            FROM security_event_ingest
+                            WHERE vendor = :vendor
+                            ORDER BY COALESCE(event_time, created_at) DESC, created_at DESC
+                            LIMIT :limit
+                            """
+                        ),
+                        {"vendor": vendor, "limit": limit},
+                    ).fetchall()
+                )
+        except Exception:
+            rows = []
+    out: list[Dict[str, Any]] = []
+    for row in rows:
+        canonical: Dict[str, Any] = {}
+        try:
+            canonical = json.loads(str(row[9] or "{}"))
+        except Exception:
+            canonical = {}
+        item: Dict[str, Any] = {
+            "id": str(row[0] or ""),
+            "trace_id": str(row[1] or "") or None,
+            "event_time": str(row[2] or row[10] or ""),
+            "severity": str(row[3] or ""),
+            "confidence": float(row[4] or 0.0),
+            "src_ip": row[5],
+            "dst_ip": row[6],
+            "user_id": row[7],
+            "device_id": row[8],
+        }
+        if vendor == "process_tree":
+            item["process_name"] = canonical.get("process_name")
+            item["parent_process"] = canonical.get("parent_process")
+            item["command_line"] = canonical.get("command_line")
+        elif vendor == "dns_proxy":
+            item["dst_host"] = canonical.get("dst_host")
+            item["action"] = canonical.get("action")
+        elif vendor == "firewall":
+            item["action"] = canonical.get("action")
+        out.append(item)
+    return out
+
+
+def _recent_runtime_cases(*, tenant_id: str | None, limit: int) -> list[Dict[str, Any]]:
+    rows: list[tuple[Any, ...]] = []
+    with db_session() as db:
+        try:
+            rows = list(
+                db.execute(
+                    sql_text(
+                        """
+                        SELECT trace_id, payload, created_at
+                        FROM decision_trace_events
+                        WHERE event_type = 'security_scan' AND source_id = 'runtime_swarm_lab'
+                        ORDER BY created_at DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"limit": max(limit * 4, 20)},
+                ).fetchall()
+            )
+        except Exception:
+            rows = []
+    out: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        trace_id = str(row[0] or "").strip()
+        if not trace_id or trace_id in seen:
+            continue
+        payload: Dict[str, Any] = {}
+        try:
+            payload = json.loads(str(row[1] or "{}"))
+        except Exception:
+            payload = {}
+        security = dict(payload.get("security") or {})
+        evidence = dict(security.get("evidence") or {})
+        confirmation_tier = "pending_runtime_evidence"
+        lane = str(security.get("evidence_lane") or "")
+        if lane == "production_confirmed_runtime_evidence":
+            confirmation_tier = "production_confirmed"
+        elif "lab" in str(evidence.get("runtime_label") or "").lower():
+            confirmation_tier = "lab_confirmed"
+        if tenant_id and str(security.get("tenant_id") or payload.get("tenant_id") or "") not in {"", tenant_id}:
+            continue
+        seen.add(trace_id)
+        out.append(
+            {
+                "trace_id": trace_id,
+                "created_at": str(row[2] or ""),
+                "attack_hypothesis": security.get("attack_hypothesis"),
+                "confirmation_tier": confirmation_tier,
+                "claim_status": security.get("claim_status"),
+                "summary": evidence.get("summary") or evidence.get("runtime_label"),
+                "runtime_evidence_present": list(security.get("runtime_evidence_present") or []),
+                "runtime_evidence_missing": list(security.get("runtime_evidence_required") or []),
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _runtime_case_detail(trace_id: str) -> Dict[str, Any]:
+    trace = str(trace_id or "").strip()
+    if not trace:
+        raise HTTPException(status_code=400, detail="trace_id_required")
+
+    runtime_event: Dict[str, Any] | None = None
+    with db_session() as db:
+        try:
+            row = db.execute(
+                sql_text(
+                    """
+                    SELECT payload, created_at
+                    FROM decision_trace_events
+                    WHERE trace_id = :trace_id AND event_type = 'security_scan' AND source_id = 'runtime_swarm_lab'
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {"trace_id": trace},
+            ).fetchone()
+        except Exception:
+            row = None
+    if row:
+        try:
+            runtime_event = {"payload": json.loads(str(row[0] or "{}")), "created_at": str(row[1] or "")}
+        except Exception:
+            runtime_event = {"payload": {}, "created_at": str(row[1] or "")}
+
+    security = dict(((runtime_event or {}).get("payload") or {}).get("security") or {})
+    evidence = dict(security.get("evidence") or {})
+    runtime_label = str(evidence.get("runtime_label") or "")
+    evidence_lane = str(security.get("evidence_lane") or "")
+    confirmation_tier = "pending_runtime_evidence"
+    if evidence_lane == "production_confirmed_runtime_evidence":
+        confirmation_tier = "production_confirmed"
+    elif "lab" in runtime_label.lower():
+        confirmation_tier = "lab_confirmed"
+
+    process_tree = _recent_ingests_by_vendor(tenant_id=None, vendor="process_tree", limit=25)
+    process_tree = [item for item in process_tree if str(item.get("trace_id") or "") == trace][:10]
+    dns_proxy = _recent_ingests_by_vendor(tenant_id=None, vendor="dns_proxy", limit=25)
+    dns_proxy = [item for item in dns_proxy if str(item.get("trace_id") or "") == trace][:10]
+    firewall = _recent_ingests_by_vendor(tenant_id=None, vendor="firewall", limit=25)
+    firewall = [item for item in firewall if str(item.get("trace_id") or "") == trace][:10]
+    edr_memory = _recent_ingests_by_vendor(tenant_id=None, vendor="edr_memory", limit=25)
+    edr_memory = [item for item in edr_memory if str(item.get("trace_id") or "") == trace][:10]
+
+    detonation = detonate_targets(
+        [str(x) for x in (evidence.get("urls") or []) if str(x).strip()],
+        [str(x) for x in (evidence.get("attachment_hashes") or []) if str(x).strip()],
+    ) if isinstance(evidence, dict) else {}
+    provider = str((detonation or {}).get("provider") or "")
+    sandbox_confirmed = provider == "private_sandbox" and bool((detonation or {}).get("malicious"))
+    process_present = bool(process_tree)
+    network_present = bool(dns_proxy or firewall)
+    reasons: list[Dict[str, Any]] = []
+    if confirmation_tier != "production_confirmed":
+        if not sandbox_confirmed:
+            reasons.append(
+                {
+                    "requirement": "sandbox_detonation",
+                    "status": "missing",
+                    "detail": "Private sandbox provider has not yet returned a malicious verdict for this case.",
+                }
+            )
+        if not process_present:
+            reasons.append(
+                {
+                    "requirement": "endpoint_process_tree",
+                    "status": "missing",
+                    "detail": "No ingested process-tree evidence is linked to this trace yet.",
+                }
+            )
+        if not network_present:
+            reasons.append(
+                {
+                    "requirement": "dns_proxy_firewall_logs",
+                    "status": "missing",
+                    "detail": "No ingested DNS/proxy or firewall telemetry is linked to this trace yet.",
+                }
+            )
+        if str(security.get("attack_hypothesis") or "") == "fileless_attack" and not edr_memory:
+            reasons.append(
+                {
+                    "requirement": "edr_memory_forensics",
+                    "status": "missing",
+                    "detail": "No ingested EDR memory or process-tampering telemetry is linked to this trace yet.",
+                }
+            )
+        for missing in list(security.get("runtime_evidence_required") or []):
+            reasons.append({"requirement": "runtime_gate", "status": "pending", "detail": str(missing)})
+
+    return {
+        "trace_id": trace,
+        "confirmation_tier": confirmation_tier,
+        "claim_status": security.get("claim_status"),
+        "attack_hypothesis": security.get("attack_hypothesis"),
+        "runtime_label": runtime_label or None,
+        "summary": evidence.get("summary") or runtime_label or None,
+        "latest_runtime_event_at": (runtime_event or {}).get("created_at"),
+        "runtime_evidence_present": list(security.get("runtime_evidence_present") or []),
+        "runtime_evidence_missing": list(security.get("runtime_evidence_required") or []),
+        "pending_reasons": reasons,
+        "sandbox_provider": {
+            "provider": provider or "local_heuristic",
+            "malicious": bool((detonation or {}).get("malicious")),
+            "score": (detonation or {}).get("score"),
+        },
+        "recent_ingests": {
+            "process_tree": process_tree,
+            "dns_proxy": dns_proxy,
+            "firewall": firewall,
+            "edr_memory": edr_memory,
+        },
+        "parallel_swarm": list(evidence.get("parallel_swarm") or []),
+    }
 
 
 @router.get("/llm10/runtime-report")
@@ -229,7 +527,36 @@ async def security_integrations_health() -> Dict:
             cspm_conn = False
     status["cspm"] = {"configured": cspm_ok, "basic_connectivity": cspm_conn}
 
+    status["private_sandbox"] = _private_sandbox_health()
+
     return {"status": status}
+
+
+@router.get("/runtime/status")
+def security_runtime_status(
+    tenant_id: str | None = None,
+    limit: int = 10,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    limit = max(1, min(int(limit or 10), 50))
+    return {
+        "sandbox_provider_health": _private_sandbox_health(),
+        "recent_ingests": {
+            "process_tree": _recent_ingests_by_vendor(tenant_id=tenant_id, vendor="process_tree", limit=limit),
+            "dns_proxy": _recent_ingests_by_vendor(tenant_id=tenant_id, vendor="dns_proxy", limit=limit),
+            "firewall": _recent_ingests_by_vendor(tenant_id=tenant_id, vendor="firewall", limit=limit),
+            "edr_memory": _recent_ingests_by_vendor(tenant_id=tenant_id, vendor="edr_memory", limit=limit),
+        },
+        "recent_runtime_cases": _recent_runtime_cases(tenant_id=tenant_id, limit=limit),
+    }
+
+
+@router.get("/runtime/cases/{trace_id}")
+def security_runtime_case_status(
+    trace_id: str,
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    return _runtime_case_detail(trace_id)
 
 
 @router.get("/demo/events")
@@ -678,6 +1005,96 @@ def security_events_ingest_firewall_syslog(
                 event_type="vendor_ingest_firewall_syslog",
                 source_type="agent",
                 source_id="Firewall_Syslog_Agent",
+                target_type="system",
+                target_id=None,
+                payload={"ok": out.get("ok"), "ingested": out.get("ingested")},
+            )
+        except Exception:
+            pass
+    return out
+
+
+@router.post("/events/ingest/process-tree")
+def security_events_ingest_process_tree(
+    payload: Dict[str, Any],
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    events = payload.get("events") if isinstance(payload.get("events"), list) else []
+    if not events:
+        raise HTTPException(status_code=400, detail="events_required")
+    out = ingest_process_tree_events(
+        events=[event for event in events if isinstance(event, dict)],
+        tenant_id=str(payload.get("tenant_id") or "default"),
+        trace_id=str(payload.get("trace_id") or "").strip() or None,
+    )
+    tid = str(payload.get("trace_id") or "").strip()
+    if tid:
+        try:
+            log_trace_event(
+                trace_id=tid,
+                event_type="vendor_ingest_process_tree",
+                source_type="agent",
+                source_id="Process_Tree_Agent",
+                target_type="system",
+                target_id=None,
+                payload={"ok": out.get("ok"), "ingested": out.get("ingested")},
+            )
+        except Exception:
+            pass
+    return out
+
+
+@router.post("/events/ingest/dns-proxy")
+def security_events_ingest_dns_proxy(
+    payload: Dict[str, Any],
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    lines = payload.get("lines") if isinstance(payload.get("lines"), list) else []
+    if not lines:
+        raise HTTPException(status_code=400, detail="lines_required")
+    out = ingest_dns_proxy_lines(
+        lines=[str(x) for x in lines],
+        tenant_id=str(payload.get("tenant_id") or "default"),
+        trace_id=str(payload.get("trace_id") or "").strip() or None,
+    )
+    tid = str(payload.get("trace_id") or "").strip()
+    if tid:
+        try:
+            log_trace_event(
+                trace_id=tid,
+                event_type="vendor_ingest_dns_proxy",
+                source_type="agent",
+                source_id="DNS_Proxy_Agent",
+                target_type="system",
+                target_id=None,
+                payload={"ok": out.get("ok"), "ingested": out.get("ingested")},
+            )
+        except Exception:
+            pass
+    return out
+
+
+@router.post("/events/ingest/edr-memory")
+def security_events_ingest_edr_memory(
+    payload: Dict[str, Any],
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    events = payload.get("events") if isinstance(payload.get("events"), list) else []
+    if not events:
+        raise HTTPException(status_code=400, detail="events_required")
+    out = ingest_edr_memory_events(
+        events=[event for event in events if isinstance(event, dict)],
+        tenant_id=str(payload.get("tenant_id") or "default"),
+        trace_id=str(payload.get("trace_id") or "").strip() or None,
+    )
+    tid = str(payload.get("trace_id") or "").strip()
+    if tid:
+        try:
+            log_trace_event(
+                trace_id=tid,
+                event_type="vendor_ingest_edr_memory",
+                source_type="agent",
+                source_id="EDR_Memory_Agent",
                 target_type="system",
                 target_id=None,
                 payload={"ok": out.get("ok"), "ingested": out.get("ingested")},

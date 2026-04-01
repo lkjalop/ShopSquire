@@ -18,6 +18,7 @@ from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, R
 from src.app.services.token_budget import TokenBudget, estimate_tokens, estimate_cost, infer_tier
 from src.app.security.observer import analyze_payload, emit_security_event
 from src.app.services.recommendations import RecommendationService
+from src.app.policy.kill_switch import assert_autonomy_allowed
 
 
 router = APIRouter(prefix="/api/v1/pricing", tags=["pricing"])
@@ -31,8 +32,12 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
         span.set_attribute("pricing.cart_total_cents", int(cart_total_cents or 0))
         span.set_attribute("pricing.has_sku", bool(sku))
         flags = load_feature_flags(get_settings().feature_flags_path)
-        if flags.get("KILL_SWITCH"):
-            raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
+        assert_autonomy_allowed(
+            "pricing",
+            flags=flags,
+            source_id="Pricing_Autonomy_Governance_Agent",
+            context={"uid_hash": hashlib.sha256(uid.encode("utf-8")).hexdigest()[:12]},
+        )
 
         # Chaos latency injection for tests/load simulations
         try:

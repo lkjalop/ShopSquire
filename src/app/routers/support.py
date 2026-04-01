@@ -14,6 +14,7 @@ from src.app.safety.redaction import redact_payload
 from src.app.services.faq_v2 import resolve_faq_match
 from src.app.services.response_normalizer import ResponseNormalizer
 from src.app.security.model_theft import enforce_model_theft_rate_limit, enforce_model_theft_policy_gate
+from src.app.policy.kill_switch import assert_autonomy_allowed
 
 
 router = APIRouter(prefix="/api/v1/support", tags=["support"])
@@ -76,8 +77,7 @@ def answer(question: str, request: Request, redis=Depends(get_redis), role: str 
         if not allow_model:
             raise HTTPException(status_code=429, detail={"message": "model_theft_guard", "reason": reason})
         flags = load_feature_flags(get_settings().feature_flags_path)
-        if flags.get("KILL_SWITCH"):
-            raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
+        assert_autonomy_allowed("support", flags=flags, source_id="Support_Autonomy_Governance_Agent")
         degradation_cfg = flags.get("DEGRADATION", {"enabled": True})
         now_ts = int(time.time())
         cb_open = cb_is_open(redis, "support", now_ts) if degradation_cfg.get("enabled", True) else False
@@ -151,8 +151,7 @@ def intents(text: str, redis=Depends(get_redis), role: str = Depends(require_rol
     with tracer.start_as_current_span("support.intents") as span:
         span.set_attribute("support.text_len", len(text or ""))
         flags = load_feature_flags(get_settings().feature_flags_path)
-        if flags.get("KILL_SWITCH"):
-            raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
+        assert_autonomy_allowed("support", flags=flags, source_id="Support_Autonomy_Governance_Agent")
         lower = text.lower()
         degradation_cfg = flags.get("DEGRADATION", {"enabled": True})
         now_ts = int(time.time())

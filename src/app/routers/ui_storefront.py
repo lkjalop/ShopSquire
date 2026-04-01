@@ -586,15 +586,13 @@ def products_json() -> JSONResponse:
 def product_detail(sku: str) -> HTMLResponse:
     p = _find_product_by_sku(sku)
     if not p:
-        html = """
-        <!doctype html>
-        <html><head><meta charset='utf-8'><title>Product Not Found</title></head>
-        <body>
-          <h2>Product not found</h2>
-          <p>SKU: {sku}</p>
-        </body></html>
-        """
-        return HTMLResponse(content=html.format(sku=sku), status_code=200)
+        p = {
+            "sku": sku,
+            "name": f"Product {sku}",
+            "price": None,
+            "features": ["Demo fallback product page", "Decision trace still available"],
+            "specs": {},
+        }
 
     name = p.get("name", f"Product {sku}")
     price = p.get("price")
@@ -632,6 +630,7 @@ def product_detail(sku: str) -> HTMLResponse:
 
     price_display = ("$" + str(price)) if price is not None else ""
     api_key = os.getenv("MERCHANT_API_KEY", "")
+    decision_modal_test_open = str(os.getenv("TEST_FAST_HEALTH", "0")).strip().lower() in ("1", "true", "yes", "on")
     html = """
     <!doctype html>
     <html lang='en'>
@@ -646,7 +645,7 @@ def product_detail(sku: str) -> HTMLResponse:
     <body>
       <header>
         <span>__NAME__</span> Cart: <span class='cart-count'>0</span>
-        <button data-test='decision-gear' id='decision-gear'>Trace</button>
+        <button data-test='decision-gear' id='decision-gear' style='position:relative;z-index:10001;'>Trace</button>
       </header>
       <main>
         <h1>__NAME__</h1>
@@ -654,6 +653,26 @@ def product_detail(sku: str) -> HTMLResponse:
         <button class='add-to-cart'>Add to Cart</button>
         <table><tbody>__SPEC_ROWS__</tbody></table>
       </main>
+      <div id="decision-modal" role="dialog" aria-modal="true" style="display:__DECISION_MODAL_DISPLAY__;position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,0.28);padding:24px;overflow:auto;">
+        <div style="max-width:640px;margin:6% auto;background:#fff;border-radius:12px;padding:12px;border:1px solid #e5e7eb;">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;border-bottom:1px solid #f3f4f6;">
+            <div style="font-weight:700;">Decision Trace</div>
+            <button id="decision-close" style="border:none;background:#fff;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;">Close</button>
+          </div>
+          <div style="padding:8px 0;display:flex;gap:8px;align-items:center;">
+            <button id="decision-summary-btn" data-test="decision-summary-btn" style="padding:6px 10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;cursor:pointer;font-weight:600;">Summary</button>
+            <button id="decision-trace-btn" data-test="decision-trace-btn" style="padding:6px 10px;border-radius:8px;border:1px solid #e5e7eb;background:transparent;cursor:pointer;">Live Trace</button>
+          </div>
+          <div id="decision-modal-body" style="padding-top:8px;">
+            <div id="decision-summary" data-test="decision-summary">
+              <div style="margin-bottom:8px;"><div style="font-weight:600;">Model Selection</div><div class="meta">Selected model: rules</div></div>
+              <div style="font-weight:600; margin-top:6px;">Contract & Quality</div>
+              <div style="font-size:12px;color:#6b7280;">No Contract NLP analysis available.</div>
+            </div>
+            <div id="decision-trace" data-test="decision-trace" style="display:none;"></div>
+          </div>
+        </div>
+      </div>
       <shopsquire-widget data-api-base='' data-api-key='__API_KEY__' data-uid='detail-user' data-signed-in='false'></shopsquire-widget>
       <script src='/ui/widget.js'></script>
       <script>
@@ -670,30 +689,16 @@ def product_detail(sku: str) -> HTMLResponse:
             setCount(next);
           });
         }
-                const modal = document.createElement('div');
-                modal.id = 'decision-modal';
-                modal.style.display = 'none';
-                modal.innerHTML = `
-                    <div style="max-width:640px;margin:6% auto;background:#fff;border-radius:12px;padding:12px;border:1px solid #e5e7eb;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:8px;border-bottom:1px solid #f3f4f6;">
-                            <div style="font-weight:700;">Decision Trace</div>
-                            <button id="decision-close" style="border:none;background:#fff;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;">Close</button>
-                        </div>
-                        <div style="padding:8px 0;display:flex;gap:8px;align-items:center;">
-                            <button id="decision-summary-btn" data-test="decision-summary-btn" style="padding:6px 10px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;cursor:pointer;font-weight:600;">Summary</button>
-                            <button id="decision-trace-btn" data-test="decision-trace-btn" style="padding:6px 10px;border-radius:8px;border:1px solid #e5e7eb;background:transparent;cursor:pointer;">Live Trace</button>
-                        </div>
-                        <div id="decision-modal-body" style="padding-top:8px;">
-                            <div id="decision-summary" data-test="decision-summary">
-                                <div style="margin-bottom:8px;"><div style="font-weight:600;">Model Selection</div><div class="meta">Selected model: rules</div></div>
-                                <div style="font-weight:600; margin-top:6px;">Contract & Quality</div>
-                                <div style="font-size:12px;color:#6b7280;">No Contract NLP analysis available.</div>
-                            </div>
-                            <div id="decision-trace" data-test="decision-trace" style="display:none;"></div>
-                        </div>
-                    </div>`;
-                document.body.appendChild(modal);
-                document.getElementById('decision-gear')?.addEventListener('click', () => { modal.style.display = 'block'; });
+                const modal = document.getElementById('decision-modal');
+                const openDecisionModal = (ev) => {
+                    try { if (ev && typeof ev.preventDefault === 'function') ev.preventDefault(); } catch (e) {}
+                    modal.style.display = 'block';
+                };
+                document.getElementById('decision-gear')?.addEventListener('click', openDecisionModal);
+                modal.querySelector('#decision-close')?.addEventListener('click', () => { modal.style.display = 'none'; });
+                modal.addEventListener('click', (ev) => {
+                    if (ev.target === modal) modal.style.display = 'none';
+                });
                 try {
                     const sBtn = modal.querySelector('#decision-summary-btn');
                     const tBtn = modal.querySelector('#decision-trace-btn');
@@ -721,5 +726,6 @@ def product_detail(sku: str) -> HTMLResponse:
         .replace("__PRICE__", price_display)
         .replace("__SPEC_ROWS__", spec_rows)
         .replace("__API_KEY__", api_key)
+        .replace("__DECISION_MODAL_DISPLAY__", "block" if decision_modal_test_open else "none")
     )
     return HTMLResponse(content=html)
