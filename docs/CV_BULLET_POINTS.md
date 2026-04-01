@@ -4,6 +4,36 @@
 
 ---
 
+## Recommended 2026 Bullets
+
+Use these when you want the strongest current version of the project on a resume without sounding inflated.
+
+1. **Agentic AI Security Platform** - Designed and hardened an agentic e-commerce security platform that autonomously triages customer, supplier, image, and email risk signals while enforcing exception-based human oversight for payments, refunds, trust changes, and regulated-data actions.
+
+2. **Policy-Gated AI Execution** - Separated model inference from deterministic policy enforcement by implementing an action-authority matrix, data-residency controls, DLP scrubbing, CSRF-safe request paths, and fail-closed provider boundaries across high-impact business workflows.
+
+3. **Email Fraud and Supplier Impersonation Detection** - Built an email-security triage system that analyzes sender trust, attachment structure, OCR-extracted payment fields, QR and URL destinations, supplier baseline drift, and linked-artifact intelligence to detect BEC, invoice fraud, and supplier-document abuse.
+
+4. **Threat Investigation and Evidence UX** - Implemented explainable investigation views that convert ranked technical findings into business-safe summaries, analyst guidance, threat-hunting hypotheses, governance actions, and decision traces suitable for audit and executive review.
+
+5. **Multimodal Fraud and CV Forensics** - Engineered multimodal return-fraud and image-security pipelines covering object mismatch detection, receipt and serial verification gates, QR payload analysis, OCR degradation handling, and linked-artifact review for suspicious uploads.
+
+6. **Frontend and Session Hardening** - Removed high-risk browser token patterns, introduced stricter cookie and CSRF controls, normalized privileged frontend request paths, and tightened admin-session handling across storefront and security console surfaces.
+
+7. **Operational Readiness and Observability** - Added runtime health checks, release-gate metrics, connector-health visibility, tamper-evident audit-chain verification, insider-threat signals, and focused regression packs for security-critical routes and workflows.
+
+8. **Compliance-Aligned Architecture** - Mapped platform controls to PCI DSS, ISO 27001, ISO 42001, NIST RMF, NIST AI RMF, GDPR, and the EU AI Act through audit-ready decision logging, policy gating, governance workflows, and privacy-by-design enforcement.
+
+### Short Resume Version
+
+- Built an agentic AI commerce-security platform that autonomously detects supplier fraud, risky attachments, QR-linked threats, and return abuse while enforcing deterministic policy gates for high-impact actions.
+- Implemented production hardening across backend and frontend layers, including CSRF protection, fail-closed provider boundaries, data-residency checks, DLP scrubbing, admin-session controls, and tamper-evident audit chaining.
+- Developed explainable investigation workflows that turn technical evidence into analyst guidance, governance decisions, and executive-safe summaries with traceable audit context.
+- Added multimodal CV and email-forensics pipelines spanning OCR, baseline drift, QR analysis, linked-artifact review, and supplier trust intelligence.
+- Established release-gate metrics, health checks, insider-threat monitoring, and regression tests to improve security reliability and operational confidence.
+
+---
+
 ## Role 1: Agentic AI Engineer
 
 1. **Multimodal CV + Fraud Forensics** — Engineered a multimodal computer vision pipeline integrating YOLOv8 object detection, dual-OCR extraction, and LLaVA visual reasoning to automate return-fraud forensics, QR prompt-injection detection, and image-metadata integrity checks across e-commerce complaint flows.
