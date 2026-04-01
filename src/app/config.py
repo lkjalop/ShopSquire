@@ -296,6 +296,20 @@ def load_feature_flags(path: str) -> dict:
                 "afterpay": {"enabled": False, "rollout_percent": 0},
             },
             "KILL_SWITCH": False,
+            "AUTONOMY": {
+                "kill_switch": False,
+                "reason": "",
+                "scopes": {
+                    "recommend": {"disabled": False, "reason": ""},
+                    "pricing": {"disabled": False, "reason": ""},
+                    "payments": {"disabled": False, "reason": ""},
+                    "support": {"disabled": False, "reason": ""},
+                    "inventory": {"disabled": False, "reason": ""},
+                    "incident": {"disabled": False, "reason": ""},
+                    "email_security": {"disabled": False, "reason": ""},
+                    "orchestrator": {"disabled": False, "reason": ""},
+                },
+            },
             "DECISION_LOG_WRITES_ENABLED": decision_writes,
             # In test/local mode, allow bypassing strict policy gate to keep
             # end-to-end smoke tests deterministic. Can be overridden via

@@ -238,7 +238,9 @@ class RecommendationService:
                 "software engineering",
                 "coding",
                 "programming",
-                "ide",
+                "vs code",
+                "visual studio",
+                "intellij",
                 "compile",
             ],
             "student": [

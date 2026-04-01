@@ -33,6 +33,7 @@ class FeatureFlags(StrictModel):
     AGENT_ROLLOUT_PERCENT: int = 20
     CAPABILITIES: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     KILL_SWITCH: bool = False
+    AUTONOMY: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SessionEvent(StrictModel):
