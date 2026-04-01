@@ -863,9 +863,11 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         _log.debug("qr_url_suspicious tag skipped: %s", _exc)
 
     # Optional vision lane (Ollama) for coarse category checks (laptop vs non-laptop) and visible damage.
+    # Always disabled in pytest to prevent egress-blocked Ollama hangs (non-strict allowlist logs and continues).
+    _in_pytest = "PYTEST_CURRENT_TEST" in __import__("os").environ
     vision = None
     try:
-        v_enabled = str(__import__("os").getenv("CV_VISION_ENABLED", "0")).strip().lower() in ("1", "true", "yes")
+        v_enabled = (not _in_pytest) and str(__import__("os").getenv("CV_VISION_ENABLED", "0")).strip().lower() in ("1", "true", "yes")
     except Exception:
         v_enabled = False
     if v_enabled:

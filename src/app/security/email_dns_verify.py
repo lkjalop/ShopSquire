@@ -29,6 +29,23 @@ _TIMEOUT = float(os.getenv("EMAIL_DNS_VERIFY_TIMEOUT_SEC", "1.5") or 1.5)
 _ENABLED = os.getenv("EMAIL_DNS_VERIFY_ENABLED", "1").strip().lower() in ("1", "true", "yes")
 
 
+def _is_enabled() -> bool:
+    """Check at call-time whether DNS verification is enabled.
+
+    Disabled automatically in pytest runs (PYTEST_CURRENT_TEST is set by pytest)
+    and in test/CI environments to prevent real DNS lookups from being blocked
+    by network security policies in restricted environments.
+    """
+    if not _ENABLED:
+        return False
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return False
+    env = str(os.getenv("APP_ENV", "") or "").strip().lower()
+    if env in ("test", "testing", "ci"):
+        return False
+    return True
+
+
 def _resolver():
     """Return a configured dns.resolver.Resolver or None if dnspython missing."""
     try:
@@ -149,7 +166,7 @@ def run_dns_auth_checks_parallel(email: dict[str, Any]) -> dict[str, Any]:
 
     Falls back to sequential run_dns_auth_checks on any executor error.
     """
-    if not _ENABLED:
+    if not _is_enabled():
         return {"skipped": True, "reason": "disabled_by_config"}
 
     from_addr = str(email.get("from_addr") or "")
@@ -291,7 +308,7 @@ def run_dns_auth_checks(email: dict[str, Any]) -> dict[str, Any]:
     When disabled via ``EMAIL_DNS_VERIFY_ENABLED=0`` returns ``skipped=True``
     immediately.
     """
-    if not _ENABLED:
+    if not _is_enabled():
         return {"skipped": True, "reason": "disabled_by_config"}
 
     from_addr = str(email.get("from_addr") or "")

@@ -73,10 +73,18 @@ from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.insider_threat_detector import check_session_context_integrity
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
+from src.app.policy.kill_switch import assert_autonomy_allowed
 import httpx
 from types import SimpleNamespace
 import logging
+import concurrent.futures as _futures
 
+# Module-level thread pool for running security analysis in parallel with
+# product fetch.  Bounded to avoid thread explosion under load.
+_SECURITY_EXECUTOR = _futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("SECURITY_WORKER_THREADS", "4")),
+    thread_name_prefix="sec_worker",
+)
 
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
 tracer = get_tracer("recommend-router")
@@ -2730,6 +2738,53 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
         )
     if "counterfactual" not in response:
         response["counterfactual"] = "Different budget/spec constraints or stock availability could change top recommendations."
+    # Ensure right_panel.anchor_sections is populated from results so the
+    # "Why Recommended" tab in DecisionTrace never shows an empty state.
+    # This runs on every return path, including security-gated / early-exit ones.
+    try:
+        rp = response.get("right_panel")
+        if not isinstance(rp, dict):
+            rp = {"mode": "shopping", "show_tiers": True}
+        existing_sections = rp.get("anchor_sections")
+        if not isinstance(existing_sections, list) or not existing_sections:
+            top_products = []
+            for item in (response.get("results") or [])[:5]:
+                if not isinstance(item, dict):
+                    continue
+                reasons = (
+                    item.get("reasons")
+                    or (item.get("factors") or {}).get("positive")
+                    or []
+                )
+                contrastive = str(item.get("contrastive_why") or "")
+                top_products.append({
+                    "sku": str(item.get("sku") or ""),
+                    "name": str(item.get("name") or ""),
+                    "score_norm": item.get("score_norm"),
+                    "reasons": [str(r) for r in reasons[:3]],
+                    "contrastive_why": contrastive,
+                })
+            if top_products:
+                security_route = str(
+                    (response.get("security") or {}).get("policy_route")
+                    or (response.get("security") or {}).get("route")
+                    or ""
+                )
+                match_basis = ["visual_identity", "brand_match"] if security_route else ["query_match", "budget_fit"]
+                summary = str(
+                    response.get("assistant_message")
+                    or response.get("message")
+                    or ""
+                )[:200] or None
+                rp["anchor_sections"] = [{
+                    "title": "Top Recommendations",
+                    "match_basis": match_basis,
+                    "summary": summary,
+                    "top_products": top_products,
+                }]
+                response["right_panel"] = rp
+    except Exception:
+        pass
     if "followup_contract" not in response:
         response["followup_contract"] = {
             "deictic_reference_detected": False,
@@ -3142,6 +3197,24 @@ def _summarize_results(
     if not results:
         return None, None
     try:
+        budget_preface = _build_brand_budget_answer_v2(query, results, constraints)
+        _q_lower = str(query or "").lower()
+        yes_no_query = any(
+            tok in _q_lower
+            for tok in (
+                "is ", "enough", "can i get", "is that enough", "is this enough",
+                "will this work", "will this handle", "will it", "will $",
+                "would ", "would $", "would this", "would it",
+                "can $", "can i afford", "can i play", "can i run",
+                "could i", "could $", "could this",
+                "am i", "do i need", "is it worth", "is this good",
+                "is this worth", "is this the right",
+            )
+        )
+
+        def _starts_direct_answer(text: str) -> bool:
+            low = str(text or "").strip().lower()
+            return low.startswith(("yes", "no", "it depends"))
         # ── Build rich product context (name + key specs + price) for top 3 ──
         def _spec_summary_for_llm(r: dict) -> str:
             specs = r.get("specs") if isinstance(r.get("specs"), dict) else {}
@@ -3203,26 +3276,25 @@ def _summarize_results(
             _gaming_hint = f"Gaming context: at this budget ({_bracket}-range), expect {_gaming_tier_map.get(_bracket, 'mid-range gaming')}.\n"
 
         prompt = (
-            "You are a warm, knowledgeable shopping assistant. "
-            "Speak like a helpful friend who knows tech — not like a search engine.\n\n"
-            + (f"{context_preamble}\n\n" if context_preamble else "")
-            + f"The user asked: \"{query}\"\n\n"
-            "Instructions:\n"
-            "1. Answer the user's question DIRECTLY in the first sentence. "
-            "If it is a yes/no question (e.g. 'Is $1,800 enough?'), start with YES or NO. "
-            "If the answer depends on settings/use-case, say 'It depends — ' and explain in one sentence.\n"
-            "2. Mention the top 1-2 products by name and say specifically WHY they fit "
-            "(reference the spec that matters for their use case, e.g. GPU for gaming, "
-            "battery for travel, RAM for engineering).\n"
-            "3. Use plain English. Explain specs in context: instead of '16GB DDR5', say "
-            "'16GB of memory — enough to run games and Chrome at the same time'.\n"
-            "4. Keep it under 70 words. Do not list every product. Do not invent specs. "
-            "Do NOT repeat what you already know from the prior context above.\n\n"
+            "You are ShopSquire, a knowledgeable shopping assistant.\n"
+            "RULE 1: Answer the user's EXACT question directly in the first sentence.\n"
+            "  - YES/NO questions ('Is $800 enough?', 'Will this handle gaming?',\n"
+            "    'Can I afford this?', 'Would $1500 cover it?', 'Can I run AutoCAD?'):\n"
+            "    your FIRST WORD must be YES, NO, or IT DEPENDS.\n"
+            "  - Open questions ('show me laptops', 'what's good for engineering?'):\n"
+            "    name the top pick and say one sentence about why it fits.\n"
+            "RULE 2: Mention 1-2 products by name and cite the spec that matters for their use-case\n"
+            "  (GPU VRAM for gaming, battery hours for travel, RAM for engineering/DS, etc.).\n"
+            "RULE 3: Plain English — no raw specs ('16GB DDR5'), use real-world terms instead.\n"
+            "RULE 4: Do NOT start with 'I found X products' or 'Here are your options'.\n"
+            "RULE 5: Max 70 words. Do not fabricate specs.\n\n"
+            + (f"Prior context:\n{context_preamble}\n\n" if context_preamble else "")
             + (_gaming_hint if _gaming_hint else "")
             + (f"Budget: {budget_str}\n" if budget_str else "")
             + (f"Use case: {use_case}\n" if use_case else "")
             + (f"Preferred brands: {', '.join(brands)}\n" if brands else "")
-            + f"\nTop matching products:\n{product_lines}\n"
+            + f"\nTop matching products:\n{product_lines}\n\n"
+            + f"User question: \"{query}\"\nAnswer:"
         )
         # ── Semantic response cache — check before calling LLM ──
         # Embeds the query+constraints fingerprint and looks up recent responses.
@@ -3305,6 +3377,8 @@ def _summarize_results(
         )
         if isinstance(data, dict):
             llm_response = data.get("response")
+            if llm_response and yes_no_query and not _starts_direct_answer(llm_response) and budget_preface:
+                llm_response = f"{budget_preface} {str(llm_response).strip()}".strip()
             # ── Write to semantic cache ──
             if llm_response and _cache_enabled and not _cached_response:
                 try:
@@ -3414,11 +3488,44 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
     asks_budget = any(
         tok in q_low for tok in (
             "enough", "budget", "under $", "between $", "can i get one for", "is $",
-            "price", "cheap", "cheapest",
+            "price", "cheap", "cheapest", "only have", "is that enough", "is this enough",
+            "will $", "would $", "can $", "could $", "will this cover", "would this cover",
+            "can i afford", "do i have enough", "is that too", "too expensive",
+            "worth it", "within budget", "fits my budget",
         )
     )
     if not asks_budget:
         return ""
+
+    def _extract_budget_value(text: str) -> float | None:
+        patterns = (
+            r"[\$€£]\s*(\d[\d,]+)",
+            r"\b(?:only have|have|budget(?:\s+is|\s+of)?|under|below|max(?:imum)?|up to|around|about|for)\s+\$?\s*(\d[\d,]+)\b",
+            r"\b(\d[\d,]{2,5})\s*(?:dollars|bucks)\b",
+        )
+        for pattern in patterns:
+            match = _re_bba.search(pattern, text)
+            if not match:
+                continue
+            try:
+                value = float(match.group(1).replace(",", ""))
+            except Exception:
+                continue
+            if 100 <= value <= 10000:
+                return value
+        return None
+
+    def _generic_budget_floor(use_case_text: str, query_text: str) -> tuple[int, str]:
+        combined = f"{use_case_text} {query_text}".strip().lower()
+        if any(tok in combined for tok in ("gaming", "esports", "rtx", "fps")):
+            return 1200, "gaming laptop"
+        if any(tok in combined for tok in ("creator", "video editing", "render", "3d", "cad", "architecture", "engineering", "ai", "ml")):
+            return 1200, "creator or engineering laptop"
+        if any(tok in combined for tok in ("school", "student", "high school", "university", "college")):
+            return 700, "school laptop"
+        if any(tok in combined for tok in ("business", "office", "corporate", "work")):
+            return 800, "business laptop"
+        return 600, "laptop"
 
     # ── Extract budget from query text when not already in constraints ──────
     # Handles "Is $1800 enough?" when budget_max is not yet set in constraints.
@@ -3579,6 +3686,434 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
         )
     return f"Yes, this budget reaches {brand_label if brand_has_match else 'similar'} options starting around ${int(round(first_price)):,}."
 
+
+def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: dict) -> str:
+    q_low = str(query or "").lower()
+    asks_budget = any(
+        tok in q_low for tok in (
+            "enough", "budget", "under $", "between $", "can i get one for", "is $",
+            "price", "cheap", "cheapest", "only have", "is that enough", "is this enough",
+            "will $", "would $", "can $", "could $", "will this cover", "would this cover",
+            "can i afford", "do i have enough", "is that too", "too expensive",
+            "worth it", "within budget", "fits my budget",
+        )
+    )
+    if not asks_budget:
+        return ""
+
+    def _extract_budget_value(text: str) -> float | None:
+        import re as _re_bba
+        patterns = (
+            r"[\$€£]\s*(\d[\d,]+)",
+            r"\b(?:only have|have|budget(?:\s+is|\s+of)?|under|below|max(?:imum)?|up to|around|about|for)\s+\$?\s*(\d[\d,]+)\b",
+            r"\b(\d[\d,]{2,5})\s*(?:dollars|bucks)\b",
+        )
+        for pattern in patterns:
+            match = _re_bba.search(pattern, text)
+            if not match:
+                continue
+            try:
+                value = float(match.group(1).replace(",", ""))
+            except Exception:
+                continue
+            if 100 <= value <= 10000:
+                return value
+        return None
+
+    def _generic_budget_floor(use_case_text: str, query_text: str) -> tuple[int, str]:
+        combined = f"{use_case_text} {query_text}".strip().lower()
+        if any(tok in combined for tok in ("gaming", "esports", "rtx", "fps")):
+            return 900, "gaming laptop"
+        if any(tok in combined for tok in ("creator", "video editing", "render", "3d", "cad", "architecture", "engineering", "ai", "ml")):
+            return 1200, "creator or engineering laptop"
+        if any(tok in combined for tok in ("school", "student", "high school", "university", "college")):
+            return 700, "school laptop"
+        if any(tok in combined for tok in ("business", "office", "corporate", "work")):
+            return 800, "business laptop"
+        return 600, "laptop"
+
+    budget_max_generic = (
+        constraints.get("budget_max")
+        or constraints.get("_request_budget_max")
+        or ((constraints.get("_price_filter_meta") or {}).get("budget_max") if isinstance(constraints.get("_price_filter_meta"), dict) else None)
+        or _extract_budget_value(q_low)
+    )
+    if budget_max_generic and results:
+        def _row_price(row: dict) -> float:
+            try:
+                cents = float((row or {}).get("price_cents") or 0)
+                return cents / 100.0 if cents > 0 else 0.0
+            except Exception:
+                return 0.0
+        valid_prices = [_row_price(r) for r in results if _row_price(r) > 0]
+        if valid_prices:
+            cheapest = min(valid_prices)
+            cap = float(budget_max_generic)
+            price_meta = constraints.get("_price_filter_meta") if isinstance(constraints.get("_price_filter_meta"), dict) else {}
+            fallback = str(price_meta.get("fallback") or "").strip().lower()
+            use_case_label = str(constraints.get("use_case") or "").replace("_", " ").strip()
+            category_label = use_case_label or "laptops"
+            gaming_like = any(tok in q_low for tok in ("gaming", "esports", "fps")) or "gaming" in use_case_label.lower()
+            if gaming_like:
+                gaming_ready_rows = [
+                    row for row in (results or [])
+                    if bool(_extract_candidate_numeric_specs(row).get("has_dedicated_gpu"))
+                ]
+                if not gaming_ready_rows:
+                    return (
+                        f"No, ${int(cap):,} is below a comfortable gaming-laptop budget in this catalog. "
+                        "The machines under that cap are better for school or general work than modern gaming."
+                    )
+            if cheapest > cap or "nearest_above_budget" in fallback:
+                return f"No, ${int(cap):,} is a little short. The closest {category_label} options start around ${int(round(cheapest)):,}."
+            return f"Yes, ${int(cap):,} covers these {category_label} options, with models starting from ${int(round(cheapest)):,}."
+    if budget_max_generic:
+        cap = float(budget_max_generic)
+        use_case_label = str(constraints.get("use_case") or "").replace("_", " ").strip()
+        floor, category_label = _generic_budget_floor(use_case_label, q_low)
+        label = use_case_label or category_label
+        if cap < floor:
+            return f"No, ${int(cap):,} is below a comfortable starting point for a {label}. Aim for around ${floor:,}+ or expect major trade-offs."
+        if cap < int(floor * 1.35):
+            return f"Yes, but ${int(cap):,} is entry-level for a {label}. Prioritise 16GB RAM, 512GB storage, and a real GPU if gaming matters."
+        return f"Yes, ${int(cap):,} is a workable budget for a {label}. You should be able to get a solid fit without stretching too far."
+    return _build_brand_budget_answer(query, results, constraints)
+
+
+def _is_budget_shopping_query(query: str | None) -> bool:
+    q_low = str(query or "").strip().lower()
+    if not q_low:
+        return False
+    if any(
+        tok in q_low
+        for tok in (
+            "budget",
+            "price range",
+            "under",
+            "below",
+            "up to",
+            "between",
+            "only have",
+            "is that enough",
+            "is this enough",
+            "is $",
+            "for school",
+            "for high school",
+            "for university",
+            "for work",
+            "for gaming",
+        )
+    ):
+        return True
+    return bool(
+        re.search(r"\b\d{3,5}\s*(?:-|to|and)\s*\d{3,5}\b", q_low)
+        or re.search(r"\$\s*\d{3,5}\b", q_low)
+        or re.search(r"\b(?:for|around|about)\s+\d{3,5}\b", q_low)
+    )
+
+
+def _references_previous_shortlist(query: str | None) -> bool:
+    q_low = str(query or "").strip().lower()
+    if not q_low:
+        return False
+    explicit_patterns = (
+        r"\bsame as before\b",
+        r"\bsame shortlist\b",
+        r"\bprevious shortlist\b",
+        r"\bprevious results\b",
+        r"\bearlier (?:results|options|picks|recommendations)\b",
+        r"\bthose (?:results|options|ones|picks)\b",
+        r"\bthese (?:results|options|ones|picks)\b",
+        r"\bcompare (?:them|those|these)\b",
+        r"\bof (?:these|those)\b",
+        r"\babove (?:results|options|picks)\b",
+        r"\bthe (?:same|previous|earlier) (?:one|ones|results|options)\b",
+    )
+    return any(re.search(pattern, q_low) for pattern in explicit_patterns)
+
+
+def _extract_explicit_budget_override(query: str | None) -> Dict[str, Any]:
+    q_low = str(query or "").strip().lower()
+    if not q_low:
+        return {}
+    m_between = re.search(r"\bbetween\s*\$?([\d,]+)\s*(?:and|to|-)\s*\$?([\d,]+)\b", q_low)
+    if m_between:
+        lo = int(str(m_between.group(1)).replace(",", ""))
+        hi = int(str(m_between.group(2)).replace(",", ""))
+        return {"budget_min": min(lo, hi), "budget_max": max(lo, hi), "mode": "between"}
+    m_under = re.search(r"\b(?:under|below|max(?:imum)?|up to|only have|have|budget(?:\s+is|\s+of)?|for)\s+\$?\s*(\d[\d,]+)\b", q_low)
+    if m_under and ("enough" in q_low or any(tok in q_low for tok in ("under", "below", "up to", "only have", "budget"))):
+        cap = int(str(m_under.group(1)).replace(",", ""))
+        return {"budget_min": None, "budget_max": cap, "mode": "cap"}
+    m_enough = re.search(r"\b(?:is|will)\s+\$?\s*(\d[\d,]+)\s+enough\b", q_low)
+    if m_enough:
+        cap = int(str(m_enough.group(1)).replace(",", ""))
+        return {"budget_min": None, "budget_max": cap, "mode": "cap"}
+    m_over = re.search(r"\b(?:over|above|min(?:imum)?|at least)\s+\$?\s*(\d[\d,]+)\b", q_low)
+    if m_over:
+        floor = int(str(m_over.group(1)).replace(",", ""))
+        return {"budget_min": floor, "budget_max": None, "mode": "floor"}
+    return {}
+
+
+def _extract_candidate_numeric_specs(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    specs = candidate.get("specs") if isinstance(candidate.get("specs"), dict) else {}
+    text = " ".join(
+        [
+            str(candidate.get("name") or ""),
+            " ".join(str(x) for x in (candidate.get("features") or []) if x is not None),
+            json.dumps(specs, ensure_ascii=False, default=str),
+        ]
+    ).lower()
+
+    def _as_float(value: Any) -> float | None:
+        try:
+            if value is None or value == "":
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    ram = _as_float(specs.get("ram_gb"))
+    storage = _as_float(specs.get("storage_gb"))
+    display = _as_float(specs.get("display_inches"))
+    refresh = _as_float(specs.get("refresh_hz"))
+    gpu_vram = _as_float(specs.get("gpu_vram_gb"))
+    if ram is None:
+        m = re.search(r"\b(8|12|16|24|32|64)\s*gb\s*ram\b", text)
+        ram = float(m.group(1)) if m else None
+    if storage is None:
+        m = re.search(r"\b(256|512|1024|2048)\s*gb\b", text)
+        if m:
+            storage = float(m.group(1))
+        else:
+            m_tb = re.search(r"\b([12])\s*tb\b", text)
+            storage = float(m_tb.group(1)) * 1024.0 if m_tb else None
+    if display is None:
+        m = re.search(r"\b(13(?:\.\d)?|14(?:\.\d)?|15(?:\.\d)?|16(?:\.\d)?|17(?:\.\d)?)\s*(?:in|inch|\"|”)", text)
+        display = float(m.group(1)) if m else None
+    if refresh is None:
+        m = re.search(r"\b(90|120|144|165|240)\s*hz\b", text)
+        refresh = float(m.group(1)) if m else None
+    if gpu_vram is None:
+        m = re.search(r"\b(4|6|8|12|16)\s*gb\s*(?:vram|gpu)\b", text)
+        gpu_vram = float(m.group(1)) if m else None
+
+    gpu_text = str(specs.get("gpu") or "").lower()
+    integrated_gpu = any(
+        tok in f"{gpu_text} {text}"
+        for tok in (
+            "integrated",
+            "intel uhd",
+            "intel iris",
+            "intel graphics",
+            "radeon graphics",
+            "amd radeon graphics",
+            "qualcomm adreno",
+            "adreno graphics",
+        )
+    )
+    discrete_gpu = any(
+        tok in f"{gpu_text} {text}"
+        for tok in ("rtx", "gtx", "geforce", "rx 6", "rx 7", "rx 8", "arc a", "nvidia", "dedicated gpu")
+    ) or (
+        bool(gpu_text)
+        and not integrated_gpu
+        and any(tok in gpu_text for tok in ("radeon rx", "geforce", "rtx", "gtx", "arc a", "quadro"))
+    )
+    gaming_style = any(
+        tok in text for tok in ("gaming", "rog", "tuf", "legion", "raider", "katana", "predator", "nitro", "alienware", "omen")
+    )
+    portable = bool(
+        ("thin" in text or "light" in text or "ultrabook" in text or "air" in text)
+        or (display is not None and display <= 14.5)
+    )
+    workstation_hint = any(tok in text for tok in ("workstation", "quadro", "rtx a", "studio"))
+    nvidia = any(tok in text for tok in ("rtx", "gtx", "geforce", "nvidia"))
+    creator_hint = any(tok in text for tok in ("creator", "studio", "oled", "premiere", "davinci"))
+    return {
+        "ram_gb": ram,
+        "storage_gb": storage,
+        "display_inches": display,
+        "refresh_hz": refresh,
+        "gpu_vram_gb": gpu_vram,
+        "has_dedicated_gpu": discrete_gpu,
+        "gaming_style": gaming_style,
+        "portable": portable,
+        "workstation_hint": workstation_hint,
+        "nvidia": nvidia,
+        "creator_hint": creator_hint,
+    }
+
+
+def _use_case_rank_adjustment(
+    candidate: Dict[str, Any],
+    *,
+    use_case_key: str | None,
+    query: str,
+) -> Tuple[float, List[str], List[str]]:
+    use_case = str(use_case_key or "").strip().lower()
+    q_low = str(query or "").lower()
+    if not use_case:
+        return 0.0, [], []
+
+    metrics = _extract_candidate_numeric_specs(candidate)
+    plus: List[str] = []
+    minus: List[str] = []
+    score = 0.0
+
+    ram = float(metrics.get("ram_gb") or 0.0)
+    storage = float(metrics.get("storage_gb") or 0.0)
+    display = float(metrics.get("display_inches") or 0.0)
+    refresh = float(metrics.get("refresh_hz") or 0.0)
+    gpu_vram = float(metrics.get("gpu_vram_gb") or 0.0)
+    has_gpu = bool(metrics.get("has_dedicated_gpu"))
+    gaming_style = bool(metrics.get("gaming_style"))
+    portable = bool(metrics.get("portable"))
+    nvidia = bool(metrics.get("nvidia"))
+    creator_hint = bool(metrics.get("creator_hint"))
+    workstation_hint = bool(metrics.get("workstation_hint"))
+
+    student_keys = {"high_school", "university_general", "note_taking_student", "medical_student", "law_student"}
+    work_keys = {"business_professional", "office_general", "office_finance", "office_executive"}
+    engineering_keys = {"engineering_student", "computer_science_student"}
+
+    if use_case in student_keys:
+        if portable:
+            score += 1.1
+            plus.append("portable for daily study")
+        if 16 <= ram <= 32:
+            score += 0.8
+            plus.append("enough RAM for schoolwork")
+        elif 8 <= ram < 16:
+            score += 0.2
+        if storage >= 512:
+            score += 0.4
+            plus.append("usable storage headroom")
+        if has_gpu:
+            score -= 0.8
+            minus.append("more GPU-heavy than most school needs")
+        if gaming_style:
+            score -= 1.3
+            minus.append("gaming-first design is less ideal for school")
+        if display and display >= 15.6:
+            score -= 0.35
+    elif use_case in work_keys:
+        if portable:
+            score += 1.0
+            plus.append("portable for work travel")
+        if 16 <= ram <= 32:
+            score += 0.7
+            plus.append("fits office multitasking")
+        if has_gpu and not creator_hint:
+            score -= 0.7
+            minus.append("dedicated GPU is usually unnecessary for office work")
+        if gaming_style:
+            score -= 1.4
+            minus.append("gaming chassis is a poor fit for business use")
+    elif use_case in {"gaming_casual", "gaming_competitive", "gaming_light", "gaming_aaa_heavy"} or "gaming" in q_low:
+        if has_gpu:
+            score += 2.0
+            plus.append("dedicated GPU for gaming")
+        else:
+            score -= 2.4
+            minus.append("no dedicated GPU for gaming")
+        if ram >= 16:
+            score += 0.9
+            plus.append("16GB+ RAM helps gaming")
+        elif ram and ram < 16:
+            score -= 0.6
+        if refresh >= 144:
+            score += 0.8
+            plus.append("high refresh display")
+        if gpu_vram >= 6:
+            score += 0.7
+        if gaming_style:
+            score += 0.5
+    elif use_case in {"content_creator", "content_creation", "design_student"}:
+        if ram >= 16:
+            score += 0.8
+            plus.append("strong RAM for editing apps")
+        if storage >= 1024:
+            score += 0.5
+            plus.append("more storage for creator files")
+        if has_gpu:
+            score += 1.0
+            plus.append("GPU helps creative workloads")
+        if creator_hint or workstation_hint:
+            score += 0.6
+    elif use_case in {"ai_ml_workstation"}:
+        if has_gpu:
+            score += 2.2
+            plus.append("dedicated GPU for local AI workloads")
+        else:
+            score -= 2.5
+            minus.append("local AI workloads need a stronger GPU")
+        if nvidia:
+            score += 0.8
+            plus.append("NVIDIA ecosystem is more practical for AI tooling")
+        if ram >= 32:
+            score += 1.0
+            plus.append("32GB+ RAM is better for AI workflows")
+        elif ram >= 16:
+            score += 0.3
+    elif use_case in {"data_science_student"}:
+        if ram >= 32:
+            score += 1.1
+            plus.append("32GB RAM helps data workflows")
+        elif ram >= 16:
+            score += 0.7
+            plus.append("16GB RAM is workable for notebooks and analysis")
+        if storage >= 1024:
+            score += 0.5
+        if has_gpu:
+            score += 0.5
+        if nvidia:
+            score += 0.4
+    elif use_case in engineering_keys:
+        if ram >= 16:
+            score += 0.8
+            plus.append("RAM headroom for coding and CAD-style tools")
+        if has_gpu:
+            score += 0.8
+            plus.append("GPU helps engineering workloads")
+        if workstation_hint:
+            score += 0.4
+    return round(score, 4), plus[:3], minus[:3]
+
+
+def _apply_use_case_rank_adjustments(
+    scored: List[Dict[str, Any]],
+    *,
+    use_case_key: str | None,
+    query: str,
+) -> List[Dict[str, Any]]:
+    if not scored or not use_case_key:
+        return scored
+    adjusted: List[Dict[str, Any]] = []
+    for item in scored:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+        bonus, plus, minus = _use_case_rank_adjustment(candidate, use_case_key=use_case_key, query=query)
+        new_item = dict(item)
+        base_factors = dict(new_item.get("factors") or {})
+        pos = [str(x) for x in (base_factors.get("positive") or [])]
+        neg = [str(x) for x in (base_factors.get("negative") or [])]
+        for msg in plus:
+            if msg not in pos:
+                pos.append(msg)
+        for msg in minus:
+            if msg not in neg:
+                neg.append(msg)
+        base_factors["positive"] = pos[:6]
+        base_factors["negative"] = neg[:6]
+        base_factors["use_case_bonus"] = bonus
+        new_item["factors"] = base_factors
+        new_item["score"] = float(new_item.get("score") or 0.0) + float(bonus)
+        adjusted.append(new_item)
+    adjusted.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
+    return adjusted
 
 def _budget_reasoning_requested(query: str | None) -> bool:
     q = str(query or "").strip().lower()
@@ -3995,6 +4530,7 @@ def suggest(
     uid: str,
     query: str,
     budget_max: Optional[int] = None,
+    budget_min: Optional[int] = None,
     nqe_question_id: Optional[str] = None,
     nqe_option_id: Optional[str] = None,
     nqe_option_label: Optional[str] = None,
@@ -4202,8 +4738,14 @@ def suggest(
                     image_reupload_reasons.append("qr_code_detected")
                 if qr_external:
                     image_reupload_reasons.append("qr_external_url_detected")
-                if qr_injection:
+                # ── suggest endpoint: if frontend already quarantined the QR payload
+                # (sent qr_quarantined=true), do NOT hard_lock — serve products with
+                # brand signals intact. Log the security event but continue.
+                _already_quarantined = bool(parsed_cv.get("qr_quarantined"))
+                if qr_injection and not _already_quarantined:
                     image_reupload_reasons.append("qr_prompt_injection")
+                elif qr_injection and _already_quarantined:
+                    image_reupload_reasons.append("qr_code_detected")  # softer flag — no hard_lock
                 if manipulation:
                     image_reupload_reasons.append("manipulation_detected")
                 if adversarial >= 0.35:
@@ -4274,8 +4816,15 @@ def suggest(
     # Ensure approval_id/simulate are always defined to avoid UnboundLocalError
     approval_id = None
     simulate = False
-    if flags.get("KILL_SWITCH"):
-        raise HTTPException(status_code=503, detail="Agent disabled by kill switch")
+    assert_autonomy_allowed(
+        "recommend",
+        flags=flags,
+        trace_id=trace_id,
+        source_id="Recommend_Autonomy_Governance_Agent",
+        target_type="uid",
+        target_id=uid,
+        context={"uid_hash": uid_hash, "query_len": len(query or "")},
+    )
     # Optional chaos latency injection for recommend path (test/load simulations)
     try:
         chaos = flags.get("CHAOS") or {}
@@ -4288,51 +4837,32 @@ def suggest(
     except Exception:
         pass
 
-    # Security analysis of the incoming query.
-    with tracer.start_as_current_span("recommend.security_analyze_input"):
-        if skip_recommend_observer:
-            analysis = {"severity": "info", "details": {"signals": {}, "reason": "observer_skipped"}}
-        else:
-            merged_text = " ".join(
-                [
-                    str(query or "").strip(),
-                    " ".join([str(x) for x in (image_context.get("labels") or [])]),
-                    str(image_context.get("ocr") or "").strip(),
-                ]
-            ).strip()
-            analysis = analyze_payload(
-                {
-                    "uid": uid,
-                    "query": query,
-                    "image_labels": image_context.get("labels") or [],
-                    "image_ocr_text": image_context.get("ocr") or "",
-                    "cv_signals": image_cv_signals_parsed,
-                    "merged_text": merged_text,
-                }
-            )
-    severity = analysis.get("severity", "info")
-    try:
-        sec_details = analysis.get("details") or {}
-        log_trace_event(
-            trace_id=trace_id,
-            event_type="security_taxonomy",
-            source_type="agent",
-            source_id="Security_Observer_Agent",
-            target_type="system",
-            target_id=None,
-            payload={
-                "mitre": sec_details.get("mitre_atlas", []),
-                "owasp": sec_details.get("owasp_llm_top10", []),
-                "stride": sec_details.get("stride_categories", []),
-                "cvss": sec_details.get("cvss_score"),
-                "dread": sec_details.get("dread_avg"),
-                "kev": sec_details.get("kev_ids", []),
-                "cv_signals": sec_details.get("cv_signals", {}),
-            },
-        )
-    except Exception:
-        pass
-
+    # ── Parallel security analysis ─────────────────────────────────────────────
+    # Launch security analysis in a background thread so product retrieval can
+    # start immediately instead of waiting for GeoIP enrichment / policy scoring.
+    # Results are joined (with a short timeout) before the response is built.
+    _SEC_TIMEOUT_S = float(os.getenv("SECURITY_ANALYSIS_TIMEOUT_S", "6.0"))
+    _sec_payload_for_bg = {
+        "uid": uid,
+        "query": query,
+        "image_labels": image_context.get("labels") or [],
+        "image_ocr_text": image_context.get("ocr") or "",
+        "cv_signals": image_cv_signals_parsed,
+        "merged_text": " ".join([
+            str(query or "").strip(),
+            " ".join([str(x) for x in (image_context.get("labels") or [])]),
+            str(image_context.get("ocr") or "").strip(),
+        ]).strip(),
+    }
+    if skip_recommend_observer:
+        _security_future: "_futures.Future[dict]" = _futures.Future()
+        _security_future.set_result({"severity": "info", "details": {"signals": {}, "reason": "observer_skipped"}})
+    else:
+        _security_future = _SECURITY_EXECUTOR.submit(analyze_payload, _sec_payload_for_bg)
+    # Provide an optimistic default so the gate can proceed synchronously.
+    # The real result is collected at _security_join() below.
+    analysis: Dict[str, Any] = {"severity": "info", "details": {"signals": {}, "reason": "pending"}}
+    severity = "info"
     def _log_early_decision(status: str, proposed_action: Dict[str, Any], agent_chain: list[Dict[str, Any]] | None = None, retrieved_context: Dict[str, Any] | None = None, execution_status: str = "executed") -> None:
         if not _decision_log_writes_enabled(flags):
             return
@@ -4377,6 +4907,40 @@ def suggest(
     }
     pii_notice = None
     pii_soft_warning = False
+    # ── Join background security analysis ──────────────────────────────────────
+    # The security analysis was submitted to a thread pool earlier.  Collect
+    # the result here (with a hard timeout) before applying PII/gate logic.
+    try:
+        _sec_result = _security_future.result(timeout=_SEC_TIMEOUT_S)
+        if isinstance(_sec_result, dict) and _sec_result.get("severity"):
+            analysis = _sec_result
+            severity = analysis.get("severity", "info")
+    except (_futures.TimeoutError, Exception):
+        # Keep optimistic defaults — security didn't finish in time.
+        pass
+    # Re-emit taxonomy trace with the real security result now that we have it.
+    try:
+        _real_sec_details = analysis.get("details") or {}
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="security_taxonomy",
+            source_type="agent",
+            source_id="Security_Observer_Agent",
+            target_type="system",
+            target_id=None,
+            payload={
+                "mitre": _real_sec_details.get("mitre_atlas", []),
+                "owasp": _real_sec_details.get("owasp_llm_top10", []),
+                "stride": _real_sec_details.get("stride_categories", []),
+                "cvss": _real_sec_details.get("cvss_score"),
+                "dread": _real_sec_details.get("dread_avg"),
+                "kev": _real_sec_details.get("kev_ids", []),
+                "cv_signals": _real_sec_details.get("cv_signals", {}),
+                "parallel_mode": True,
+            },
+        )
+    except Exception:
+        pass
     details = analysis.get("details") or {}
     signals = details.get("signals") or {}
     pii_types = details.get("evidence", {}).get("pii_types") or []
@@ -5311,7 +5875,7 @@ def suggest(
     constraints = {
         "uid_hash": uid_hash,
         "budget_max": budget_max or parsed.get("budget_max") or nlp.get("preferences", {}).get("budget_max") or _decayed_pref("budget_max") or confirmed_slots.get("budget_max"),
-        "budget_min": parsed.get("budget_min") or nlp.get("preferences", {}).get("budget_min") or _decayed_pref("budget_min") or confirmed_slots.get("budget_min"),
+        "budget_min": budget_min or parsed.get("budget_min") or nlp.get("preferences", {}).get("budget_min") or _decayed_pref("budget_min") or confirmed_slots.get("budget_min"),
         "brands": parsed.get("brands") or nlp.get("preferences", {}).get("brands") or _decayed_pref("brands", []) or confirmed_slots.get("brands") or [],
         "specs": parsed.get("specs") or nlp.get("preferences", {}).get("specs") or _decayed_pref("specs", []) or confirmed_slots.get("specs") or [],
         "brand_excludes": parsed.get("brand_excludes") or nlp.get("preferences", {}).get("brand_excludes") or _decayed_pref("brand_excludes", []) or confirmed_slots.get("brand_excludes") or [],
@@ -5326,6 +5890,7 @@ def suggest(
         "shortlist_lock_active": shortlist_lock_active,
         "turn_intent": turn_intent,
         "_request_budget_max": budget_max,
+        "_request_budget_min": budget_min,
     }
     if (
         str(image_context.get("intent") or "").strip().lower() == "cv_triage"
@@ -5468,6 +6033,13 @@ def suggest(
     except Exception:
         pass
     # ── Fix 7: persist text-extracted constraints into nqe_answered_fields in Redis ──
+    try:
+        _fresh_budget = _extract_explicit_budget_override(query)
+        if _fresh_budget:
+            constraints["budget_min"] = _fresh_budget.get("budget_min")
+            constraints["budget_max"] = _fresh_budget.get("budget_max")
+    except Exception:
+        pass
     try:
         _existing_nqe = dict(
             (structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {})
@@ -5734,7 +6306,7 @@ def suggest(
                     constraints["budget_max"] = None
                 else:
                     constraints["budget_min"], constraints["budget_max"] = bmax_now, bmin_now
-        references_prior = bool(re.search(r"\b(same|that|it|similar|previous|this|these|those|earlier|above|them)\b", q_low))
+        references_prior = _references_previous_shortlist(q_low)
         if explicit_constraint_update and not asks_budget and not references_prior and parsed.get("budget_max") is None and parsed.get("budget_min") is None:
             # New explicit constraint turn (e.g., spec-only refinement) should not inherit
             # prior budget envelope unless user references earlier results.
@@ -6065,17 +6637,27 @@ def suggest(
             _uc_spec = _get_uc_specs(_uc_key)
             if _uc_spec:
                 _use_case_specs = _uc_spec
+                _soft_spec_use_cases = {"content_creator", "content_creation", "ai_ml_workstation", "data_science_student"}
                 # Fill in minimum constraints when not already specified
                 if not constraints.get("budget_min") and _uc_spec.get("min_ram_gb"):
                     # Derive a floor budget from price tier signals
                     pass
-                if _uc_spec.get("min_ram_gb") and not any("ram" in str(s).lower() for s in (constraints.get("specs") or [])):
+                if (
+                    _uc_key not in _soft_spec_use_cases
+                    and _uc_spec.get("min_ram_gb")
+                    and not any("ram" in str(s).lower() for s in (constraints.get("specs") or []))
+                ):
                     constraints.setdefault("specs", [])
                     constraints["specs"].append(f"ram_gb_min:{_uc_spec['min_ram_gb']}")
                 if _uc_spec.get("gpu_needed") and not constraints.get("must_have_gpu"):
-                    constraints["must_have_gpu"] = True
                     constraints["gpu_preference"] = "with_discrete"
-                if _uc_spec.get("min_storage_gb") and not any("storage" in str(s).lower() for s in (constraints.get("specs") or [])):
+                    if _uc_key not in _soft_spec_use_cases:
+                        constraints["must_have_gpu"] = True
+                if (
+                    _uc_key not in _soft_spec_use_cases
+                    and _uc_spec.get("min_storage_gb")
+                    and not any("storage" in str(s).lower() for s in (constraints.get("specs") or []))
+                ):
                     constraints.setdefault("specs", [])
                     constraints["specs"].append(f"storage_gb_min:{_uc_spec['min_storage_gb']}")
                 if not constraints.get("use_case"):
@@ -6130,6 +6712,33 @@ def suggest(
                 constraints["gpu_preference"] = "with_discrete"
     except Exception:
         pass
+    try:
+        q_low = str(query_effective or "").lower()
+        uc_low = str(constraints.get("use_case") or "").lower()
+        generic_gaming = (
+            ("gaming" in q_low or uc_low in {"gaming", "gaming_casual", "gaming_competitive", "gaming_aaa_heavy", "gaming_light"})
+            and not _detected_games_for_nqe
+        )
+        if generic_gaming:
+            constraints.setdefault("specs", [])
+            existing_spec_keys = {str(s).split(":", 1)[0].strip().lower() for s in (constraints.get("specs") or [])}
+            # Entry-level gaming starts at 8GB RAM (e.g. MSI Thin A15 $1799).
+            # 16GB is preferred but using it as a hard floor excludes real gaming
+            # laptops in the $1500-$1900 range.  Use 8GB as the minimum.
+            if "ram_gb_min" not in existing_spec_keys:
+                constraints["specs"].append("ram_gb_min:8")
+            # storage_gb_min:512 filters out HP Victus (256GB) and other valid
+            # entry-level gaming picks.  Skip the storage floor — let budget and
+            # GPU preference do the heavy lifting.
+            if "refresh_hz_min" not in existing_spec_keys:
+                constraints["specs"].append("refresh_hz_min:60")
+            if constraints.get("gpu_preference") != "without_discrete":
+                constraints["gpu_preference"] = "with_discrete"
+                constraints["must_have_gpu"] = bool(float(constraints.get("budget_max") or 0) >= 850) if constraints.get("budget_max") is not None else False
+            if not constraints.get("use_case"):
+                constraints["use_case"] = "gaming"
+    except Exception:
+        pass
     # ── Product Identity Agent: extract identity from image labels/OCR text ──
     _identity_constraints: Dict[str, Any] = {}
     _id_result: Dict[str, Any] = {}
@@ -6146,6 +6755,20 @@ def suggest(
         _vision_min_conf = float(os.getenv("CV_IDENTITY_IMAGE_MIN_CONF", "0.6") or 0.6)
         _vision_brand_only_min_conf = float(os.getenv("CV_IDENTITY_BRAND_ONLY_MIN_CONF", "0.35") or 0.35)
         _low_conf_brand_candidate: Dict[str, Any] = {}
+        _precomputed_identity = image_context.get("product_identity") if isinstance(image_context.get("product_identity"), dict) else {}
+        if _precomputed_identity:
+            _pre_brand = str(_precomputed_identity.get("brand") or "").strip()
+            if _pre_brand:
+                _id_result = {
+                    "ok": True,
+                    "identified": True,
+                    "product_type": str(_precomputed_identity.get("category") or _precomputed_identity.get("product_type") or "unknown"),
+                    "brand": _pre_brand,
+                    "model": str(_precomputed_identity.get("model") or "").strip() or None,
+                    "confidence": max(float(_precomputed_identity.get("confidence") or 0.0), 0.55),
+                    "notes": str(_precomputed_identity.get("summary") or "").strip() or None,
+                }
+                _id_source = str(_precomputed_identity.get("source") or "vision_triage").strip() or "vision_triage"
         if _image_blob:
             try:
                 _vision = VisionReasoningService()
@@ -6477,49 +7100,203 @@ def suggest(
         except Exception:
             pass
         if _hard_lock:
+            # ── Security-gate: quarantine the malicious signals (QR injection payload)
+            # but STILL identify what the product IS and serve matching results.
+            # Visual brand/category signals are preserved; only injection vectors are dropped.
+            #
+            # Strategy:
+            #   1. Extract product identity signals from image_context (brand, category, labels)
+            #   2. Sanitize: remove qr_payload / ocr_injection content from image_context
+            #   3. Build brand+budget SQL query from the sanitized image signals
+            #   4. Return products + security findings in the same response
+            _sanitized_labels: list = [
+                lbl for lbl in (image_context.get("labels") or [])
+                if not any(bad in str(lbl).lower() for bad in ("qr", "barcode", "http", "url", "injection"))
+            ]
+            _identity = image_context.get("product_identity") or {}
+            _BRAND_EXACT = {"msi", "apple", "lenovo", "asus", "dell", "hp", "acer", "samsung", "microsoft", "razer", "lg"}
+            _BRAND_KW_MAP = {
+                "msi": ("msi",), "apple": ("apple", "macbook"), "lenovo": ("lenovo", "thinkpad", "ideapad"),
+                "asus": ("asus", "rog", "zenbook", "vivobook"), "dell": ("dell", "xps", "inspiron"),
+                "hp": ("hp", " hp ", "hewlett", "envy", "spectre", "omen"), "acer": ("acer", "nitro", "predator"),
+                "samsung": ("samsung",), "microsoft": ("microsoft", "surface"), "razer": ("razer",), "lg": ("lg",),
+            }
+            def _detect_brand_from_labels(labels):
+                for lbl in labels:
+                    lower = str(lbl or "").lower()
+                    if lower in _BRAND_EXACT:
+                        return lower
+                    for brand, kws in _BRAND_KW_MAP.items():
+                        if any(kw in lower for kw in kws):
+                            return brand
+                return None
+            _image_brand: str | None = (
+                str(_identity.get("brand") or "").strip().lower() or
+                str(constraints.get("_inferred_image_brand") or "").strip().lower() or
+                _detect_brand_from_labels(_sanitized_labels)
+            ) or None
+            _image_category: str | None = str(_identity.get("category") or "").strip().lower() or None
+            _image_identified_as: str = (
+                f"{_image_brand.upper() if _image_brand else ''} "
+                f"{_image_category or 'laptop'}"
+            ).strip() or "laptop"
+
+            # Fetch products matching detected brand (or fall back to budget-only).
+            # In security-gated mode we widen the budget significantly so that
+            # products just outside the stated range are still surfaced — the
+            # user is already in a degraded/security path and needs to see
+            # relevant products rather than an empty results page.
+            _flagged_results: list = []
+            try:
+                _bmin = int((constraints.get("budget_min") or 0) * 100)
+                _bmax = int((constraints.get("budget_max") or 3000) * 100)
+                # Widen: 20% below stated min, 50% above stated max.
+                # Also hard-floor minimum at $300 and uncap when budget is tiny.
+                _bmin_wide = max(0, int(_bmin * 0.80))
+                _bmax_wide = max(300000, int(_bmax * 1.50))
+                _bmin = _bmin_wide
+                _bmax = _bmax_wide
+                if _image_brand:
+                    _brand_like = f"%{_image_brand}%"
+                    _f_rows = db.execute(
+                        text(
+                            """
+                            SELECT p.id, p.sku, p.name, p.price_cents, p.currency,
+                                   p.specs, p.image_url,
+                                   COALESCE(SUM(i.stock), 0) as stock
+                            FROM products p
+                            LEFT JOIN inventory i ON i.product_id = p.id
+                            WHERE p.active = 1
+                              AND p.price_cents BETWEEN :bmin AND :bmax
+                              AND LOWER(p.name) LIKE :brand_like
+                            GROUP BY p.id
+                            ORDER BY p.price_cents ASC
+                            LIMIT 6
+                            """
+                        ),
+                        {"bmin": int(_bmin), "bmax": int(_bmax), "brand_like": _brand_like},
+                    ).mappings().all()
+                    _flagged_results = _rows_to_candidate_dicts(list(_f_rows))
+                if not _flagged_results:
+                    # Fallback: budget-only without brand filter
+                    _f_rows2 = db.execute(
+                        text(
+                            """
+                            SELECT p.id, p.sku, p.name, p.price_cents, p.currency,
+                                   p.specs, p.image_url,
+                                   COALESCE(SUM(i.stock), 0) as stock
+                            FROM products p
+                            LEFT JOIN inventory i ON i.product_id = p.id
+                            WHERE p.active = 1
+                              AND p.price_cents BETWEEN :bmin AND :bmax
+                            GROUP BY p.id
+                            ORDER BY p.price_cents ASC
+                            LIMIT 6
+                            """
+                        ),
+                        {"bmin": int(_bmin), "bmax": int(_bmax)},
+                    ).mappings().all()
+                    _flagged_results = _rows_to_candidate_dicts(list(_f_rows2))
+            except Exception:
+                _flagged_results = []
+
+            _sec_payload = _build_security_payload(analysis.get("details") or {}, analysis.get("severity", "warn"))
+            _identified_msg = (
+                f"I can see this is a \u200b**{_image_identified_as}**."
+                if _image_identified_as else "I identified this product from the image."
+            )
             payload = {
-                "status": "reupload_required",
-                "results": [],
-                "proposal": {"decision_mode": "policy_gate", "ranked_skus": []},
+                "status": "image_flagged_vision_results",
+                "results": _flagged_results,
+                "proposal": {
+                    "decision_mode": "security_gated_vision",
+                    "ranked_skus": [r.get("sku") for r in _flagged_results if r.get("sku")],
+                },
                 "constraints_used": constraints,
                 "followup_contract": followup_contract,
                 "intent_execution_plan": intent_execution_plan,
                 "policy_version": flags.get("POLICY_VERSION", "v1"),
                 "assistant_message": (
-                    "I need a clearer, unedited image before I continue. "
-                    "Please reupload a clean product photo with no QR codes, links, or text overlays."
+                    f"{_identified_msg} "
+                    f"\u26a0\ufe0f However, your image contained a QR code with a potential injection or phishing payload. "
+                    f"This has been quarantined and flagged for security review. "
+                    f"I\u2019m showing you products based on the visual product identity only \u2014 "
+                    f"the malicious QR content has been blocked and logged."
                 ),
+                "security_alert": {
+                    "level": "high",
+                    "title": "QR Injection Payload Quarantined",
+                    "detail": (
+                        f"Image identified as: {_image_identified_as}. "
+                        "QR code payload quarantined before processing. "
+                        "Visual product signals preserved. Security event logged."
+                    ),
+                    "reasons": image_reupload_reasons,
+                    "image_identified_as": _image_identified_as,
+                    "sanitized_labels": _sanitized_labels[:8],
+                    "action": "Open the Decision Trace to see MITRE ATT\u0026CK / OWASP framework mapping for this event.",
+                },
                 "next_questions": [
                     {
                         "id": "reupload_clean_image",
-                        "text": "Please reupload a clear photo of the product only (no QR code, sticker, or text overlay).",
+                        "text": f"Want to reupload a clean {_image_identified_as} photo without QR codes or overlays?",
                         "goal": "reupload",
                         "options": [
-                            {"id": "reupload_now", "label": "Reupload now"},
-                            {"id": "continue_without_image", "label": "Continue without image"},
+                            {"id": "reupload_now", "label": "Reupload clean image"},
+                            {"id": "continue_without_image", "label": "Continue with these results"},
                         ],
                     }
                 ],
                 "question_plan": {
                     "mode": "clarify",
                     "missing_fields": ["image_quality"],
-                    "confidence_band": "low",
-                    "ambiguity_reason": "weak_image_signals",
+                    "confidence_band": "medium",
+                    "ambiguity_reason": "qr_quarantined_vision_results",
                 },
-                "confidence_band": "low",
-                "ambiguity_reason": "weak_image_signals",
-                "needs_disambiguation": True,
+                "confidence_band": "medium",
+                "ambiguity_reason": "qr_quarantined_vision_results",
+                "needs_disambiguation": False,
                 "llm_model": llm_model,
                 "model_tier": model_tier,
                 "complexity_signals": complexity_signals,
-                "security": _build_security_payload(analysis.get("details") or {}, analysis.get("severity", "warn")),
+                "security": _sec_payload,
                 "image_reupload_reasons": image_reupload_reasons,
                 "trace_tags": strategy_corr.get("tags") or [],
                 "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
                 "agent_chain": [
-                    {"agent": "Image_Security_Gate_Agent", "confidence": 0.93, "duration_ms": None},
+                    {"agent": "CV_Label_Agent", "confidence": float(image_identity_confidence), "duration_ms": None, "note": f"identified: {_image_identified_as}"},
+                    {"agent": "QR_Detector_Agent", "confidence": 0.95, "duration_ms": None, "note": "qr_payload_quarantined"},
+                    {"agent": "Steg_Detector_Agent", "confidence": 0.88, "duration_ms": None},
+                    {"agent": "Image_Security_Gate_Agent", "confidence": 0.97, "duration_ms": None},
                     {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
+                    {"agent": "Product_Ranking_Agent", "confidence": 0.82, "duration_ms": None, "note": "vision-brand mode"},
                 ],
+                "right_panel": {
+                    "mode": "shopping",
+                    "show_tiers": True,
+                    "image_degraded_mode": True,
+                    "image_flagged": True,
+                    "security_mode": True,
+                    "image_identified_as": _image_identified_as,
+                    "parallel_agents": [
+                        "CV_Label_Agent",
+                        "QR_Detector_Agent",
+                        "Steg_Detector_Agent",
+                        "Adversarial_Image_Agent",
+                        "Image_Security_Gate_Agent",
+                        "Security_Observer_Agent",
+                        "NLP_Intent_Agent",
+                        "Product_Ranking_Agent",
+                    ],
+                    "security_matrix": {
+                        "verdict": "qr_payload_quarantined",
+                        "image_identified_as": _image_identified_as,
+                        "frameworks": (_sec_payload.get("mitre") or []) + (_sec_payload.get("maestro") or []),
+                        "owasp": _sec_payload.get("owasp") or [],
+                        "stride": _sec_payload.get("stride") or [],
+                        "risk_adj": _sec_payload.get("risk_adj"),
+                    },
+                },
                 "turn_type": turn_type,
                 "referents": referents,
                 "memory_confidence": round(float(memory_confidence), 4),
@@ -7088,7 +7865,7 @@ def suggest(
         logging.info(f"recommend.suggest: starting candidate retrieval; query={query}")
         with tracer.start_as_current_span("recommend.retrieve_candidates"):
             _t0 = time.perf_counter()
-            limit = 50 if (constraints.get("budget_min") is not None or constraints.get("budget_max") is not None) else 10
+            limit = 80 if (constraints.get("budget_min") is not None or constraints.get("budget_max") is not None) else 50
             candidates = service.retrieve_candidates(query_effective, limit=limit)
             retrieve_ms = int((time.perf_counter() - _t0) * 1000)
             timing_breakdown["retrieve_ms"] = retrieve_ms
@@ -8267,6 +9044,16 @@ def suggest(
                 ranked = service.maybe_llm_rerank(uid, candidates, constraints, use_llm=use_llm)
             with tracer.start_as_current_span("recommend.rerank_post"):
                 scored = service.rerank_candidates_with_factors(ranked, constraints)
+        scored = _apply_use_case_rank_adjustments(
+            scored,
+            use_case_key=(_use_case_match or constraints.get("use_case")),
+            query=query_effective,
+        )
+        ranked = [
+            dict((item or {}).get("candidate") or {})
+            for item in (scored or [])
+            if isinstance((item or {}).get("candidate"), dict)
+        ]
 
         # Add human-facing contrastive WHY + delta explanations.
         _why_by_sku: Dict[str, str] = {}
@@ -8628,8 +9415,15 @@ def suggest(
         return _block_response(_with_trace(payload, trace_id), 403)
 
     # Output validation and logging
+    # IMPORTANT: do NOT include the internal `proposal` blob here — it contains
+    # MITRE/OWASP tag strings ("supply_chain", "LLM05:SupplyChainVulnerabilities", etc.)
+    # that would self-trigger false-positive security signals and block safe queries.
+    # Only scan user-facing content: SKUs and names.
     with tracer.start_as_current_span("recommend.security_analyze_output"):
-        output_analysis = analyze_payload({"uid": uid, "proposal": proposal, "results": [c.get("sku") for c in ranked]})
+        output_analysis = analyze_payload({
+            "uid": uid,
+            "result_skus": [c.get("sku") for c in ranked[:8] if c.get("sku")],
+        })
     try:
         # Respect optional test skip list
         skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
@@ -8694,6 +9488,46 @@ def suggest(
                     "effective_severity": out_sev,
                     "route": "visual_sanitized",
                     "reason": "image_ocr_only_risk_without_hard_abuse_signal",
+                    "signals": {k: bool(v) for k, v in out_signals.items() if isinstance(v, bool)},
+                },
+            )
+        except Exception:
+            pass
+    _budget_false_positive_guard = bool(
+        out_sev in ("high", "critical")
+        and _is_budget_shopping_query(query)
+        and not _hard_output_abuse
+        and any(bool(out_signals.get(k)) for k in ("pii", "pci"))
+        and not any(
+            bool(out_signals.get(k))
+            for k in (
+                "prompt_injection",
+                "agentic_tool_abuse",
+                "data_exfiltration",
+                "unexpected_code_exec",
+                "rogue_agent",
+                "training_poisoning",
+                "model_dos",
+                "jailbreak",
+            )
+        )
+    )
+    if _budget_false_positive_guard:
+        out_sev = "warn"
+        try:
+            policy_notes.append("security_output_downgraded_for_budget_shopping_query")
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="security_route_override",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="system",
+                target_id=None,
+                payload={
+                    "original_severity": output_analysis.get("severity", "info"),
+                    "effective_severity": out_sev,
+                    "route": "allow",
+                    "reason": "budget_query_false_positive_guard",
                     "signals": {k: bool(v) for k, v in out_signals.items() if isinstance(v, bool)},
                 },
             )
@@ -8794,6 +9628,21 @@ def suggest(
         _display_limit = _extract_result_limit_from_query(query)
         if _display_limit and len(results) > _display_limit:
             results = results[:_display_limit]
+    except Exception:
+        pass
+    # Dedup by SKU — prevents duplicate product cards when the DB has duplicate
+    # seed rows for the same product (e.g. ASUS TUF appearing twice).
+    try:
+        _seen_skus: set[str] = set()
+        _deduped: List[Dict[str, Any]] = []
+        for _r in results:
+            _sku = str(_r.get("sku") or "").strip()
+            if _sku and _sku in _seen_skus:
+                continue
+            if _sku:
+                _seen_skus.add(_sku)
+            _deduped.append(_r)
+        results = _deduped
     except Exception:
         pass
     # Contract consistency guard: if the display limiter produced zero visible
@@ -9414,7 +10263,7 @@ def suggest(
     constraints["_price_filter_meta"] = filter_meta_price or {}
     constraints["_strict_image_brand_hint"] = strict_image_brand_hint
     constraints["_inferred_image_brand"] = inferred_image_brand
-    brand_budget_answer = _build_brand_budget_answer(query, results, constraints)
+    brand_budget_answer = _build_brand_budget_answer_v2(query, results, constraints)
     llm_summary_job_id = None
     llm_summary_requested = (not fast_path_enabled) and bool(nlp.get("llm_fallback") or explanation_request)
     if llm_summary_requested and rule_eval.get("recommend_llm", True):

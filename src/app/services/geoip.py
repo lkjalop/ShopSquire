@@ -152,6 +152,17 @@ def _ip_api_lookup(ip: str) -> Optional[Dict[str, Any]]:
     """Free ip-api.com lookup (45 req/min, no key needed). HTTP only."""
     if str(os.getenv("GEOIP_DISABLE_IP_API", "")).strip().lower() in ("1", "true"):
         return None
+    # Skip external lookup for loopback, private, or non-routable IPs (also
+    # covers FastAPI TestClient which uses the literal string "testclient").
+    _ip_str = str(ip or "").strip().lower()
+    _NON_ROUTABLE = (
+        "testclient", "localhost", "::1", "0.0.0.0", "",
+        "127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
+        "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+        "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
+    )
+    if any(_ip_str == tok or _ip_str.startswith(tok) for tok in _NON_ROUTABLE):
+        return None
     try:
         import httpx
 

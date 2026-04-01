@@ -80,7 +80,7 @@ export interface Props {
 const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
 const WIDEN_STEPS = [200, 400];
-const RECOMMEND_TIMEOUT_MS = 15000;
+const RECOMMEND_TIMEOUT_MS = 30000;
 
 function persistOperatorMetrics(timing: any, traceId: string | null, source = 'visual_search') {
   if (!timing || typeof timing !== 'object') return;
@@ -308,6 +308,30 @@ function extractBudgetMax(query: string, fallbackMax?: number): number | undefin
   return fallbackMax;
 }
 
+/** Extract the lower bound from range queries like "from 1500 to 2200" or "$1500-$2200". */
+function extractBudgetMin(query: string): number | undefined {
+  const q = String(query || '');
+  // "from X to Y", "X to Y", "X-Y", "$X-$Y", "between X and Y"
+  const range = q.match(/\b(?:from\s+)?\$?\s*(\d{3,5})\s*(?:to|-)\s*\$?\s*(\d{3,5})\b/i);
+  if (range) {
+    const a = Number(range[1]);
+    const b = Number(range[2]);
+    if (Number.isFinite(a) && Number.isFinite(b)) return Math.min(a, b);
+  }
+  const between = q.match(/\bbetween\s+\$?\s*(\d{3,5})\s+and\s+\$?\s*(\d{3,5})\b/i);
+  if (between) {
+    const a = Number(between[1]);
+    const b = Number(between[2]);
+    if (Number.isFinite(a) && Number.isFinite(b)) return Math.min(a, b);
+  }
+  const over = q.match(/\bover\s+\$?\s*(\d{3,5})\b/i);
+  if (over) {
+    const v = Number(over[1]);
+    if (Number.isFinite(v)) return v;
+  }
+  return undefined;
+}
+
 function sanitizeSummary(summary: string, productCount: number, fallback: string): string {
   const msg = String(summary || '').trim();
   if (productCount <= 0) return 'No products found in your budget range.';
@@ -469,6 +493,13 @@ function looksOffDomainContext(ctx: ImageAnalysisContext | null, brandLabel: str
   return /fruit|apple[-_\s]?red|red apple|banana|lettuce|fresh produce|grocery/.test(joined) && !/laptop|notebook|computer|macbook|chromebook|intel|amd|ryzen/.test(joined);
 }
 
+function looksLikelyDeviceContext(ctx: ImageAnalysisContext | null, brandLabel: string): boolean {
+  const joined = `${brandLabel || ''} ${ctx?.source_name || ''} ${(ctx?.labels || []).join(' ')} ${ctx?.ocr_text || ''}`.toLowerCase();
+  const strongDeviceSignals = /laptop|notebook|computer|pc|macbook|chromebook|dell|lenovo|hp|asus|acer|msi|samsung|surface|intel|amd|ryzen|ssd|ram|gpu/.test(joined);
+  const produceSignals = /fruit|apple[-_\s]?red|red apple|banana|lettuce|fresh produce|grocery/.test(joined);
+  return strongDeviceSignals && !produceSignals;
+}
+
 function conciseLaneReason(products: ProductCard[], query: string, brand: string): string {
   if (!products.length) return buildNoResultsText(brand);
   const useCase = inferSummaryUseCase(query);
@@ -491,6 +522,7 @@ async function fetchSuggest(
   query: string,
   ctx: ImageAnalysisContext | null,
   budgetMax?: number,
+  budgetMin?: number,
 ): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[]; traceId: string | null; offDomain: boolean; lowSupport: boolean; domainBadge: string | null; fillBadge: string | null; linkedArtifactSummary?: string | null; linkedArtifactPolicyAction?: string | null; linkedArtifactVerdictLabel?: string | null; linkedArtifactConfidenceBand?: string | null }> {
   const params = new URLSearchParams({ uid: DEFAULT_UID, query: query || 'show me laptops' });
   if (ctx) {
@@ -515,6 +547,7 @@ async function fetchSuggest(
     params.set('image_cv_signals', JSON.stringify(_safeSigs));
   }
   if (budgetMax) params.set('budget_max', String(budgetMax));
+  if (budgetMin) params.set('budget_min', String(budgetMin));
   params.set('copywriting_enabled', 'false');
   params.set('fast_path', shouldUseFastPath(query) ? 'true' : 'false');
   const controller = new AbortController();
@@ -582,6 +615,8 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     const windows = isWindowsLikeBrand(brandLabel);
     if (!apple && !windows) return null;
     const profile = apple ? 'apple macbook' : 'windows laptop';
+    const useCase = inferSummaryUseCase(baseQuery);
+    const gamingProfile = useCase === 'gaming' ? 'gaming laptop' : profile;
 
     const baseMax = Number.isFinite(Number(budgetMax)) ? Number(budgetMax) : 1200;
     const steps = apple ? [400, 800] : [400, 800, 1400];
@@ -596,6 +631,23 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               ? `No in-budget MacBook found. Showing nearest MacBook options up to $${raisedMax.toLocaleString()}.`
               : `No in-budget Windows option found. Showing nearest Windows options up to $${raisedMax.toLocaleString()}.`
           ),
+        };
+      }
+    }
+
+    // Nothing found above budget — try below-budget sweep using up to 80% of the ceiling.
+    // This covers the common case where catalogue price points sit below the user's stated range.
+    const belowMax = Math.round(baseMax * 0.8);
+    if (belowMax > 200) {
+      const below = await fetchSuggest(
+        `${cleanBase} ${gamingProfile} show nearest in-stock options`.trim(),
+        ctx,
+        belowMax,
+      );
+      if ((below.products || []).length > 0) {
+        return {
+          ...below,
+          summary: below.summary || `No exact ${brandLabel} match found at $${baseMax.toLocaleString()}. Showing nearest ${gamingProfile} options.`,
         };
       }
     }
@@ -633,6 +685,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     const useCase = detectUseCase(userQuery);
     const autoBudget = useCase ? USE_CASE_BUDGET[useCase] ?? 1200 : undefined;
     const parsedBudgetMax = extractBudgetMax(userQuery, autoBudget);
+    const parsedBudgetMin = extractBudgetMin(userQuery);
 
     // One group per image (parallelized so one slow image does not block the others)
     const perImage = await Promise.all(
@@ -665,22 +718,73 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
         }
 
         if (trust === 'red') {
-          return {
-            group: {
-              source: ctx.source_name || `Image ${i + 1}: ${brand}`,
-              icon: '\uD83D\uDCF8',
-              trustLevel: trust,
-              friendlyBrand: brand,
-              securityNote: note,
-              products: [],
-              summary: '',
-              context: ctx,
-              lowSupport: false,
-              domainBadge: null,
-              fillBadge: null,
-            } as ImageGroup,
-            traceId: null as string | null,
-          };
+          // ── Security-gate: still fetch products using sanitized signals.
+          // Quarantine the injection payload but keep visual identity (brand, labels).
+          // The backend hard_lock path now returns products + security findings.
+          const sanitizedSignals: Record<string, any> = {};
+          for (const [k, v] of Object.entries(ctx.cv_signals || {})) {
+            // Strip injection/payload signals — keep brand/visual signals
+            if (!['qr_prompt_injection', 'qr_external_url_detected', 'qr_payloads', 'qr_redirect_probe', 'ocr_prompt_injection'].includes(k)) {
+              sanitizedSignals[k] = v;
+            }
+          }
+          // Keep qr_code_detected so backend knows a QR was present but quarantined
+          sanitizedSignals['qr_code_detected'] = true;
+          sanitizedSignals['qr_quarantined'] = true;
+          const sanitizedCtx: ImageAnalysisContext = { ...ctx, cv_signals: sanitizedSignals };
+          const securityNote = buildBuyerSecurityNotice(ctx.cv_signals || {});
+          const detectionReason = buildLaneDetectionReason(ctx.cv_signals || {});
+          try {
+            const base = stripBudgetHints(userQuery);
+            const addLaptopToken = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(base) && !/^product$/i.test(brand);
+            const imageQuery = `${base} ${addLaptopToken ? 'laptop' : ''} ${brand}`.trim();
+            const result = await fetchSuggest(imageQuery, sanitizedCtx, parsedBudgetMax, parsedBudgetMin);
+            let products = result.products.slice(0, 3);
+            if (products.length === 0) {
+              const chain = await runBrandFallbackChain(userQuery, brand, sanitizedCtx, parsedBudgetMax);
+              if (chain) products = (chain.products || []).slice(0, 3);
+            }
+            return {
+              group: {
+                source: ctx.source_name || `Image ${i + 1}: ${brand}`,
+                icon: '\uD83D\uDCF8',
+                trustLevel: trust,
+                friendlyBrand: brand,
+                securityNote,
+                products,
+                summary: products.length > 0
+                  ? `\u26a0\ufe0f QR payload quarantined. Showing ${brand} products based on visual identity only.`
+                  : buildNoResultsText(brand),
+                context: ctx,
+                lowSupport: false,
+                domainBadge: null,
+                fillBadge: null,
+                detectionReason,
+                verdictLabel: 'QR Injection Blocked',
+                confidenceBand: 'high',
+              } as ImageGroup,
+              traceId: result.traceId || null,
+            };
+          } catch (_err) {
+            // Fallback to empty on error — at least show security note
+            return {
+              group: {
+                source: ctx.source_name || `Image ${i + 1}: ${brand}`,
+                icon: '\uD83D\uDCF8',
+                trustLevel: trust,
+                friendlyBrand: brand,
+                securityNote,
+                products: [],
+                summary: `\u26a0\ufe0f QR payload blocked. Could not load ${brand} products right now.`,
+                context: ctx,
+                lowSupport: false,
+                domainBadge: null,
+                fillBadge: null,
+                detectionReason,
+              } as ImageGroup,
+              traceId: null,
+            };
+          }
         }
 
         if (forcedOffDomain) {
@@ -708,7 +812,8 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           const base = stripBudgetHints(userQuery);
           const addLaptopToken = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(base) && !/^product$/i.test(brand);
           const imageQuery = `${base} ${addLaptopToken ? 'laptop' : ''} ${brand}`.trim();
-          const result = await fetchSuggest(imageQuery, ctx, parsedBudgetMax);
+          const result = await fetchSuggest(imageQuery, ctx, parsedBudgetMax, parsedBudgetMin);
+          const shouldTreatAsOffDomain = forcedOffDomain || (result.offDomain && !looksLikelyDeviceContext(ctx, brand));
           let pickedTraceId: string | null = result.traceId || null;
           let products = result.products.slice(0, 3);
           let safeSummary = sanitizeSummary(result.summary, products.length, `Top ${brand} picks matching your image.`);
@@ -723,7 +828,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             linked_artifact_fetch: Boolean(result.linkedArtifactSummary),
             security_review_required: Boolean(ctx.cv_signals?.qr_external_url_detected || ctx.cv_signals?.qr_prompt_injection || result.linkedArtifactPolicyAction === 'review' || result.linkedArtifactPolicyAction === 'privacy_hold'),
           }, pickedTraceId, 'visual_search');
-          if (products.length === 0 && !result.offDomain) {
+          if (products.length === 0 && !shouldTreatAsOffDomain) {
             const chain = await runBrandFallbackChain(userQuery, brand, ctx, parsedBudgetMax);
             if (chain) {
               pickedTraceId = pickedTraceId || chain.traceId || null;
@@ -731,7 +836,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               safeSummary = sanitizeSummary(chain.summary, products.length, `Top ${brand} picks matching your image.`);
             }
           }
-          if (result.offDomain || forcedOffDomain) {
+          if (shouldTreatAsOffDomain) {
             trustLevel = trust === 'red' ? trust : 'orange';
             securityNote = 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.';
             products = [];
@@ -740,7 +845,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           if (products.length === 0 && assistantClaimsProducts(safeSummary)) {
             safeSummary = 'No products found in your budget range.';
           }
-          safeSummary = (result.offDomain || forcedOffDomain)
+          safeSummary = shouldTreatAsOffDomain
             ? lockedOffDomainSummary(userQuery)
             : conciseLaneReason(products, userQuery, brand);
           return {
@@ -752,11 +857,13 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               securityNote,
               products,
               summary: safeSummary,
-              widenState: products.length === 0 && !(result.offDomain || forcedOffDomain) ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
+              widenState: products.length === 0 && !shouldTreatAsOffDomain ? { budgetMin: 0, budgetMax: parsedBudgetMax ?? 1200, noResults: true } : undefined,
               context: ctx,
-              offDomain: result.offDomain || forcedOffDomain,
+              offDomain: shouldTreatAsOffDomain,
               lowSupport: result.lowSupport || forcedOffDomain,
-              domainBadge: forcedOffDomain ? 'Off-domain image' : result.domainBadge,
+              domainBadge: shouldTreatAsOffDomain
+                ? 'Off-domain image'
+                : (result.lowSupport ? 'Needs catalog confirmation' : null),
               fillBadge: result.fillBadge,
               verdictLabel: result.linkedArtifactVerdictLabel || null,
               confidenceBand: result.linkedArtifactConfidenceBand || null,
@@ -826,7 +933,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     // Query-intent group (if query adds context beyond image brands)
     if (userQuery && imageContexts.length === 0) {
       try {
-        const result = await fetchSuggest(stripBudgetHints(userQuery), null, parsedBudgetMax);
+        const result = await fetchSuggest(stripBudgetHints(userQuery), null, parsedBudgetMax, parsedBudgetMin);
         if (!firstTraceId && result.traceId) { firstTraceId = result.traceId; onTraceId?.(result.traceId); }
         let products = result.products.slice(0, 3);
         let safeSummary = sanitizeSummary(

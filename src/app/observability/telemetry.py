@@ -85,12 +85,15 @@ def telemetry_emit(
         # Splunk HEC
         hec_url = os.getenv("SPLUNK_HEC_URL")
         hec_token = os.getenv("SPLUNK_HEC_TOKEN")
-
-        if hec_url and hec_token and not dry_run:
+        # Skip HEC posting entirely in pytest runs to avoid hanging on
+        # unreachable test addresses (e.g. 127.0.0.1:1 in unit tests).
+        _in_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        _hec_timeout = float(os.getenv("SPLUNK_HEC_TIMEOUT_SEC", "5") or 5)
+        if hec_url and hec_token and not dry_run and not _in_pytest:
             try:
                 headers = {"Authorization": f"Splunk {hec_token}", "Content-Type": "application/json"}
                 body = _splunk_hec_payload(payload, sourcetype=sourcetype)
-                safe_post(hec_url, headers=headers, data=json.dumps(body), timeout=5)
+                safe_post(hec_url, headers=headers, data=json.dumps(body), timeout=_hec_timeout)
             except Exception as exc:
                 logger.exception("Failed sending telemetry to Splunk HEC: %s", exc)
                 logger.info("Telemetry event fallback: %s", json.dumps(payload))

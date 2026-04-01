@@ -1,5 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from typing import Any, Dict, List, Optional
+import asyncio as _asyncio
+import functools as _functools
 import json
 import os
 import uuid
@@ -18,6 +20,7 @@ from src.app.routers.support_complaints import _normalize_ocr_and_detect, _probe
 from src.app.security import linked_artifact_analysis
 from src.app.security.passive_payload_analysis import classify_passive_payload
 from src.app.security.threat_hunter_leads import build_threat_hunter_leads
+from src.app.services.faq_bank import match_faq
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 
@@ -523,8 +526,21 @@ async def triage(
                                 except Exception:
                                     qr_redirect_probe = {"enabled": True, "checked": False, "chain": [], "error": "probe_exception"}
                                 # ── Auto-analyze linked artifact (SSN / PII / payload scan) ──
+                                # Run in a thread executor so the synchronous HTTP calls inside
+                                # analyze_linked_artifact do not block the event loop.
                                 try:
-                                    linked = linked_artifact_analysis.analyze_linked_artifact(url=data, timeout=6.0)
+                                    _loop = _asyncio.get_event_loop()
+                                    linked = await _asyncio.wait_for(
+                                        _loop.run_in_executor(
+                                            None,
+                                            _functools.partial(
+                                                linked_artifact_analysis.analyze_linked_artifact,
+                                                url=data,
+                                                timeout=3.0,
+                                            ),
+                                        ),
+                                        timeout=4.0,
+                                    )
                                     linked_artifact_result = linked if isinstance(linked, dict) else None
                                     resp["linked_artifact"] = linked
                                     if linked_artifact_result:
@@ -608,7 +624,11 @@ async def triage(
     if not fast:
         try:
             from src.app.security.adversarial_image_detector import detect_adversarial
-            adv = detect_adversarial(content)
+            _loop = _asyncio.get_event_loop()
+            adv = await _asyncio.wait_for(
+                _loop.run_in_executor(None, detect_adversarial, content),
+                timeout=8.0,
+            )
             if hasattr(adv, "is_adversarial") and adv.is_adversarial:
                 security_signals["adversarial_detected"] = True
                 security_clean = False
@@ -621,7 +641,11 @@ async def triage(
     if not fast:
         try:
             from src.app.security.steg_detector import detect_steganography
-            steg = detect_steganography(content)
+            _loop = _asyncio.get_event_loop()
+            steg = await _asyncio.wait_for(
+                _loop.run_in_executor(None, detect_steganography, content),
+                timeout=8.0,
+            )
             steg_score = float(getattr(steg, "steg_score", 0.0) or 0.0)
             steg_elevated_min = float(os.getenv("CV_STEG_ELEVATED_MIN", "0.385") or 0.385)
             if hasattr(steg, "is_suspicious") and steg.is_suspicious:
@@ -946,14 +970,79 @@ async def triage(
             "unconfirmed_higher_order_hypotheses": [f for f in payload_findings if str(f.get("finding_group") or "") == "unconfirmed_higher_order_hypotheses"],
         },
     }
+    evidence_snapshot = {
+        "sender_infrastructure": {
+            "originating_geo": {
+                "country": ((linked_artifact_result or {}).get("country") if isinstance(linked_artifact_result, dict) else None),
+                "asn_org": ((linked_artifact_result or {}).get("asn_org") if isinstance(linked_artifact_result, dict) else None),
+            },
+            "reputation": {
+                "flags": list((qr_redirect_probe or {}).get("risk_flags") or []),
+            },
+            "related_incidents": {
+                "count": int((linked_artifact_result or {}).get("related_incident_count") or 0) if isinstance(linked_artifact_result, dict) else 0,
+            },
+        }
+    }
     try:
         resp["security"]["threat_hunter_leads"] = build_threat_hunter_leads(
             findings=payload_findings,
-            evidence_snapshot={},
+            evidence_snapshot=evidence_snapshot,
             llm_assist={},
         )
     except Exception:
         resp["security"]["threat_hunter_leads"] = []
+    if not resp["security"]["threat_hunter_leads"] and payload_findings:
+        fallback_leads = []
+        for idx, finding in enumerate(payload_findings[:3]):
+            next_steps = [str(x) for x in (finding.get("next_steps") or []) if str(x).strip()]
+            evidence_lines = [str(x) for x in (finding.get("evidence") or []) if str(x).strip()]
+            fallback_leads.append(
+                {
+                    "lead_id": f"fallback_{idx}",
+                    "finding_type": str(finding.get("finding_type") or "artifact_hunt"),
+                    "title": f"Threat Hunter Lead: {str(finding.get('headline') or finding.get('summary') or 'Investigate artifact behavior')}",
+                    "what_we_observed": evidence_lines[:3] or [str(finding.get("business_risk") or "Suspicious artifact behavior detected.")],
+                    "why_it_matters": str(finding.get("business_risk") or "This artifact warrants targeted hunting before broader action."),
+                    "what_to_hunt_next": next_steps[:4] or ["Correlate this artifact with endpoint, identity, and network telemetry before containment."],
+                    "where_to_check": ["XDR / EDR", "DNS / proxy logs", "Email / browser telemetry"],
+                    "confirmation_signals": list((finding.get("threat_context") or {}).get("runtime_evidence_required") or []),
+                    "disproving_signals": ["No supporting endpoint or network evidence tied to the same host, user, or session."],
+                    "push_downstream": ["Human review before autonomous containment"],
+                    "likely_kill_chain_stage": str((finding.get("threat_context") or {}).get("pasta_stage") or finding.get("pasta_stage") or "Review"),
+                    "confidence_score": float(finding.get("confidence_score") or 0.62),
+                    "confidence_band": str(finding.get("confidence_band") or "medium"),
+                    "analyst_guidance": "Treat this as an evidence-led lead. Confirm runtime telemetry before promoting it to an active incident.",
+                    "business_guidance": "Use the plain-English summary and next steps to brief a human reviewer before any blocking action.",
+                    "evidence_refs": [str(x) for x in (finding.get("evidence_refs") or []) if str(x).strip()],
+                    "target_checklists": {},
+                }
+            )
+        resp["security"]["threat_hunter_leads"] = fallback_leads
+    faq_query_parts = [
+        str(name or ""),
+        str(extracted_text or ""),
+        str(payload_analysis.get("attack_hypothesis") or ""),
+        " ".join(str(x) for x in (labels or []) if str(x).strip()),
+    ]
+    if float(security_signals.get("damage_score") or 0.0) >= 0.4:
+        faq_query_parts.append("repair cracked screen damage")
+    if "blue screen" in str(extracted_text or "").lower() or "bsod" in str(name or "").lower():
+        faq_query_parts.append("blue screen bsod windows repair")
+    try:
+        faq_match, faq_score = match_faq(" ".join(part for part in faq_query_parts if part).strip())
+        if faq_match and float(faq_score or 0.0) > 0:
+            resp["faq_playbooks"] = [
+                {
+                    "id": str(faq_match.get("q") or "faq_playbook").lower().replace(" ", "_"),
+                    "title": str(faq_match.get("q") or "Recommended support playbook"),
+                    "description": str(faq_match.get("a") or "").strip(),
+                    "steps": [str(faq_match.get("a") or "").strip()],
+                    "tags": list(faq_match.get("tags") or []),
+                }
+            ]
+    except Exception:
+        pass
     # Attach productive QR data (manufacturer URLs, model hints) for downstream identity extraction
     if qr_product_data:
         resp["qr_product_data"] = qr_product_data
