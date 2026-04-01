@@ -27,8 +27,8 @@ _SCREEN_RE = re.compile(r"(\d{1,2}(?:\.\d)?)\"")
 
 def _default_product_source() -> str:
     for candidate in (
-        "docs/laptop-products-new-short.txt",
         "docs/laptop-products-new.txt",
+        "docs/laptop-products-new-short.txt",
         "docs/laptop-products-exp.txt",
     ):
         if Path(candidate).exists():
@@ -179,8 +179,8 @@ def _ensure_accessories(db, static_root: Path) -> None:
         {"sku": "BAG-SLEEVE-15", "name": "Laptop Sleeve 15 inch", "price_cents": 2900, "specs": {"category": "laptop_sleeve", "tags": ["laptop_sleeve", "student", "office", "travel"]}},
         {"sku": "PERIPH-MOUSE-WL", "name": "Wireless Mouse", "price_cents": 3900, "specs": {"category": "mouse", "tags": ["mouse", "student", "office_general", "university_general"]}},
         {"sku": "ACC-SSD-1TB", "name": "1TB External SSD", "price_cents": 12900, "specs": {"category": "external_ssd", "tags": ["external_ssd", "creator", "engineering_student", "content_creator"]}},
-        {"sku": "ACC-DOCK-USB-C", "name": "USB-C Docking Station", "price_cents": 14900, "specs": {"category": "dock", "tags": ["dock", "office_general", "business_professional", "developer"]}},
-        {"sku": "MON-27-QHD", "name": "27 inch QHD Productivity Monitor", "price_cents": 24900, "specs": {"category": "monitor", "tags": ["monitor", "office_finance", "computer_science_student", "content_creator"]}},
+        {"sku": "ACC-DOCK-USB-C", "name": "USB-C Docking Station", "price_cents": 14900, "specs": {"category": "dock", "tags": ["dock", "office_general", "business_professional", "developer", "engineering_student", "data_science_student"]}},
+        {"sku": "MON-27-QHD", "name": "27 inch QHD Productivity Monitor", "price_cents": 24900, "specs": {"category": "monitor", "tags": ["monitor", "office_finance", "computer_science_student", "content_creator", "engineering_student", "data_science_student"]}},
         {"sku": "HEAD-NC-01", "name": "Noise Cancelling Headset", "price_cents": 11900, "specs": {"category": "headset", "tags": ["headset", "business_professional", "gaming_casual", "music_production"]}},
         {"sku": "COOL-PAD-01", "name": "Cooling Pad", "price_cents": 5900, "specs": {"category": "cooling_pad", "tags": ["cooling_pad", "gaming_competitive", "gaming_aaa_heavy"]}},
         {"sku": "COOL-STAND-01", "name": "Adjustable Laptop Stand", "price_cents": 4500, "specs": {"category": "laptop_stand", "tags": ["laptop_stand", "office_general", "creator", "student"]}},
@@ -193,8 +193,27 @@ def _ensure_accessories(db, static_root: Path) -> None:
         {"sku": "ACC-AUDIO-IF-01", "name": "Compact Audio Interface", "price_cents": 15900, "specs": {"category": "audio_interface", "tags": ["audio_interface", "music_production", "creator"]}},
     ]
     for acc in accessories:
-        exists = db.execute(text("SELECT 1 FROM products WHERE sku = :sku"), {"sku": acc["sku"]}).scalar()
-        if exists:
+        pid_row = db.execute(text("SELECT id FROM products WHERE sku = :sku"), {"sku": acc["sku"]}).fetchone()
+        if pid_row:
+            # Product already exists — ensure inventory record is present so stock > 0
+            existing_inv = db.execute(
+                text("SELECT 1 FROM inventory WHERE product_id = :pid"),
+                {"pid": pid_row[0]},
+            ).scalar()
+            if not existing_inv:
+                db.execute(
+                    text(
+                        "INSERT INTO inventory (id, product_id, stock, warehouse, updated_at) "
+                        "VALUES (:id, :product_id, :stock, :warehouse, :updated_at)"
+                    ),
+                    {
+                        "id": _uuid(),
+                        "product_id": pid_row[0],
+                        "stock": 50,
+                        "warehouse": "default",
+                        "updated_at": datetime.utcnow(),
+                    },
+                )
             continue
         pid = _uuid()
         svg_path = static_root / f"{acc['sku']}.svg"

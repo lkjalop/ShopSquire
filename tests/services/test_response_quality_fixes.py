@@ -5,8 +5,10 @@ Covers:
 - Fix 2: _build_context_preamble injects Redis answered fields into LLM prompt
 - Fix 4: _build_brand_budget_answer corporate branch + budget extraction from query
 - Fix 5: _classify_budget_bracket returns correct gaming tier labels
+- BUG-7: expanded asks_budget token detection for will/would/can/could phrasings
 """
 from __future__ import annotations
+import pytest
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -165,6 +167,45 @@ def test_no_budget_mention_returns_empty():
     results = _make_results([100000])
     answer = _build_brand_budget_answer("show me laptops", results, {})
     assert answer == ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BUG-7 — expanded asks_budget token detection
+# ─────────────────────────────────────────────────────────────────────────────
+from src.app.routers.recommend import _build_brand_budget_answer_v2
+
+
+@pytest.mark.parametrize("query", [
+    "Will $1500 cover a gaming laptop?",
+    "Would $800 be enough for a MacBook?",
+    "Can $900 get me a good laptop?",
+    "Could $700 cover an engineering-student laptop?",
+    "Can I afford a gaming laptop at $1200?",
+    "Is $1800 worth it for a gaming laptop?",
+    "Do I have enough at $1000 for a student laptop?",
+    "Is that too expensive at $2000?",
+    "Fits my budget at $1500?",
+])
+def test_expanded_asks_budget_triggers_answer(query):
+    """Expanded token list must produce a non-empty answer for common budget phrasings."""
+    results = _make_results([100000, 120000])  # $1000, $1200
+    answer = _build_brand_budget_answer_v2(query, results, {})
+    assert answer, f"Expected non-empty budget answer for query: {query!r}"
+
+
+def test_will_dollar_v2_answer():
+    """'Will $1500 cover...' pattern should trigger budget answer."""
+    results = _make_results([130000, 145000])  # $1300, $1450
+    answer = _build_brand_budget_answer_v2("Will $1500 cover a gaming laptop?", results, {})
+    assert answer
+    assert "yes" in answer.lower() or "1,500" in answer or "1500" in answer
+
+
+def test_would_dollar_v2_over_budget():
+    results = _make_results([200000, 250000])  # $2000, $2500
+    answer = _build_brand_budget_answer_v2("Would $1500 be enough?", results, {})
+    assert answer
+    assert "no" in answer.lower() or "short" in answer.lower() or "2,000" in answer
 
 
 # ─────────────────────────────────────────────────────────────────────────────

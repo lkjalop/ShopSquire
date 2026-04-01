@@ -159,6 +159,40 @@ class TestGetAccessoryAffinities:
         mouse_idx = result.index("mouse") if "mouse" in result else -1
         assert mouse_idx >= 0 and mouse_idx < 4  # near the front
 
+    # ── engineering_student affinities ──────────────────────────────────────
+    def test_engineering_student_includes_ssd_monitor_dock(self):
+        result = get_accessory_affinities("engineering_student")
+        for slug in ("external_ssd", "monitor", "dock"):
+            assert slug in result, f"engineering_student affinities missing {slug!r}"
+
+    def test_engineering_student_includes_usb_hub(self):
+        result = get_accessory_affinities("engineering_student")
+        assert "usb_hub" in result
+
+    def test_engineering_student_specific_items_before_universal(self):
+        result = get_accessory_affinities("engineering_student")
+        ssd_idx = result.index("external_ssd") if "external_ssd" in result else -1
+        sleeve_idx = result.index("laptop_sleeve") if "laptop_sleeve" in result else len(result)
+        # external_ssd (specific) must come before laptop_sleeve (universal)
+        assert ssd_idx >= 0 and ssd_idx < sleeve_idx
+
+    # ── high_school affinities ────────────────────────────────────────────────
+    def test_high_school_includes_mouse(self):
+        result = get_accessory_affinities("high_school")
+        assert "mouse" in result, "high_school affinities should include mouse"
+
+    def test_high_school_includes_universal_items(self):
+        result = get_accessory_affinities("high_school")
+        assert any(s in result for s in ("laptop_sleeve", "usb_hub", "screen_protector")), \
+            "high_school affinities should include universal accessories"
+
+    def test_high_school_no_gaming_specific_items(self):
+        result = get_accessory_affinities("high_school")
+        # High school should NOT get gaming accessories
+        for gaming_slug in ("gaming_mouse", "cooling_pad", "headset"):
+            assert gaming_slug not in result, \
+                f"high_school affinities should not contain {gaming_slug!r}"
+
 
 class TestGetUseCasePriorityFactors:
     def test_gaming_returns_gpu_first(self):
