@@ -2341,6 +2341,12 @@ const DevTracePanel = ({ open, onClose, trace }) => {
       ...toStrList(sec.mitre),
       ...toStrList(sec.mitre_attack),
     ];
+    const possibleMitre = [
+      ...toStrList(sec.mitre_atlas_possible),
+      ...toStrList(sec.possible_mitre_atlas),
+      ...toStrList(sec.mitre_attack_possible),
+      ...toStrList(sec.possible_mitre_attack),
+    ];
     const owasp = [
       ...toStrList(sec.owasp_llm_top10),
       ...toStrList(sec.owasp_llm),
@@ -2354,7 +2360,37 @@ const DevTracePanel = ({ open, onClose, trace }) => {
     const evidence = (sec.evidence && typeof sec.evidence === 'object') ? sec.evidence : {};
     const containment = toStrList(sec.containment_actions || sec.actions);
     const bitemporal = (sec.bitemporal && typeof sec.bitemporal === 'object') ? sec.bitemporal : (p.bitemporal && typeof p.bitemporal === 'object' ? p.bitemporal : null);
-    return { severity, route, thresholdVersion, confidence, signals, mitre, owasp, stride, evidence, containment, bitemporal };
+    const payloadFindings = Array.isArray(sec.payload_findings) ? sec.payload_findings : [];
+    const findingGroups = (sec.finding_groups && typeof sec.finding_groups === 'object') ? sec.finding_groups : (evidence.finding_groups && typeof evidence.finding_groups === 'object' ? evidence.finding_groups : {});
+    const activeFindings = Array.isArray(findingGroups.active_findings) ? findingGroups.active_findings : payloadFindings.filter((f) => String(f?.finding_group || '') === 'active_findings');
+    const detectionArtifactPatterns = Array.isArray(findingGroups.detection_artifact_patterns) ? findingGroups.detection_artifact_patterns : payloadFindings.filter((f) => String(f?.finding_group || '') === 'detection_artifact_patterns');
+    const unconfirmedHypotheses = Array.isArray(findingGroups.unconfirmed_higher_order_hypotheses) ? findingGroups.unconfirmed_higher_order_hypotheses : payloadFindings.filter((f) => String(f?.finding_group || '') === 'unconfirmed_higher_order_hypotheses');
+    const provenance = Array.isArray(evidence.artifact_provenance) ? evidence.artifact_provenance : [];
+    return {
+      severity,
+      route,
+      thresholdVersion,
+      confidence,
+      signals,
+      mitre,
+      possibleMitre,
+      owasp,
+      stride,
+      evidence,
+      containment,
+      bitemporal,
+      claimStatus: sec.claim_status || evidence.claim_status || null,
+      findingGroup: sec.finding_group || evidence.finding_group || null,
+      evidenceLane: sec.evidence_lane || evidence.evidence_lane || null,
+      payloadHypothesis: evidence.payload_hypothesis || sec.attack_hypothesis || null,
+      activeFindings,
+      detectionArtifactPatterns,
+      unconfirmedHypotheses,
+      runtimeEvidenceRequired: toStrList(sec.runtime_evidence_required || evidence.runtime_evidence_required),
+      runtimeEvidencePresent: toStrList(sec.runtime_evidence_present || evidence.runtime_evidence_present),
+      payloadFindings,
+      provenance,
+    };
   };
 
   const securitySnapshots = (() => {
@@ -2523,12 +2559,69 @@ const DevTracePanel = ({ open, onClose, trace }) => {
   );
 
   const renderSecurityTab = () => {
+    const activeFindings = Array.isArray(securityCurrent?.activeFindings) ? securityCurrent.activeFindings : [];
+    const detectionArtifacts = Array.isArray(securityCurrent?.detectionArtifactPatterns) ? securityCurrent.detectionArtifactPatterns : [];
+    const unconfirmed = Array.isArray(securityCurrent?.unconfirmedHypotheses) ? securityCurrent.unconfirmedHypotheses : [];
+    const runtimeRequired = Array.isArray(securityCurrent?.runtimeEvidenceRequired) ? securityCurrent.runtimeEvidenceRequired : [];
+    const runtimePresent = Array.isArray(securityCurrent?.runtimeEvidencePresent) ? securityCurrent.runtimeEvidencePresent : [];
+    const possibleMitre = Array.isArray(securityCurrent?.possibleMitre) ? securityCurrent.possibleMitre : [];
+    const provenance = Array.isArray(securityCurrent?.provenance) ? securityCurrent.provenance : [];
     const signalEntries = Object.entries(signals || {}).filter(([, v]) => Boolean(v));
     const hasMatrix = signalEntries.length > 0
       || (securityCurrent?.mitre || []).length > 0
+      || possibleMitre.length > 0
       || (securityCurrent?.owasp || []).length > 0
       || (securityCurrent?.stride || []).length > 0
+      || activeFindings.length > 0
+      || detectionArtifacts.length > 0
+      || unconfirmed.length > 0
       || !!securityCurrent?.route;
+
+    const renderFindingSection = (title, items, tone) => {
+      const rows = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (rows.length === 0) return null;
+      const palette = tone === 'warn'
+        ? { bg: '#fff7ed', border: '#fdba74', text: '#9a3412' }
+        : tone === 'muted'
+          ? { bg: '#f8fafc', border: '#cbd5e1', text: '#475569' }
+          : { bg: '#ecfeff', border: '#67e8f9', text: '#155e75' };
+      return (
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', marginBottom: '10px' }}>
+          <div style={{ fontWeight: 900, marginBottom: '8px' }}>{title}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {rows.map((item, idx) => {
+              const refs = Array.isArray(item?.evidence_refs) ? item.evidence_refs : [];
+              const evidence = Array.isArray(item?.evidence) ? item.evidence : [];
+              return (
+                <div key={`${title}-${idx}`} style={{ border: '1px solid #e5e7eb', borderRadius: '10px', padding: '10px', background: '#fff' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <strong style={{ color: '#111827', fontSize: '12px' }}>{String(item?.headline || item?.summary || item?.finding_type || 'finding')}</strong>
+                    <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '999px', background: palette.bg, border: `1px solid ${palette.border}`, color: palette.text }}>
+                      {String(item?.claim_status || 'inferred')}
+                    </span>
+                  </div>
+                  {(item?.business_outcome || item?.business_risk) && (
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#374151' }}>
+                      {String(item.business_outcome || item.business_risk)}
+                    </div>
+                  )}
+                  {evidence.length > 0 && (
+                    <ul style={{ margin: '8px 0 0 18px', fontSize: '12px', color: '#374151' }}>
+                      {evidence.slice(0, 3).map((entry, eidx) => <li key={eidx}>{String(entry)}</li>)}
+                    </ul>
+                  )}
+                  {refs.length > 0 && (
+                    <div style={{ marginTop: '6px', fontSize: '11px', color: '#6b7280' }}>
+                      refs: {refs.join(', ')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
 
     if (!hasMatrix) {
       return (
@@ -2548,19 +2641,31 @@ const DevTracePanel = ({ open, onClose, trace }) => {
     return (
       <div style={{ padding: '12px', overflowY: 'auto', width: '100%' }}>
         <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', marginBottom: '10px' }}>
-          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Route</div>
+          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Assessment</div>
           <div style={{ fontSize: '12px', color: '#374151', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
             <span><small style={{ color: '#6b7280' }}>Route:</small> {securityCurrent?.route || '-'}</span>
             <span><small style={{ color: '#6b7280' }}>Severity:</small> {securityCurrent?.severity || '-'}</span>
             <span><small style={{ color: '#6b7280' }}>Threshold:</small> {securityCurrent?.thresholdVersion || '-'}</span>
             <span><small style={{ color: '#6b7280' }}>Confidence:</small> {typeof securityCurrent?.confidence === 'number' ? securityCurrent.confidence.toFixed(3) : '-'}</span>
+            <span><small style={{ color: '#6b7280' }}>Evidence lane:</small> {securityCurrent?.evidenceLane || '-'}</span>
+            <span><small style={{ color: '#6b7280' }}>Claim status:</small> {securityCurrent?.claimStatus || '-'}</span>
+            <span><small style={{ color: '#6b7280' }}>Finding group:</small> {securityCurrent?.findingGroup || '-'}</span>
           </div>
+          {securityCurrent?.payloadHypothesis && (
+            <div style={{ marginTop: '8px', fontSize: '12px', color: '#374151' }}>
+              <small style={{ color: '#6b7280' }}>Payload hypothesis:</small> {String(securityCurrent.payloadHypothesis)}
+            </div>
+          )}
           {securityCurrent?.bitemporal && (
             <div style={{ marginTop: '8px', fontSize: '11px', color: '#6b7280' }}>
-              valid_from: {securityCurrent.bitemporal.valid_from || '-'} | system_from: {securityCurrent.bitemporal.system_from || '-'}
+              valid_from: {securityCurrent.bitemporal.valid_from || '-'} | valid_to: {securityCurrent.bitemporal.valid_to || '-'} | system_from: {securityCurrent.bitemporal.system_from || '-'} | system_to: {securityCurrent.bitemporal.system_to || '-'}
             </div>
           )}
         </div>
+
+        {renderFindingSection('Observed Evidence', activeFindings, 'info')}
+        {renderFindingSection('Detection Artifact Patterns', detectionArtifacts, 'muted')}
+        {renderFindingSection('Unconfirmed Hypotheses Pending Runtime Telemetry', unconfirmed, 'warn')}
 
         <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', marginBottom: '10px' }}>
           <div style={{ fontWeight: 900, marginBottom: '6px' }}>Signals</div>
@@ -2577,19 +2682,38 @@ const DevTracePanel = ({ open, onClose, trace }) => {
         </div>
 
         <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px', marginBottom: '10px' }}>
-          <div style={{ fontWeight: 900, marginBottom: '6px' }}>MITRE / OWASP / STRIDE</div>
+          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Framework Mappings</div>
           <div style={{ fontSize: '12px', color: '#374151', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div><small style={{ color: '#6b7280' }}>MITRE:</small> <span>{(securityCurrent?.mitre || []).join(', ') || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>Active ATT&amp;CK / ATLAS:</small> <span>{(securityCurrent?.mitre || []).join(', ') || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>Possible mappings:</small> <span>{possibleMitre.join(', ') || '-'}</span></div>
             <div><small style={{ color: '#6b7280' }}>OWASP:</small> <span>{(securityCurrent?.owasp || []).join(', ') || '-'}</span></div>
             <div><small style={{ color: '#6b7280' }}>STRIDE:</small> <span>{(securityCurrent?.stride || []).join(', ') || '-'}</span></div>
           </div>
+          {possibleMitre.length > 0 && (
+            <div style={{ marginTop: '8px', fontSize: '11px', color: '#9a3412', background: '#fff7ed', border: '1px solid #fdba74', borderRadius: '10px', padding: '8px 10px' }}>
+              No execution or C2 mapping is treated as active until sandbox, endpoint, and network telemetry provide runtime confirmation.
+            </div>
+          )}
         </div>
 
         <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '12px' }}>
-          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Evidence / Actions</div>
+          <div style={{ fontWeight: 900, marginBottom: '6px' }}>Evidence Provenance / Actions</div>
           <div style={{ fontSize: '12px', color: '#374151', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div><small style={{ color: '#6b7280' }}>Source:</small> <span>{securityCurrent?.evidence?.source || '-'}</span></div>
             <div><small style={{ color: '#6b7280' }}>Containment:</small> <span>{(securityCurrent?.containment || []).join(', ') || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>Matched patterns:</small> <span>{toStrList(securityCurrent?.evidence?.matched_patterns).join(', ') || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>Runtime evidence present:</small> <span>{runtimePresent.join(', ') || '-'}</span></div>
+            <div><small style={{ color: '#6b7280' }}>Runtime evidence still required:</small> <span>{runtimeRequired.join(', ') || '-'}</span></div>
+            <div>
+              <small style={{ color: '#6b7280' }}>Artifact provenance:</small>
+              <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {provenance.length > 0 ? provenance.map((row, idx) => (
+                  <div key={idx} style={{ fontSize: '11px', color: '#374151' }}>
+                    {String(row?.source_file || 'artifact')} • {String(row?.extraction_method || 'extract')} • {String(row?.match_ref || 'match')} • {String(row?.confidence || 'unknown')}
+                  </div>
+                )) : <span>-</span>}
+              </div>
+            </div>
           </div>
         </div>
       </div>

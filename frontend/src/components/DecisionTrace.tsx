@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+﻿import { useEffect, useState, useRef, useCallback } from 'react';
 import styles from './DecisionTrace.module.css';
 import { apiUrl, getApiBase, safeJson, wsUrl } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
@@ -156,7 +156,7 @@ function humanizeKey(key: string): string {
 }
 
 function renderValue(value: any) {
-  const unknownText = new Set(['', '?', '--', '—', 'â€”', 'unknown', 'n/a', 'null', 'undefined']);
+  const unknownText = new Set(['', '?', '--', 'â€”', 'Ã¢â‚¬â€', 'unknown', 'n/a', 'null', 'undefined']);
   if (value === null || value === undefined) return <span className={styles.muted}>Not available</span>;
   if (typeof value === 'boolean') {
     return <span className={value ? styles.booleanYes : styles.booleanNo}>{value ? 'Yes' : 'No'}</span>;
@@ -166,9 +166,9 @@ function renderValue(value: any) {
     const normalized = value.trim();
     if (unknownText.has(normalized.toLowerCase())) return <span className={styles.muted}>Not available</span>;
     const cleaned = normalized
-      .replaceAll('â€”', 'Not available')
       .replaceAll('Ã¢â‚¬â€', 'Not available')
-      .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', 'Not available');
+      .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', 'Not available')
+      .replaceAll('ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â', 'Not available');
     const trimmed = cleaned.length > 220 ? `${cleaned.slice(0, 220)}...` : cleaned;
     return <span className={styles.valueText} title={cleaned}>{trimmed}</span>;
   }
@@ -190,7 +190,7 @@ function isMissingValue(value: any): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    return ['', '?', '--', '—', 'â€”', 'unknown', 'n/a', 'null', 'undefined'].includes(normalized);
+    return ['', '?', '--', 'â€”', 'Ã¢â‚¬â€', 'unknown', 'n/a', 'null', 'undefined'].includes(normalized);
   }
   if (Array.isArray(value)) return value.length === 0;
   if (typeof value === 'object') return Object.keys(value).length === 0;
@@ -204,9 +204,9 @@ function formatDisplayText(value: any, fallback = 'Not available'): string {
   if (Array.isArray(value)) return value.map((item) => String(item)).join(', ');
   return String(value)
     .replaceAll('_', ' ')
-    .replaceAll('â€”', fallback)
     .replaceAll('Ã¢â‚¬â€', fallback)
-    .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', fallback);
+    .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', fallback)
+    .replaceAll('ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â', fallback);
 }
 
 function eventAliases(evt: TraceEvent): string[] {
@@ -794,7 +794,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return [];
   })();
 
-  /** One-line "why this fired" for the analyst — driven by hypothesis first, signals as fallback. */
+  /** One-line "why this fired" for the analyst â€” driven by hypothesis first, signals as fallback. */
   function buildWhyFiredLine(sigs: Record<string, any>, payloadAnalysis: any): string | null {
     const hyp = payloadAnalysis?.attack_hypothesis;
     const DETECTION_MAP: Record<string, string> = {
@@ -836,7 +836,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (sigs.adversarial_detected) parts.push('Adversarial perturbation signature found; image may be crafted to mislead the classifier.');
     if (sigs.ai_generated_suspected) parts.push('High diffusion-model score ? image may be AI-generated.');
     if (payloadAnalysis.attack_hypothesis === 'ransomware' || sigs.ransomware_indicator) {
-      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR — sandbox detonation required before any further processing. Do NOT execute on a live host.');
+      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR â€” sandbox detonation required before any further processing. Do NOT execute on a live host.');
     } else if (payloadAnalysis.attack_hypothesis && payloadAnalysis.attack_hypothesis !== 'unknown') {
       parts.push(`Passive triage suggests ${String(payloadAnalysis.attack_hypothesis).replace(/_/g, ' ')} behavior.`);
     } else if (sigs.steg_suspicious) {
@@ -1047,7 +1047,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         const _profileSummary = _profiles.length > 0
           ? ` ${_profiles.map((p: any) => `${p.full_name || p.binary} (${p.mitre_sub_technique || 'MITRE'})`).join(' | ')}.`
           : '';
-        const _ransomwareWarning = _ransomware ? ' ⚠\ufe0f Ransomware indicator — do NOT execute outside sandbox.' : '';
+        const _ransomwareWarning = _ransomware ? ' âš \ufe0f Ransomware indicator â€” do NOT execute outside sandbox.' : '';
         const _hypothesis = String(payloadAnalysis?.attack_hypothesis || 'unknown').replace(/_/g, ' ');
         const _payloadType = String(payloadAnalysis?.payload_type || 'unknown').replace(/_/g, ' ');
         const _nextStep = String(payloadAnalysis?.suggested_next_step || 'allow').replace(/_/g, ' ');
@@ -1492,7 +1492,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         <div className={styles.sectionTitle}>{sec?.title || `Image ${idx + 1}`}</div>
                         <div className={styles.kvRow}>
                           <span>Match basis</span>
-                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' Ãƒâ€šÃ‚Â· ') : '?'}</span>
+                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ') : '?'}</span>
                         </div>
                         {sec?.summary && <div className={styles.whyNarrative}>{sec.summary}</div>}
                         {Array.isArray(sec?.top_products) && sec.top_products.slice(0, 3).map((p: any, pIdx: number) => (
@@ -2066,6 +2066,50 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           </div>
                         );
                       })()}
+                      {(() => {
+                        const severityLabel = formatDisplayText(security.severity, 'review').toLowerCase();
+                        const killChainPhase = formatDisplayText(
+                          security.pasta?.current_stage || security.pasta?.stage || security.pasta_stage,
+                          'Review',
+                        );
+                        const lead = Array.isArray(security?.threat_hunter_leads) && security.threat_hunter_leads.length > 0
+                          ? security.threat_hunter_leads[0]
+                          : null;
+                        const approvalAware = ['high', 'critical'].includes(severityLabel) || String(security.policy_route || security.route || '').toLowerCase().includes('escal');
+                        const plainEnglish = lead?.why_it_matters
+                          || buildWhyFiredLine(security?.signals || {}, security?.payload_analysis || {})
+                          || 'This artifact needs review because the evidence suggests a security-relevant workflow, not just a cosmetic image issue.';
+                        const hunterAction = lead?.what_to_hunt_next?.[0] || 'Correlate this artifact with endpoint, identity, and network telemetry before broader containment.';
+                        const humanAction = approvalAware
+                          ? 'Hold blocking or containment actions until a human reviewer approves the next step.'
+                          : 'Low-risk logging and observation can continue automatically, but escalation should stay human-led.';
+                        return (
+                          <div className={styles.playbookPanel}>
+                            <div className={styles.sectionTitle}>What This Means</div>
+                            <div className={styles.muted}>{plainEnglish}</div>
+                            <div className={styles.kvRow}><span>Kill chain phase</span><span>{killChainPhase}</span></div>
+                            <div className={styles.kvRow}><span>Severity gate</span><span>{severityLabel}</span></div>
+                            <div className={styles.kvRow}><span>Human approval</span><span>{humanAction}</span></div>
+                            <details className={styles.detailSection}>
+                              <summary className={styles.detailToggle}>Role-based next actions</summary>
+                              <div className={styles.detailBody}>
+                                <div className={styles.sectionTitle}>Threat Hunter</div>
+                                <ul className={styles.playbookList}>
+                                  <li>{hunterAction}</li>
+                                </ul>
+                                <div className={styles.sectionTitle}>SOC / Security Ops</div>
+                                <ul className={styles.playbookList}>
+                                  <li>{approvalAware ? 'Prepare containment options, but keep them pending explicit approval.' : 'Queue low-risk monitoring and evidence collection.'}</li>
+                                </ul>
+                                <div className={styles.sectionTitle}>Human Reviewer</div>
+                                <ul className={styles.playbookList}>
+                                  <li>{lead?.business_guidance || 'Use the plain-English summary to decide whether to escalate, block, or request more evidence.'}</li>
+                                </ul>
+                              </div>
+                            </details>
+                          </div>
+                        );
+                      })()}
                       <details className={styles.detailSection}>
                         <summary className={styles.detailToggle}>Open security matrix detail</summary>
                         <div className={styles.detailBody}>
@@ -2104,11 +2148,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           <span className={trustChannels?.visual_embedding_trusted ? styles.booleanYes : styles.booleanNo}>
                             visual:{trustChannels?.visual_embedding_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' Â· '}
+                          {' Ã‚Â· '}
                           <span className={trustChannels?.ocr_trusted ? styles.booleanYes : styles.booleanNo}>
                             ocr:{trustChannels?.ocr_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' Â· '}
+                          {' Ã‚Â· '}
                           <span className={trustChannels?.qr_trusted ? styles.booleanYes : styles.booleanNo}>
                             qr:{trustChannels?.qr_trusted ? 'trusted' : 'untrusted'}
                           </span>
@@ -2392,7 +2436,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               <span>{filename}</span>
                               <span className={clean ? styles.tagGreen : styles.tagRed}>{clean ? 'Clean' : 'Flagged'}</span>
                             </div>
-                            {/* Why this fired — one-liner analyst detection reason */}
+                            {/* Why this fired â€” one-liner analyst detection reason */}
                             {!clean && (() => {
                               const _why = buildWhyFiredLine(sigs, payloadAnalysis);
                               return _why ? (
@@ -2525,7 +2569,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                     <div className={styles.sectionSubTitle}>Linked Artifact Provenance</div>
                                     <ul className={styles.playbookList}>
                                       {linkedArtifact.linked_artifact_provenance.map((row: any, pi: number) => (
-                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} � ${row?.extraction_method || 'extract'} � ${row?.match_ref || 'match'} � ${row?.confidence || 'unknown'}${row?.reason ? ` � ${row.reason}` : ''}`}</li>
+                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} • ${row?.extraction_method || 'extract'} • ${row?.match_ref || 'match'} • ${row?.confidence || 'unknown'}${row?.reason ? ` • ${row.reason}` : ''}`}</li>
                                       ))}
                                     </ul>
                                   </>
@@ -2622,7 +2666,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 <div className={styles.sectionSubTitle}>Artifact Provenance</div>
                                 <ul className={styles.playbookList}>
                                   {artifactProvenance.map((row: any, pi: number) => (
-                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} � ${row?.extraction_method || 'extract'} � ${row?.match_ref || 'match'} � ${row?.confidence || 'unknown'}${row?.reason ? ` � ${row.reason}` : ''}`}</li>
+                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} • ${row?.extraction_method || 'extract'} • ${row?.match_ref || 'match'} • ${row?.confidence || 'unknown'}${row?.reason ? ` • ${row.reason}` : ''}`}</li>
                                   ))}
                                 </ul>
                               </>
@@ -2809,6 +2853,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     </div>
   );
 }
+
 
 
 

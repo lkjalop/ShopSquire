@@ -11,6 +11,7 @@ export default function AttachmentButton({ onFiles, disabled = false, className 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const acceptImages = 'image/*,.avif,image/avif';
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
@@ -78,8 +79,8 @@ export default function AttachmentButton({ onFiles, disabled = false, className 
           </button>
         </div>
       )}
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple onChange={handleFileSelect} className={styles.hidden} />
-      <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} className={styles.hidden} />
+      <input ref={cameraInputRef} type="file" accept={acceptImages} capture="environment" multiple onChange={handleFileSelect} className={styles.hidden} />
+      <input ref={fileInputRef} type="file" accept={acceptImages} multiple onChange={handleFileSelect} className={styles.hidden} />
     </div>
   );
 }

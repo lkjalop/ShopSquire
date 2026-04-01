@@ -13,6 +13,7 @@ export default function CameraButton({
   className?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const acceptImages = 'image/*,.avif,image/avif';
 
   const handleClick = () => {
     if (disabled) return;
@@ -43,7 +44,7 @@ export default function CameraButton({
         ref={inputRef}
         className={styles.fileInput}
         type="file"
-        accept="image/*"
+        accept={acceptImages}
         capture="environment"
         multiple
         onChange={handleChange}

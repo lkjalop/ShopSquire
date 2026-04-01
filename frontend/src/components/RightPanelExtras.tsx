@@ -55,6 +55,7 @@ export type CVSubmitResult = {
   warranty_eligibility?: { eligible?: boolean | null; expires?: string; gap_days?: number; advice?: string; reason?: string } | null;
   user_prompt?: string | null;
   ui_actions?: UIActions;
+  faq_playbooks?: Array<{ id?: string; title?: string; description?: string; steps?: string[]; tags?: string[] }>;
 };
 
 export default function RightPanelExtras({
@@ -307,6 +308,7 @@ export default function RightPanelExtras({
         warranty_eligibility: j.warranty_eligibility || null,
         user_prompt: j.user_prompt,
         ui_actions: j.ui_actions,
+        faq_playbooks: Array.isArray(j.faq_playbooks) ? j.faq_playbooks : [],
       });
       onResult?.({
         decision_id: j.decision_id,
@@ -322,6 +324,7 @@ export default function RightPanelExtras({
         warranty_eligibility: j.warranty_eligibility || null,
         user_prompt: j.user_prompt,
         ui_actions: j.ui_actions,
+        faq_playbooks: Array.isArray(j.faq_playbooks) ? j.faq_playbooks : [],
       });
       // Extract image recommend context from complaint submit response (same as analyzeSafely)
       const irc = j.image_recommend_context;
@@ -391,6 +394,7 @@ export default function RightPanelExtras({
         warranty_eligibility: (resp as any)?.warranty_eligibility || null,
         user_prompt: ic?.prompt || null,
         ui_actions: (resp as any)?.ui_actions || { chat_with_admin: false },
+        faq_playbooks: Array.isArray((resp as any)?.faq_playbooks) ? (resp as any).faq_playbooks : [],
       };
       onTraceId?.(resolvedTraceId);
       setResult(cvRes);
@@ -425,6 +429,7 @@ export default function RightPanelExtras({
         warranty_eligibility: cvRes.warranty_eligibility,
         user_prompt: cvRes.user_prompt,
         ui_actions: cvRes.ui_actions,
+        faq_playbooks: cvRes.faq_playbooks,
         qr_prompt_injection: (resp as any)?.qr_prompt_injection,
       });
     } catch (e: any) {
@@ -544,6 +549,7 @@ export default function RightPanelExtras({
         warranty_eligibility: (up as any)?.warranty_eligibility || null,
         user_prompt: null,
         ui_actions: { chat_with_admin: needsReview },
+        faq_playbooks: Array.isArray((up as any)?.faq_playbooks) ? (up as any).faq_playbooks : [],
       });
       onResult?.({
         decision_id: (up as any)?.case_id,
@@ -559,6 +565,7 @@ export default function RightPanelExtras({
         warranty_eligibility: (up as any)?.warranty_eligibility || null,
         user_prompt: null,
         ui_actions: { chat_with_admin: needsReview },
+        faq_playbooks: Array.isArray((up as any)?.faq_playbooks) ? (up as any).faq_playbooks : [],
       });
     } catch (e: any) {
       setError(e?.message || 'Upload via nonce failed');
@@ -758,6 +765,24 @@ export default function RightPanelExtras({
           {result.user_prompt && (
             <div style={{ marginTop: 8, background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', borderRadius: 8, padding: '8px 10px' }}>
               <strong>Verify photos:</strong> {result.user_prompt}
+            </div>
+          )}
+          {Array.isArray(result.faq_playbooks) && result.faq_playbooks.length > 0 && (
+            <div style={{ marginTop: 8, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '8px 10px' }}>
+              <strong>Suggested support playbook</strong>
+              {result.faq_playbooks.slice(0, 2).map((item, idx) => (
+                <div key={item.id || idx} style={{ marginTop: idx === 0 ? 6 : 10 }}>
+                  <div style={{ fontWeight: 600 }}>{item.title || 'Support guide'}</div>
+                  {item.description && <div style={{ fontSize: 12, marginTop: 4 }}>{item.description}</div>}
+                  {Array.isArray(item.steps) && item.steps.length > 0 && (
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                      {item.steps.slice(0, 3).map((step, stepIdx) => (
+                        <li key={stepIdx} style={{ fontSize: 12 }}>{step}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           {result.image_consistency?.images && (

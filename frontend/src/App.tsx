@@ -1276,6 +1276,15 @@ export default function App() {
         }
         setTraceId(nextTraceId);
 
+        // Auto-open decision trace when image is security-flagged so the analyst sees the full matrix immediately
+        if (
+          nextTraceId &&
+          (data.status === 'image_flagged_vision_results' || data.status === 'image_flagged_text_results') &&
+          data.security_alert
+        ) {
+          setTraceOpen(true);
+        }
+
         if (isDisambiguation) {
           // Show disambiguation buttons instead of products
           const assistantMsg: ChatMessage = {
@@ -1860,6 +1869,28 @@ export default function App() {
                     </div>
                   )}
 
+                  {Array.isArray((rightPanelContract as any)?.parallel_agents) && (rightPanelContract as any).parallel_agents.length > 0 && (
+                    <div className={styles.supportAgents} style={{ background: (rightPanelContract as any).image_flagged ? 'rgba(239,68,68,0.08)' : undefined, borderRadius: 8, marginBottom: 8, padding: '8px 12px' }}>
+                      {(rightPanelContract as any).image_flagged && (
+                        <div style={{ color: '#ef4444', fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
+                          ⚠️ Image flagged — security agents engaged, showing text-only results
+                        </div>
+                      )}
+                      <div className={styles.tierTitle}>Parallel agents running</div>
+                      <div className={styles.tagRow}>
+                        {(rightPanelContract as any).parallel_agents.map((a: any) => (
+                          <span key={String(a)} className={styles.quickChip} style={{ background: (rightPanelContract as any).image_flagged ? '#fef2f2' : undefined, color: (rightPanelContract as any).image_flagged ? '#dc2626' : undefined }}>{String(a)}</span>
+                        ))}
+                      </div>
+                      {(rightPanelContract as any).security_matrix && (
+                        <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+                          <strong>Security matrix:</strong>{' '}
+                          {[(rightPanelContract as any).security_matrix.verdict, ...((rightPanelContract as any).security_matrix.owasp || []).slice(0, 2)].filter(Boolean).join(' · ')}
+                          {' '}— <button style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: 0, fontSize: 12 }} onClick={() => setTraceOpen(true)}>View full trace ↗</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {rightPanelContract?.mode === 'shopping' && rightPanelContract?.show_tiers && (
                     <div className={styles.tierPanel}>
                       <div className={styles.tierBlock}>
