@@ -4750,6 +4750,10 @@ def suggest(
                     image_reupload_reasons.append("manipulation_detected")
                 if adversarial >= 0.35:
                     image_reupload_reasons.append("adversarial_score_high")
+                if bool(parsed_cv.get("ssn_detected")):
+                    image_reupload_reasons.append("pii_detected_ssn")
+                elif bool(parsed_cv.get("pii_detected")):
+                    image_reupload_reasons.append("pii_detected")
         if image_context.get("ocr"):
             ocr_aug = _augment_image_cv_signals_from_ocr(image_context.get("ocr"))
             for _k, _v in ocr_aug.items():
@@ -4777,9 +4781,12 @@ def suggest(
         catalog_relevance = {}
     query_effective = query
     if image_context.get("labels") or image_context.get("ocr"):
+        _ocr_for_query = image_context.get("ocr") or ""
+        if any(r in image_reupload_reasons for r in ("pii_detected_ssn", "pii_detected", "pci_card_exposed")):
+            _ocr_for_query = scrub_pii(_ocr_for_query)
         query_effective = (
             f"{query or ''} image_labels:{' '.join(image_context.get('labels') or [])} "
-            f"image_ocr:{image_context.get('ocr') or ''}"
+            f"image_ocr:{_ocr_for_query}"
         ).strip()
         try:
             log_trace_event(

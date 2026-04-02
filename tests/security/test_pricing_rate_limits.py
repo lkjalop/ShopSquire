@@ -8,6 +8,19 @@ MERCHANT_KEY = os.getenv("MERCHANT_API_KEY", "local-merchant-key")
 
 hdr = {"x-api-key": MERCHANT_KEY}
 
+# Live-server tests: skip when no running API is available.
+def _server_up() -> bool:
+    try:
+        return requests.get(BASE_URL + "/healthz", timeout=1).status_code == 200
+    except Exception:
+        return False
+
+if not _server_up():
+    pytest.skip(
+        f"Pricing rate-limit E2E tests require a running API at {BASE_URL}",
+        allow_module_level=True,
+    )
+
 
 @pytest.mark.xfail(reason="Server may not expose rate-limit headers until restarted")
 def test_pricing_rate_limit_headers_present():

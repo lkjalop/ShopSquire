@@ -63,7 +63,10 @@ def test_server():
     os.environ.setdefault("TEST_TOLERANT_GET_ERRORS", "1")
     os.environ["TEST_FAST_HEALTH"] = "1"
     os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
-    os.environ.setdefault("CV_PROVIDER", "basic")
+    os.environ["CV_PROVIDER"] = "basic"
+    os.environ["CV_VISION_ENABLED"] = "0"
+    os.environ["CV_OCR_PROVIDER"] = "disabled"
+    os.environ["OLLAMA_URL"] = ""
     os.environ["DISABLE_UI_ROUTES"] = "0"
     os.environ["RATE_LIMIT_PER_IP_PER_MIN"] = "0"
     os.environ["TEST_USE_DEMO_DECISION_TRACE"] = "0"

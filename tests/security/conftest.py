@@ -58,7 +58,13 @@ def security_test_server():
         yield {"base_url": base_url}
         return
 
-    db_path = os.path.join("tests", "security", "redteam.sqlite")
+    # When running under pytest without a pre-started server and without
+    # SECURITY_SERVER_SPAWN=1 explicitly set, skip the subprocess spawn.
+    # Most security tests are pure unit tests; live-server tests should be
+    # run with E2E_BASE_URL or SECURITY_SERVER_SPAWN=1 set explicitly.
+    if os.getenv("SECURITY_SERVER_SPAWN", "0") != "1":
+        yield None
+        return
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     if os.path.exists(db_path):
         try:

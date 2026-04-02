@@ -124,6 +124,14 @@ class CSRFMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # API-key-authenticated requests are not vulnerable to CSRF:
+        # browsers cannot send custom headers cross-origin without an explicit
+        # CORS preflight approval, so the presence of x-api-key acts as its
+        # own same-origin proof (analogous to Origin checking).
+        if request.headers.get("x-api-key"):
+            await self.app(scope, receive, send)
+            return
+
         mode = _enforcement_mode()
         if mode == "off":
             await self.app(scope, receive, send)

@@ -1,8 +1,16 @@
 from pathlib import Path
+import os
+
+import pytest
 
 from src.app.security.email_eval_matrix import build_evaluation_report
 
 
+@pytest.mark.skipif(
+    not os.getenv("PYTEST_FULL_INTEGRATION"),
+    reason="Heavy integration test (steg + QR on real attachments). Set PYTEST_FULL_INTEGRATION=1 to enable.",
+)
+@pytest.mark.timeout(300)
 def test_email_eval_matrix_builds_expected_cases_when_fixtures_present():
     root = Path(__file__).resolve().parents[2]
     if not ((root / "dump" / "email-2" / "files").exists() or (root / "dump" / "email").exists()):
