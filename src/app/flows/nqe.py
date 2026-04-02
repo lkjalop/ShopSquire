@@ -492,6 +492,45 @@ class NextQuestionEngine:
                 )
             )
 
+        # ── High school hobby/extracurricular probe ──
+        # Fire when use_case = high_school AND the user hasn't mentioned gaming/editing/
+        # music yet AND we haven't already asked.  One question routes a $699 mainstream
+        # pick to a $899 creator/gaming spec without requiring the user to know what RAM
+        # or GPU they need.
+        _hs_probe_not_asked = "high_school_activity" not in set(
+            str(k).lower() for k in (inp.answered_fields or {})
+        )
+        _no_activity_signal = not any(
+            w in (query_text or "").lower()
+            for w in ("gaming", "game", "video edit", "editing", "music", "coding", "code", "design", "art", "graphics")
+        )
+        if (
+            inp.detected_use_case in ("high_school", "student", "high_schooler")
+            and _hs_probe_not_asked
+            and _no_activity_signal
+        ):
+            questions.append(
+                NextQuestion(
+                    id="ask_high_school_activity",
+                    text=_personalize_q(
+                        "Any hobbies or after-school activities that need the laptop? "
+                        "This helps us pick the right specs without overspending.",
+                        query_text,
+                    ),
+                    goal="refine_use_case",
+                    evidence_needed=["high_school_activity"],
+                    source="use_case_disambiguation",
+                    options=[
+                        {"label": "School notes / browsing only — keep it light", "value": "high_school_basic"},
+                        {"label": "Casual gaming (Minecraft, Roblox, Fortnite)", "value": "gaming_light"},
+                        {"label": "Video editing / YouTube / content creation", "value": "content_creator"},
+                        {"label": "Music production / audio software", "value": "music_production"},
+                        {"label": "Coding / programming projects", "value": "engineering_student"},
+                        {"label": "Digital art / graphic design", "value": "design_student"},
+                    ],
+                )
+            )
+
         # ── University subject specialization ──
         if inp.detected_use_case == "university_general":
             questions.append(

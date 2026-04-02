@@ -6424,11 +6424,20 @@ def suggest(
         if inferred_brand:
             constraints["_request_brand_hint"] = inferred_brand
         if inferred_brand and not (constraints.get("brands") or []):
-            constraints["brands"] = [inferred_brand]
             if str(inferred_brand).lower() == "apple":
+                # Apple images → hard-lock to macOS/Apple inventory only.
+                constraints["brands"] = ["apple"]
                 strict_image_brand_hint = "apple"
-            elif str(inferred_brand).lower() in _SUPPORTED_IMAGE_BRAND_HINTS:
+            else:
+                # Non-Apple brand detected (MSI, Lenovo, Dell, HP, Asus…)
+                # Priority: budget + specific_brand → budget + Windows OS (all non-Apple)
+                # This prevents empty results when the exact brand isn't in inventory.
+                # The specific brand is preferred first; we fall through to Windows later
+                # at the DB fallback layer if no brand-specific results exist.
+                constraints["brands"] = [inferred_brand]
                 strict_image_brand_hint = str(inferred_brand).lower()
+                # Stash OS hint used by the Windows fallback below.
+                constraints["_image_os_hint"] = "windows"
             log_trace_event(
                 trace_id=trace_id,
                 event_type="nqe_assumption_applied",
@@ -6439,6 +6448,7 @@ def suggest(
                 payload={
                     "assumption": "brand_from_image_label",
                     "brand": inferred_brand,
+                    "os_hint": "windows" if str(inferred_brand).lower() != "apple" else "macos",
                     "image_labels": image_context.get("labels") or [],
                     **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["image_labels"]),
                 },
@@ -8211,90 +8221,65 @@ def suggest(
                         except Exception:
                             pass
                     else:
-                        # Deterministic auto-jump: if widened band still has 0 results,
-                        # jump to the nearest viable inventory window (above or below).
-                        jump_alt = []
-                        jump_meta = {}
-                        try:
-                            q_low_price = str(query_effective or query or "").lower()
-                            explicit_hard_cap = any(tok in q_low_price for tok in (" under ", " below ", " max ", " at most ", " no more than "))
-                            allow_nearest_viable_fallback = (
-                                (budget_min_val is not None and budget_max_val is not None)
-                                or any(tok in q_low_price for tok in ("nearest", "closest", "widen", "broaden", "expand"))
-                                or not explicit_hard_cap
-                            )
-                            if not allow_nearest_viable_fallback:
-                                raise RuntimeError("nearest_viable_fallback_disabled_for_hard_cap")
-                            current_span = None
-                            if budget_min_val is not None and budget_max_val is not None:
-                                current_span = max(200, int(float(budget_max_val) - float(budget_min_val)))
-                            jump_span = max(400, int(current_span or 400))
-                            baseline_min = (
-                                float(budget_max_val)
-                                if budget_max_val is not None
-                                else (float(budget_min_val) if budget_min_val is not None else 0.0)
-                            )
-                            baseline_c = int(max(0.0, baseline_min) * 100)
-                            row_nearest = db.execute(
-                                text(
-                                    """
-                                    SELECT p.price_cents AS nearest_price_cents
-                                    FROM products p
-                                    WHERE p.active = 1
-                                    ORDER BY ABS(p.price_cents - :baseline_c) ASC, p.price_cents ASC
-                                    LIMIT 1
-                                    """
-                                ),
-                                {"baseline_c": baseline_c},
-                            ).mappings().first()
-                            nearest_c = int((row_nearest or {}).get("nearest_price_cents") or 0)
-                            if nearest_c > 0:
-                                nearest_direction = "above" if nearest_c >= baseline_c else "below"
-                                jump_min = int(nearest_c / 100)
-                                jump_max = int(jump_min + jump_span)
-                                rows_jump = db.execute(
+                        # ── Windows OS fallback for non-Apple image uploads ──────────────
+                        # When a specific brand (MSI, Lenovo, Dell…) was inferred from the
+                        # uploaded image but no in-budget products exist for that brand,
+                        # fall back to all Windows laptops in the same budget band.
+                        # This is correct UX: the user cares about OS/ecosystem (Windows vs
+                        # macOS) more than the exact brand, so we stay within the right OS
+                        # family rather than returning a random global budget search.
+                        # Apple images NEVER reach this path (hard-locked above).
+                        _windows_fallback_alt = []
+                        _windows_fallback_meta = {}
+                        _os_hint = str(constraints.get("_image_os_hint") or "").lower()
+                        _non_apple_brand = (
+                            str(strict_image_brand_hint or "").lower() not in ("apple", "")
+                            and _os_hint == "windows"
+                        )
+                        if _non_apple_brand:
+                            try:
+                                _win_pred = _brand_sql_predicate("windows")
+                                _min_c_win = int(budget_min_val * 100) if budget_min_val is not None else 0
+                                _max_c_win = int(budget_max_val * 100) if budget_max_val is not None else 10_000_000
+                                rows_win = db.execute(
                                     text(
-                                        """
+                                        f"""
                                         SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
                                                COALESCE(SUM(i.stock), 0) as stock
                                         FROM products p
                                         LEFT JOIN inventory i ON i.product_id = p.id
-                                        WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                                        WHERE p.active = 1
+                                          AND p.price_cents BETWEEN :min_c AND :max_c
+                                          AND {_win_pred}
                                         GROUP BY p.id
                                         ORDER BY p.price_cents ASC
                                         LIMIT 24
                                         """
                                     ),
-                                    {"min_c": int(jump_min * 100), "max_c": int(jump_max * 100)},
+                                    {"min_c": _min_c_win, "max_c": _max_c_win},
                                 ).mappings().all()
-                                for rj in rows_jump or []:
-                                    jump_alt.append({
-                                        "id": rj.get("id"),
-                                        "sku": rj.get("sku"),
-                                        "name": rj.get("name"),
-                                        "price_cents": rj.get("price_cents"),
-                                        "currency": rj.get("currency"),
-                                        "image_url": rj.get("image_url"),
-                                        "stock": rj.get("stock"),
-                                        "specs": rj.get("specs") or {},
-                                    })
-                                if jump_alt:
-                                    jump_meta = {
-                                        "budget_min": jump_min,
-                                        "budget_max": jump_max,
+                                _windows_fallback_alt = _rows_to_candidate_dicts(list(rows_win))
+                                if _windows_fallback_alt:
+                                    _windows_fallback_meta = {
+                                        "budget_min": budget_min_val,
+                                        "budget_max": budget_max_val,
                                         "candidates_before": retrieved_count,
-                                        "candidates_after": len(jump_alt),
-                                        "fallback": "db_nearest_viable_band",
-                                        "nearest_price": round(float(nearest_c) / 100.0, 2),
-                                        "nearest_direction": nearest_direction,
+                                        "candidates_after": len(_windows_fallback_alt),
+                                        "fallback": "windows_os_image_fallback",
+                                        "brand_hint_original": str(strict_image_brand_hint or "").lower(),
+                                        "os_hint": "windows",
                                     }
-                        except Exception:
-                            jump_alt = []
-                            jump_meta = {}
-                        if jump_alt:
-                            candidates = jump_alt
+                            except Exception:
+                                _windows_fallback_alt = []
+                        if _windows_fallback_alt:
+                            candidates = _windows_fallback_alt
                             filter_price_applied = True
-                            filter_meta_price = jump_meta
+                            filter_meta_price = _windows_fallback_meta
+                            # Update brand hint so assistant message reflects OS rather than
+                            # the missing specific brand.
+                            strict_image_brand_hint = "windows"
+                            constraints["_inferred_image_brand"] = "windows"
+                            constraints["_request_brand_hint"] = "windows"
                             try:
                                 log_trace_event(
                                     trace_id=trace_id,
@@ -8303,59 +8288,156 @@ def suggest(
                                     source_id="Price_Filter_Agent",
                                     target_type="system",
                                     target_id=None,
-                                    payload=filter_meta_price,
+                                    payload=_windows_fallback_meta,
                                 )
                             except Exception:
                                 pass
                         else:
-                            cb_record(redis, "recommend", True, degradation_cfg)
+                            # Deterministic auto-jump: if widened band still has 0 results,
+                            # jump to the nearest viable inventory window (above or below).
+                            jump_alt = []
+                            jump_meta = {}
                             try:
-                                _requested_qty = constraints.get("quantity") or 1
-                                log_trace_event(
-                                    trace_id=trace_id,
-                                    event_type="inventory_check",
-                                    source_type="agent",
-                                    source_id="Inventory_Agent",
-                                    target_type="system",
-                                    target_id=None,
-                                    payload={
-                                        "evaluations": [],
-                                        "requested_qty": _requested_qty,
-                                        "status": "skipped_no_candidates",
-                                        "reason": "no_candidates_after_price_filter",
-                                    },
+                                q_low_price = str(query_effective or query or "").lower()
+                                explicit_hard_cap = any(tok in q_low_price for tok in (" under ", " below ", " max ", " at most ", " no more than "))
+                                allow_nearest_viable_fallback = (
+                                    (budget_min_val is not None and budget_max_val is not None)
+                                    or any(tok in q_low_price for tok in ("nearest", "closest", "widen", "broaden", "expand"))
+                                    or not explicit_hard_cap
                                 )
+                                if not allow_nearest_viable_fallback:
+                                    raise RuntimeError("nearest_viable_fallback_disabled_for_hard_cap")
+                                current_span = None
+                                if budget_min_val is not None and budget_max_val is not None:
+                                    current_span = max(200, int(float(budget_max_val) - float(budget_min_val)))
+                                jump_span = max(400, int(current_span or 400))
+                                baseline_min = (
+                                    float(budget_max_val)
+                                    if budget_max_val is not None
+                                    else (float(budget_min_val) if budget_min_val is not None else 0.0)
+                                )
+                                baseline_c = int(max(0.0, baseline_min) * 100)
+                                row_nearest = db.execute(
+                                    text(
+                                        """
+                                        SELECT p.price_cents AS nearest_price_cents
+                                        FROM products p
+                                        WHERE p.active = 1
+                                        ORDER BY ABS(p.price_cents - :baseline_c) ASC, p.price_cents ASC
+                                        LIMIT 1
+                                        """
+                                    ),
+                                    {"baseline_c": baseline_c},
+                                ).mappings().first()
+                                nearest_c = int((row_nearest or {}).get("nearest_price_cents") or 0)
+                                if nearest_c > 0:
+                                    nearest_direction = "above" if nearest_c >= baseline_c else "below"
+                                    jump_min = int(nearest_c / 100)
+                                    jump_max = int(jump_min + jump_span)
+                                    rows_jump = db.execute(
+                                        text(
+                                            """
+                                            SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
+                                                   COALESCE(SUM(i.stock), 0) as stock
+                                            FROM products p
+                                            LEFT JOIN inventory i ON i.product_id = p.id
+                                            WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                                            GROUP BY p.id
+                                            ORDER BY p.price_cents ASC
+                                            LIMIT 24
+                                            """
+                                        ),
+                                        {"min_c": int(jump_min * 100), "max_c": int(jump_max * 100)},
+                                    ).mappings().all()
+                                    for rj in rows_jump or []:
+                                        jump_alt.append({
+                                            "id": rj.get("id"),
+                                            "sku": rj.get("sku"),
+                                            "name": rj.get("name"),
+                                            "price_cents": rj.get("price_cents"),
+                                            "currency": rj.get("currency"),
+                                            "image_url": rj.get("image_url"),
+                                            "stock": rj.get("stock"),
+                                            "specs": rj.get("specs") or {},
+                                        })
+                                    if jump_alt:
+                                        jump_meta = {
+                                            "budget_min": jump_min,
+                                            "budget_max": jump_max,
+                                            "candidates_before": retrieved_count,
+                                            "candidates_after": len(jump_alt),
+                                            "fallback": "db_nearest_viable_band",
+                                            "nearest_price": round(float(nearest_c) / 100.0, 2),
+                                            "nearest_direction": nearest_direction,
+                                        }
                             except Exception:
-                                pass
-                            if budget_min_val is not None and budget_max_val is not None:
-                                message = f"No products found between ${budget_min_val} and ${budget_max_val}."
-                            elif budget_max_val is not None:
-                                message = f"No products found under ${budget_max_val}."
-                            elif budget_min_val is not None:
-                                message = f"No products found above ${budget_min_val}."
+                                jump_alt = []
+                                jump_meta = {}
+                            if jump_alt:
+                                candidates = jump_alt
+                                filter_price_applied = True
+                                filter_meta_price = jump_meta
+                                try:
+                                    log_trace_event(
+                                        trace_id=trace_id,
+                                        event_type="agent_process",
+                                        source_type="agent",
+                                        source_id="Price_Filter_Agent",
+                                        target_type="system",
+                                        target_id=None,
+                                        payload=filter_meta_price,
+                                    )
+                                except Exception:
+                                    pass
                             else:
-                                message = "No products found in your price range."
-                            payload = {
-                                "results": [],
-                                "proposal": {"decision_mode": "rules", "ranked_skus": []},
-                                "constraints_used": constraints,
-                                "price_filter": filter_meta_price or {},
-                                "policy_version": flags.get("POLICY_VERSION", "v1"),
-                                "message": message,
-                                "degraded": use_rules,
-                                "eligible": not simulate,
-                                "view_mode": view_hint.get("view_mode"),
-                                "view_reason": view_hint.get("view_reason"),
-                                "agent_chain": [
-                                    {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
-                                    {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
-                                    {"agent": "Price_Filter_Agent", "candidates": 0, "constraints": filter_meta_price},
-                                    {"agent": "Inventory_Agent", "candidates_evaluated": 0, "status": "skipped_no_candidates"},
-                                ],
-                                "llm_model": llm_model,
-                                "model_tier": model_tier,
-                                "complexity_signals": complexity_signals,
-                            }
+                                cb_record(redis, "recommend", True, degradation_cfg)
+                                try:
+                                    _requested_qty = constraints.get("quantity") or 1
+                                    log_trace_event(
+                                        trace_id=trace_id,
+                                        event_type="inventory_check",
+                                        source_type="agent",
+                                        source_id="Inventory_Agent",
+                                        target_type="system",
+                                        target_id=None,
+                                        payload={
+                                            "evaluations": [],
+                                            "requested_qty": _requested_qty,
+                                            "status": "skipped_no_candidates",
+                                            "reason": "no_candidates_after_price_filter",
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+                                if budget_min_val is not None and budget_max_val is not None:
+                                    message = f"No products found between ${budget_min_val} and ${budget_max_val}."
+                                elif budget_max_val is not None:
+                                    message = f"No products found under ${budget_max_val}."
+                                elif budget_min_val is not None:
+                                    message = f"No products found above ${budget_min_val}."
+                                else:
+                                    message = "No products found in your price range."
+                                payload = {
+                                    "results": [],
+                                    "proposal": {"decision_mode": "rules", "ranked_skus": []},
+                                    "constraints_used": constraints,
+                                    "price_filter": filter_meta_price or {},
+                                    "policy_version": flags.get("POLICY_VERSION", "v1"),
+                                    "message": message,
+                                    "degraded": use_rules,
+                                    "eligible": not simulate,
+                                    "view_mode": view_hint.get("view_mode"),
+                                    "view_reason": view_hint.get("view_reason"),
+                                    "agent_chain": [
+                                        {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None, "severity": severity},
+                                        {"agent": "Candidate_Retrieval_Agent", "candidates": retrieved_count, "duration_ms": retrieve_ms},
+                                        {"agent": "Price_Filter_Agent", "candidates": 0, "constraints": filter_meta_price},
+                                        {"agent": "Inventory_Agent", "candidates_evaluated": 0, "status": "skipped_no_candidates"},
+                                    ],
+                                    "llm_model": llm_model,
+                                    "model_tier": model_tier,
+                                    "complexity_signals": complexity_signals,
+                                }
                             payload = _apply_image_security_response_fields(
                                 payload,
                                 analysis_details=analysis.get("details") or {},
