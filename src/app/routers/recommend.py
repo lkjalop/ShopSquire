@@ -6754,6 +6754,20 @@ def suggest(
                 constraints["must_have_gpu"] = bool(float(constraints.get("budget_max") or 0) >= 850) if constraints.get("budget_max") is not None else False
             if not constraints.get("use_case"):
                 constraints["use_case"] = "gaming"
+            # OS segregation: gaming queries are Windows ecosystem.
+            # Apple/macOS products do not carry discrete gaming GPUs (RTX/Radeon RX)
+            # in this catalog, so exclude them from gaming results unless the user
+            # explicitly requested Apple.
+            _current_brands = [str(b).lower() for b in (constraints.get("brands") or [])]
+            _request_brand_hint_low = str(constraints.get("_request_brand_hint") or "").lower()
+            _inferred_brand_low = str(constraints.get("_inferred_image_brand") or "").lower()
+            _any_apple_hint = (
+                "apple" in _current_brands
+                or "apple" in _request_brand_hint_low
+                or "apple" in _inferred_brand_low
+            )
+            if not _any_apple_hint and not constraints.get("_image_os_hint"):
+                constraints["_image_os_hint"] = "windows"
     except Exception:
         pass
     # ── Product Identity Agent: extract identity from image labels/OCR text ──
@@ -7195,10 +7209,17 @@ def suggest(
                     ).mappings().all()
                     _flagged_results = _rows_to_candidate_dicts(list(_f_rows))
                 if not _flagged_results:
-                    # Fallback: budget-only without brand filter
+                    # Fallback 1: GPU/gaming laptops in budget (OS-segregated: never mix
+                    # Windows gaming brands with macOS, and vice-versa).
+                    _is_apple_brand = (_image_brand or "").lower() in ("apple",)
+                    _mac_exclusion = (
+                        "AND LOWER(p.name) NOT LIKE '%macbook%' "
+                        "AND LOWER(p.name) NOT LIKE '%mac mini%' "
+                        "AND LOWER(p.name) NOT LIKE '%imac%'"
+                    ) if not _is_apple_brand else ""
                     _f_rows2 = db.execute(
                         text(
-                            """
+                            f"""
                             SELECT p.id, p.sku, p.name, p.price_cents, p.currency,
                                    p.specs, p.image_url,
                                    COALESCE(SUM(i.stock), 0) as stock
@@ -7206,6 +7227,14 @@ def suggest(
                             LEFT JOIN inventory i ON i.product_id = p.id
                             WHERE p.active = 1
                               AND p.price_cents BETWEEN :bmin AND :bmax
+                              AND (
+                                LOWER(p.name) LIKE '%gaming%'
+                                OR LOWER(CAST(p.specs AS TEXT)) LIKE '%rtx%'
+                                OR LOWER(CAST(p.specs AS TEXT)) LIKE '%geforce%'
+                                OR LOWER(CAST(p.specs AS TEXT)) LIKE '%radeon rx%'
+                                OR LOWER(CAST(p.specs AS TEXT)) LIKE '%discrete%'
+                              )
+                              {_mac_exclusion}
                             GROUP BY p.id
                             ORDER BY p.price_cents ASC
                             LIMIT 6
@@ -7214,6 +7243,31 @@ def suggest(
                         {"bmin": int(_bmin), "bmax": int(_bmax)},
                     ).mappings().all()
                     _flagged_results = _rows_to_candidate_dicts(list(_f_rows2))
+                if not _flagged_results:
+                    # Fallback 2: any in-budget laptop (OS-segregated)
+                    _mac_exclusion2 = (
+                        "AND LOWER(p.name) NOT LIKE '%macbook%' "
+                        "AND LOWER(p.name) NOT LIKE '%mac mini%'"
+                    ) if not _is_apple_brand else ""
+                    _f_rows3 = db.execute(
+                        text(
+                            f"""
+                            SELECT p.id, p.sku, p.name, p.price_cents, p.currency,
+                                   p.specs, p.image_url,
+                                   COALESCE(SUM(i.stock), 0) as stock
+                            FROM products p
+                            LEFT JOIN inventory i ON i.product_id = p.id
+                            WHERE p.active = 1
+                              AND p.price_cents BETWEEN :bmin AND :bmax
+                              {_mac_exclusion2}
+                            GROUP BY p.id
+                            ORDER BY p.price_cents ASC
+                            LIMIT 6
+                            """
+                        ),
+                        {"bmin": int(_bmin), "bmax": int(_bmax)},
+                    ).mappings().all()
+                    _flagged_results = _rows_to_candidate_dicts(list(_f_rows3))
             except Exception:
                 _flagged_results = []
 

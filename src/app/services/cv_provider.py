@@ -148,16 +148,30 @@ class ManagedCVProvider:
 
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
         prompt = _PRODUCT_IDENTITY_PROMPT if mode == "visual_search" else _TRIAGE_PROMPT
-        payload = json.dumps({
-            "model": self.model,
-            "prompt": prompt,
-            "images": [img_b64],
-            "stream": False,
-        }).encode("utf-8")
-        base = (os.getenv("OLLAMA_URL", "http://127.0.0.1:11434") or "http://127.0.0.1:11434").rstrip("/")
+        _ollama_url_env = (os.getenv("OLLAMA_URL", "") or "").strip().rstrip("/")
+        base = _ollama_url_env or "http://127.0.0.1:11434"
         url = f"{base}/api/generate"
         ensure_safe_outbound_url(url)
-        timeout = float(os.getenv("CV_VISION_TIMEOUT_SEC", "20") or 20)
+        # Use a shorter default timeout (4 s) to avoid blocking for 2+ minutes
+        # when Ollama is not running.  Individual production deployments can
+        # raise this via CV_VISION_TIMEOUT_SEC.
+        timeout = float(os.getenv("CV_VISION_TIMEOUT_SEC", "4") or 4)
+
+        # Fast connectivity probe: hit /api/tags with a 2-second timeout before
+        # attempting any model inference.  This avoids 6 × timeout hangs when
+        # Ollama is simply not available (e.g. non-Docker dev host).
+        _probe_url = f"{base}/api/tags"
+        try:
+            ensure_safe_outbound_url(_probe_url)
+            _probe_req = urllib.request.Request(_probe_url, method="GET")
+            with urllib.request.urlopen(_probe_req, timeout=2.0):
+                pass  # reachable
+        except Exception as _probe_err:
+            logging.getLogger(__name__).debug(
+                "cv_provider.ollama_probe_failed url=%s err=%s — skipping vision inference",
+                base, _probe_err,
+            )
+            return [], "", None
 
         # Try configured model first, then a small fallback list for resilience.
         model_candidates = []
@@ -165,11 +179,11 @@ class ManagedCVProvider:
             if m and str(m).strip():
                 model_candidates.append(str(m).strip())
         # stable de-dupe preserving order
-        seen = set()
-        model_candidates = [m for m in model_candidates if m not in seen and not seen.add(m)]
+        seen: set = set()
+        model_candidates = [m for m in model_candidates if m not in seen and not seen.add(m)]  # type: ignore[func-returns-value]
 
         last_err = None
-        for model_name in model_candidates[:6]:
+        for model_name in model_candidates[:2]:  # cap at 2 models after connectivity confirmed
             req = urllib.request.Request(
                 url=url,
                 data=json.dumps(

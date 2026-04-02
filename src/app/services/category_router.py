@@ -24,8 +24,13 @@ _CATEGORY_PATTERNS: List[Tuple[str, List[str]]] = [
     ]),
     # Electronics — computers
     ("laptop", [
-        r"\blaptop\b", r"\bnotebook\b", r"\bultrabook\b", r"\bmacbook\b",
+        r"\blaptops?\b", r"\bnotebooks?\b", r"\bultrabook\b", r"\bmacbook\b",
         r"\bchromebook\b", r"\bthinkpad\b", r"\bideapad\b", r"\blegion\b",
+        # Laptop brand / gaming keywords used as image labels or in queries
+        r"\bmsi\b", r"\brazer\b", r"\balienware\b", r"\bomen\b",
+        r"\bvivobook\b", r"\bzenbook\b", r"\brog\b", r"\btuf\b",
+        r"\bspectre\b", r"\benvy\b", r"\bvictus\b",
+        r"\bgaming\s+laptop\b", r"\bgaming\s+notebook\b",
     ]),
     ("desktop", [r"\bdesktop\b", r"\bgaming\s?pc\b", r"\btower\b", r"\bmini\s?pc\b"]),
     ("phone", [r"\bphone\b", r"\bsmartphone\b", r"\biphone\b", r"\bgalaxy\b", r"\bpixel\b", r"\bmobile\b"]),
@@ -90,6 +95,11 @@ _IMAGE_LABEL_MAP: Dict[str, str] = {
     "produce": "fresh_produce",
     "grocery": "fresh_produce",
     "laptop": "laptop", "notebook": "laptop", "keyboard": "accessory",
+    # Laptop brand labels that may appear from CV or filename parsing
+    "msi": "laptop", "razer": "laptop", "alienware": "laptop",
+    "rog": "laptop", "tuf gaming": "laptop", "vivobook": "laptop",
+    "spectre": "laptop", "envy": "laptop", "victus": "laptop",
+    "gaming laptop": "laptop", "gaming notebook": "laptop",
     "phone": "phone", "cell phone": "phone", "smartphone": "phone",
     "television": "tv", "tv": "tv", "monitor": "monitor",
     "sofa": "furniture", "couch": "furniture", "bed": "furniture",
@@ -102,9 +112,18 @@ def category_from_image_labels(image_labels: List[str] | None = None) -> str | N
     counts: Counter[str] = Counter()
     for label in (image_labels or []):
         lbl = str(label or "").lower().strip()
+        # Exact-match lookup first
         mapped = _IMAGE_LABEL_MAP.get(lbl)
         if mapped:
             counts[mapped] += 1
+            continue
+        # Multi-word label: check if any individual word is a known exact key
+        words = lbl.replace("-", " ").split()
+        for word in words:
+            word_mapped = _IMAGE_LABEL_MAP.get(word)
+            if word_mapped:
+                counts[word_mapped] += 1
+                break
     if not counts:
         return None
     ranked = counts.most_common()
@@ -118,6 +137,13 @@ def category_from_image_labels(image_labels: List[str] | None = None) -> str | N
     return top_categories[0]
 
 
+# Routing / intent tokens that should NOT be treated as product categories
+_ROUTING_INTENTS: frozenset[str] = frozenset({
+    "", "unknown", "other", "visual_search", "cv_triage", "shopping",
+    "support_claim", "intent", "general",
+})
+
+
 def detect_category(
     query: str | None = None,
     image_labels: List[str] | None = None,
@@ -127,10 +153,10 @@ def detect_category(
 
     Priority: explicit constraint > query text > image labels > "general".
     """
-    # 1. Explicit constraint
+    # 1. Explicit constraint — but skip routing/intent strings
     if constraints:
         pt = str(constraints.get("product_type") or "").strip().lower()
-        if pt and pt not in ("", "unknown", "other"):
+        if pt and pt not in _ROUTING_INTENTS:
             return pt
 
     # 2. Query text matching
