@@ -57,6 +57,7 @@ def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     # time, before pytest_sessionstart.  Without this, ManagedCVProvider will
     # block up to 20 s × 6 model candidates = 120 s every time /cv/analyze is
     # hit in TestCVAnalyzeWithRealImages (and similar) when Ollama is offline.
+    os.environ.setdefault("CV_VISION_ENABLED", "0")
     os.environ.setdefault("CV_VISION_TIMEOUT_SEC", "1")
     os.environ.setdefault("CV_DAMAGE_YOLO_MODEL", "")
     os.environ.setdefault("CV_DETECTOR_MODEL", "")

@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Dict
 from sqlalchemy import text
-import sqlite3
 
 from src.app.config import get_settings, load_feature_flags
 from src.app.observability.tracing import get_tracer
@@ -36,84 +35,46 @@ def _demo_checkout_allowed(settings, capability: Dict | None) -> bool:
 def _idempotent(path: str, key: str | None) -> bool:
     if not key:
         return True
-    settings = get_settings()
-    db_url = str(getattr(settings, "database_url", "") or "")
-    if db_url.startswith("sqlite"):
-        try:
-            sqlite_path = db_url.split("///", 1)[1]
-            con = sqlite3.connect(sqlite_path)
-            try:
-                cur = con.cursor()
-                cur.execute(
-                    "CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
-                )
-                cur.execute("INSERT INTO idempotency_keys (key) VALUES (?)", (f"{path}:{key}",))
-                con.commit()
-                return True
-            except Exception:
-                con.rollback()
-                cur = con.cursor()
-                cur.execute("SELECT 1 FROM idempotency_keys WHERE key = ?", (f"{path}:{key}",))
-                return cur.fetchone() is None
-            finally:
-                con.close()
-        except Exception:
-            return True
+    k = f"{path}:{key}"
     with db_session() as db:
-        # Ensure idempotency table exists (supports SQLite-based tests)
         try:
-            if getattr(db.bind, "dialect", None) is not None and db.bind.dialect.name == "sqlite":
-                raw = db.connection().connection
-                cur = raw.cursor()
-                cur.execute(
-                    "CREATE TABLE IF NOT EXISTS idempotency_keys (key TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
-                )
-                k = f"{path}:{key}"
-                try:
-                    cur.execute("INSERT INTO idempotency_keys (key) VALUES (?)", (k,))
-                    raw.commit()
-                    return True
-                except Exception:
-                    raw.rollback()
-                    try:
-                        cur.execute("SELECT 1 FROM idempotency_keys WHERE key = ?", (k,))
-                        return cur.fetchone() is None
-                    except Exception:
-                        return True
+            # Ensure the table exists — schema matches idempotency middleware.
+            # fingerprint NOT NULL so we provide the operation type as fingerprint.
+            db.execute(text(
+                "CREATE TABLE IF NOT EXISTS idempotency_keys "
+                "(key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, "
+                "response_status INT, response_body TEXT, "
+                "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            ))
+            db.commit()
         except Exception:
-            # If table creation fails (e.g., transient DB), treat as idempotent to avoid false conflicts
-            return True
-        try:
-            k = f"{path}:{key}"
-            try:
-                db.execute(text("INSERT INTO idempotency_keys (key) VALUES (:k)"), {"k": k})
-                try:
-                    db.commit()
-                except Exception:
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
-                    return False
-                return True
-            except Exception:
-                # On duplicate insert, fail idempotency. If DB access itself is broken, fail open.
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                try:
-                    row = db.execute(text("SELECT 1 FROM idempotency_keys WHERE key = :k"), {"k": k}).fetchone()
-                    return row is None
-                except Exception:
-                    return True
-        except Exception:
-            # On any DB error, allow the request rather than incorrectly signaling conflict
             try:
                 db.rollback()
             except Exception:
                 pass
-                return True
+        try:
+            # INSERT OR IGNORE silently skips UNIQUE violations on SQLite.
+            # rowcount == 1 → new key (allow); rowcount == 0 → duplicate (reject).
+            result = db.execute(
+                text("INSERT OR IGNORE INTO idempotency_keys (key, fingerprint) VALUES (:k, :fp)"),
+                {"k": k, "fp": path},
+            )
+            db.commit()
+            inserted = getattr(result, "rowcount", 1)
+            return bool(inserted)  # True = first occurrence; False = duplicate
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            # Fallback: check directly whether the key already exists
+            try:
+                row = db.execute(
+                    text("SELECT 1 FROM idempotency_keys WHERE key = :k"), {"k": k}
+                ).fetchone()
+                return row is None  # True = no existing row (fail open), False = duplicate
+            except Exception:
+                return True  # fail open on DB error
 
 
 @router.get("/providers/rollout")

@@ -176,6 +176,10 @@ def test_runbook_failure_dispatches_alert(tmp_path, monkeypatch):
 
     monkeypatch.setattr(er, "dispatch_incident_alert", _fake_dispatch)
     monkeypatch.setattr(er, "execute_typed_actions", _raise_actions)
+    # Bypass the human-approval gate (INCIDENT_RUNBOOK_APPROVAL_REQUIRED=1 by
+    # default) by passing human_approved=True so the test exercises the failure
+    # dispatch path, not the approval-pending path.
+    monkeypatch.setenv("INCIDENT_RUNBOOK_APPROVAL_REQUIRED", "0")
 
     app = create_app()
     client = TestClient(app)

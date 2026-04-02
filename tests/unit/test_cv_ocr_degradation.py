@@ -2,6 +2,9 @@ from src.app.services import cv_ocr
 
 
 def test_extract_text_marks_degraded_when_provider_errors(monkeypatch):
+    # conftest.py sets CV_OCR_PROVIDER=disabled globally; override for this test
+    # so extract_text() actually reaches the tesseract branch.
+    monkeypatch.setenv("CV_OCR_PROVIDER", "tesseract")
     monkeypatch.setattr(
         cv_ocr,
         "_tesseract_ocr",

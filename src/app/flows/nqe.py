@@ -856,11 +856,29 @@ class NextQuestionEngine:
             ]
             _generic_priority = ['ask_budget_tier', 'ask_budget', 'ask_use_case', 'ask_platform', 'ask_brand_pref']
             _ordered_priority = _domain_priority + _generic_priority
+            # Map each template id to the missing-field it covers so we never
+            # consume two cap slots on the same field (e.g. ask_budget_tier AND
+            # ask_budget both count for 'budget', leaving no room for brand_pref).
+            _template_field_map: dict[str, str] = {
+                'ask_budget_tier': 'budget',
+                'ask_budget': 'budget',
+                'ask_use_case': 'use_case',
+                'ask_platform': 'use_case',
+                'ask_brand_pref': 'brand_preference',
+                'ask_specs': 'specs',
+            }
+            _covered_fields: set[str] = set()
             _out_by_id = {q.id: q for q in out}
             result: List[NextQuestion] = []
             for pid in _ordered_priority:
-                if pid in _keep_set and pid in _out_by_id and _out_by_id[pid] not in result:
-                    result.append(_out_by_id[pid])
+                if pid not in _keep_set or pid not in _out_by_id:
+                    continue
+                field = _template_field_map.get(pid)
+                if field and field in _covered_fields:
+                    continue  # already have a question for this field
+                result.append(_out_by_id[pid])
+                if field:
+                    _covered_fields.add(field)
                 if len(result) >= cap:
                     break
             if len(result) < cap:
