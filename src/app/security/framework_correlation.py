@@ -892,6 +892,11 @@ def _pasta(signals: Dict[str, Any], severity: str | None, *, dread: Dict[str, An
     ]
     current = "Stage1"
     stage_rank = {item["id"]: idx + 1 for idx, item in enumerate(stages)}
+    # DREAD floor: high-DREAD + advanced kill chain stage forces minimum Stage6.
+    _DREAD_FLOOR_THRESHOLD = 7.5
+    _DREAD_FLOOR_KC_STAGES = {
+        "Exploitation", "Installation", "CommandAndControl", "ActionsOnObjectives",
+    }
     try:
         claim_stages: List[Tuple[int, str]] = []
         for item in _artifact_claims((dread or {}).get("evidence_context")):
@@ -943,6 +948,17 @@ def _pasta(signals: Dict[str, Any], severity: str | None, *, dread: Dict[str, An
                 break
         if late_claim_stage and stage_rank[current] < stage_rank[late_claim_stage]:
             current = late_claim_stage
+        # ── DREAD floor rule ─────────────────────────────────────────────────
+        # If DREAD weighted_avg >= threshold AND kill_chain is an advanced stage,
+        # floor PASTA at Stage6 (ModellingAndSimulation) regardless of signals.
+        try:
+            _dread_avg = float((dread or {}).get("weighted_avg") or (dread or {}).get("avg") or 0.0)
+            _dread_kc = str((dread or {}).get("kill_chain_stage") or "").strip()
+            if _dread_avg >= _DREAD_FLOOR_THRESHOLD and _dread_kc in _DREAD_FLOOR_KC_STAGES:
+                if stage_rank[current] < stage_rank["Stage6"]:
+                    current = "Stage6"
+        except Exception:
+            pass
     except Exception:
         pass
     workflow: List[Dict[str, Any]] = []

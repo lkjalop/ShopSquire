@@ -49,18 +49,39 @@ def _ensure_tables():
 def test_decision_query_includes_bitemporal_fields():
     _enable_flags()
     _ensure_tables()
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO decision_logs (id, agent_name, valid_from, system_from, input_data, proposed_action, policy_version, approval_required, execution_status) "
-                "VALUES ('bitemp-1', 'rec-agent', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '{}', '{}', 'v1', 0, 'executed')"
+    # Override app.state.engine and dbmod.engine so request handlers
+    # read/write our StaticPool engine (same as our engine.begin() inserts).
+    import src.app.models.db as _dbmod
+    orig_app_engine = getattr(app.state, "engine", None)
+    orig_dbmod_engine = _dbmod.engine
+    app.state.engine = engine
+    _dbmod.engine = engine
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO decision_logs (id, agent_name, valid_from, system_from, input_data, proposed_action, policy_version, approval_required, execution_status) "
+                    "VALUES ('bitemp-1', 'rec-agent', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '{}', '{}', 'v1', 0, 'executed')"
+                )
             )
-        )
-    resp = client.get("/api/v1/decisions/query")
-    assert resp.status_code == 200
-    data = resp.json()
-    rows = data.get("results") or []
-    assert any(r.get("id") == "bitemp-1" for r in rows)
-    row = next(r for r in rows if r.get("id") == "bitemp-1")
-    assert row.get("valid_from")
-    assert row.get("system_from")
+        resp = client.get("/api/v1/decisions/query")
+        assert resp.status_code == 200
+        data = resp.json()
+        rows = data.get("results") or []
+        assert any(r.get("id") == "bitemp-1" for r in rows)
+        row = next(r for r in rows if r.get("id") == "bitemp-1")
+        assert row.get("valid_from")
+        assert row.get("system_from")
+    finally:
+        # Always restore to previous state regardless of what it was.
+        # conftest._restore_db_engine will further align all singletons.
+        app.state.engine = orig_app_engine
+        _dbmod.engine = orig_dbmod_engine
+        # Re-align all singletons so subsequent tests see a consistent engine.
+        from tests.conftest import _SINGLETONS, _SINGLETONS_LOCK
+        with _SINGLETONS_LOCK:
+            for _app_inst in _SINGLETONS.values():
+                try:
+                    _app_inst.state.engine = orig_dbmod_engine
+                except Exception:
+                    pass

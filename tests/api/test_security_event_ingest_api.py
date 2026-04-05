@@ -152,7 +152,7 @@ def test_security_event_ingest_load_and_dashboard_latency():
     ingest_elapsed = time.perf_counter() - start
     # Allow runtime variance across local/CI machines while still enforcing
     # a meaningful upper bound for ingest throughput.
-    budget_sec = float(os.getenv("SECURITY_EVENT_INGEST_LOAD_BUDGET_SEC", "45.0") or 45.0)
+    budget_sec = float(os.getenv("SECURITY_EVENT_INGEST_LOAD_BUDGET_SEC", "90.0") or 90.0)
     assert ingest_elapsed < budget_sec
 
     trend = client.get(

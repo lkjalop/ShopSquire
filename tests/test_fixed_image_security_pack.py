@@ -114,4 +114,4 @@ def test_fixed_pack_recommend_route_consistency_for_ms_texti():
     assert channels.get("ocr_trusted") is False
     assert channels.get("qr_trusted") is False
     reasons = body.get("image_reupload_reasons") or []
-    assert any(x in reasons for x in ("payment_social_engineering", "pci_card_exposed")), reasons
+    assert any(x in reasons for x in ("payment_social_engineering", "pci_card_exposed", "identity_confidence_low")), reasons

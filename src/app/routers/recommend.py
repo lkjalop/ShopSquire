@@ -4663,6 +4663,35 @@ def suggest(
     except Exception:
         pass
     if guard.get("verdict") == "block":
+        try:
+            if not any("/api/v1/recommend".startswith(p) for p in _skip_prefixes):
+                emit_security_event(
+                    "/api/v1/recommend/suggest",
+                    {
+                        "payload": {"uid": uid, "query": query},
+                        "analysis": {
+                            "signals": {r: True for r in (guard.get("reasons") or [])},
+                            "mitre_atlas": guard.get("mitre_atlas") or [],
+                            "mitre_attack": guard.get("mitre_attack") or [],
+                            "owasp_llm_top10": guard.get("owasp_llm") or [],
+                            "verdict": guard.get("verdict"),
+                            "severity": guard.get("severity"),
+                        },
+                    },
+                    request=request,
+                )
+        except Exception:
+            pass
+        _block_mode = os.getenv("SECURITY_BLOCK_MODE", "200").strip()
+        _block_payload = {
+            "status": "blocked",
+            "blocked": True,
+            "reasons": guard.get("reasons") or ["invalid_payload"],
+            "verdict": guard.get("verdict"),
+            "severity": guard.get("severity"),
+        }
+        if _block_mode == "200":
+            return _block_payload
         raise HTTPException(status_code=400, detail=f"blocked_suggest: {', '.join(guard.get('reasons') or ['invalid_payload'])}")
     image_cv_signals_parsed: Dict[str, Any] = {}
     incoming_image_payload = bool(image_labels or image_ocr_text or image_hash or image_intent or image_product_identity or image_cv_signals)
@@ -6564,23 +6593,28 @@ def suggest(
         brand_pred = _brand_sql_predicate(brand_hint)
         if not brand_pred:
             return []
-        rows = db.execute(
-            text(
-                f"""
-                SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
-                       COALESCE(SUM(i.stock), 0) as stock
-                FROM products p
-                LEFT JOIN inventory i ON i.product_id = p.id
-                WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
-                  AND {brand_pred}
-                GROUP BY p.id
-                ORDER BY p.price_cents ASC
-                LIMIT :limit_rows
-                """
-            ),
-            {"min_c": int(min_c), "max_c": int(max_c), "limit_rows": int(limit_rows)},
-        ).mappings().all()
-        return _rows_to_candidate_dicts(rows)
+        try:
+            rows = db.execute(
+                text(
+                    f"""
+                    SELECT p.id, p.sku, p.name, p.price_cents, p.currency, p.specs, p.image_url,
+                           COALESCE(SUM(i.stock), 0) as stock
+                    FROM products p
+                    LEFT JOIN inventory i ON i.product_id = p.id
+                    WHERE p.active = 1 AND p.price_cents BETWEEN :min_c AND :max_c
+                      AND {brand_pred}
+                    GROUP BY p.id
+                    ORDER BY p.price_cents ASC
+                    LIMIT :limit_rows
+                    """
+                ),
+                {"min_c": int(min_c), "max_c": int(max_c), "limit_rows": int(limit_rows)},
+            ).mappings().all()
+            return _rows_to_candidate_dicts(rows)
+        except Exception as _fbc_exc:
+            import traceback as _tb2
+            logging.error(f"[_fetch_brand_candidates_in_band] Exception: {_fbc_exc}\n{_tb2.format_exc(limit=3)}")
+            return []
 
     def _fetch_brand_nearest_above_budget(brand_hint: str | None, baseline_c: int, span_c: int, limit_rows: int = 24) -> tuple[list[dict], dict]:
         brand_pred = _brand_sql_predicate(brand_hint)
@@ -6666,9 +6700,9 @@ def suggest(
                 ):
                     constraints.setdefault("specs", [])
                     constraints["specs"].append(f"ram_gb_min:{_uc_spec['min_ram_gb']}")
-                if _uc_spec.get("gpu_needed") and not constraints.get("must_have_gpu"):
+                if _uc_spec.get("gpu_needed") and not constraints.get("must_have_gpu") and constraints.get("gpu_preference") != "without_discrete":
                     constraints["gpu_preference"] = "with_discrete"
-                    if _uc_key not in _soft_spec_use_cases:
+                    if _uc_key not in _soft_spec_use_cases and not gpu_pref_inferred:
                         constraints["must_have_gpu"] = True
                 if (
                     _uc_key not in _soft_spec_use_cases
@@ -6751,7 +6785,8 @@ def suggest(
                 constraints["specs"].append("refresh_hz_min:60")
             if constraints.get("gpu_preference") != "without_discrete":
                 constraints["gpu_preference"] = "with_discrete"
-                constraints["must_have_gpu"] = bool(float(constraints.get("budget_max") or 0) >= 850) if constraints.get("budget_max") is not None else False
+                _derived_must_have = bool(float(constraints.get("budget_max") or 0) >= 850) if constraints.get("budget_max") is not None else False
+                constraints["must_have_gpu"] = _derived_must_have and not gpu_pref_inferred
             if not constraints.get("use_case"):
                 constraints["use_case"] = "gaming"
             # OS segregation: gaming queries are Windows ecosystem.
@@ -6891,7 +6926,7 @@ def suggest(
                 trace_id=trace_id,
             )
             _id_source = "text_heuristic"
-        if (not _id_result) and _low_conf_brand_candidate:
+        if (not _id_result or not _id_result.get("identified")) and _low_conf_brand_candidate:
             _weak_labels = [str(x).strip().lower() for x in (image_context.get("labels") or []) if str(x).strip()]
             _labels_weak = not _weak_labels or all(len(x) <= 8 or "text" in x or "overlay" in x for x in _weak_labels)
             _image_flagged = bool(image_reupload_reasons or image_cv_signals_parsed.get("payment_social_engineering") or image_cv_signals_parsed.get("pci_card_exposed") or image_cv_signals_parsed.get("steg_suspicious"))
@@ -6906,6 +6941,15 @@ def suggest(
                 # Merge identity constraints into the main constraints dict
                 if _identity_constraints.get("identity_brand") and not constraints.get("brand"):
                     constraints["brand"] = _identity_constraints["identity_brand"]
+                # Also propagate brand hint from vision identity so brand-priority fallback fetches work
+                _id_brand_low = str(_identity_constraints.get("identity_brand") or "").strip().lower()
+                if _id_brand_low and _id_brand_low in _SUPPORTED_IMAGE_BRAND_HINTS:
+                    if not strict_image_brand_hint:
+                        strict_image_brand_hint = _id_brand_low
+                    if not constraints.get("_request_brand_hint"):
+                        constraints["_request_brand_hint"] = _id_brand_low
+                    if not constraints.get("brands"):
+                        constraints["brands"] = [_id_brand_low]
                 if _identity_constraints.get("identity_budget_min") and not constraints.get("budget_min"):
                     constraints["budget_min"] = _identity_constraints["identity_budget_min"]
                 if _identity_constraints.get("identity_budget_max") and not constraints.get("budget_max"):
@@ -7558,6 +7602,7 @@ def suggest(
         and not (constraints.get("brands") or [])
         and _user_supplied_specs_count == 0
         and intent_conf < 0.95
+        and str(turn_intent or "").upper() != "SUPPORT_CLAIM"
     )
     if is_open_ended:
         question_plan = _build_question_plan(
@@ -8137,7 +8182,9 @@ def suggest(
                             "stock": r.get("stock"),
                             "specs": r.get("specs") or {},
                         })
-                except Exception:
+                except Exception as _brand_alt_exc:
+                    import traceback as _tb
+                    logging.error(f"[brand_alt_debug] Exception in brand DB fallback: {_brand_alt_exc}\n{_tb.format_exc(limit=3)}")
                     alt = []
                 if alt:
                     candidates = alt
@@ -8499,21 +8546,21 @@ def suggest(
                                     "model_tier": model_tier,
                                     "complexity_signals": complexity_signals,
                                 }
-                            payload = _apply_image_security_response_fields(
-                                payload,
-                                analysis_details=analysis.get("details") or {},
-                                severity=severity,
-                                image_reupload_reasons=image_reupload_reasons,
-                                image_cv_signals_parsed=image_cv_signals_parsed,
-                            )
-                            _log_early_decision(
-                                status="no_results",
-                                proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
-                                agent_chain=payload.get("agent_chain") or [],
-                                retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
-                            )
-                            payload = _ensure_trace_response(payload, trace_id, flags)
-                            return _with_trace(payload, trace_id)
+                                payload = _apply_image_security_response_fields(
+                                    payload,
+                                    analysis_details=analysis.get("details") or {},
+                                    severity=severity,
+                                    image_reupload_reasons=image_reupload_reasons,
+                                    image_cv_signals_parsed=image_cv_signals_parsed,
+                                )
+                                _log_early_decision(
+                                    status="no_results",
+                                    proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
+                                    agent_chain=payload.get("agent_chain") or [],
+                                    retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
+                                )
+                                payload = _ensure_trace_response(payload, trace_id, flags)
+                                return _with_trace(payload, trace_id)
         # Enforce spec filtering if requested
         specs = constraints.get("specs") or []
         if specs and not shortlist_lock_active:

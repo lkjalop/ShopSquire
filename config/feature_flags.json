@@ -1,1 +1,35 @@
-{"USE_AGENT_CAPABILITIES": true, "AGENT_ROLLOUT_PERCENT": 100, "CAPABILITIES": {"recommend": {"enabled": true, "rollout_percent": 100}}, "KILL_SWITCH": false, "DECISION_LOG_WRITES_ENABLED": false, "DEGRADATION": {"enabled": false}, "TEST_FORCE_BAD_SKU": false, "POLICY_VERSION": "v1"}
+{
+  "USE_AGENT_CAPABILITIES": true,
+  "AGENT_ROLLOUT_PERCENT": 100,
+  "CAPABILITIES": {
+    "recommend": {
+      "enabled": true,
+      "rollout_percent": 100
+    }
+  },
+  "KILL_SWITCH": false,
+  "DECISION_LOG_WRITES_ENABLED": false,
+  "DEGRADATION": {
+    "enabled": true
+  },
+  "TEST_FORCE_BAD_SKU": false,
+  "SEASONAL_CONTEXT": {
+    "active_season": null,
+    "boosts": {
+      "back_to_school": {
+        "laptop": 1.3,
+        "tablet": 1.2,
+        "backpack": 1.15
+      },
+      "holiday": {
+        "gaming": 1.4,
+        "tv": 1.3,
+        "headphones": 1.25
+      },
+      "new_year": {
+        "fitness": 1.2,
+        "monitor": 1.15
+      }
+    }
+  }
+}

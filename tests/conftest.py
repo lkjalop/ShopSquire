@@ -187,6 +187,28 @@ def pytest_sessionstart(session):
             if session_db_url not in _SINGLETONS:
                 import src.app.main as _m  # noqa: PLC0415
                 _SINGLETONS[session_db_url] = _m._original_create_app()
+        # Align ALL singleton apps' app.state.engine so that db_session()
+        # inside request handlers uses the session DB engine.
+        # Tests with their own module-specific engines (e.g. StaticPool) should
+        # override app.state.engine in their own test bodies and restore it when done.
+        with _SINGLETONS_LOCK:
+            for _app_inst in _SINGLETONS.values():
+                try:
+                    _app_inst.state.engine = _session_eng
+                except Exception:
+                    pass
+        # Also ensure the schema exists in the session DB (the stale singleton's
+        # ensure_metadata() may have run against a different engine).
+        try:
+            from src.app.models.db import _ensure_minimal_sqlite_tables  # noqa: PLC0415
+            _ensure_minimal_sqlite_tables(_session_eng)
+        except Exception:
+            pass
+        try:
+            from src.app.models.orm import Base  # noqa: PLC0415
+            Base.metadata.create_all(_session_eng)
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -266,6 +288,22 @@ def _restore_db_engine():
         from src.app.models.db import get_engine, set_engine  # noqa: PLC0415
         if get_engine() is not original_engine:
             set_engine(original_engine)
+            # Re-align all singleton app.state.engine so that request handlers
+            # use the same engine as db_session() after restoration.
+            with _SINGLETONS_LOCK:
+                for _app_inst in _SINGLETONS.values():
+                    try:
+                        _app_inst.state.engine = original_engine
+                    except Exception:
+                        pass
+            # Reset one-time table-ready flags so they re-create tables on the
+            # restored engine.  This prevents "no such table" errors when a test
+            # used an in-memory or isolated engine and these flags stayed True.
+            try:
+                import src.app.security.security_event_ingest as _sei  # noqa: PLC0415
+                _sei._SECURITY_EVENT_TABLE_READY = False
+            except Exception:
+                pass
     except Exception:
         pass
 

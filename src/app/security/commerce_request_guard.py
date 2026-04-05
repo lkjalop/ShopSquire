@@ -66,6 +66,7 @@ def inspect_commerce_request(
         verdict = "block"
         severity = "high"
         risk = max(risk, 0.92)
+        owasp_llm: list[str] = ["LLM01:PromptInjection"]
 
     if any(p.search(lowered) for p in _XSS_PATTERNS):
         reasons.append("xss_pattern")
@@ -148,4 +149,5 @@ def inspect_commerce_request(
         "mitigations": sorted(set(mitigations)),
         "mitre_atlas": [],
         "mitre_attack": sorted(set(mitre_attack)),
+        "owasp_llm": locals().get("owasp_llm", []),
     }

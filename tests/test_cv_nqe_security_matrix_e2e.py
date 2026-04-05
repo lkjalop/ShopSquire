@@ -133,7 +133,9 @@ class TestImageLabelWiring:
         )
         assert r.status_code == 200
         body = r.json()
-        assert body.get("status") == "reupload_required"
+        # Status is "image_flagged_vision_results" (shows matched products alongside the
+        # security warning) or legacy "reupload_required" — both include the reupload question.
+        assert body.get("status") in ("reupload_required", "image_flagged_vision_results")
         nqs = body.get("next_questions") or []
         assert any(
             str((q or {}).get("id") or "") == "reupload_clean_image"

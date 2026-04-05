@@ -206,6 +206,8 @@ def checkout_initiate(
 
     settings = get_settings()
     flags = load_feature_flags(settings.feature_flags_path)
+    amount_cents = max(0, int(body.amount_cents or 0))
+    currency = str(body.currency or "USD").upper()[:3]
     assert_autonomy_allowed(
         "payments",
         flags=flags,
@@ -214,8 +216,6 @@ def checkout_initiate(
     )
     cap = flags.get("CAPABILITIES", {}).get("stripe") or flags.get("CAPABILITIES", {}).get("payments") or {}
 
-    amount_cents = max(0, int(body.amount_cents or 0))
-    currency = str(body.currency or "USD").upper()[:3]
     allow_demo_checkout = _demo_checkout_allowed(settings, cap)
 
     stripe_live = (
