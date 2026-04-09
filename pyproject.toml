@@ -55,7 +55,7 @@ ruff = "^0.3.0"
 mypy = "^1.8.0"
 types-redis = "^4.6.0.20240106"
 requests = "^2.31.0"
-neo4j = "^5.18.0"
+neo4j = "^6.1.0"
 
 [tool.coverage.run]
 source = ["src"]
