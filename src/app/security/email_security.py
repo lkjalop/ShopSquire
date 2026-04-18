@@ -282,31 +282,49 @@ def _llm_assist_summary(email: Dict[str, Any], extracted: Dict[str, Any], verdic
 
     if enabled:
         try:
+            import json as _json
+            import os as _os
             from src.app.services.llm_providers import get_provider
 
-            body_snippet = str(email.get("body") or "")[:300]
+            _email_llm_provider = _os.getenv("EMAIL_SECURITY_LLM_PROVIDER", "ollama")
+            _email_llm_model = _os.getenv("EMAIL_SECURITY_LLM_MODEL", _os.getenv("OLLAMA_SMALL_MODEL", "qwen2.5:14b"))
+            body_snippet = str(email.get("body") or "")[:600]
             prompt = (
-                "System: You are a non-authoritative email security analyst. "
-                "Summarize the findings and flag anything the rule engine may have missed. "
-                "Do not override the verdict. Be concise (2-3 sentences).\n\n"
-                f"Email subject: {subject[:120]}\n"
+                'You are a non-authoritative email security analyst. Respond with JSON only:\n'
+                '{"summary":"<2-3 sentence finding>","missed_signals":["<signal>"],"attack_stage":"<stage>","mitre_techniques":["<T-id>"]}\n\n'
+                f"Rule-engine verdict: {verdict.get('verdict_action')} / route={verdict.get('route')} / severity={verdict.get('severity')}\n"
+                f"Email subject: {subject[:200]}\n"
                 f"Body snippet: {body_snippet}\n"
-                f"Rule-engine verdict: {verdict.get('verdict_action')} / route={verdict.get('route')}\n"
                 f"Detected signal types: {', '.join(ind_types[:12]) or 'none'}\n"
-                f"Reasons: {'; '.join(reasons[:6])}\n"
+                f"Reasons: {'; '.join(reasons[:8])}\n"
+                "Flag anything the rule engine may have missed. Do NOT override the verdict."
             )
-            result = get_provider().generate(prompt, max_tokens=256)
+            result = get_provider(_email_llm_provider).generate(
+                prompt, model=_email_llm_model, max_tokens=512, temperature=0.1
+            )
             llm_text = str(result.get("text") or "").strip()
-            # Reject stub/error responses (providers return "[...stub...]" when no key configured)
+            # Reject stub/error responses
             if llm_text and not llm_text.startswith("["):
+                parsed: Dict[str, Any] = {}
+                try:
+                    import re as _re
+                    m = _re.search(r'\{.*\}', llm_text, _re.DOTALL)
+                    if m:
+                        parsed = _json.loads(m.group(0))
+                except Exception:
+                    pass
                 return {
                     "enabled": True,
                     "source": "llm_assist",
                     "provider": result.get("provider"),
-                    "summary": llm_text,
+                    "model": _email_llm_model,
+                    "summary": parsed.get("summary") or llm_text[:400],
+                    "missed_signals": list(parsed.get("missed_signals") or [])[:8],
+                    "attack_stage": str(parsed.get("attack_stage") or ""),
+                    "mitre_techniques": list(parsed.get("mitre_techniques") or [])[:10],
                     "secondary_risk_signal": round(float(secondary_risk), 3),
                     "non_authoritative": True,
-                    "reasons": reasons[:6],
+                    "reasons": reasons[:8],
                 }
         except Exception:
             pass  # fall through to heuristic

@@ -10,7 +10,7 @@ from src.app.security.provider_boundary import sanitize_for_provider
 
 import httpx
 
-SMALL_DEFAULT = os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b")
+SMALL_DEFAULT = os.getenv("OLLAMA_SMALL_MODEL", "qwen2.5:14b")
 BIG_DEFAULT = os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 

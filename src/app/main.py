@@ -210,6 +210,11 @@ def create_app() -> FastAPI:
         except Exception:
             pass
         try:
+            from src.app.services.intake_gate import ensure_qr_allowlist_table
+            ensure_qr_allowlist_table()
+        except Exception:
+            pass
+        try:
             init_logging()
         except Exception:
             pass

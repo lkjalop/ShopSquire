@@ -12,8 +12,8 @@
       "name": "small",
       "score_min": 3,
       "score_max": 4,
-      "model": "llama3:8b",
-      "description": "Lightweight model. Single-constraint product searches, simple follow-ups."
+      "model": "qwen2.5:14b",
+      "description": "Lightweight model. Single-constraint product searches, simple follow-ups. qwen2.5:14b preferred: 32K context, reliable JSON output."
     },
     {
       "name": "medium",

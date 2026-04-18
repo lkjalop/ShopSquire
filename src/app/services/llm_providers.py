@@ -157,12 +157,41 @@ class MistralAdapter(MistralProvider):
     name = "mistral"
 
 
+class OllamaProvider(BaseLLMProvider):
+    """Local air-gapped Ollama provider. No data leaves the host — GDPR/data-sovereignty safe."""
+    name = "ollama"
+
+    def __init__(self):
+        self.base_url = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+        self.default_model = os.getenv("EMAIL_SECURITY_LLM_MODEL", os.getenv("OLLAMA_SMALL_MODEL", "qwen2.5:14b"))
+
+    def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        try:
+            import requests
+
+            model = kwargs.get("model", self.default_model)
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": kwargs.get("temperature", 0.1), "num_predict": kwargs.get("max_tokens", 512)},
+            }
+            r = requests.post(f"{self.base_url}/api/generate", json=payload, timeout=30.0)
+            r.raise_for_status()
+            j = r.json()
+            txt = str(j.get("response") or "").strip()
+            return {"provider": self.name, "text": txt, "raw": j, "model": model}
+        except Exception as e:
+            return {"provider": self.name, "text": f"[ollama error: {e}]", "raw": None}
+
+
 # ── Provider registry ──
 
 _PROVIDER_MAP: Dict[str, type] = {
     "anthropic": AnthropicProvider,
     "openai": OpenAIProvider,
     "mistral": MistralProvider,
+    "ollama": OllamaProvider,
 }
 
 
@@ -172,7 +201,9 @@ def get_provider(name: str | None = None) -> BaseLLMProvider:
         require_provider_transfer(name.lower(), data_categories=["llm_prompt"])
         return _PROVIDER_MAP[name.lower()]()
 
-    # Auto-select: prefer the first provider with an API key
+    # Auto-select: Ollama first (air-gapped, data-sovereign); then external APIs
+    if os.getenv("OLLAMA_URL") or os.getenv("EMAIL_SECURITY_LLM_PROVIDER", "").lower() == "ollama":
+        return OllamaProvider()
     if os.getenv("ANTHROPIC_API_KEY"):
         require_provider_transfer("anthropic", data_categories=["llm_prompt"])
         return AnthropicProvider()

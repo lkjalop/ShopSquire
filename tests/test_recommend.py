@@ -28,7 +28,12 @@ def _write_flags(flags: dict):
     base = {}
     if os.path.isfile(path):
         with open(path, "r", encoding="utf-8") as f:
-            base = json.load(f)
+            raw = f.read().strip()
+        if raw:
+            try:
+                base = json.loads(raw)
+            except json.JSONDecodeError:
+                base = {}
     if isinstance(base, dict):
         merged = dict(base)
         merged.update(flags or {})
