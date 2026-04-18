@@ -16,10 +16,10 @@ def test_flag_dual_approval_flow(monkeypatch):
     client = TestClient(app)
 
     flags_path = Path("config/feature_flags.json")
-    original = flags_path.read_text(encoding="utf-8")
+    original = flags_path.read_text(encoding="utf-8").strip()
 
     try:
-        baseline = json.loads(original)
+        baseline = json.loads(original) if original else {}
         changed = dict(baseline)
         changed["KILL_SWITCH"] = not bool(baseline.get("KILL_SWITCH", False))
 

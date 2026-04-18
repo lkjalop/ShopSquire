@@ -78,8 +78,10 @@ document.addEventListener('DOMContentLoaded', function () {
     const labels = buckets.map(b => b.bucket);
     const agentCounts = buckets.map(b => b.agent_count || 0);
     const latencies = buckets.map(b => b.latency_ms_total || 0);
-    const ctx2 = document.getElementById('chart').getContext('2d');
+    // Destroy the bar summary chart before reusing the canvas — Chart.js throws if canvas is in use
+    if (chart) { chart.destroy(); chart = null; }
     if (timelineChart) timelineChart.destroy();
+    const ctx2 = document.getElementById('chart').getContext('2d');
     timelineChart = new Chart(ctx2, {
       type: 'line',
       data: {

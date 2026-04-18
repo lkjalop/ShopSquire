@@ -24,6 +24,10 @@ def test_admin_investigation_payload_and_actions():
         "phishing_page_stage": {"stage": "queued", "detected": True, "max_risk_score": 0.78},
         "bec_kill_chain": {"stage": "Execution", "stages": ["Initial Access", "Execution"]},
     }
+    # Ensure investigation actions table exists (normally done at startup)
+    from src.app.routers.admin_email_security import ensure_investigation_actions_table
+    ensure_investigation_actions_table()
+
     with db_session() as db:
         db.execute(
             text(
@@ -131,3 +135,39 @@ def test_admin_investigation_payload_and_actions():
     assert out3.get("action") == "force_reauth"
     assert out3.get("status") == "executed"
     assert isinstance(out3.get("execution"), dict)
+
+    # Invalid action → 400
+    r4 = client.post(
+        f"/api/v1/admin/email_security/investigations/{incident_id}/action",
+        headers={"x-api-key": "local-owner-key"},
+        json={"action": "wire_the_money", "note": "should fail"},
+    )
+    assert r4.status_code == 400
+
+    # quarantine_sender → pending_implementation (not "queued")
+    r5 = client.post(
+        f"/api/v1/admin/email_security/investigations/{incident_id}/action",
+        headers={"x-api-key": "local-owner-key"},
+        json={"action": "quarantine_sender", "note": "block this domain"},
+    )
+    assert r5.status_code == 200
+    out5 = r5.json()
+    assert out5.get("status") == "pending_implementation"
+    assert out5.get("warning") is not None  # explicit warning returned, not silent
+
+    # GET on non-existent incident → 404
+    r6 = client.get(
+        "/api/v1/admin/email_security/investigations/does-not-exist",
+        headers={"x-api-key": "local-owner-key"},
+    )
+    assert r6.status_code == 404
+
+    # Actions list returned in GET after recording hold_payment
+    r7 = client.get(
+        f"/api/v1/admin/email_security/investigations/{incident_id}",
+        headers={"x-api-key": "local-owner-key"},
+    )
+    assert r7.status_code == 200
+    body7 = r7.json()
+    action_types = [a.get("action") for a in (body7.get("actions") or [])]
+    assert "hold_payment" in action_types or "force_reauth" in action_types

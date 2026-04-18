@@ -215,6 +215,11 @@ def create_app() -> FastAPI:
         except Exception:
             pass
         try:
+            from src.app.routers.admin_email_security import ensure_investigation_actions_table
+            ensure_investigation_actions_table()
+        except Exception:
+            pass
+        try:
             init_logging()
         except Exception:
             pass

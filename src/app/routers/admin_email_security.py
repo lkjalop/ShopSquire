@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 import hashlib
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger("shopsquire.admin_email_security")
 
 from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.responses import HTMLResponse
@@ -331,6 +334,29 @@ def _execute_investigation_action(action: str, incident: Dict[str, Any], payload
         exec_res.update({"executed": True, "session_revoke": session_res, "session_memory": memory_res})
         return exec_res
     return exec_res
+
+
+def ensure_investigation_actions_table() -> None:
+    """Create email_security_investigation_actions table once at startup."""
+    try:
+        with db_session() as db:
+            db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS email_security_investigation_actions (
+                        id TEXT PRIMARY KEY,
+                        incident_id TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        note TEXT,
+                        actor TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            db.commit()
+    except Exception as exc:
+        logger.warning("ensure_investigation_actions_table failed: %s", exc)
 
 
 def _ensure_ioc_feedback_table() -> None:
@@ -2722,27 +2748,13 @@ def get_investigation(
                         "created_at": r[5],
                     }
                 )
-        except Exception:
+        except Exception as _te:
+            logger.warning("get_investigation: timeline fetch failed for trace_id=%s: %s", trace_id, _te)
             timeline = []
 
     actions: List[Dict[str, Any]] = []
     try:
         with db_session() as db:
-            db.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS email_security_investigation_actions (
-                        id TEXT PRIMARY KEY,
-                        incident_id TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        note TEXT,
-                        actor TEXT,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
-                )
-            )
-            db.commit()
             rows = db.execute(
                 text(
                     """
@@ -2757,7 +2769,8 @@ def get_investigation(
             ).fetchall()
         for r in rows or []:
             actions.append({"id": r[0], "action": r[1], "note": r[2], "actor": r[3], "created_at": r[4]})
-    except Exception:
+    except Exception as _ae:
+        logger.warning("get_investigation: actions fetch failed for incident=%s: %s", incident_id, _ae)
         actions = []
 
     recommended_actions = [
@@ -3011,20 +3024,6 @@ def investigation_action(
             db.execute(
                 text(
                     """
-                    CREATE TABLE IF NOT EXISTS email_security_investigation_actions (
-                        id TEXT PRIMARY KEY,
-                        incident_id TEXT NOT NULL,
-                        action TEXT NOT NULL,
-                        note TEXT,
-                        actor TEXT,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
-                )
-            )
-            db.execute(
-                text(
-                    """
                     INSERT INTO email_security_investigation_actions (id, incident_id, action, note, actor)
                     VALUES (:id, :incident_id, :action, :note, :actor)
                     """
@@ -3032,8 +3031,8 @@ def investigation_action(
                 {"id": action_id, "incident_id": incident_id, "action": action, "note": note, "actor": role},
             )
             db.commit()
-    except Exception:
-        pass
+    except Exception as _dbe:
+        logger.error("investigation_action: DB insert failed for incident=%s action=%s: %s", incident_id, action, _dbe)
     try:
         if trace_id:
             log_trace_event(
@@ -3068,7 +3067,8 @@ def investigation_action(
         "incident_id": incident_id,
         "action_id": action_id,
         "action": action,
-        "status": "executed" if action in {"force_reauth", "invalidate_sessions"} else ("queued" if action in {"quarantine_sender", "restore_access"} else "recorded"),
+        "status": "executed" if action in {"force_reauth", "invalidate_sessions"} else ("pending_implementation" if action in {"quarantine_sender", "restore_access"} else "recorded"),
+        "warning": "quarantine_sender/restore_access are recorded but require manual follow-up — async queue not yet wired" if action in {"quarantine_sender", "restore_access"} else None,
         "execution": execution if execution else None,
     }
 
