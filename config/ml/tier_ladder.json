@@ -19,22 +19,22 @@
       "name": "medium",
       "score_min": 5,
       "score_max": 6,
-      "model": "mixtral:8x7b",
-      "description": "Mid-range model. Multi-constraint queries, contextual follow-ups with budget+specs."
+      "model": "qwen3:14b",
+      "description": "Mid-range model. Multi-constraint queries, contextual follow-ups with budget+specs. qwen3:14b with thinking mode for structured reasoning."
     },
     {
       "name": "large",
       "score_min": 7,
       "score_max": 8,
-      "model": "mixtral:8x7b",
-      "description": "High-capacity model. Comparisons, technical analysis, multi-turn reasoning."
+      "model": "qwen3:30b",
+      "description": "High-capacity model with chain-of-thought. Comparisons, technical analysis, multi-turn reasoning. qwen3:30b think=true."
     },
     {
       "name": "expert",
       "score_min": 9,
       "score_max": 10,
-      "model": "mixtral:8x7b",
-      "description": "Expert tier. Complex multi-turn reasoning, policy questions, detailed justifications."
+      "model": "qwen3:30b",
+      "description": "Expert tier with full chain-of-thought. Complex multi-turn reasoning, policy questions, detailed justifications. qwen3:30b think=true."
     }
   ],
   "signals": {

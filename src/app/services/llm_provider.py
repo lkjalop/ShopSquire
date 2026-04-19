@@ -11,8 +11,15 @@ from src.app.security.provider_boundary import sanitize_for_provider
 import httpx
 
 SMALL_DEFAULT = os.getenv("OLLAMA_SMALL_MODEL", "qwen2.5:14b")
-BIG_DEFAULT = os.getenv("OLLAMA_BIG_MODEL", "mixtral:8x7b")
+MEDIUM_DEFAULT = os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b")
+BIG_DEFAULT = os.getenv("OLLAMA_BIG_MODEL", "qwen3:30b")
+EXPERT_DEFAULT = os.getenv("OLLAMA_EXPERT_MODEL", "qwen3:30b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+
+# Qwen3 thinking mode: pass /think in prompt or set think=True in options.
+# Activates chain-of-thought reasoning for complex multi-hop queries.
+_QWEN3_THINK_ENABLED = os.getenv("QWEN3_THINK_ENABLED", "1") == "1"
+_QWEN3_THINK_SCORE_THRESHOLD = int(os.getenv("QWEN3_THINK_SCORE_THRESHOLD", "7"))
 
 # ---------------------------------------------------------------------------
 # Tier ladder (loaded once, cached)
@@ -304,6 +311,9 @@ async def ollama_generate(model: str, prompt: str, options: Dict | None = None, 
             "num_predict": 256,
         },
     }
+    # Enable Qwen3 chain-of-thought for complex queries routed to qwen3 models
+    if _QWEN3_THINK_ENABLED and "qwen3" in model.lower():
+        payload["think"] = True
     if options:
         payload["options"].update(options)
     t0 = time.perf_counter()
