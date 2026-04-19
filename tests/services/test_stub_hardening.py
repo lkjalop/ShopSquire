@@ -53,7 +53,9 @@ def test_mistral_no_key_raises():
 
 def test_get_provider_no_keys_raises():
     """get_provider() with no keys and no LLM_PROVIDER set → RuntimeError."""
-    with _unset("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "MISTRAL_API_KEY", "LLM_PROVIDER"):
+    # OLLAMA_URL must also be unset: OllamaProvider has no API key requirement,
+    # so clearing it ensures the fail-closed path is exercised end-to-end.
+    with _unset("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "MISTRAL_API_KEY", "LLM_PROVIDER", "OLLAMA_URL"):
         with pytest.raises(RuntimeError, match="No LLM provider"):
             get_provider()
 

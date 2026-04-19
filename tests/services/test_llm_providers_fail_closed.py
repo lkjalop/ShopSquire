@@ -10,6 +10,8 @@ def test_get_provider_raises_when_no_keys_configured(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    # OllamaProvider has no API key but requires OLLAMA_URL — clear it too
+    monkeypatch.setenv("OLLAMA_URL", "")
     with pytest.raises(RuntimeError, match="No LLM provider API key is configured"):
         get_provider()
 
