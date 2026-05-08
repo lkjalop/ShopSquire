@@ -42,7 +42,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
     read_only: true
     tmpfs:
       - /tmp:size=512M
@@ -102,7 +101,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
 
   security-crowdstrike-poll:
     build: .
@@ -129,7 +127,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
 
   security-syslog-listener:
     build: .
@@ -157,7 +154,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
 
   security-celery-worker:
     build: .
@@ -189,7 +185,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
 
   security-celery-beat:
     build: .
@@ -219,7 +214,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
 
   prometheus:
     image: prom/prometheus:latest
@@ -288,7 +282,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
 
   # ── Neo4j — GNN fraud ring detection (profile-gated, not started by default) ──
   # To activate: docker compose --profile neo4j up -d
@@ -350,7 +343,6 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-      - seccomp=default
     read_only: true
     tmpfs:
       - /tmp:size=512M
