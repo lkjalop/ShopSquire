@@ -138,14 +138,13 @@ def _detect_touch_screen_need(query: str, answered: Dict[str, Any]) -> bool:
 
 
 def _detect_corporate_subtype(query: str) -> Optional[str]:
-    """Detect corporate work subtype from query."""
+    """Detect corporate work subtype from query — only specific signals, not generic."""
     q = (query or "").lower()
     if any(w in q for w in ["finance", "accounting", "excel", "spreadsheet", "power bi", "tableau", "sap", "bloomberg"]):
         return "office_finance"
-    if any(w in q for w in ["executive", "travel", "presentation", "ceo", "cfo", "director", "boardroom"]):
+    if any(w in q for w in ["executive", "travel laptop", "ceo", "cfo", "director", "boardroom"]):
         return "office_executive"
-    if any(w in q for w in ["office", "corporate", "business", "admin", "clerical"]):
-        return "office_general"
+    # Do NOT auto-resolve generic "office"/"corporate"/"business" — let NQE ask
     return None
 
 
@@ -868,6 +867,8 @@ class NextQuestionEngine:
             _keep_set: set[str] = set()
 
             # 1. Use-case disambiguation is always highest priority
+            if inp.detected_use_case in ('high_school', 'student', 'high_schooler') and _hs_probe_not_asked and _no_activity_signal:
+                _keep_set.add('ask_high_school_activity')
             if inp.detected_use_case and 'university' in (inp.detected_use_case or '').lower():
                 _keep_set.add('ask_university_subject')
             if _gaming_detected and not detected_games:
@@ -890,6 +891,7 @@ class NextQuestionEngine:
 
             # Build result in priority order: domain-specific first, then generic slots
             _domain_priority = [
+                'ask_high_school_activity',
                 'ask_university_subject', 'ask_gaming_depth', 'ask_software_confirm',
                 'ask_corporate_work_type', 'ask_touch_screen_type', 'ask_image_model',
             ]
@@ -899,6 +901,7 @@ class NextQuestionEngine:
             # consume two cap slots on the same field (e.g. ask_budget_tier AND
             # ask_budget both count for 'budget', leaving no room for brand_pref).
             _template_field_map: dict[str, str] = {
+                'ask_high_school_activity': 'use_case',
                 'ask_budget_tier': 'budget',
                 'ask_budget': 'budget',
                 'ask_use_case': 'use_case',

@@ -646,6 +646,15 @@ def _attachment_forensics_snapshot(
         if ext in {".py", ".ps1", ".sh"}:
             if any(tok in text for tok in ("image.new", "generate", "simulat", "shopsquire", "invoice")):
                 return "contextual_test_artifact"
+        if ext in {".bas", ".vba", ".xlsm", ".xlam", ".vbs"}:
+            _vba_exec_toks = (
+                "sub auto_open()", "sub workbook_open()", "sub document_open()",
+                "wscript.shell", "createobject(", "shell(", "mshta ", "certutil",
+                "bitsadmin", "powershell",
+            )
+            if any(tok in text for tok in _vba_exec_toks):
+                return "active_payment_lure"
+            return "contextual_test_artifact"
         if suspicious_instructions or urls:
             return "active_payment_lure"
         return "contextual_test_artifact"
@@ -691,6 +700,26 @@ def _attachment_forensics_snapshot(
             suspicious_instructions.append("Requests new or changed payment instructions.")
         if bank_fields:
             suspicious_instructions.append("Contains bank or remittance details in the attachment.")
+        # VBA / script macro execution indicators in extracted text.
+        # Fires for .bas, .vba, .xlsm, .xlam, .ps1, .vbs, and any other attachment
+        # where the text surface contains recognisable offensive VBA/script primitives.
+        _vba_indicator_map = [
+            ("sub auto_open()",       "vba_auto_open_macro"),
+            ("sub workbook_open()",   "vba_workbook_open_macro"),
+            ("sub document_open()",   "vba_document_open_macro"),
+            ("wscript.shell",         "vba_wscript_shell"),
+            ("createobject(",         "vba_createobject_call"),
+            ("shell(",                "vba_shell_call"),
+            ("mshta ",                "vba_mshta_lolbin"),
+            ("certutil",              "vba_certutil_lolbin"),
+            ("bitsadmin",             "vba_bitsadmin_lolbin"),
+            ("powershell",            "vba_powershell_indicator"),
+        ]
+        for _vba_pat, _vba_label in _vba_indicator_map:
+            if _vba_pat in lower_text:
+                suspicious_instructions.append(
+                    f"Attachment contains VBA/script execution indicator: {_vba_label}"
+                )
         attachment_reasons = [
             str(item.get("reason") or "")
             for item in contributions
@@ -782,6 +811,45 @@ def _attachment_forensics_snapshot(
                 "steg_details": dict(att.get("steg_details") or {}) if isinstance(att.get("steg_details"), dict) else {},
             }
         )
+        # MAESTRO SC-04B per-attachment boundary check for attachment_forensics_agent.
+        # Each attachment processed is a discrete boundary enforcement point.
+        # Maps to OWASP Agentic AI AA03 (trust boundary violation) and AA05 (prompt injection
+        # via content channels — OCR/QR surfaces in attachments can carry injections).
+        try:
+            _att_tools_used = []
+            if extracted_text:
+                _att_tools_used.append("ocr_attachment")
+            if str(att.get("content_type") or "").lower().endswith("pdf") or name.lower().endswith(".pdf"):
+                _att_tools_used.append("parse_pdf")
+            if att.get("qr_code_detected"):
+                _att_tools_used.append("scan_qr")
+            if bank_fields:
+                _att_tools_used.append("extract_bank_fields")
+            if not _att_tools_used:
+                _att_tools_used.append("extract_text")
+            _att_violations = []
+            for _tool in _att_tools_used:
+                for _v in validate_agent_action(agent_name="attachment_forensics_agent", tool_name=_tool):
+                    _att_violations.append({"violation_type": _v.violation_type, "detail": _v.detail, "severity": _v.severity})
+            for _v in validate_agent_action(agent_name="attachment_forensics_agent", data_scope="attachments"):
+                _att_violations.append({"violation_type": _v.violation_type, "detail": _v.detail, "severity": _v.severity})
+            # AA05: flag if attachment carries active injection indicators via OCR/QR channel.
+            _aa05_signals = []
+            if att.get("qr_prompt_injection") or (att.get("steg_suspicious") and extracted_text):
+                _aa05_signals.append("qr_or_steg_injection_channel_active")
+            if re.search(r"(?i)(ignore\s+previous|system\s*prompt|developer\s+mode|do\s+not\s+follow)", extracted_text):
+                _aa05_signals.append("ocr_text_prompt_injection_pattern")
+            summary[-1]["maestro_boundary_check"] = {
+                "agent": "attachment_forensics_agent",
+                "tools_validated": _att_tools_used,
+                "scope_enforced": len(_att_violations) == 0,
+                "scope_violations": _att_violations,
+                "owasp_agentic": ["AA03"] + (["AA05"] if _aa05_signals else []),
+                "aa05_signals": _aa05_signals,
+                "maestro_control": "SC-04B",
+            }
+        except Exception:
+            pass
     return summary
 
 
@@ -4274,6 +4342,22 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 structured_findings=structured_findings,
                 evidence_snapshot=evs,
             )
+            # Surface VBA/macro execution findings as a human-readable reason so
+            # they appear in the top-level "reasons" field.  macro_auto_execution_lure
+            # findings come from the passive-payload classifier for .bas/.xlsm files
+            # with uncommented auto-execution subs (Sub Auto_Open, Sub Workbook_Open).
+            try:
+                _macro_ftypes = {"macro_auto_execution_lure", "lolbin_command_sequence"}
+                if any(
+                    str((f or {}).get("finding_type") or "") in _macro_ftypes
+                    for f in (structured_findings or [])
+                    if isinstance(f, dict)
+                ):
+                    v["reasons"] = list(dict.fromkeys(
+                        (v.get("reasons") or []) + ["vba_macro_execution_indicator_detected"]
+                    ))
+            except Exception:
+                pass
             vendor_trust_graph = build_vendor_trust_graph_snapshot(
                 governance_snapshot=supplier_governance,
                 evidence_snapshot=evs,

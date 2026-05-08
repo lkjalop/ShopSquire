@@ -106,8 +106,8 @@ def select_template(
     sig = image_cv_signals if isinstance(image_cv_signals, dict) else {}
     if bool(sig.get("qr_prompt_injection") or sig.get("qr_external_url_detected")):
         return {"template_id": "cv_reupload_with_text_fallback_template", "reason": "cv_hard_block"}
-    if str(decomp.get("primary_intent") or "") == "support" and "eta_to_resolve" in (decomp.get("required_answers") or []):
-        return {"template_id": "repair_return_eta_template", "reason": "support_eta"}
+    if str(decomp.get("primary_intent") or "") == "support":
+        return {"template_id": "repair_return_eta_template", "reason": "support_routing"}
     if not products:
         return {"template_id": "no_match_explain_template", "reason": "no_products"}
     if "budget_recommendation" in (decomp.get("required_answers") or []):
@@ -154,10 +154,22 @@ def score_answer_coverage(*, query: str, message: str, required_answers: List[st
 
 
 def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_message: str) -> str:
+    # Prefer stated user budget over any price range found in the LLM message text
+    q_lo, q_hi = _extract_query_budget_bounds(query)
+    # Also try "around $N" / "budget $N" / "about $N" patterns
+    _around = re.search(r"(?:around|about|roughly|approx\.?|budget\s+(?:of\s+)?)\$?\s*([\d,]{3,6})", str(query or ""), re.I)
+    if _around and q_hi is None:
+        _v = _to_int(_around.group(1))
+        if _v:
+            q_hi = _v
     lo_msg, hi_msg = _extract_price_range_from_message(base_message)
     prices = [int(float(p.get("price") or 0)) for p in (products or []) if p.get("price") is not None]
     if prices and (lo_msg is None or hi_msg is None):
         lo_msg, hi_msg = min(prices), max(prices)
+    # Override with actual product price range + user budget ceiling
+    if prices:
+        lo_msg = min(prices)
+        hi_msg = q_hi if q_hi and q_hi > max(prices) else max(prices)
     threshold = _extract_budget_threshold(query)
     direct = None
     if threshold is not None and hi_msg is not None:
@@ -280,4 +292,5 @@ def apply_answer_quality(
         "template_selected": {"template_id": template_id, "reason": templ.get("reason")},
         "answer_coverage_scored": cov2,
     }
+
 

@@ -56,6 +56,7 @@ from src.app.services.playbook_engine import (
 from src.app.policy.gate import evaluate_policy_gate
 from src.app.security.tool_intent_gate import evaluate_tool_intent
 from src.app.security.agent_guardrails import assess_agent_interaction
+from src.app.security.maestro_boundaries import validate_agent_action as _maestro_validate
 
 logger = logging.getLogger("shopsquire.orchestrator")
 
@@ -511,6 +512,24 @@ class Orchestrator:
         except Exception:
             pass
 
+    # Maps orchestrator stage prefixes to MAESTRO data scopes.
+    _STAGE_SCOPE: Dict[str, str] = {
+        "phase1": "products",
+        "phase2": "inventory",
+        "phase3": "orders",
+        "phase4": "images",
+    }
+    # Maps caller-supplied agent names to canonical MAESTRO boundary names.
+    _MAESTRO_NAME: Dict[str, str] = {
+        "Orchestrator_Agent": "Orchestrator",
+        "Recommendation_Agent": "Product_Ranking_Agent",
+        "Inventory_Agent": "Candidate_Retrieval_Agent",
+        "Fraud_Agent": "Fraud_Scoring_Agent",
+        "CV_Agent": "CV_Label_Agent",
+        "NLP_Agent": "NLP_Search_Agent",
+        "NQE_Agent": "NQE_Engine",
+    }
+
     def _agent_guardrail(
         self,
         *,
@@ -527,6 +546,48 @@ class Orchestrator:
             tenant_id=tenant_id,
             trace_id=trace_id,
         )
+        # MAESTRO boundary check — audit/warn/block depending on MAESTRO_ENFORCEMENT_MODE.
+        maestro_violations: List[Dict[str, Any]] = []
+        maestro_blocked = False
+        try:
+            from src.app.security.maestro_boundaries import MaestroViolationError
+            boundary_name = self._MAESTRO_NAME.get(agent_name, agent_name)
+            stage_prefix = (stage or "").split(".")[0]
+            data_scope = self._STAGE_SCOPE.get(stage_prefix)
+            for v in _maestro_validate(agent_name=boundary_name, data_scope=data_scope):
+                maestro_violations.append(
+                    {"type": v.violation_type, "detail": v.detail, "severity": v.severity}
+                )
+        except MaestroViolationError as exc:
+            # block mode — re-raise so the caller (route handler) sees a 403-worthy error
+            maestro_violations = [
+                {"type": v.violation_type, "detail": v.detail, "severity": v.severity}
+                for v in exc.violations
+            ]
+            maestro_blocked = True
+            try:
+                if trace_id:
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="agent_guardrail",
+                        source_type="security",
+                        source_id=agent_name,
+                        target_type="agent",
+                        target_id=agent_name,
+                        payload={
+                            **decision,
+                            "maestro_checked": True,
+                            "maestro_boundary": self._MAESTRO_NAME.get(agent_name, agent_name),
+                            "maestro_violations": maestro_violations,
+                            "maestro_blocked": True,
+                            "tags": ["maestro", "maestro_block"],
+                        },
+                    )
+            except Exception:
+                pass
+            raise
+        except Exception:
+            pass
         try:
             if trace_id:
                 log_trace_event(
@@ -536,7 +597,14 @@ class Orchestrator:
                     source_id=agent_name,
                     target_type="agent",
                     target_id=agent_name,
-                    payload=decision,
+                    payload={
+                        **decision,
+                        "maestro_checked": True,
+                        "maestro_boundary": self._MAESTRO_NAME.get(agent_name, agent_name),
+                        "maestro_violations": maestro_violations,
+                        "maestro_blocked": maestro_blocked,
+                        "tags": ["maestro"] + (["maestro_violation"] if maestro_violations else []),
+                    },
                 )
         except Exception:
             pass
@@ -1076,7 +1144,25 @@ class Orchestrator:
                     except Exception:
                         pass
                     return {"sku": sku_val, "skipped_due_budget": True}
-                res = await asyncio.to_thread(inv.evaluate_stock_rule, sku_val, {"stock": stock})
+                # Pass product metadata flags so the 50-rule inventory engine
+                # can fire beyond the stock-count fallback (R001-R004).
+                _inv_ctx = {
+                    "stock": stock,
+                    "product_status": str(r.get("status") or r.get("product_status") or "active"),
+                    "reorder_active": bool(r.get("reorder_active")),
+                    "preorder": bool(r.get("preorder")),
+                    "dropship_only": bool(r.get("dropship_only")),
+                    "made_to_order": bool(r.get("made_to_order")),
+                    "high_return_rate": bool(r.get("high_return_rate")),
+                    "high_return_rate_recent": bool(r.get("high_return_rate_recent")),
+                    "manual_hold": bool(r.get("manual_hold")),
+                    "fraud_hold": bool(r.get("fraud_hold")),
+                    "recall_active": bool(r.get("recall_active")),
+                    "clearance": bool(r.get("clearance")),
+                    "lead_time": int(r.get("lead_time_days") or 2),
+                    "eta_days": int(r.get("eta_days") or 7),
+                }
+                res = await asyncio.to_thread(inv.evaluate_stock_rule, sku_val, _inv_ctx)
                 res["available_qty"] = stock
                 res["low_stock"] = stock > 0 and stock < 5
                 item = {"sku": sku_val, **res}

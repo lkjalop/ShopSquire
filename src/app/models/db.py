@@ -123,6 +123,9 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  total_cents INT NOT NULL,\n"
                     "  currency TEXT NOT NULL DEFAULT 'USD',\n"
                     "  status TEXT NOT NULL DEFAULT 'pending_payment',\n"
+                    "  stripe_intent_id TEXT,\n"
+                    "  tracking_number TEXT,\n"
+                    "  carrier TEXT,\n"
                     "  created_at TEXT DEFAULT CURRENT_TIMESTAMP,\n"
                     "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                     ")"
@@ -657,6 +660,21 @@ def _ensure_minimal_sqlite_tables(bind):
                     pass
                 try:
                     conn.execute(sql_text("ALTER TABLE orders ADD COLUMN guest_email_encrypted TEXT"))
+                except Exception:
+                    pass
+                for _stmt in (
+                    "ALTER TABLE orders ADD COLUMN stripe_intent_id TEXT",
+                    "ALTER TABLE orders ADD COLUMN tracking_number TEXT",
+                    "ALTER TABLE orders ADD COLUMN carrier TEXT",
+                ):
+                    try:
+                        conn.execute(sql_text(_stmt))
+                    except Exception:
+                        pass
+                try:
+                    conn.execute(sql_text(
+                        "CREATE INDEX IF NOT EXISTS idx_orders_stripe_intent ON orders(stripe_intent_id)"
+                    ))
                 except Exception:
                     pass
                 try:

@@ -1,3 +1,7 @@
+import json
+import logging
+import os
+
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Dict
@@ -10,6 +14,8 @@ from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.transaction_firewall import evaluate_transaction_firewall
 from src.app.policy.kill_switch import assert_autonomy_allowed
+
+_log = logging.getLogger("shopsquire.payments")
 
 
 router = APIRouter(prefix="/api/v1/payments", tags=["payments"])
@@ -189,6 +195,7 @@ class _CheckoutInitiateBody(BaseModel):
     customer_email: str | None = None
     shipping_address: str | None = None
     cart_id: str | None = None
+    order_id: str | None = None  # internal order ID from POST /api/v1/orders/create
 
 
 @router.post("/checkout-initiate")
@@ -230,8 +237,26 @@ def checkout_initiate(
             client = StripeClient(settings.stripe_api_key)
             intent = client.create_payment_intent(amount_cents, currency)
             if isinstance(intent, dict):
+                stripe_intent_id = intent.get("id") or f"pi_{secrets.token_hex(8)}"
+                # Link the Stripe intent to the internal order so the webhook can
+                # transition pending → paid without guessing the association.
+                if body.order_id:
+                    try:
+                        with db_session() as _db:
+                            _db.execute(
+                                text(
+                                    "UPDATE orders SET stripe_intent_id = :iid, "
+                                    "updated_at = CURRENT_TIMESTAMP "
+                                    "WHERE id = :oid"
+                                ),
+                                {"iid": stripe_intent_id, "oid": body.order_id},
+                            )
+                            _db.commit()
+                    except Exception as _db_exc:
+                        _log.warning("checkout_initiate: failed to store stripe_intent_id: %s", _db_exc)
                 return {
-                    "order_id": intent.get("id", f"pi_{secrets.token_hex(8)}"),
+                    "order_id": body.order_id or stripe_intent_id,
+                    "stripe_intent_id": stripe_intent_id,
                     "client_secret": intent.get("client_secret"),
                     "status": "requires_payment",
                     "amount_cents": amount_cents,
@@ -248,12 +273,97 @@ def checkout_initiate(
             detail="Checkout provider unavailable. Configure Stripe or explicitly enable demo checkout in non-production environments.",
         )
 
+    # Hard-block demo mode in production even if ALLOW_DEMO_CHECKOUT is somehow set.
+    if _is_non_dev_env(settings.app_env) and not os.environ.get("ALLOW_DEMO_CHECKOUT", "").lower() in ("1", "true", "yes", "on"):
+        raise HTTPException(
+            status_code=503,
+            detail="Checkout unavailable in production without a configured Stripe key.",
+        )
+    _log.warning(
+        "checkout_initiate: returning demo_confirmed — no real payment processed "
+        "(app_env=%s, ALLOW_DEMO_CHECKOUT=%s)",
+        getattr(settings, "app_env", "unknown"),
+        os.environ.get("ALLOW_DEMO_CHECKOUT", ""),
+    )
     demo_order_id = f"DEMO-{secrets.token_urlsafe(6).upper()}"
     return {
         "order_id": demo_order_id,
+        "stripe_intent_id": None,
         "client_secret": None,
         "status": "demo_confirmed",
         "amount_cents": amount_cents,
         "currency": currency,
         "demo_mode": True,
     }
+
+
+# ─── Stripe webhook ───────────────────────────────────────────────────────────
+
+@router.post("/webhook")
+async def stripe_webhook(request: Request) -> Dict:
+    """Stripe sends payment_intent.succeeded / payment_intent.payment_failed here.
+
+    Signature verification uses STRIPE_WEBHOOK_SECRET.  Without it the endpoint
+    still processes events but logs a warning — acceptable in dev, not in prod.
+    """
+    payload_bytes = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+
+    if webhook_secret:
+        try:
+            import stripe as _stripe
+            event = _stripe.Webhook.construct_event(payload_bytes, sig_header, webhook_secret)
+        except Exception as exc:
+            _log.warning("stripe_webhook: invalid signature — %s", exc)
+            raise HTTPException(status_code=400, detail=f"Invalid Stripe webhook signature: {exc}")
+    else:
+        _log.warning("stripe_webhook: STRIPE_WEBHOOK_SECRET not set — skipping signature verification")
+        try:
+            event = json.loads(payload_bytes)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}")
+
+    event_type = str(event.get("type") or "")
+    data_obj = (event.get("data") or {}).get("object") or {}
+    intent_id = str(data_obj.get("id") or "").strip()
+
+    if event_type == "payment_intent.succeeded" and intent_id:
+        with db_session() as _db:
+            result = _db.execute(
+                text(
+                    "UPDATE orders SET status = 'paid', updated_at = CURRENT_TIMESTAMP "
+                    "WHERE stripe_intent_id = :iid AND status = 'created'"
+                ),
+                {"iid": intent_id},
+            )
+            _db.commit()
+        _log.info("stripe_webhook: marked paid for intent %s (rows=%s)", intent_id, getattr(result, "rowcount", "?"))
+
+    elif event_type == "payment_intent.payment_failed" and intent_id:
+        with db_session() as _db:
+            _db.execute(
+                text(
+                    "UPDATE orders SET status = 'payment_failed', updated_at = CURRENT_TIMESTAMP "
+                    "WHERE stripe_intent_id = :iid AND status = 'created'"
+                ),
+                {"iid": intent_id},
+            )
+            _db.commit()
+        _log.warning("stripe_webhook: payment_failed for intent %s", intent_id)
+
+    elif event_type == "charge.refunded" and intent_id:
+        # charge.refunded carries payment_intent field, not id
+        pi_id = str(data_obj.get("payment_intent") or "").strip() or intent_id
+        with db_session() as _db:
+            _db.execute(
+                text(
+                    "UPDATE orders SET status = 'returned', updated_at = CURRENT_TIMESTAMP "
+                    "WHERE stripe_intent_id = :iid AND status IN ('delivered', 'shipped', 'paid')"
+                ),
+                {"iid": pi_id},
+            )
+            _db.commit()
+        _log.info("stripe_webhook: refund processed for intent %s", pi_id)
+
+    return {"received": True, "type": event_type}

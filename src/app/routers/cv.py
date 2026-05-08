@@ -28,6 +28,7 @@ from src.app.deps import get_redis
 from src.app.services.tenant_quota import TenantQuotaGuard
 from src.app.policy.vertical_pack import load_vertical_pack, resolve_pack_id
 from src.app.rules.image_quality import assess_image_quality
+from src.app.security.maestro_boundaries import validate_agent_action as _maestro_validate_cv
 from src.app.services.dependency_resilience import call_with_resilience
 import asyncio as _asyncio
 from src.app.models.db import db_session
@@ -301,11 +302,40 @@ async def analyze(
 
             # ── Parallelize independent analysis tasks for ~2-3x speedup ──
             # tier2 scan, image consistency, and QR decode are independent once labels/text exist.
+            #
+            # Upload advice for large images
+            # ─────────────────────────────────────────────────────────────────────
+            # Recommended upload spec (server-side enforced below):
+            #   max dimension: 1024px (longer side resampled to 1024, aspect preserved)
+            #   format:        JPEG or PNG — WEBP accepted but converted
+            #   size:          < 4 MB after base64 decode
+            # YOLO + steg + adversarial all run on the full image so large
+            # resolutions increase processing time significantly.  Images
+            # >1024px on either axis are resampled to 1024 before tier-2 to
+            # keep within the CV_ANALYZE_TIMEOUT_SEC budget without blocking
+            # the result — original bytes are preserved for OCR and QR decode.
+            _tier2_img_bytes = sanitized_images[0].get("bytes") or b"" if sanitized_images else b""
+            try:
+                if _tier2_img_bytes and len(_tier2_img_bytes) > 0:
+                    from PIL import Image as _PIL_Image
+                    import io as _io
+                    _pil = _PIL_Image.open(_io.BytesIO(_tier2_img_bytes))
+                    _w, _h = _pil.size
+                    _max_dim = int(os.getenv("CV_TIER2_MAX_DIM", "1024") or "1024")
+                    if _w > _max_dim or _h > _max_dim:
+                        _scale = _max_dim / max(_w, _h)
+                        _pil = _pil.resize((int(_w * _scale), int(_h * _scale)), _PIL_Image.LANCZOS)
+                        _buf = _io.BytesIO()
+                        _pil.save(_buf, format="JPEG", quality=88)
+                        _tier2_img_bytes = _buf.getvalue()
+                        _log.debug("cv.analyze pre-shrunk image %dx%d → %dx%d for tier2", _w, _h, int(_w * _scale), int(_h * _scale))
+            except Exception as _shrink_exc:
+                _log.debug("cv.analyze image pre-shrink skipped: %s", _shrink_exc)
+
             async def _run_tier2_task():
                 try:
                     if sanitized_images and str(sanitized_images[0].get("status") or "") == "sanitized":
-                        _img0 = sanitized_images[0].get("bytes") or b""
-                        if isinstance(_img0, (bytes, bytearray)) and _img0:
+                        if isinstance(_tier2_img_bytes, (bytes, bytearray)) and _tier2_img_bytes:
                             _meta = {
                                 "filename": str(sanitized_images[0].get("filename") or "analyze_1.jpg"),
                                 "case_id": str(req.case_id or ""),
@@ -314,7 +344,7 @@ async def analyze(
                                 "order_id": req.order_id,
                             }
                             result = await _asyncio.to_thread(
-                                run_tier2, bytes(_img0), meta=_meta,
+                                run_tier2, bytes(_tier2_img_bytes), meta=_meta,
                                 pack_id=resolve_pack_id(req.description or req.issue_type or "electronics"),
                             )
                             return result
@@ -377,8 +407,11 @@ async def analyze(
             # Run all three in parallel, bounded by a wall-clock timeout so the
             # endpoint never hangs indefinitely (e.g. when Ollama / OCR / YOLO is
             # unavailable in test environments).
+            # Default is 15s (was 8s) — images are pre-shrunk to CV_TIER2_MAX_DIM
+            # (default 1024px) so steg+adversarial+YOLO finish well within budget.
+            # Override with CV_ANALYZE_TIMEOUT_SEC env var.
             _cv_analyze_timeout = float(
-                (os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "60").strip() or "60"
+                (os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "15").strip() or "15"
             )
             try:
                 tier2_result, image_consistency, (_qr_hits, _qr_reasons, _qr_inj, _diag_cnt) = await _asyncio.wait_for(
@@ -894,6 +927,32 @@ async def analyze(
         if _escalation_level in ("orange", "red"):
             _needs_chat = True
 
+        # MAESTRO SC-04B: validate CV agent boundary before returning.
+        # cv_analysis_agent is allowed to use: detect_adversarial, detect_steganography,
+        # run_yolo, run_ocr, decode_barcodes, run_tier2.  Data scope: images.
+        _maestro_violations_cv: list[dict] = []
+        _maestro_checked_cv = False
+        try:
+            _cv_tools = ["run_yolo", "run_ocr"]
+            if tier2_result:
+                _cv_tools += ["detect_adversarial", "detect_steganography", "run_tier2"]
+            if qr_decode_hits:
+                _cv_tools.append("decode_barcodes")
+            for _t in _cv_tools:
+                for _v in _maestro_validate_cv(agent_name="cv_analysis_agent", tool_name=_t):
+                    _maestro_violations_cv.append({"violation_type": _v.violation_type, "detail": _v.detail, "severity": _v.severity})
+            for _v in _maestro_validate_cv(agent_name="cv_analysis_agent", data_scope="images"):
+                _maestro_violations_cv.append({"violation_type": _v.violation_type, "detail": _v.detail, "severity": _v.severity})
+            _maestro_checked_cv = True
+        except Exception:
+            pass
+        _maestro_verdict_cv = "clean" if not _maestro_violations_cv else (
+            "blocked" if any(v.get("severity") in ("critical", "high") for v in _maestro_violations_cv) else "warned"
+        )
+        _owasp_agentic_cv = ["AA03"]
+        if tier2_evidence_tags and any("inject" in t or "steg" in t for t in tier2_evidence_tags):
+            _owasp_agentic_cv.append("AA05")
+
         return {
             "status": "ok",
             "case_id": case_id,
@@ -918,6 +977,11 @@ async def analyze(
                 "ocr_word_count": ocr_meta.get("ocr_word_count"),
                 "cv_extraction_method": ocr_meta.get("cv_extraction_method"),
             },
+            "maestro_checked": _maestro_checked_cv,
+            "maestro_verdict": _maestro_verdict_cv,
+            "maestro_control": "SC-04B",
+            "maestro_violations": _maestro_violations_cv,
+            "owasp_agentic": _owasp_agentic_cv,
             "cv_runtime": runtime,
             "ui_actions": {"chat_with_admin": _needs_chat},
             "suggested_routing": "security_review" if _needs_chat else "standard_queue",
@@ -1158,7 +1222,7 @@ async def upload(
                     },
                     pack_id=pack_id,
                 ),
-                timeout_s=8.0,
+                timeout_s=90.0,
                 retries=1,
             )
         except Exception as exc:

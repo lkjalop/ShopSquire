@@ -160,6 +160,10 @@ function productPrice(p: any): number {
   return 0;
 }
 
+function formatAUD(n: number): string {
+  return n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
+}
+
 function isShoppingIntentQuery(query: string): boolean {
   const q = String(query || '').toLowerCase();
   return /laptop|computer|price|under|below|above|budget|cheap|affordable|\$|show|find|search|gaming|macbook|dell|hp|asus|lenovo|msi|university|student|study/.test(q);
@@ -229,12 +233,12 @@ function laneSummary(lane: DeviceLane, items: Product[], budgetStatus?: string, 
       ? 'Budget allows performance-oriented options.'
       : 'Recommendations balance value and use-case fit.';
   if (lane === 'windows') {
-    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks range from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()}.`;
+    return `${budgetHint} Top ${useCase} options are ${top.join(' and ')}. Windows picks range from ${formatAUD(minPrice)} to ${formatAUD(maxPrice)}.`;
   }
   if (lane === 'macbook') {
-    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, from $${minPrice.toLocaleString()} to $${maxPrice.toLocaleString()}.`;
+    return `${budgetHint} ${top.join(' and ')} are prioritized for battery life and reliability, from ${formatAUD(minPrice)} to ${formatAUD(maxPrice)}.`;
   }
-  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, $${minPrice.toLocaleString()}-$${maxPrice.toLocaleString()}).`;
+  return `${budgetHint} Tablet/Chromebook alternatives are shown when portability or price make more sense (${top.join(' and ')}, ${formatAUD(minPrice)}–${formatAUD(maxPrice)}).`;
 }
 
 
@@ -838,7 +842,7 @@ export default function App() {
     const ping = async () => {
       const ctl = new AbortController();
       const t0 = performance.now();
-      const to = setTimeout(() => ctl.abort(), 2500);
+      const to = setTimeout(() => ctl.abort(), 10000);
       try {
         const r = await fetch(apiUrl('/healthz'), { signal: ctl.signal });
         const ms = Math.round(performance.now() - t0);
@@ -1304,11 +1308,11 @@ export default function App() {
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
           else switchRightPanelMode(mode === 'none' ? 'grid' : mode);
-          const whySummary = summarizeWhy(prods);
+          const whySummary = _stripTechnicalTokens(summarizeWhy(prods));
           const hasAssistantBody = typeof respAssistant === 'string' && respAssistant.trim().length > 0;
           const baseLine = hasAssistantBody
             ? _stripTechnicalTokens(respAssistant.trim())
-            : `I found ${prods.length} ${mode === 'compare' ? 'products to compare' : 'matching products'} and I’m showing the top ${visibleProducts.length}.`;
+            : `I found ${prods.length} ${mode === 'compare' ? 'products to compare' : 'matching products'} and I'm showing the top ${visibleProducts.length}.`;
           const includeWhy = whySummary && !/top picks:/i.test(baseLine);
           const budgetNote = budgetAdvice && !baseLine.includes('budget') ? `\n\n⚠️ Budget note: ${budgetAdvice}` : '';
 
@@ -1323,9 +1327,12 @@ export default function App() {
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
+          // Zero results: only override panel for explicit support/cart flows.
+          // Do NOT switch to 'grid' on zero results — that causes a flicker
+          // on follow-up refine queries where the panel was already in a useful state.
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
-          else switchRightPanelMode(shoppingIntent ? 'grid' : mode);
+          // else: keep current panel mode unchanged
           const nqePrompt = formatNextQuestions(nextQuestions);
           const noProdsBase = respAssistant || 'I could not find products matching that query.';
           const budgetNote = budgetAdvice ? `\n\n⚠️ Budget note: ${budgetAdvice}` : '';
@@ -1567,10 +1574,14 @@ export default function App() {
                       {msg.content}
                       {/* Voice badge */}
                       {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
-                      {/* Complexity badge */}
+                      {/* Complexity badge — dev-only hint, shown below message as dim metadata */}
                       {msg.complexity && (
-                        <span className={styles.complexityBadge} title={`Tier: ${msg.complexity.tier} | Model: ${msg.complexity.model}`}>
-                          ⚡ {msg.complexity.score}/10
+                        <span
+                          className={styles.complexityBadge}
+                          title={`Complexity ${msg.complexity.score}/10 · Tier: ${msg.complexity.tier} · Model: ${msg.complexity.model}`}
+                          style={{ display: 'block', fontSize: '0.62em', opacity: 0.35, marginTop: 4, letterSpacing: '0.02em' }}
+                        >
+                          {msg.complexity.tier} · {msg.complexity.model?.split(':')[0]}
                         </span>
                       )}
                       {msg.agentStepsReadable && msg.agentStepsReadable.length > 0 && (
@@ -1668,7 +1679,7 @@ export default function App() {
                     <MicIcon />
                     {stt.whisperPending && <span className={styles.whisperDot} />}
                   </button>
-                  <button className={styles.sendBtn} onClick={handleSend} disabled={isThinking || imageRoutingInFlight}><SendIcon /></button>
+                  <button className={styles.sendBtn} onClick={() => handleSend()} disabled={isThinking || imageRoutingInFlight}><SendIcon /></button>
                 </div>
                 {latestAssistantQuestions.length > 0 && (
                   <div className={styles.quickChipsRow}>
@@ -1796,7 +1807,7 @@ export default function App() {
                             {(section?.top_products || []).slice(0, 3).map((p) => (
                               <article key={`anchor-${idx}-${p.sku}`} className={styles.tierCard}>
                                 <div className={styles.tierName}>{p.name}</div>
-                                <div className={styles.tierPrice}>${productPrice(p).toLocaleString()}</div>
+                                <div className={styles.tierPrice}>{formatAUD(productPrice(p))}</div>
                                 <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
                               </article>
                             ))}
@@ -1833,7 +1844,7 @@ export default function App() {
                                     <div className={styles.deviceLaneImgPlaceholder}>No image</div>
                                   )}
                                   <div className={styles.deviceLaneName}>{p.name}</div>
-                                  <div className={styles.deviceLanePrice}>${productPrice(p).toLocaleString()}</div>
+                                  <div className={styles.deviceLanePrice}>{formatAUD(productPrice(p))}</div>
                                   <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
                                 </article>
                               ))}
@@ -2011,7 +2022,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          <tr><td>Price</td>{filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>${p.price.toLocaleString()}</td>)}</tr>
+                          <tr><td>Price</td>{filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>{formatAUD(productPrice(p))}</td>)}</tr>
                           {['Display', 'Processor', 'RAM', 'Storage', 'Graphics'].map((feat, i) => (
                             <tr key={feat}>
                               <td>{feat}</td>
@@ -2032,6 +2043,12 @@ export default function App() {
                         onAdd={addToCart}
                         onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
                       />
+                    ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
+                      <div className={styles.emptyProductState}>
+                        <div className={styles.emptyProductIcon}>🔍</div>
+                        <div className={styles.emptyProductTitle}>No products found</div>
+                        <div className={styles.emptyProductHint}>Try adjusting your budget, use-case, or brand filter. I can help — just ask!</div>
+                      </div>
                     ) : (
                       <ProductGrid
                         products={filteredDisplayProducts}

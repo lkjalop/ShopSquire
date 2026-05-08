@@ -386,6 +386,143 @@ export function EmailXdr({ role }: Props) {
                 <div className="page-sub" style={{ fontWeight: 600 }}>Evidence snapshot (redacted)</div>
                 <pre className="panel" style={{ maxHeight: 220, overflow: 'auto' }}>{JSON.stringify(selectedFull?.evidence_snapshot || selected.evidence_snapshot || {}, null, 2)}</pre>
               </div>
+
+              {/* Per-attachment MAESTRO SC-04B boundary checks (AA03 / AA05) */}
+              {(() => {
+                const attachmentForensics: any[] = (selectedFull?.evidence_snapshot as any)?.attachment_forensics || [];
+                const withChecks = attachmentForensics.filter((a: any) => a?.maestro_boundary_check);
+                if (withChecks.length === 0) return null;
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <div className="page-sub" style={{ fontWeight: 600 }}>
+                      MAESTRO Per-Attachment Boundary (SC-04B / AA03 / AA05)
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 6 }}>
+                      <thead>
+                        <tr style={{ background: '#f3f4f6' }}>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>File</th>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>Scope</th>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>OWASP Agentic</th>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>AA05 Signals</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {withChecks.map((att: any, idx: number) => {
+                          const chk = att.maestro_boundary_check;
+                          return (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                              <td style={{ padding: '4px 8px', fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>
+                                {att.file_name || `attachment-${idx + 1}`}
+                              </td>
+                              <td style={{ padding: '4px 8px' }}>
+                                {chk.scope_enforced
+                                  ? <span style={{ color: '#16a34a', fontWeight: 600 }}>✓ enforced</span>
+                                  : <span style={{ color: '#dc2626', fontWeight: 600 }}>✗ violated</span>
+                                }
+                              </td>
+                              <td style={{ padding: '4px 8px' }}>
+                                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                  {(chk.owasp_agentic || []).map((tag: string) => (
+                                    <span key={tag} style={{
+                                      background: tag === 'AA05' ? '#dc2626' : '#7c3aed',
+                                      color: '#fff', borderRadius: 4, padding: '1px 5px', fontSize: 10,
+                                    }}>{tag}</span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td style={{ padding: '4px 8px', fontSize: 11, color: '#6b7280' }}>
+                                {(chk.aa05_signals || []).length === 0
+                                  ? '—'
+                                  : (chk.aa05_signals || []).map((s: string) => s.replace(/_/g, ' ')).join(', ')
+                                }
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+
+              {/* MAESTRO Agentic Compliance Audit */}
+              {(() => {
+                const runs: Array<any> = (
+                  investigation?.agent_runs ||
+                  investigation?.explain?.agent_runs ||
+                  (selectedFull?.evidence_snapshot as any)?.agent_runs ||
+                  []
+                );
+                if (runs.length === 0) return null;
+                const totalViolations = runs.reduce((acc: number, r: any) => acc + ((r.scope_violations || []).length), 0);
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <div className="page-sub" style={{ fontWeight: 600 }}>
+                      MAESTRO Agentic Compliance (CSA 2025) —{' '}
+                      {totalViolations === 0
+                        ? <span style={{ color: '#16a34a' }}>All {runs.length} agents within boundary</span>
+                        : <span style={{ color: '#dc2626' }}>{totalViolations} violation{totalViolations > 1 ? 's' : ''} across {runs.length} agents</span>
+                      }
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 6 }}>
+                      <thead>
+                        <tr style={{ background: '#f3f4f6' }}>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>Agent</th>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>Scope</th>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>Violations</th>
+                          <th style={{ textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #e5e7eb' }}>Confidence</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runs.slice(0, 10).map((r: any, idx: number) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '4px 8px', fontFamily: 'ui-monospace, monospace' }}>{r.agent_name || '—'}</td>
+                            <td style={{ padding: '4px 8px' }}>
+                              {r.scope_enforced
+                                ? <span style={{ color: '#16a34a', fontWeight: 600 }}>✓ enforced</span>
+                                : <span style={{ color: '#dc2626', fontWeight: 600 }}>✗ violated</span>
+                              }
+                            </td>
+                            <td style={{ padding: '4px 8px' }}>
+                              {(r.scope_violations || []).length === 0
+                                ? <span style={{ color: '#6b7280' }}>—</span>
+                                : (r.scope_violations || []).map((v: any, vi: number) => (
+                                    <div key={vi} title={v.detail} style={{ marginBottom: 2 }}>
+                                      <span style={{
+                                        background: v.severity === 'critical' || v.severity === 'high' ? '#dc2626' : '#f59e0b',
+                                        color: '#fff', borderRadius: 4, padding: '1px 5px', fontSize: 10, marginRight: 4,
+                                      }}>{v.severity}</span>
+                                      {String(v.violation_type || '').replace(/_/g, ' ')}
+                                    </div>
+                                  ))
+                              }
+                            </td>
+                            <td style={{ padding: '4px 8px', color: '#6b7280' }}>
+                              {typeof r.confidence === 'number' ? `${Math.round(r.confidence * 100)}%` : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {/* YARA maestro_tactic tags from evidence_snapshot */}
+                    {(() => {
+                      const yaraMatches: any[] = (selectedFull?.evidence_snapshot as any)?.yara_matches?.matches || [];
+                      const tactics = [...new Set(yaraMatches.map((m: any) => m?.correlation?.maestro_tactic).filter(Boolean))];
+                      if (tactics.length === 0) return null;
+                      return (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>MAESTRO Tactics (YARA matches)</div>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {tactics.map((t: string) => (
+                              <span key={t} style={{ background: '#7c3aed', color: '#fff', borderRadius: 4, padding: '2px 7px', fontSize: 11 }}>{t}</span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
             </>
           )}
         </div>

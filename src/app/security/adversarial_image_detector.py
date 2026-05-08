@@ -295,3 +295,186 @@ def detect_adversarial(
             "diffusion_score": round(diffusion, 4),
         },
     )
+
+
+@dataclass
+class PixelPromptInjectionResult:
+    """Result of pixel-space prompt injection analysis.
+
+    OWASP Agentic AI AA05 (Prompt Injection via content channels).
+    Detects adversarial perturbations specifically crafted to inject
+    instructions into vision-LLM attention without visible text.
+
+    Unlike general adversarial perturbations (which target classifiers),
+    pixel-space prompt injections targeting vision-LLMs have distinctive
+    signatures:
+    - Grid-aligned low-amplitude noise in 8×8 or 16×16 blocks (matching
+      transformer patch tokeniser boundaries).
+    - High spatial entropy in a narrow amplitude band (≈1–4 LSBs),
+      indicating structured, information-dense noise.
+    - DCT coefficient skew in AC bands (naturally-zero AC terms populated
+      by structured noise across the image, not localised patches).
+    """
+    injection_score: float = 0.0
+    grid_alignment_score: float = 0.0
+    lsb_entropy_score: float = 0.0
+    dct_ac_anomaly_score: float = 0.0
+    is_injection_risk: bool = False
+    owasp_tag: str = "AA05"
+    explanations: List[str] = field(default_factory=list)
+
+
+def detect_pixel_prompt_injection(
+    image_bytes: bytes,
+    *,
+    threshold: float = 0.52,
+) -> PixelPromptInjectionResult:
+    """Detect pixel-space prompt injection targeting vision-LLMs.
+
+    Analyses three independent channels:
+
+    1. **Grid alignment** — computes pixel-variance in 8×8 and 16×16 blocks
+       (transformer patch boundaries). Legitimate natural noise is spatially
+       random; injection payloads show elevated variance *aligned* to block
+       boundaries, producing a grid-shaped variance map.
+
+    2. **LSB entropy** — measures Shannon entropy of the two least-significant
+       bits of each pixel channel. Natural images have LSB entropy ≈ 0.9–1.0
+       (near-random). Structured injection encodings show entropy > 1.8 due
+       to non-random information density (multiple bits per pixel used as a
+       covert channel).
+
+    3. **DCT AC coefficient anomaly** — natural images have very few non-zero
+       AC terms at the Nyquist frequency. Injection payloads populate these
+       terms uniformly across the image, creating an anomalously flat high-
+       frequency DCT profile rather than the expected rapid falloff.
+
+    Args:
+        image_bytes: raw image file bytes.
+        threshold: composite score above which injection risk is flagged.
+
+    Returns:
+        PixelPromptInjectionResult mapped to OWASP Agentic AI AA05.
+    """
+    if np is None or Image is None:
+        return PixelPromptInjectionResult(explanations=["numpy/Pillow not available"])
+
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception as exc:
+        return PixelPromptInjectionResult(explanations=[f"Cannot open image: {exc}"])
+
+    arr = np.asarray(img, dtype=np.uint8)
+    h, w = arr.shape[:2]
+    explanations: List[str] = []
+
+    # ── 1. Grid alignment score ───────────────────────────────────────────────
+    # Compare intra-block pixel variance (8×8 grid) vs inter-block boundary
+    # variance. Injection payloads show elevated within-block variance that is
+    # *correlated* across the entire image (regular grid pattern).
+    grid_score = 0.0
+    try:
+        gray = arr.mean(axis=2)
+        block = 8
+        bh, bw_b = h // block, w // block
+        if bh >= 4 and bw_b >= 4:
+            tiles = gray[:bh * block, :bw_b * block].reshape(bh, block, bw_b, block)
+            # Variance within each block
+            block_var = tiles.var(axis=(1, 3))  # shape (bh, bw_b)
+            # A regular injection grid produces a correlation across block variance maps
+            # — measure how uniformly elevated variance is across blocks
+            mean_var = float(block_var.mean())
+            std_var = float(block_var.std())
+            # Natural images: high std (some blocks smooth, some textured)
+            # Injection grid: low std (every block has similar low-amplitude noise)
+            if mean_var > 1e-6:
+                uniformity = 1.0 - min(1.0, std_var / (mean_var + 1e-6))
+                # Only score as suspicious if mean variance is in the "noise but not texture" band
+                if 2.0 < mean_var < 80.0:
+                    grid_score = float(min(1.0, uniformity * (1.0 - mean_var / 80.0) * 2.5))
+    except Exception:
+        pass
+
+    # ── 2. LSB entropy score ─────────────────────────────────────────────────
+    lsb_score = 0.0
+    try:
+        # Extract 2 LSBs from each channel
+        lsbs = arr & 0x03  # values 0–3
+        entropy_per_channel: List[float] = []
+        for c in range(3):
+            chan = lsbs[:, :, c].ravel()
+            counts = np.bincount(chan, minlength=4).astype(np.float64)
+            probs = counts / (counts.sum() + 1e-12)
+            # Shannon entropy in bits (max = 2 bits for 4 symbols)
+            ent = float(-np.sum(probs[probs > 0] * np.log2(probs[probs > 0])))
+            entropy_per_channel.append(ent)
+        mean_lsb_ent = float(np.mean(entropy_per_channel))
+        # Natural images: LSB entropy ≈ 0.9–1.6 (non-uniform due to JPEG artifacts)
+        # Structured injection: LSB entropy > 1.85 (near-maximum — information-dense encoding)
+        lsb_score = float(min(1.0, max(0.0, (mean_lsb_ent - 1.75) / 0.25)))
+    except Exception:
+        pass
+
+    # ── 3. DCT AC coefficient anomaly score ──────────────────────────────────
+    dct_score = 0.0
+    try:
+        gray_f = arr.mean(axis=2).astype(np.float64)
+        block = 8
+        bh, bw_b = gray_f.shape[0] // block, gray_f.shape[1] // block
+        if bh >= 4 and bw_b >= 4:
+            tiles = gray_f[:bh * block, :bw_b * block].reshape(bh, block, bw_b, block)
+            # Simple DCT approximation: use the DFT magnitude of each block
+            total_blocks = bh * bw_b
+            nyquist_energy: List[float] = []
+            dc_energy: List[float] = []
+            for bi in range(bh):
+                for bj in range(bw_b):
+                    tile = tiles[bi, :, bj, :]
+                    F = np.abs(np.fft.fft2(tile))
+                    dc_energy.append(float(F[0, 0]))
+                    # Nyquist band = outer ring of 8×8 DFT
+                    outer = float(F[4:, :].sum() + F[:4, 4:].sum())
+                    nyquist_energy.append(outer)
+            # Ratio of mean nyquist energy to DC energy across blocks
+            mean_dc = float(np.mean(dc_energy)) + 1e-6
+            mean_nyq = float(np.mean(nyquist_energy))
+            # Natural images: nyquist/dc ≈ 0.01–0.15
+            # Injection payload: nyquist/dc ≈ 0.20–0.50 (uniform energy across freq)
+            nyq_ratio = mean_nyq / mean_dc
+            dct_score = float(min(1.0, max(0.0, (nyq_ratio - 0.15) / 0.30)))
+    except Exception:
+        pass
+
+    # ── Composite score ───────────────────────────────────────────────────────
+    score = 0.35 * grid_score + 0.40 * lsb_score + 0.25 * dct_score
+    score = float(min(1.0, max(0.0, score)))
+
+    if grid_score >= 0.50:
+        explanations.append(
+            f"Grid-aligned noise pattern detected (score={grid_score:.2f}) — "
+            "pixel perturbation aligned to transformer patch boundaries (8×8 grid)"
+        )
+    if lsb_score >= 0.50:
+        explanations.append(
+            f"High LSB entropy (score={lsb_score:.2f}) — "
+            "least-significant bits show near-maximum information density, "
+            "consistent with structured instruction encoding"
+        )
+    if dct_score >= 0.50:
+        explanations.append(
+            f"DCT AC coefficient anomaly (score={dct_score:.2f}) — "
+            "abnormally flat high-frequency DCT profile across image blocks, "
+            "consistent with uniform noise injection rather than natural content"
+        )
+
+    is_risk = score >= threshold
+
+    return PixelPromptInjectionResult(
+        injection_score=round(score, 4),
+        grid_alignment_score=round(grid_score, 4),
+        lsb_entropy_score=round(lsb_score, 4),
+        dct_ac_anomaly_score=round(dct_score, 4),
+        is_injection_risk=is_risk,
+        owasp_tag="AA05",
+        explanations=explanations,
+    )

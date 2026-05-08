@@ -50,6 +50,7 @@ from src.app.routers.analytics import router as analytics_router
 from src.app.routers.query_clusters import router as clusters_router
 from src.app.routers.security_integrations import router as security_integrations_router
 from src.app.routers.shipping_security import router as shipping_security_router
+from src.app.routers.shipping_webhooks import router as shipping_webhooks_router
 from src.app.routers.support_complaints import router as support_complaints_router
 from src.app.routers.query import router as query_router
 from src.app.routers.session_events import router as session_events_router
@@ -142,8 +143,8 @@ def _cv_ocr_runtime_snapshot(provider: str | None = None) -> dict[str, Any]:
     else:
         runtime["pyzbar_runtime"] = False
 
-    if selected in ("disabled", "none", "off", "embedded"):
-        ready = True
+    if selected in ("disabled", "none", "off", "embedded", "glm-ocr", "glm_ocr", "ollama-ocr"):
+        ready = True  # glm-ocr uses Ollama — no local binary required
     elif selected == "tesseract":
         ready = bool(deps.get("pytesseract") and runtime.get("tesseract_bin"))
         if not ready:
@@ -1748,6 +1749,7 @@ def create_app() -> FastAPI:
         logging.getLogger("shopsquire.startup").exception("failed to include merchant_intelligence router: %s", e)
     app.include_router(security_integrations_router)
     app.include_router(shipping_security_router)
+    app.include_router(shipping_webhooks_router)
     # Vulnerability scanning (Trivy / Nuclei / Semgrep / CISA KEV)
     try:
         from src.app.routers.vuln_scan import router as vuln_scan_router

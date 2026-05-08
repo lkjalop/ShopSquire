@@ -1253,6 +1253,32 @@ async def chat_query(
     except Exception:
         pass
 
+    # Log escalation trace event for steg/suspicious images that need human review
+    # (the lockdown path below has its own trace; this covers the escalate route)
+    if bool(image_security_posture.get("needs_human_review")) and not bool(image_security_posture.get("chat_lockdown")):
+        try:
+            _esc_signals = {str(k): bool(v) for k, v in (image_cv_signals_in or {}).items() if isinstance(v, bool)}
+            _esc_steg_score = float((image_cv_signals_in or {}).get("steg_score") or 0.0)
+            log_trace_event(
+                trace_id=None,
+                event_type="image_security_escalation",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="chat",
+                target_id=uid,
+                payload={
+                    "route": str(image_security_posture.get("route") or "escalate"),
+                    "severity": str(image_security_posture.get("severity") or "high"),
+                    "signals": _esc_signals,
+                    "steg_score": _esc_steg_score,
+                    "image_hash": str(image_hash_in or "")[:64],
+                    "query_preview": str(q or "")[:120],
+                    "warning": str(image_security_posture.get("warning_message") or ""),
+                },
+            )
+        except Exception:
+            pass
+
     if bool(image_security_posture.get("chat_lockdown")):
         decision_trace_id = str(uuid.uuid4())
         _sec_signals = {str(k): bool(v) for k, v in (image_cv_signals_in or {}).items() if isinstance(v, bool)}
@@ -1330,6 +1356,8 @@ async def chat_query(
     base = str(request.base_url).rstrip("/")
     url = f"{base}/api/v1/recommend/suggest"
     params = {"uid": uid, "query": q}
+    if turn_intent and turn_intent != "SEARCH":
+        params["turn_intent"] = turn_intent
     nqe_selection = (payload or {}).get("nqe_selection") or {}
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if isinstance(nqe_selection, dict):
@@ -1394,7 +1422,7 @@ async def chat_query(
             headers["x-api-key"] = fwd_key
         except Exception:
             headers["x-api-key"] = "local-merchant-key"
-        async with httpx.AsyncClient(timeout=8.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.get(url, params=params, headers=headers)
             data = {}
             try:
@@ -1503,7 +1531,10 @@ async def chat_query(
                 return out
             r.raise_for_status()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"recommend_unavailable: {e}")
+        import traceback as _tb
+        _detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        logger.warning("chat.recommend_call_failed detail=%s tb=%s", _detail, _tb.format_exc()[-500:])
+        raise HTTPException(status_code=502, detail=f"recommend_unavailable: {_detail}")
 
     # Map results into canonical product shape
     results = data.get("results") or []

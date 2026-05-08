@@ -163,7 +163,16 @@ def _parse_date(s: str) -> datetime:
     try:
         return datetime.strptime(str(s), "%Y-%m-%d")
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid_date_expected_yyyy_mm_dd")
+        pass
+    # Accept Unix timestamps (seconds or milliseconds)
+    try:
+        ts = float(str(s))
+        if ts > 1e10:  # milliseconds
+            ts /= 1000
+        return datetime.utcfromtimestamp(ts)
+    except Exception:
+        pass
+    raise HTTPException(status_code=400, detail="invalid_date_expected_yyyy_mm_dd")
 
 
 def _sql_ts_from_text(col: str) -> str:

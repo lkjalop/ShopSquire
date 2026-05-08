@@ -70,7 +70,11 @@ export function clearStoredUid(): void {
 
 export function getOwnerApiKey(): string {
   const s = session();
-  return s ? String(s.getItem(OWNER_KEY) || '').trim() : '';
+  const stored = s ? String(s.getItem(OWNER_KEY) || '').trim() : '';
+  if (stored) return stored;
+  // Fall back to build-time env var (VITE_OWNER_API_KEY in .env.local)
+  const envKey = String((import.meta as any).env?.VITE_OWNER_API_KEY || '').trim();
+  return envKey;
 }
 
 export function setOwnerApiKey(value: string): void {

@@ -38,6 +38,7 @@ from src.app.services.ethical_ai import EthicalAIGuard
 from src.app.services.decision_log import log_trace_event, log_decision
 from src.app.services.catalog_profile import assess_catalog_relevance, get_cached_catalog_profile_with_meta
 from src.app.security.commerce_request_guard import inspect_commerce_request
+from src.app.security.maestro_boundaries import validate_agent_action as _maestro_validate
 from src.app.services.agent_bus import AgentBus
 from src.app.services.agent_handoff import request_handoff_best_effort
 from src.app.deps import hash_uid
@@ -857,6 +858,11 @@ _TECHY_QUERY_TOKENS = (
     "cores",
     "ghz",
     "fps",
+    "gaming",
+    "gamer",
+    "esports",
+    "144hz",
+    "240hz",
 )
 
 
@@ -992,7 +998,12 @@ def _apply_nqe_confidence_gating(
             if qid in {"ask_specs", "ask_system_requirements", "ask_requirements"}:
                 q["text"] = "If you know them, share target specs (GPU class, RAM, storage, and CPU tier)."
             elif qid == "ask_gpu_preference":
-                q["text"] = "Do you need a dedicated GPU class for your workloads (RTX/Radeon), or integrated is fine?"
+                q_low = str(query or "").lower()
+                gaming_q = any(tok in q_low for tok in ("gaming", "gamer", "game", "esports", "fps"))
+                if not gaming_q:
+                    # Only override text for non-gaming queries; gaming queries use the
+                    # game-tier options set in _append_gpu_disambiguation_question
+                    q["text"] = "Do you need a dedicated GPU class for your workloads (RTX/Radeon), or integrated is fine?"
     return out[:3]
 
 
@@ -1049,6 +1060,7 @@ def _filter_nqe_questions_by_missing_fields(
                 "ask_corporate_work_type",
                 "ask_touch_screen_type",
                 "ask_gaming_depth",
+                "ask_high_school_activity",
                 "ask_software_confirm",
             }
         )
@@ -1059,8 +1071,8 @@ def _filter_nqe_questions_by_missing_fields(
     # not a missing one.
     _REFINEMENT_IDS = {
         "ask_university_subject", "ask_gaming_depth",
-        "ask_corporate_work_type", "ask_touch_screen_type",
-        "ask_software_confirm", "ask_image_model",
+        "ask_high_school_activity", "ask_corporate_work_type",
+        "ask_touch_screen_type", "ask_software_confirm", "ask_image_model",
     }
     allow.update(_REFINEMENT_IDS)
     filtered: list[dict] = []
@@ -1570,28 +1582,65 @@ _PERSONA_PATTERNS: dict[str, list[str]] = {
     "high_schooler": [
         r"\bhigh\s?school\b", r"\byr\s?(?:7|8|9|10|11|12)\b", r"\byear\s?(?:7|8|9|10|11|12)\b",
         r"\bteen\b", r"\bHSC\b", r"\bVCE\b", r"\bATAR\b", r"\bgcse\b", r"\ba[\s-]?level\b",
+        r"\bsecondary\s?school\b",
     ],
     "corporate": [
         r"\bcorporate\b", r"\boffice\b", r"\bwork\s?from\s?home\b", r"\bwfh\b",
         r"\bteams\b", r"\bzoom\b", r"\boutlook\b", r"\bexcel\b", r"\bpresentation\b",
+        r"\bfor\s?work\b", r"\bwork\s?laptop\b", r"\bbusiness\b", r"\bprofessional\b",
     ],
     "job_hunter": [
         r"\bjob\s?hunt\b", r"\binterview\b", r"\bnew\s?job\b", r"\bcareer\s?change\b",
-        r"\bjob\s?search\b", r"\bfreelance\b",
+        r"\bjob\s?search\b", r"\bfreelance\b", r"\bstarting\s?a\s?new\s?job\b",
     ],
     "gamer": [
         r"\bgaming\b", r"\bfps\b", r"\bgame\b", r"\bvalorant\b", r"\bfortnite\b",
-        r"\bcyberpunk\b", r"\bsteam\b", r"\belden\s?ring\b",
+        r"\bcyberpunk\b", r"\bsteam\b", r"\belden\s?ring\b", r"\besports\b",
+        r"\bray\s?trac\b", r"\bdlss\b", r"\brefresh\s?rate\b",
     ],
     "creative": [
         r"\bvideo\s?edit\b", r"\bcontent\s?creat\b", r"\byoutube\b", r"\bstreaming\b",
         r"\bpremiere\b", r"\bdavinci\b", r"\bphotoshop\b", r"\bblender\b",
+        r"\bafter\s?effects\b", r"\bcolor\s?grad\b", r"\b4k\s?edit\b",
+    ],
+    "developer": [
+        r"\bai\s?engineer\b", r"\bml\s?engineer\b", r"\bdata\s?scientist\b",
+        r"\bpytorch\b", r"\btensorflow\b", r"\bcuda\b", r"\bdeep\s?learn\b",
+        r"\bmachine\s?learn\b", r"\bai\s?train\b", r"\bllm\s?train\b",
+        r"\bmodel\s?train\b", r"\bjupyter\b", r"\bnotebook\b",
+    ],
+    "engineer_student": [
+        r"\bengineering\s?student\b", r"\bautocad\b", r"\bsolidworks\b",
+        r"\bmatlab\b", r"\bfea\b", r"\bansys\b", r"\bmechanical\s?eng\b",
+        r"\bcivil\s?eng\b", r"\belectrical\s?eng\b",
     ],
     "traveler": [
         r"\btravel\b", r"\bholiday\b", r"\bon\s?the\s?go\b", r"\bportable\b",
-        r"\blightweight\b", r"\bbackpack\b", r"\bcommut\b",
+        r"\blightweight\b", r"\bbackpack\b", r"\bcommut\b", r"\bairport\b",
+        r"\bdigital\s?nomad\b",
     ],
 }
+
+
+_CHECKOUT_INTENT_PHRASES = (
+    "buy this", "buy now", "buy it", "purchase this", "purchase it",
+    "add to cart", "add to my cart", "add it to cart",
+    "i want to buy", "i'll buy", "i want this one",
+    "i'll take it", "i'll take this", "i'll get this",
+    "get this one", "order this", "place order", "proceed to checkout",
+    "go to checkout", "checkout now", "i'm ready to buy",
+    "ready to purchase", "take my money", "how do i buy",
+    "how to buy", "how to order", "where do i buy",
+    "can i buy", "let me buy", "i want to order",
+)
+
+
+def _detect_checkout_intent(query: str | None) -> bool:
+    """Return True if the query contains a clear purchase-intent signal."""
+    q = str(query or "").lower().strip()
+    if not q:
+        return False
+    return any(phrase in q for phrase in _CHECKOUT_INTENT_PHRASES)
 
 
 def _detect_buyer_persona(query: str | None) -> str | None:
@@ -1702,6 +1751,7 @@ def _summaries_differ(a: str | None, b: str | None) -> bool:
 # ── Budget fitness pre-check ─────────────────────────────────────────────────
 _USE_CASE_BUDGET_FLOORS: dict[str, int] = {
     # Minimum viable new-laptop price (AUD/USD rough floor) per workload tier
+    "high_school": 400,
     "gaming_casual": 600, "gaming_competitive": 900, "gaming_light": 500,
     "gaming_aaa_heavy": 1200,
     "engineering_student": 1000, "architecture_student": 1000,
@@ -1985,6 +2035,7 @@ def _question_slot_from_id(question_id: str | None) -> str:
         "ask_university_subject",
         "ask_corporate_work_type",
         "ask_gaming_depth",
+        "ask_high_school_activity",
         "ask_software_confirm",
     }:
         return "use_case"
@@ -1997,6 +2048,22 @@ def _question_slot_from_id(question_id: str | None) -> str:
     if qid in {"ask_image_model", "reupload_clean_image"}:
         return "image_quality"
     return "unknown"
+
+
+def _use_case_needs_nqe_refinement(value: Any) -> bool:
+    """Broad use cases still need a domain-specific NQE follow-up."""
+    use_case = str(value or "").strip().lower()
+    return use_case in {
+        "high_school",
+        "high_schooler",
+        "student",
+        "university_general",
+        "office",
+        "office_general",
+        "business",
+        "business_professional",
+        "corporate",
+    }
 
 
 def _normalize_recent_nqe_asked(raw: Any) -> list[dict]:
@@ -2242,7 +2309,9 @@ def _apply_intent_specific_question_bank(
             "ask_budget_tier": 1,
             "ask_use_case": 2,
             "ask_university_subject": 2,
+            "ask_high_school_activity": 2,
             "ask_corporate_work_type": 2,
+            "ask_gaming_depth": 2,
             "ask_brand_pref": 3,
             "ask_brand": 3,
         }
@@ -2281,6 +2350,42 @@ def _candidate_looks_like_laptop(candidate: Dict[str, Any] | None) -> bool:
     positive_terms = (
         "laptop", "notebook", "ultrabook", "macbook", "chromebook", "thinkpad",
         "ideapad", "legion", "yoga", "vivobook", "zenbook", "gram", "xps",
+    )
+    return any(t in text_blob for t in positive_terms)
+
+
+def _candidate_looks_like_device(candidate: Dict[str, Any] | None) -> bool:
+    """Return True for primary devices, not accessories.
+
+    Used by fallback guards where SKU prefixes are unreliable in tests and seed
+    data. Prefer explicit category/specs, then names/SKUs.
+    """
+    c = candidate or {}
+    name = str(c.get("name") or "").lower()
+    sku = str(c.get("sku") or "").upper()
+    specs = c.get("specs") if isinstance(c.get("specs"), dict) else {}
+    category = str(specs.get("category") or specs.get("product_category") or "").lower()
+    if category in {"laptop", "notebook", "tablet", "desktop", "pc", "chromebook", "phone", "mobile"}:
+        return True
+    if category and category not in {"computer", "device"}:
+        return False
+    negative_terms = (
+        "monitor", "headphone", "headset", "earbud", "speaker", "keyboard",
+        "mouse", "dock", "docking station", "webcam", "microphone", "sleeve",
+        "case", "bag", "charger", "cable", "ssd", "card reader", "stand",
+        "power bank", "stylus", "audio interface",
+    )
+    if any(t in name for t in negative_terms):
+        return False
+    device_prefixes = ("LAP-", "SYN-LAP-", "TAB-", "PHO-", "MOB-", "GAM-", "RGAM-", "PC-", "NB-")
+    if sku.startswith(device_prefixes):
+        return True
+    text_blob = f"{name} {json.dumps(specs, ensure_ascii=False)}".lower()
+    positive_terms = (
+        "laptop", "notebook", "ultrabook", "macbook", "chromebook", "thinkpad",
+        "ideapad", "legion", "yoga", "vivobook", "zenbook", "gram", "xps",
+        "victus", "omen", "alienware", "tablet", "ipad", "galaxy tab",
+        "desktop", "all-in-one", "pc",
     )
     return any(t in text_blob for t in positive_terms)
 
@@ -2487,24 +2592,32 @@ def _append_gpu_disambiguation_question(existing: list[dict] | None, query: str 
     if any(str((q or {}).get("id") or "") == qid for q in out):
         return out
     techy = _is_techy_query(query)
-    question_text = (
-        "Do you want a dedicated GPU (RTX/Radeon) or integrated graphics only?"
-        if techy
-        else "What matters more for your laptop: faster heavy-task performance, or longer battery life and lower cost?"
-    )
-    options = (
-        [
+    q_low = str(query or "").lower()
+    gaming_query = any(tok in q_low for tok in ("gaming", "gamer", "game", "esports", "fps"))
+
+    if gaming_query:
+        # For gaming queries: ask what tier of gaming to get the right GPU level
+        question_text = "What kind of games will you mainly play? This determines the GPU tier needed."
+        options = [
+            {"id": "gaming_light", "label": "Light (Minecraft, Roblox, League of Legends)", "value": "gaming_light"},
+            {"id": "gaming_casual", "label": "Casual (Fortnite, Apex, Valorant at 60fps)", "value": "gaming_casual"},
+            {"id": "gaming_competitive", "label": "Competitive Esports (CS2, Valorant at 144fps+)", "value": "gaming_competitive"},
+            {"id": "gaming_aaa_heavy", "label": "AAA Heavy (Cyberpunk, Starfield, Space Marines 2)", "value": "gaming_aaa_heavy"},
+        ]
+    elif techy:
+        question_text = "Do you want a dedicated GPU (RTX/Radeon) or integrated graphics only?"
+        options = [
             {"id": "with_discrete", "label": "Dedicated GPU (RTX/Radeon)"},
             {"id": "without_discrete", "label": "Integrated graphics only"},
             {"id": "no_preference", "label": "No strong preference"},
         ]
-        if techy
-        else [
+    else:
+        question_text = "What matters more for your laptop: faster heavy-task performance, or longer battery life and lower cost?"
+        options = [
             {"id": "with_discrete", "label": "Better performance for gaming/creative work"},
             {"id": "without_discrete", "label": "Longer battery life and lower price"},
             {"id": "no_preference", "label": "Show both"},
         ]
-    )
     out.append(
         {
             "id": qid,
@@ -2682,6 +2795,84 @@ def _apply_nqe_selection_to_constraints(
             applied["use_case"] = use_case
             applied["use_case_tags"] = tags
         return applied
+
+    if qid == "ask_high_school_activity":
+        hs_mapping = {
+            "high_school_basic": ("high_school", ["student", "high_school"]),
+            "gaming_light":      ("gaming",      ["gaming", "gaming_light"]),
+            "content_creator":   ("content_creator", ["content_creator"]),
+            "music_production":  ("music_production", ["music_production"]),
+            "engineering_student": ("engineering_student", ["student", "engineering_student"]),
+            "design_student":    ("design_student", ["student", "design_student"]),
+        }
+        _key = oid if oid in hs_mapping else (val if val in hs_mapping else None)
+        if _key:
+            _uc, _tags = hs_mapping[_key]
+            constraints["use_case"] = _uc
+            constraints["use_case_tags"] = _tags
+            applied["use_case"] = _uc
+            applied["use_case_tags"] = _tags
+            if _key == "gaming_light":
+                constraints["gpu_preference"] = "without_discrete"
+                applied["gpu_preference"] = "without_discrete"
+        return applied
+
+    if qid == "ask_university_subject":
+        uni_mapping = {
+            "computer_science_student":  (["student", "computer_science_student"],  "with_discrete"),
+            "engineering_student":        (["student", "engineering_student"],        "with_discrete"),
+            "data_science_student":       (["student", "data_science_student"],       "with_discrete"),
+            "design_student":             (["student", "design_student"],             "with_discrete"),
+            "architecture_student":       (["student", "architecture_student"],       "with_discrete"),
+            "medical_student":            (["student", "medical_student"],            None),
+            "law_student":                (["student", "law_student"],                None),
+            "university_general":         (["student", "university_general"],         None),
+        }
+        _key = oid if oid in uni_mapping else (val if val in uni_mapping else None)
+        if _key:
+            _tags, _gpu = uni_mapping[_key]
+            constraints["use_case"] = _key
+            constraints["use_case_tags"] = _tags
+            applied["use_case"] = _key
+            applied["use_case_tags"] = _tags
+            if _gpu:
+                constraints["gpu_preference"] = _gpu
+                applied["gpu_preference"] = _gpu
+        return applied
+
+    if qid == "ask_corporate_work_type":
+        corp_mapping = {
+            "office_general":   ("office_general",   ["office", "office_general"]),
+            "office_finance":   ("office_finance",   ["office", "office_finance"]),
+            "office_executive": ("office_executive", ["office", "office_executive"]),
+        }
+        _key = oid if oid in corp_mapping else (val if val in corp_mapping else None)
+        if _key:
+            _uc, _tags = corp_mapping[_key]
+            constraints["use_case"] = _uc
+            constraints["use_case_tags"] = _tags
+            applied["use_case"] = _uc
+            applied["use_case_tags"] = _tags
+        return applied
+
+    if qid in ("ask_gaming_depth", "ask_gpu_preference") and qid == "ask_gaming_depth":
+        gaming_gpu = {
+            "gaming_light":       ("gaming", ["gaming", "gaming_light"],       "without_discrete"),
+            "gaming_casual":      ("gaming", ["gaming", "gaming_casual"],       "with_discrete"),
+            "gaming_competitive": ("gaming", ["gaming", "gaming_competitive"],  "with_discrete"),
+            "gaming_aaa_heavy":   ("gaming", ["gaming", "gaming_aaa_heavy"],    "with_discrete"),
+        }
+        _key = oid if oid in gaming_gpu else (val if val in gaming_gpu else None)
+        if _key:
+            _uc, _tags, _gpu = gaming_gpu[_key]
+            constraints["use_case"] = _uc
+            constraints["use_case_tags"] = _tags
+            constraints["gpu_preference"] = _gpu
+            applied["use_case"] = _uc
+            applied["use_case_tags"] = _tags
+            applied["gpu_preference"] = _gpu
+        return applied
+
     return applied
 
 
@@ -3013,6 +3204,7 @@ def _build_context_preamble(
     kv: dict,
     structured_state: dict,
     constraints: dict,
+    prior_shortlist_products: list | None = None,
 ) -> str:
     """Build a structured memory preamble injected into the LLM prompt.
 
@@ -3103,7 +3295,38 @@ def _build_context_preamble(
 
     if not lines:
         return ""
-    return "Prior conversation context:\n" + "\n".join(lines)
+    result = "Prior conversation context:\n" + "\n".join(lines)
+
+    # Inject specs of previously shown products so the LLM can compare them
+    # directly in follow-up turns ("is the 4070 worth it over the 4060?")
+    if prior_shortlist_products:
+        spec_lines: list[str] = []
+        for prod in prior_shortlist_products[:4]:
+            if not isinstance(prod, dict):
+                continue
+            name = (prod.get("specs", {}) or {}).get("display_name") or prod.get("name") or ""
+            if not name:
+                continue
+            specs = prod.get("specs") if isinstance(prod.get("specs"), dict) else {}
+            price = int(float(prod.get("price_cents") or 0) / 100)
+            parts: list[str] = []
+            if specs.get("gpu_model"):
+                parts.append(str(specs["gpu_model"]))
+            elif specs.get("gpu"):
+                gpu_short = str(specs["gpu"]).split("(")[0].strip()
+                parts.append(gpu_short[:30])
+            if specs.get("ram_gb"):
+                parts.append(f"{specs['ram_gb']}GB RAM")
+            if specs.get("refresh_hz"):
+                parts.append(f"{specs['refresh_hz']}Hz")
+            if specs.get("display_inches"):
+                parts.append(f"{specs['display_inches']}\"")
+            spec_str = ", ".join(parts) if parts else "specs unavailable"
+            spec_lines.append(f"  - {name} (${price:,}): {spec_str}")
+        if spec_lines:
+            result += "\nProducts shown last turn:\n" + "\n".join(spec_lines)
+
+    return result
 
 
 def _trace_to_context_summary(
@@ -3184,6 +3407,184 @@ def _trace_to_context_summary(
         return ""
 
 
+def _build_persona_prompt_context(
+    use_case: str,
+    buyer_persona: str,
+    budget_bracket: str | None,
+) -> str | None:
+    """Return a persona-calibrated context block injected into the LLM prompt.
+
+    Maps use_case + buyer_persona to: who the shopper is, which specs matter
+    in plain English, and tone guidance.  Returns None for unknown personas.
+    """
+    uc = (use_case or "").lower().strip()
+    bp = (buyer_persona or "").lower().strip()
+    br = (budget_bracket or "").lower().strip()
+
+    # ── High schooler ────────────────────────────────────────────────────────
+    if bp == "high_schooler" or uc == "high_school":
+        return (
+            "Shopper: High school student (or a parent buying for them). Budget-conscious. Needs to survive a full school day.\n"
+            "Emphasize: Battery life (8+ hours for school), how light and easy it is to carry, screen quality for reading and note-taking. A 2-in-1 or stylus support is a bonus.\n"
+            "Tone: Simple and reassuring — no jargon. Say 'lasts all day on one charge' not '60Wh'. Say 'easy to carry to school' not '1.4kg'. Mention homework, notes, and streaming.\n"
+            "Avoid: Gaming GPU specs, benchmark numbers, enterprise language."
+        )
+
+    # ── University student (general) ─────────────────────────────────────────
+    if bp == "student" and uc in ("university_general", "note_taking_student", ""):
+        value_note = " Value for money matters — this needs to last 4 years." if br in ("entry", "mid") else ""
+        return (
+            f"Shopper: University student. Juggles lectures, assignments, research, light creative work, and maybe weekend gaming.{value_note}\n"
+            "Emphasize: RAM (multiple tabs and apps running at once), battery (full campus day without a charger), storage (4 years of files add up), reliability.\n"
+            "Tone: Practical and honest. Say 'handles multiple assignments at once', 'won't slow down in 3rd year', 'plenty of storage for your whole degree'. Avoid overselling.\n"
+            "Avoid: Enterprise buzzwords. Don't say '16GB DDR5' — say '16GB of memory for smooth multitasking'."
+        )
+
+    # ── Engineering / architecture / computer science student ─────────────────
+    if uc in ("engineering_student", "architecture_student", "computer_science_student"):
+        label_map = {
+            "engineering_student": "engineering",
+            "architecture_student": "architecture",
+            "computer_science_student": "computer science",
+        }
+        soft_map = {
+            "engineering_student": "AutoCAD, SolidWorks, or MATLAB",
+            "architecture_student": "Revit, AutoCAD, and 3D rendering tools",
+            "computer_science_student": "IDEs, virtual machines, and compilers",
+        }
+        label = label_map.get(uc, "technical")
+        soft = soft_map.get(uc, "technical software")
+        return (
+            f"Shopper: {label.title()} student. Regularly runs {soft} — needs real performance, not marketing specs.\n"
+            f"Emphasize: RAM (simulations and compilation need headroom — 16GB minimum), dedicated GPU (3D viewport and rendering), screen size (technical drawings need real estate), CPU speed.\n"
+            f"Tone: Matter-of-fact. Say 'handles {soft.split(',')[0]} without lag', 'big enough screen for technical drawings'. Flag if RAM is below 16GB.\n"
+            "Spec note: Integrated graphics is a red flag for heavy engineering/CAD work. Call it out if a product lacks a discrete GPU."
+        )
+
+    # ── Data science student / AI-ML engineer ────────────────────────────────
+    if uc in ("data_science_student", "ai_ml_workstation") or bp == "developer":
+        if uc == "ai_ml_workstation":
+            label = "AI/ML engineer or researcher"
+            ctx = "Trains models and runs large datasets. GPU VRAM is the single most important spec."
+        else:
+            label = "data science student"
+            ctx = "Runs Python notebooks, trains ML models, and processes datasets."
+        return (
+            f"Shopper: {label}. {ctx}\n"
+            "Emphasize: GPU VRAM (the hard limit for model training), RAM (large datasets need to fit in memory), storage speed (datasets can be huge), CUDA compatibility.\n"
+            "Tone: Technical but grounded. Say 'enough GPU memory for training models', 'handles PyTorch and TensorFlow without bottleneck', 'CUDA-ready for accelerated computing'. GPU VRAM matters more than CPU GHz here.\n"
+            "Spec note: RTX GPU with 8GB+ VRAM is near-essential. Flag it if a product lacks a dedicated GPU."
+        )
+
+    # ── Content creator / video editor ───────────────────────────────────────
+    if uc in ("content_creator", "content_creation") or bp == "creative":
+        return (
+            "Shopper: Content creator or video editor. Works in Premiere Pro, DaVinci Resolve, After Effects, or Blender.\n"
+            "Emphasize: Display color accuracy (color grading depends on it), RAM (video editing is memory-hungry), GPU (accelerated rendering), fast storage (4K video files are large).\n"
+            "Tone: Visual and creative. Say 'accurate colors for color grading', 'handles 4K timelines without dropping frames', 'renders exports faster'. Mention the screen if it looks great.\n"
+            "Avoid: Say 'accurate, vibrant display' not '98% sRGB'. Say 'fast for render exports' not 'CUDA cores'."
+        )
+
+    # ── Design student ───────────────────────────────────────────────────────
+    if uc == "design_student":
+        return (
+            "Shopper: Design student. Works in Photoshop, Illustrator, Figma, or InDesign. Display quality is paramount.\n"
+            "Emphasize: Display accuracy and resolution (design demands true colors), RAM (Photoshop layers), stylus/touch support if available, GPU for 3D work in Blender.\n"
+            "Tone: Creative and visual. Say 'sharp, color-accurate screen perfect for design work', 'handles Photoshop layers without stuttering'. Lead with the display.\n"
+            "Avoid: Gamer language. No frame rates. These users care about aesthetics and display quality."
+        )
+
+    # ── Music production ──────────────────────────────────────────────────────
+    if uc == "music_production":
+        return (
+            "Shopper: Music producer or audio engineer. Works in Ableton, FL Studio, or Logic. Needs low CPU latency and quiet thermals.\n"
+            "Emphasize: CPU speed (audio plugins are CPU-bound), RAM (large sample libraries), storage speed (fast SSD for sample libraries), fan noise (loud fans kill recordings).\n"
+            "Tone: Studio-aware. Say 'runs dozens of plugins without crackle', 'quiet enough for recording sessions', 'handles large sample libraries'. Mention Thunderbolt/USB-C for audio interface connection.\n"
+            "Avoid: GPU jargon — audio production doesn't need a gaming GPU."
+        )
+
+    # ── Corporate / business professional ────────────────────────────────────
+    if bp == "corporate" or uc in ("office_general", "business_professional"):
+        return (
+            "Shopper: Corporate or office professional. Daily tools: Microsoft 365, Teams video calls, email, presentations. May travel between meetings or offices.\n"
+            "Emphasize: Battery life (all-day away from a charger), thin and light (easy to carry to meetings), build quality (reliability matters when work depends on it), webcam quality (video calls every day).\n"
+            "Tone: Professional and practical. Say 'holds up through back-to-back meetings', 'slim enough for your bag', 'reliable for Teams calls and client presentations'. Mention how it looks in professional settings if build quality is premium.\n"
+            "Avoid: Gaming language, benchmark numbers. This person doesn't care about frame rates."
+        )
+
+    # ── Office executive ──────────────────────────────────────────────────────
+    if uc == "office_executive":
+        return (
+            "Shopper: Senior executive or C-suite professional. Values premium build, prestige, and effortless reliability. Performance is assumed — they want it to just work, everywhere.\n"
+            "Emphasize: Build quality (metal chassis, premium finish), display clarity (polished presentations), portability (light enough for airports), connectivity (Thunderbolt for boardroom AV), battery.\n"
+            "Tone: Premium and concise. Say 'investment-grade build', 'commands respect in boardroom settings', 'seamlessly moves from office to airport to client site'. This person expects perfection.\n"
+            "Avoid: Spec-sheet reciting. They care about it working everywhere, always — not GHz numbers."
+        )
+
+    # ── Finance / accounting professional ────────────────────────────────────
+    if uc == "office_finance":
+        return (
+            "Shopper: Finance professional. Heavy Excel, Power BI, or SAP usage. Large financial models, pivot tables, and data refreshes daily.\n"
+            "Emphasize: CPU speed (Excel is single-core, faster = snappier spreadsheets), RAM (large financial models in memory), security features (TPM, Windows Hello for sensitive data), reliability.\n"
+            "Tone: Dependable and direct. Say 'handles large Excel models without freezing', 'fast enough for Power BI dashboards to refresh instantly', 'secure for sensitive financial data'.\n"
+            "Spec note: Integrated graphics is fine for this role. CPU speed and RAM matter far more than GPU."
+        )
+
+    # ── Gamer ─────────────────────────────────────────────────────────────────
+    if bp == "gamer" or "gaming" in uc:
+        bracket_map = {
+            "entry": "entry-level gaming — smooth 1080p in older and indie titles, medium settings in recent AAA games",
+            "mid": "solid 1080p/1440p gaming — high settings in most modern titles, smooth competitive play",
+            "high": "high-end gaming — ultra settings at 1440p, ray tracing in most titles",
+            "ultra": "enthusiast gaming — max settings, 4K, ray tracing, maximum refresh rates",
+        }
+        perf_note = bracket_map.get(br or "", "solid gaming performance for the price")
+        return (
+            f"Shopper: Gamer. At this budget, expect {perf_note}.\n"
+            "Emphasize: GPU performance (the single biggest factor in gaming), display refresh rate (Hz matters for competitive games), thermals (gaming laptops run hot — cooling matters), VRAM.\n"
+            "Tone: Enthusiast but grounded. Say 'runs Fortnite/Valorant at 144+ fps', 'dedicated GPU that handles modern games', '144Hz screen for competitive gaming'. Be honest about what the budget tier can and can't do.\n"
+            "Avoid: Generic 'great for gaming' with no substance. Name what settings/fps this GPU tier delivers."
+        )
+
+    # ── Medical student ───────────────────────────────────────────────────────
+    if uc == "medical_student":
+        return (
+            "Shopper: Medical student. Marathon study sessions — anatomy, clinical notes, medical imaging software, PDF-heavy reading.\n"
+            "Emphasize: Battery life (12+ hours if possible), display clarity (reading dense text and viewing medical imagery), weight (carrying heavy textbooks + a laptop), reliability.\n"
+            "Tone: Endurance-focused. Say 'survives a full clinical study day', 'sharp display for reading dense medical content', 'reliable enough that you never worry about it failing before an exam'.\n"
+            "Avoid: Gaming specs. Medical students don't care about GPUs."
+        )
+
+    # ── Law student ───────────────────────────────────────────────────────────
+    if uc == "law_student":
+        return (
+            "Shopper: Law student. Case briefs, legal research databases, long reading/writing sessions. Pure productivity.\n"
+            "Emphasize: Battery life (long library sessions), keyboard comfort (typing-heavy work — briefs, essays, memos), display clarity (reading-heavy), reliability.\n"
+            "Tone: No-nonsense and direct. Say 'handles long case brief sessions without slowing down', 'comfortable to type on for hours'. Pure productivity focus.\n"
+            "Avoid: GPU/gaming specs. A discrete GPU is wasted spend for a law student."
+        )
+
+    # ── Traveler ─────────────────────────────────────────────────────────────
+    if bp == "traveler" or "travel" in uc:
+        return (
+            "Shopper: Frequent traveler. Works from airports, hotels, and client sites. Every gram and every hour of battery counts.\n"
+            "Emphasize: Weight (lighter is always better), battery life (8+ hours real-world), build quality (bumps happen in transit), USB-C charging (one less adapter to carry).\n"
+            "Tone: Practical and liberating. Say 'light enough to forget you're carrying it', 'lasts through a long-haul flight', 'tough enough for carry-on life'. Mention USB-C charging if available.\n"
+            "Avoid: Heavy workstation specs. Freedom from outlets and weight are the wins."
+        )
+
+    # ── Job hunter / career changer ───────────────────────────────────────────
+    if bp == "job_hunter":
+        return (
+            "Shopper: Job hunter or career changer. Starting a new chapter — needs something professional-looking, reliable, and interview-ready.\n"
+            "Emphasize: Professional build and appearance (makes an impression), reliability, webcam and microphone quality (video interviews), keyboard comfort.\n"
+            "Tone: Encouraging and practical. Say 'professional build for interviews and the first day on the job', 'reliable enough that it never lets you down in a crucial moment'.\n"
+            "Avoid: Gaming specs. Focus on professionalism, reliability, and first impressions."
+        )
+
+    return None
+
+
 def _summarize_results(
     query: str,
     results: list[dict],
@@ -3194,7 +3595,39 @@ def _summarize_results(
 ) -> tuple[str | None, str | None]:
     if not os.getenv("USE_LLM_SUMMARY", "1").lower() in ("1", "true", "yes"):
         return None, None
+    # For zero-result turns: generate guidance when we know who the shopper is
+    # (ai_ml, engineering, creative) rather than returning silent None.
     if not results:
+        _uc0 = str(constraints.get("use_case") or "").strip()
+        _bp0 = str(constraints.get("buyer_persona") or constraints.get("inferred_persona") or "").strip()
+        _pc0 = _build_persona_prompt_context(_uc0, _bp0, None)
+        _guidance_personas = {
+            "ai_ml_workstation", "data_science_student", "engineering_student",
+            "computer_science_student", "architecture_student", "content_creator",
+            "music_production",
+        }
+        if _uc0 in _guidance_personas and _pc0:
+            try:
+                _model0 = model or os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b"))
+                _is_q3_0 = "qwen3" in _model0.lower()
+                _p0 = (
+                    "You are ShopSquire, a helpful shopping assistant.\n"
+                    f"{_pc0}\n\n"
+                    f"The user asked: \"{query}\"\n"
+                    "No matching products are in the current catalog for this specific use-case. "
+                    "In 60 words max, tell them what key specs to look for and suggest they refine their search. "
+                    "Be honest, helpful, and persona-appropriate. Do NOT invent product names or prices."
+                )
+                _payload0: dict = {"model": _model0, "prompt": _p0, "stream": False, "options": {"temperature": 0.3, "num_predict": 2048 if _is_q3_0 else 256}}
+                if _is_q3_0:
+                    _payload0["think"] = True
+                _data0 = call_with_resilience("ollama.summary", lambda: _llm_generate_payload(_payload0), timeout_s=90.0, retries=0)
+                if isinstance(_data0, dict):
+                    _resp0 = str(_data0.get("response") or "").strip()
+                    if _resp0:
+                        return _resp0, None
+            except Exception:
+                pass
         return None, None
     try:
         budget_preface = _build_brand_budget_answer_v2(query, results, constraints)
@@ -3246,7 +3679,14 @@ def _summarize_results(
         # Pull the most useful constraint signals for the prompt
         budget_min = constraints.get("budget_min")
         budget_max = constraints.get("budget_max")
-        use_case = str(constraints.get("use_case") or constraints.get("buyer_persona") or "").replace("_", " ")
+        _use_case_raw = str(constraints.get("use_case") or "").strip()
+        _buyer_persona_raw = str(
+            constraints.get("buyer_persona")
+            or constraints.get("inferred_persona")
+            or (constraints.get("shopper_intent") or {}).get("persona")
+            or ""
+        ).strip()
+        use_case = (_use_case_raw or _buyer_persona_raw).replace("_", " ")
         brands = constraints.get("brands") or []
 
         budget_str = ""
@@ -3260,40 +3700,57 @@ def _summarize_results(
         # Budget bracket for LLM context (entry/mid/high/ultra)
         _bracket = _classify_budget_bracket(budget_max)
         if _bracket and _bracket not in ("high", "ultra"):
-            # Helps LLM calibrate value language for budget-conscious buyers
             budget_str = f"{budget_str} ({_bracket}-range)" if budget_str else f"{_bracket}-range budget"
 
-        # Gaming tier calibration hint — tells LLM what the budget tier can actually do
-        _gaming_hint = ""
-        _uc_lower = use_case.lower()
-        if "gaming" in _uc_lower and _bracket:
-            _gaming_tier_map = {
-                "entry": "entry-level gaming (1080p/medium settings, older or indie titles)",
-                "mid": "solid 1080p/1440p gaming (high settings on most modern titles)",
-                "high": "high-end 1440p/4K gaming (ultra settings on most titles)",
-                "ultra": "enthusiast/4K gaming (max settings, ray tracing, high refresh rate)",
-            }
-            _gaming_hint = f"Gaming context: at this budget ({_bracket}-range), expect {_gaming_tier_map.get(_bracket, 'mid-range gaming')}.\n"
+        # Rich persona context block — replaces the bare "Use case:" line.
+        # Tells the LLM who the shopper is, which specs to emphasise, and the right tone.
+        _persona_ctx = _build_persona_prompt_context(_use_case_raw, _buyer_persona_raw, _bracket)
+
+        # For personas already covered by persona context, drop the redundant Use case line.
+        _use_case_line = f"Use case: {use_case}\n" if (use_case and not _persona_ctx) else ""
+
+        # Approach 1 — Security prompt fence: when image is under review or flagged,
+        # instruct LLM to ignore image-derived context and rely on text + catalog only.
+        _img_verdict = str(constraints.get("_image_feature_allowlist_verdict") or "full").strip()
+        _security_fence = ""
+        if _img_verdict == "text_only":
+            _security_fence = (
+                "SECURITY CONSTRAINT: The uploaded image has been flagged by the security system "
+                "and ALL image-derived signals have been removed from this request. "
+                "Base your response ENTIRELY on the user's text query and catalog data. "
+                "Do NOT reference or imply image content, uploaded photos, or visual similarity. "
+                "Do NOT mention that an image was uploaded.\n\n"
+            )
+        elif _img_verdict == "sanitized":
+            _security_fence = (
+                "SECURITY CONSTRAINT: The uploaded image is under security review. "
+                "Brand identity and product identity signals from the image have been removed. "
+                "Recommendations are based on text query and general category context only. "
+                "Do NOT claim to have identified a specific brand or product from an image. "
+                "Do NOT mention that an image was uploaded.\n\n"
+            )
 
         prompt = (
-            "You are ShopSquire, a knowledgeable shopping assistant.\n"
-            "RULE 1: Answer the user's EXACT question directly in the first sentence.\n"
+            "You are ShopSquire, a helpful shopping assistant. Write like a knowledgeable friend, not a search engine.\n"
+            + _security_fence
+            + "RULE 1: Answer the user's EXACT question directly in the first sentence.\n"
             "  - YES/NO questions ('Is $800 enough?', 'Will this handle gaming?',\n"
             "    'Can I afford this?', 'Would $1500 cover it?', 'Can I run AutoCAD?'):\n"
             "    your FIRST WORD must be YES, NO, or IT DEPENDS.\n"
             "  - Open questions ('show me laptops', 'what's good for engineering?'):\n"
             "    name the top pick and say one sentence about why it fits.\n"
-            "RULE 2: Mention 1-2 products by name and cite the spec that matters for their use-case\n"
-            "  (GPU VRAM for gaming, battery hours for travel, RAM for engineering/DS, etc.).\n"
-            "RULE 3: Plain English — no raw specs ('16GB DDR5'), use real-world terms instead.\n"
+            "RULE 2: Mention 1-2 products by name and cite the spec that MATTERS for this shopper's use-case.\n"
+            "  Follow the 'Emphasize' guidance below — cite the spec that actually changes their decision.\n"
+            "RULE 3: Plain English only — say 'fast processor' not 'Intel Core i7-13650HX'. Translate specs into outcomes.\n"
             "RULE 4: Do NOT start with 'I found X products' or 'Here are your options'.\n"
-            "RULE 5: Max 70 words. Do not fabricate specs.\n\n"
+            "RULE 5: Max 70 words. Do not fabricate specs or invent prices.\n"
+            "RULE 6: NEVER write technical tokens like +in_stock, +embedding_similarity, +cross_encoder, or any +tag or score numbers. Pure natural language only.\n\n"
             + (f"Prior context:\n{context_preamble}\n\n" if context_preamble else "")
-            + (_gaming_hint if _gaming_hint else "")
+            + (f"{_persona_ctx}\n\n" if _persona_ctx else "")
             + (f"Budget: {budget_str}\n" if budget_str else "")
-            + (f"Use case: {use_case}\n" if use_case else "")
+            + _use_case_line
             + (f"Preferred brands: {', '.join(brands)}\n" if brands else "")
-            + f"\nTop matching products:\n{product_lines}\n\n"
+            + f"\nAvailable options:\n{product_lines}\n\n"
             + f"User question: \"{query}\"\nAnswer:"
         )
         # ── Semantic response cache — check before calling LLM ──
@@ -3361,22 +3818,44 @@ def _summarize_results(
                     return None, job_id
             except Exception:
                 pass
+        # For summaries prefer a fast thinking-capable model so the clean answer
+        # lands in Ollama's `response` field (not mixed into reasoning text).
+        # qwen3:14b is faster than 30b and purpose-fit for short responses.
+        _summ_model_env = os.getenv("OLLAMA_SUMMARY_MODEL", "")
+        _llm_model = (
+            _summ_model_env
+            or model
+            or os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b")
+        )
+        # If the passed model is still a display name, fall back to summary model
+        if not _llm_model or "rule-based" in str(_llm_model) or " " in str(_llm_model):
+            _llm_model = _summ_model_env or os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:30b")
+        _is_qwen3 = "qwen3" in _llm_model.lower()
+        # With think=True, qwen3 routes chain-of-thought to `thinking` and puts
+        # the clean final answer in `response`.  Needs 2048+ tokens so thinking
+        # phase doesn't exhaust the budget before the response is written.
         payload = {
-            "model": model or os.getenv("OLLAMA_SMALL_MODEL", "llama3:8b"),
+            "model": _llm_model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 220},
+            "options": {"temperature": 0.3, "num_predict": 2048 if _is_qwen3 else 512},
         }
+        if _is_qwen3:
+            payload["think"] = True
         from src.app.services.dependency_resilience import call_with_resilience
 
         data = call_with_resilience(
             "ollama.summary",
             lambda: _llm_generate_payload(payload),
-            timeout_s=6.0,
+            timeout_s=90.0,
             retries=1,
         )
         if isinstance(data, dict):
             llm_response = data.get("response")
+            # Strip qwen3 chain-of-thought blocks that leak when think=False is ignored
+            if llm_response:
+                import re as _re_think
+                llm_response = _re_think.sub(r"<think>[\s\S]*?</think>\s*", "", llm_response).strip()
             if llm_response and yes_no_query and not _starts_direct_answer(llm_response) and budget_preface:
                 llm_response = f"{budget_preface} {str(llm_response).strip()}".strip()
             # ── Write to semantic cache ──
@@ -3412,7 +3891,7 @@ def _summarize_results(
 
 
 def _llm_generate_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    with httpx.Client(timeout=6.0) as client:
+    with httpx.Client(timeout=100.0) as client:
         r = client.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=payload)
         r.raise_for_status()
         return r.json()
@@ -3528,17 +4007,39 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
         return 600, "laptop"
 
     # ── Extract budget from query text when not already in constraints ──────
-    # Handles "Is $1800 enough?" when budget_max is not yet set in constraints.
+    # Handles ranges ("$1200 to $1800"), single values ("under $1800"), and
+    # bare number ranges ("1200 to 1800", "1200-1800 dollars").
     if not constraints.get("budget_max") and not constraints.get("_request_budget_max"):
-        _m = _re_bba.search(r"[\$€£]\s*(\d[\d,]+)", q_low)
-        if _m:
+        import re as _re_bba2
+        _budget_extracted = False
+        # Range: "$X to $Y" / "$X - $Y" / "X to Y" / "X-Y" — take Y as max, X as min
+        _rng = _re_bba2.search(
+            r"[\$€£]?\s*(\d{3,5})\s*(?:to|and|-)\s*[\$€£]?\s*(\d{3,5})\b", q_low
+        )
+        if _rng:
             try:
-                _extracted = float(_m.group(1).replace(",", ""))
-                if _extracted > 100:  # sanity: ignore $10 etc
-                    constraints = dict(constraints)  # local copy, don't mutate caller
-                    constraints["budget_max"] = _extracted
+                _lo = float(_rng.group(1).replace(",", ""))
+                _hi = float(_rng.group(2).replace(",", ""))
+                if 100 < _lo < _hi <= 10000:
+                    constraints = dict(constraints)
+                    constraints["budget_min"] = _lo
+                    constraints["budget_max"] = _hi
+                    _budget_extracted = True
             except Exception:
                 pass
+        if not _budget_extracted:
+            # Single value: "$1800", "under 1800 dollars", "budget of 1800"
+            _m = _re_bba2.search(r"[\$€£]\s*(\d[\d,]+)", q_low)
+            if not _m:
+                _m = _re_bba2.search(r"\b(\d{3,5})\s*(?:dollars|bucks)\b", q_low)
+            if _m:
+                try:
+                    _extracted = float(_m.group(1).replace(",", ""))
+                    if _extracted > 100:
+                        constraints = dict(constraints)
+                        constraints["budget_max"] = _extracted
+                except Exception:
+                    pass
 
     # ── Corporate / business use case deterministic answer ──────────────────
     _is_corporate = any(
@@ -3702,7 +4203,17 @@ def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: 
         return ""
 
     def _extract_budget_value(text: str) -> float | None:
+        """Return the budget ceiling from text. For ranges ($X to $Y) returns Y (the max)."""
         import re as _re_bba
+        # Range pattern first — "$1200 to $1800" or "1200 to 1800" → return 1800 (the max)
+        rng = _re_bba.search(r"[\$€£]?\s*(\d{3,5})\s*(?:to|and|-)\s*[\$€£]?\s*(\d{3,5})\b", text)
+        if rng:
+            try:
+                lo, hi = float(rng.group(1)), float(rng.group(2))
+                if 100 < lo < hi <= 10000:
+                    return hi  # caller wants the ceiling / budget_max
+            except Exception:
+                pass
         patterns = (
             r"[\$€£]\s*(\d[\d,]+)",
             r"\b(?:only have|have|budget(?:\s+is|\s+of)?|under|below|max(?:imum)?|up to|around|about|for)\s+\$?\s*(\d[\d,]+)\b",
@@ -3841,6 +4352,16 @@ def _extract_explicit_budget_override(query: str | None) -> Dict[str, Any]:
         lo = int(str(m_between.group(1)).replace(",", ""))
         hi = int(str(m_between.group(2)).replace(",", ""))
         return {"budget_min": min(lo, hi), "budget_max": max(lo, hi), "mode": "between"}
+    # Range pattern: "budget is $1200 to $1800", "price range 1200-1800", "$1200 to $1800"
+    m_range = re.search(
+        r"(?:budget(?:\s+is|\s+of)?|price\s+range|range)?\s*\$?\s*([\d,]+)\s*(?:to|-)\s*\$?\s*([\d,]+)",
+        q_low,
+    )
+    if m_range:
+        lo = int(str(m_range.group(1)).replace(",", ""))
+        hi = int(str(m_range.group(2)).replace(",", ""))
+        if lo != hi and max(lo, hi) <= 100_000:
+            return {"budget_min": min(lo, hi), "budget_max": max(lo, hi), "mode": "range"}
     m_under = re.search(r"\b(?:under|below|max(?:imum)?|up to|only have|have|budget(?:\s+is|\s+of)?|for)\s+\$?\s*(\d[\d,]+)\b", q_low)
     if m_under and ("enough" in q_low or any(tok in q_low for tok in ("under", "below", "up to", "only have", "budget"))):
         cap = int(str(m_under.group(1)).replace(",", ""))
@@ -4233,7 +4754,7 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
 
     # Core count message (pluralised, comma-formatted budget)
     n = len(results)
-    plural = "s" if n != 1 else ""
+    plural = "es" if n != 1 else ""
     if budget_min is not None and budget_max is not None:
         core = f"found {n} match{plural} between ${int(budget_min):,} and ${int(budget_max):,}"
     elif budget_max is not None:
@@ -4662,6 +5183,49 @@ def suggest(
         )
     except Exception:
         pass
+    # MAESTRO boundary check for the Orchestrator agent at recommend ingress.
+    # In "block" mode (MAESTRO_ENFORCEMENT_MODE=block), a critical/high violation
+    # raises MaestroViolationError which is caught here and returned as 403.
+    try:
+        from src.app.security.maestro_boundaries import MaestroViolationError as _MaestroViolationError
+        _maestro_v = [
+            {"type": v.violation_type, "detail": v.detail, "severity": v.severity}
+            for v in _maestro_validate(agent_name="Orchestrator", data_scope="products")
+        ]
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="agent_guardrail",
+            source_type="security",
+            source_id="Orchestrator",
+            target_type="agent",
+            target_id="Orchestrator",
+            payload={
+                "maestro_checked": True,
+                "maestro_boundary": "Orchestrator",
+                "maestro_violations": _maestro_v,
+                "maestro_blocked": False,
+                "tags": ["maestro"] + (["maestro_violation"] if _maestro_v else []),
+            },
+        )
+    except _MaestroViolationError as _me:
+        _mv = [{"type": v.violation_type, "detail": v.detail, "severity": v.severity} for v in _me.violations]
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="agent_guardrail",
+                source_type="security",
+                source_id="Orchestrator",
+                target_type="agent",
+                target_id="Orchestrator",
+                payload={"maestro_checked": True, "maestro_boundary": "Orchestrator",
+                         "maestro_violations": _mv, "maestro_blocked": True, "tags": ["maestro", "maestro_block"]},
+            )
+        except Exception:
+            pass
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(status_code=403, detail={"error": "maestro_boundary_violation", "violations": _mv})
+    except Exception:
+        pass
     if guard.get("verdict") == "block":
         try:
             if not any("/api/v1/recommend".startswith(p) for p in _skip_prefixes):
@@ -4795,6 +5359,67 @@ def suggest(
         image_reupload_reasons = []
     if incoming_image_payload and not image_cv_signals_parsed and not (image_context.get("labels") or image_context.get("ocr")):
         image_reupload_reasons.append("insufficient_image_signals")
+
+    # ── Approach 3: Policy Gate — produce FeatureAllowlist from security verdict ──
+    # Runs once per request, before ANY image signal reaches retrieval.
+    # The allowlist drives both feature stripping (A2) and the LLM prompt fence (A1).
+    try:
+        from src.app.security.image_feature_gate import evaluate_image_feature_gate as _eval_img_gate
+        _image_feature_allowlist = _eval_img_gate(image_reupload_reasons, analysis if isinstance(locals().get("analysis"), dict) else {})
+    except Exception:
+        from src.app.security.image_feature_gate import FeatureAllowlist as _FAL
+        _image_feature_allowlist = _FAL(
+            allow_brand_hint=True, allow_product_identity=True,
+            allow_image_labels=True, allow_ocr=True, allow_catalog_relevance=True,
+            verdict="full", reason="gate_error_fallback", blocked_signals=[],
+        )
+
+    # Emit auditable trace event for the gate decision (every request, verdict included).
+    try:
+        log_trace_event(
+            trace_id,
+            "image_feature_gate",
+            "agent",
+            "Policy_Gate_Agent",
+            "system",
+            None,
+            {
+                "verdict": _image_feature_allowlist.verdict,
+                "reason": _image_feature_allowlist.reason,
+                "blocked_signals": _image_feature_allowlist.blocked_signals,
+                "allowlist": _image_feature_allowlist.to_dict(),
+                # MAESTRO SC-04B: bounded influence — tool allowlist enforcement at image ingress.
+                # Each gate decision is an explicit agent boundary enforcement point.
+                "maestro_checked": True,
+                "maestro_boundary": "Policy_Gate_Agent",
+                "maestro_control": "SC-04B",
+                "maestro_verdict": "boundary_enforced" if _image_feature_allowlist.verdict == "full" else "influence_bounded",
+                # OWASP Agentic AI AA03 (trust boundary violation via image channel).
+                # AA05 risk is present when OCR/QR surfaces carry active signals.
+                "owasp_agentic": (
+                    ["AA03", "AA05"]
+                    if any(s in (_image_feature_allowlist.blocked_signals or [])
+                           for s in ("qr_prompt_injection", "ocr_prompt_injection", "adversarial_score_high"))
+                    else ["AA03"]
+                ),
+            },
+        )
+    except Exception:
+        pass
+
+    # ── Approach 2: Feature stripping — enforce the allowlist structurally ──
+    # Strips tainted signals BEFORE they reach brand-hint extraction, identity
+    # matching, or candidate retrieval.  "text_only" = complete image feature reset.
+    if _image_feature_allowlist.verdict != "full":
+        if not _image_feature_allowlist.allow_ocr:
+            image_context.pop("ocr", None)
+        if not _image_feature_allowlist.allow_image_labels:
+            image_context.pop("labels", None)
+        if _image_feature_allowlist.verdict == "text_only":
+            # Full strip: wipe all image-derived context signals
+            image_context = {}
+            image_cv_signals_parsed = {}
+
     try:
         _catalog_t0 = time.perf_counter()
         catalog_profile, catalog_cache_meta = get_cached_catalog_profile_with_meta(db, tenant_id=tenant_id)
@@ -4879,7 +5504,7 @@ def suggest(
     # Results are joined (with a short timeout) before the response is built.
     _SEC_TIMEOUT_S = float(os.getenv("SECURITY_ANALYSIS_TIMEOUT_S", "6.0"))
     _sec_payload_for_bg = {
-        "uid": uid,
+        "uid_hash": uid_hash,
         "query": query,
         "image_labels": image_context.get("labels") or [],
         "image_ocr_text": image_context.get("ocr") or "",
@@ -5740,18 +6365,21 @@ def suggest(
         dt_ms = None
 
         if ollama_rollout.get("invoke_ollama") or ollama_rollout.get("shadow_capture"):
-            req_payload = {
+            _intent_payload = {
                 "model": model,
                 "prompt": (
                     "Summarize the user's shopping intent in one sentence and list the top 2 attributes to consider.\n"
                     f"User Query: {query_effective}"
                 ),
                 "stream": False,
-                "options": {"temperature": 0.2, "num_predict": 128},
+                "options": {"temperature": 0.2, "num_predict": 256},
             }
+            if "qwen3" in model.lower():
+                _intent_payload["think"] = False
+            req_payload = _intent_payload
             try:
                 t0 = time.perf_counter()
-                with httpx.Client(timeout=5.0) as client:
+                with httpx.Client(timeout=30.0) as client:
                     r = client.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=req_payload)
                     r.raise_for_status()
                     resp = r.json()
@@ -6086,8 +6714,11 @@ def suggest(
             ("budget_max", constraints.get("budget_max")),
             ("use_case", constraints.get("use_case")),
             ("gpu_preference", constraints.get("gpu_preference")),
-            ("buyer_persona", constraints.get("buyer_persona")),
+            # buyer_persona is auto-detected, not user-provided — don't count it as
+            # a converged NQE slot or it pushes fresh queries over the threshold early.
         ):
+            if _tk == "use_case" and _use_case_needs_nqe_refinement(_tv):
+                continue
             if _tv and not _existing_nqe.get(_tk):
                 _text_facts[_tk] = _tv
         if _text_facts:
@@ -6431,6 +7062,8 @@ def suggest(
     strict_image_brand_hint = None
     inferred_image_brand = None
     _budget_mismatch_question: Dict[str, Any] | None = None
+    # A2 gate: if allowlist denies brand hint, skip the entire brand extraction block
+    _gate_allows_brand = getattr(_image_feature_allowlist, "allow_brand_hint", True)
     _BRAND_LABEL_PATTERNS = {
         "apple":     ["macbook", "imac", "mac mini", "mac pro", "apple"],
         "lenovo":    ["thinkpad", "ideapad", "legion", "yoga", "lenovo"],
@@ -6446,9 +7079,13 @@ def suggest(
         "toshiba":   ["dynabook", "toshiba"],
     }
     try:
+        if not _gate_allows_brand:
+            # A2/A3 enforcement: Policy Gate denied brand hint — skip extraction entirely.
+            # This prevents a flagged MSI QR image from steering retrieval toward MSI products.
+            raise Exception("brand_hint_blocked_by_policy_gate")
         img_labels_low = [str(x).lower() for x in (image_context.get("labels") or [])]
         # Also consider product_identity from CV pipeline if available
-        _pi = image_context.get("product_identity") or {}
+        _pi = (image_context.get("product_identity") or {}) if getattr(_image_feature_allowlist, "allow_product_identity", True) else {}
         if _pi.get("brand"):
             img_labels_low = img_labels_low + [str(_pi["brand"]).lower()]
         inferred_brand = None
@@ -6674,8 +7311,11 @@ def suggest(
         # Generic categories (e.g. "student") should be refined to specific
         # sub-types (e.g. "university_general", "engineering_student") by the
         # knowledge-backed advisor so NQE can ask the right follow-ups.
-        _GENERIC_USE_CASES = {"student", "business", "gaming", "content_creation", "mobile"}
-        if not _uc_key or _uc_key in _GENERIC_USE_CASES:
+        # "gaming" is excluded: it's a valid key (tier lives in use_case_tags) and
+        # must not be overridden when set via NQE selection.
+        _GENERIC_USE_CASES = {"student", "business", "content_creation", "mobile"}
+        _nqe_set_use_case = bool(nqe_selection_applied.get("use_case"))
+        if not _nqe_set_use_case and (not _uc_key or _uc_key in _GENERIC_USE_CASES):
             _refined = _match_uc(query_effective)
             if _refined:
                 _uc_key = _refined
@@ -6809,7 +7449,13 @@ def suggest(
     _identity_constraints: Dict[str, Any] = {}
     _id_result: Dict[str, Any] = {}
     _id_source = "none"
+    # A2/A3 enforcement: skip identity resolution for flagged/review images.
+    # A flagged image's product_identity must NOT flow into constraints or retrieval.
+    if not getattr(_image_feature_allowlist, "allow_product_identity", True):
+        _id_source = "blocked_by_policy_gate"
     try:
+        if not getattr(_image_feature_allowlist, "allow_product_identity", True):
+            raise Exception("product_identity_blocked_by_policy_gate")
         from src.app.services.vision_reasoning import VisionReasoningService
         from src.app.services.product_identity_agent import (
             identify_product_from_image,
@@ -7600,6 +8246,8 @@ def suggest(
         not constraints.get("budget_min")
         and not constraints.get("budget_max")
         and not (constraints.get("brands") or [])
+        and not constraints.get("use_case")
+        and not constraints.get("buyer_persona")
         and _user_supplied_specs_count == 0
         and intent_conf < 0.95
         and str(turn_intent or "").upper() != "SUPPORT_CLAIM"
@@ -7665,6 +8313,8 @@ def suggest(
                 ("brand_preference", (constraints.get("brands") or [None])[0]),
                 ("gpu_preference", constraints.get("gpu_preference")),
             ):
+                if _ck == "use_case" and _use_case_needs_nqe_refinement(_cv):
+                    continue
                 if _cv and not _nqe_answered.get(_ck):
                     _nqe_answered[_ck] = _cv
             nqe_input = NQEInput(
@@ -7969,6 +8619,116 @@ def suggest(
         payload = _ensure_trace_response(payload, trace_id, flags)
         return _with_trace(payload, trace_id)
 
+    # SUPPORT_CLAIM path: text-only OR image with CV damage/triage signals but not off-domain
+    # (off-domain + SUPPORT_CLAIM is handled earlier in the image off-domain block)
+    if str(turn_intent or "").upper() == "SUPPORT_CLAIM" and (
+        not incoming_image_payload
+        or float(image_cv_signals_parsed.get("damage_score") or 0.0) > 0.4
+        or bool(image_cv_signals_parsed.get("intent_cv_triage"))
+    ):
+        _warranty = _infer_account_warranty_status(uid)
+        _q_lower = str(query or "").lower()
+        _cv_damage = (
+            float(image_cv_signals_parsed.get("damage_score") or 0.0) > 0.4
+            or bool(image_cv_signals_parsed.get("intent_cv_triage"))
+            or str(image_context.get("intent") or "").strip().lower() == "cv_triage"
+        )
+        if _cv_damage and not any(w in _q_lower for w in ("return", "refund", "warranty", "cracked", "repair")):
+            _support_title = "Device Damage Assessment"
+            _support_msg = (
+                "This looks like a damaged device. I can help with repair, warranty, or return steps. "
+                + (
+                    "I found account order history to review next."
+                    if str(_warranty.get("status") or "").strip().lower() == "found"
+                    else "Upload a receipt or order reference if you have one."
+                )
+            )
+            _playbook_id = "faq_cracked_screen"
+            _playbook_steps = ["Capture damage close-up", "Capture serial/label", "Attach receipt or order reference"]
+        elif any(w in _q_lower for w in ("return", "refund", "sent back", "send back")):
+            _support_title = "Return Request"
+            _support_msg = (
+                "To start a return: locate your order confirmation email, confirm the item is within the 30-day return window, "
+                "and submit via the Returns Portal or reply here with your order number. "
+                "Unopened items get a full refund; opened items may incur a 15% restocking fee."
+            )
+            _playbook_id = "faq_return_policy"
+            _playbook_steps = ["Locate order confirmation", "Check return window (30 days)", "Submit return via portal or order number"]
+        elif any(w in _q_lower for w in ("cracked", "broken screen", "shattered", "screen damage", "black lines", "dead pixel")):
+            _support_title = "Screen Damage Claim"
+            _support_msg = (
+                "Physical screen damage (cracks, dead pixels, black lines) is typically not covered under standard warranty. "
+                "Options: accidental damage protection claim if you purchased it, third-party repair quote (avg $150–$300), "
+                "or trade-in with discounted replacement. Upload a clear damage photo and serial label to start the assessment."
+            )
+            _playbook_id = "faq_cracked_screen"
+            _playbook_steps = ["Capture damage close-up photo", "Capture serial/label", "Attach receipt or order reference", "Upload via CV Triage for damage score"]
+        elif any(w in _q_lower for w in ("warranty", "covered", "under warranty", "repair", "faulty", "not working", "bsod", "blue screen", "stop code")):
+            _support_title = "Warranty / Repair Claim"
+            _support_msg = (
+                "Standard warranty covers manufacturing defects for 1–2 years from purchase date. "
+                "Physical/liquid damage and accidental breakage are not covered. "
+                f"Account warranty status: {_warranty.get('status', 'unknown')}. "
+                "To open a claim: share your order number and a description of the fault. "
+                "For BSOD/software faults, try a Windows Reset (Settings → Recovery) before claiming."
+            )
+            _playbook_id = "faq_warranty_claim"
+            _playbook_steps = ["Describe fault", "Share order number", "Try software reset for OS issues", "Submit claim for hardware faults"]
+        else:
+            _support_title = "Support Request"
+            _support_msg = (
+                "I've routed this as a support request. To help you faster: share your order number or serial number, "
+                "describe the issue in detail, and upload a photo if there's visible damage. "
+                "A human agent is available in this session if needed."
+            )
+            _playbook_id = "faq_general_support"
+            _playbook_steps = ["Describe the issue", "Share order number or serial number", "Upload damage photo if applicable"]
+        try:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="support_routing",
+                source_type="agent",
+                source_id="Support_Routing_Agent",
+                target_type="system",
+                target_id=None,
+                payload={"turn_intent": turn_intent, "query": query, "playbook": _playbook_id},
+            )
+        except Exception:
+            pass
+        payload = {
+            "status": "support_claim",
+            "results": [],
+            "proposal": {"decision_mode": "support", "ranked_skus": []},
+            "constraints_used": constraints,
+            "assistant_message": _support_msg,
+            "right_panel": {
+                "mode": "support",
+                "title": _support_title,
+                "options": [
+                    {"id": "open_return_portal", "title": "Open Returns Portal", "status": "available", "message": "Start your return or exchange online."},
+                    {"id": "human_agent", "title": "Talk to a Human Agent", "status": "available", "message": "A support agent can help with complex claims."},
+                    {"id": "upload_damage_photo", "title": "Upload Damage Photo", "status": "review", "message": "Upload a clear photo for CV triage and claim assessment."},
+                ],
+                "faq_playbooks": [{"id": _playbook_id, "title": _support_title, "steps": _playbook_steps}],
+                "parallel_agents": ["CV_Triage_Agent", "Warranty_Agent", "Support_Playbook_Agent"],
+            },
+            "turn_type": "explain_turn",
+            "turn_intent": turn_intent,
+            "next_questions": [
+                {"id": "provide_order_number", "text": "Share your order number or serial number for faster resolution.", "goal": "clarify_details"},
+                {"id": "upload_damage_photo", "text": "Upload a clear photo of the damage or fault (speeds up claim assessment).", "goal": "clarify_details"},
+            ],
+            "view_mode": "support",
+            "llm_model": llm_model,
+            "model_tier": model_tier,
+            "complexity_signals": complexity_signals,
+            "nqe_selection_applied": nqe_selection_applied,
+            "referents": referents,
+            "memory_confidence": round(float(memory_confidence), 4),
+        }
+        payload = _ensure_trace_response(payload, trace_id, flags)
+        return _with_trace(payload, trace_id)
+
     retrieve_ms = None
     rerank_ms = None
     agent_chain: list[Dict[str, Any]] = []
@@ -8087,6 +8847,15 @@ def suggest(
                 if budget_max_val is not None and price > budget_max_val:
                     continue
                 filtered.append(c)
+            # If query is device-intent (laptop/tablet/PC) but filtered only has accessories,
+            # treat as no-match so the nearest-above-budget fallback can show actual devices.
+            _device_query_tokens = ("laptop", "notebook", "computer", "tablet", "pc", "desktop", "chromebook")
+            _is_device_query = any(tok in str(query_effective or "").lower() for tok in _device_query_tokens)
+            if filtered and _is_device_query:
+                if not any(_candidate_looks_like_device(c) for c in filtered):
+                    # All in-budget matches are accessories — fall through to nearest-above-budget
+                    filtered = []
+
             if filtered:
                 candidates = filtered
                 filter_price_applied = True
@@ -8128,9 +8897,15 @@ def suggest(
                                     span_c,
                                 )
                                 if nearest_alt:
+                                    # Hard cap: only show over-budget items within 20% tolerance
+                                    _over_tol = float(os.getenv("OVER_BUDGET_TOLERANCE", "1.20"))
+                                    if budget_max_val is not None:
+                                        _hard_cap = budget_max_val * _over_tol
+                                        nearest_alt = [c for c in nearest_alt if (c.get("price_cents") or 0) / 100 <= _hard_cap]
                                     candidates = nearest_alt
                                     filter_meta_price.update(nearest_meta)
                                     filter_meta_price["candidates_after"] = len(candidates)
+                                    filter_meta_price["over_budget_tolerance"] = _over_tol
                 except Exception:
                     pass
                 try:
@@ -8186,6 +8961,12 @@ def suggest(
                     import traceback as _tb
                     logging.error(f"[brand_alt_debug] Exception in brand DB fallback: {_brand_alt_exc}\n{_tb.format_exc(limit=3)}")
                     alt = []
+                # Same accessory-only guard: if DB returned only accessories for a
+                # device-intent query, fall through to nearest-above-budget search.
+                if alt and _is_device_query:
+                    if not any(_candidate_looks_like_device(c) for c in alt):
+                        alt = []
+
                 if alt:
                     candidates = alt
                     filter_price_applied = True
@@ -9329,10 +10110,27 @@ def suggest(
             "security": _build_security_payload(analysis.get("details") or {}, severity),
         }, trace_id)
 
+    # Build per-SKU rationale for Why Recommended tab (humanised, no raw tokens)
+    _per_sku_rationale: dict = {}
+    for _rc in ranked[:6]:
+        _sku = _rc.get("sku") or ""
+        if not _sku:
+            continue
+        _pos_raw = (_rc.get("factors") or {}).get("positive") or []
+        _pos_human = _humanize_positive_factor_tokens(_pos_raw)[:3] if _pos_raw else []
+        if not _pos_human:
+            # Fall back to spec-derived reason
+            _specs = _rc.get("specs") if isinstance(_rc.get("specs"), dict) else {}
+            if _specs.get("gpu_model"):
+                _pos_human.append(f"equipped with {_specs['gpu_model']}")
+            if _specs.get("ram_gb"):
+                _pos_human.append(f"{_specs['ram_gb']}GB RAM")
+        _per_sku_rationale[_sku] = _pos_human or ["strong match for your criteria"]
     proposal = {
         "decision_mode": "rules" if use_rules or simulate else "agent_rerank",
         "ranked_skus": [c["sku"] for c in ranked],
-        "rationale": (ollama_meta.get("intent_summary") or "Reranked within candidate set based on inferred intent and constraints.") if not use_rules else "Rule-based fallback.",
+        "rationale": (ollama_meta.get("intent_summary") or "Reranked within candidate set based on inferred intent and constraints.") if not use_rules else "Rule-based ranking by spec fit and stock.",
+        "per_sku_rationale": _per_sku_rationale,
         "factor_telemetry": {
             "decision_mode": "rules" if use_rules or simulate else "agent_rerank",
             "window_precision": "na",
@@ -9344,7 +10142,7 @@ def suggest(
     }
 
     def _sanitize_proposal(p: Dict[str, Any]) -> Dict[str, Any]:
-        allowed = {"decision_mode", "ranked_skus", "rationale", "factor_telemetry", "nlp"}
+        allowed = {"decision_mode", "ranked_skus", "rationale", "factor_telemetry", "nlp", "per_sku_rationale"}
         cleaned = {k: v for k, v in p.items() if k in allowed}
         skus = cleaned.get("ranked_skus") or []
         cleaned["ranked_skus"] = [str(s) for s in skus if isinstance(s, (str, int))]
@@ -9611,7 +10409,6 @@ def suggest(
     # Only scan user-facing content: SKUs and names.
     with tracer.start_as_current_span("recommend.security_analyze_output"):
         output_analysis = analyze_payload({
-            "uid": uid,
             "result_skus": [c.get("sku") for c in ranked[:8] if c.get("sku")],
         })
     try:
@@ -10150,6 +10947,8 @@ def suggest(
                 ("brand_preference", (constraints.get("brands") or [None])[0]),
                 ("gpu_preference", constraints.get("gpu_preference")),
             ):
+                if _ck == "use_case" and _use_case_needs_nqe_refinement(_cv):
+                    continue
                 if _cv and not _nqe_answered2.get(_ck):
                     _nqe_answered2[_ck] = _cv
             nqe_input = NQEInput(
@@ -10455,7 +11254,23 @@ def suggest(
     constraints["_inferred_image_brand"] = inferred_image_brand
     brand_budget_answer = _build_brand_budget_answer_v2(query, results, constraints)
     llm_summary_job_id = None
-    llm_summary_requested = (not fast_path_enabled) and bool(nlp.get("llm_fallback") or explanation_request)
+    # Force LLM summary whenever the query has enough context to deserve a real response.
+    # Rule-based fallback leaks "+in_stock" tokens and misses nuance for budget/gaming/work queries.
+    _reason = ollama_meta.get("reason") or {}
+    _complexity_score = int(_reason.get("score") or (ollama_meta.get("decision") or {}).get("triggers", {}).get("score") or 0)
+    _signals = _reason.get("signals") or {}
+    _use_case_str = str(constraints.get("use_case") or "").lower()
+    _has_budget_range = (constraints.get("budget_min") is not None and constraints.get("budget_max") is not None)
+    _llm_force = (
+        _complexity_score >= 4                              # medium-tier or above
+        or bool(_signals.get("use_case_specific"))         # gaming/creative/engineering
+        or bool(_signals.get("budget_question"))           # "is $X enough?"
+        or bool(_signals.get("comparison_keywords"))       # "vs", "compare", "which one"
+        or _has_budget_range                               # any budget range query deserves natural language
+        or "gaming" in _use_case_str
+        or explanation_request
+    )
+    llm_summary_requested = (not fast_path_enabled) and bool(nlp.get("llm_fallback") or _llm_force)
     if llm_summary_requested and rule_eval.get("recommend_llm", True):
         # ── Build frontier-style memory injection for LLM prompt ──────────────
         # Mirrors Kimi K2 / Claude extended context: structured slot state prepended
@@ -10463,10 +11278,24 @@ def suggest(
         _ctx_preamble: str | None = None
         _trace_ctx: str | None = None
         try:
+            # Fetch prior shortlist products with specs for multi-hop comparison context
+            _prior_prods: list | None = None
+            try:
+                if prior_shortlist and db is not None:
+                    from sqlalchemy import text as _sqla_text
+                    _skus_for_ctx = [str(s) for s in prior_shortlist[:4] if s]
+                    if _skus_for_ctx:
+                        _bind = {f"s{i}": sk for i, sk in enumerate(_skus_for_ctx)}
+                        _placeholders = ", ".join(f":s{i}" for i in range(len(_skus_for_ctx)))
+                        _rows = db.execute(_sqla_text(f"SELECT sku, name, price_cents, specs FROM products WHERE sku IN ({_placeholders}) AND active=1"), _bind).mappings().all()
+                        _prior_prods = [{"sku": r["sku"], "name": r["name"], "price_cents": r["price_cents"], "specs": json.loads(r["specs"]) if isinstance(r["specs"], str) else (r["specs"] or {})} for r in _rows]
+            except Exception:
+                _prior_prods = None
             _ctx_preamble = _build_context_preamble(
                 kv=kv if isinstance(kv, dict) else {},
                 structured_state=structured_state if isinstance(structured_state, dict) else {},
                 constraints=constraints,
+                prior_shortlist_products=_prior_prods,
             ) or None
         except Exception:
             pass
@@ -10474,11 +11303,31 @@ def suggest(
             _trace_ctx = _trace_to_context_summary(trace_id, mem, uid) or None
         except Exception:
             pass
-        # Combine: conversation memory first, then trace context
-        _combined_preamble_parts = [p for p in (_ctx_preamble, _trace_ctx) if p]
+        # Combine: conversation memory first, then trace context, then recent turn history.
+        # Truncate session summary to ~400 chars so it doesn't crowd the product context.
+        _session_excerpt = (str(_session_context_summary or "").strip())[:400] or None
+        _combined_preamble_parts = [p for p in (_ctx_preamble, _trace_ctx, _session_excerpt) if p]
         _combined_preamble = "\n\n".join(_combined_preamble_parts) if _combined_preamble_parts else None
+        # Use a real Ollama model for the summary. `llm_model` may be a display
+        # name like "rule-based (prefer_small)" when the intent rollout is off —
+        # in that case fall back to the configured medium model so the LLM
+        # actually runs.
+        _summ_model = llm_model
+        if not _summ_model or "rule-based" in str(_summ_model) or " " in str(_summ_model):
+            _summ_model = os.getenv("OLLAMA_MEDIUM_MODEL", os.getenv("OLLAMA_BIG_MODEL", "qwen3:30b"))
+        # Thread image trust verdict into constraints so _summarize_results
+        # can inject the security fence (Approach 1).
+        try:
+            _allowlist_verdict = getattr(_image_feature_allowlist, "verdict", "full")
+            if _allowlist_verdict != "full":
+                constraints["_image_feature_allowlist_verdict"] = _allowlist_verdict
+                constraints["_image_feature_blocked_signals"] = getattr(
+                    _image_feature_allowlist, "blocked_signals", []
+                )
+        except Exception:
+            pass
         assistant_message, llm_summary_job_id = _summarize_results(
-            query, results, constraints, llm_model, trace_id,
+            query, results, constraints, _summ_model, trace_id,
             context_preamble=_combined_preamble,
         )
     if explanation_request:
@@ -11129,6 +11978,28 @@ def suggest(
             )
             mem.set_summary(uid, rolling_summary, ttl_seconds=active_ttl)
             payload["session_summary"] = rolling_summary
+            # Persist a typed Episode so get_session_context_summary() returns
+            # real turn history on every subsequent turn (not always "").
+            try:
+                from src.app.services.episodic_memory import EpisodicMemory as _EpisodicMemory
+                _ep_mem_ckpt = _EpisodicMemory(mem)
+                _ep_skus = [str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)][:6]
+                _ep_slots = {
+                    k: constraints[k] for k in ("budget_max", "budget_min", "use_case", "brands", "gpu_preference")
+                    if k in constraints and constraints[k] is not None
+                }
+                _ep_response_text = str(assistant_message or "")[:120] or turn_type
+                _ep_mem_ckpt.save_episode(
+                    uid,
+                    turn_index=int(kv_out.get("conversation_turn") or 0),
+                    query=str(query or "")[:200],
+                    response_summary=_ep_response_text,
+                    slots_captured=_ep_slots,
+                    products_shown=_ep_skus,
+                    model_used=str(llm_model or ""),
+                )
+            except Exception:
+                pass
             log_trace_event(
                 trace_id=trace_id,
                 event_type="session_summary_checkpoint",
@@ -11287,6 +12158,37 @@ def suggest(
         )
     except Exception:
         pass
+
+    # ── Checkout handoff: detect purchase intent and surface a checkout_action ──
+    # The AI stays in advisory mode — it never touches money directly.  When the
+    # user signals intent to buy we emit a structured checkout_action so the
+    # frontend can route them to the deterministic payment flow.
+    try:
+        if _detect_checkout_intent(query):
+            _top_result = (redacted.get("results") or [{}])[0] if redacted.get("results") else {}
+            _top_sku = str(_top_result.get("sku") or "").strip()
+            _top_price = _top_result.get("price_cents") or (
+                int(float(_top_result.get("price") or 0) * 100) if _top_result.get("price") else None
+            )
+            redacted["checkout_action"] = {
+                "intent": "checkout",
+                "suggested_sku": _top_sku or None,
+                "suggested_price_cents": _top_price,
+                "endpoint": "/api/v1/payments/checkout-initiate",
+                "order_create_endpoint": "/api/v1/orders/create",
+                "message": (
+                    f"Ready to buy {_top_result.get('name', 'this item')}? "
+                    "Create an order and proceed to checkout."
+                ) if _top_sku else "Ready to proceed? Create an order and go to checkout.",
+                "flow": [
+                    {"step": 1, "action": "POST /api/v1/orders/create", "description": "Create order record with SKUs"},
+                    {"step": 2, "action": "POST /api/v1/payments/checkout-initiate", "description": "Initiate Stripe payment"},
+                    {"step": 3, "action": "Stripe Elements (client-side)", "description": "Collect and confirm payment"},
+                ],
+            }
+    except Exception:
+        pass
+
     return redacted
 
 
@@ -11967,3 +12869,4 @@ def nqe_feedback_summary(
         c = int(r[2] or 0)
         items.append({"variant": str(r[0] or "control"), "samples": n, "conversion_rate": (float(c) / float(max(1, n)))})
     return {"status": "ok", "tenant_id": tenant_id, "days": days, "items": items}
+

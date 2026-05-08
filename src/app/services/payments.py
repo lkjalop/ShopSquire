@@ -36,7 +36,13 @@ class StripeClient:
             self.supply_chain.detect_response_anomaly("stripe", dict(intent))
         except Exception:
             pass
-        return {"id": intent.get("id"), "amount": intent.get("amount"), "currency": intent.get("currency"), "status": intent.get("status")}
+        return {
+            "id": intent.get("id"),
+            "client_secret": intent.get("client_secret"),
+            "amount": intent.get("amount"),
+            "currency": intent.get("currency"),
+            "status": intent.get("status"),
+        }
 
 
 class PayPalClient:

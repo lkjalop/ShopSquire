@@ -500,7 +500,22 @@ def classify_passive_payload(
 
     benign_comment_only = _is_benign_comment_only_vba_source(filename_lower, content_text)
     if benign_comment_only:
-        matched_hypotheses = [h for h in matched_hypotheses if h not in {"lolbin_command_sequence", "c2_beacon", "data_exfiltration", "fileless_attack", "macros"}]
+        # Suppress LOLBin/C2 hypotheses derived from commented-out patterns only.
+        # Keep "macros" if the file has real (uncommented) auto-execution subs —
+        # Sub Auto_Open / Sub Workbook_Open are live execution triggers even in
+        # an otherwise "benign test" artifact.
+        _has_uncommented_macro_exec = any(
+            not line.strip().startswith("'")
+            and any(
+                trigger in line.strip().lower()
+                for trigger in ("sub auto_open(", "sub workbook_open(", "sub document_open(")
+            )
+            for line in str(content_text or "").splitlines()
+        )
+        _suppress_set = {"lolbin_command_sequence", "c2_beacon", "data_exfiltration", "fileless_attack"}
+        if not _has_uncommented_macro_exec:
+            _suppress_set.add("macros")
+        matched_hypotheses = [h for h in matched_hypotheses if h not in _suppress_set]
 
     if not matched_hypotheses:
         matched_hypotheses = ["unknown"]

@@ -98,12 +98,133 @@ class TestMAESTROBoundaries:
         )
         assert len(violations) >= 3  # tool, data_scope, peer, value
 
+    def test_validate_unknown_agent_returns_missing_boundary(self):
+        from src.app.security.maestro_boundaries import validate_agent_action
+        violations = validate_agent_action(
+            agent_name="UnknownAgent_XYZ",
+            tool_name="do_something",
+        )
+        assert len(violations) == 1
+        assert violations[0].violation_type == "missing_boundary"
+        assert violations[0].severity == "warning"
+
     def test_boundary_summary_keys(self):
         from src.app.security.maestro_boundaries import get_boundary_summary
         summary = get_boundary_summary()
         assert "Orchestrator" in summary
         assert "risk_tier" in summary["Orchestrator"]
         assert summary["Orchestrator"]["risk_tier"] == "critical"
+
+
+# ===========================================================================
+# Pixel-Space Prompt Injection (OWASP Agentic AI AA05)
+# ===========================================================================
+
+class TestPixelPromptInjection:
+    """Tests for detect_pixel_prompt_injection in adversarial_image_detector.
+
+    Uses synthetic image bytes so the tests are self-contained and never
+    require external files or network access.
+    """
+
+    @staticmethod
+    def _make_natural_png(size: int = 64) -> bytes:
+        """Generate a smooth gradient PNG — low adversarial and injection scores."""
+        try:
+            from PIL import Image as PILImage
+            import io
+            import numpy as np
+            arr = np.zeros((size, size, 3), dtype=np.uint8)
+            for y in range(size):
+                for x in range(size):
+                    arr[y, x] = [int(x * 255 / size), int(y * 255 / size), 128]
+            img = PILImage.fromarray(arr, "RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except ImportError:
+            return b""
+
+    @staticmethod
+    def _make_lsb_injected_png(size: int = 64) -> bytes:
+        """Generate an image with maximum LSB entropy — simulates structured injection."""
+        try:
+            from PIL import Image as PILImage
+            import io
+            import numpy as np
+            rng = np.random.default_rng(42)
+            # Base: smooth gradient
+            arr = np.zeros((size, size, 3), dtype=np.uint8)
+            for y in range(size):
+                for x in range(size):
+                    arr[y, x] = [int(x * 255 / size), int(y * 255 / size), 128]
+            # Inject: replace LSBs with near-uniform random 2-bit values
+            lsb_noise = (rng.integers(0, 4, size=(size, size, 3), dtype=np.uint8))
+            arr = (arr & 0xFC) | lsb_noise  # clear bottom 2 bits, set structured noise
+            img = PILImage.fromarray(arr.astype(np.uint8), "RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+        except ImportError:
+            return b""
+
+    def test_natural_image_low_score(self):
+        from src.app.security.adversarial_image_detector import detect_pixel_prompt_injection
+        img_bytes = self._make_natural_png()
+        if not img_bytes:
+            pytest.skip("Pillow not installed")
+        result = detect_pixel_prompt_injection(img_bytes)
+        assert result.injection_score < 0.7, (
+            f"Natural image scored too high: {result.injection_score}"
+        )
+        assert result.owasp_tag == "AA05"
+
+    def test_lsb_injected_image_raises_score(self):
+        from src.app.security.adversarial_image_detector import detect_pixel_prompt_injection
+        img_bytes = self._make_lsb_injected_png()
+        if not img_bytes:
+            pytest.skip("Pillow not installed")
+        result = detect_pixel_prompt_injection(img_bytes)
+        # LSB entropy score should be elevated — the dominant signal for this type
+        assert result.lsb_entropy_score > 0.0, (
+            "LSB-injected image should have non-zero LSB entropy score"
+        )
+        assert result.owasp_tag == "AA05"
+
+    def test_invalid_bytes_returns_gracefully(self):
+        from src.app.security.adversarial_image_detector import detect_pixel_prompt_injection
+        result = detect_pixel_prompt_injection(b"not an image")
+        assert result.injection_score == 0.0
+        assert not result.is_injection_risk
+        assert len(result.explanations) > 0  # error explanation present
+
+    def test_empty_bytes_returns_gracefully(self):
+        from src.app.security.adversarial_image_detector import detect_pixel_prompt_injection
+        result = detect_pixel_prompt_injection(b"")
+        assert result.injection_score == 0.0
+
+    def test_result_fields_are_bounded(self):
+        from src.app.security.adversarial_image_detector import detect_pixel_prompt_injection
+        img_bytes = self._make_natural_png()
+        if not img_bytes:
+            pytest.skip("Pillow not installed")
+        result = detect_pixel_prompt_injection(img_bytes)
+        assert 0.0 <= result.injection_score <= 1.0
+        assert 0.0 <= result.grid_alignment_score <= 1.0
+        assert 0.0 <= result.lsb_entropy_score <= 1.0
+        assert 0.0 <= result.dct_ac_anomaly_score <= 1.0
+
+    def test_threshold_respected(self):
+        from src.app.security.adversarial_image_detector import detect_pixel_prompt_injection
+        img_bytes = self._make_natural_png()
+        if not img_bytes:
+            pytest.skip("Pillow not installed")
+        # Force flag by setting threshold=0.0
+        result = detect_pixel_prompt_injection(img_bytes, threshold=0.0)
+        assert result.is_injection_risk is True
+        # Force clear by setting threshold=1.0
+        result2 = detect_pixel_prompt_injection(img_bytes, threshold=1.0)
+        assert result2.is_injection_risk is False
 
 
 # ===========================================================================

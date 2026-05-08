@@ -51,7 +51,7 @@ export async function extractImageMeta(file: File): Promise<ImageMeta> {
     // ignore
   }
   try {
-    meta.sha256 = await hashSha256(file);
+    meta.sha256 = (await hashSha256(file)) ?? undefined;
   } catch {
     // ignore
   }

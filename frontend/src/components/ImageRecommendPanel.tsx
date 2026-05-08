@@ -80,7 +80,7 @@ export interface Props {
 const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
 const WIDEN_STEPS = [200, 400];
-const RECOMMEND_TIMEOUT_MS = 30000;
+const RECOMMEND_TIMEOUT_MS = 90000;
 
 function persistOperatorMetrics(timing: any, traceId: string | null, source = 'visual_search') {
   if (!timing || typeof timing !== 'object') return;
@@ -792,7 +792,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             group: {
               source: ctx.source_name || `Image ${i + 1}: ${brand}`,
               icon: '\uD83D\uDCF8',
-              trustLevel: trust === 'red' ? trust : 'orange',
+              trustLevel: (trust as unknown as string) === 'red' ? ('red' as TrustLevel) : ('orange' as TrustLevel),
               friendlyBrand: brand,
               securityNote: 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.',
               products: [],
@@ -817,7 +817,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           let pickedTraceId: string | null = result.traceId || null;
           let products = result.products.slice(0, 3);
           let safeSummary = sanitizeSummary(result.summary, products.length, `Top ${brand} picks matching your image.`);
-          let trustLevel = trust;
+          let trustLevel: TrustLevel = trust as TrustLevel;
           let securityNote = trust === 'green' ? note : buildBuyerSecurityNotice(ctx.cv_signals || {});
           if (result.linkedArtifactSummary && result.linkedArtifactPolicyAction !== 'allow') {
             securityNote = `${securityNote} ${result.linkedArtifactSummary}`.trim();
@@ -837,7 +837,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             }
           }
           if (shouldTreatAsOffDomain) {
-            trustLevel = trust === 'red' ? trust : 'orange';
+            trustLevel = (trust as unknown as string) === 'red' ? ('red' as TrustLevel) : ('orange' as TrustLevel);
             securityNote = 'Uploaded image appears outside the current merchant catalog. No unrelated substitutions were made.';
             products = [];
             safeSummary = lockedOffDomainSummary(userQuery);

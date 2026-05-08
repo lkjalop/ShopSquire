@@ -1,5 +1,4 @@
 from __future__ import annotations
-from __future__ import annotations
 
 from typing import Dict, List
 
@@ -15,9 +14,19 @@ router = APIRouter(prefix="/api/v1/products", tags=["products"])
 
 
 @router.get("/list")
-def list_products() -> List[Dict]:
-    """Return seeded product list for UI fallbacks and API consumers."""
-    return _get_products()
+def list_products(page: int = 1, per_page: int = 50) -> Dict:
+    """Return seeded product list with pagination metadata."""
+    all_products = _get_products()
+    total = len(all_products)
+    offset = (page - 1) * per_page
+    page_products = all_products[offset : offset + per_page]
+    return {
+        "products": page_products,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": max(1, (total + per_page - 1) // per_page),
+    }
 
 
 @router.get("/{sku}")

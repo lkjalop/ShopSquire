@@ -6,9 +6,10 @@ function resolveImplicitApiBase(): string {
   const localHost = hostname.toLowerCase();
   const isLocal = localHost === '127.0.0.1' || localHost === 'localhost';
   if (!isLocal) return '';
+  if (port === '8099') return `${protocol}//${host}`;
   if (port === '8080') return `${protocol}//${host}`;
   if (port === '5173' || port === '4173' || port === '3000') {
-    return `${protocol}//${hostname}:8080`;
+    return `${protocol}//${hostname}:8099`;
   }
   return '';
 }

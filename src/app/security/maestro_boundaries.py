@@ -10,9 +10,36 @@ Reference: MAESTRO Framework for Agentic AI Security (2025)
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set
 from src.app.services.registry import get_tool_metadata
+
+
+# ---------------------------------------------------------------------------
+# Enforcement mode
+# ---------------------------------------------------------------------------
+# MAESTRO_ENFORCEMENT_MODE controls what happens when a boundary violation is found:
+#   "audit"  — log violations, never raise (default; forensics only)
+#   "warn"   — log violations, emit a warning but continue
+#   "block"  — raise MaestroViolationError for critical/high violations, blocking execution
+#
+# Set via environment variable. Defaults to "audit" so existing behaviour is unchanged.
+_ENFORCEMENT_MODE: str = os.getenv("MAESTRO_ENFORCEMENT_MODE", "audit").strip().lower()
+_BLOCK_SEVERITIES: frozenset[str] = frozenset({"critical", "high"})
+
+
+class MaestroViolationError(Exception):
+    """Raised in 'block' enforcement mode when a critical/high boundary violation occurs.
+
+    Callers (orchestrator, recommend ingress) should catch this and convert
+    to HTTP 403 or equivalent policy-gate rejection.
+    """
+    def __init__(self, violations: List["BoundaryViolation"]) -> None:
+        self.violations = violations
+        top = violations[0] if violations else None
+        detail = top.detail if top else "unknown violation"
+        super().__init__(f"MAESTRO boundary violation [{top.severity if top else 'unknown'}]: {detail}")
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +354,22 @@ def validate_agent_action(
     """Run all boundary checks for a single agent action.
 
     Returns a list of violations (empty = action is within boundaries).
+    An agent not present in AGENT_BOUNDARIES produces a ``missing_boundary``
+    violation — this is deliberate: an unregistered agent has no defined
+    scope, which is itself a boundary violation rather than a clean pass.
     """
     violations: List[BoundaryViolation] = []
+    if agent_name not in AGENT_BOUNDARIES:
+        violations.append(BoundaryViolation(
+            agent_name=agent_name,
+            violation_type="missing_boundary",
+            detail=(
+                f"Agent '{agent_name}' has no registered MAESTRO boundary. "
+                "Unregistered agents must be added to AGENT_BOUNDARIES before deployment."
+            ),
+            severity="warning",
+        ))
+        return violations
     if tool_name:
         v = check_tool_access(agent_name, tool_name)
         if v:
@@ -345,6 +386,13 @@ def validate_agent_action(
         v = check_autonomous_value(agent_name, value_usd)
         if v:
             violations.append(v)
+
+    # Enforcement gate — applies AFTER all checks so callers always get the full list.
+    if violations and _ENFORCEMENT_MODE == "block":
+        blocking = [v for v in violations if v.severity in _BLOCK_SEVERITIES]
+        if blocking:
+            raise MaestroViolationError(blocking)
+
     return violations
 
 

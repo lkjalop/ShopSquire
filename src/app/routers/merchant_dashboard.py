@@ -3308,7 +3308,7 @@ def merchant_email_lab(request: Request):
             }catch(e){ pushTraceNotice('render_panels_error', { error: String(e) }); }
           }
 
-          async function analyze(){ resetPlaybookRunCard(); document.getElementById('status').textContent='Analyzing…'; const to = document.getElementById('to').value.trim(); const subj = document.getElementById('subject').value.trim(); const body = document.getElementById('body').value.trim(); let atts = []; try { atts = await collectAllAttachments(); } catch(attErr){ const msg = 'Attachment encoding failed: ' + String(attErr && attErr.message ? attErr.message : attErr); document.getElementById('status').textContent = msg; pushTraceNotice('attachment_encoding_failed', { error: msg }); return; } const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
+          async function analyze(){ resetPlaybookRunCard(); document.getElementById('status').textContent='Preparing attachments...'; const to = document.getElementById('to').value.trim(); const subj = document.getElementById('subject').value.trim(); const body = document.getElementById('body').value.trim(); let atts = []; try { atts = await collectAllAttachments(); } catch(attErr){ const msg = 'Attachment encoding failed: ' + String(attErr && attErr.message ? attErr.message : attErr); document.getElementById('status').textContent = msg; pushTraceNotice('attachment_encoding_failed', { error: msg }); return; } document.getElementById('status').textContent = `Analyzing ${atts.length} attachment${atts.length===1?'':'s'}... this can take 30-60s locally`; const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
             try {
               let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', credentials:'include', headers: postHeaders({ 'Content-Type':'application/json', 'x-api-key': getApiKey() }), body: JSON.stringify(payload) });
               if (r.status === 401 || r.status === 403) {
@@ -3321,6 +3321,7 @@ def merchant_email_lab(request: Request):
               document.getElementById('reasons').textContent = (j.reasons||[]).slice(0,6).join(' · ');
               const ex = []; try { const ev = j.evidence_snapshot||{}; const ioc = ev.ioc_counts||{}; ex.push(`IOC: url=${ioc.url||0} domain=${ioc.domain||0} hash=${ioc.hash||0}`); if(ev.sender_trust && ev.sender_trust.sender_trust_score!=null){ ex.push(`Trust=${parseFloat(ev.sender_trust.sender_trust_score).toFixed(2)}`); } } catch(e) {}
               document.getElementById('extract').textContent = ex.join(' | ');
+              document.getElementById('status').textContent='Rendering evidence panels...';
               renderSecurityPanels(j);
               const tid = j.decision_trace_id || j.decision_id || payload.message_id;
               pushTraceNotice('analysis_ready', { trace_id: tid, verdict_action: j.verdict_action || 'unknown', severity: j.severity || 'info', reasons: (j.reasons||[]).slice(0,3), attachment_count: Array.isArray(atts) ? atts.length : 0 });
@@ -3330,7 +3331,7 @@ def merchant_email_lab(request: Request):
           }
           async function submitEscalate(){
             resetPlaybookRunCard();
-            document.getElementById('status').textContent='Analyzing & escalating…';
+            document.getElementById('status').textContent='Preparing attachments for escalation...';
             const to = document.getElementById('to').value.trim();
             const subj = document.getElementById('subject').value.trim();
             const body = document.getElementById('body').value.trim();
@@ -3343,6 +3344,7 @@ def merchant_email_lab(request: Request):
               return;
             }
             const payload = { message_id: 'lab-'+Math.random().toString(36).slice(2), from_addr: to, reply_to: to, subject: subj, body: body, attachments: atts, external_sender: true, dmarc_fail: false, spf_result: 'neutral', dkim_result: 'neutral', dmarc_result: 'quarantine', dmarc_policy: 'reject', vendor_domain: 'ingramfake.com.au' };
+            document.getElementById('status').textContent = `Analyzing ${atts.length} attachment${atts.length===1?'':'s'} and escalating... this can take 30-60s locally`;
             try {
               let r = await fetch('/api/v1/email_security/evaluate', { method:'POST', credentials:'include', headers: postHeaders({ 'Content-Type':'application/json', 'x-api-key': getApiKey() }), body: JSON.stringify(payload) });
               if (r.status === 401 || r.status === 403) {

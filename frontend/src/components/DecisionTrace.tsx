@@ -33,6 +33,7 @@ type Trace = {
     path?: string[] | null;
     latency_ms?: number | null;
     intent_summary?: string | null;
+    decision?: { action?: string; from?: string; to?: string } | null;
   };
   products?: any[];
   right_panel?: { anchor_sections?: any[] } | null;
@@ -156,7 +157,7 @@ function humanizeKey(key: string): string {
 }
 
 function renderValue(value: any) {
-  const unknownText = new Set(['', '?', '--', 'â€”', 'Ã¢â‚¬â€', 'unknown', 'n/a', 'null', 'undefined']);
+  const unknownText = new Set(['', '?', '--', '—', 'unknown', 'n/a', 'null', 'undefined']);
   if (value === null || value === undefined) return <span className={styles.muted}>Not available</span>;
   if (typeof value === 'boolean') {
     return <span className={value ? styles.booleanYes : styles.booleanNo}>{value ? 'Yes' : 'No'}</span>;
@@ -165,10 +166,7 @@ function renderValue(value: any) {
   if (typeof value === 'string') {
     const normalized = value.trim();
     if (unknownText.has(normalized.toLowerCase())) return <span className={styles.muted}>Not available</span>;
-    const cleaned = normalized
-      .replaceAll('Ã¢â‚¬â€', 'Not available')
-      .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', 'Not available')
-      .replaceAll('ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â', 'Not available');
+    const cleaned = normalized.replace(/Ã¢[€“]/g, '—');
     const trimmed = cleaned.length > 220 ? `${cleaned.slice(0, 220)}...` : cleaned;
     return <span className={styles.valueText} title={cleaned}>{trimmed}</span>;
   }
@@ -190,7 +188,7 @@ function isMissingValue(value: any): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    return ['', '?', '--', 'â€”', 'Ã¢â‚¬â€', 'unknown', 'n/a', 'null', 'undefined'].includes(normalized);
+    return ['', '?', '--', '—', 'unknown', 'n/a', 'null', 'undefined'].includes(normalized);
   }
   if (Array.isArray(value)) return value.length === 0;
   if (typeof value === 'object') return Object.keys(value).length === 0;
@@ -204,9 +202,6 @@ function formatDisplayText(value: any, fallback = 'Not available'): string {
   if (Array.isArray(value)) return value.map((item) => String(item)).join(', ');
   return String(value)
     .replaceAll('_', ' ')
-    .replaceAll('Ã¢â‚¬â€', fallback)
-    .replaceAll('ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â', fallback)
-    .replaceAll('ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â', fallback);
 }
 
 function eventAliases(evt: TraceEvent): string[] {
@@ -683,6 +678,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (Array.isArray(raw.stride_categories) && !Array.isArray(merged.stride)) merged.stride = raw.stride_categories;
     if (Array.isArray(raw.mitre_atlas) && !Array.isArray(merged.mitre)) merged.mitre = raw.mitre_atlas;
     if (Array.isArray(raw.owasp_agentic_top10) && !Array.isArray(merged.owasp_agentic)) merged.owasp_agentic = raw.owasp_agentic_top10;
+    // MAESTRO agentic boundary normalization
+    if (Array.isArray(raw.maestro_tags) && !Array.isArray(merged.maestro_tags)) merged.maestro_tags = raw.maestro_tags;
+    if (raw.maestro_checked != null && merged.maestro_checked == null) merged.maestro_checked = raw.maestro_checked;
+    if (raw.maestro_boundary != null && merged.maestro_boundary == null) merged.maestro_boundary = raw.maestro_boundary;
+    if (Array.isArray(raw.maestro_violations) && !Array.isArray(merged.maestro_violations)) merged.maestro_violations = raw.maestro_violations;
     return Object.keys(merged).length > 0 ? merged : null;
   };
 
@@ -725,6 +725,23 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   };
 
   const security = extractSecurity();
+
+  // Collect MAESTRO agent_guardrail events from the trace event stream.
+  // These are emitted by the orchestrator and recommend ingress with
+  // maestro_checked, maestro_boundary, and maestro_violations.
+  const maestroGuardrailEvents: Array<{ agent: string; boundary: string; violations: any[]; tags: string[] }> = (() => {
+    const allEvts = events.length > 0 ? events : displayEvents;
+    return allEvts
+      .filter((e) => String(e.event_type || '').toLowerCase() === 'agent_guardrail' && e.payload?.maestro_checked)
+      .map((e) => ({
+        agent: String(e.source_id || e.payload?.maestro_boundary || ''),
+        boundary: String(e.payload?.maestro_boundary || ''),
+        violations: Array.isArray(e.payload?.maestro_violations) ? e.payload.maestro_violations : [],
+        tags: Array.isArray(e.payload?.tags) ? e.payload.tags : [],
+      }));
+  })();
+  const maestroViolationCount = maestroGuardrailEvents.reduce((acc, ev) => acc + ev.violations.length, 0);
+
   const playbookEvent = events.find((e) => eventMatches(e, ['cv_playbook', 'proposal_build']));
   const playbookPayload = playbookEvent?.payload || null;
   const playbookPreview = playbookPayload?.playbook || null;
@@ -2249,6 +2266,70 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         ))}
                         {owaspAgenticTags.length === 0 && <span className={styles.muted}>None</span>}
                       </div>
+
+                      <div className={styles.sectionTitle}>MAESTRO Agentic Boundaries (CSA 2025)</div>
+                      {maestroGuardrailEvents.length === 0 && (
+                        <div className={styles.muted}>No agent boundary checks recorded for this trace.</div>
+                      )}
+                      {maestroGuardrailEvents.length > 0 && (
+                        <div className={styles.playbookPanel}>
+                          <div className={styles.kvRow}>
+                            <span>Boundaries checked</span>
+                            <span>{maestroGuardrailEvents.length}</span>
+                          </div>
+                          <div className={styles.kvRow}>
+                            <span>Violations</span>
+                            <span>
+                              {maestroViolationCount === 0
+                                ? <span className={styles.booleanYes}>None — all agents within scope</span>
+                                : <span className={styles.tagRed}>{maestroViolationCount} violation{maestroViolationCount > 1 ? 's' : ''}</span>
+                              }
+                            </span>
+                          </div>
+                          <table className={styles.smallTable}>
+                            <thead>
+                              <tr>
+                                <th>Agent</th>
+                                <th>Boundary</th>
+                                <th>Status</th>
+                                <th>Violations</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {maestroGuardrailEvents.map((ev, idx) => (
+                                <tr key={`maestro-${idx}`}>
+                                  <td>{ev.agent || '—'}</td>
+                                  <td>{ev.boundary || '—'}</td>
+                                  <td>
+                                    {ev.violations.length === 0
+                                      ? <span className={styles.booleanYes}>✓ within boundary</span>
+                                      : <span className={styles.tagWarn}>{ev.violations.length} violation{ev.violations.length > 1 ? 's' : ''}</span>
+                                    }
+                                  </td>
+                                  <td>
+                                    {ev.violations.length === 0
+                                      ? <span className={styles.muted}>—</span>
+                                      : (
+                                        <ul className={styles.playbookList}>
+                                          {ev.violations.map((v: any, vi: number) => (
+                                            <li key={vi} title={v.detail}>
+                                              <span className={v.severity === 'critical' || v.severity === 'high' ? styles.tagRed : styles.tagWarn}>
+                                                {v.severity}
+                                              </span>
+                                              {' '}{String(v.violation_type || '').replace(/_/g, ' ')}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      )
+                                    }
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
 
                       <div className={styles.sectionTitle}>STRIDE</div>
                       <div className={styles.tagRow}>

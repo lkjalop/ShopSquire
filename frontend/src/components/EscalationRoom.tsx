@@ -168,7 +168,17 @@ export default function EscalationRoom({
         if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
         typingTimerRef.current = window.setTimeout(() => setRemoteTyping(false), 2400);
       }
-      const messageEvents = incoming.filter((e: any) => String(e?.event_type || 'message').toLowerCase() !== 'typing');
+      const resolveEvents = incoming.filter((e: any) =>
+        ['incident_resolved', 'resolved', 'room_closed'].includes(String(e?.event_type || '').toLowerCase())
+      );
+      if (resolveEvents.length > 0 && mounted) {
+        setResolved(true);
+        onResolve?.(incidentId);
+      }
+      const messageEvents = incoming.filter((e: any) => {
+        const t = String(e?.event_type || 'message').toLowerCase();
+        return t !== 'typing' && !['incident_resolved', 'resolved', 'room_closed'].includes(t);
+      });
       if (messageEvents.length > 0) {
         setRemoteTyping(false);
         setEvents((prev) => [...prev, ...messageEvents]);
@@ -191,13 +201,15 @@ export default function EscalationRoom({
           }
         };
         ws.onerror = () => {
-          if (mounted) setConnectionError('WebSocket connection failed. Falling back to SSE.');
-          try {
-            ws && ws.close();
-          } catch {
-            // ignore close errors
-          }
+          try { ws && ws.close(); } catch { /* ignore */ }
           ws = null;
+          if (!mounted) return;
+          setConnectionError('WebSocket disconnected. Reconnecting…');
+          window.setTimeout(() => {
+            if (!mounted) return;
+            setConnectionError(null);
+            connectWS();
+          }, 3000);
         };
       } catch {
         ws = null;

@@ -231,7 +231,7 @@ export default function RightPanelExtras({
     if (r.includes('low_visual_evidence')) return 'Photo is too unclear to verify';
     if (r.includes('invalid_or_unsupported_image')) return 'Unsupported image format';
     if (r.includes('order_id_not_visible_or_mismatch')) return 'Order ID not visible or mismatched';
-    return reason.replaceAll('_', ' ');
+    return (reason ?? '').replaceAll('_', ' ');
   };
 
   const submitCV = async () => {

@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const apiTarget = (env.VITE_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '');
+  const apiWsTarget = apiTarget.replace(/^http/, 'ws');
 
   return {
     plugins: [react()],
@@ -23,7 +24,7 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       proxy: {
-        '/api': { target: apiTarget, changeOrigin: true },
+        '/api': { target: apiTarget, changeOrigin: true, ws: true },
         '/health': { target: apiTarget, changeOrigin: true },
         '/healthz': { target: apiTarget, changeOrigin: true },
         '/ui': { target: apiTarget, changeOrigin: true },
@@ -43,13 +44,13 @@ export default defineConfig(({ mode }) => {
           "script-src 'self' 'unsafe-eval'",   // Vite HMR requires unsafe-eval in dev
           "style-src 'self' 'unsafe-inline'",
           "img-src 'self' data: blob: https:",
-          "connect-src 'self' http://localhost:8080 ws://localhost:8080 ws://localhost:5173",
+          `connect-src 'self' ${apiTarget} ${apiWsTarget} ws://localhost:5173`,
           "media-src 'self' blob:",
           "worker-src blob:",
           "object-src 'none'",
           "base-uri 'self'",
           "frame-ancestors 'none'",
-          "report-uri http://localhost:8080/api/v1/security/csp-report",
+          `report-uri ${apiTarget}/api/v1/security/csp-report`,
         ].join('; '),
       },
     }

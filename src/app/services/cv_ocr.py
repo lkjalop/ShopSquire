@@ -125,11 +125,44 @@ def _paddle_ocr(image_bytes: bytes) -> Dict[str, Any]:
     return {"text": " ".join(lines)[:2000], "confidence": confidence, "boxes": boxes, "provider": "paddle"}
 
 
+def _glm_ocr(image_bytes: bytes) -> Dict[str, Any]:
+    """OCR via glm-ocr:latest served by Ollama — no local binary required."""
+    import base64
+    import json as _json
+    try:
+        import requests as _req  # lightweight; already in requirements
+    except Exception as exc:
+        return {"text": "", "confidence": 0.0, "boxes": [], "error": str(exc), "provider": "glm-ocr"}
+    try:
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        model = os.getenv("OLLAMA_GLM_OCR_MODEL", "glm-ocr:latest")
+        img_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        payload = {
+            "model": model,
+            "prompt": "Extract all text from this image. Output only the extracted text.",
+            "images": [img_b64],
+            "stream": False,
+        }
+        timeout = _ocr_timeout_sec() or 30
+        resp = _req.post(f"{ollama_url}/api/generate", json=payload, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        text = str(data.get("response") or "").strip()
+        return {"text": text[:2000], "confidence": 0.85, "boxes": [], "provider": "glm-ocr"}
+    except Exception as exc:
+        return {"text": "", "confidence": 0.0, "boxes": [], "error": str(exc), "provider": "glm-ocr"}
+
+
 def extract_text(image_bytes: bytes, provider: str | None = None, fallback: str | None = None) -> Dict[str, Any]:
     # Allow tests/integration to override without editing model packs.
     provider = (os.getenv("CV_OCR_PROVIDER") or provider or "tesseract").lower()
     if provider in ("disabled", "none", "off"):
         return _annotate_degradation({"text": "", "confidence": 0.0, "boxes": [], "error": None, "provider": "disabled"})
+    if provider in ("glm-ocr", "glm_ocr", "ollama-ocr"):
+        out = _glm_ocr(image_bytes)
+        if out.get("text") or not fallback:
+            return _annotate_degradation(out)
+        return _annotate_degradation(_embedded_ocr(image_bytes))
     if provider == "paddle":
         out = _paddle_ocr(image_bytes)
         if out.get("text") or not fallback:
@@ -139,7 +172,6 @@ def extract_text(image_bytes: bytes, provider: str | None = None, fallback: str 
         out = _embedded_ocr(image_bytes)
         if out.get("text") or not fallback:
             return _annotate_degradation(out)
-        # If embedded text is missing, honor fallback behavior.
         return extract_text(image_bytes, provider=fallback, fallback=None)
     if provider == "tesseract":
         return _annotate_degradation(_tesseract_ocr(image_bytes))

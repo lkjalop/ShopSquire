@@ -1320,6 +1320,89 @@ def scoring_diff(a: str, b: str, role: str = Depends(require_role([ROLE_OWNER, R
     return {"diff": {k: {"a": pa.get(k), "b": pb.get(k)} for k in set(pa.keys()) | set(pb.keys())}}
 
 
+@router.get("/security/maestro/boundaries")
+def get_maestro_boundaries(
+    request: Request,
+    agent: str | None = Query(None, description="Filter to a single agent name"),
+    risk_tier: str | None = Query(None, description="Filter by risk tier (low/medium/high/critical)"),
+    include_recent_violations: bool = Query(False, description="Attach 24-hour violation counts per agent from trace events"),
+    hours: int = Query(24, ge=1, le=168, description="Look-back window in hours for violation counts"),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+    db=Depends(get_db),
+) -> Dict:
+    """Return the MAESTRO agent boundary registry.
+
+    Exposes the full allowlist per agent: allowed tools, data scopes, peer graph,
+    max autonomous value, risk tier, and capability flags.  Intended for security
+    review, CISO audits, and the admin-react boundary registry tab.
+
+    Query params:
+      agent                     — return only the named agent's boundary (exact match)
+      risk_tier                 — filter to agents of a given risk tier (low/medium/high/critical)
+      include_recent_violations — if true, attach live violation counts per agent from decision_trace_events
+      hours                     — look-back window for violation counts (default 24, max 168)
+    """
+    from src.app.security.maestro_boundaries import get_boundary_summary
+    import os as _os
+
+    summary = get_boundary_summary()
+
+    if agent:
+        if agent not in summary:
+            raise HTTPException(status_code=404, detail=f"Agent '{agent}' not found in boundary registry")
+        summary = {agent: summary[agent]}
+
+    if risk_tier:
+        summary = {k: v for k, v in summary.items() if v.get("risk_tier") == risk_tier}
+
+    # Attach live violation counts from decision_trace_events
+    violation_counts: Dict[str, int] = {}
+    check_counts: Dict[str, int] = {}
+    if include_recent_violations:
+        since_dt = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        try:
+            rows = db.execute(
+                """
+                SELECT payload
+                FROM decision_trace_events
+                WHERE created_at >= :since
+                  AND event_type = 'agent_guardrail'
+                LIMIT 10000
+                """,
+                {"since": since_dt},
+            ).fetchall()
+        except Exception:
+            rows = []
+        for row in rows or []:
+            try:
+                p = json.loads(row[0]) if isinstance(row[0], str) and row[0] else (row[0] or {})
+            except Exception:
+                p = {}
+            ag = str((p or {}).get("agent") or "").strip()
+            if not ag:
+                continue
+            check_counts[ag] = check_counts.get(ag, 0) + 1
+            violations = (p or {}).get("violations") or []
+            if violations or (p or {}).get("maestro_blocked"):
+                violation_counts[ag] = violation_counts.get(ag, 0) + (len(violations) if violations else 1)
+
+    # Attach counts into boundary entries
+    for ag_name, entry in summary.items():
+        if include_recent_violations:
+            entry["recent_violations_24h"] = violation_counts.get(ag_name, 0)
+            entry["recent_checks_24h"] = check_counts.get(ag_name, 0)
+
+    return {
+        "enforcement_mode": _os.getenv("MAESTRO_ENFORCEMENT_MODE", "audit"),
+        "agent_count": len(summary),
+        "boundaries": summary,
+        "framework": "MAESTRO (CSA Agentic AI Security, Feb 2025)",
+        "control": "SC-04B — Tool-call allowlist enforcement per agent",
+        "violation_window_hours": hours if include_recent_violations else None,
+        "total_violations_in_window": sum(violation_counts.values()) if include_recent_violations else None,
+    }
+
+
 @router.get("/security/events")
 def get_security_events(
     request: Request,

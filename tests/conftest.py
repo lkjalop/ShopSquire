@@ -61,6 +61,11 @@ def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     os.environ.setdefault("CV_VISION_TIMEOUT_SEC", "1")
     os.environ.setdefault("CV_DAMAGE_YOLO_MODEL", "")
     os.environ.setdefault("CV_DETECTOR_MODEL", "")
+    # Prevent _summarize_results from calling live Ollama during tests.
+    # Tests that need LLM summary behavior monkeypatch recommend_router._summarize_results directly.
+    os.environ.setdefault("USE_LLM_SUMMARY", "0")
+    os.environ.setdefault("USE_LLM_RERANK", "0")
+    os.environ.setdefault("USE_OLLAMA_INTENT", "0")
     # Tesseract calls pytesseract.image_to_string() without a timeout by default,
     # which can hang indefinitely when tesseract.exe is not on PATH or unresponsive.
     # In tests without a real tesseract binary, set a short timeout (3 s) so the

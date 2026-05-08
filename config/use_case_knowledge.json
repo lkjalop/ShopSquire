@@ -171,6 +171,15 @@
         "storage_gb": 256,
         "gpu": "integrated"
       }
+    },
+    "high_school": {
+      "label": "High School Student",
+      "min_price_floor": 400,
+      "min_specs": {
+        "ram_gb": 8,
+        "storage_gb": 256,
+        "gpu": "integrated"
+      }
     }
   }
 }

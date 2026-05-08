@@ -132,7 +132,6 @@ function OverviewTab() {
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Quick Links</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {[
-            ['RAGAS Summary', '/api/v1/analytics/ragas/summary'],
             ['Query Clusters', '/api/v1/analytics/query_clusters/latest'],
             ['Metrics', '/metrics'],
             ['Health', '/healthz'],

@@ -1126,3 +1126,29 @@ body {
     max-width: none;
   }
 }
+
+.emptyProductState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  gap: 10px;
+}
+
+.emptyProductIcon {
+  font-size: 2.5rem;
+}
+
+.emptyProductTitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary, #f1f5f9);
+}
+
+.emptyProductHint {
+  font-size: 0.85rem;
+  color: var(--muted, #4f5d72);
+  max-width: 280px;
+}

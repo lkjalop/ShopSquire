@@ -930,6 +930,16 @@ export type EmailSecurityInvestigation = {
   phishing_page_stage?: any;
   bec_kill_chain?: any;
   explain?: any;
+  agent_runs?: Array<{
+    agent_name: string;
+    scope_enforced: boolean;
+    tools_used: string[];
+    scope_violations: Array<{ violation_type: string; detail: string; severity: string }>;
+    confidence: number;
+    why_ran: string;
+    output_quality: string;
+    verdict_after: string;
+  }>;
   recommended_actions?: Array<{ id: string; label: string }>;
   actions?: Array<{ id: string; action: string; note?: string; actor?: string; created_at?: string }>;
   feedback?: any;
@@ -949,7 +959,43 @@ export async function submitEmailSecurityInvestigationAction(
   });
 }
 
-export async function runEmailSecurityReplayLab(payload: {
+export type MaestroBoundaryEntry = {
+  risk_tier: string;
+  allowed_tools: string[];
+  allowed_data_scopes: string[];
+  max_autonomous_value_usd: number;
+  can_write_db: boolean;
+  can_call_external_api: boolean;
+  can_invoke_llm: boolean;
+  allowed_peers: string[];
+  recent_violations_24h?: number;
+  recent_checks_24h?: number;
+};
+
+export async function fetchMaestroBoundaries(opts?: {
+  agent?: string;
+  risk_tier?: string;
+  include_recent_violations?: boolean;
+  hours?: number;
+}): Promise<{
+  enforcement_mode: string;
+  agent_count: number;
+  boundaries: Record<string, MaestroBoundaryEntry>;
+  framework: string;
+  control: string;
+  violation_window_hours?: number | null;
+  total_violations_in_window?: number | null;
+}> {
+  const params = new URLSearchParams();
+  if (opts?.agent) params.set('agent', opts.agent);
+  if (opts?.risk_tier) params.set('risk_tier', opts.risk_tier);
+  if (opts?.include_recent_violations) params.set('include_recent_violations', '1');
+  if (opts?.hours) params.set('hours', String(opts.hours));
+  const qs = params.toString();
+  return http(`/api/v1/admin/security/maestro/boundaries${qs ? `?${qs}` : ''}`);
+}
+
+
   tenant_id?: string;
   incident_ids?: string[];
   decision_ids?: string[];

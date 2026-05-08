@@ -12,29 +12,29 @@
       "name": "small",
       "score_min": 3,
       "score_max": 4,
-      "model": "qwen2.5:14b",
-      "description": "Lightweight model. Single-constraint product searches, simple follow-ups. qwen2.5:14b preferred: 32K context, reliable JSON output."
+      "model": "qwen3-vl:8b",
+      "description": "Vision-language model. Single-constraint searches, image uploads, security matrix analysis. qwen3-vl:8b: fast (~4s), vision capable, reliable JSON."
     },
     {
       "name": "medium",
       "score_min": 5,
       "score_max": 6,
-      "model": "qwen3:14b",
-      "description": "Mid-range model. Multi-constraint queries, contextual follow-ups with budget+specs. qwen3:14b with thinking mode for structured reasoning."
+      "model": "qwen3.6:27b",
+      "description": "High-capacity text reasoning. Gaming, budget reasoning, multi-constraint queries, use-case specific recommendations. qwen3.6:27b (Qwen3.5 27B Q4_K_M): strong reasoning, text-only."
     },
     {
       "name": "large",
       "score_min": 7,
       "score_max": 8,
-      "model": "qwen3:30b",
-      "description": "High-capacity model with chain-of-thought. Comparisons, technical analysis, multi-turn reasoning. qwen3:30b think=true."
+      "model": "qwen3.6:27b",
+      "description": "High-capacity with chain-of-thought. Comparisons, technical analysis, multi-turn reasoning. qwen3.6:27b think=true."
     },
     {
       "name": "expert",
       "score_min": 9,
       "score_max": 10,
-      "model": "qwen3:30b",
-      "description": "Expert tier with full chain-of-thought. Complex multi-turn reasoning, policy questions, detailed justifications. qwen3:30b think=true."
+      "model": "qwen3.6:27b",
+      "description": "Expert tier with full chain-of-thought. Complex multi-turn reasoning, security analysis, policy questions, detailed justifications. qwen3.6:27b think=true."
     }
   ],
   "signals": {
@@ -44,10 +44,16 @@
     "technical_keywords": {"points": 1, "description": "Technical domain keywords (GPU, VRAM, CUDA, etc.)"},
     "conjunction_count": {"points": 1, "description": "Multiple conjunctions/clauses (≥2)"},
     "multi_turn_depth": {"points": 1, "description": "Conversation turn count > 3"},
-    "multimodal": {"points": 1, "description": "Image + text combined input"},
-    "followup_explain": {"points": 1, "description": "Follow-up explain/why/list request"},
+    "multimodal": {"points": 2, "description": "Image + text combined input — vision model required"},
+    "visual_similarity_intent": {"points": 2, "description": "Visual similarity/compare intent with image"},
+    "vision_synthesis": {"points": 2, "description": "Synthesis reasoning over uploaded image"},
+    "image_use_case_query": {"points": 1, "description": "Use-case assessment with product image"},
+    "followup_explain": {"points": 1, "description": "Follow-up explain/why request"},
     "fully_constrained": {"points": 1, "description": "Budget + specs + use_case all present"},
-    "negation_constraints": {"points": 1, "description": "Negation constraints (not X, except, exclude)"}
+    "negation_constraints": {"points": 1, "description": "Negation constraints (not X, except, exclude)"},
+    "budget_constraint": {"points": 1, "description": "Explicit budget/price range in query"},
+    "budget_question": {"points": 2, "description": "Direct budget yes/no question — medium model required"},
+    "use_case_specific": {"points": 2, "description": "Gaming/creative/engineering use-case — medium model minimum"}
   },
   "escalation": {
     "enabled": true,
@@ -55,8 +61,10 @@
     "triggers": ["empty_results", "low_confidence"]
   },
   "env_overrides": {
-    "OLLAMA_SMALL_MODEL": "Model override for small/medium tiers",
-    "OLLAMA_BIG_MODEL": "Model override for large/expert tiers",
+    "OLLAMA_SMALL_MODEL": "Model override for small tier (default: qwen3-vl:8b) — MUST be a VLM for image uploads",
+    "OLLAMA_MEDIUM_MODEL": "Model override for medium tier (default: qwen3.6:27b)",
+    "OLLAMA_BIG_MODEL": "Model override for large/expert tiers (default: qwen3.6:27b)",
+    "OLLAMA_SECURITY_MODEL": "Model for security matrix analysis (default: qwen3-vl:8b)",
     "TIER_LADDER_PATH": "Path to custom tier ladder JSON"
   }
 }

@@ -12,7 +12,7 @@ from src.app.cv.document_schema_extractor import extract_document_schema
 from src.app.observability.metrics import record_cv_fraud
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.gan_image_detector import detect_fake_image
-from src.app.security.adversarial_image_detector import detect_adversarial
+from src.app.security.adversarial_image_detector import detect_adversarial, detect_pixel_prompt_injection
 from src.app.security.steg_detector import detect_steganography
 from src.app.security.observer import analyze_payload
 from src.app.services.cv_vision_ollama import vision_analyze_with_ollama
@@ -706,6 +706,25 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
             if float(adversarial.get("diffusion_score") or 0.0) >= diff_min:
                 diffusion_generated = True
                 evidence_tags.append("diffusion_generated_suspected")
+        # OWASP Agentic AI AA05 — pixel-space prompt injection analysis.
+        # Runs unconditionally when adversarial detection is enabled; detects
+        # instruction-encoding perturbations targeting vision-LLM attention.
+        try:
+            ppi_res = detect_pixel_prompt_injection(image_bytes)
+            adversarial["pixel_prompt_injection"] = {
+                "injection_score": float(ppi_res.injection_score),
+                "grid_alignment_score": float(ppi_res.grid_alignment_score),
+                "lsb_entropy_score": float(ppi_res.lsb_entropy_score),
+                "dct_ac_anomaly_score": float(ppi_res.dct_ac_anomaly_score),
+                "is_injection_risk": bool(ppi_res.is_injection_risk),
+                "owasp_tag": ppi_res.owasp_tag,
+                "explanations": list(ppi_res.explanations or [])[:6],
+            }
+            if ppi_res.is_injection_risk:
+                evidence_tags.append("pixel_prompt_injection_suspected")
+                record_cv_fraud("robustness_pixel_prompt_injection")
+        except Exception:
+            adversarial["pixel_prompt_injection"] = {"error": "ppi_detector_failed"}
     except Exception:
         adversarial = {"error": "adversarial_detector_failed"}
     try:

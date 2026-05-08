@@ -17,6 +17,8 @@ export type CVResult = {
     needs_better_count?: number;
   };
   order_validation?: { provided?: boolean; exists?: boolean | null; triggered_security?: boolean } | null;
+  warranty_eligibility?: { eligible?: boolean | null; expires?: string; gap_days?: number; advice?: string; reason?: string } | null;
+  faq_playbooks?: Array<{ id?: string; title?: string; description?: string; steps?: string[]; tags?: string[] }>;
   user_prompt?: string | null;
   ui_actions?: { chat_with_admin?: boolean };
   qr_prompt_injection?: boolean;

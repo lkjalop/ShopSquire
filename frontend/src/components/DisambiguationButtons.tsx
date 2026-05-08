@@ -1,35 +1,58 @@
+import { useEffect } from 'react';
 import styles from './DisambiguationButtons.module.css';
 
-interface DisambiguationOption {
+export interface DisambiguationOption {
   id: string;
   text: string;
-  goal: string;
+  goal?: string;
 }
 
 interface DisambiguationButtonsProps {
-  options: DisambiguationOption[];
-  onSelect: (option: DisambiguationOption) => void;
+  options: (string | DisambiguationOption)[];
+  onSelect: (text: string) => void;
   disabled?: boolean;
 }
 
 const ICONS: Record<string, string> = {
-  visual_search: '\uD83D\uDD0D',  // 🔍
-  cv_triage: '\uD83D\uDCE6',      // 📦
-  freeform: '\uD83D\uDCAC',       // 💬
+  visual_search: '🔍',  // 🔍
+  cv_triage: '📦',      // 📦
+  freeform: '💬',       // 💬
 };
 
+function normalize(opt: string | DisambiguationOption): DisambiguationOption {
+  if (typeof opt === 'string') return { id: opt, text: opt, goal: 'freeform' };
+  return { id: opt.id, text: opt.text, goal: opt.goal || 'freeform' };
+}
+
 export default function DisambiguationButtons({ options, onSelect, disabled = false }: DisambiguationButtonsProps) {
+  const normalized = options.map(normalize);
+
+  useEffect(() => {
+    if (disabled) return;
+    const handler = (e: KeyboardEvent) => {
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= 9 && normalized[n - 1]) {
+        e.preventDefault();
+        onSelect(normalized[n - 1].text);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [normalized, onSelect, disabled]);
+
   return (
     <div className={styles.container}>
-      {options.map(opt => (
+      {normalized.map((opt, i) => (
         <button
           key={opt.id}
           className={styles.btn}
-          onClick={() => onSelect(opt)}
+          onClick={() => onSelect(opt.text)}
           disabled={disabled}
           type="button"
+          title={'Press ' + (i + 1)}
         >
-          <span className={styles.icon}>{ICONS[opt.goal] || '\u2728'}</span>
+          <span className={styles.shortcut}>{i + 1}</span>
+          <span className={styles.icon}>{ICONS[opt.goal || ''] || '✨'}</span>
           <span className={styles.label}>{opt.text}</span>
         </button>
       ))}

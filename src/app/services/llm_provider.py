@@ -10,10 +10,15 @@ from src.app.security.provider_boundary import sanitize_for_provider
 
 import httpx
 
-SMALL_DEFAULT = os.getenv("OLLAMA_SMALL_MODEL", "qwen2.5:14b")
-MEDIUM_DEFAULT = os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b")
-BIG_DEFAULT = os.getenv("OLLAMA_BIG_MODEL", "qwen3:30b")
-EXPERT_DEFAULT = os.getenv("OLLAMA_EXPERT_MODEL", "qwen3:30b")
+# Small tier: vision-language model — matches tier_ladder.json config.
+# Must be a VLM (qwen3-vl, qwen2.5-vl, llava, etc.) so image-upload queries
+# receive a model that can actually process pixel data.
+SMALL_DEFAULT = os.getenv("OLLAMA_SMALL_MODEL", "qwen3-vl:8b")
+# Medium / large / expert: text-reasoning models.
+# qwen3.6:27b (Qwen3.5 27B Q4_K_M) — confirmed text-only, strong reasoning.
+MEDIUM_DEFAULT = os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3.6:27b")
+BIG_DEFAULT = os.getenv("OLLAMA_BIG_MODEL", "qwen3.6:27b")
+EXPERT_DEFAULT = os.getenv("OLLAMA_EXPERT_MODEL", "qwen3.6:27b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 
 # Qwen3 thinking mode: pass /think in prompt or set think=True in options.
@@ -74,7 +79,19 @@ TECHNICAL_KEYWORDS = [
     "rag", "embedding", "transformer",
     "rtx", "radeon", "ram", "ssd", "nvme", "cpu", "cores", "threads",
     "benchmark", "specs", "resolution", "refresh rate", "thunderbolt",
+    # Gaming / use-case hardware terms
+    "gaming", "fps", "esports", "144hz", "240hz", "high refresh", "frame rate",
+    "ray tracing", "dlss", "fsr", "anti-cheat", "overclocking", "thermal",
+    "oled", "mini-led", "g-sync", "freesync",
 ]
+
+# Use-case keywords that on their own indicate a higher-complexity product search.
+# Gaming, creative, and engineering workloads need multi-constraint reasoning.
+_USE_CASE_HIGH = re.compile(
+    r"\b(gaming|esports|game|fps|streamer|streaming|content.creat|video.edit|3d.render|cad|"
+    r"machine.learn|deep.learn|data.science|engineering|architecture|music.produc)\b",
+    re.IGNORECASE,
+)
 
 NEGATION_PATTERNS = re.compile(
     r"\b(not|except|exclude|without|no\s+\w+|don'?t want)\b", re.IGNORECASE
@@ -181,10 +198,16 @@ def score_query_complexity(
 
     # 10. Explicit budget / price constraint in query text
     import re as _re2
-    if _re2.search(r"(budget|under|below|less than|cheaper than|max price|price range)\s*[\$€£]?\s*\d", q) or \
-       _re2.search(r"[\$€£]\s*\d", q):
+    if (_re2.search(r"(budget|under|below|less than|cheaper than|max price|price range)\s*[\$€£]?\s*\d", q)
+            or _re2.search(r"[\$€£]\s*\d", q)
+            or _re2.search(r"\b\d{3,5}\s+(to|and|-)\s*\d{3,5}\b", q)):  # "1200 to 1800" / "1200-1800"
         signals["budget_constraint"] = 1
         explanations.append("Explicit budget/price constraint")
+
+    # 11. Use-case specific query (gaming/creative/engineering) — needs multi-constraint reasoning
+    if _USE_CASE_HIGH.search(q):
+        signals["use_case_specific"] = 2
+        explanations.append("Use-case specific query (gaming/creative/engineering) — medium model minimum")
 
     # 11. Budget yes/no question — needs medium model to answer directly
     if _re2.search(
@@ -195,12 +218,13 @@ def score_query_complexity(
         explanations.append("Direct budget yes/no question — medium model required")
 
     total = min(10, sum(signals.values()))
-    # Budget yes/no questions require at least the medium tier regardless of other signals.
-    # llama3:8b (<= score 4) does not reliably follow multi-step prompt instructions,
-    # so even a short "Is $1800 enough for gaming?" must route to mixtral (score_min 5).
+    # Budget yes/no questions and use-case specific queries require at least medium tier.
     if signals.get("budget_question") and total < 5:
         total = 5
         explanations.append("Budget question floor: score raised to 5 → medium model")
+    if signals.get("use_case_specific") and total < 5:
+        total = 5
+        explanations.append("Use-case query floor: score raised to 5 → medium model")
     tier_name, model = _tier_for_score(total)
 
     return {
@@ -290,7 +314,7 @@ async def _openai_generate_fallback(prompt: str, options: Dict | None = None, tr
         return None
 
 
-async def ollama_generate(model: str, prompt: str, options: Dict | None = None, trace_id: str | None = None) -> Dict:
+async def ollama_generate(model: str, prompt: str, options: Dict | None = None, trace_id: str | None = None, *, complexity_score: int = 0) -> Dict:
     if not OLLAMA_URL:
         # Try OpenAI fallback before raising
         fallback = await _openai_generate_fallback(prompt, options, trace_id)
@@ -302,23 +326,27 @@ async def ollama_generate(model: str, prompt: str, options: Dict | None = None, 
         except Exception:
             pass
         raise err
+    # Thinking mode: only for large/expert tier (score >= threshold). Medium and below use no_think.
+    _use_think = _QWEN3_THINK_ENABLED and "qwen3" in model.lower() and complexity_score >= _QWEN3_THINK_SCORE_THRESHOLD
+    # Budget tokens and timeout scale with thinking mode
+    _num_predict = 1024 if _use_think else 512
+    _timeout = 90.0 if _use_think else 45.0
     payload: Dict = {
         "model": model,
         "prompt": prompt,
         "stream": False,
         "options": {
             "temperature": 0.2,
-            "num_predict": 256,
+            "num_predict": _num_predict,
         },
     }
-    # Enable Qwen3 chain-of-thought for complex queries routed to qwen3 models
-    if _QWEN3_THINK_ENABLED and "qwen3" in model.lower():
-        payload["think"] = True
+    if "qwen3" in model.lower():
+        payload["think"] = _use_think
     if options:
         payload["options"].update(options)
     t0 = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=_timeout) as client:
             r = await client.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=payload)
             r.raise_for_status()
             data = r.json()

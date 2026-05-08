@@ -12,7 +12,11 @@
       "gpu_note": "Integrated graphics sufficient; shaders need dedicated GPU",
       "min_gpu_vram_gb": 2,
       "recommended_gpu": "GTX 1060 / RX 580 for shaders",
-      "tags": ["sandbox", "casual", "family"]
+      "tags": [
+        "sandbox",
+        "casual",
+        "family"
+      ]
     },
     "fortnite": {
       "label": "Fortnite",
@@ -23,7 +27,11 @@
       "min_gpu_vram_gb": 4,
       "recommended_gpu": "RTX 3050 / RX 6600 for competitive settings",
       "target_fps": 60,
-      "tags": ["battle_royale", "casual", "competitive"]
+      "tags": [
+        "battle_royale",
+        "casual",
+        "competitive"
+      ]
     },
     "valorant": {
       "label": "Valorant",
@@ -35,7 +43,11 @@
       "recommended_gpu": "GTX 1650+ for 144fps",
       "min_refresh_hz": 144,
       "target_fps": 144,
-      "tags": ["fps", "competitive", "esports"]
+      "tags": [
+        "fps",
+        "competitive",
+        "esports"
+      ]
     },
     "cs2": {
       "label": "Counter-Strike 2",
@@ -47,7 +59,11 @@
       "recommended_gpu": "RTX 3060 / RX 6600 XT for 144fps+",
       "min_refresh_hz": 144,
       "target_fps": 144,
-      "tags": ["fps", "competitive", "esports"]
+      "tags": [
+        "fps",
+        "competitive",
+        "esports"
+      ]
     },
     "apex_legends": {
       "label": "Apex Legends",
@@ -59,7 +75,11 @@
       "recommended_gpu": "RTX 3060 / RX 6650 XT",
       "min_refresh_hz": 144,
       "target_fps": 144,
-      "tags": ["fps", "battle_royale", "competitive"]
+      "tags": [
+        "fps",
+        "battle_royale",
+        "competitive"
+      ]
     },
     "space_marines_2": {
       "label": "Warhammer 40K: Space Marines 2",
@@ -70,7 +90,11 @@
       "min_gpu_vram_gb": 8,
       "recommended_gpu": "RTX 4070 / RX 7800 XT for Ultra settings",
       "target_fps": 60,
-      "tags": ["action", "aaa", "gpu_heavy"]
+      "tags": [
+        "action",
+        "aaa",
+        "gpu_heavy"
+      ]
     },
     "cyberpunk_2077": {
       "label": "Cyberpunk 2077",
@@ -81,7 +105,12 @@
       "min_gpu_vram_gb": 8,
       "recommended_gpu": "RTX 4070 Ti / RX 7900 XT for ray tracing",
       "target_fps": 60,
-      "tags": ["rpg", "aaa", "gpu_heavy", "raytracing"]
+      "tags": [
+        "rpg",
+        "aaa",
+        "gpu_heavy",
+        "raytracing"
+      ]
     },
     "hogwarts_legacy": {
       "label": "Hogwarts Legacy",
@@ -92,7 +121,11 @@
       "min_gpu_vram_gb": 8,
       "recommended_gpu": "RTX 4060 Ti / RX 7700 XT",
       "target_fps": 60,
-      "tags": ["rpg", "aaa", "gpu_heavy"]
+      "tags": [
+        "rpg",
+        "aaa",
+        "gpu_heavy"
+      ]
     },
     "baldurs_gate_3": {
       "label": "Baldur's Gate 3",
@@ -103,7 +136,10 @@
       "min_gpu_vram_gb": 4,
       "recommended_gpu": "RTX 3060 / RX 6700 XT",
       "target_fps": 60,
-      "tags": ["rpg", "aaa"]
+      "tags": [
+        "rpg",
+        "aaa"
+      ]
     },
     "elden_ring": {
       "label": "Elden Ring",
@@ -114,7 +150,11 @@
       "min_gpu_vram_gb": 6,
       "recommended_gpu": "RTX 3060 Ti / RX 6700 XT",
       "target_fps": 60,
-      "tags": ["rpg", "aaa", "action"]
+      "tags": [
+        "rpg",
+        "aaa",
+        "action"
+      ]
     },
     "league_of_legends": {
       "label": "League of Legends",
@@ -125,7 +165,11 @@
       "min_gpu_vram_gb": 1,
       "recommended_gpu": "Integrated graphics sufficient",
       "target_fps": 60,
-      "tags": ["moba", "casual", "esports"]
+      "tags": [
+        "moba",
+        "casual",
+        "esports"
+      ]
     },
     "gta_v": {
       "label": "GTA V / GTA Online",
@@ -136,7 +180,10 @@
       "min_gpu_vram_gb": 4,
       "recommended_gpu": "RTX 3050 / RX 6600",
       "target_fps": 60,
-      "tags": ["open_world", "aaa"]
+      "tags": [
+        "open_world",
+        "aaa"
+      ]
     },
     "roblox": {
       "label": "Roblox",
@@ -147,7 +194,11 @@
       "gpu_note": "Integrated graphics sufficient",
       "min_gpu_vram_gb": 1,
       "target_fps": 60,
-      "tags": ["sandbox", "casual", "family"]
+      "tags": [
+        "sandbox",
+        "casual",
+        "family"
+      ]
     },
     "call_of_duty_warzone": {
       "label": "Call of Duty: Warzone",
@@ -158,7 +209,11 @@
       "min_gpu_vram_gb": 8,
       "recommended_gpu": "RTX 4060 / RX 7600 XT",
       "target_fps": 60,
-      "tags": ["fps", "battle_royale", "aaa"]
+      "tags": [
+        "fps",
+        "battle_royale",
+        "aaa"
+      ]
     },
     "starfield": {
       "label": "Starfield",
@@ -169,7 +224,11 @@
       "min_gpu_vram_gb": 8,
       "recommended_gpu": "RTX 4070 / RX 7800 XT",
       "target_fps": 60,
-      "tags": ["rpg", "aaa", "gpu_heavy"]
+      "tags": [
+        "rpg",
+        "aaa",
+        "gpu_heavy"
+      ]
     }
   },
   "software_requirements": {
@@ -181,7 +240,11 @@
       "gpu_needed": true,
       "gpu_note": "Certified GPU recommended (NVIDIA T-series or RTX)",
       "category": "cad",
-      "tags": ["engineering", "architecture", "design"]
+      "tags": [
+        "engineering",
+        "architecture",
+        "design"
+      ]
     },
     "solidworks": {
       "label": "SolidWorks",
@@ -190,7 +253,10 @@
       "gpu_needed": true,
       "gpu_note": "Certified workstation GPU (Quadro/T-series recommended)",
       "category": "cad",
-      "tags": ["engineering", "mechanical"]
+      "tags": [
+        "engineering",
+        "mechanical"
+      ]
     },
     "adobe_premiere": {
       "label": "Adobe Premiere Pro",
@@ -200,7 +266,10 @@
       "gpu_note": "CUDA/OpenCL GPU for Mercury Playback Engine",
       "min_gpu_vram_gb": 4,
       "category": "video_editing",
-      "tags": ["content_creation", "video"]
+      "tags": [
+        "content_creation",
+        "video"
+      ]
     },
     "blender": {
       "label": "Blender",
@@ -210,7 +279,11 @@
       "gpu_note": "NVIDIA GPU with CUDA or OptiX for Cycles rendering",
       "min_gpu_vram_gb": 4,
       "category": "3d_modeling",
-      "tags": ["3d", "animation", "rendering"]
+      "tags": [
+        "3d",
+        "animation",
+        "rendering"
+      ]
     },
     "matlab": {
       "label": "MATLAB",
@@ -219,7 +292,11 @@
       "gpu_needed": "optional",
       "gpu_note": "GPU accelerates Parallel Computing Toolbox",
       "category": "scientific",
-      "tags": ["engineering", "science", "math"]
+      "tags": [
+        "engineering",
+        "science",
+        "math"
+      ]
     },
     "davinci_resolve": {
       "label": "DaVinci Resolve",
@@ -229,7 +306,11 @@
       "gpu_note": "GPU essential — Resolve is GPU-compute heavy",
       "min_gpu_vram_gb": 6,
       "category": "video_editing",
-      "tags": ["content_creation", "video", "color_grading"]
+      "tags": [
+        "content_creation",
+        "video",
+        "color_grading"
+      ]
     },
     "photoshop": {
       "label": "Adobe Photoshop",
@@ -238,7 +319,10 @@
       "gpu_needed": "optional",
       "gpu_note": "GPU accelerates 3D/filters but not required",
       "category": "design",
-      "tags": ["design", "creative"]
+      "tags": [
+        "design",
+        "creative"
+      ]
     },
     "revit": {
       "label": "Autodesk Revit",
@@ -247,7 +331,10 @@
       "gpu_needed": true,
       "gpu_note": "DirectX 11 capable GPU",
       "category": "architecture",
-      "tags": ["architecture", "bim"]
+      "tags": [
+        "architecture",
+        "bim"
+      ]
     },
     "docker": {
       "label": "Docker Desktop",
@@ -256,7 +343,10 @@
       "gpu_needed": false,
       "gpu_note": "GPU passthrough available but not required for most workflows",
       "category": "development",
-      "tags": ["developer", "devops"]
+      "tags": [
+        "developer",
+        "devops"
+      ]
     },
     "android_studio": {
       "label": "Android Studio",
@@ -265,7 +355,10 @@
       "gpu_needed": false,
       "gpu_note": "Emulator benefits from GPU acceleration",
       "category": "development",
-      "tags": ["developer", "mobile"]
+      "tags": [
+        "developer",
+        "mobile"
+      ]
     },
     "xcode": {
       "label": "Xcode",
@@ -274,7 +367,11 @@
       "gpu_needed": false,
       "category": "development",
       "os_required": "macOS",
-      "tags": ["developer", "ios", "apple"]
+      "tags": [
+        "developer",
+        "ios",
+        "apple"
+      ]
     }
   },
   "use_cases": {
@@ -290,10 +387,26 @@
       "min_display_inches": 13,
       "recommended_display_inches": 14,
       "battery_hours_min": 6,
-      "form_factor_preference": ["ultrabook", "2-in-1"],
-      "apps": ["Microsoft 365", "Teams", "Zoom", "Chrome", "Google Workspace"],
-      "tags": ["student", "general_productivity"],
-      "priority_factors": ["battery", "portability", "value"]
+      "form_factor_preference": [
+        "ultrabook",
+        "2-in-1"
+      ],
+      "apps": [
+        "Microsoft 365",
+        "Teams",
+        "Zoom",
+        "Chrome",
+        "Google Workspace"
+      ],
+      "tags": [
+        "student",
+        "general_productivity"
+      ],
+      "priority_factors": [
+        "battery",
+        "portability",
+        "value"
+      ]
     },
     "engineering_student": {
       "label": "University — Engineering / CAD",
@@ -307,10 +420,28 @@
       "min_display_inches": 15,
       "recommended_display_inches": 15.6,
       "battery_hours_min": 4,
-      "form_factor_preference": ["standard", "workstation"],
-      "apps": ["AutoCAD", "SolidWorks", "MATLAB", "VS Code", "Fusion 360", "ANSYS"],
-      "tags": ["student", "engineering", "cad"],
-      "priority_factors": ["performance", "gpu", "display"]
+      "form_factor_preference": [
+        "standard",
+        "workstation"
+      ],
+      "apps": [
+        "AutoCAD",
+        "SolidWorks",
+        "MATLAB",
+        "VS Code",
+        "Fusion 360",
+        "ANSYS"
+      ],
+      "tags": [
+        "student",
+        "engineering",
+        "cad"
+      ],
+      "priority_factors": [
+        "performance",
+        "gpu",
+        "display"
+      ]
     },
     "computer_science_student": {
       "label": "University — Computer Science / Software Dev",
@@ -324,10 +455,30 @@
       "min_display_inches": 13,
       "recommended_display_inches": 15,
       "battery_hours_min": 5,
-      "form_factor_preference": ["ultrabook", "standard"],
-      "apps": ["VS Code", "IntelliJ IDEA", "Docker", "Git", "Python", "Node.js", "PostgreSQL"],
-      "tags": ["student", "developer", "programming"],
-      "priority_factors": ["ram", "cpu", "storage", "keyboard_quality"]
+      "form_factor_preference": [
+        "ultrabook",
+        "standard"
+      ],
+      "apps": [
+        "VS Code",
+        "IntelliJ IDEA",
+        "Docker",
+        "Git",
+        "Python",
+        "Node.js",
+        "PostgreSQL"
+      ],
+      "tags": [
+        "student",
+        "developer",
+        "programming"
+      ],
+      "priority_factors": [
+        "ram",
+        "cpu",
+        "storage",
+        "keyboard_quality"
+      ]
     },
     "data_science_student": {
       "label": "University — Data Science / ML",
@@ -341,10 +492,29 @@
       "min_display_inches": 15,
       "recommended_display_inches": 15.6,
       "battery_hours_min": 3,
-      "form_factor_preference": ["standard", "workstation"],
-      "apps": ["Jupyter", "Python", "PyTorch", "TensorFlow", "Docker", "CUDA Toolkit", "VS Code"],
-      "tags": ["student", "data_science", "ml"],
-      "priority_factors": ["gpu", "ram", "cpu"]
+      "form_factor_preference": [
+        "standard",
+        "workstation"
+      ],
+      "apps": [
+        "Jupyter",
+        "Python",
+        "PyTorch",
+        "TensorFlow",
+        "Docker",
+        "CUDA Toolkit",
+        "VS Code"
+      ],
+      "tags": [
+        "student",
+        "data_science",
+        "ml"
+      ],
+      "priority_factors": [
+        "gpu",
+        "ram",
+        "cpu"
+      ]
     },
     "design_student": {
       "label": "University — Graphic Design / Visual Arts",
@@ -359,10 +529,27 @@
       "recommended_display_inches": 16,
       "display_notes": "Color-accurate display (100% sRGB, ideally P3) essential",
       "battery_hours_min": 4,
-      "form_factor_preference": ["standard", "ultrabook"],
-      "apps": ["Adobe Photoshop", "Illustrator", "Figma", "Sketch", "Blender"],
-      "tags": ["student", "design", "creative"],
-      "priority_factors": ["display_quality", "gpu", "color_accuracy"]
+      "form_factor_preference": [
+        "standard",
+        "ultrabook"
+      ],
+      "apps": [
+        "Adobe Photoshop",
+        "Illustrator",
+        "Figma",
+        "Sketch",
+        "Blender"
+      ],
+      "tags": [
+        "student",
+        "design",
+        "creative"
+      ],
+      "priority_factors": [
+        "display_quality",
+        "gpu",
+        "color_accuracy"
+      ]
     },
     "gaming_casual": {
       "label": "Casual Gaming",
@@ -379,11 +566,26 @@
       "min_refresh_hz": 60,
       "recommended_refresh_hz": 120,
       "battery_hours_min": 3,
-      "form_factor_preference": ["gaming", "standard"],
-      "apps": ["Steam", "Epic Games", "Discord", "Chrome"],
-      "tags": ["gaming", "casual"],
+      "form_factor_preference": [
+        "gaming",
+        "standard"
+      ],
+      "apps": [
+        "Steam",
+        "Epic Games",
+        "Discord",
+        "Chrome"
+      ],
+      "tags": [
+        "gaming",
+        "casual"
+      ],
       "resolution_target": "1080p 60fps",
-      "priority_factors": ["gpu", "value", "cooling"]
+      "priority_factors": [
+        "gpu",
+        "value",
+        "cooling"
+      ]
     },
     "gaming_competitive": {
       "label": "Competitive Gaming / Esports",
@@ -400,11 +602,28 @@
       "min_refresh_hz": 144,
       "recommended_refresh_hz": 240,
       "battery_hours_min": 2,
-      "form_factor_preference": ["gaming"],
-      "apps": ["CS2", "Valorant", "Apex Legends", "OBS Studio", "Discord"],
-      "tags": ["gaming", "competitive", "esports"],
+      "form_factor_preference": [
+        "gaming"
+      ],
+      "apps": [
+        "CS2",
+        "Valorant",
+        "Apex Legends",
+        "OBS Studio",
+        "Discord"
+      ],
+      "tags": [
+        "gaming",
+        "competitive",
+        "esports"
+      ],
       "resolution_target": "1080p 144fps+",
-      "priority_factors": ["gpu", "refresh_rate", "cpu", "cooling"]
+      "priority_factors": [
+        "gpu",
+        "refresh_rate",
+        "cpu",
+        "cooling"
+      ]
     },
     "content_creator": {
       "label": "Content Creation / Video Editing",
@@ -420,10 +639,28 @@
       "recommended_display_inches": 16,
       "display_notes": "Color-accurate display (P3 gamut, HDR support a plus)",
       "battery_hours_min": 3,
-      "form_factor_preference": ["standard", "workstation"],
-      "apps": ["Adobe Premiere Pro", "DaVinci Resolve", "After Effects", "Photoshop", "OBS Studio"],
-      "tags": ["content_creation", "video_editing", "creative"],
-      "priority_factors": ["gpu", "ram", "storage_speed", "display_quality"]
+      "form_factor_preference": [
+        "standard",
+        "workstation"
+      ],
+      "apps": [
+        "Adobe Premiere Pro",
+        "DaVinci Resolve",
+        "After Effects",
+        "Photoshop",
+        "OBS Studio"
+      ],
+      "tags": [
+        "content_creation",
+        "video_editing",
+        "creative"
+      ],
+      "priority_factors": [
+        "gpu",
+        "ram",
+        "storage_speed",
+        "display_quality"
+      ]
     },
     "business_professional": {
       "label": "Business / Office Professional",
@@ -437,10 +674,27 @@
       "min_display_inches": 13,
       "recommended_display_inches": 14,
       "battery_hours_min": 8,
-      "form_factor_preference": ["ultrabook"],
-      "apps": ["Microsoft 365", "Teams", "Slack", "Zoom", "Outlook", "Salesforce"],
-      "tags": ["business", "general_productivity"],
-      "priority_factors": ["battery", "portability", "build_quality", "keyboard"]
+      "form_factor_preference": [
+        "ultrabook"
+      ],
+      "apps": [
+        "Microsoft 365",
+        "Teams",
+        "Slack",
+        "Zoom",
+        "Outlook",
+        "Salesforce"
+      ],
+      "tags": [
+        "business",
+        "general_productivity"
+      ],
+      "priority_factors": [
+        "battery",
+        "portability",
+        "build_quality",
+        "keyboard"
+      ]
     },
     "ai_ml_workstation": {
       "label": "AI/ML Development / Training",
@@ -455,10 +709,28 @@
       "min_display_inches": 15,
       "recommended_display_inches": 16,
       "battery_hours_min": 2,
-      "form_factor_preference": ["workstation"],
-      "apps": ["PyTorch", "TensorFlow", "CUDA Toolkit", "Docker", "VS Code", "Jupyter", "Weights & Biases"],
-      "tags": ["ai_ml_workstation", "deep_learning"],
-      "priority_factors": ["gpu_vram", "gpu", "ram", "cpu"]
+      "form_factor_preference": [
+        "workstation"
+      ],
+      "apps": [
+        "PyTorch",
+        "TensorFlow",
+        "CUDA Toolkit",
+        "Docker",
+        "VS Code",
+        "Jupyter",
+        "Weights & Biases"
+      ],
+      "tags": [
+        "ai_ml_workstation",
+        "deep_learning"
+      ],
+      "priority_factors": [
+        "gpu_vram",
+        "gpu",
+        "ram",
+        "cpu"
+      ]
     },
     "music_production": {
       "label": "Music Production / Audio Engineering",
@@ -472,10 +744,28 @@
       "min_display_inches": 14,
       "recommended_display_inches": 15.6,
       "battery_hours_min": 4,
-      "form_factor_preference": ["standard", "ultrabook"],
-      "apps": ["Ableton Live", "Logic Pro", "FL Studio", "Pro Tools", "Audacity"],
-      "tags": ["music", "audio", "creative"],
-      "priority_factors": ["cpu", "ram", "storage_speed", "low_latency_audio"]
+      "form_factor_preference": [
+        "standard",
+        "ultrabook"
+      ],
+      "apps": [
+        "Ableton Live",
+        "Logic Pro",
+        "FL Studio",
+        "Pro Tools",
+        "Audacity"
+      ],
+      "tags": [
+        "music",
+        "audio",
+        "creative"
+      ],
+      "priority_factors": [
+        "cpu",
+        "ram",
+        "storage_speed",
+        "low_latency_audio"
+      ]
     },
     "architecture_student": {
       "label": "University — Architecture",
@@ -490,10 +780,28 @@
       "recommended_display_inches": 16,
       "display_notes": "Color accuracy important for rendering presentations",
       "battery_hours_min": 3,
-      "form_factor_preference": ["standard", "workstation"],
-      "apps": ["Revit", "SketchUp", "Rhino", "V-Ray", "AutoCAD", "Adobe Suite"],
-      "tags": ["student", "architecture", "3d_rendering"],
-      "priority_factors": ["gpu", "display_quality", "ram"]
+      "form_factor_preference": [
+        "standard",
+        "workstation"
+      ],
+      "apps": [
+        "Revit",
+        "SketchUp",
+        "Rhino",
+        "V-Ray",
+        "AutoCAD",
+        "Adobe Suite"
+      ],
+      "tags": [
+        "student",
+        "architecture",
+        "3d_rendering"
+      ],
+      "priority_factors": [
+        "gpu",
+        "display_quality",
+        "ram"
+      ]
     },
     "note_taking_student": {
       "label": "University — Note-Taking / Pen Input",
@@ -509,11 +817,32 @@
       "touch_screen_required": true,
       "pen_input_required": true,
       "battery_hours_min": 8,
-      "form_factor_preference": ["2-in-1", "tablet"],
-      "apps": ["OneNote", "Notability", "GoodNotes", "Microsoft 365", "Zoom"],
-      "tags": ["student", "note_taking", "touch_screen", "pen"],
-      "priority_factors": ["touch_screen", "pen_input", "portability", "battery"],
-      "followup_questions": ["Do you prefer a detachable keyboard or 360-degree hinge?"]
+      "form_factor_preference": [
+        "2-in-1",
+        "tablet"
+      ],
+      "apps": [
+        "OneNote",
+        "Notability",
+        "GoodNotes",
+        "Microsoft 365",
+        "Zoom"
+      ],
+      "tags": [
+        "student",
+        "note_taking",
+        "touch_screen",
+        "pen"
+      ],
+      "priority_factors": [
+        "touch_screen",
+        "pen_input",
+        "portability",
+        "battery"
+      ],
+      "followup_questions": [
+        "Do you prefer a detachable keyboard or 360-degree hinge?"
+      ]
     },
     "gaming_aaa_heavy": {
       "label": "AAA Gaming — GPU-Heavy Titles",
@@ -530,12 +859,33 @@
       "min_refresh_hz": 60,
       "recommended_refresh_hz": 144,
       "battery_hours_min": 1,
-      "form_factor_preference": ["gaming"],
-      "apps": ["Steam", "Epic Games", "Discord", "GeForce Experience"],
-      "tags": ["gaming", "aaa", "gpu_heavy"],
+      "form_factor_preference": [
+        "gaming"
+      ],
+      "apps": [
+        "Steam",
+        "Epic Games",
+        "Discord",
+        "GeForce Experience"
+      ],
+      "tags": [
+        "gaming",
+        "aaa",
+        "gpu_heavy"
+      ],
       "resolution_target": "1080p Ultra / 1440p High",
-      "priority_factors": ["gpu", "gpu_vram", "cooling", "cpu"],
-      "example_games": ["Cyberpunk 2077", "Space Marines 2", "Starfield", "Hogwarts Legacy"]
+      "priority_factors": [
+        "gpu",
+        "gpu_vram",
+        "cooling",
+        "cpu"
+      ],
+      "example_games": [
+        "Cyberpunk 2077",
+        "Space Marines 2",
+        "Starfield",
+        "Hogwarts Legacy"
+      ]
     },
     "gaming_light": {
       "label": "Light Gaming — Browser / Indie / Esports-Lite",
@@ -549,12 +899,32 @@
       "min_display_inches": 14,
       "recommended_display_inches": 15.6,
       "battery_hours_min": 4,
-      "form_factor_preference": ["standard", "ultrabook"],
-      "apps": ["Steam", "Discord", "Chrome"],
-      "tags": ["gaming", "light", "casual"],
+      "form_factor_preference": [
+        "standard",
+        "ultrabook"
+      ],
+      "apps": [
+        "Steam",
+        "Discord",
+        "Chrome"
+      ],
+      "tags": [
+        "gaming",
+        "light",
+        "casual"
+      ],
       "resolution_target": "1080p 60fps",
-      "priority_factors": ["value", "portability", "battery"],
-      "example_games": ["Minecraft", "Roblox", "League of Legends", "Stardew Valley"]
+      "priority_factors": [
+        "value",
+        "portability",
+        "battery"
+      ],
+      "example_games": [
+        "Minecraft",
+        "Roblox",
+        "League of Legends",
+        "Stardew Valley"
+      ]
     },
     "office_general": {
       "label": "Office — General / Administrative",
@@ -567,10 +937,27 @@
       "min_display_inches": 13,
       "recommended_display_inches": 14,
       "battery_hours_min": 8,
-      "form_factor_preference": ["ultrabook"],
-      "apps": ["Microsoft 365", "Teams", "Outlook", "Chrome", "Zoom"],
-      "tags": ["business", "office", "admin"],
-      "priority_factors": ["battery", "portability", "keyboard", "value"]
+      "form_factor_preference": [
+        "ultrabook"
+      ],
+      "apps": [
+        "Microsoft 365",
+        "Teams",
+        "Outlook",
+        "Chrome",
+        "Zoom"
+      ],
+      "tags": [
+        "business",
+        "office",
+        "admin"
+      ],
+      "priority_factors": [
+        "battery",
+        "portability",
+        "keyboard",
+        "value"
+      ]
     },
     "office_finance": {
       "label": "Office — Finance / Accounting / Data Analysis",
@@ -584,10 +971,30 @@
       "min_display_inches": 14,
       "recommended_display_inches": 15.6,
       "battery_hours_min": 6,
-      "form_factor_preference": ["standard", "ultrabook"],
-      "apps": ["Excel (large datasets)", "Power BI", "Tableau", "QuickBooks", "SAP", "Bloomberg Terminal"],
-      "tags": ["business", "office", "finance", "data_analysis"],
-      "priority_factors": ["ram", "cpu", "display_size", "multi_monitor_support"],
+      "form_factor_preference": [
+        "standard",
+        "ultrabook"
+      ],
+      "apps": [
+        "Excel (large datasets)",
+        "Power BI",
+        "Tableau",
+        "QuickBooks",
+        "SAP",
+        "Bloomberg Terminal"
+      ],
+      "tags": [
+        "business",
+        "office",
+        "finance",
+        "data_analysis"
+      ],
+      "priority_factors": [
+        "ram",
+        "cpu",
+        "display_size",
+        "multi_monitor_support"
+      ],
       "notes": "Heavy Excel users with 100K+ row datasets need 32GB RAM"
     },
     "office_executive": {
@@ -601,10 +1008,29 @@
       "min_display_inches": 13,
       "recommended_display_inches": 14,
       "battery_hours_min": 10,
-      "form_factor_preference": ["ultrabook"],
-      "apps": ["Microsoft 365", "PowerPoint", "Teams", "Zoom", "Outlook"],
-      "tags": ["business", "office", "executive", "travel"],
-      "priority_factors": ["build_quality", "battery", "portability", "weight", "premium_feel"],
+      "form_factor_preference": [
+        "ultrabook"
+      ],
+      "apps": [
+        "Microsoft 365",
+        "PowerPoint",
+        "Teams",
+        "Zoom",
+        "Outlook"
+      ],
+      "tags": [
+        "business",
+        "office",
+        "executive",
+        "travel"
+      ],
+      "priority_factors": [
+        "build_quality",
+        "battery",
+        "portability",
+        "weight",
+        "premium_feel"
+      ],
       "notes": "Executives prioritize thin-and-light, premium build, long battery for travel"
     },
     "medical_student": {
@@ -620,10 +1046,28 @@
       "recommended_display_inches": 14,
       "touch_screen_required": false,
       "battery_hours_min": 7,
-      "form_factor_preference": ["ultrabook", "2-in-1"],
-      "apps": ["Complete Anatomy", "Anki", "Microsoft 365", "Zoom", "Notion"],
-      "tags": ["student", "medical", "health"],
-      "priority_factors": ["portability", "battery", "display_quality", "value"],
+      "form_factor_preference": [
+        "ultrabook",
+        "2-in-1"
+      ],
+      "apps": [
+        "Complete Anatomy",
+        "Anki",
+        "Microsoft 365",
+        "Zoom",
+        "Notion"
+      ],
+      "tags": [
+        "student",
+        "medical",
+        "health"
+      ],
+      "priority_factors": [
+        "portability",
+        "battery",
+        "display_quality",
+        "value"
+      ],
       "notes": "Medical students benefit from 2-in-1 for annotating anatomy diagrams"
     },
     "law_student": {
@@ -637,38 +1081,207 @@
       "min_display_inches": 13,
       "recommended_display_inches": 14,
       "battery_hours_min": 8,
-      "form_factor_preference": ["ultrabook"],
-      "apps": ["Microsoft 365", "Westlaw", "LexisNexis", "Notion", "Zotero"],
-      "tags": ["student", "law", "research"],
-      "priority_factors": ["keyboard", "battery", "portability", "display_quality"],
+      "form_factor_preference": [
+        "ultrabook"
+      ],
+      "apps": [
+        "Microsoft 365",
+        "Westlaw",
+        "LexisNexis",
+        "Notion",
+        "Zotero"
+      ],
+      "tags": [
+        "student",
+        "law",
+        "research"
+      ],
+      "priority_factors": [
+        "keyboard",
+        "battery",
+        "portability",
+        "display_quality"
+      ],
       "notes": "Law students type heavily; keyboard quality and battery life are key"
+    },
+    "high_school": {
+      "label": "High School Student",
+      "min_price_floor": 400,
+      "min_ram_gb": 8,
+      "recommended_ram_gb": 8,
+      "min_storage_gb": 256,
+      "recommended_storage_gb": 256,
+      "recommended_cpu": "Intel Core i5 / AMD Ryzen 5 / Apple M1",
+      "gpu_needed": false,
+      "gpu_note": "Integrated graphics sufficient for schoolwork and light use",
+      "min_display_inches": 13,
+      "recommended_display_inches": 14,
+      "battery_hours_min": 8,
+      "form_factor_preference": [
+        "standard",
+        "ultrabook"
+      ],
+      "apps": [
+        "Microsoft 365",
+        "Teams",
+        "Zoom",
+        "Chrome",
+        "Google Classroom",
+        "OneNote"
+      ],
+      "tags": [
+        "student",
+        "high_school"
+      ],
+      "priority_factors": [
+        "battery",
+        "value",
+        "durability",
+        "portability"
+      ],
+      "notes": "Prioritise battery life and value. Any gaming or creative needs require GPU tier bump."
     }
   },
   "accessory_affinities": {
     "_description": "Per use-case accessory affinities for upsell scoring. Keys are use-case slugs (plus '_universal' applied to all). Values are ordered lists of accessory category slugs to boost in checkout upsell scoring.",
     "_version": "1.0.0",
-    "_universal": ["screen_protector", "cleaning_kit", "laptop_sleeve", "usb_hub"],
-    "office_general":           ["dock", "monitor", "keyboard_mouse_combo", "usb_hub"],
-    "office_finance":           ["monitor", "dock", "keyboard_mouse_combo", "external_ssd"],
-    "office_executive":         ["compact_charger", "laptop_sleeve", "power_bank", "dock"],
-    "business_professional":    ["dock", "monitor", "headset", "keyboard_mouse_combo"],
-    "university_general":       ["laptop_sleeve", "mouse", "usb_hub", "power_bank"],
-    "computer_science_student": ["external_ssd", "usb_hub", "monitor", "keyboard_mouse_combo"],
-    "engineering_student":      ["external_ssd", "monitor", "dock", "usb_hub"],
-    "data_science_student":     ["external_ssd", "monitor", "dock", "usb_hub"],
-    "design_student":           ["monitor", "external_ssd", "stylus", "color_calibrator"],
-    "note_taking_student":      ["stylus", "laptop_sleeve", "usb_hub", "extra_charging_cable"],
-    "law_student":              ["laptop_sleeve", "mouse", "external_ssd", "power_bank"],
-    "medical_student":          ["laptop_sleeve", "usb_hub", "mouse", "extra_charging_cable"],
-    "architecture_student":     ["monitor", "external_ssd", "stylus", "usb_hub"],
-    "high_school":              ["mouse", "laptop_sleeve", "usb_hub", "power_bank"],
-    "gaming":                   ["gaming_mouse", "headset", "cooling_pad", "laptop_stand"],
-    "gaming_light":             ["mouse", "headset", "laptop_stand", "cooling_pad"],
-    "gaming_casual":            ["mouse", "headset", "cooling_pad", "laptop_stand"],
-    "gaming_competitive":       ["gaming_mouse", "headset", "cooling_pad", "extended_warranty"],
-    "gaming_aaa_heavy":         ["gaming_mouse", "headset", "cooling_pad", "extended_warranty"],
-    "content_creator":          ["external_ssd", "card_reader", "monitor", "color_calibrator"],
-    "music_production":         ["audio_interface", "headphones", "external_ssd", "usb_hub"],
-    "ai_ml_workstation":        ["external_ssd", "monitor", "dock", "cooling_pad"]
+    "_universal": [
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+    ],
+    "office_general": [
+      "dock",
+      "monitor",
+      "keyboard_mouse_combo",
+      "usb_hub"
+    ],
+    "office_finance": [
+      "monitor",
+      "dock",
+      "keyboard_mouse_combo",
+      "external_ssd"
+    ],
+    "office_executive": [
+      "compact_charger",
+      "laptop_sleeve",
+      "power_bank",
+      "dock"
+    ],
+    "business_professional": [
+      "dock",
+      "monitor",
+      "headset",
+      "keyboard_mouse_combo"
+    ],
+    "university_general": [
+      "laptop_sleeve",
+      "mouse",
+      "usb_hub",
+      "power_bank"
+    ],
+    "computer_science_student": [
+      "external_ssd",
+      "usb_hub",
+      "monitor",
+      "keyboard_mouse_combo"
+    ],
+    "engineering_student": [
+      "external_ssd",
+      "monitor",
+      "dock",
+      "usb_hub"
+    ],
+    "data_science_student": [
+      "external_ssd",
+      "monitor",
+      "dock",
+      "usb_hub"
+    ],
+    "design_student": [
+      "monitor",
+      "external_ssd",
+      "stylus",
+      "color_calibrator"
+    ],
+    "note_taking_student": [
+      "stylus",
+      "laptop_sleeve",
+      "usb_hub",
+      "extra_charging_cable"
+    ],
+    "law_student": [
+      "laptop_sleeve",
+      "mouse",
+      "external_ssd",
+      "power_bank"
+    ],
+    "medical_student": [
+      "laptop_sleeve",
+      "usb_hub",
+      "mouse",
+      "extra_charging_cable"
+    ],
+    "architecture_student": [
+      "monitor",
+      "external_ssd",
+      "stylus",
+      "usb_hub"
+    ],
+    "high_school": [
+      "mouse",
+      "laptop_sleeve",
+      "usb_hub",
+      "power_bank"
+    ],
+    "gaming": [
+      "gaming_mouse",
+      "headset",
+      "cooling_pad",
+      "laptop_stand"
+    ],
+    "gaming_light": [
+      "mouse",
+      "headset",
+      "laptop_stand",
+      "cooling_pad"
+    ],
+    "gaming_casual": [
+      "mouse",
+      "headset",
+      "cooling_pad",
+      "laptop_stand"
+    ],
+    "gaming_competitive": [
+      "gaming_mouse",
+      "headset",
+      "cooling_pad",
+      "extended_warranty"
+    ],
+    "gaming_aaa_heavy": [
+      "gaming_mouse",
+      "headset",
+      "cooling_pad",
+      "extended_warranty"
+    ],
+    "content_creator": [
+      "external_ssd",
+      "card_reader",
+      "monitor",
+      "color_calibrator"
+    ],
+    "music_production": [
+      "audio_interface",
+      "headphones",
+      "external_ssd",
+      "usb_hub"
+    ],
+    "ai_ml_workstation": [
+      "external_ssd",
+      "monitor",
+      "dock",
+      "cooling_pad"
+    ]
   }
 }

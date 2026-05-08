@@ -39,3 +39,17 @@
 .label {
   font-weight: 500;
 }
+
+.shortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.2);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary, #94a3b8);
+  flex-shrink: 0;
+}
