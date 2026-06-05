@@ -218,3 +218,47 @@ def test_server():
             os.environ["SKIP_RESTORE_DB_ENGINE"] = prev_skip_restore_db_engine
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Pre-test backend latency gate
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def backend_latency_gate(test_server):
+    """Fail fast when /api/v1/chat/query latency is above threshold in strict mode."""
+    if os.getenv("STRICT_TRACE_READY", "").lower() not in ("1", "true"):
+        yield
+        return
+
+    base = test_server["base_url"]
+    _THRESHOLD_S = 8.0
+    t0 = time.perf_counter()
+    try:
+        r = requests.get(
+            f"{base}/health",
+            headers={"x-api-key": os.getenv("TEST_API_KEY", "local-merchant-key")},
+            timeout=5,
+        )
+        if r.status_code != 200:
+            pytest.fail(f"health gate returned {r.status_code}: {r.text[:200]}")
+
+        t0 = time.perf_counter()
+        rq = requests.post(
+            f"{base}/api/v1/chat/query",
+            json={"uid": f"gate-{int(time.time())}", "query": "show laptops under 1500"},
+            headers={"x-api-key": os.getenv("TEST_API_KEY", "local-merchant-key")},
+            timeout=_THRESHOLD_S + 2,
+        )
+        latency = time.perf_counter() - t0
+        if rq.status_code != 200:
+            pytest.fail(f"chat/query gate status={rq.status_code}: {rq.text[:280]}")
+        if latency > _THRESHOLD_S:
+            pytest.fail(
+                f"chat/query latency {latency:.1f}s exceeds {_THRESHOLD_S}s strict gate"
+            )
+    except requests.Timeout:
+        pytest.fail("chat/query latency gate timed out")
+    except Exception as exc:
+        pytest.fail(f"chat/query gate failed before browser assertions: {exc}")
+    yield

@@ -33,6 +33,18 @@ class DecisionTraceQueryResponse(StrictModel):
     decision_id: Optional[str] = None
     timestamp: Optional[str] = None
     input_query: Optional[str] = None
+    intent_analysis: Dict[str, Any] = Field(default_factory=dict)
+    agent_chain: List[Dict[str, Any]] = Field(default_factory=list)
+    rag_context: Dict[str, Any] = Field(default_factory=dict)
+    recommendation: Any = None
+    policy_gates: Dict[str, Any] = Field(default_factory=dict)
+    model_selection: Dict[str, Any] = Field(default_factory=dict)
+    right_panel: Optional[Dict[str, Any]] = None
+    security: Optional[Dict[str, Any]] = None
+    security_matrix: Optional[Dict[str, Any]] = None
+    products: List[Dict[str, Any]] = Field(default_factory=list)
+    multimodal_fusion: Optional[Dict[str, Any]] = None
+    image_security: Optional[Dict[str, Any]] = None
     bitemporal: Optional[BitemporalStamp] = None
     events: List[DecisionTraceEvent] = Field(default_factory=list)
     evidence: Any = Field(default_factory=dict)

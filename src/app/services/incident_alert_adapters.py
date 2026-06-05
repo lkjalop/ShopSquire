@@ -10,9 +10,9 @@ from typing import Any, Dict, List
 from src.app.security.url_guard import ensure_safe_outbound_url
 
 try:
-    import requests
-except Exception:  # pragma: no cover - optional dependency in some envs
-    requests = None
+    import httpx as _httpx
+except Exception:  # pragma: no cover
+    _httpx = None  # type: ignore[assignment]
 
 
 def _enabled() -> bool:
@@ -107,12 +107,28 @@ def _email_recipients() -> List[str]:
     return dedup
 
 
+def _http_post(url: str, payload: Dict[str, Any], timeout: float = 8.0) -> int:
+    """Sync HTTP POST using httpx (same API as requests, non-blocking-event-loop safe).
+
+    Called from threads or asyncio.to_thread() — never called directly from async handlers.
+    Returns HTTP status code, or 0 on failure.
+    """
+    if _httpx is None:
+        return 0
+    try:
+        with _httpx.Client(timeout=timeout) as client:
+            resp = client.post(url, json=payload)
+            return int(resp.status_code)
+    except Exception:
+        return 0
+
+
 def _send_slack(summary: Dict[str, Any]) -> Dict[str, Any]:
     urls = _slack_webhooks()
     if not urls:
         return {"enabled": False, "sent": 0, "errors": []}
-    if requests is None:
-        return {"enabled": True, "sent": 0, "errors": ["requests_unavailable"]}
+    if _httpx is None:
+        return {"enabled": True, "sent": 0, "errors": ["httpx_unavailable"]}
     sent = 0
     errors: List[str] = []
     text = (
@@ -124,11 +140,11 @@ def _send_slack(summary: Dict[str, Any]) -> Dict[str, Any]:
     for url in urls:
         try:
             ensure_safe_outbound_url(url)
-            resp = requests.post(url, json=payload, timeout=8)
-            if 200 <= int(resp.status_code) < 300:
+            status = _http_post(url, payload, timeout=8.0)
+            if 200 <= status < 300:
                 sent += 1
             else:
-                errors.append(f"status_{resp.status_code}")
+                errors.append(f"status_{status}")
         except Exception as exc:
             errors.append(str(exc))
     return {"enabled": True, "sent": sent, "errors": errors}
@@ -138,8 +154,8 @@ def _send_pagerduty(summary: Dict[str, Any]) -> Dict[str, Any]:
     routing_key = _pagerduty_routing_key()
     if not routing_key:
         return {"enabled": False, "sent": 0, "errors": []}
-    if requests is None:
-        return {"enabled": True, "sent": 0, "errors": ["requests_unavailable"]}
+    if _httpx is None:
+        return {"enabled": True, "sent": 0, "errors": ["httpx_unavailable"]}
     url = _pagerduty_events_url()
     payload = {
         "routing_key": routing_key,
@@ -154,10 +170,10 @@ def _send_pagerduty(summary: Dict[str, Any]) -> Dict[str, Any]:
     }
     try:
         ensure_safe_outbound_url(url)
-        resp = requests.post(url, json=payload, timeout=8)
-        if 200 <= int(resp.status_code) < 300:
+        status = _http_post(url, payload, timeout=8.0)
+        if 200 <= status < 300:
             return {"enabled": True, "sent": 1, "errors": []}
-        return {"enabled": True, "sent": 0, "errors": [f"status_{resp.status_code}"]}
+        return {"enabled": True, "sent": 0, "errors": [f"status_{status}"]}
     except Exception as exc:
         return {"enabled": True, "sent": 0, "errors": [str(exc)]}
 

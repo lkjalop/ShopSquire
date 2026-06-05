@@ -21,9 +21,13 @@ except Exception:
     redis = None
 
 
+_LOCAL_CACHE_MAXSIZE = 500
+
+
 class SemanticCache:
-    def __init__(self, redis_url: Optional[str] = None, default_ttl: int = 3600):
+    def __init__(self, redis_url: Optional[str] = None, default_ttl: int = 3600, maxsize: int = _LOCAL_CACHE_MAXSIZE):
         self.default_ttl = default_ttl
+        self._maxsize = maxsize
         self._local: dict[str, Any] = {}
         self._local_expiry: dict[str, float] = {}
         self._redis = None
@@ -76,6 +80,18 @@ class SemanticCache:
 
         # Local store fallback
         try:
+            # Evict expired entries first; if still over maxsize, drop oldest by expiry.
+            if len(self._local) >= self._maxsize:
+                now = time.time()
+                expired_keys = [k for k, exp in list(self._local_expiry.items()) if exp < now]
+                for k in expired_keys:
+                    self._local.pop(k, None)
+                    self._local_expiry.pop(k, None)
+            if len(self._local) >= self._maxsize:
+                oldest = sorted(self._local_expiry.items(), key=lambda x: x[1])[:max(1, self._maxsize // 10)]
+                for k, _ in oldest:
+                    self._local.pop(k, None)
+                    self._local_expiry.pop(k, None)
             self._local[key] = value
             self._local_expiry[key] = time.time() + max(1, int(ex))
         except Exception:

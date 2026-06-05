@@ -210,9 +210,27 @@ def create_app() -> FastAPI:
             ensure_audit_chain_table()
         except Exception:
             pass
+        # Eagerly validate AUDIT_CHAIN_SECRET at startup so a misconfigured production
+        # deployment fails immediately rather than silently forging audit records.
+        try:
+            from src.app.security.audit_chain import _get_chain_secret
+            _get_chain_secret()
+        except RuntimeError as _audit_err:
+            import logging as _al
+            _al.getLogger("shopsquire.startup").critical(
+                "STARTUP BLOCKED: %s — set AUDIT_CHAIN_SECRET before starting in production.", _audit_err
+            )
+            raise  # Abort startup — do not run with a broken audit chain in prod
+        except Exception:
+            pass
         try:
             from src.app.services.intake_gate import ensure_qr_allowlist_table
             ensure_qr_allowlist_table()
+        except Exception:
+            pass
+        try:
+            from src.app.services.supplier_domain_guard import ensure_trusted_supplier_domains_table
+            ensure_trusted_supplier_domains_table()
         except Exception:
             pass
         try:
@@ -276,18 +294,19 @@ def create_app() -> FastAPI:
             await start_stream_consumer()
         except Exception:
             pass
-        # Pre-warm the CLIP model so first visual-search query is not slow.
-        # This runs unconditionally (faiss is not required) in a background thread
-        # so the event loop stays unblocked during model loading.
+        # Optional CLIP pre-warm. Keep this off by default for the shopping fast
+        # path because compromised-image recommendations use safe catalog hints
+        # and should not compete with model loading during startup.
         try:
-            import asyncio as _asyncio_startup
-            from src.app.services.visual_search import _load_clip as _vs_load_clip
-            _asyncio_startup.get_event_loop().run_in_executor(None, _vs_load_clip)
+            if str(os.getenv("VISUAL_SEARCH_PREWARM_ON_START", "0")).lower() in ("1", "true", "yes"):
+                import asyncio as _asyncio_startup
+                from src.app.services.visual_search import _load_clip as _vs_load_clip
+                _asyncio_startup.get_event_loop().run_in_executor(None, _vs_load_clip)
         except Exception:
             pass
         # Build visual search index in background on startup
         try:
-            if str(os.getenv("VISUAL_SEARCH_INDEX_ON_START", "1")).lower() in ("1", "true", "yes"):
+            if str(os.getenv("VISUAL_SEARCH_INDEX_ON_START", "0")).lower() in ("1", "true", "yes"):
                 from src.app.workers.task_runner import submit_task, register_handler
 
                 def _vs_index_handler(payload):
@@ -351,7 +370,7 @@ def create_app() -> FastAPI:
             pass
         # Auto-index FAQ into faq_embeddings table if empty on startup
         try:
-            if str(os.getenv("FAQ_VECTOR_INDEX_ON_START", "1")).lower() in ("1", "true", "yes"):
+            if str(os.getenv("FAQ_VECTOR_INDEX_ON_START", "0")).lower() in ("1", "true", "yes"):
                 from src.app.workers.task_runner import submit_task as _submit, register_handler as _reg
 
                 def _faq_index_handler(payload):
@@ -393,6 +412,31 @@ def create_app() -> FastAPI:
         try:
             from src.app.workers.task_runner import start_consumer
             start_consumer()
+        except Exception:
+            pass
+        # VLM cold-start warming: fire a tiny generate request so the first real user request
+        # doesn't pay the full model-load latency (typically 4-8 s for qwen3-vl:8b on RTX 5070 Ti).
+        try:
+            if str(os.getenv("VLM_WARMUP_ON_START", "1")).lower() not in ("0", "false", "no"):
+                import asyncio as _asyncio
+                import logging as _wlog
+
+                async def _warm_vlm():
+                    import httpx
+                    _log = _wlog.getLogger("shopsquire.startup")
+                    base = (os.getenv("OLLAMA_URL") or "http://127.0.0.1:11434").rstrip("/")
+                    model = (os.getenv("OLLAMA_SMALL_MODEL") or os.getenv("CV_VISION_MODEL") or "qwen3-vl:8b").strip()
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as _client:
+                            await _client.post(
+                                f"{base}/api/generate",
+                                json={"model": model, "prompt": "hi", "stream": False, "options": {"num_predict": 1}},
+                            )
+                        _log.info("VLM warm-up complete: model=%s url=%s", model, base)
+                    except Exception as _exc:
+                        _log.info("VLM warm-up skipped (Ollama not ready yet): %s", _exc)
+
+                _asyncio.ensure_future(_warm_vlm())
         except Exception:
             pass
         yield
@@ -578,11 +622,6 @@ def create_app() -> FastAPI:
         patch_outbound_egress_guard()
     except Exception:
         pass
-    # Capture JA3/JA4 headers from trusted ingress proxies for fraud scoring.
-    try:
-        app.add_middleware(TLSFingerprintMiddleware)
-    except Exception:
-        pass
     # Enforce proxy-validated mTLS headers for internal service routes when enabled.
     try:
         app.add_middleware(InternalMTLSMiddleware)
@@ -643,6 +682,12 @@ def create_app() -> FastAPI:
         per_key = int(os.getenv("RATE_LIMIT_PER_MINUTE_KEY", default_per_key) or default_per_key)
         per_ip = int(os.getenv("RATE_LIMIT_PER_MINUTE_IP", default_per_ip) or default_per_ip)
         app.add_middleware(RateLimitMiddleware, per_min_key=per_key, per_min_ip=per_ip)
+    except Exception:
+        pass
+    # Capture JA3/JA4 headers from trusted ingress proxies for fraud scoring.
+    # Added last so it runs first — fingerprint data is available to all downstream middleware and handlers.
+    try:
+        app.add_middleware(TLSFingerprintMiddleware)
     except Exception:
         pass
 
@@ -793,12 +838,13 @@ def create_app() -> FastAPI:
                     return ORJSONResponse({"detail": "server busy"}, status_code=503)
                 app.state.current_concurrency += 1
                 record_inflight("api", app.state.current_concurrency)
-                # Tiny processing delay for overview to stabilize concurrency tests
+                # Tiny async delay for overview to stabilize concurrency tests without blocking the event loop.
                 try:
                     if request.url.path == "/api/v1/admin/overview":
-                        import time as _t
                         delay = float(os.getenv("BACKPRESSURE_TEST_DELAY_SEC", "0.03") or 0)
-                        _t.sleep(delay)
+                        if delay > 0:
+                            import asyncio as _asyncio_bp
+                            await _asyncio_bp.sleep(delay)
                 except Exception:
                     pass
         except Exception:
@@ -1023,7 +1069,9 @@ def create_app() -> FastAPI:
     async def security_observer_middleware(request: Request, call_next):
         path = request.url.path
         # Skip noisy or low-value endpoints
-        if path in ("/health", "/metrics"):
+        if request.method == "OPTIONS" or path in ("/health", "/healthz", "/metrics"):
+            return await call_next(request)
+        if path.startswith("/api/v1/vision/triage") or path.startswith("/api/v1/recommend/suggest"):
             return await call_next(request)
         # Allow per-request skip via header (for performance tests)
         try:
@@ -1107,28 +1155,28 @@ def create_app() -> FastAPI:
                 emit_security_event(path, payload, request=request)
             except Exception:
                 pass
-                # Anomaly detection hook (model-poison / DDOS signals) - non-blocking
-                try:
-                    from src.app.security.anomaly_detector import detect_anomaly
-                    from src.app.observability.metrics import record_security_event
-                    an = detect_anomaly(payload)
-                    if isinstance(an, dict) and an.get("anomaly"):
-                        # Best-effort: create a ticket for high severity anomalies and emit a security metric
-                        try:
-                            if an.get("severity") in ("high", "critical"):
-                                from src.app.services.ticketing import TicketingAgent
-                                t = TicketingAgent()
-                                title = f"Anomaly detected: {an.get('reason')}"
-                                desc = str({"path": path, "reason": an.get("reason"), "payload_summary": payload.get("body") if isinstance(payload, dict) else None})
-                                t.create_ticket(title=title, description=desc, severity=(an.get("severity") or "high"))
-                        except Exception:
-                            pass
-                        try:
-                            record_security_event("anomaly_detected", an.get("severity") or "medium", an.get("reason") or "anomaly")
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+            # Anomaly detection hook (model-poison / DDOS signals) - non-blocking.
+            # Runs unconditionally on every request, not only when emit_security_event fails.
+            try:
+                from src.app.security.anomaly_detector import detect_anomaly
+                from src.app.observability.metrics import record_security_event
+                an = detect_anomaly(payload)
+                if isinstance(an, dict) and an.get("anomaly"):
+                    try:
+                        if an.get("severity") in ("high", "critical"):
+                            from src.app.services.ticketing import TicketingAgent
+                            t = TicketingAgent()
+                            title = f"Anomaly detected: {an.get('reason')}"
+                            desc = str({"path": path, "reason": an.get("reason"), "payload_summary": payload.get("body") if isinstance(payload, dict) else None})
+                            t.create_ticket(title=title, description=desc, severity=(an.get("severity") or "high"))
+                    except Exception:
+                        pass
+                    try:
+                        record_security_event("anomaly_detected", an.get("severity") or "medium", an.get("reason") or "anomaly")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             response = await call_next(request)
             return response
         finally:
@@ -1206,17 +1254,21 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz():
-        """Readiness probe: verifies DB + key service dependencies."""
+    def readyz(deep: bool = False, force: bool = False):
+        """Readiness probe.
+
+        Default mode is intentionally fast and local for UI/test polling. Use
+        ``?deep=true`` or ``/diagnostics/dependencies`` for external probes.
+        """
         ok = True
         reasons: list[str] = []
         config_report = {"ok": True, "missing": [], "warnings": [], "contract": {}}
         components: dict[str, dict[str, Any]] = {
             "backend": {"status": "ready", "details": {"liveness": "ok"}},
-            "frontend": {"status": "unknown", "details": {}},
-            "ollama": {"status": "unknown", "details": {}},
-            "cv_ocr": {"status": "unknown", "details": {}},
-            "redis": {"status": "unknown", "details": {}},
+            "frontend": {"status": "skipped", "details": {"mode": "deep_only"}},
+            "ollama": {"status": "skipped", "details": {"mode": "deep_only"}},
+            "cv_ocr": {"status": "skipped", "details": {"mode": "deep_only"}},
+            "redis": {"status": "skipped", "details": {"mode": "deep_only"}},
             "db": {"status": "unknown", "details": {}},
         }
 
@@ -1256,58 +1308,65 @@ def create_app() -> FastAPI:
             reasons.append("ready_check_failed")
             _set_component("db", False, {"error": "ready_check_failed"})
 
-        try:
-            from src.app.observability.health import dependency_health_snapshot
+        if deep:
+            try:
+                from src.app.observability.health import dependency_health_snapshot
 
-            snap = dependency_health_snapshot(force=True)
-            deps = (snap or {}).get("dependencies") or {}
-            redis_dep = deps.get("redis") if isinstance(deps, dict) else None
-            if isinstance(redis_dep, dict):
-                redis_ok = str(redis_dep.get("status") or "").lower() == "healthy"
-                _set_component("redis", redis_ok, redis_dep)
-                if not redis_ok:
-                    ok = False
-                    reasons.append("redis_unhealthy")
-        except Exception:
-            _set_component("redis", False, {"error": "health_snapshot_failed"})
-            ok = False
-            reasons.append("redis_check_failed")
+                snap = dependency_health_snapshot(force=force)
+                deps = (snap or {}).get("dependencies") or {}
+                for dep_name in ("redis", "ollama"):
+                    dep = deps.get(dep_name) if isinstance(deps, dict) else None
+                    if isinstance(dep, dict):
+                        dep_ok = str(dep.get("status") or "").lower() == "healthy"
+                        _set_component(dep_name, dep_ok, dep)
+                        if dep_name == "redis" and not dep_ok:
+                            ok = False
+                            reasons.append("redis_unhealthy")
+            except Exception:
+                _set_component("redis", False, {"error": "health_snapshot_failed"})
+                ok = False
+                reasons.append("redis_check_failed")
 
-        try:
-            import urllib.request as _urlreq
+            try:
+                import urllib.request as _urlreq
 
-            frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
-            req = _urlreq.Request(frontend_url, method="GET")
-            with _urlreq.urlopen(req, timeout=1.5) as resp:
-                status_code = int(getattr(resp, "status", 0) or 0)
-                _set_component("frontend", status_code < 500, {"url": frontend_url, "status_code": status_code})
-        except Exception as exc:
-            _set_component("frontend", False, {"url": os.getenv("FRONTEND_URL", "http://127.0.0.1:5173"), "error": str(exc)})
+                frontend_url = os.getenv("FRONTEND_URL", "http://127.0.0.1:5173")
+                req = _urlreq.Request(frontend_url, method="GET")
+                with _urlreq.urlopen(req, timeout=1.5) as resp:
+                    status_code = int(getattr(resp, "status", 0) or 0)
+                    _set_component("frontend", status_code < 500, {"url": frontend_url, "status_code": status_code})
+            except Exception as exc:
+                _set_component("frontend", False, {"url": os.getenv("FRONTEND_URL", "http://127.0.0.1:5173"), "error": str(exc)})
 
-        try:
-            import urllib.request as _urlreq
-
-            ollama_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-            req = _urlreq.Request(f"{ollama_url.rstrip('/')}/api/tags", method="GET")
-            with _urlreq.urlopen(req, timeout=1.5) as resp:
-                status_code = int(getattr(resp, "status", 0) or 0)
-                _set_component("ollama", status_code < 500, {"url": ollama_url, "status_code": status_code})
-        except Exception as exc:
-            _set_component("ollama", False, {"url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"), "error": str(exc)})
-
-        try:
-            cv_smoke = _cv_ocr_runtime_snapshot()
-            _set_component("cv_ocr", bool(cv_smoke.get("ready")), cv_smoke)
-        except Exception as exc:
-            _set_component(
-                "cv_ocr",
-                False,
-                {"provider": os.getenv("CV_OCR_PROVIDER", "auto"), "error": str(exc)},
-            )
+            try:
+                cv_smoke = _cv_ocr_runtime_snapshot()
+                _set_component("cv_ocr", bool(cv_smoke.get("ready")), cv_smoke)
+            except Exception as exc:
+                _set_component(
+                    "cv_ocr",
+                    False,
+                    {"provider": os.getenv("CV_OCR_PROVIDER", "auto"), "error": str(exc)},
+                )
 
         status = "ok" if ok else "unavailable"
         code = 200 if ok else 503
-        return ORJSONResponse({"status": status, "reasons": reasons, "config": config_report, "components": components}, status_code=code)
+        return ORJSONResponse(
+            {
+                "status": status,
+                "mode": "deep" if deep else "fast",
+                "reasons": reasons,
+                "config": config_report,
+                "components": components,
+            },
+            status_code=code,
+        )
+
+    @app.get("/diagnostics/dependencies")
+    def diagnostics_dependencies(force: bool = False):
+        """Deep dependency snapshot for diagnostics pages and manual checks."""
+        from src.app.observability.health import dependency_health_snapshot
+
+        return dependency_health_snapshot(force=force)
 
     def _status_summary_payload() -> dict[str, Any]:
         warn_count = 0
@@ -1965,12 +2024,6 @@ def create_app() -> FastAPI:
     app.include_router(payments_revolut)
     app.include_router(payments_googlepay)
     app.include_router(payments_afterpay)
-    # Shopify connector webhooks
-    try:
-        from src.app.routers.shopify_webhooks import router as shopify_webhooks_router
-        app.include_router(shopify_webhooks_router)
-    except Exception:
-        pass
     # Returns and Fraud routers
     try:
         from src.app.routers.returns import router as returns_router
@@ -1983,69 +2036,68 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
-        # Optional inventory background worker
-        try:
-            import asyncio
-            from src.app.services.inventory_agent import InventoryAgent
-            from src.app.observability.metrics import decisions_events_counter
+    # Inventory background worker — monitors stock levels and generates reorder recommendations.
+    # Registered unconditionally; previously was erroneously inside the fraud router except block.
+    try:
+        import asyncio
+        from src.app.services.inventory_agent import InventoryAgent
+        from src.app.observability.metrics import decisions_events_counter
 
-            INVENTORY_WORKER_ENABLED = os.getenv("INVENTORY_WORKER_ENABLED", "1").lower() in ("1", "true", "yes")
-            INVENTORY_WORKER_INTERVAL = int(os.getenv("INVENTORY_WORKER_INTERVAL_SECONDS", "60") or 60)
+        INVENTORY_WORKER_ENABLED = os.getenv("INVENTORY_WORKER_ENABLED", "1").lower() in ("1", "true", "yes")
+        INVENTORY_WORKER_INTERVAL = int(os.getenv("INVENTORY_WORKER_INTERVAL_SECONDS", "60") or 60)
 
-            async def _inventory_worker_loop(app: FastAPI):
-                agent = InventoryAgent()
-                while True:
-                    try:
-                        alerts = agent.monitor_stock_levels()
-                        if alerts:
-                            recs = agent.generate_reorder_recommendations(alerts)
-                            try:
-                                decisions_events_counter.inc()
-                            except Exception:
-                                pass
-                        await asyncio.sleep(INVENTORY_WORKER_INTERVAL)
-                    except asyncio.CancelledError:
-                        break
-                    except Exception:
+        async def _inventory_worker_loop(app: FastAPI):
+            agent = InventoryAgent()
+            while True:
+                try:
+                    alerts = agent.monitor_stock_levels()
+                    if alerts:
+                        recs = agent.generate_reorder_recommendations(alerts)
                         try:
-                            await asyncio.sleep(INVENTORY_WORKER_INTERVAL)
+                            decisions_events_counter.inc()
                         except Exception:
-                            break
-
-            def _start_inventory_worker():
-                if not INVENTORY_WORKER_ENABLED:
-                    return None
-                loop = None
-                try:
-                    loop = asyncio.get_running_loop()
+                            pass
+                    await asyncio.sleep(INVENTORY_WORKER_INTERVAL)
+                except asyncio.CancelledError:
+                    break
                 except Exception:
-                    loop = None
-                task = None
-                try:
-                    # schedule task on current loop
-                    if loop:
-                        task = loop.create_task(_inventory_worker_loop(app))
-                        app.state.inventory_worker_task = task
-                except Exception:
-                    task = None
-                return task
+                    try:
+                        await asyncio.sleep(INVENTORY_WORKER_INTERVAL)
+                    except Exception:
+                        break
 
-            def _stop_inventory_worker():
-                try:
-                    t = getattr(app.state, "inventory_worker_task", None)
-                    if t and not t.done():
-                        t.cancel()
-                except Exception:
-                    pass
-
-            # Hook into startup/shutdown
+        def _start_inventory_worker():
+            if not INVENTORY_WORKER_ENABLED:
+                return None
+            loop = None
             try:
-                app.add_event_handler("startup", _start_inventory_worker)
-                app.add_event_handler("shutdown", _stop_inventory_worker)
+                loop = asyncio.get_running_loop()
+            except Exception:
+                loop = None
+            task = None
+            try:
+                if loop:
+                    task = loop.create_task(_inventory_worker_loop(app))
+                    app.state.inventory_worker_task = task
+            except Exception:
+                task = None
+            return task
+
+        def _stop_inventory_worker():
+            try:
+                t = getattr(app.state, "inventory_worker_task", None)
+                if t and not t.done():
+                    t.cancel()
             except Exception:
                 pass
+
+        try:
+            app.add_event_handler("startup", _start_inventory_worker)
+            app.add_event_handler("shutdown", _stop_inventory_worker)
         except Exception:
             pass
+    except Exception:
+        pass
 
     # Retention cleanup loop (DB TTL enforcement)
     try:

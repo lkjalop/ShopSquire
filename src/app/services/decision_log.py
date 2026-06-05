@@ -691,6 +691,7 @@ def log_trace_event(
     target_type: str | None,
     target_id: str | None,
     payload: Dict[str, Any],
+    durable: bool = True,
 ) -> None:
     global _TRACE_TABLE_ENSURED, _OUTBOX_TABLE_ENSURED
     if not trace_id:
@@ -751,6 +752,13 @@ def log_trace_event(
         # Always keep a lightweight in-process copy so readers can recover even
         # when transient DB writes fail under SQLite contention.
         _cache_trace_event(trace_id, broker_payload)
+        if not durable:
+            try:
+                if _publish_sync is not None and not _redis_stream_enabled_by_env():
+                    _publish_sync(trace_id, broker_payload)
+            except Exception:
+                pass
+            return
         # Load/smoke mode: when recommendation observer paths are explicitly
         # skipped, avoid expensive durable trace writes for high-throughput
         # benchmark tests.

@@ -59,6 +59,85 @@ router = APIRouter(prefix="/api/v1/support/complaints", tags=["support"])
 _QR_REDIRECT_TASKS: Dict[str, asyncio.Task] = {}
 
 
+def _build_complaint_security_matrix(
+    *,
+    security_details: Dict[str, Any] | None = None,
+    security_severity: str | None = None,
+    rule_eval: Dict[str, Any] | None = None,
+    nlp_rules: Dict[str, Any] | None = None,
+    image_consistency: Dict[str, Any] | None = None,
+    qr_payload_types: Any = None,
+    recommended_route: str | None = None,
+) -> Dict[str, Any]:
+    """Canonical Security Matrix payload for complaint/CV traces."""
+    details = security_details if isinstance(security_details, dict) else {}
+    cv_signals = dict((rule_eval or {}).get("signals") or {})
+    nlp_signals = dict((nlp_rules or {}).get("signals") or {})
+    observer_signals = dict(details.get("signals") or {})
+    merged_signals = {**observer_signals, **cv_signals, **nlp_signals}
+    qr_types = sorted([str(x) for x in (qr_payload_types or []) if str(x).strip()])
+    mismatch_count = 0
+    try:
+        mismatch_count = int((image_consistency or {}).get("mismatch_count") or 0)
+    except Exception:
+        mismatch_count = 0
+    severity = str(security_severity or details.get("severity") or ("high" if recommended_route == "security_review" else "info"))
+    mitre = list(details.get("mitre_atlas") or details.get("mitre") or [])
+    owasp = list(details.get("owasp_llm_top10") or details.get("owasp_llm") or [])
+    stride = list(details.get("stride_categories") or details.get("stride") or [])
+    if any(merged_signals.get(k) for k in ("ocr_prompt_injection", "qr_prompt_injection", "cross_image_split_injection")):
+        if "LLM01 Prompt Injection" not in owasp:
+            owasp.append("LLM01 Prompt Injection")
+    if any(merged_signals.get(k) for k in ("qr_external_url_detected", "qr_url_suspicious")):
+        if "T1566 Phishing" not in mitre:
+            mitre.append("T1566 Phishing")
+    if mismatch_count > 0 and "Tampering" not in stride:
+        stride.append("Tampering")
+    return {
+        "verdict": recommended_route or details.get("route") or "review",
+        "severity_band": severity,
+        "policy_action": recommended_route or "security_review",
+        "mitre": mitre,
+        "owasp": owasp,
+        "owasp_llm": owasp,
+        "stride": stride,
+        "signals": merged_signals,
+        "cv_signals": cv_signals,
+        "qr_payload_types": qr_types,
+        "image_consistency": {
+            "status": (image_consistency or {}).get("status"),
+            "mismatch_count": mismatch_count,
+            "repeat_mismatch": bool((image_consistency or {}).get("repeat_mismatch")),
+        },
+        "maestro": [
+            {
+                "control": "SC-04B",
+                "boundary": "Image_Intake_Agent",
+                "verdict": "raw_image_payload_quarantined",
+                "action": "safe_evidence_features_only",
+            },
+            {
+                "control": "SC-04B",
+                "boundary": "Security_Observer_Agent",
+                "verdict": "prompt_and_artifact_boundaries_enforced",
+                "action": "route_suspicious_content_to_review",
+            },
+            {
+                "control": "SC-07",
+                "boundary": "Routing_Agent",
+                "verdict": "policy_gated",
+                "action": recommended_route or "security_review",
+            },
+        ],
+        "containment_actions": [
+            "quarantine_raw_ocr_and_qr_payloads",
+            "do_not_execute_image_text",
+            "require_order_and_policy_verification",
+        ],
+        "evidence_source": "support_complaints.submit",
+    }
+
+
 async def _dispatch_case_created_notification(case_id: str | None, customer_email: str | None = None) -> None:
     try:
         ns = NotificationService()
@@ -1492,6 +1571,30 @@ def triage(req: ComplaintTriageRequest, db=Depends(get_db), request: Request = N
     except Exception:
         case_id = None
 
+    security_matrix = _build_complaint_security_matrix(
+        security_details={
+            "severity": severity,
+            "signals": (nlp_rules.get("signals") if isinstance(nlp_rules, dict) else {}) or {},
+            "mitre_atlas": (nlp_rules.get("mitre_atlas") if isinstance(nlp_rules, dict) else []) or [],
+            "owasp_llm_top10": (nlp_rules.get("owasp_llm_top10") if isinstance(nlp_rules, dict) else []) or [],
+        },
+        security_severity=severity,
+        nlp_rules=nlp_rules,
+        recommended_route=recommended_action,
+    )
+    try:
+        log_trace_event(
+            trace_id=decision_id,
+            event_type="security_scan",
+            source_type="agent",
+            source_id="Security_Observer_Agent",
+            target_type="system",
+            target_id=None,
+            payload={"severity": severity, "security_matrix": security_matrix, "maestro": security_matrix.get("maestro", [])},
+        )
+    except Exception:
+        pass
+
     return {
         "intent": parsed["intent"],
         "confidence": parsed["confidence"],
@@ -1502,6 +1605,7 @@ def triage(req: ComplaintTriageRequest, db=Depends(get_db), request: Request = N
         "recommended_action": recommended_action,
         "decision_id": decision_id,
         "ticket_id": ticket_id,
+        "security_matrix": security_matrix,
         "human_review": {"status": "pending" if ticket_id else "not_required", "ticket_id": ticket_id},
         "next_questions": nqe_questions,
         # Frontend-friendly aliases
@@ -2135,6 +2239,7 @@ async def submit_complaint(
     # Security observer scan for CV/NLP evidence (includes OCR prompt injection detection)
     security_details = {}
     security_sev = None
+    security_matrix: Dict[str, Any] = {}
     try:
         security_payload = {
             "description": description,
@@ -2159,6 +2264,15 @@ async def submit_complaint(
         security_analysis = analyze_payload(security_payload)
         security_details = security_analysis.get("details") or {}
         security_sev = security_analysis.get("severity")
+        security_matrix = _build_complaint_security_matrix(
+            security_details=security_details,
+            security_severity=security_sev,
+            rule_eval=rule_eval,
+            nlp_rules=nlp_rules,
+            image_consistency=image_consistency,
+            qr_payload_types=qr_payload_types,
+            recommended_route=None,
+        )
         try:
             emit_security_event("/api/v1/support/complaints/submit", {"payload": security_payload, "analysis": security_details}, request=request)
         except Exception:
@@ -2171,13 +2285,19 @@ async def submit_complaint(
                 source_id="Security_Observer_Agent",
                 target_type="system",
                 target_id=None,
-                payload={"details": security_details, "severity": security_sev},
+                payload={
+                    "details": security_details,
+                    "severity": security_sev,
+                    "security_matrix": security_matrix,
+                    "maestro": security_matrix.get("maestro") if isinstance(security_matrix, dict) else [],
+                },
             )
         except Exception:
             pass
     except Exception:
         security_details = {}
         security_sev = None
+        security_matrix = {}
 
     # Policy gate decision (CV flow)
     gate_force_review = False
@@ -2314,6 +2434,16 @@ async def submit_complaint(
     if bool(geoip_trace.get("force_security_review")):
         recommended_route = "security_review"
         rule_eval["signals"]["high_risk_region"] = True
+
+    security_matrix = _build_complaint_security_matrix(
+        security_details=security_details,
+        security_severity=security_sev,
+        rule_eval=rule_eval,
+        nlp_rules=nlp_rules,
+        image_consistency=image_consistency,
+        qr_payload_types=qr_payload_types,
+        recommended_route=recommended_route,
+    )
 
     # Trust routing override based on trust tier + risk band + exposure.
     # Security and soft-verify routes are sticky and cannot be downgraded by trust.
@@ -2464,6 +2594,7 @@ async def submit_complaint(
                 "risk_adj": security_details.get("risk_adj") if isinstance(security_details, dict) else None,
                 "signals": (security_details.get("signals") if isinstance(security_details, dict) else None),
             },
+            "security_matrix": security_matrix,
         },
         proposed_action={
             "analysis": analysis,
@@ -2473,6 +2604,7 @@ async def submit_complaint(
             "geoip_trace": geoip_trace,
             "user_prompt": image_consistency.get("prompt"),
             "ui_actions": {"chat_with_admin": bool(recommended_route == "security_review")},
+            "security_matrix": security_matrix,
         },
         agent_reasoning=f"rule_based_labels={labels}",
         policy_version="v1",
@@ -2487,7 +2619,13 @@ async def submit_complaint(
             source_id="Security_Observer_Agent",
             target_type="system",
             target_id=None,
-            payload={"details": security_details, "severity": security_sev},
+            payload={
+                "details": security_details,
+                "severity": security_sev,
+                "security_matrix": security_matrix,
+                "maestro": security_matrix.get("maestro") if isinstance(security_matrix, dict) else [],
+                "policy_action": security_matrix.get("policy_action") if isinstance(security_matrix, dict) else None,
+            },
         )
     except Exception:
         pass
@@ -2727,6 +2865,7 @@ async def submit_complaint(
         "user_prompt": image_consistency.get("prompt"),
         "ui_actions": {"chat_with_admin": bool(recommended_route == "security_review" or needs_human)},
         "agent_chain": agent_chain,
+        "security_matrix": security_matrix,
         "risk_quantification": risk_quant,
         "human_review": {"status": "pending" if needs_human else "not_required", "ticket_id": ticket_id},
         "ticket_id": ticket_id,
@@ -2939,6 +3078,12 @@ async def submit_complaint_guest(
     except Exception:
         fraud_t0 = None
     # Create case early (guest flow) to allow scoring/evidence linkage
+    tenant_id = None
+    try:
+        if request is not None and hasattr(request, "headers"):
+            tenant_id = request.headers.get("X-Tenant-Id") or request.headers.get("x-tenant-id")
+    except Exception:
+        tenant_id = None
     case_id = create_case(order_id=None, issue_type=issue_type, description=scrub_pii(description), customer_id=None, guest_email=None, tenant_id=tenant_id)
 
     fraud_score, fraud_level, signals = fraud.score_with_enrichment(
@@ -3074,6 +3219,11 @@ async def submit_complaint_guest(
     support_thr = _get_support_thresholds()
     auto_conf = float(support_thr.get("auto_process_confidence_min_guest", 0.85))
     allowed_fraud = tuple(support_thr.get("auto_process_fraud_levels", ["minimal", "low"]) or ["minimal", "low"])
+    try:
+        conf_raw = analysis.get("confidence") if isinstance(analysis, dict) else None
+        conf_val = float(conf_raw) if conf_raw is not None else None
+    except Exception:
+        conf_val = None
     if (conf_val or 0.0) > auto_conf and analysis.get("severity") in ("minor",) and thresholds.get("max_amount_usd", 0.0) >= 50.0 and fraud_level in allowed_fraud:
         recommended_route = "auto_process"
     if any(r.get("severity") == "high" for r in (nlp_rules.get("rules") or [])):
@@ -3161,6 +3311,8 @@ async def submit_complaint_guest(
     except Exception:
         pass
 
+    # Guest flow has no order lookup, so supplier signals are unavailable.
+    supplier_signals = {}
     evidence_bundle = build_evidence_bundle(
         case_id=case_id,
         sanitized_images=dmg_sanitized,

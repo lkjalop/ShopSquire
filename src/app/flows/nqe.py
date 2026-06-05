@@ -66,6 +66,9 @@ class NQEInput(BaseModel):
     detected_games: List[str] = []  # game titles mentioned in query
     detected_software: List[str] = []  # software names mentioned
     turn_intent: Optional[str] = None  # SEARCH | FILTER | EXPLAIN | COMPARE
+    # Stock context (set by recommend.py after candidate retrieval)
+    oos_fraction: float = 0.0  # fraction of candidates that are out of stock (0.0–1.0)
+    stock_filter_opted_in: bool = False  # True when user already chose "in-stock only"
 
 
 # ── Game / software detection from query text ──
@@ -332,6 +335,32 @@ class NextQuestionEngine:
                 )
         except Exception:
             pass
+
+        # ── Stock availability question ──────────────────────────────────────────
+        # Fire when >30% of candidates are OOS and the user hasn't already opted
+        # into the stock filter. This is a high-signal UX moment: asking once
+        # prevents future frustration when recommended items are unavailable.
+        _stock_q_id = "ask_stock_filter"
+        if (
+            float(inp.oos_fraction or 0.0) >= 0.30
+            and not bool(inp.stock_filter_opted_in)
+            and _stock_q_id not in (inp.previously_asked_ids or [])
+            and str(inp.answered_fields.get("stock_filter_preference") or "") == ""
+            and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM")
+        ):
+            questions.append(
+                NextQuestion(
+                    id=_stock_q_id,
+                    text="Some of your options are currently out of stock. Would you like me to only show items available right now?",
+                    goal="stock_filter_preference",
+                    evidence_needed=["stock_filter_preference"],
+                    source="inventory_nqe",
+                    options=[
+                        {"label": "Yes, in-stock only", "value": "in_stock_only"},
+                        {"label": "Show all (including out-of-stock)", "value": "show_all"},
+                    ],
+                )
+            )
 
         # ── Detect implicit context from query ──
         detected_games = inp.detected_games or detect_games_in_text(query_text)

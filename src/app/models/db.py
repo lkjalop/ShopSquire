@@ -46,8 +46,24 @@ def _register_sqlite_now(engine):
 # register compatibility helpers; otherwise, defer connectivity to callers/tests.
 def _create_engine_with_fallback(url: str):
     if url and url.startswith("sqlite"):
-        eng = create_engine(url, pool_pre_ping=True, future=True)
+        eng = create_engine(
+            url,
+            pool_pre_ping=True,
+            future=True,
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
         _register_sqlite_now(eng)
+        # Enable WAL journal mode and a generous busy_timeout so concurrent
+        # background agents don't deadlock on the same SQLite file.
+        try:
+            from sqlalchemy import event as _sa_event, text as _text
+            @_sa_event.listens_for(eng, "connect")
+            def _sqlite_wal(dbapi_conn, _rec):
+                dbapi_conn.execute("PRAGMA journal_mode=WAL")
+                dbapi_conn.execute("PRAGMA busy_timeout=10000")
+                dbapi_conn.execute("PRAGMA synchronous=NORMAL")
+        except Exception:
+            pass
         return eng
     # Do not fallback silently to SQLite; always honor configured URL.
     # create_engine does not connect immediately, so this is safe even if the

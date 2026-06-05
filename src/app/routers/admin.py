@@ -1410,6 +1410,7 @@ def get_security_events(
     offset: int = Query(0, ge=0),
     severity: str | None = Query(None),
     path_contains: str | None = Query(None),
+    request_id: str | None = Query(None),
     since: str | None = Query(None),
     until: str | None = Query(None),
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
@@ -1539,6 +1540,22 @@ def get_security_events(
             except Exception:
                 r["details"] = r.get("details")
             merged.append(r)
+        if request_id:
+            rid_want = str(request_id).strip()
+            filtered: list[dict] = []
+            for r in merged:
+                details = r.get("details") if isinstance(r.get("details"), dict) else {}
+                payload = details.get("payload") if isinstance(details.get("payload"), dict) else {}
+                inner_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+                rid_val = str(
+                    payload.get("request_id")
+                    or inner_payload.get("request_id")
+                    or details.get("request_id")
+                    or ""
+                ).strip()
+                if rid_val == rid_want:
+                    filtered.append(r)
+            merged = filtered
         return {"events": merged[:limit], "count": len(merged)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

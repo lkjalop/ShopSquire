@@ -123,33 +123,45 @@ def vision_analyze_with_ollama(
 
         img_b64 = base64.b64encode(norm_bytes).decode("ascii")
         last_err: Dict[str, Any] | None = None
+        _MAX_ATTEMPTS = 2  # 1 retry on transient failure (timeout / connection reset)
         for url in base_urls:
             for m in model_candidates:
-                started = time.time()
-                try:
-                    resp = requests.post(
-                        f"{url}/api/generate",
-                        json={
-                            "model": m,
-                            "prompt": prompt,
-                            "images": [img_b64],
-                            "stream": False,
-                            "options": {"temperature": 0.0},
-                        },
-                        timeout=timeout_s,
-                    )
-                    ms = int((time.time() - started) * 1000)
-                    if resp.status_code >= 400:
-                        last_err = {"ok": False, "error": f"ollama_http_{resp.status_code}", "detail": resp.text[:2000], "ms": ms, "model": m, "url": url}
+                _success = False
+                for _attempt in range(_MAX_ATTEMPTS):
+                    started = time.time()
+                    try:
+                        resp = requests.post(
+                            f"{url}/api/generate",
+                            json={
+                                "model": m,
+                                "prompt": prompt,
+                                "images": [img_b64],
+                                "stream": False,
+                                "options": {"temperature": 0.0},
+                            },
+                            timeout=timeout_s,
+                        )
+                        ms = int((time.time() - started) * 1000)
+                        if resp.status_code >= 400:
+                            last_err = {"ok": False, "error": f"ollama_http_{resp.status_code}", "detail": resp.text[:2000], "ms": ms, "model": m, "url": url}
+                            break  # HTTP error won't improve on retry
+                        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                        raw = str(data.get("response") or "")
+                        parsed = _extract_json(raw)
+                        if not isinstance(parsed, dict):
+                            last_err = {"ok": False, "error": "ollama_non_json", "raw": raw[:4000], "ms": ms, "model": m, "url": url}
+                            break  # Bad JSON won't improve on retry
+                        _success = True
+                        break
+                    except requests.exceptions.Timeout as exc:
+                        last_err = {"ok": False, "error": "ollama_timeout", "detail": str(exc), "attempt": _attempt + 1, "model": m, "url": url}
+                        if _attempt < _MAX_ATTEMPTS - 1:
+                            time.sleep(1.0)
                         continue
-                    data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                    raw = str(data.get("response") or "")
-                    parsed = _extract_json(raw)
-                    if not isinstance(parsed, dict):
-                        last_err = {"ok": False, "error": "ollama_non_json", "raw": raw[:4000], "ms": ms, "model": m, "url": url}
-                        continue
-                except requests.RequestException as exc:
-                    last_err = {"ok": False, "error": "ollama_request_exception", "detail": str(exc), "model": m, "url": url}
+                    except requests.RequestException as exc:
+                        last_err = {"ok": False, "error": "ollama_request_exception", "detail": str(exc), "model": m, "url": url}
+                        break  # Non-timeout network error — move to next candidate
+                if not _success:
                     continue
 
                 # Normalize shape and clamp enums to avoid surprising UI logic.

@@ -13,8 +13,18 @@ export default function AttachmentButton({ onFiles, disabled = false, className 
   const [menuOpen, setMenuOpen] = useState(false);
   const acceptImages = 'image/*,.avif,image/avif';
 
+  const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — matches backend ATTACHMENT_MAX_BYTES (12 MB) with margin
+
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
+    const all = e.target.files ? Array.from(e.target.files) : [];
+    const oversized = all.filter(f => f.size > MAX_FILE_BYTES);
+    if (oversized.length > 0) {
+      alert(`Image too large: ${oversized.map(f => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Maximum is 10 MB.`);
+      e.target.value = '';
+      setMenuOpen(false);
+      return;
+    }
+    const files = all.filter(f => f.size > 0);
     if (files.length > 0) onFiles(files);
     e.target.value = '';
     setMenuOpen(false);

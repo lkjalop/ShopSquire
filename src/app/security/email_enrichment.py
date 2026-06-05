@@ -7,7 +7,10 @@ import os
 import time
 import logging
 
-import requests
+try:
+    import httpx as _httpx
+except Exception:
+    _httpx = None  # type: ignore[assignment]
 
 from src.app.security.threat_intel_store import resolve_indicator
 
@@ -107,7 +110,7 @@ def enrich_iocs(iocs: List[Dict[str, Any]], *, tenant_id: str | None = None) -> 
                 indicator = value
                 kind = "domain" if ioc_type == "domain" else ("IPv4" if ioc_type == "ip" else "url")
                 url = f"https://otx.alienvault.com/api/v1/indicators/{kind}/{indicator}/general"
-                r = requests.get(url, headers={"X-OTX-API-KEY": otx_key}, timeout=3.0)
+                r = _httpx.get(url, headers={"X-OTX-API-KEY": otx_key}, timeout=3.0)
                 if 200 <= int(r.status_code) < 300:
                     body = r.json()
                     pulse_info = body.get("pulse_info") or {}
@@ -188,7 +191,7 @@ def detonate_targets(urls: List[str], attachment_hashes: List[str]) -> Dict[str,
             headers = {"Content-Type": "application/json"}
             if sandbox_token:
                 headers["Authorization"] = f"Bearer {sandbox_token}"
-            r = requests.post(sandbox_url, headers=headers, data=json.dumps(payload), timeout=6.0)
+            r = _httpx.post(sandbox_url, headers=headers, content=json.dumps(payload).encode(), timeout=6.0)
             if 200 <= int(r.status_code) < 300:
                 body = r.json() if "application/json" in (r.headers.get("content-type") or "") else {}
                 return {

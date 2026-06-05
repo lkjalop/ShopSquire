@@ -218,6 +218,10 @@ def score_query_complexity(
         explanations.append("Direct budget yes/no question — medium model required")
 
     total = min(10, sum(signals.values()))
+    # Image input floor: bare image (no keyword match) still deserves vision-capable small model minimum.
+    if ctx.get("has_image") and total < 3:
+        total = 3
+        explanations.append("Image input floor: score raised to 3 → VLM minimum")
     # Budget yes/no questions and use-case specific queries require at least medium tier.
     if signals.get("budget_question") and total < 5:
         total = 5

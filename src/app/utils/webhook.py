@@ -8,9 +8,9 @@ import hmac
 from src.app.security.url_guard import ensure_safe_outbound_url
 
 try:
-    import requests
+    import httpx as _httpx
 except Exception:
-    requests = None
+    _httpx = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +49,13 @@ def send_webhook(url: str, payload: dict, timeout: float = 0.5, secret: str | No
         except Exception:
             pass
 
-        if not requests:
-            logger.debug("requests not available; webhook skipped for %s", url)
+        if not _httpx:
+            logger.debug("httpx not available; webhook skipped for %s", url)
             return
         try:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers = {"Content-Type": "application/json"}
             ts = int(time.time())
-            # allow explicit secret override; fallback to env var
             effective_secret = secret or os.getenv("WEBHOOK_SECRET", "")
             if effective_secret:
                 sig = _make_signature(effective_secret, body, ts)
@@ -64,8 +63,8 @@ def send_webhook(url: str, payload: dict, timeout: float = 0.5, secret: str | No
                 headers[os.getenv("WEBHOOK_TIMESTAMP_HEADER", "x-webhook-timestamp")] = str(ts)
                 if key_id:
                     headers["x-webhook-key"] = key_id
-
-            requests.post(url, data=body, headers=headers, timeout=timeout)
+            with _httpx.Client(timeout=timeout) as client:
+                client.post(url, content=body, headers=headers)
         except Exception as e:
             logger.debug("webhook send failed: %s", e)
 

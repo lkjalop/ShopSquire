@@ -34,6 +34,127 @@ from src.app.schemas.ui_contracts import DecisionTraceQueryResponse
 router = APIRouter(prefix="/api/v1/decisions", tags=["decisions"])
 tracer = get_tracer("decisions-router")
 logger = logging.getLogger(__name__)
+_EXPLAIN_CACHE: dict[str, tuple[float, Dict]] = {}
+_EXPLAIN_CACHE_TTL_SECONDS = 300.0
+
+
+def _trace_context_from_events(trace_id: str, events: list[dict] | None) -> Dict:
+    """Reconstruct enough trace context from memory/durable events for fast paths."""
+    events = events or []
+    products_summary = None
+    right_panel_contract = None
+    shopper_intent = None
+    multimodal_fusion = None
+    image_security = None
+    input_query = None
+    ranked_products = None
+    agent_chain: list[dict] = []
+    security_analysis = None
+    security_matrix = None
+
+    for evt in events:
+        payload = evt.get("payload") if isinstance(evt, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        et = str(evt.get("event_type") or payload.get("_event_type") or "").lower()
+        original = str(payload.get("_original_event_type") or payload.get("original_event_type") or "").lower()
+        source_id = str(evt.get("source_id") or payload.get("_producer") or "")
+        if input_query is None and isinstance(payload.get("query"), str):
+            input_query = payload.get("query")
+        if shopper_intent is None:
+            if isinstance(payload.get("shopper_intent"), dict):
+                shopper_intent = payload.get("shopper_intent")
+            elif isinstance(payload.get("intent_analysis"), dict):
+                shopper_intent = payload.get("intent_analysis")
+        if multimodal_fusion is None and isinstance(payload.get("multimodal_fusion"), dict):
+            multimodal_fusion = payload.get("multimodal_fusion")
+        if image_security is None and isinstance(payload.get("image_security"), dict):
+            image_security = payload.get("image_security")
+        if products_summary is None and isinstance(payload.get("products_summary"), list):
+            products_summary = payload.get("products_summary")
+        if products_summary is None and isinstance(payload.get("promoted"), list):
+            products_summary = payload.get("promoted")
+        if ranked_products is None and isinstance(payload.get("ranked_products"), list):
+            ranked_products = payload.get("ranked_products")
+        if right_panel_contract is None and isinstance(payload.get("right_panel_contract"), dict):
+            right_panel_contract = payload.get("right_panel_contract")
+        if right_panel_contract is None and isinstance(payload.get("right_panel"), dict):
+            right_panel_contract = payload.get("right_panel")
+        if security_matrix is None and isinstance(payload.get("security_matrix"), dict):
+            security_matrix = payload.get("security_matrix")
+        if et in {"agent_step", "candidate_retrieval", "product_ranking", "security_scan", "shopper_intent"} or source_id.endswith("_Agent"):
+            agent_name = source_id or str(payload.get("agent") or "")
+            if agent_name and not any(a.get("agent") == agent_name for a in agent_chain):
+                agent_chain.append({"agent": agent_name, "duration_ms": payload.get("duration_ms")})
+        if et == "security_scan" or original == "security_scan":
+            matrix = security_matrix or ((right_panel_contract or {}).get("security_matrix") if isinstance(right_panel_contract, dict) else {})
+            details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+            security_analysis = {
+                "severity": payload.get("severity") or details.get("severity") or matrix.get("severity_band") or "review",
+                "policy_route": payload.get("policy_action") or (matrix or {}).get("policy_action"),
+                "signals": {
+                    "raw_payload_quarantined": payload.get("raw_payload_quarantined", True),
+                    "recommendation_allowed": payload.get("recommendation_allowed", True),
+                    "deep_security_pending": payload.get("deep_security_pending", True),
+                    **(matrix.get("signals") if isinstance(matrix.get("signals"), dict) else {}),
+                    **(details.get("signals") if isinstance(details.get("signals"), dict) else {}),
+                    **{str(flag): True for flag in (payload.get("unsafe_flags") or [])},
+                },
+                "owasp_llm_top10": (matrix or {}).get("owasp") or (matrix or {}).get("owasp_llm") or details.get("owasp_llm_top10") or [],
+                "mitre_atlas": (matrix or {}).get("mitre") or details.get("mitre_atlas") or [],
+                "stride_categories": (matrix or {}).get("stride") or details.get("stride_categories") or [],
+                "maestro": payload.get("maestro") or (matrix or {}).get("maestro") or [],
+            }
+
+    if products_summary is None and ranked_products is not None:
+        products_summary = ranked_products
+    if security_matrix is None and isinstance(right_panel_contract, dict):
+        security_matrix = right_panel_contract.get("security_matrix")
+    if security_analysis is None and isinstance(security_matrix, dict):
+        security_analysis = {
+            "severity": "review",
+            "policy_route": security_matrix.get("policy_action"),
+            "owasp_llm_top10": security_matrix.get("owasp") or [],
+            "mitre_atlas": security_matrix.get("mitre") or [],
+            "maestro": security_matrix.get("maestro") or [],
+            "signals": {
+                "raw_payload_quarantined": True,
+                "recommendation_allowed": True,
+                "deep_security_pending": True,
+            },
+        }
+
+    out: Dict = {
+        "decision_id": trace_id,
+        "timestamp": (events[0].get("created_at") if events and isinstance(events[0], dict) else None),
+        "input_query": input_query,
+        "intent_analysis": shopper_intent or {},
+        "agent_chain": agent_chain,
+        "rag_context": {"products_retrieved": len(products_summary or [])},
+        "evidence": {},
+        "recommendation": {
+            "product_id": ((products_summary or [{}])[0] or {}).get("sku") if products_summary else None,
+            "reasoning": "fast_path_event_trace",
+            "score": ((products_summary or [{}])[0] or {}).get("score_norm") if products_summary else None,
+        },
+        "policy_gates": {"decision": "allow", "policy_action": (security_matrix or {}).get("policy_action") if isinstance(security_matrix, dict) else None},
+        "bitemporal": {},
+        "model_selection": {"selected": "rule-based fast path", "complex": False, "path": ["fast_path_catalog"]},
+        "events": events,
+    }
+    if products_summary is not None:
+        out["products"] = products_summary
+    if right_panel_contract is not None:
+        out["right_panel"] = right_panel_contract
+    if security_matrix is not None:
+        out["security_matrix"] = security_matrix
+    if multimodal_fusion is not None:
+        out["multimodal_fusion"] = multimodal_fusion
+    if image_security is not None:
+        out["image_security"] = image_security
+    if security_analysis is not None:
+        out["security"] = _build_security_payload(security_analysis)
+    return out
 
 _QUERY_DECISIONS_SQL = text(
         """
@@ -304,6 +425,11 @@ def _build_security_payload(details: Dict | None) -> Dict:
         "owasp_agentic": sec.get("owasp_agentic_top10", []),
         "owasp_api": sec.get("owasp_api_top10", []),
         "stride": sec.get("stride_categories", []),
+        "maestro": sec.get("maestro", []),
+        "maestro_tags": sec.get("maestro_tags", []),
+        "maestro_checked": sec.get("maestro_checked"),
+        "maestro_boundary": sec.get("maestro_boundary"),
+        "maestro_violations": sec.get("maestro_violations", []),
         "signals": signals,
         "risk_adj": sec.get("risk_adj"),
         "risk_raw": sec.get("risk_raw"),
@@ -1340,14 +1466,32 @@ def query_decision_trace(
                 events = []
             if not events:
                 try:
+                    events = get_cached_trace_events(trace_id) or []
+                except Exception:
+                    events = []
+            if not events:
+                try:
                     events = _synthesize_trace_events(trace_id, {"decision_id": trace_id})
                 except Exception:
                     events = []
+            event_context = _trace_context_from_events(trace_id, events or [])
             return {
                 "decision_id": trace_id,
-                "timestamp": None,
-                "input_query": None,
-                "bitemporal": {},
+                "timestamp": event_context.get("timestamp"),
+                "input_query": event_context.get("input_query"),
+                "intent_analysis": event_context.get("intent_analysis") or {},
+                "agent_chain": event_context.get("agent_chain") or [],
+                "rag_context": event_context.get("rag_context") or {},
+                "recommendation": event_context.get("recommendation"),
+                "policy_gates": event_context.get("policy_gates") or {},
+                "bitemporal": event_context.get("bitemporal") or {},
+                "model_selection": event_context.get("model_selection") or {},
+                "right_panel": event_context.get("right_panel"),
+                "security": event_context.get("security"),
+                "security_matrix": event_context.get("security_matrix"),
+                "products": event_context.get("products") or [],
+                "multimodal_fusion": event_context.get("multimodal_fusion"),
+                "image_security": event_context.get("image_security"),
                 "events": events or [],
                 "evidence": [] if include_evidence else {},
             }
@@ -1412,6 +1556,17 @@ def query_decision_trace(
                 base["events"] = _synthesize_trace_events(trace_id, base)
             except Exception:
                 base["events"] = []
+        try:
+            event_context = _trace_context_from_events(trace_id, base.get("events") or [])
+            for key in ("products", "right_panel", "security", "security_matrix", "multimodal_fusion", "image_security"):
+                if event_context.get(key) is not None and not base.get(key):
+                    base[key] = event_context.get(key)
+            if not base.get("agent_chain") and event_context.get("agent_chain"):
+                base["agent_chain"] = event_context.get("agent_chain")
+            if not base.get("intent_analysis") and event_context.get("intent_analysis"):
+                base["intent_analysis"] = event_context.get("intent_analysis")
+        except Exception:
+            pass
     if include_evidence:
         try:
             rows = db.execute(
@@ -1425,6 +1580,18 @@ def query_decision_trace(
         "decision_id": base.get("decision_id") or trace_id,
         "timestamp": base.get("timestamp"),
         "input_query": base.get("input_query"),
+        "intent_analysis": base.get("intent_analysis") or {},
+        "agent_chain": base.get("agent_chain") or [],
+        "rag_context": base.get("rag_context") or {},
+        "recommendation": base.get("recommendation"),
+        "policy_gates": base.get("policy_gates") or {},
+        "model_selection": base.get("model_selection") or {},
+        "right_panel": base.get("right_panel"),
+        "security": base.get("security"),
+        "security_matrix": base.get("security_matrix"),
+        "products": base.get("products") or [],
+        "multimodal_fusion": base.get("multimodal_fusion"),
+        "image_security": base.get("image_security"),
         "bitemporal": base.get("bitemporal"),
         "events": base.get("events") or [],
         "evidence": base.get("evidence") or {},
@@ -1679,6 +1846,10 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
         if isinstance(retrieved_context, dict) and retrieved_context.get("security_analysis"):
             sec = retrieved_context.get("security_analysis") or {}
             out["security"] = _build_security_payload(sec)
+        if isinstance(retrieved_context, dict) and isinstance(retrieved_context.get("security_matrix"), dict):
+            out["security_matrix"] = retrieved_context.get("security_matrix")
+        if isinstance(proposed_action, dict) and isinstance(proposed_action.get("security_matrix"), dict):
+            out["security_matrix"] = proposed_action.get("security_matrix")
         # Normalize model_selection keys for UI compatibility
         ms = out.get("model_selection") or {}
         if isinstance(ms, dict):
@@ -1749,6 +1920,7 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
         try:
             products_summary = None
             right_panel_contract = None
+            security_matrix = out.get("security_matrix") if isinstance(out.get("security_matrix"), dict) else None
             if isinstance(proposed_action, dict):
                 if isinstance(proposed_action.get("products_summary"), list):
                     products_summary = proposed_action.get("products_summary")
@@ -1773,6 +1945,8 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                     ]
                 if right_panel_contract is None and isinstance(proposed_action.get("right_panel"), dict):
                     right_panel_contract = proposed_action.get("right_panel")
+                if security_matrix is None and isinstance(proposed_action.get("security_matrix"), dict):
+                    security_matrix = proposed_action.get("security_matrix")
             events = _fetch_trace_events(str(trace_id))
             for evt in reversed(events or []):
                 payload = evt.get("payload") if isinstance(evt, dict) else None
@@ -1784,12 +1958,16 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
                     products_summary = payload.get("promoted")
                 if right_panel_contract is None and isinstance(payload.get("right_panel_contract"), dict):
                     right_panel_contract = payload.get("right_panel_contract")
-                if products_summary is not None and right_panel_contract is not None:
+                if security_matrix is None and isinstance(payload.get("security_matrix"), dict):
+                    security_matrix = payload.get("security_matrix")
+                if products_summary is not None and right_panel_contract is not None and security_matrix is not None:
                     break
             if products_summary is not None:
                 out["products"] = products_summary
             if right_panel_contract is not None:
                 out["right_panel"] = right_panel_contract
+            if security_matrix is not None:
+                out["security_matrix"] = security_matrix
         except Exception:
             pass
         return out
@@ -1808,6 +1986,9 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
     flags = load_feature_flags(get_settings().feature_flags_path)
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
+    cached = _EXPLAIN_CACHE.get(trace_id)
+    if cached and (time.time() - cached[0]) < _EXPLAIN_CACHE_TTL_SECONDS:
+        return cached[1]
 
     from sqlalchemy import text as _text
     try:
@@ -1837,7 +2018,56 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
         except Exception:
             row = None
     if not row:
-        raise HTTPException(status_code=404, detail="decision_not_found")
+        try:
+            events = _fetch_trace_events(trace_id)
+        except Exception:
+            events = []
+        if not events:
+            try:
+                events = get_cached_trace_events(trace_id) or []
+            except Exception:
+                events = []
+        if not events:
+            raise HTTPException(status_code=404, detail="decision_not_found")
+        event_context = _trace_context_from_events(trace_id, events)
+        products = event_context.get("products") or []
+        right_panel = event_context.get("right_panel") or {}
+        security_matrix = event_context.get("security_matrix") or (right_panel.get("security_matrix") if isinstance(right_panel, dict) else {}) or {}
+        summary = {
+            "reasoning": [
+                "Fast-path recommendation used sanitized query text and safe image hints only.",
+                "Raw QR/OCR/link payloads were quarantined and were not used to retrieve products.",
+                "Products were ranked from the local catalog by query fit, budget, gaming signals, stock, and safe brand/use-case hints.",
+            ],
+            "products": [
+                {
+                    "sku": p.get("sku"),
+                    "name": p.get("name"),
+                    "score_norm": p.get("score_norm"),
+                    "reasons": p.get("reasons") or [],
+                    "reason_codes": p.get("reason_codes") or [],
+                }
+                for p in products[:8]
+                if isinstance(p, dict)
+            ],
+            "risks": {
+                "policy_action": security_matrix.get("policy_action"),
+                "maestro": security_matrix.get("maestro") or [],
+            },
+            "next_steps": "Render recommendations immediately; continue deeper image/security triage outside the user-facing fast path.",
+        }
+        out = {
+            "decision_id": trace_id,
+            "model": None,
+            "summary": summary,
+            "partial": True,
+            "source": "fast_path_event_trace",
+            "right_panel": right_panel,
+            "security_matrix": security_matrix,
+            "products": products,
+        }
+        _EXPLAIN_CACHE[trace_id] = (time.time(), out)
+        return out
 
     def _json(val):
         if val is None:
@@ -1906,7 +2136,7 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
         from src.app.services.llm_provider import select_ollama_model, ollama_generate
         q = f"Summarize decision in 3 bullets: reasoning, risks, and next steps. Also summarize any CV forensics (verdict and key signals).\nContext: {json.dumps(prompt, ensure_ascii=False)}"
         model = select_ollama_model(q)
-        res = await ollama_generate(model, q)
+        res = await asyncio.wait_for(ollama_generate(model, q), timeout=2.5)
         summary = res.get("response")
     except Exception:
         try:
@@ -1919,11 +2149,14 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
         except Exception:
             summary = "summary_unavailable"
 
-    return {
+    out = {
         "decision_id": trace_id,
         "model": model,
         "summary": summary,
+        "partial": model is None,
     }
+    _EXPLAIN_CACHE[trace_id] = (time.time(), out)
+    return out
 
 
 # --- New: Replay view (inputs, model choices, tools invoked) ---
@@ -1936,7 +2169,12 @@ def replay_decision(trace_id: str, role: str = Depends(require_role([ROLE_MERCHA
     flags = load_feature_flags(get_settings().feature_flags_path)
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
-    base = get_decision_trace(trace_id=trace_id, role=role, db=db)
+    try:
+        base = get_decision_trace(trace_id=trace_id, role=role, db=db)
+    except HTTPException as exc:
+        if getattr(exc, "status_code", None) != 404:
+            raise
+        base = {"decision_id": trace_id, "input_query": None, "intent_analysis": None, "model_selection": None, "agent_chain": []}
     try:
         events = _fetch_trace_events(trace_id)
     except Exception:

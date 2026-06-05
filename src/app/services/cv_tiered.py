@@ -16,6 +16,7 @@ from src.app.observability.telemetry import telemetry_emit
 from src.app.policy.vertical_pack import load_vertical_pack
 from src.app.rules.image_quality import assess_image_quality
 from src.app.deps import get_redis
+import asyncio
 import os
 import time
 import math
@@ -278,7 +279,9 @@ class TieredCVProvider:
             enhanced["damage_classifier"] = {"error": "damage_classifier_failed"}
         try:
             if isinstance(image_bytes, (bytes, bytearray)) and image_bytes:
-                enhanced["forensics"] = self.forensics.analyze_image(bytes(image_bytes))
+                enhanced["forensics"] = await asyncio.to_thread(
+                    self.forensics.analyze_image, bytes(image_bytes)
+                )
         except Exception:
             enhanced["forensics"] = {"error": "forensics_failed"}
         try:

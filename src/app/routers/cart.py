@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Dict, List
 
@@ -181,6 +182,73 @@ def get_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWN
         return {"cart_id": cart_id, **hydrated}
 
 
+def _get_cart_sku_qty(uid: str, sku: str) -> int:
+    """Return quantity of *sku* already in uid's active cart without creating one."""
+    try:
+        from sqlalchemy import text as _text
+        with db_session() as db:
+            row = db.execute(
+                _text(
+                    "SELECT line_items FROM draft_orders "
+                    "WHERE customer_id = :uid AND status = 'draft' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"uid": str(uid)},
+            ).fetchone()
+        if not row:
+            return 0
+        items = _load_items(row[0])
+        return next((int(it.get("quantity") or 0) for it in items if it.get("sku") == sku), 0)
+    except Exception:
+        return 0
+
+
+def _get_stock_level(sku: str) -> int:
+    """Return current stock for *sku* joining through products (inventory has no sku column)."""
+    try:
+        from sqlalchemy import text as _text
+        with db_session() as db:
+            row = db.execute(
+                _text(
+                    "SELECT COALESCE(SUM(i.stock), 0) "
+                    "FROM inventory i "
+                    "JOIN products p ON p.id = i.product_id "
+                    "WHERE p.sku = :sku"
+                ),
+                {"sku": str(sku)},
+            ).fetchone()
+            return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+
+
+def _batch_stock_levels(skus: List[str]) -> Dict[str, int]:
+    """Batch variant of _get_stock_level for the PUT stock gate."""
+    if not skus:
+        return {}
+    try:
+        from sqlalchemy import text as _text
+        params = {f"s{i}": s for i, s in enumerate(skus)}
+        placeholders = ", ".join(f":{k}" for k in params)
+        with db_session() as db:
+            rows = db.execute(
+                _text(
+                    f"SELECT p.sku, COALESCE(SUM(i.stock), 0) "
+                    f"FROM products p "
+                    f"LEFT JOIN inventory i ON i.product_id = p.id "
+                    f"WHERE p.sku IN ({placeholders}) "
+                    f"GROUP BY p.sku"
+                ),
+                params,
+            ).fetchall()
+        result = {str(r[0]): int(r[1] or 0) for r in rows}
+        for sku in skus:
+            result.setdefault(sku, 0)
+        return result
+    except Exception:
+        return {sku: 0 for sku in skus}
+
+
 @router.post("/items")
 def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.add_item"):
@@ -192,20 +260,69 @@ def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_ME
             sku_values=[payload.sku],
             quantity_values=[payload.quantity],
         )
+        # Stock gate: validate before touching the cart so rejected requests
+        # never create phantom carts. Read existing qty with a lightweight
+        # read-only query (no cart creation), then stock check, then get-or-create.
+        requested_qty = int(payload.quantity or 1)
+        existing_qty = _get_cart_sku_qty(payload.uid, payload.sku)
+        total_qty = existing_qty + requested_qty
+        stock = _get_stock_level(payload.sku)
+        if stock == 0:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "out_of_stock", "sku": payload.sku, "available": 0},
+            )
+        if stock < total_qty:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "insufficient_stock",
+                    "sku": payload.sku,
+                    "available": stock,
+                    "in_cart": existing_qty,
+                    "requested": requested_qty,
+                    "total_would_be": total_qty,
+                },
+            )
+        # Stock validated — now get-or-create the cart and persist.
         cart_id, items = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.add_item", signal=signal)
         found = False
         for it in items:
             if it.get("sku") == payload.sku:
-                it["quantity"] = int(it.get("quantity") or 1) + int(payload.quantity or 1)
+                it["quantity"] = total_qty
                 found = True
                 break
         if not found:
-            items.append({"sku": payload.sku, "quantity": int(payload.quantity or 1)})
+            items.append({"sku": payload.sku, "quantity": requested_qty})
         _save_cart(cart_id, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
         hydrated = _with_bundle_state(cart_id=cart_id, uid=payload.uid, role=role, hydrated=hydrated)
+        # ── Upsell candidates ──────────────────────────────────────────────────
+        try:
+            from src.app.services.upsell_engine import get_upsell_candidates
+            cart_skus = [it.get("sku") for it in items if it.get("sku") and it.get("sku") != payload.sku]
+            # Retrieve session query from Redis for NLP use-case expansion (best-effort)
+            session_query = None
+            try:
+                from src.app.deps import get_redis
+                _r = get_redis()
+                _q_raw = _r.get(f"session:{payload.uid}:last_query")
+                if _q_raw:
+                    session_query = _q_raw.decode("utf-8") if isinstance(_q_raw, bytes) else str(_q_raw)
+            except Exception:
+                pass
+            upsell = get_upsell_candidates(
+                added_sku=payload.sku,
+                cart_skus=cart_skus,
+                session_query=session_query,
+                max_results=3,
+            )
+            if upsell:
+                hydrated["upsell"] = {"trigger": "cart_add", "candidates": upsell}
+        except Exception:
+            pass  # Upsell failure is non-fatal
         return {"cart_id": cart_id, **hydrated}
 
 
@@ -218,9 +335,38 @@ def replace_items(payload: CartItemsPayload, role: str = Depends(require_role([R
             sku_values=[str(it.sku or "") for it in payload.items],
             quantity_values=[int(it.quantity or 1) for it in payload.items],
         )
+        # Aggregate duplicate SKUs in the payload before checking stock.
+        aggregated: Dict[str, int] = {}
+        for it in payload.items:
+            if not it.sku:
+                continue
+            aggregated[str(it.sku)] = aggregated.get(str(it.sku), 0) + int(it.quantity or 1)
+
+        # Batch stock check: reject any SKU whose requested qty exceeds available stock.
+        if aggregated:
+            stock_map = _batch_stock_levels(list(aggregated.keys()))
+            oos_errors = []
+            over_errors = []
+            for sku, qty in aggregated.items():
+                avail = stock_map.get(sku, 0)
+                if avail == 0:
+                    oos_errors.append({"sku": sku, "available": 0})
+                elif avail < qty:
+                    over_errors.append({"sku": sku, "available": avail, "requested": qty})
+            if oos_errors or over_errors:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "stock_validation_failed",
+                        "out_of_stock": oos_errors,
+                        "insufficient_stock": over_errors,
+                    },
+                )
+
         cart_id, _ = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.replace_items", signal=signal)
-        items = [{"sku": it.sku, "quantity": int(it.quantity or 1)} for it in payload.items if it.sku]
+        # Use aggregated quantities (deduped) as the canonical line items.
+        items = [{"sku": sku, "quantity": qty} for sku, qty in aggregated.items()]
         _save_cart(cart_id, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
@@ -257,3 +403,237 @@ def clear_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_O
             "trace_id": _cart_trace_id(cart_id),
             "decision_trace_id": _cart_trace_id(cart_id),
         }
+
+
+# ── Voucher / Discount Code ────────────────────────────────────────────────────
+
+_VOUCHER_ENABLED = os.getenv("VOUCHER_ENDPOINT_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _ensure_voucher_tables() -> None:
+    """Create vouchers and cart_vouchers tables if they don't exist.
+
+    Safe to call multiple times (CREATE TABLE IF NOT EXISTS).
+    Called lazily on first voucher request to avoid blocking startup.
+    """
+    from sqlalchemy import text as _text
+    with db_session() as db:
+        db.execute(_text("""
+            CREATE TABLE IF NOT EXISTS vouchers (
+                id          TEXT PRIMARY KEY,
+                code        TEXT NOT NULL UNIQUE,
+                discount_cents  INTEGER DEFAULT 0,
+                discount_pct    REAL DEFAULT 0.0,
+                description TEXT,
+                max_uses    INTEGER,
+                use_count   INTEGER DEFAULT 0,
+                active      INTEGER DEFAULT 1,
+                min_order_cents INTEGER DEFAULT 0,
+                applies_to_skus TEXT,
+                expires_at  TEXT
+            )
+        """))
+        db.execute(_text("""
+            CREATE TABLE IF NOT EXISTS cart_vouchers (
+                id          TEXT PRIMARY KEY,
+                cart_id     TEXT NOT NULL,
+                voucher_id  TEXT NOT NULL,
+                applied_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+                voided_at   TEXT,
+                UNIQUE (cart_id, voucher_id)
+            )
+        """))
+        try:
+            db.commit()
+        except Exception:
+            pass
+
+
+class VoucherPayload(BaseModel):
+    uid: str
+    code: str
+
+
+def _apply_voucher_atomic(cart_id: str, uid: str, code: str) -> Dict:
+    """Apply a voucher code to a cart using Redis SETNX for distributed locking.
+
+    Protects against:
+    - Race conditions: two simultaneous requests with the same code
+    - Replay attacks: cancel+reuse by marking used atomically with DB update
+    - Stacking: enforces one active voucher per cart
+
+    Returns a dict with keys: discount_cents, discount_pct, description, voucher_id.
+    Raises HTTPException on any invalid/already-used/OOS state.
+    """
+    from sqlalchemy import text as _text
+
+    # ── Sanitise code ──────────────────────────────────────────────────────────
+    code = str(code or "").strip().upper()
+    if not code or len(code) > 64:
+        raise HTTPException(status_code=400, detail="invalid_voucher_code")
+
+    # ── Redis distributed lock (SETNX, 30s TTL) ───────────────────────────────
+    redis_client = None
+    lock_key = f"voucher:lock:{code}"
+    lock_acquired = False
+    try:
+        from src.app.deps import get_redis
+        redis_client = get_redis()
+        lock_acquired = bool(redis_client.set(lock_key, cart_id, nx=True, ex=30))
+        if not lock_acquired:
+            raise HTTPException(status_code=409, detail="voucher_being_processed_try_again")
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Redis unavailable — proceed without distributed lock (DB uniqueness still protects)
+
+    try:
+        with db_session() as db:
+            # ── Look up voucher ────────────────────────────────────────────────
+            try:
+                row = db.execute(
+                    _text(
+                        "SELECT id, discount_cents, discount_pct, description, max_uses, use_count, "
+                        "active, min_order_cents, applies_to_skus, expires_at "
+                        "FROM vouchers WHERE code = :code"
+                    ),
+                    {"code": code},
+                ).fetchone()
+            except Exception:
+                row = None
+
+            if not row:
+                raise HTTPException(status_code=404, detail="voucher_not_found")
+
+            (
+                voucher_id, discount_cents, discount_pct, description,
+                max_uses, use_count, active, min_order_cents,
+                applies_to_skus_raw, expires_at,
+            ) = row
+
+            if not active:
+                raise HTTPException(status_code=409, detail="voucher_inactive")
+
+            # ── Expiry check ────────────────────────────────────────────────
+            if expires_at:
+                from datetime import datetime, timezone as _tz
+                try:
+                    exp = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+                    if exp.tzinfo is None:
+                        exp = exp.replace(tzinfo=_tz.utc)
+                    if datetime.now(_tz.utc) > exp:
+                        raise HTTPException(status_code=409, detail="voucher_expired")
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+
+            # ── Max-uses check ──────────────────────────────────────────────
+            if max_uses and int(use_count or 0) >= int(max_uses):
+                raise HTTPException(status_code=409, detail="voucher_exhausted")
+
+            # ── Stacking check: only one active voucher per cart ────────────
+            try:
+                existing = db.execute(
+                    _text("SELECT COUNT(*) FROM cart_vouchers WHERE cart_id = :cid AND voided_at IS NULL"),
+                    {"cid": cart_id},
+                ).scalar()
+                if int(existing or 0) >= 1:
+                    raise HTTPException(status_code=409, detail="only_one_voucher_per_cart")
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+
+            # ── Atomic: cart binding INSERT first, then use_count increment ──
+            # Order matters: only charge the use_count if the binding succeeds.
+            # INSERT without IGNORE so a duplicate constraint raises immediately.
+            binding_id = str(uuid.uuid4())
+            try:
+                db.execute(
+                    _text(
+                        "INSERT INTO cart_vouchers (id, cart_id, voucher_id, applied_at) "
+                        "VALUES (:id, :cid, :vid, CURRENT_TIMESTAMP)"
+                    ),
+                    {"id": binding_id, "cid": cart_id, "vid": voucher_id},
+                )
+            except Exception:
+                raise HTTPException(status_code=409, detail="voucher_already_applied_to_cart")
+
+            updated = db.execute(
+                _text(
+                    "UPDATE vouchers SET use_count = use_count + 1 "
+                    "WHERE id = :vid AND (max_uses IS NULL OR use_count < max_uses)"
+                ),
+                {"vid": voucher_id},
+            ).rowcount
+            if updated == 0:
+                # Concurrent exhaustion: roll back the binding we just inserted.
+                db.execute(_text("DELETE FROM cart_vouchers WHERE id = :id"), {"id": binding_id})
+                raise HTTPException(status_code=409, detail="voucher_exhausted_concurrent")
+
+            try:
+                db.commit()
+            except Exception:
+                pass
+
+        return {
+            "voucher_id": str(voucher_id),
+            "code": code,
+            "discount_cents": int(discount_cents or 0),
+            "discount_pct": float(discount_pct or 0.0),
+            "description": str(description or ""),
+        }
+    finally:
+        # Always release the distributed lock
+        if lock_acquired and redis_client is not None:
+            try:
+                redis_client.delete(lock_key)
+            except Exception:
+                pass
+
+
+@router.post("/voucher")
+def apply_voucher(
+    payload: VoucherPayload,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    """Apply a discount voucher code to the user's active cart.
+
+    Feature-flagged via VOUCHER_ENDPOINT_ENABLED=1 (default: disabled).
+    Tables are created lazily on first call so startup is never blocked.
+    Rate limiting, SETNX distributed lock, and atomic DB update prevent
+    race conditions, replay attacks, and voucher stacking.
+    """
+    if not _VOUCHER_ENABLED:
+        raise HTTPException(status_code=404, detail="voucher_endpoint_not_enabled")
+    # Lazy schema creation: safe to call on every request (IF NOT EXISTS).
+    try:
+        _ensure_voucher_tables()
+    except Exception:
+        raise HTTPException(status_code=503, detail="voucher_schema_unavailable")
+    with tracer.start_as_current_span("cart.apply_voucher"):
+        signal = _guard_cart_request(
+            surface="cart.apply_voucher",
+            uid=payload.uid,
+            sku_values=[],
+            quantity_values=[],
+        )
+        cart_id, items = _get_or_create_cart(payload.uid)
+        _log_cart_security_scan(
+            trace_id=_cart_trace_id(cart_id),
+            source_id="cart.apply_voucher",
+            signal=signal,
+        )
+        voucher = _apply_voucher_atomic(cart_id=cart_id, uid=payload.uid, code=payload.code)
+        hydrated = _hydrate(items)
+        # Apply discount to subtotal
+        discount_cents = int(voucher.get("discount_cents") or 0)
+        if not discount_cents:
+            pct = float(voucher.get("discount_pct") or 0.0)
+            discount_cents = int(round(hydrated.get("subtotal_cents", 0) * pct / 100.0))
+        hydrated["discount_cents"] = discount_cents
+        hydrated["total_cents"] = max(0, hydrated.get("subtotal_cents", 0) - discount_cents)
+        hydrated["voucher"] = voucher
+        hydrated["trace_id"] = _cart_trace_id(cart_id)
+        return {"cart_id": cart_id, **hydrated}

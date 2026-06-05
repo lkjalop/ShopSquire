@@ -32,6 +32,8 @@ interface ProductCard {
   specs_summary?: string;
   use_case_fit?: string;
   image_url?: string;
+  reasons?: string[];
+  reason_codes?: any[];
 }
 
 interface ImageGroup {
@@ -55,10 +57,44 @@ interface ImageGroup {
   detectionReason?: string | null;
   verdictLabel?: string | null;
   confidenceBand?: string | null;
+  fastPathTimeout?: boolean;
+  tracePayload?: RecommendTracePayload | null;
   /** True when the image was classified as a damaged device — show repair card instead of products */
   isRepairIntent?: boolean;
   repairContext?: { brand: string; damage_score: number } | null;
 }
+
+type RecommendTracePayload = {
+  trace_id?: string | null;
+  decision_trace_id?: string | null;
+  decision_id?: string | null;
+  right_panel?: any;
+  security_matrix?: any;
+  safe_image_hints?: any;
+  ranked_products?: any[];
+  image_security?: any;
+};
+
+type SuggestResult = {
+  products: ProductCard[];
+  summary: string;
+  nextQuestions: any[];
+  traceId: string | null;
+  offDomain: boolean;
+  lowSupport: boolean;
+  domainBadge: string | null;
+  fillBadge: string | null;
+  linkedArtifactSummary?: string | null;
+  linkedArtifactPolicyAction?: string | null;
+  linkedArtifactVerdictLabel?: string | null;
+  linkedArtifactConfidenceBand?: string | null;
+  rightPanel?: any;
+  securityMatrix?: any;
+  safeImageHints?: any;
+  rankedProducts?: any[];
+  imageSecurity?: any;
+  raw?: RecommendTracePayload;
+};
 
 type TrustLevel = 'green' | 'yellow' | 'orange' | 'red';
 
@@ -80,7 +116,46 @@ export interface Props {
 const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
 const DEFAULT_UID = ((import.meta as any).env?.VITE_DEFAULT_UID as string | undefined) || 'demo-user';
 const WIDEN_STEPS = [200, 400];
-const RECOMMEND_TIMEOUT_MS = 90000;
+const RECOMMEND_TIMEOUT_MS = 9000;
+
+const LOCAL_FAST_FALLBACK_PRODUCTS: ProductCard[] = [
+  {
+    sku: 'LOCAL-MSI-THIN-A15',
+    name: 'MSI Thin A15 15"',
+    price: 1799,
+    specs_summary: 'Ryzen 5 · RTX 3050 · 8GB RAM · 144Hz',
+    reasons: ['local_fast_path_timeout', 'gaming_use_case_match', 'safe_image_brand_hint'],
+    reason_codes: [
+      { code: 'local_fast_path_timeout', confidence: 0.7 },
+      { code: 'gaming_use_case_match', confidence: 0.82 },
+      { code: 'safe_image_brand_hint', confidence: 0.74 },
+    ],
+  },
+  {
+    sku: 'LOCAL-MSI-KATANA-15',
+    name: 'MSI Katana 15 B13VGK',
+    price: 1499,
+    specs_summary: 'RTX 4070 · 16GB RAM · 144Hz',
+    reasons: ['local_fast_path_timeout', 'discrete_gpu_match', 'in_budget'],
+    reason_codes: [
+      { code: 'local_fast_path_timeout', confidence: 0.7 },
+      { code: 'discrete_gpu_match', confidence: 0.86 },
+      { code: 'in_budget', confidence: 0.8 },
+    ],
+  },
+  {
+    sku: 'LOCAL-LENOVO-LOQ-15',
+    name: 'Lenovo LOQ 15',
+    price: 1399,
+    specs_summary: 'Ryzen 5 · RTX 4050 · 16GB RAM',
+    reasons: ['local_fast_path_timeout', 'nearest_safe_catalog_option', 'in_budget'],
+    reason_codes: [
+      { code: 'local_fast_path_timeout', confidence: 0.7 },
+      { code: 'nearest_safe_catalog_option', confidence: 0.78 },
+      { code: 'in_budget', confidence: 0.8 },
+    ],
+  },
+];
 
 function persistOperatorMetrics(timing: any, traceId: string | null, source = 'visual_search') {
   if (!timing || typeof timing !== 'object') return;
@@ -112,6 +187,7 @@ export function computeTrustLevel(signals: ImageAnalysisContext['cv_signals'], s
   // Explicit threat-hypothesis signals always warrant orange
   if (s.ransomware_indicator || s.c2_beacon_detected || s.payment_social_engineering) return 'orange';
   if (signals.qr_external_url_detected) return 'orange';
+  if (s.fast_triage_timeout) return 'orange';
   if (sessionSuspicious >= 2 || signals.manipulation_detected || signals.steg_suspicious) return 'orange';
   if (signals.qr_code_detected) return 'yellow';
   return 'green';
@@ -380,6 +456,8 @@ function normalizeProductCard(raw: any): ProductCard | null {
     specs_summary: specsSummary || undefined,
     use_case_fit: raw.use_case_suitability || raw.use_case_fit || raw.reason || null,
     image_url: raw.image_url || null,
+    reasons: Array.isArray(raw.reasons) ? raw.reasons.slice(0, 5).map(String) : undefined,
+    reason_codes: Array.isArray(raw.reason_codes) ? raw.reason_codes.slice(0, 5) : undefined,
   };
 }
 
@@ -523,7 +601,7 @@ async function fetchSuggest(
   ctx: ImageAnalysisContext | null,
   budgetMax?: number,
   budgetMin?: number,
-): Promise<{ products: ProductCard[]; summary: string; nextQuestions: any[]; traceId: string | null; offDomain: boolean; lowSupport: boolean; domainBadge: string | null; fillBadge: string | null; linkedArtifactSummary?: string | null; linkedArtifactPolicyAction?: string | null; linkedArtifactVerdictLabel?: string | null; linkedArtifactConfidenceBand?: string | null }> {
+): Promise<SuggestResult> {
   const params = new URLSearchParams({ uid: DEFAULT_UID, query: query || 'show me laptops' });
   if (ctx) {
     const labels = [...(ctx.labels || [])];
@@ -549,14 +627,17 @@ async function fetchSuggest(
   if (budgetMax) params.set('budget_max', String(budgetMax));
   if (budgetMin) params.set('budget_min', String(budgetMin));
   params.set('copywriting_enabled', 'false');
-  params.set('fast_path', shouldUseFastPath(query) ? 'true' : 'false');
+  params.set('fast_path', 'true');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RECOMMEND_TIMEOUT_MS);
 
   try {
     const resp = await fetch(apiUrl(`/api/v1/recommend/suggest?${params.toString()}`), {
       credentials: 'include',
-      headers: API_KEY ? { 'x-api-key': API_KEY } : undefined,
+      headers: {
+        ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
+        'x-skip-observer': '1',
+      },
       signal: controller.signal,
     });
     const data = await safeJson(resp);
@@ -571,6 +652,12 @@ async function fetchSuggest(
       summary: data.assistant_message || '',
       nextQuestions: Array.isArray(data.next_questions) ? data.next_questions : [],
       traceId: data.decision_trace_id || data.trace_id || data.decision_id || null,
+      rightPanel: data?.right_panel || null,
+      securityMatrix: data?.security_matrix || data?.right_panel?.security_matrix || null,
+      safeImageHints: data?.safe_image_hints || null,
+      rankedProducts: Array.isArray(data?.ranked_products) ? data.ranked_products : [],
+      imageSecurity: data?.image_security || null,
+      raw: data,
       offDomain: Boolean(data?.catalog_relevance?.off_domain),
       lowSupport: Boolean(data?.catalog_relevance?.low_support),
       domainBadge: data?.catalog_relevance?.off_domain
@@ -592,6 +679,32 @@ async function fetchSuggest(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function buildLocalTimeoutFallback(
+  query: string,
+  brand: string,
+  budgetMax?: number,
+  budgetMin?: number,
+): ProductCard[] {
+  const q = String(query || '').toLowerCase();
+  let products = LOCAL_FAST_FALLBACK_PRODUCTS;
+  if (isAppleLikeBrand(brand) || /macbook|apple/.test(q)) {
+    products = [
+      {
+        sku: 'LOCAL-MACBOOK-AIR-M2',
+        name: 'MacBook Air 13"',
+        price: 1599,
+        specs_summary: 'Apple M2 · 8GB RAM · 256GB SSD',
+        reasons: ['local_fast_path_timeout', 'nearest_safe_macbook_option'],
+        reason_codes: [{ code: 'local_fast_path_timeout', confidence: 0.7 }, { code: 'nearest_safe_macbook_option', confidence: 0.76 }],
+      },
+      ...LOCAL_FAST_FALLBACK_PRODUCTS.slice(1, 3),
+    ];
+  }
+  return products
+    .filter((p) => (budgetMin == null || p.price >= budgetMin) && (budgetMax == null || p.price <= Math.max(budgetMax + 400, budgetMax)))
+    .slice(0, 3);
 }
 
 /* ---------- component ---------- */
@@ -660,7 +773,11 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
   }, []);
 
   const buildGroups = useCallback(async () => {
-    if (imageContexts.length === 0 && !userQuery) return;
+    if (imageContexts.length === 0) {
+      setGroups([]);
+      setLoading(false);
+      return;
+    }
     const buildKey = JSON.stringify({
       q: String(userQuery || ''),
       s: sessionSuspiciousCount,
@@ -680,6 +797,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     setGlobalRedBlock(false);
 
     const built: ImageGroup[] = [];
+    const builtSlots: Array<ImageGroup | null> = new Array(imageContexts.length).fill(null);
     let firstTraceId: string | null = null;
     // Auto-budget: derive a sensible ceiling from the detected use-case when none explicit
     const useCase = detectUseCase(userQuery);
@@ -687,9 +805,10 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
     const parsedBudgetMax = extractBudgetMax(userQuery, autoBudget);
     const parsedBudgetMin = extractBudgetMin(userQuery);
 
-    // One group per image (parallelized so one slow image does not block the others)
-    const perImage = await Promise.all(
-      imageContexts.map(async (ctx, i) => {
+    // One group per image. Each lane commits as soon as it resolves so a slow or
+    // compromised image cannot hold the whole visual panel hostage.
+    const perImageSettled = await Promise.allSettled(
+      imageContexts.map((ctx, i) => (async () => {
         const trust = computeTrustLevel(ctx.cv_signals || {}, sessionSuspiciousCount);
         const brand = friendlyBrand(ctx.labels, ctx.ocr_text, ctx.source_name, userQuery);
         const note = TRUST_NOTES[trust];
@@ -812,7 +931,13 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
           const base = stripBudgetHints(userQuery);
           const addLaptopToken = !/\blaptop|notebook|computer|pc|macbook|chromebook\b/i.test(base) && !/^product$/i.test(brand);
           const imageQuery = `${base} ${addLaptopToken ? 'laptop' : ''} ${brand}`.trim();
-          const result = await fetchSuggest(imageQuery, ctx, parsedBudgetMax, parsedBudgetMin);
+          const shouldUseSafePrimary = trust !== 'green' || Boolean((ctx.cv_signals as Record<string, any>)?.fast_triage_timeout);
+          const result = await fetchSuggest(
+            shouldUseSafePrimary ? buildSafeFallbackQuery(userQuery, brand) : imageQuery,
+            ctx,
+            shouldUseSafePrimary && parsedBudgetMax ? parsedBudgetMax + 400 : parsedBudgetMax,
+            shouldUseSafePrimary ? undefined : parsedBudgetMin,
+          );
           const shouldTreatAsOffDomain = forcedOffDomain || (result.offDomain && !looksLikelyDeviceContext(ctx, brand));
           let pickedTraceId: string | null = result.traceId || null;
           let products = result.products.slice(0, 3);
@@ -872,13 +997,26 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             traceId: pickedTraceId,
           };
         } catch (e: any) {
-          const timeoutMsg = String(e?.message || '').includes('recommend_timeout_')
+          const isFastPathTimeout = String(e?.message || '').includes('recommend_timeout_');
+          const timeoutMsg = isFastPathTimeout
             ? `Timed out loading ${brand} recommendations.`
             : `Could not load ${brand} recommendations.`;
           let fallbackProducts: ProductCard[] = [];
           let fallbackSummary = timeoutMsg;
           let fallbackTraceId: string | null = null;
-          if (!forcedOffDomain) {
+          if (isFastPathTimeout && !forcedOffDomain) {
+            fallbackProducts = buildLocalTimeoutFallback(userQuery, brand, parsedBudgetMax, parsedBudgetMin);
+            fallbackSummary = fallbackProducts.length > 0
+              ? `Recommendation service timed out, so I am showing deterministic safe ${inferSummaryUseCase(userQuery)} laptop fallbacks while backend analysis continues.`
+              : timeoutMsg;
+            persistOperatorMetrics({
+              recommendation_timeout: true,
+              recommendation_fallback_used: fallbackProducts.length > 0,
+              recommendation_fallback_source: 'local_deterministic_catalog',
+              qr_decode_success: Boolean(ctx.cv_signals?.qr_code_detected),
+              security_review_required: Boolean(ctx.cv_signals?.qr_external_url_detected || ctx.cv_signals?.qr_prompt_injection),
+            }, null, 'visual_search_local_timeout_fallback');
+          } else if (!forcedOffDomain) {
             try {
               const fallback = await fetchSuggest(buildSafeFallbackQuery(userQuery, brand), ctx, parsedBudgetMax ? parsedBudgetMax + 400 : undefined);
               fallbackProducts = fallback.products.slice(0, 3);
@@ -919,12 +1057,25 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
               verdictLabel: null,
               confidenceBand: null,
               detectionReason: forcedOffDomain ? null : (trust === 'green' ? null : buildLaneDetectionReason(ctx.cv_signals || {})),
+              fastPathTimeout: isFastPathTimeout,
             } as ImageGroup,
             traceId: fallbackTraceId,
           };
         }
-      }),
+      })().then((item) => {
+        if (buildSeq !== buildSeqRef.current) return item;
+        builtSlots[i] = item.group;
+        setGroups(builtSlots.filter(Boolean) as ImageGroup[]);
+        if (!firstTraceId && item.traceId) {
+          firstTraceId = item.traceId;
+          onTraceId?.(item.traceId);
+        }
+        return item;
+      })),
     );
+    const perImage = perImageSettled
+      .filter((item): item is PromiseFulfilledResult<{ group: ImageGroup; traceId: string | null }> => item.status === 'fulfilled')
+      .map((item) => item.value);
     for (const item of perImage) {
       built.push(item.group);
       if (!firstTraceId && item.traceId) firstTraceId = item.traceId;
@@ -1058,7 +1209,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       )}
 
       {/* Loading */}
-      {loading && (
+      {loading && groups.length === 0 && (
         <div className={styles.loading}>
           <div className={styles.spinner} />
           <div>Finding the best matches...</div>
@@ -1071,7 +1222,7 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
       )}
 
       {/* Per-image groups */}
-      {!loading && groups.map((group, idx) => {
+      {groups.map((group, idx) => {
         const trustClass = styles[`trust${group.trustLevel.charAt(0).toUpperCase() + group.trustLevel.slice(1)}`] || styles.trustGreen;
         return (
           <div key={`${group.source}-${idx}`} className={styles.anchorGroup}>

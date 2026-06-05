@@ -1,5 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import fs from 'fs';
+import path from 'path';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -28,7 +30,18 @@ export default defineConfig(({ mode }) => {
         '/health': { target: apiTarget, changeOrigin: true },
         '/healthz': { target: apiTarget, changeOrigin: true },
         '/ui': { target: apiTarget, changeOrigin: true },
-        '/static': { target: apiTarget, changeOrigin: true },
+        '/static': {
+          target: apiTarget,
+          changeOrigin: true,
+          bypass(req) {
+            // Serve files that exist in public/ directly; don't proxy them.
+            const localPath = path.join(process.cwd(), 'public', req.url ?? '');
+            if (fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+              return req.url;
+            }
+            return null;
+          },
+        },
       },
       // CRIT-07: Security headers for the Vite dev server (port 5173).
       // Production builds are served behind nginx/CDN which must mirror these.

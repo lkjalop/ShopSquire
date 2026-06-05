@@ -10,7 +10,33 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from src.app.observability.metrics import record_email_security_connector_event, record_email_security_connector_failure
 from src.app.security.email_security import evaluate_email_security
+
 router = APIRouter(prefix="/api/v1/ingest/gmail", tags=["ingest-gmail"])
+
+
+def _apply_supplier_domain_guard(email: dict) -> dict:
+    """Validate email sender domain against the trusted_supplier_domains allowlist.
+
+    Mutates *email* in-place by adding:
+      - supplier_domain_trusted: bool
+      - supplier_domain_quarantine_id: str | None
+
+    Non-fatal: if the guard raises, the email proceeds with trusted=False so the
+    security evaluation can still inspect it and flag it accordingly.
+    """
+    try:
+        from src.app.services.supplier_domain_guard import validate_supplier_email
+        _guard = validate_supplier_email(
+            str(email.get("from_addr") or ""),
+            operation="email_ingest_gmail",
+            payload_summary=str(email.get("subject") or "")[:120],
+        )
+        email["supplier_domain_trusted"] = _guard.get("trusted", False)
+        email["supplier_domain_quarantine_id"] = _guard.get("quarantine_id")
+    except Exception:
+        email["supplier_domain_trusted"] = False
+        email["supplier_domain_quarantine_id"] = None
+    return email
 
 
 def _check_secret(secret: str | None) -> None:
@@ -50,6 +76,7 @@ async def pubsub_push(
     if isinstance(email, dict) and email.get("from_addr"):
         email = dict(email)
         email["provider"] = "gmail"
+        _apply_supplier_domain_guard(email)
         evaluate_email_security(email, tenant_id=tenant_id)
         return {"ok": True}
 
@@ -68,6 +95,8 @@ async def pubsub_push(
             if isinstance(email2, dict) and email2.get("from_addr"):
                 email2 = dict(email2)
                 email2["provider"] = "gmail"
+                # Apply supplier domain guard to pub/sub decoded path too
+                _apply_supplier_domain_guard(email2)
                 evaluate_email_security(email2, tenant_id=tenant_id)
                 return {"ok": True}
             # Notification-only mode (real Gmail watch): enqueue for worker fetch.

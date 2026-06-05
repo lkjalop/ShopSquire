@@ -1,10 +1,30 @@
 import base64
+import concurrent.futures
 import json
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, List
 import asyncio
 import logging
+
+
+def _run_async_safe(coro):
+    """Run an async coroutine from a sync context safely.
+
+    When the orchestrator.run() sync method is called directly from an async
+    FastAPI route handler there is already a running event loop in the thread,
+    so asyncio.run() raises RuntimeError.  This helper detects that case and
+    executes the coroutine in a fresh thread pool thread that has no event loop,
+    preserving the asyncio.run() semantics without crashing.
+    """
+    try:
+        asyncio.get_running_loop()
+        # We ARE inside a running loop — delegate to a thread where it's safe.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    except RuntimeError:
+        # No running loop in this thread — asyncio.run() is safe.
+        return asyncio.run(coro)
 
 from src.app.models.db import db_session
 from src.app.repositories.catalog import CatalogRepository
@@ -1258,7 +1278,7 @@ class Orchestrator:
                 done = await asyncio.gather(*tasks, return_exceptions=True)
                 return done
 
-            done = asyncio.run(_run_phase2())
+            done = _run_async_safe(_run_phase2())
             for item in done:
                 try:
                     if isinstance(item, dict) and "score" in item and "level" in item:
@@ -1307,14 +1327,13 @@ class Orchestrator:
                 from src.app.services.cv_provider import ManagedCVProvider
                 from src.app.services.cv_triage_basic import BasicCVTriage
                 from src.app.services.vision_reasoning import VisionReasoningService
-                import asyncio as _asyncio
                 t_agent_start = time.time()
-                labels, text, *_ = _asyncio.run(ManagedCVProvider().get_labels_and_text(images[0]))
-                cv_analysis = _asyncio.run(BasicCVTriage().analyze(labels, text))
+                labels, text, *_ = _run_async_safe(ManagedCVProvider().get_labels_and_text(images[0]))
+                cv_analysis = _run_async_safe(BasicCVTriage().analyze(labels, text))
                 try:
                     vision = VisionReasoningService()
                     if vision.available:
-                        product_vision = _asyncio.run(vision.analyze_product(images[0]))
+                        product_vision = _run_async_safe(vision.analyze_product(images[0]))
                         if product_vision and not product_vision.error:
                             if not isinstance(cv_analysis, dict):
                                 cv_analysis = {}
@@ -1514,7 +1533,7 @@ class Orchestrator:
                         from src.app.services.agent_dag_runtime import run_exploration_dag
                         tenant_id = payload.get("tenant_id") if isinstance(payload, dict) else None
                         try:
-                            dag = asyncio.run(
+                            dag = _run_async_safe(
                                 run_exploration_dag(
                                     payload=payload,
                                     run_security=lambda: sec,
@@ -1789,6 +1808,66 @@ class Orchestrator:
             proposal["intent_confidence"] = round(_intent_conf, 3)
         except Exception:
             pass
+
+        # ── Post-action verification (EU AI Act Art. 14 human oversight) ────────
+        # Runs for high-stakes autonomous decisions (deny/escalate) to verify the
+        # action was justified by evidence. Skipped in simulation mode and for
+        # low-stakes auto-resolved decisions to avoid latency overhead.
+        _autonomy_tier = str(proposal.get("autonomy_tier") or "auto")
+        if not simulate_only and _autonomy_tier in ("denied", "escalated"):
+            try:
+                from src.app.services.action_verifier import verify_action, RiskSignals, PolicySnapshot
+                from src.app.services.session_artifacts import RiskSignals as _RSClass, PolicySnapshot as _PSClass
+
+                _fraud_score_v = float(
+                    (fraud_summary.get("score") or fraud_summary.get("fraud_score") or 0)
+                    if isinstance(fraud_summary, dict) else 0
+                ) / 100.0  # normalise 0-100 → 0-1
+
+                _risk = RiskSignals(
+                    fraud_score=_fraud_score_v,
+                    signals=list((fraud_summary.get("evidence") or fraud_summary.get("top_evidence") or []))[:10]
+                    if isinstance(fraud_summary, dict) else [],
+                    policy_blocks=list((policy.get("blocks") or []))[:6] if isinstance(policy, dict) else [],
+                    threat_level="high" if _fraud_score_v >= 0.8 else ("medium" if _fraud_score_v >= 0.4 else "low"),
+                )
+                _pol = PolicySnapshot(
+                    gdpr_consent=bool(payload.get("gdpr_consent")),
+                    personalization_opt_in=bool(payload.get("personalization_opt_in")),
+                )
+                _action_str = "block" if _autonomy_tier == "denied" else "escalate_human"
+                _reasoning = str(proposal.get("synthesis_reasoning") or "")[:400]
+
+                verifier_result = verify_action(
+                    _action_str,
+                    _risk,
+                    _pol,
+                    agent_reasoning=_reasoning,
+                    llm_provider=None,  # air-gapped hard-rules only; no LLM for PII
+                )
+                proposal["verifier"] = {
+                    "score": round(verifier_result.score, 3),
+                    "verdict": verifier_result.verdict,
+                    "reason": verifier_result.reason,
+                    "escalate": verifier_result.escalate,
+                    "hard_rule_fired": verifier_result.hard_rule_fired,
+                    "policy_citations": list(verifier_result.policy_citations or [])[:3],
+                }
+                # Upgrade to full escalation when verifier disagrees with the action
+                if verifier_result.escalate and not policy.get("approval_required"):
+                    policy["approval_required"] = True
+                    proposal["autonomy_badge"] = "ESCALATED — VERIFIER OVERRIDE"
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="verifier_escalation",
+                        source_type="agent",
+                        source_id="action_verifier",
+                        target_type="decision",
+                        target_id=trace_id,
+                        payload=proposal["verifier"],
+                    )
+            except Exception:
+                pass  # Verifier failure is non-fatal; original decision stands
 
         executed = (not simulate_only) and (not bool(policy.get("approval_required", False)))
         return OrchestratorResult(
@@ -2317,9 +2396,8 @@ class Orchestrator:
                 try:
                     from src.app.services.cv_provider import ManagedCVProvider
                     from src.app.services.cv_triage_basic import BasicCVTriage
-                    import asyncio as _asyncio
-                    labels, text = _asyncio.run(ManagedCVProvider().get_labels_and_text(img))
-                    analysis = _asyncio.run(BasicCVTriage().analyze(labels, text))
+                    labels, text = _run_async_safe(ManagedCVProvider().get_labels_and_text(img))
+                    analysis = _run_async_safe(BasicCVTriage().analyze(labels, text))
                     out = dict(analysis or {})
                     out["labels"] = labels
                     out["extracted_text"] = text
@@ -2330,9 +2408,8 @@ class Orchestrator:
             if tool_name == "cv_tier_route":
                 try:
                     from src.app.services.cv_tiered import TieredCVProvider
-                    import asyncio as _asyncio
                     cvt = TieredCVProvider(flags=self.flags)
-                    res = _asyncio.run(cvt.process(img, meta={"trace_id": trace_id}))
+                    res = _run_async_safe(cvt.process(img, meta={"trace_id": trace_id}))
                     _tag(res)
                     return res
                 except Exception:

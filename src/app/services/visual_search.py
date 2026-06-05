@@ -77,8 +77,9 @@ def _ensure_index_dir() -> None:
     _INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _is_index_ready() -> bool:
-    return _faiss_index is not None and len(_product_map) > 0 and _load_clip() and _get_faiss() is not None
+def _is_index_ready(*, load_model: bool = True) -> bool:
+    model_ready = _load_clip() if load_model else (_clip_model is not None)
+    return _faiss_index is not None and len(_product_map) > 0 and model_ready and _get_faiss() is not None
 
 
 def _to_serializable_product(p: Dict[str, Any]) -> Dict[str, Any]:
@@ -121,12 +122,16 @@ def status() -> Dict[str, Any]:
         built_at = int(_state.get("built_at") or 0)
         age_seconds = max(0, now - built_at) if built_at else None
         stale = bool(age_seconds is not None and age_seconds > (_DEFAULT_FRESHNESS_MINUTES * 60))
+        faiss_available = _get_faiss() is not None
+        model_loaded = _clip_model is not None
         return {
-            "available": is_available(),
-            "index_ready": bool(_is_index_ready()),
+            "available": bool(model_loaded and faiss_available),
+            "index_ready": bool(_is_index_ready(load_model=False)),
             "index_size": len(_product_map),
             "embed_dim": int(_EMBED_DIM or 0),
             "model_name": _MODEL_NAME,
+            "model_loaded": model_loaded,
+            "faiss_available": faiss_available,
             "freshness": {
                 "built_at": built_at,
                 "age_seconds": age_seconds,

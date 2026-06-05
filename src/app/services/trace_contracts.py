@@ -297,6 +297,7 @@ def apply_trace_contract(
     event = str(event_type or "").strip().lower()
 
     if event == "security_scan":
+        original_matrix = safe_payload.get("security_matrix") if isinstance(safe_payload.get("security_matrix"), dict) else {}
         security_payload = normalize_security_scan_payload(safe_payload, now_ts=now, source_id=source_id)
         matrix = {
             "severity_band": security_payload.get("severity"),
@@ -307,6 +308,16 @@ def apply_trace_contract(
             "evidence_source": (security_payload.get("evidence") or {}).get("source"),
             "containment_actions": security_payload.get("containment_actions", []),
         }
+        if original_matrix:
+            matrix = {**original_matrix, **{k: v for k, v in matrix.items() if v not in (None, [], {})}}
+            if original_matrix.get("maestro") is not None:
+                matrix["maestro"] = original_matrix.get("maestro")
+            if original_matrix.get("policy_action") is not None:
+                matrix["policy_action"] = original_matrix.get("policy_action")
+        elif safe_payload.get("maestro") is not None:
+            matrix["maestro"] = safe_payload.get("maestro")
+        if safe_payload.get("policy_action") is not None:
+            matrix["policy_action"] = safe_payload.get("policy_action")
         safe_payload["security"] = security_payload
         safe_payload["security_analysis"] = security_payload
         safe_payload["details"] = security_payload
