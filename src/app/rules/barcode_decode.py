@@ -171,7 +171,10 @@ def _try_decode_pyzbar(image_bytes: bytes) -> List[Dict[str, Any]]:
         if not variants:
             variants = [Image.open(BytesIO(image_bytes))]
         for img in variants:
-            decoded = decode(img)
+            try:
+                decoded = decode(img)
+            except Exception:
+                continue
             for d in decoded:
                 try:
                     data = (getattr(d, "data", b"") or b"").decode("utf-8", errors="ignore")

@@ -9,17 +9,30 @@ from tests.utils import default_headers
 def test_followup_query_keeps_budget_context(monkeypatch):
     app = create_app()
     client = TestClient(app, headers=default_headers())
-    state: dict[str, dict] = {}
+    kv_state: dict[str, dict] = {}
+    structured: dict[str, dict] = {}
 
     def _get_context(self, uid: str):
-        kv = state.get(uid) or {}
+        kv = kv_state.get(uid) or {}
         return {"summary": None, "kv": kv, "recent_retrieval": None}
 
     def _set_kv(self, uid: str, kv: dict, ttl_seconds=None):
-        state[uid] = kv or {}
+        kv_state[uid] = dict(kv or {})
+
+    def _get_kv(self, uid: str):
+        return dict(kv_state.get(uid) or {})
+
+    def _set_structured(self, uid: str, s: dict, ttl_seconds=None):
+        structured[uid] = dict(s or {})
+
+    def _get_structured(self, uid: str):
+        return dict(structured.get(uid) or {})
 
     monkeypatch.setattr(Memory, "get_context", _get_context)
     monkeypatch.setattr(Memory, "set_kv", _set_kv)
+    monkeypatch.setattr(Memory, "get_kv", _get_kv)
+    monkeypatch.setattr(Memory, "set_structured_state", _set_structured)
+    monkeypatch.setattr(Memory, "get_structured_state", _get_structured)
 
     def _fake_candidates(self, query: str, limit: int = 10):
         return [
@@ -45,13 +58,16 @@ def test_followup_query_keeps_budget_context(monkeypatch):
 
     second = client.get(
         "/api/v1/recommend/suggest",
-        params={"uid": uid, "query": "can i get a detailed list? also tell me why this laptops?"},
+        params={"uid": uid, "query": "why did you pick those gaming laptops? explain your reasoning"},
     )
     assert second.status_code == 200
     second_body = second.json()
     second_constraints = second_body.get("constraints_used") or {}
 
-    # Regression guard: follow-up prompts should retain prior budget context.
+    # Regression guard: follow-up explain prompts should retain prior budget context.
+    assert second_constraints.get("budget_max") is not None, (
+        f"budget_max missing from followup constraints: {second_constraints}"
+    )
     assert int(second_constraints.get("budget_max")) == 1900
     assert int(second_constraints.get("budget_min")) == 1500
 

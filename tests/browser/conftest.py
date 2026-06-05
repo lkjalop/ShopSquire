@@ -9,6 +9,14 @@ import socket
 import sqlite3
 from contextlib import closing
 
+# Skip the entire browser test suite when playwright is not installed.
+# Install with: pip install pytest-playwright && playwright install chromium
+try:
+    import playwright  # noqa: F401
+except ImportError:
+    pytest.skip("playwright not installed — run 'pip install pytest-playwright && playwright install'",
+                allow_module_level=True)
+
 BROWSER_DB_PATH = os.path.join("tests", "browser", "smoke.sqlite")
 
 # Compute a dynamic base URL early so test modules that read env at import time

@@ -26,10 +26,12 @@ class EasyPostProvider(BaseShippingProvider):
 
     def create_label(self, shipment_info: Dict[str, Any]) -> Dict[str, Any]:
         if not self.api_key:
-            raise RuntimeError(
-                "EASYPOST_API_KEY is not configured — cannot create real shipping label. "
-                "Set EASYPOST_API_KEY in your environment."
-            )
+            return {
+                "ok": False,
+                "stub": True,
+                "provider": "easypost",
+                "error": "EASYPOST_API_KEY is not configured — set it to create real shipping labels.",
+            }
         try:
             import requests
             headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
@@ -284,7 +286,7 @@ def get_default_shipping_provider() -> BaseShippingProvider:
     if ss.key and ss.secret:
         return ss
 
-    raise RuntimeError(
-        "No shipping provider is configured. Set one of: "
-        "AUSPOST_API_KEY, STARTRACK_API_KEY, EASYPOST_API_KEY, or SHIPSTATION_API_KEY."
-    )
+    # No live provider configured — return EasyPost stub so callers get a
+    # valid provider object that returns graceful {"ok": False, "stub": True}
+    # rather than raising. Real labels require a configured API key.
+    return EasyPostProvider()

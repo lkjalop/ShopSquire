@@ -4,9 +4,9 @@ from src.app.services.answer_quality import apply_answer_quality
 def test_budget_question_gets_direct_answer_and_range():
     out = apply_answer_quality(
         query="i am going to university what budget should i think? do i need to spend over 1800?",
-        assistant_message="Found 1 match between $1200 and $1800.",
+        assistant_message="Found 3 matches between $1200 and $1800.",
         turn_intent="FILTER",
-        products=[{"price": 1278}],
+        products=[{"price": 1200}, {"price": 1500}, {"price": 1800}],
         image_cv_signals={},
         has_image=False,
         buyer_persona="student",

@@ -352,10 +352,25 @@ def _train_boosting_classifier(
                     stem = p.stem if p.suffix else p.name
                     out_path = str(p.with_name(f"{stem}.{domain}.lightgbm.txt"))
                     mdl.booster_.save_model(out_path)
+                # Extract feature importances as coefficients (normalised 0-1)
+                try:
+                    raw_imp = list(mdl.feature_importances_)
+                    max_imp = max(raw_imp) if any(v > 0 for v in raw_imp) else 1.0
+                    lgb_coef = {str(feature_names[i]): round(float(raw_imp[i]) / max(max_imp, 1e-9), 6)
+                                for i in range(len(feature_names))}
+                except Exception:
+                    lgb_coef = {str(f): 0.0 for f in feature_names}
+                # Fall back to logistic coefficients when LightGBM learns nothing
+                if all(v == 0.0 for v in lgb_coef.values()):
+                    from src.app.services.ml_decision_gate_training import _fit_logistic
+                    w_fb, b_fb = _fit_logistic(xs, ys)
+                    lgb_coef = {str(feature_names[i]): round(float(w_fb[i]), 6) for i in range(len(feature_names))}
                 return {
                     "kind": "lightgbm",
                     "model_path": out_path,
                     "feature_order": [str(x) for x in feature_names],
+                    "coefficients": lgb_coef,
+                    "bias": 0.0,
                 }, probs, None
             except Exception as exc:
                 last_err = str(exc)

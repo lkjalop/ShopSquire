@@ -5371,15 +5371,16 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
 
     # Core count message (pluralised, comma-formatted budget)
     n = len(results)
-    plural = "es" if n != 1 else ""
+    match_plural = "es" if n != 1 else ""   # "matches"
+    option_plural = "s" if n != 1 else ""   # "options"
     if budget_min is not None and budget_max is not None:
-        core = f"found {n} match{plural} between ${int(budget_min):,} and ${int(budget_max):,}"
+        core = f"found {n} match{match_plural} between ${int(budget_min):,} and ${int(budget_max):,}"
     elif budget_max is not None:
-        core = f"found {n} option{plural} under ${int(budget_max):,}"
+        core = f"found {n} option{option_plural} under ${int(budget_max):,}"
     elif budget_min is not None:
-        core = f"found {n} option{plural} above ${int(budget_min):,}"
+        core = f"found {n} option{option_plural} above ${int(budget_min):,}"
     else:
-        core = f"found {n} option{plural} that match your criteria"
+        core = f"found {n} option{option_plural} that match your criteria"
 
     top_lines: list[str] = []
     try:

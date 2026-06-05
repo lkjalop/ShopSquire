@@ -65,16 +65,27 @@ def test_decision_logs_include_retrieved_context_and_policy(monkeypatch, tmp_pat
         draft_id = d.id
 
     # enable decision log writes and policy version via feature flags
+    # Merge with existing flags to preserve keys like SEASONAL_CONTEXT
     settings = get_settings()
+    _existing_flags: dict = {}
+    try:
+        with open(settings.feature_flags_path, "r", encoding="utf-8") as _ef:
+            _raw = _ef.read().strip()
+        if _raw:
+            _existing_flags = json.loads(_raw)
+    except Exception:
+        _existing_flags = {}
+    _test_flags = dict(_existing_flags)
+    _test_flags.update({
+        "USE_AGENT_CAPABILITIES": True,
+        "AGENT_ROLLOUT_PERCENT": 100,
+        "CAPABILITIES": {"pricing": {"enabled": True, "rollout_percent": 100}},
+        "KILL_SWITCH": False,
+        "DECISION_LOG_WRITES_ENABLED": True,
+        "POLICY_VERSION": "v-test-1",
+    })
     with open(settings.feature_flags_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "USE_AGENT_CAPABILITIES": True,
-            "AGENT_ROLLOUT_PERCENT": 100,
-            "CAPABILITIES": {"pricing": {"enabled": True, "rollout_percent": 100}},
-            "KILL_SWITCH": False,
-            "DECISION_LOG_WRITES_ENABLED": True,
-            "POLICY_VERSION": "v-test-1",
-        }, f, ensure_ascii=False, indent=2)
+        json.dump(_test_flags, f, ensure_ascii=False, indent=2)
 
     # set session kv to reference draft using a FakeRedis
     class FakeRedis:
