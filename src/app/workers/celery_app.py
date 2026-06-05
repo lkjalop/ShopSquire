@@ -275,7 +275,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
         timezone="UTC",
         enable_utc=True,
         task_default_queue=default_q,
-        task_queues=(Queue(default_q), Queue(swarm_q)),
+        task_queues=(Queue(default_q), Queue(swarm_q), Queue("security")),
         task_routes={
             "src.app.tasks.swarm_tasks.run_swarm": {"queue": swarm_q},
             "src.app.tasks.security_poll_tasks.poll_crowdstrike": {"queue": default_q},
@@ -292,6 +292,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.security_poll_tasks.check_config_integrity": {"queue": default_q},
             "src.app.tasks.security_poll_tasks.verify_prompt_hashes": {"queue": default_q},
             "src.app.tasks.security_poll_tasks.verify_audit_chain": {"queue": default_q},
+            "sandbox.detonate": {"queue": "security"},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -299,6 +300,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.model_ops_tasks",
             "src.app.tasks.incident_ops_tasks",
             "src.app.tasks.anomaly_tasks",
+            "src.app.tasks.sandbox_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

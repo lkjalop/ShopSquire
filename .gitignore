@@ -75,3 +75,36 @@ compose.effective.yml
 *.sql.enc
 *.dump
 config/tls/certs/
+
+# Runtime server logs emitted at repo root during dev/test runs
+backend-*.log
+backend-*.err.log
+backend-*.out.log
+frontend-*.log
+frontend-*.err.log
+frontend-*.out.log
+debug.log
+
+# Temporary probe/keeper scripts and their outputs (generated during dev sessions)
+tmp_*.log
+tmp_*.js
+tmp_*.py
+tmp_*.json
+tmp_*.png
+tmp_*.txt
+tmp_pdf_extracts/
+tmp_ui_uploads/
+tmp_server_keeper.*
+tmp_keeper_*.log
+vid-demo/
+
+# Backup / scratch files
+*.bak_utf8
+*.baktest
+_tmp_write_test.txt
+
+# Playwright MCP runtime state
+.playwright-mcp/
+
+# Resume / personal files accidentally placed in repo root
+resume_*.md

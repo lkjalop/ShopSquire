@@ -4464,7 +4464,7 @@ def _summarize_results(
         data = call_with_resilience(
             "ollama.summary",
             lambda: _llm_generate_payload(payload),
-            timeout_s=90.0,
+            timeout_s=float(os.getenv("OLLAMA_SUMMARY_TIMEOUT_S", "25")),
             retries=1,
         )
         if isinstance(data, dict):
@@ -4473,10 +4473,15 @@ def _summarize_results(
             if llm_response:
                 import re as _re_think
                 llm_response = _re_think.sub(r"<think>[\s\S]*?</think>\s*", "", llm_response).strip()
-            if llm_response and yes_no_query and not _starts_direct_answer(llm_response) and budget_preface:
-                llm_response = f"{budget_preface} {str(llm_response).strip()}".strip()
+            if llm_response and yes_no_query and not _starts_direct_answer(llm_response):
+                _preface = budget_preface or _capability_preface(query, results, constraints)
+                if _preface:
+                    llm_response = f"{_preface} {str(llm_response).strip()}".strip()
             # ── Write to semantic cache ──
-            if llm_response and _cache_enabled and not _cached_response:
+            # Quality gate: don't cache a yes/no response that wasn't fixed up
+            # (i.e., LLM non-compliance with no available preface).
+            _cache_ok = not (yes_no_query and not _starts_direct_answer(llm_response or ""))
+            if llm_response and _cache_enabled and not _cached_response and _cache_ok:
                 try:
                     from datetime import datetime, timezone as _tz
                     from src.app.services.embedding_pipeline import EmbeddingPipeline
@@ -4906,6 +4911,94 @@ def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: 
             return f"Yes, but ${int(cap):,} is entry-level for a {label}. Prioritise 16GB RAM, 512GB storage, and a real GPU if gaming matters."
         return f"Yes, ${int(cap):,} is a workable budget for a {label}. You should be able to get a solid fit without stretching too far."
     return _build_brand_budget_answer(query, results, constraints)
+
+
+_CAPABILITY_KB_CACHE: dict | None = None
+_CAPABILITY_KB_LOADED: bool = False
+
+
+def _load_capability_kb() -> dict:
+    global _CAPABILITY_KB_CACHE, _CAPABILITY_KB_LOADED
+    if _CAPABILITY_KB_LOADED:
+        return _CAPABILITY_KB_CACHE or {}
+    try:
+        import json as _json
+        _kb_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "use_case_kb.json")
+        )
+        with open(_kb_path, "r", encoding="utf-8") as _f:
+            _CAPABILITY_KB_CACHE = _json.load(_f)
+    except Exception:
+        _CAPABILITY_KB_CACHE = {}
+    _CAPABILITY_KB_LOADED = True
+    return _CAPABILITY_KB_CACHE or {}
+
+
+def _capability_preface(query: str, results: list[dict], constraints: dict) -> str:
+    """Return a yes/no sentence for software/use-case capability queries.
+
+    Fires when the query is a yes/no capability test ('can this run Premiere Pro?',
+    'will this handle gaming?') but no budget_preface was generated.  Checks the
+    top result against use_case_kb.json required_specs and exclusion_rules.
+    """
+    if not results:
+        return ""
+    q_low = str(query or "").lower()
+    _cap_patterns = (
+        "can this run", "can it run", "will this run", "will it run",
+        "can this handle", "can it handle", "will this handle", "will it handle",
+        "can i play", "can i run", "can this play", "can you run",
+        "will this work for", "suitable for", "meant for", "compatible with",
+    )
+    if not any(tok in q_low for tok in _cap_patterns):
+        return ""
+    try:
+        _kb = _load_capability_kb()
+    except Exception:
+        return ""
+    aliases: dict = _kb.get("use_case_aliases") or {}
+    use_cases: dict = _kb.get("use_cases") or {}
+    detected_uc = str(constraints.get("use_case") or "").lower().strip()
+    if not detected_uc:
+        for _alias, _uc in aliases.items():
+            if _alias.lower() in q_low:
+                detected_uc = _uc
+                break
+    if not detected_uc:
+        return ""
+    kb_entry: dict = use_cases.get(detected_uc) or {}
+    if not kb_entry:
+        return ""
+    req: dict = kb_entry.get("required_specs") or {}
+    excl: list = kb_entry.get("exclusion_rules") or []
+    label: str = kb_entry.get("label") or detected_uc.replace("_", " ").title()
+    top = results[0] if results else {}
+    specs: dict = top.get("specs") if isinstance(top.get("specs"), dict) else {}
+    full_text = f"{(top.get('name') or '').lower()} {str(specs).lower()}"
+    _discrete_markers = ("rtx", "geforce", "nvidia", "radeon rx", "radeon 6", "radeon 7",
+                          "radeon 8", "arc a", "discrete")
+    has_discrete = any(k in full_text for k in _discrete_markers)
+    violations: list[str] = []
+    if "integrated_gpu_only" in excl and not has_discrete:
+        violations.append("lacks a dedicated GPU")
+    if "fanless_design" in excl and "fanless" in full_text:
+        violations.append("fanless design limits sustained performance")
+    unmet: list[str] = []
+    if req.get("gpu_tier") and "discrete" in str(req["gpu_tier"]) and not has_discrete:
+        unmet.append("dedicated GPU")
+    ram_req = req.get("ram_gb_min")
+    if ram_req:
+        try:
+            ram_val = int(specs.get("ram_gb") or 0)
+            if 0 < ram_val < int(ram_req):
+                unmet.append(f"RAM ({ram_val}GB, needs {ram_req}GB+)")
+        except Exception:
+            pass
+    top_name = str(top.get("name") or "The top result")
+    if violations or unmet:
+        missing = (violations + unmet)[0]
+        return f"No — {top_name} isn't ideal for {label}: it {missing}."
+    return f"Yes — {top_name} handles {label} tasks well."
 
 
 def _is_budget_shopping_query(query: str | None) -> bool:
@@ -12070,6 +12163,33 @@ def suggest(
         }
     except Exception:
         payload["recommendation_tiers"] = {"minimum": [], "recommended": [], "show_split": False}
+
+    # ── Recommendation finalizer ──────────────────────────────────────────────
+    # CRITICAL: runs before _summarize_results() so the LLM, trace, and payload
+    # all describe products in the same finalized, stock-annotated order.
+    # This is the canonical stock-annotation pass; the late pass at line ~12800
+    # only runs as a fallback when this block raises an exception.
+    _finalizer_ran: bool = False
+    try:
+        from src.app.services.recommend_response_finalizer import finalize_recommendation_response as _finalize
+        _stock_filter_opted = bool((kv or {}).get("stock_filter_preference") == "in_stock_only")
+        _fin = _finalize(
+            results=results,
+            constraints=constraints,
+            uid=uid,
+            stock_filter_opted=_stock_filter_opted,
+        )
+        results = _fin.results
+        payload["results"] = results
+        payload["products"] = results
+        if _fin.oos_removed:
+            payload["oos_removed_count"] = len(_fin.oos_removed)
+        if not _fin.contract_valid:
+            payload["_contract_violations"] = _fin.contract_violations[:5]
+        _finalizer_ran = True
+    except Exception as _fin_exc:
+        _log.warning("recommend_finalizer failed, continuing with pre-finalized results: %s", _fin_exc)
+
     assistant_message = None
     constraints["_price_filter_meta"] = filter_meta_price or {}
     constraints["_strict_image_brand_hint"] = strict_image_brand_hint
@@ -12703,11 +12823,12 @@ def suggest(
         )
     except Exception:
         pass
-    # ── Batch stock annotation ────────────────────────────────────────────────
-    # Annotate each result with live inventory data in a single batch DB query.
-    # OOS items get a rank penalty; stock urgency labels are surfaced to the UI.
+    # ── Batch stock annotation (fallback pass) ───────────────────────────────
+    # The recommend_response_finalizer() above is the canonical stock-annotation
+    # path.  This block only runs when the finalizer was skipped or raised, which
+    # means stock_level may still be None on some results.
     try:
-        if results:
+        if results and not _finalizer_ran:
             from src.app.services.inventory_query_service import batch_stock_levels
             _skus_to_check = [str((r or {}).get("sku") or "") for r in results if isinstance(r, dict) and (r or {}).get("sku")]
             if _skus_to_check:
@@ -12729,8 +12850,9 @@ def suggest(
                         _r["stock_urgency"] = f"{_stock} units remaining"
                     else:
                         _r["stock_status"] = "in_stock"
-                # Apply rank penalty: move OOS items to end
                 results = sorted(results, key=lambda r: float(r.get("_rank_penalty") or 0.0))
+                payload["results"] = results
+                payload["products"] = results
     except Exception:
         pass  # Stock annotation failure is non-fatal
 

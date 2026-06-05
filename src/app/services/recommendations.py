@@ -27,6 +27,25 @@ from src.app.services.recommendation_identity_graph import linked_uid_hashes
 from src.app.services.recommendation_als import load_precomputed_cf_scores
 from src.app.services.recommendation_bandit import choose_recommendation_arm
 
+_USE_CASE_KB: dict | None = None
+_USE_CASE_KB_LOADED: bool = False
+
+
+def _load_use_case_kb() -> dict:
+    global _USE_CASE_KB, _USE_CASE_KB_LOADED
+    if _USE_CASE_KB_LOADED:
+        return _USE_CASE_KB or {}
+    try:
+        _kb_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "use_case_kb.json")
+        )
+        with open(_kb_path, "r", encoding="utf-8") as _f:
+            _USE_CASE_KB = json.load(_f)
+    except Exception:
+        _USE_CASE_KB = {}
+    _USE_CASE_KB_LOADED = True
+    return _USE_CASE_KB or {}
+
 
 # ── Seasonal context auto-injection ──────────────────────────────────────────
 _FEATURE_FLAGS_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "feature_flags.json")
@@ -232,6 +251,30 @@ class RecommendationService:
                 "tensorflow",
                 "cuda",
                 "neural",
+                # First-turn software signals — catches "matlab", "jupyter", etc.
+                "matlab",
+                "jupyter",
+                "numpy",
+                "pandas",
+                "scikit",
+                "transformers",
+                "hugging face",
+                "gradient descent",
+                "gpu training",
+                "fine-tuning",
+                "inference",
+            ],
+            "engineering_student": [
+                "autocad",
+                "solidworks",
+                "ansys",
+                "catia",
+                "fusion 360",
+                "civil engineering",
+                "mechanical engineering",
+                "electrical engineering",
+                "architecture student",
+                "3d cad",
             ],
             "software_development": [
                 "developer",
@@ -242,6 +285,12 @@ class RecommendationService:
                 "visual studio",
                 "intellij",
                 "compile",
+                "docker",
+                "kubernetes",
+                "git",
+                "linux dev",
+                "backend dev",
+                "frontend dev",
             ],
             "student": [
                 "university",
@@ -249,6 +298,11 @@ class RecommendationService:
                 "student",
                 "school",
                 "campus",
+                "grad school",
+                "thesis",
+                "dissertation",
+                "lecture notes",
+                "essay writing",
             ],
             "business": [
                 "business",
@@ -256,6 +310,11 @@ class RecommendationService:
                 "corporate",
                 "enterprise",
                 "work laptop",
+                "microsoft teams",
+                "zoom calls",
+                "excel",
+                "powerpoint",
+                "salesforce",
             ],
             "gaming": [
                 "gaming",
@@ -263,6 +322,12 @@ class RecommendationService:
                 "geforce",
                 "esports",
                 "fps",
+                "game",
+                "play games",
+                "high refresh",
+                "144hz",
+                "165hz",
+                "240hz",
             ],
             "content_creation": [
                 "video editing",
@@ -274,6 +339,13 @@ class RecommendationService:
                 "3d",
                 "rendering",
                 "cad",
+                "blender",
+                "davinci resolve",
+                "final cut",
+                "after effects",
+                "illustration",
+                "graphic design",
+                "color grading",
             ],
             "mobile": [
                 "travel",
@@ -281,6 +353,9 @@ class RecommendationService:
                 "battery",
                 "lightweight",
                 "thin",
+                "commute",
+                "portable",
+                "ultrabook",
             ],
         }
 
@@ -554,9 +629,24 @@ class RecommendationService:
             if gpu:
                 score += 2.0
                 reasons.append("use_case_gpu")
+            else:
+                score -= 3.0
+                reasons.append("use_case_no_discrete_gpu")
             if "rtx" in text:
                 score += 1.5
                 reasons.append("use_case_rtx")
+            _hz_m = re.search(r"(\d+)\s*hz", text)
+            if _hz_m:
+                try:
+                    _hz = int(_hz_m.group(1))
+                    if _hz >= 144:
+                        score += 1.0
+                        reasons.append("use_case_144hz")
+                    elif _hz < 60:
+                        score -= 1.5
+                        reasons.append("use_case_low_refresh")
+                except Exception:
+                    pass
         elif use_case in ("content_creation", "content_creator"):
             if gpu:
                 score += 1.5
@@ -603,6 +693,41 @@ class RecommendationService:
             if any(k in text for k in ("thin", "light", "ultrabook", "air")):
                 score += 1.0
                 reasons.append("use_case_portable")
+
+        # KB exclusion penalties — fires for any use_case defined in use_case_kb.json
+        try:
+            _kb = _load_use_case_kb()
+            _uc_entry: dict = (_kb.get("use_cases") or {}).get(use_case, {})
+            _excl_rules: list = _uc_entry.get("exclusion_rules") or []
+            _excl_w = float(
+                ((_kb.get("soft_requirement_weights") or {}).get("exclusion_violation") or -2.0)
+            )
+            for _rule in _excl_rules:
+                if _rule == "integrated_gpu_only" and not features.get("gpu_discrete"):
+                    # Only penalise once — skip if heuristic branch already applied no-GPU penalty
+                    _already = any("no_discrete_gpu" in r or "no_gpu" in r for r in reasons)
+                    if not _already:
+                        score += _excl_w
+                        reasons.append(f"kb_exclusion:{_rule}")
+                elif _rule == "fanless_design" and "fanless" in text:
+                    score += _excl_w
+                    reasons.append(f"kb_exclusion:{_rule}")
+                elif _rule == "refresh_hz_below_60":
+                    _m = re.search(r"(\d+)\s*hz", text)
+                    if _m:
+                        try:
+                            if int(_m.group(1)) < 60:
+                                score += _excl_w
+                                reasons.append(f"kb_exclusion:{_rule}")
+                        except Exception:
+                            pass
+                elif _rule == "consumer_gaming_aesthetic":
+                    if any(k in text for k in ("gaming", "omen", "nitro", "tuf", "predator", "lol")):
+                        score += _excl_w
+                        reasons.append(f"kb_exclusion:{_rule}")
+        except Exception:
+            pass
+
         return score, reasons
 
     def _extract_condition_availability(self, text: str) -> Dict[str, Any]:
@@ -1796,9 +1921,29 @@ class RecommendationService:
             lam = 0.7
         def _sim(a: Dict[str, Any], b: Dict[str, Any]) -> float:
             try:
-                na = (a.get("candidate", {}).get("name") or "").lower()
-                nb = (b.get("candidate", {}).get("name") or "").lower()
-                return 1.0 if na == nb else 0.0
+                ca = a.get("candidate") or {}
+                cb = b.get("candidate") or {}
+                na = (ca.get("name") or "").lower()
+                nb = (cb.get("name") or "").lower()
+                if na and na == nb:
+                    return 1.0
+                # Same GPU model (e.g., both RTX 4060) → highly redundant result set
+                sa = ca.get("specs") if isinstance(ca.get("specs"), dict) else {}
+                sb = cb.get("specs") if isinstance(cb.get("specs"), dict) else {}
+                gpu_a = str(sa.get("gpu_model") or "").lower().strip()
+                gpu_b = str(sb.get("gpu_model") or "").lower().strip()
+                if gpu_a and gpu_b and gpu_a == gpu_b:
+                    return 0.65
+                # Same brand + within 15% price bracket → moderately redundant
+                brand_a = str(ca.get("brand") or "").lower().strip() or na[:6]
+                brand_b = str(cb.get("brand") or "").lower().strip() or nb[:6]
+                price_a = float(ca.get("price_cents") or 0)
+                price_b = float(cb.get("price_cents") or 0)
+                if brand_a and brand_a == brand_b and price_b > 0:
+                    ratio = price_a / price_b
+                    if 0.85 <= ratio <= 1.15:
+                        return 0.35
+                return 0.0
             except Exception:
                 return 0.0
         mmr: List[Dict[str, Any]] = []

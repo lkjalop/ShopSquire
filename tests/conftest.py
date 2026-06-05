@@ -52,6 +52,88 @@ def _get_or_create_app_for_url() -> object:
 
 def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
     """Install the per-URL singleton factory before any test module is imported."""
+    # ── Guard: ensure KILL_SWITCH is False before any module is collected ────
+    # A previous crashed run may leave config/feature_flags.json with
+    # KILL_SWITCH: True.  test_rollout_and_killswitch.py captures _ORIGINAL_FLAGS
+    # at module-import time (collection), so it would "restore" to the corrupted
+    # kill-switch-on state for every test in the suite.  Reset it here, before
+    # any module is imported, so _ORIGINAL_FLAGS always captures a clean state.
+    try:
+        import json as _json
+
+        _fpath = Path("config/feature_flags.json")
+        _fpath.parent.mkdir(parents=True, exist_ok=True)
+
+        # Canonical flags baseline — written whenever the file is missing,
+        # empty, or missing required keys (handles truncated-file cascade).
+        _BASELINE_FLAGS: dict = {
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {
+                "recommend": {"enabled": True, "rollout_percent": 100},
+                "pricing": {"enabled": True, "rollout_percent": 100},
+            },
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+            "SEASONAL_CONTEXT": {
+                "active_season": None,
+                "boosts": {
+                    "back_to_school": {
+                        "student": 1.3,
+                        "content_creation": 1.15,
+                        "software_development": 1.1,
+                    },
+                    "gaming_season": {
+                        "gaming": 1.4,
+                        "rtx": 1.25,
+                        "high_performance": 1.2,
+                    },
+                    "holiday": {
+                        "gaming": 1.35,
+                        "content_creation": 1.2,
+                        "premium": 1.15,
+                    },
+                    "new_year_refresh": {
+                        "business": 1.2,
+                        "student": 1.15,
+                        "value": 1.1,
+                    },
+                },
+            },
+        }
+
+        # Read current file; fall back to baseline on empty / invalid JSON
+        _fdata: dict = {}
+        if _fpath.exists():
+            try:
+                _raw = _fpath.read_text("utf-8").strip()
+                _fdata = _json.loads(_raw) if _raw else {}
+            except Exception:
+                _fdata = {}
+
+        _dirty = False
+        if not _fdata:
+            # Empty or unreadable — restore full baseline
+            _fdata = dict(_BASELINE_FLAGS)
+            _dirty = True
+        else:
+            # Selective repairs on an otherwise valid file
+            if _fdata.get("KILL_SWITCH"):
+                _fdata["KILL_SWITCH"] = False
+                _dirty = True
+            if "SEASONAL_CONTEXT" not in _fdata:
+                _fdata["SEASONAL_CONTEXT"] = _BASELINE_FLAGS["SEASONAL_CONTEXT"]
+                _dirty = True
+
+        if _dirty:
+            _fpath.write_text(
+                _json.dumps(_fdata, indent=2, ensure_ascii=False), "utf-8"
+            )
+    except Exception:
+        pass
+
     # ── Prevent Ollama from hanging collection-time create_app() calls ───────
     # Module-level `app = create_app()` in ~32 test files runs at collection
     # time, before pytest_sessionstart.  Without this, ManagedCVProvider will

@@ -40,6 +40,18 @@ COPY pyproject.toml /app/
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --only main --no-root
 
+# Optional: install PyTorch Geometric for GNN fraud-ring detection.
+# Skipped by default (adds ~1.5GB to image). Set INSTALL_PYGEOMETRIC=1 to enable.
+# When absent the GNN detector falls back to networkx heuristic scoring.
+ARG INSTALL_PYGEOMETRIC=0
+RUN if [ "$INSTALL_PYGEOMETRIC" = "1" ]; then \
+        TORCH_VERSION=$(python -c "import torch; print(torch.__version__.split('+')[0])") && \
+        pip install --no-cache-dir \
+            torch-geometric \
+            torch-scatter torch-sparse torch-cluster torch-spline-conv \
+            -f "https://data.pyg.org/whl/torch-${TORCH_VERSION}+cpu.html"; \
+    fi
+
 COPY src /app/src
 COPY alembic.ini /app/
 COPY alembic /app/alembic
