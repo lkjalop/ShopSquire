@@ -106,6 +106,31 @@ class BasicCVTriage:
         if insufficient_data:
             severity_reason = "no_labels_or_text_extracted"
 
+        # ── Category relevance gate ───────────────────────────────────────────
+        # Flag images that are clearly not electronics so the recommend flow
+        # can surface an "off-topic image" warning rather than silently ignoring.
+        _ELECTRONICS_TOKENS = frozenset({
+            "laptop", "computer", "notebook", "pc", "desktop", "tablet",
+            "phone", "smartphone", "keyboard", "mouse", "monitor", "screen",
+            "display", "gaming", "console", "camera", "lens", "headphone",
+            "headset", "earphone", "microphone", "router", "modem", "printer",
+            "scanner", "electronics", "device", "gadget", "charger", "cable",
+            "usb", "ssd", "ram", "gpu", "cpu", "processor", "motherboard",
+            "battery", "gpu", "rtx", "radeon", "intel", "amd", "msi",
+            "asus", "dell", "lenovo", "hp", "acer", "apple", "macbook",
+        })
+        _combined_lower = (" ".join(effective_labels) + " " + effective_text).lower()
+        _is_electronics = effective_labels and any(
+            tok in _combined_lower for tok in _ELECTRONICS_TOKENS
+        )
+        image_relevance = "relevant" if (_is_electronics or not effective_labels) else "off_topic"
+        image_relevance_note = (
+            "The uploaded image does not appear to be an electronics product. "
+            "Recommendations will be based on your text query only."
+            if image_relevance == "off_topic"
+            else ""
+        )
+
         result: Dict[str, Any] = {
             "status": "analyzed",
             "damage_type": damage_type,
@@ -117,6 +142,8 @@ class BasicCVTriage:
             "raw_labels": effective_labels[:10],
             "needs_human_review": confidence < 0.6 or insufficient_data,
             "ai_disclaimer": "preliminary",
+            "image_relevance": image_relevance,
+            "image_relevance_note": image_relevance_note,
         }
         if severity_reason:
             result["severity_reason"] = severity_reason

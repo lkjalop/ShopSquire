@@ -372,7 +372,7 @@ async def triage(
         triage_result = triager.analyze(
             labels,
             extracted_text or "",
-            image_bytes=content,
+            image_bytes=None if fast else content,
             mime=mime or "image/jpeg",
         )
     except TypeError:
@@ -455,7 +455,34 @@ async def triage(
     qr_reason_summaries: List[str] = []
     try:
         from src.app.rules.barcode_decode import decode_barcodes
-        qr = decode_barcodes([(str(name or "image.jpg"), content)])
+        if fast:
+            _loop = _asyncio.get_event_loop()
+            try:
+                qr = await _asyncio.wait_for(
+                    _loop.run_in_executor(
+                        None,
+                        decode_barcodes,
+                        [(str(name or "image.jpg"), content)],
+                    ),
+                    timeout=float(os.getenv("CV_FAST_QR_TIMEOUT_S", "1.5") or 1.5),
+                )
+            except Exception:
+                qr = []
+                security_signals["qr_decode_deferred"] = True
+        else:
+            _loop = _asyncio.get_event_loop()
+            try:
+                qr = await _asyncio.wait_for(
+                    _loop.run_in_executor(
+                        None,
+                        decode_barcodes,
+                        [(str(name or "image.jpg"), content)],
+                    ),
+                    timeout=float(os.getenv("CV_QR_TIMEOUT_S", "4.0") or 4.0),
+                )
+            except Exception:
+                qr = []
+                security_signals["qr_decode_error"] = True
         qr_codes = qr.codes if hasattr(qr, "codes") else (qr if isinstance(qr, list) else [])
         if qr_codes:
             security_signals["qr_code_detected"] = True
@@ -900,6 +927,29 @@ async def triage(
             }
         )
 
+    # ── Auto-queue sandbox detonation for high-risk hypotheses ──────────────
+    # c2_beacon and lolbin_command_sequence require runtime confirmation;
+    # queue a background detonation job when either is detected.
+    _sandbox_queue_result: dict = {}
+    try:
+        from src.app.services.sandbox_queue import queue_sandbox_detonation, should_auto_queue
+
+        if should_auto_queue(hypothesis):
+            _steg_decoded = str((security_signals.get("steg_details") or {}).get("decoded_content") or "")
+            _qr_urls = [str(u) for u in (security_signals.get("qr_payloads") or []) if str(u).strip()]
+            _sandbox_queue_result = queue_sandbox_detonation(
+                hypothesis=hypothesis,
+                trace_id=str(resp.get("trace_id") or ""),
+                tenant_id=None,
+                decoded_content=_steg_decoded or None,
+                urls=_qr_urls,
+                steg_score=float((security_signals.get("steg_details") or {}).get("steg_score") or 0.0),
+                source="image_scan",
+            )
+    except Exception as _sq_exc:
+        import logging as _sqlog
+        _sqlog.getLogger(__name__).debug("vision: sandbox_queue failed (non-fatal): %s", _sq_exc)
+
     resp["security"] = {
         "clean": security_clean,
         # Plain-English image authenticity verdict for merchant UI
@@ -923,6 +973,8 @@ async def triage(
         "decoded_artifact_available": payload_analysis.get("decoded_artifact_available"),
         "payload_type": payload_analysis.get("payload_type"),
         "attack_hypothesis": payload_analysis.get("attack_hypothesis"),
+        "sandbox_detonation_queued": bool(_sandbox_queue_result.get("queued")),
+        "sandbox_queue_path": _sandbox_queue_result.get("path"),
         "mitre_attack": payload_analysis.get("mitre_attack") or [],
         "possible_mitre_attack": payload_analysis.get("possible_mitre_attack") or [],
         "mitre_atlas": payload_analysis.get("mitre_atlas") or [],

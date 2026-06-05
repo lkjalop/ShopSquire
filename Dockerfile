@@ -48,6 +48,9 @@ COPY db /app/db
 COPY docs /app/docs
 COPY scripts /app/scripts
 COPY README.md /app/
+# Bake static assets (SVG product images) into the image so product cards
+# have images even on read-only container filesystems.
+COPY static /app/static
 
 EXPOSE 8080
 

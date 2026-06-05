@@ -94,6 +94,9 @@ type RightPanelContract = {
   anchor_sections?: AnchorSection[];
 };
 
+const IMAGE_FAST_TRIAGE_TIMEOUT_MS = 3000;
+const IMAGE_DEEP_TRIAGE_DELAY_MS = 30000;
+
 type BackendStatus = {
   ok: boolean;
   latencyMs: number | null;
@@ -249,7 +252,7 @@ function useProducts() {
     const ctl = new AbortController();
     fetch('/ui/products.json', { signal: ctl.signal })
       .then((r) => r.json())
-      .then((d) => setProducts(Array.isArray(d) ? d : []))
+      .then((d) => setProducts(Array.isArray(d) ? d : Array.isArray(d?.products) ? d.products : []))
       .catch(() => setProducts([]))
       .finally(() => setLoading(false));
     return () => ctl.abort();
@@ -515,24 +518,93 @@ export default function App() {
     }));
   }, []);
 
+  const makeClientFastImageTriage = useCallback((file: File) => {
+    const filenameHint = file.name.replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim();
+    const suspiciousName = /\b(ssn|qr|password|credential|token|secret|invoice|receipt)\b/i.test(filenameHint);
+    return {
+      _filename: file.name,
+      filename: file.name,
+      provider: 'client_fast_boundary',
+      labels: filenameHint ? [filenameHint] : [],
+      extracted_text: '',
+      damage_score: 0,
+      intent: 'visual_search',
+      intent_routing: {
+        intent: 'visual_search',
+        confidence: 0.2,
+        reason: 'client_safe_hint_before_deep_triage',
+      },
+      security: {
+        clean: !suspiciousName,
+        signals: {
+          fast_triage_timeout: true,
+          filename_suspicious: suspiciousName,
+        },
+        analysis_stage: 'client_safe_hint',
+        verdict: 'Image bytes are queued for background security enrichment; product recommendations use safe filename hints only.',
+      },
+    };
+  }, []);
+
   const fetchImageTriages = useCallback(async (files: File[], fast = false) => {
     const triagePromises = files.map(async (file) => {
       const fd = new FormData();
       fd.append('image', file);
       const triagePath = fast ? '/api/v1/vision/triage?fast=1' : '/api/v1/vision/triage';
-      const r = await fetch(apiUrl(triagePath), {
+      const controller = new AbortController();
+      const timeoutId = fast
+        ? window.setTimeout(() => controller.abort(), IMAGE_FAST_TRIAGE_TIMEOUT_MS)
+        : null;
+      try {
+        const r = await fetch(apiUrl(triagePath), {
+          method: 'POST',
+          credentials: 'include',
+          body: fd,
+          signal: controller.signal,
+          headers: {
+            'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+            'x-skip-observer': '1',
+          },
+        });
+        if (!r.ok) return null;
+        const data = await safeJson(r);
+        if (!data) return null;
+        data._filename = file.name;
+        return data;
+      } catch {
+        if (!fast) return null;
+        return makeClientFastImageTriage(file);
+      } finally {
+        if (timeoutId != null) window.clearTimeout(timeoutId);
+      }
+    });
+    return (await Promise.all(triagePromises)).filter(Boolean);
+  }, [makeClientFastImageTriage]);
+
+  const fetchSupportAnswer = useCallback(async (question: string): Promise<string | null> => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 3000);
+    try {
+      const params = new URLSearchParams({ question });
+      const r = await fetch(apiUrl(`/api/v1/support/answer?${params.toString()}`), {
         method: 'POST',
         credentials: 'include',
-        body: fd,
-        headers: { 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+        signal: controller.signal,
+        headers: {
+          ...csrfHeaders(),
+          'x-api-key': ((import.meta as any).env?.VITE_API_KEY || ''),
+          'x-skip-observer': '1',
+        },
       });
       if (!r.ok) return null;
       const data = await safeJson(r);
-      if (!data) return null;
-      data._filename = file.name;
-      return data;
-    });
-    return (await Promise.all(triagePromises)).filter(Boolean);
+      const answer = String(data?.answer || '').trim();
+      return answer || null;
+    } catch {
+      return null;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
   }, []);
 
   const handleRightPanelBack = useCallback(() => {
@@ -866,14 +938,16 @@ export default function App() {
   }, [chatOpen]);
 
   useEffect(() => {
-    if (!chatOpen) return;
+    if (!chatOpen || !readinessOpen) return;
     let mounted = true;
     let iv: any = null;
 
     const pollReadyz = async () => {
+      const ctl = new AbortController();
+      const timeout = setTimeout(() => ctl.abort(), 2500);
       setReadyzLoading(true);
       try {
-        const r = await fetch(apiUrl('/readyz'));
+        const r = await fetch(apiUrl('/readyz'), { signal: ctl.signal });
         const data = await safeJson(r);
         if (!mounted) return;
         if (r.ok && data) setReadyz(data as ReadyzResponse);
@@ -881,17 +955,18 @@ export default function App() {
         if (!mounted) return;
         setReadyz(null);
       } finally {
+        clearTimeout(timeout);
         if (mounted) setReadyzLoading(false);
       }
     };
 
     pollReadyz();
-    iv = setInterval(pollReadyz, 10000);
+    iv = setInterval(pollReadyz, 15000);
     return () => {
       mounted = false;
       if (iv) clearInterval(iv);
     };
-  }, [chatOpen]);
+  }, [chatOpen, readinessOpen]);
 
   const handleWhyProduct = async (sku: string) => {
     if (!sku || !traceId) return;
@@ -984,10 +1059,41 @@ export default function App() {
       // If images are attached, triage them first
       let imageTriageResults: any[] = [];
       if (hasImages) {
+        if (complaintIntent || explicitComplaintIntent || mode === 'faq') {
+          setCvPrefillImages(currentAttachedFiles);
+          switchRightPanelMode(mode === 'faq' ? 'faq' : 'cv');
+          setCvAutoIssueType(detectCVIssueType(q));
+          const lowerQ = q.toLowerCase();
+          const fallbackAnswer = /return|refund|warranty|replace|exchange/.test(lowerQ)
+            ? 'I opened the return/complaint flow. You can start the claim now; image security and damage triage will continue in the background so the policy answer is not blocked.'
+            : 'I opened the support flow for this device issue. I will keep the uploaded image under review in the background while you continue.';
+          const supportAnswer = await fetchSupportAnswer(q);
+          const answer = supportAnswer || fallbackAnswer;
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: answer,
+            timestamp: new Date(),
+          }]);
+          setImageRoutingInFlight(false);
+          window.setTimeout(() => void (async () => {
+            try {
+              const deepResults = await fetchImageTriages(currentAttachedFiles, false);
+              if (!Array.isArray(deepResults) || deepResults.length === 0) return;
+              setImageTriageContexts(toImageTriageContexts(deepResults, currentAttachedFiles));
+              setImageTriageRaw(deepResults);
+            } catch {
+              // Support/FAQ answer is intentionally independent of deep image triage.
+            }
+          })(), IMAGE_DEEP_TRIAGE_DELAY_MS);
+          setIsThinking(false);
+          return;
+        }
         const useFastImageTriage = !complaintIntent && !explicitComplaintIntent;
         setImageRoutingInFlight(true);
         try {
-          imageTriageResults = await fetchImageTriages(currentAttachedFiles, useFastImageTriage);
+          imageTriageResults = useFastImageTriage
+            ? currentAttachedFiles.map((file) => makeClientFastImageTriage(file))
+            : await fetchImageTriages(currentAttachedFiles, false);
         } finally {
           setImageRoutingInFlight(false);
         }
@@ -1018,8 +1124,8 @@ export default function App() {
           switchRightPanelMode('visual_search');
           setVisualSearchQuery(q);
 
-          // Defer heavier security enrichment after visual search is already open.
-          void (async () => {
+          // Let the first recommendation render before starting heavyweight security enrichment.
+          window.setTimeout(() => void (async () => {
             try {
               const deepResults = await fetchImageTriages(currentAttachedFiles, false);
               if (!Array.isArray(deepResults) || deepResults.length === 0) return;
@@ -1028,7 +1134,7 @@ export default function App() {
             } catch {
               // Keep the fast-path visual route even if deep enrichment fails.
             }
-          })();
+          })(), IMAGE_DEEP_TRIAGE_DELAY_MS);
 
           // Give the user a feedback message and short-circuit — the right panel handles recs
           const imageNames = currentAttachedFiles.map(f => f.name).join(', ');
@@ -1493,7 +1599,7 @@ export default function App() {
             <button className={styles.filterBtn} onClick={() => openChatWithQuery('Show me laptops with a dedicated GPU or RTX graphics card')}>GPU</button>
           </div>
         </div>
-        <ProductGrid products={products} onAdd={addToCart} viewMode="grid" />
+        <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
       </main>
 
       {/* Floating Chat Button */}

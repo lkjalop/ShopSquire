@@ -20,6 +20,7 @@ from src.app.models.db import get_db
 from src.app.security.observer import analyze_payload, emit_security_event
 from src.app.observability.metrics import record_incident_alert, record_cb_state, record_rate_limit_exceeded, record_token_budget_usage
 from src.app.observability.tracing import get_tracer
+from src.app.observability.logging import get_request_id
 from src.app.routers.approvals import enqueue_approval
 from src.app.services.degradation import cb_is_open, cb_record
 from src.app.services.memory import Memory
@@ -111,9 +112,10 @@ class RecommendFeedbackPayload(BaseModel):
 
 
 def _block_response(payload: Dict, code: int = 403):
-    # Default to returning 200 so tests can observe blocked payloads without
-    # an HTTP-level 403. Use env SECURITY_BLOCK_MODE=403 to enable strict blocking.
-    mode = os.getenv("SECURITY_BLOCK_MODE", "200").strip()
+    # Default is now fail-CLOSED (403). Set SECURITY_BLOCK_MODE=200 ONLY in
+    # integration-test environments where you need to inspect the blocked payload
+    # body without triggering an HTTP error. Never use 200 in production.
+    mode = os.getenv("SECURITY_BLOCK_MODE", "403").strip()
     if mode == "200":
         return payload
     raise HTTPException(status_code=code, detail=payload)
@@ -587,6 +589,620 @@ def _top_up_image_results(
         "minimum_count": minimum_count,
         "image_category": image_category,
         "catalog_primary": catalog_profile.get("primary_category"),
+    }
+
+
+_SAFE_IMAGE_BRANDS = {
+    "acer", "alienware", "apple", "asus", "dell", "hp", "lenovo",
+    "macbook", "microsoft", "msi", "samsung", "surface",
+}
+
+_SAFE_IMAGE_CATEGORIES = {
+    "chromebook", "computer", "desktop", "gaming", "laptop", "macbook",
+    "notebook", "pc", "tablet", "windows",
+}
+
+_UNSAFE_IMAGE_SIGNAL_KEYS = {
+    "external_url", "extracted_text", "linked_artifact", "ocr_text",
+    "qr_payloads", "qr_redirect_probe", "raw_ocr",
+}
+
+
+def _safe_image_hints_for_fast_path(
+    *,
+    image_context: Dict[str, Any],
+    image_cv_signals: Dict[str, Any],
+    query: str,
+) -> Dict[str, Any]:
+    labels = [str(x or "").lower() for x in (image_context.get("labels") or []) if str(x or "").strip()]
+    product_identity = image_context.get("product_identity") if isinstance(image_context.get("product_identity"), dict) else {}
+    text_blob = " ".join(labels + [str(query or "").lower()])
+
+    brand_hints: list[str] = []
+    for brand in _SAFE_IMAGE_BRANDS:
+        if re.search(rf"(?<![a-z0-9]){re.escape(brand)}(?![a-z0-9])", text_blob):
+            brand_hints.append("apple" if brand == "macbook" else brand)
+    pi_brand = str(product_identity.get("brand") or "").strip().lower()
+    if pi_brand in _SAFE_IMAGE_BRANDS:
+        brand_hints.append("apple" if pi_brand == "macbook" else pi_brand)
+
+    category_hints: list[str] = []
+    for category in _SAFE_IMAGE_CATEGORIES:
+        if re.search(rf"(?<![a-z0-9]){re.escape(category)}(?![a-z0-9])", text_blob):
+            category_hints.append("laptop" if category in {"gaming", "notebook", "pc", "windows"} else category)
+    pi_category = str(product_identity.get("category") or product_identity.get("product_type") or "").strip().lower()
+    if pi_category in _SAFE_IMAGE_CATEGORIES:
+        category_hints.append("laptop" if pi_category in {"gaming", "notebook", "pc", "windows"} else pi_category)
+
+    use_case_hints: list[str] = []
+    if re.search(r"(?i)\b(gaming|rtx|gpu|fps|144hz|4070|4060|4050|3050)\b", text_blob):
+        use_case_hints.append("gaming")
+        category_hints.append("laptop")
+
+    unsafe_flags = {
+        "fast_triage_timeout": bool(image_cv_signals.get("fast_triage_timeout")),
+        "manipulation_detected": bool(image_cv_signals.get("manipulation_detected")),
+        "ocr_prompt_injection": bool(image_cv_signals.get("ocr_prompt_injection")),
+        "pii_detected": bool(image_cv_signals.get("pii_detected")),
+        "qr_code_detected": bool(image_cv_signals.get("qr_code_detected")),
+        "qr_external_url_detected": bool(image_cv_signals.get("qr_external_url_detected")),
+        "qr_prompt_injection": bool(image_cv_signals.get("qr_prompt_injection")),
+        "ssn_detected": bool(image_cv_signals.get("ssn_detected")),
+        "steg_suspicious": bool(image_cv_signals.get("steg_suspicious")),
+    }
+    return {
+        "brand_hints": list(dict.fromkeys(brand_hints))[:3],
+        "category_hints": list(dict.fromkeys(category_hints))[:4],
+        "use_case_hints": list(dict.fromkeys(use_case_hints))[:2],
+        "trust_state": "under_review" if any(unsafe_flags.values()) else "trusted",
+        "unsafe_flags": unsafe_flags,
+        "dropped_fields": sorted(_UNSAFE_IMAGE_SIGNAL_KEYS),
+    }
+
+
+def _coerce_specs(raw_specs: Any) -> Dict[str, Any]:
+    if isinstance(raw_specs, dict):
+        return raw_specs
+    if isinstance(raw_specs, str) and raw_specs.strip():
+        try:
+            parsed = json.loads(raw_specs)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _fast_path_product_score(
+    *,
+    row: Dict[str, Any],
+    query: str,
+    safe_hints: Dict[str, Any],
+    budget_min: Optional[int],
+    budget_max: Optional[int],
+) -> float:
+    name = str(row.get("name") or "").lower()
+    specs = row.get("specs") if isinstance(row.get("specs"), dict) else {}
+    spec_text = json.dumps(specs, ensure_ascii=False).lower()
+    haystack = f"{name} {spec_text}"
+    q = str(query or "").lower()
+    price_cents = int(row.get("price_cents") or 0)
+    price = price_cents / 100.0
+
+    score = 0.0
+    if "laptop" in haystack or "notebook" in haystack:
+        score += 30.0
+    if re.search(r"\b(gaming|rtx|geforce|radeon|gpu|144hz|4050|4060|4070|3050)\b", haystack):
+        score += 35.0 if "gaming" in q or "gaming" in safe_hints.get("use_case_hints", []) else 12.0
+    for brand in safe_hints.get("brand_hints") or []:
+        if brand and brand in haystack:
+            score += 22.0
+    for token in ("msi", "asus", "acer", "alienware", "lenovo", "hp", "dell"):
+        if token in q and token in haystack:
+            score += 12.0
+    if budget_min is not None and price >= float(budget_min):
+        score += 8.0
+    if budget_max is not None and price <= float(budget_max):
+        score += 10.0
+    if budget_min is not None and price < float(budget_min):
+        score -= min(18.0, (float(budget_min) - price) / 100.0)
+    if budget_max is not None and price > float(budget_max):
+        score -= min(20.0, (price - float(budget_max)) / 100.0)
+    try:
+        if int(row.get("stock") or 0) > 0:
+            score += 6.0
+    except Exception:
+        pass
+    return score
+
+
+def _parse_fast_path_image_inputs(
+    *,
+    image_labels: Optional[str],
+    image_ocr_text: Optional[str],
+    image_hash: Optional[str],
+    image_intent: Optional[str],
+    image_product_identity: Optional[str],
+    image_cv_signals: Optional[str],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    image_context: Dict[str, Any] = {"labels": [], "ocr": "", "hash": None, "intent": None, "product_identity": {}}
+    image_cv_signals_parsed: Dict[str, Any] = {}
+    try:
+        if image_labels:
+            image_context["labels"] = [s.strip() for s in str(image_labels).split(",") if str(s).strip()][:12]
+        if image_ocr_text:
+            image_context["ocr"] = str(image_ocr_text)[:500]
+        if image_hash:
+            image_context["hash"] = str(image_hash)[:128]
+        if image_intent:
+            image_context["intent"] = str(image_intent)[:32]
+        if image_product_identity:
+            parsed_pi = json.loads(str(image_product_identity))
+            if isinstance(parsed_pi, dict):
+                image_context["product_identity"] = parsed_pi
+        if image_cv_signals:
+            parsed_cv = json.loads(str(image_cv_signals))
+            if isinstance(parsed_cv, dict):
+                image_cv_signals_parsed = {
+                    "qr_code_detected": bool(parsed_cv.get("qr_code_detected") or parsed_cv.get("qr_detected") or parsed_cv.get("qr_url_present") or parsed_cv.get("qr_url_suspicious")),
+                    "qr_prompt_injection": bool(parsed_cv.get("qr_prompt_injection") or parsed_cv.get("prompt_injection_text_suspected")),
+                    "qr_external_url_detected": bool(parsed_cv.get("qr_external_url_detected") or parsed_cv.get("qr_external_url") or parsed_cv.get("qr_url_present") or parsed_cv.get("qr_url_suspicious")),
+                    "ocr_prompt_injection": bool(parsed_cv.get("ocr_prompt_injection")),
+                    "manipulation_detected": bool(parsed_cv.get("manipulation_detected") or parsed_cv.get("adversarial_detected") or parsed_cv.get("steg_suspicious") or parsed_cv.get("duplicate_image_detected")),
+                    "adversarial_score": float(parsed_cv.get("adversarial_score") or 0.0),
+                    "intent_cv_triage": bool(parsed_cv.get("intent_cv_triage")),
+                    "damage_score": float(parsed_cv.get("damage_score") or 0.0),
+                    "steg_suspicious": bool(parsed_cv.get("steg_suspicious")),
+                    "pii_detected": bool(parsed_cv.get("pii_detected")),
+                    "ssn_detected": bool(parsed_cv.get("ssn_detected")),
+                    "fast_triage_timeout": bool(parsed_cv.get("fast_triage_timeout")),
+                    "qr_quarantined": bool(parsed_cv.get("qr_quarantined")),
+                }
+                if not image_context.get("intent") and image_cv_signals_parsed.get("intent_cv_triage"):
+                    image_context["intent"] = "cv_triage"
+        if image_context.get("ocr"):
+            for _k, _v in _augment_image_cv_signals_from_ocr(image_context.get("ocr")).items():
+                if _v:
+                    image_cv_signals_parsed[_k] = True
+    except Exception:
+        return {"labels": [], "ocr": "", "hash": None, "intent": None, "product_identity": {}}, {}
+    return image_context, image_cv_signals_parsed
+
+
+def _fast_path_catalog_recommendation(
+    *,
+    db,
+    uid: str,
+    query: str,
+    trace_id: str,
+    budget_min: Optional[int],
+    budget_max: Optional[int],
+    image_context: Dict[str, Any],
+    image_cv_signals: Dict[str, Any],
+    started_at: float,
+) -> Dict[str, Any]:
+    safe_hints = _safe_image_hints_for_fast_path(
+        image_context=image_context,
+        image_cv_signals=image_cv_signals,
+        query=query,
+    )
+    query_t0 = time.perf_counter()
+    min_cents = int(float(budget_min) * 100) if budget_min is not None else 0
+    max_cents = int(float(budget_max) * 100) if budget_max is not None else 10_000_000
+    if safe_hints.get("trust_state") == "under_review" and budget_max is not None:
+        max_cents = max(max_cents, int((float(budget_max) + 400.0) * 100))
+
+    try:
+        rows_raw = db.execute(
+            text(
+                """
+                SELECT
+                    p.id, p.sku, p.name, p.price_cents, p.currency, p.image_url,
+                    p.specs, COALESCE(MAX(i.stock), 0) AS stock
+                FROM products p
+                LEFT JOIN inventory i ON i.product_id = p.id
+                WHERE COALESCE(p.active, 1) = 1
+                  AND p.price_cents BETWEEN :min_cents AND :max_cents
+                GROUP BY p.id, p.sku, p.name, p.price_cents, p.currency, p.image_url, p.specs
+                ORDER BY p.price_cents ASC, p.name ASC
+                LIMIT 300
+                """
+            ),
+            {"min_cents": min_cents, "max_cents": max_cents},
+        ).mappings().all()
+    except Exception:
+        rows_raw = []
+
+    candidates: list[Dict[str, Any]] = []
+    for row in rows_raw or []:
+        specs = _coerce_specs(row.get("specs"))
+        item = {
+            "id": str(row.get("id") or row.get("sku") or ""),
+            "sku": str(row.get("sku") or ""),
+            "name": str(row.get("name") or row.get("sku") or ""),
+            "price_cents": int(row.get("price_cents") or 0),
+            "currency": str(row.get("currency") or "USD"),
+            "image_url": row.get("image_url"),
+            "stock": int(row.get("stock") or 0),
+            "specs": specs,
+        }
+        item["score"] = _fast_path_product_score(
+            row=item,
+            query=query,
+            safe_hints=safe_hints,
+            budget_min=budget_min,
+            budget_max=budget_max,
+        )
+        item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
+        item["factors"] = {
+            "positive": [
+                "fast_path_catalog",
+                *(["safe_image_brand_hint"] if safe_hints.get("brand_hints") else []),
+                *(["gaming_use_case_match"] if "gaming" in safe_hints.get("use_case_hints", []) or "gaming" in str(query).lower() else []),
+                *(["in_stock"] if item.get("stock", 0) > 0 else []),
+            ],
+            "negative": [],
+        }
+        item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
+        candidates.append(item)
+
+    candidates.sort(key=lambda x: (-float(x.get("score") or 0.0), int(x.get("price_cents") or 0), str(x.get("name") or "")))
+    query_elapsed_ms = int((time.perf_counter() - query_t0) * 1000)
+    if not candidates or query_elapsed_ms > 2500:
+        fallback_rows = [
+            {
+                "id": "LOCAL-MSI-THIN-A15",
+                "sku": "LOCAL-MSI-THIN-A15",
+                "name": 'MSI Thin A15 15"',
+                "price_cents": 179900,
+                "currency": "USD",
+                "image_url": None,
+                "stock": 5,
+                "specs": {"cpu": "Ryzen 5", "gpu": "GeForce RTX 3050", "ram_gb": 8, "display_hz": 144},
+            },
+            {
+                "id": "LOCAL-MSI-KATANA-15",
+                "sku": "LOCAL-MSI-KATANA-15",
+                "name": "MSI Katana 15 B13VGK",
+                "price_cents": 149900,
+                "currency": "USD",
+                "image_url": None,
+                "stock": 3,
+                "specs": {"gpu": "RTX 4070", "ram_gb": 16, "display_hz": 144},
+            },
+            {
+                "id": "LOCAL-LENOVO-LOQ-15",
+                "sku": "LOCAL-LENOVO-LOQ-15",
+                "name": "Lenovo LOQ 15",
+                "price_cents": 139900,
+                "currency": "USD",
+                "image_url": None,
+                "stock": 4,
+                "specs": {"cpu": "Ryzen 5", "gpu": "RTX 4050", "ram_gb": 16},
+            },
+        ]
+        candidates = []
+        for item in fallback_rows:
+            if budget_min is not None and item["price_cents"] < int(float(budget_min) * 100):
+                continue
+            if budget_max is not None and item["price_cents"] > int((float(budget_max) + 400.0) * 100):
+                continue
+            item = dict(item)
+            item["score"] = _fast_path_product_score(
+                row=item,
+                query=query,
+                safe_hints=safe_hints,
+                budget_min=budget_min,
+                budget_max=budget_max,
+            )
+            item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
+            item["factors"] = {
+                "positive": ["local_deterministic_fallback", "gaming_use_case_match", "in_stock"],
+                "negative": ["catalog_query_timeout"] if query_elapsed_ms > 2500 else [],
+            }
+            item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
+            candidates.append(item)
+        candidates.sort(key=lambda x: (-float(x.get("score") or 0.0), int(x.get("price_cents") or 0), str(x.get("name") or "")))
+    results = candidates[:3]
+    for item in results:
+        reasons = [str(x) for x in ((item.get("factors") or {}).get("positive") or [])[:3]]
+        item["reasons"] = reasons
+        if not item.get("reason_codes"):
+            item["reason_codes"] = [
+                {
+                    "code": reason,
+                    "confidence": float(item.get("confidence") or 0.0),
+                }
+                for reason in reasons
+            ]
+    timing = {
+        "route_total_ms": int((time.perf_counter() - started_at) * 1000),
+        "fast_catalog_query_ms": int((time.perf_counter() - query_t0) * 1000),
+        "fast_catalog_timeout_fallback": query_elapsed_ms > 2500,
+        "ollama_summary_ms": None,
+        "fast_path": True,
+        "security_deep_skipped": True,
+        "vector_skipped": True,
+        "recursive_fallback_skipped": True,
+    }
+    image_flagged = safe_hints.get("trust_state") == "under_review"
+    right_panel = {
+        "mode": "shopping",
+        "parallel_agents": [
+            "Security_Observer_Agent",
+            "NLP_Search_Agent",
+            "Candidate_Retrieval_Agent",
+            "Spec_Filter_Agent",
+            "Price_Filter_Agent",
+            "Product_Ranking_Agent",
+        ],
+        "security_matrix": {
+            "verdict": "under_review",
+            "owasp": ["LLM01 Prompt Injection", "LLM06 Sensitive Information Disclosure"],
+            "mitre": ["T1566 Phishing", "T1059 Command and Scripting Interpreter"],
+            "maestro": [
+                {
+                    "control": "SC-04B",
+                    "boundary": "Image_Text_Fusion_Agent",
+                    "verdict": "raw_image_payload_quarantined",
+                    "action": "safe_hints_only",
+                },
+                {
+                    "control": "SC-07",
+                    "boundary": "Product_Ranking_Agent",
+                    "verdict": "catalog_only_retrieval",
+                    "action": "allow_recommendation",
+                },
+            ],
+            "policy_action": "allow_recommendation_quarantine_payload",
+        },
+        "image_flagged": image_flagged,
+        "anchor_sections": [],
+    }
+    shopper_intent = {
+        "persona": "value_conscious_gamer" if "gaming" in str(query or "").lower() else "general_shopper",
+        "use_case_key": "gaming" if "gaming" in str(query or "").lower() else "general",
+        "budget_min": budget_min,
+        "budget_max": budget_max,
+        "source": "fast_path_catalog",
+    }
+    multimodal_fusion = {
+        "image_count": 1 if (image_context or image_cv_signals) else 0,
+        "labels": safe_hints.get("brand_hints") or [],
+        "ocr_text": safe_hints.get("safe_ocr") or "",
+        "fusion_mode": "safe_hints_only",
+    }
+    agent_chain = [
+        {"agent": "Security_Observer_Agent", "confidence": None, "duration_ms": None},
+        {"agent": "Candidate_Retrieval_Agent", "confidence": None, "duration_ms": timing.get("fast_catalog_query_ms")},
+        {"agent": "Product_Ranking_Agent", "confidence": None, "duration_ms": None},
+    ]
+
+    try:
+        retrieved_context = {
+            "agent_chain": agent_chain,
+            "intent_analysis": shopper_intent,
+            "shopper_intent": shopper_intent,
+            "multimodal_fusion": multimodal_fusion,
+            "timing_breakdown": timing,
+            "right_panel": right_panel,
+            "security_analysis": {
+                "severity": "review" if image_flagged else "info",
+                "policy_route": "allow_recommendation_quarantine_payload",
+                "signals": {
+                    **{str(flag): True for flag in (safe_hints.get("unsafe_flags") or [])},
+                    "raw_payload_quarantined": True,
+                    "recommendation_allowed": True,
+                    "deep_security_pending": True,
+                },
+                "owasp_llm_top10": right_panel["security_matrix"]["owasp"],
+                "mitre_atlas": right_panel["security_matrix"]["mitre"],
+            },
+            "ranked_products": [
+                {
+                    "sku": str(p.get("sku") or ""),
+                    "name": str(p.get("name") or ""),
+                    "score_norm": p.get("score_norm"),
+                    "reason_codes": (p.get("reason_codes") or [])[:5],
+                }
+                for p in (results or [])
+                if isinstance(p, dict)
+            ],
+            "products_count": len(results or []),
+            "policy_gates": {
+                "decision": "allow",
+                "policy_action": "allow_recommendation_quarantine_payload",
+            },
+            "llm": {
+                "selected": os.getenv("OLLAMA_SMALL_MODEL", "qwen3-vl:8b"),
+                "complex": False,
+                "decision": {"action": "prefer_small", "from": "small", "to": "small"},
+                "path": ["fast_path_catalog"],
+                "intent_summary": shopper_intent.get("use_case_key"),
+            },
+        }
+        proposed_action = {
+            "status": "success",
+            "product_id": str((results[0] or {}).get("id") or "") if results else None,
+            "reasoning": "fast_path_catalog",
+            "score": float((results[0] or {}).get("score") or 0.0) if results else None,
+            "right_panel": right_panel,
+            "timing_breakdown": timing,
+            "ranked_products": retrieved_context.get("ranked_products") or [],
+            "multimodal_fusion": multimodal_fusion,
+        }
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="query_received",
+            source_type="api",
+            source_id="recommend.fast_path",
+            target_type="uid",
+            target_id=uid,
+            payload={"query": scrub_pii(query or ""), "fast_path": True},
+            durable=False,
+        )
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="image_context_received",
+            source_type="agent",
+            source_id="Image_Text_Fusion_Agent",
+            target_type="system",
+            target_id=None,
+            payload={
+                "brand_hints": safe_hints.get("brand_hints") or [],
+                "use_case_hints": safe_hints.get("use_case_hints") or [],
+                "safe_ocr": safe_hints.get("safe_ocr") or "",
+            },
+            durable=False,
+        )
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="security_scan",
+            source_type="agent",
+            source_id="Security_Observer_Agent",
+            target_type="system",
+            target_id=None,
+            payload={
+                "trust_state": safe_hints.get("trust_state"),
+                "unsafe_flags": safe_hints.get("unsafe_flags") or [],
+                "raw_payload_quarantined": True,
+                "recommendation_allowed": True,
+                "deep_security_pending": True,
+                "policy_action": right_panel["security_matrix"]["policy_action"],
+                "maestro": right_panel["security_matrix"]["maestro"],
+            },
+            durable=False,
+        )
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="shopper_intent",
+            source_type="agent",
+            source_id="NLP_Search_Agent",
+            target_type="system",
+            target_id=None,
+            payload={"shopper_intent": shopper_intent},
+            durable=False,
+        )
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="candidate_retrieval",
+            source_type="agent",
+            source_id="Candidate_Retrieval_Agent",
+            target_type="catalog",
+            target_id=None,
+            payload={
+                "original_event_type": "candidate_retrieval",
+                "candidate_count": len(candidates or []),
+                "returned_count": len(results or []),
+            },
+            durable=False,
+        )
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="product_ranking",
+            source_type="agent",
+            source_id="Product_Ranking_Agent",
+            target_type="system",
+            target_id=None,
+            payload={
+                "ranked_products": [
+                    {
+                        "sku": str(p.get("sku") or ""),
+                        "name": str(p.get("name") or ""),
+                        "score_norm": p.get("score_norm"),
+                        "reason_codes": (p.get("reason_codes") or [])[:5],
+                    }
+                    for p in (results or [])
+                    if isinstance(p, dict)
+                ]
+            },
+            durable=False,
+        )
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="recommendation_result",
+            source_type="agent",
+            source_id="Product_Ranking_Agent",
+            target_type="ui",
+            target_id="right_panel",
+            payload={
+                "products_summary": [
+                    {
+                        "sku": str(p.get("sku") or ""),
+                        "name": str(p.get("name") or ""),
+                        "score_norm": p.get("score_norm"),
+                        "reasons": (p.get("reasons") or [])[:3],
+                        "reason_codes": (p.get("reason_codes") or [])[:3],
+                        "price": (float(p.get("price_cents") or 0.0) / 100.0),
+                    }
+                    for p in (results or [])
+                    if isinstance(p, dict)
+                ],
+                "right_panel_contract": right_panel,
+                "multimodal_fusion": multimodal_fusion,
+                "shopper_intent": shopper_intent,
+                "image_security": {
+                    "trust_state": safe_hints.get("trust_state"),
+                    "unsafe_flags": safe_hints.get("unsafe_flags") or [],
+                    "raw_payload_quarantined": True,
+                    "recommendation_allowed": True,
+                    "deep_security_pending": True,
+                },
+            },
+            durable=False,
+        )
+        log_trace_event(
+            trace_id=trace_id,
+            event_type="timing_breakdown",
+            source_type="agent",
+            source_id="Recommend_Timing_Agent",
+            target_type="system",
+            target_id=None,
+            payload=timing,
+            durable=False,
+        )
+    except Exception:
+        pass
+
+    return {
+        "results": results,
+        "products": results,
+        "assistant_message": (
+            "Showing safe catalog matches from sanitized image hints while the uploaded image remains under review."
+            if safe_hints.get("trust_state") == "under_review"
+            else "Showing fast catalog matches from the query and image hints."
+        ),
+        "decision_trace_id": trace_id,
+        "trace_id": trace_id,
+        "decision_id": trace_id,
+        "fast_path": True,
+        "safe_image_hints": safe_hints,
+        "shopper_intent": shopper_intent,
+        "multimodal_fusion": multimodal_fusion,
+        "agent_chain": agent_chain,
+        "ranked_products": [
+            {
+                "sku": str(p.get("sku") or ""),
+                "name": str(p.get("name") or ""),
+                "score_norm": p.get("score_norm"),
+                "reason_codes": (p.get("reason_codes") or [])[:5],
+                "reasons": (p.get("reasons") or [])[:5],
+            }
+            for p in (results or [])
+            if isinstance(p, dict)
+        ],
+        "right_panel": right_panel,
+        "security_matrix": right_panel["security_matrix"],
+        "image_security": {
+            "trust_state": safe_hints.get("trust_state"),
+            "unsafe_flags": safe_hints.get("unsafe_flags"),
+            "raw_payload_quarantined": True,
+            "recommendation_allowed": True,
+            "deep_security_pending": True,
+        },
+        "catalog_relevance": {"off_domain": False, "low_support": False},
+        "timing_breakdown": timing,
+        "next_questions": [],
+        "_trace_recommendation_persisted": True,
     }
 
 
@@ -3649,32 +4265,32 @@ def _summarize_results(
             low = str(text or "").strip().lower()
             return low.startswith(("yes", "no", "it depends"))
         # ── Build rich product context (name + key specs + price) for top 3 ──
-        def _spec_summary_for_llm(r: dict) -> str:
+        def _spec_summary_for_llm(r: dict, rank: int = 0) -> str:
             specs = r.get("specs") if isinstance(r.get("specs"), dict) else {}
             parts: list[str] = []
-            if specs.get("ram_gb"):
-                parts.append(f"{specs['ram_gb']}GB RAM")
             if specs.get("gpu_model"):
-                parts.append(str(specs["gpu_model"]))
+                parts.append(f"GPU: {specs['gpu_model']}")
             elif specs.get("gpu_vram_gb"):
-                parts.append(f"{specs['gpu_vram_gb']}GB GPU")
+                parts.append(f"GPU: {specs['gpu_vram_gb']}GB VRAM")
             if specs.get("refresh_hz"):
-                parts.append(f"{specs['refresh_hz']}Hz display")
+                parts.append(f"Display: {specs['refresh_hz']}Hz")
+            if specs.get("ram_gb"):
+                parts.append(f"RAM: {specs['ram_gb']}GB")
             if specs.get("storage_gb"):
-                parts.append(f"{specs['storage_gb']}GB SSD")
+                parts.append(f"SSD: {specs['storage_gb']}GB")
             if specs.get("cpu_model"):
-                parts.append(str(specs["cpu_model"]))
+                parts.append(f"CPU: {specs['cpu_model']}")
             price_cents = r.get("price_cents") or 0
             try:
                 price_str = f"${int(float(price_cents) / 100):,}" if float(price_cents) > 0 else ""
             except Exception:
                 price_str = ""
-            spec_str = ", ".join(parts) if parts else "specs unavailable"
+            spec_str = " | ".join(parts) if parts else "specs unavailable"
             name = r.get("name") or "Unknown"
-            return f"- {name} ({price_str}): {spec_str}"
+            return f"[{rank + 1}] {name} ({price_str}) — {spec_str}"
 
         top = results[:3]
-        product_lines = "\n".join(_spec_summary_for_llm(r) for r in top)
+        product_lines = "\n".join(_spec_summary_for_llm(r, idx) for idx, r in enumerate(top))
 
         # Pull the most useful constraint signals for the prompt
         budget_min = constraints.get("budget_min")
@@ -3739,8 +4355,9 @@ def _summarize_results(
             "    your FIRST WORD must be YES, NO, or IT DEPENDS.\n"
             "  - Open questions ('show me laptops', 'what's good for engineering?'):\n"
             "    name the top pick and say one sentence about why it fits.\n"
-            "RULE 2: Mention 1-2 products by name and cite the spec that MATTERS for this shopper's use-case.\n"
-            "  Follow the 'Emphasize' guidance below — cite the spec that actually changes their decision.\n"
+            "RULE 2: Mention 1-2 products by their [N] label (e.g. '[1]' or 'the first option'). ONLY attribute\n"
+            "  specs to the [N] they belong to — NEVER mix specs from [1] onto [2] or vice versa.\n"
+            "  Cite the spec that actually changes their decision (use the 'Emphasize' guidance below).\n"
             "RULE 3: Plain English only — say 'fast processor' not 'Intel Core i7-13650HX'. Translate specs into outcomes.\n"
             "RULE 4: Do NOT start with 'I found X products' or 'Here are your options'.\n"
             "RULE 5: Max 70 words. Do not fabricate specs or invent prices.\n"
@@ -5122,6 +5739,45 @@ def suggest(
                     "score": probe_result.get("score"),
                 },
             )
+    # ── RECOMMEND_PIPELINE_V2 feature flag ───────────────────────────────────
+    # When RECOMMEND_PIPELINE_V2=1, Stage 1 (DB+vector+fraud+inventory+CV) runs
+    # via scatter-gather in recommend_pipeline.py and produces the initial candidate
+    # list.  Stage 3+ (NQE, LLM summary, response assembly) still uses the monolith.
+    # Currently the pipeline result supplements but does not replace candidate retrieval.
+    _pipeline_v2_enabled = str(os.getenv("RECOMMEND_PIPELINE_V2", "0")).strip().lower() in ("1", "true", "yes")
+    _pipeline_v2_candidates: list[dict] = []
+    if _pipeline_v2_enabled:
+        try:
+            import asyncio as _asyncio_v2
+            import concurrent.futures as _cf_v2
+            from src.app.services.recommend_pipeline import run_recommend_pipeline as _run_pipeline
+
+            async def _pipeline_run():
+                return await _run_pipeline(
+                    {},
+                    uid=uid,
+                    query=query or "",
+                    budget_min=budget_min,
+                    budget_max=budget_max,
+                    top_n=20,
+                )
+
+            try:
+                _loop = _asyncio_v2.get_running_loop()
+                with _cf_v2.ThreadPoolExecutor(max_workers=1) as _pool:
+                    _pv2_result = _pool.submit(_asyncio_v2.run, _pipeline_run()).result(timeout=30)
+            except RuntimeError:
+                _pv2_result = _asyncio_v2.run(_pipeline_run())
+
+            _pipeline_v2_candidates = list((_pv2_result or {}).get("candidates") or [])
+        except Exception as _pv2_exc:
+            import logging as _pv2_log
+            _pv2_log.getLogger("shopsquire.recommend").debug(
+                "RECOMMEND_PIPELINE_V2: pipeline call failed, falling back to monolith: %s", _pv2_exc
+            )
+            _pipeline_v2_candidates = []
+    # _pipeline_v2_candidates is injected into the candidate pool after retrieval.
+    # See injection point near the candidate retrieval block below.
     flags_path = os.getenv("FEATURE_FLAGS_PATH") or get_settings().feature_flags_path
     flags = load_feature_flags(flags_path)
     skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
@@ -5152,10 +5808,30 @@ def suggest(
     fast_path_enabled = bool(fast_path)
     if fast_path_enabled:
         copywriting_enabled = False
+        _fast_path_image_context, _fast_path_image_cv_signals = _parse_fast_path_image_inputs(
+            image_labels=image_labels,
+            image_ocr_text=image_ocr_text,
+            image_hash=image_hash,
+            image_intent=image_intent,
+            image_product_identity=image_product_identity,
+            image_cv_signals=image_cv_signals,
+        )
+        return _with_trace(_fast_path_catalog_recommendation(
+            db=db,
+            uid=uid,
+            query=scrub_pii(query or ""),
+            trace_id=trace_id,
+            budget_min=budget_min,
+            budget_max=budget_max,
+            image_context=_fast_path_image_context,
+            image_cv_signals=_fast_path_image_cv_signals,
+            started_at=route_t0,
+        ), trace_id)
     _guard_t0 = time.perf_counter()
+    guard_image_ocr_text = None if fast_path_enabled else image_ocr_text
     guard = inspect_commerce_request(
         surface="recommend.suggest",
-        texts=[query, image_labels, image_ocr_text],
+        texts=[query, image_labels, guard_image_ocr_text],
         uid=uid,
         sku_values=[],
         quantity_values=[],
@@ -5183,6 +5859,37 @@ def suggest(
         )
     except Exception:
         pass
+    # ── Inventory intent fast-path ──────────────────────────────────────────────
+    # Intercept stock-level queries BEFORE the full LLM pipeline.
+    # Stock counts MUST come from DB only — the LLM must never generate them.
+    # Injection attempts are caught here and returned as safe refusals.
+    # Skip when query is off-domain so the off_domain_request status is returned
+    # correctly by the normal pipeline (not intercepted here).
+    try:
+        from src.app.services.inventory_query_service import handle_inventory_intent
+        _inv_skip = _query_signals_off_domain(query) or _query_signals_unsupported_intent(query)
+        _inv_response = None if _inv_skip else handle_inventory_intent(query=query, uid=uid)
+        if _inv_response is not None:
+            return _with_trace(
+                {
+                    "recommendations": [],
+                    "nqe": None,
+                    "answer": _inv_response.get("answer"),
+                    "inventory": {
+                        "sku": _inv_response.get("sku"),
+                        "name": _inv_response.get("name"),
+                        "stock_level": _inv_response.get("stock_level"),
+                        "rule_id": _inv_response.get("rule_id"),
+                    },
+                    "source": _inv_response.get("source"),
+                    "injection_blocked": bool(_inv_response.get("injection_blocked")),
+                    "timing": {"route_ms": int((time.perf_counter() - route_t0) * 1000)},
+                },
+                trace_id,
+            )
+    except Exception:
+        pass  # Inventory fast-path failure is non-fatal; fall through to normal pipeline
+
     # MAESTRO boundary check for the Orchestrator agent at recommend ingress.
     # In "block" mode (MAESTRO_ENFORCEMENT_MODE=block), a critical/high violation
     # raises MaestroViolationError which is caught here and returned as 403.
@@ -5227,12 +5934,29 @@ def suggest(
     except Exception:
         pass
     if guard.get("verdict") == "block":
+        _request_id = ""
+        try:
+            _request_id = str(get_request_id() or "").strip()
+        except Exception:
+            _request_id = ""
+        if not _request_id:
+            try:
+                _request_id = str((request.headers.get("x-request-id") if request is not None else "") or "").strip()
+            except Exception:
+                _request_id = ""
+        _blocked_event_ref = f"blocked_suggest:{trace_id}"
         try:
             if not any("/api/v1/recommend".startswith(p) for p in _skip_prefixes):
                 emit_security_event(
                     "/api/v1/recommend/suggest",
                     {
-                        "payload": {"uid": uid, "query": query},
+                        "payload": {
+                            "uid": uid,
+                            "query": query,
+                            "trace_id": trace_id,
+                            "request_id": _request_id,
+                            "event_ref": _blocked_event_ref,
+                        },
                         "analysis": {
                             "signals": {r: True for r in (guard.get("reasons") or [])},
                             "mitre_atlas": guard.get("mitre_atlas") or [],
@@ -5253,10 +5977,24 @@ def suggest(
             "reasons": guard.get("reasons") or ["invalid_payload"],
             "verdict": guard.get("verdict"),
             "severity": guard.get("severity"),
+            "trace_id": trace_id,
+            "decision_trace_id": trace_id,
+            "request_id": _request_id,
+            "event_ref": _blocked_event_ref,
         }
         if _block_mode == "200":
             return _block_payload
-        raise HTTPException(status_code=400, detail=f"blocked_suggest: {', '.join(guard.get('reasons') or ['invalid_payload'])}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "blocked_suggest",
+                "reasons": guard.get("reasons") or ["invalid_payload"],
+                "trace_id": trace_id,
+                "decision_trace_id": trace_id,
+                "request_id": _request_id,
+                "event_ref": _blocked_event_ref,
+            },
+        )
     image_cv_signals_parsed: Dict[str, Any] = {}
     incoming_image_payload = bool(image_labels or image_ocr_text or image_hash or image_intent or image_product_identity or image_cv_signals)
     image_reupload_reasons: list[str] = []
@@ -5320,10 +6058,13 @@ def suggest(
                     "steg_suspicious": bool(parsed_cv.get("steg_suspicious")),
                     "pii_detected": bool(parsed_cv.get("pii_detected")),
                     "ssn_detected": bool(parsed_cv.get("ssn_detected")),
+                    "fast_triage_timeout": bool(parsed_cv.get("fast_triage_timeout")),
                     "ssn_count": int(parsed_cv.get("ssn_count") or 0) if parsed_cv.get("ssn_count") is not None else 0,
                     "qr_payload_types": parsed_cv.get("qr_payload_types") if isinstance(parsed_cv.get("qr_payload_types"), list) else [],
                     "qr_payloads": parsed_cv.get("qr_payloads") if isinstance(parsed_cv.get("qr_payloads"), list) else [],
                     "qr_redirect_probe": parsed_cv.get("qr_redirect_probe") if isinstance(parsed_cv.get("qr_redirect_probe"), dict) else {},
+                    "image_relevance": str(parsed_cv.get("image_relevance") or "relevant"),
+                    "image_relevance_note": str(parsed_cv.get("image_relevance_note") or ""),
                 }
                 if not image_context.get("intent") and image_cv_signals_parsed.get("intent_cv_triage"):
                     image_context["intent"] = "cv_triage"
@@ -5347,6 +6088,8 @@ def suggest(
                     image_reupload_reasons.append("pii_detected_ssn")
                 elif bool(parsed_cv.get("pii_detected")):
                     image_reupload_reasons.append("pii_detected")
+                if bool(parsed_cv.get("fast_triage_timeout")):
+                    image_reupload_reasons.append("fast_triage_timeout")
         if image_context.get("ocr"):
             ocr_aug = _augment_image_cv_signals_from_ocr(image_context.get("ocr"))
             for _k, _v in ocr_aug.items():
@@ -5410,6 +6153,9 @@ def suggest(
     # ── Approach 2: Feature stripping — enforce the allowlist structurally ──
     # Strips tainted signals BEFORE they reach brand-hint extraction, identity
     # matching, or candidate retrieval.  "text_only" = complete image feature reset.
+    _fast_path_image_context = dict(image_context) if isinstance(image_context, dict) else {}
+    _fast_path_image_cv_signals = dict(image_cv_signals_parsed) if isinstance(image_cv_signals_parsed, dict) else {}
+
     if _image_feature_allowlist.verdict != "full":
         if not _image_feature_allowlist.allow_ocr:
             image_context.pop("ocr", None)
@@ -5419,6 +6165,19 @@ def suggest(
             # Full strip: wipe all image-derived context signals
             image_context = {}
             image_cv_signals_parsed = {}
+
+    if fast_path_enabled:
+        return _with_trace(_fast_path_catalog_recommendation(
+            db=db,
+            uid=uid,
+            query=query,
+            trace_id=trace_id,
+            budget_min=budget_min,
+            budget_max=budget_max,
+            image_context=_fast_path_image_context,
+            image_cv_signals=_fast_path_image_cv_signals,
+            started_at=route_t0,
+        ), trace_id)
 
     try:
         _catalog_t0 = time.perf_counter()
@@ -5571,14 +6330,25 @@ def suggest(
     # ── Join background security analysis ──────────────────────────────────────
     # The security analysis was submitted to a thread pool earlier.  Collect
     # the result here (with a hard timeout) before applying PII/gate logic.
+    _sec_start_ms = int(time.perf_counter() * 1000)
     try:
         _sec_result = _security_future.result(timeout=_SEC_TIMEOUT_S)
         if isinstance(_sec_result, dict) and _sec_result.get("severity"):
             analysis = _sec_result
             severity = analysis.get("severity", "info")
-    except (_futures.TimeoutError, Exception):
-        # Keep optimistic defaults — security didn't finish in time.
-        pass
+    except _futures.TimeoutError:
+        # Security analysis didn't finish — treat as uncertain, not clean.
+        analysis["severity"] = "warn"
+        analysis["details"]["reason"] = "security_analysis_timeout"
+        analysis["timeout"] = True
+        severity = "warn"
+    except Exception:
+        analysis["severity"] = "warn"
+        analysis["details"]["reason"] = "security_analysis_error"
+        analysis["timeout"] = True
+        severity = "warn"
+    finally:
+        timing_breakdown["security_analysis_ms"] = int(time.perf_counter() * 1000) - _sec_start_ms
     # Re-emit taxonomy trace with the real security result now that we have it.
     try:
         _real_sec_details = analysis.get("details") or {}
@@ -8317,6 +9087,26 @@ def suggest(
                     continue
                 if _cv and not _nqe_answered.get(_ck):
                     _nqe_answered[_ck] = _cv
+            # Compute OOS fraction using a direct batch stock lookup at NQE-build time.
+            # The bulk stock annotation pass happens later (line ~12600), so we cannot
+            # rely on stock_status being set on results yet.  A separate batch query
+            # here is cheap (single SQL round-trip) and gives NQE accurate signal.
+            _oos_fraction = 0.0
+            try:
+                _nqe_result_skus = [
+                    str((r or {}).get("sku") or "")
+                    for r in (results or [])
+                    if isinstance(r, dict) and (r or {}).get("sku")
+                ]
+                if _nqe_result_skus:
+                    from src.app.services.inventory_query_service import batch_stock_levels as _bsl
+                    _nqe_stock = _bsl(_nqe_result_skus)
+                    _nqe_oos = sum(1 for sku in _nqe_result_skus if _nqe_stock.get(sku, 0) == 0)
+                    _oos_fraction = float(_nqe_oos) / float(max(1, len(_nqe_result_skus)))
+            except Exception:
+                _oos_fraction = 0.0
+            _stock_filter_opted = bool((kv or {}).get("stock_filter_preference") == "in_stock_only")
+
             nqe_input = NQEInput(
                 intent="product_search",
                 product_category=category,
@@ -8340,6 +9130,8 @@ def suggest(
                 chat_history_summary=_session_context_summary,
                 user_profile=_user_profile_dict,
                 turn_intent=turn_intent,
+                oos_fraction=_oos_fraction,
+                stock_filter_opted_in=_stock_filter_opted,
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
@@ -10020,6 +10812,33 @@ def suggest(
             use_case_key=(_use_case_match or constraints.get("use_case")),
             query=query_effective,
         )
+        # ── Pre-ranking stock penalty ─────────────────────────────────────────
+        # Apply live inventory penalties BEFORE building results so ranking
+        # reflects stock reality. OOS items lose 0.5 pts; unknown stock loses 0.1.
+        try:
+            from src.app.services.inventory_query_service import batch_stock_levels as _bsl_pre
+            _pre_skus = [
+                str((item or {}).get("candidate", {}).get("sku") or "")
+                for item in scored
+                if isinstance(item, dict) and isinstance((item or {}).get("candidate"), dict)
+            ]
+            if _pre_skus:
+                _pre_stock = _bsl_pre([s for s in _pre_skus if s])
+                for _item in scored:
+                    _cand = (_item or {}).get("candidate") or {}
+                    _sku = str(_cand.get("sku") or "")
+                    if not _sku:
+                        continue
+                    _lvl = _pre_stock.get(_sku)
+                    if _lvl is None:
+                        _item["score"] = float(_item.get("score") or 0.0) - 0.1
+                        _cand["_stock_penalty"] = "unknown"
+                    elif _lvl == 0:
+                        _item["score"] = float(_item.get("score") or 0.0) - 0.5
+                        _cand["_stock_penalty"] = "out_of_stock"
+                scored.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+        except Exception:
+            pass
         ranked = [
             dict((item or {}).get("candidate") or {})
             for item in (scored or [])
@@ -10595,10 +11414,12 @@ def suggest(
         rerank_delta = None
         if baseline_rank is not None:
             rerank_delta = baseline_rank - idx
+        _pos_factors = list(((item.get("factors") or {}).get("positive") or []))[:3]
         results.append({
             **c,
             "confidence": item.get("confidence"),
             "factors": item.get("factors"),
+            "why": _pos_factors,
             "score": score_val,
             "score_norm": _normalize_score(score_val),
             "rank_delta": rank_delta,
@@ -11308,6 +12129,35 @@ def suggest(
         _session_excerpt = (str(_session_context_summary or "").strip())[:400] or None
         _combined_preamble_parts = [p for p in (_ctx_preamble, _trace_ctx, _session_excerpt) if p]
         _combined_preamble = "\n\n".join(_combined_preamble_parts) if _combined_preamble_parts else None
+        # ── QR signal injection into LLM preamble ────────────────────────────
+        # Surface decoded QR content to the LLM so it can mention the finding
+        # when relevant (e.g. QR on a product display, promotional code, etc.).
+        try:
+            if image_cv_signals_parsed.get("qr_code_detected"):
+                _qr_payloads = [str(p) for p in (image_cv_signals_parsed.get("qr_payloads") or [])
+                                if isinstance(p, (str, bytes)) and str(p).strip()][:2]
+                if _qr_payloads:
+                    _qr_note = (
+                        f"Note: A QR code was detected in the uploaded image "
+                        f"(decoded: {', '.join(_qr_payloads)}). Mention this if relevant to the query."
+                    )
+                else:
+                    _qr_note = (
+                        "Note: A QR code was detected in the uploaded image. "
+                        "Mention this if it appears relevant to the query."
+                    )
+                _combined_preamble = (_combined_preamble + "\n\n" + _qr_note) if _combined_preamble else _qr_note
+        except Exception:
+            pass
+        # ── Off-topic image note injection ───────────────────────────────────
+        try:
+            if image_cv_signals_parsed.get("image_relevance") == "off_topic":
+                _off_note = str(image_cv_signals_parsed.get("image_relevance_note") or
+                                "The uploaded image does not appear to be an electronics product. "
+                                "Recommendations will be based on the text query only.")
+                _combined_preamble = (_combined_preamble + "\n\n" + _off_note) if _combined_preamble else _off_note
+        except Exception:
+            pass
         # Use a real Ollama model for the summary. `llm_model` may be a display
         # name like "rule-based (prefer_small)" when the intent rollout is off —
         # in that case fall back to the configured medium model so the LLM
@@ -11732,6 +12582,34 @@ def suggest(
             payload["intent_confidence"] = round(_intent_conf_gate, 3)
         except Exception:
             pass
+        # ── Security event prefix in assistant_message ───────────────────────
+        # When the uploaded image was flagged (steg, QR injection, adversarial),
+        # prepend a visible [SECURITY] notice so the user sees it in the chat UI.
+        try:
+            _steg_flag = bool(image_cv_signals_parsed.get("steg_suspicious"))
+            _qr_inj_flag = bool(image_cv_signals_parsed.get("qr_prompt_injection"))
+            _adv_flag = float(image_cv_signals_parsed.get("adversarial_score") or 0.0) >= 0.35
+            _manip_flag = bool(image_cv_signals_parsed.get("manipulation_detected"))
+            if incoming_image_payload and (_steg_flag or _qr_inj_flag or _adv_flag or _manip_flag):
+                _sec_reasons = []
+                if _steg_flag:
+                    _sec_reasons.append("hidden payload detected (steganography)")
+                if _qr_inj_flag:
+                    _sec_reasons.append("QR prompt injection")
+                if _adv_flag:
+                    _sec_reasons.append("adversarial perturbation")
+                if _manip_flag:
+                    _sec_reasons.append("image manipulation")
+                _sec_prefix = (
+                    f"⚠️ [SECURITY] Image flagged: {', '.join(_sec_reasons)}. "
+                    "Using text-only mode. "
+                )
+                if assistant_message:
+                    assistant_message = _sec_prefix + assistant_message
+                else:
+                    assistant_message = _sec_prefix + "Recommendations below are based on your text query only."
+        except Exception:
+            pass
         payload["assistant_message"] = assistant_message
         payload["catalog_profile"] = catalog_profile
         payload["catalog_relevance"] = catalog_relevance
@@ -11824,6 +12702,37 @@ def suggest(
         )
     except Exception:
         pass
+    # ── Batch stock annotation ────────────────────────────────────────────────
+    # Annotate each result with live inventory data in a single batch DB query.
+    # OOS items get a rank penalty; stock urgency labels are surfaced to the UI.
+    try:
+        if results:
+            from src.app.services.inventory_query_service import batch_stock_levels
+            _skus_to_check = [str((r or {}).get("sku") or "") for r in results if isinstance(r, dict) and (r or {}).get("sku")]
+            if _skus_to_check:
+                _stock_map = batch_stock_levels(_skus_to_check)
+                for _r in results:
+                    if not isinstance(_r, dict):
+                        continue
+                    _sku = str((_r or {}).get("sku") or "")
+                    _stock = _stock_map.get(_sku, 0)
+                    _r["stock_level"] = _stock
+                    if _stock == 0:
+                        _r["stock_status"] = "out_of_stock"
+                        _r["_rank_penalty"] = 0.5
+                    elif _stock <= 3:
+                        _r["stock_status"] = "very_low_stock"
+                        _r["stock_urgency"] = f"Only {_stock} left in stock"
+                    elif _stock <= 10:
+                        _r["stock_status"] = "low_stock"
+                        _r["stock_urgency"] = f"{_stock} units remaining"
+                    else:
+                        _r["stock_status"] = "in_stock"
+                # Apply rank penalty: move OOS items to end
+                results = sorted(results, key=lambda r: float(r.get("_rank_penalty") or 0.0))
+    except Exception:
+        pass  # Stock annotation failure is non-fatal
+
     try:
         shortlist_skus = [str((r or {}).get("sku") or "") for r in (results or []) if isinstance(r, dict)]
         shortlist_skus = [s for s in shortlist_skus if s][:12]

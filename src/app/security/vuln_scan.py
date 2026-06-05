@@ -2,10 +2,126 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import os
 import re
 import uuid
 from typing import Any, Dict, List
+
+_log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# CISA Known Exploited Vulnerabilities (KEV) catalog — local cache
+# ---------------------------------------------------------------------------
+# Subset of high-impact KEV entries relevant to ecommerce / web stacks.
+# Full live feed: https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json
+# Set CISA_KEV_LIVE_FEED=1 to fetch the live feed at check time (requires network).
+_CISA_KEV_LOCAL: Dict[str, Dict[str, Any]] = {
+    "CVE-2025-54236": {
+        "product": "Adobe Commerce / Magento",
+        "short_description": "SessionReaper — unauthenticated session fixation leading to admin takeover",
+        "cvss_v3": 9.1,
+        "due_date": "2025-07-15",
+        "known_ransomware": False,
+        "notes": "250+ stores compromised overnight. Patch: Adobe Commerce 2.4.8-p1 / 2.4.7-p3.",
+    },
+    "CVE-2025-24085": {
+        "product": "Apple iOS / macOS",
+        "short_description": "Core Media use-after-free — exploited in the wild for privilege escalation",
+        "cvss_v3": 7.8,
+        "due_date": "2025-02-19",
+        "known_ransomware": False,
+        "notes": "Patch: iOS 18.3, macOS Sequoia 15.3.",
+    },
+    "CVE-2025-0282": {
+        "product": "Ivanti Connect Secure VPN",
+        "short_description": "Stack-based buffer overflow — unauthenticated RCE in VPN gateway",
+        "cvss_v3": 9.0,
+        "due_date": "2025-01-22",
+        "known_ransomware": True,
+        "notes": "Ransomware groups actively exploiting. Immediate patching required.",
+    },
+    "CVE-2024-23113": {
+        "product": "Fortinet FortiOS / FortiProxy",
+        "short_description": "Format string vulnerability — unauthenticated RCE in SSL-VPN daemon",
+        "cvss_v3": 9.8,
+        "due_date": "2024-10-23",
+        "known_ransomware": True,
+        "notes": "Critical: actively used by ransomware operators and nation-state actors.",
+    },
+    "CVE-2024-3400": {
+        "product": "Palo Alto Networks PAN-OS",
+        "short_description": "Command injection in GlobalProtect gateway — unauthenticated RCE",
+        "cvss_v3": 10.0,
+        "due_date": "2024-04-19",
+        "known_ransomware": True,
+        "notes": "Zero-day used in Operation MidnightEclipse. Apply hotfix immediately.",
+    },
+    "CVE-2024-21887": {
+        "product": "Ivanti Connect Secure / Policy Secure",
+        "short_description": "Command injection — authenticated RCE via web component",
+        "cvss_v3": 9.1,
+        "due_date": "2024-01-31",
+        "known_ransomware": False,
+        "notes": "Chained with CVE-2023-46805 for unauthenticated RCE. Factory reset required.",
+    },
+    "CVE-2023-44487": {
+        "product": "HTTP/2 Protocol",
+        "short_description": "Rapid Reset — HTTP/2 CONTINUATION flood DoS (affects nginx, Apache, IIS)",
+        "cvss_v3": 7.5,
+        "due_date": "2023-10-31",
+        "known_ransomware": False,
+        "notes": "Update web servers: nginx 1.25.3+, Apache 2.4.58+, HAProxy 2.8.5+.",
+    },
+}
+
+
+def check_cisa_kev(cve_ids: List[str]) -> List[Dict[str, Any]]:
+    """Match a list of CVE IDs against the CISA KEV catalog.
+
+    Returns entries where the CVE is in the KEV catalog (confirmed exploited in wild).
+    If CISA_KEV_LIVE_FEED=1, also fetches the live CISA feed (cached per process).
+    """
+    if not cve_ids:
+        return []
+
+    catalog = dict(_CISA_KEV_LOCAL)
+
+    # Optionally fetch live KEV feed (best-effort)
+    if str(os.getenv("CISA_KEV_LIVE_FEED", "0")).strip() == "1":
+        try:
+            import httpx
+            resp = httpx.get(
+                "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+                timeout=10.0,
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            live_data = resp.json()
+            for entry in (live_data.get("vulnerabilities") or []):
+                cve_id = str(entry.get("cveID") or "").strip()
+                if cve_id and cve_id not in catalog:
+                    catalog[cve_id] = {
+                        "product": entry.get("product"),
+                        "short_description": entry.get("shortDescription"),
+                        "cvss_v3": None,
+                        "due_date": entry.get("dueDate"),
+                        "known_ransomware": str(entry.get("knownRansomwareCampaignUse") or "").lower() == "known",
+                        "notes": entry.get("notes"),
+                    }
+        except Exception as exc:
+            _log.debug("CISA KEV live feed fetch failed (using local cache): %s", exc)
+
+    hits = []
+    for cve_id in (cve_ids or []):
+        normalized = str(cve_id or "").strip().upper()
+        if normalized in catalog:
+            hits.append({
+                "cve_id": normalized,
+                "kev_confirmed": True,
+                **catalog[normalized],
+            })
+    return hits
 
 
 _HOST_RE = re.compile(r"^[a-z0-9.-]+$", re.IGNORECASE)
@@ -212,10 +328,26 @@ def auto_create_incidents_from_findings(
     findings = scan_result.get("findings") or []
     created: List[Dict[str, Any]] = []
 
+    # Enrich all findings with CISA KEV status in a single batch check
+    all_cve_ids = [str(f.get("id") or "") for f in findings if str(f.get("id") or "").startswith("CVE-")]
+    kev_hits_by_id = {h["cve_id"]: h for h in check_cisa_kev(all_cve_ids)}
+
     for finding in findings:
         sev = str(finding.get("severity") or "").lower()
         cvss = severity_to_cvss(sev)
-        if cvss < cvss_threshold:
+        # CISA KEV entries always trigger an incident regardless of CVSS threshold
+        cve_id = str(finding.get("id") or "").strip().upper()
+        kev_entry = kev_hits_by_id.get(cve_id)
+        if kev_entry:
+            finding["kev_confirmed"] = True
+            finding["kev_details"] = kev_entry
+            # Use KEV CVSS if higher than our severity-based estimate
+            if kev_entry.get("cvss_v3") and float(kev_entry["cvss_v3"]) > cvss:
+                cvss = float(kev_entry["cvss_v3"])
+            if kev_entry.get("known_ransomware"):
+                sev = "critical"
+                cvss = max(cvss, 9.0)
+        if cvss < cvss_threshold and not kev_entry:
             continue
 
         incident_id = str(uuid.uuid4())

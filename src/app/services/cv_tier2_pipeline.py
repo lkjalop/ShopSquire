@@ -731,6 +731,7 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
         steg_enabled = str(os.getenv("CV_STEG_DETECT_ENABLED", "1")).lower() in ("1", "true", "yes")
         if steg_enabled:
             steg_res = detect_steganography(image_bytes)
+            _steg_decoded = str((steg_res.details or {}).get("decoded_content") or "")
             steganography = {
                 "steg_score": float(steg_res.steg_score),
                 "chi_square_p": float(steg_res.chi_square_p),
@@ -739,6 +740,7 @@ def run_tier2(image_bytes: bytes, meta: Dict[str, Any] | None = None, pack_id: s
                 "lsb_entropy_b": float(steg_res.lsb_entropy_b),
                 "is_suspicious": bool(steg_res.is_suspicious),
                 "explanations": list(steg_res.explanations or [])[:8],
+                "decoded_content": _steg_decoded[:500] if _steg_decoded else None,
             }
             if steganography.get("is_suspicious"):
                 evidence_tags.append("steganography_suspected")

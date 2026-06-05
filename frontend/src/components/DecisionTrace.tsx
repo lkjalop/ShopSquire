@@ -1,6 +1,6 @@
-﻿import { useEffect, useState, useRef, useCallback } from 'react';
+import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import styles from './DecisionTrace.module.css';
-import { apiUrl, getApiBase, safeJson, wsUrl } from '../lib/api';
+import { apiUrl, wsUrl, getApiBase, safeJson } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
 
 type TraceEvent = {
@@ -157,7 +157,7 @@ function humanizeKey(key: string): string {
 }
 
 function renderValue(value: any) {
-  const unknownText = new Set(['', '?', '--', '—', 'unknown', 'n/a', 'null', 'undefined']);
+  const unknownText = new Set(['', '?', '--', '-', 'unknown', 'n/a', 'null', 'undefined']);
   if (value === null || value === undefined) return <span className={styles.muted}>Not available</span>;
   if (typeof value === 'boolean') {
     return <span className={value ? styles.booleanYes : styles.booleanNo}>{value ? 'Yes' : 'No'}</span>;
@@ -166,7 +166,7 @@ function renderValue(value: any) {
   if (typeof value === 'string') {
     const normalized = value.trim();
     if (unknownText.has(normalized.toLowerCase())) return <span className={styles.muted}>Not available</span>;
-    const cleaned = normalized.replace(/Ã¢[€“]/g, '—');
+    const cleaned = normalized.replace(/\u2013|\u2014/g, '-');
     const trimmed = cleaned.length > 220 ? `${cleaned.slice(0, 220)}...` : cleaned;
     return <span className={styles.valueText} title={cleaned}>{trimmed}</span>;
   }
@@ -188,7 +188,7 @@ function isMissingValue(value: any): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
-    return ['', '?', '--', '—', 'unknown', 'n/a', 'null', 'undefined'].includes(normalized);
+    return ['', '?', '--', '-', 'unknown', 'n/a', 'null', 'undefined'].includes(normalized);
   }
   if (Array.isArray(value)) return value.length === 0;
   if (typeof value === 'object') return Object.keys(value).length === 0;
@@ -250,7 +250,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [minimized, setMinimized] = useState(false);
   const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll'>('poll');
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const traceIdText = typeof traceId === 'string' ? traceId : '';
+  const [fallbackTraceId, setFallbackTraceId] = useState<string | null>(null);
+  const noTraceTelemetrySentRef = useRef(false);
+  const effectiveTraceId = (typeof traceId === 'string' && traceId.trim()) ? traceId.trim() : (fallbackTraceId || null);
+  const traceIdText = effectiveTraceId || '';
   const [payloadActionStatus, setPayloadActionStatus] = useState<Record<string, string>>({});
   const [linkedArtifactResults, setLinkedArtifactResults] = useState<Record<string, any>>({});
   const [runtimeSecurityResults, setRuntimeSecurityResults] = useState<Record<string, any>>({});
@@ -259,7 +262,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [posthocNote, setPosthocNote] = useState<string>('');
   const [posthocStatus, setPosthocStatus] = useState<string | null>(null);
   const [eventFilter, setEventFilter] = useState<'all' | 'turn_envelope_diff'>('all');
+  const [explainReplayLoading, setExplainReplayLoading] = useState(false);
   const apiBase = getApiBase();
+  const explainReplayAbortRef = useRef<AbortController | null>(null);
   const displayEventType = (evt: TraceEvent): string =>
     String(evt?.payload?._original_event_type || evt?.payload?.original_event_type || evt.event_type || 'event');
 
@@ -310,19 +315,19 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
 
   // Detach to new window
   const handleDetach = () => {
-    if (!traceId) return;
+    if (!traceIdText) return;
     const width = 750;
     const height = 600;
     const left = window.screenX + (window.innerWidth - width) / 2;
     const top = window.screenY + (window.innerHeight - height) / 2;
 
-    const traceWindow = window.open('', `DecisionTrace_${traceId}`, `width=${width},height=${height},left=${left},top=${top}`);
+    const traceWindow = window.open('', `DecisionTrace_${traceIdText}`, `width=${width},height=${height},left=${left},top=${top}`);
     if (traceWindow) {
       traceWindow.document.write(`
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Decision Trace - ${traceId}</title>
+  <title>Decision Trace - ${traceIdText}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, sans-serif; background: #f3f4f6; padding: 16px; }
@@ -338,7 +343,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   </style>
 </head>
 <body>
-  <div class="header">Decision Trace: ${traceId}</div>
+  <div class="header">Decision Trace: ${traceIdText}</div>
   <div class="content">
     <div class="loading" id="loading">Loading trace data...</div>
     <div id="trace-content" style="display:none"></div>
@@ -348,7 +353,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     const apiKey = ${JSON.stringify(effectiveApiKey)};
     async function loadTrace() {
       try {
-        const url = (apiBase ? apiBase : '') + '/api/v1/decisions/${traceId}';
+        const url = (apiBase ? apiBase : '') + '/api/v1/decisions/${traceIdText}';
         const headers = apiKey ? { 'x-api-key': apiKey } : undefined;
         const r = await fetch(url, {
           credentials: 'include',
@@ -374,200 +379,216 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     }
   };
 
+  const bumpNoTraceTelemetry = useCallback(() => {
+    try {
+      const key = 'shopsquire.trace.no_trace_modal_opens';
+      const raw = Number(window.localStorage.getItem(key) || '0');
+      const next = Number.isFinite(raw) ? raw + 1 : 1;
+      window.localStorage.setItem(key, String(next));
+      const w = window as any;
+      if (!w.__shopsquireTelemetry || typeof w.__shopsquireTelemetry !== 'object') {
+        w.__shopsquireTelemetry = {};
+      }
+      w.__shopsquireTelemetry.no_trace_modal_opens = next;
+    } catch {}
+  }, []);
+
+  const fetchExplainReplayLazy = useCallback(async () => {
+    if (!effectiveTraceId) return;
+    const tabsAllowFetch = activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw';
+    if (!tabsAllowFetch) return;
+
+    try {
+      if (explainReplayAbortRef.current) explainReplayAbortRef.current.abort();
+    } catch {}
+    const ctl = new AbortController();
+    explainReplayAbortRef.current = ctl;
+    const timeoutId = window.setTimeout(() => ctl.abort(), 3000);
+    setExplainReplayLoading(true);
+    try {
+      const headers = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
+      const [reExplain, reReplay] = await Promise.all([
+        fetch(apiUrl(`/api/v1/decisions/${effectiveTraceId}/explain`), {
+          signal: ctl.signal,
+          credentials: 'include',
+          headers,
+        }).then(safeJson),
+        fetch(apiUrl(`/api/v1/decisions/${effectiveTraceId}/replay`), {
+          signal: ctl.signal,
+          credentials: 'include',
+          headers,
+        }).then(safeJson),
+      ]);
+      setExplain(reExplain);
+      setReplay(reReplay);
+    } catch {
+      if (!ctl.signal.aborted) {
+        setExplain(null);
+        setReplay(null);
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (explainReplayAbortRef.current === ctl) explainReplayAbortRef.current = null;
+      setExplainReplayLoading(false);
+    }
+  }, [effectiveTraceId, activeTab, effectiveApiKey]);
+
   useEffect(() => {
-    if (!traceId) {
+    if (traceId && traceId.trim()) {
+      setFallbackTraceId(null);
+      noTraceTelemetrySentRef.current = false;
+    }
+  }, [traceId]);
+
+  useEffect(() => {
+    if (effectiveTraceId) return;
+    if (!traceId && !noTraceTelemetrySentRef.current) {
+      noTraceTelemetrySentRef.current = true;
+      bumpNoTraceTelemetry();
+    }
+  }, [effectiveTraceId, traceId, bumpNoTraceTelemetry]);
+
+  useEffect(() => {
+    const currentTraceId = effectiveTraceId;
+    if (!currentTraceId) {
       setTrace(null);
       setEvents([]);
       setExplain(null);
       setReplay(null);
+      setAuditTrail(null);
       setUpdating(false);
       setStreamMode('poll');
+      try {
+        if (explainReplayAbortRef.current) explainReplayAbortRef.current.abort();
+      } catch {}
       return;
     }
     let mounted = true;
     const ctl = new AbortController();
     let es: EventSource | null = null;
     let ws: WebSocket | null = null;
+    let pollIv: ReturnType<typeof setInterval> | null = null;
 
-    const fetchTraceViaQuery = async () => {
-      const qr = await fetch(apiUrl(`/api/v1/decisions/${traceId}/query?include_events=true`), {
-        signal: ctl.signal,
-        credentials: 'include',
-        headers: authHeaders,
+    const mergeEvents = (incoming: any[]) => {
+      if (!mounted || !Array.isArray(incoming)) return;
+      setEvents(prev => {
+        const byId = new Map<string, any>();
+        (prev || []).forEach(e => { if (e.id) byId.set(e.id, e); });
+        incoming.forEach(e => { if (e.id) byId.set(e.id, e); });
+        return Array.from(byId.values()).sort((a, b) => (a.seq || 0) - (b.seq || 0));
       });
-      if (!qr.ok) throw new Error(`trace_query_${qr.status}`);
-      const qd = await safeJson(qr);
-      if (!mounted || !qd) return;
-      setTrace(qd as any);
-      if (Array.isArray((qd as any).events)) setEvents((qd as any).events);
     };
 
-    const fetchTrace = async () => {
+    const fetchCanonicalTrace = async () => {
       setUpdating(true);
       try {
-        const r = await fetch(apiUrl(`/api/v1/decisions/${traceId}`), {
+        const r = await fetch(apiUrl(`/api/v1/decisions/${currentTraceId}`), {
           signal: ctl.signal,
           credentials: 'include',
           headers: authHeaders,
         });
-        if (!r.ok) {
-          if (r.status === 404) {
-            await fetchTraceViaQuery();
-            return;
-          }
-          throw new Error(`trace_${r.status}`);
+        if (r.ok) {
+          const d = await safeJson(r);
+          if (mounted) setTrace(d);
+          return;
         }
-        const d = await safeJson(r);
-        if (mounted) setTrace(d);
+        // fallback to query endpoint
+        const qr = await fetch(apiUrl(`/api/v1/decisions/${currentTraceId}/query?include_events=true`), {
+          signal: ctl.signal,
+          credentials: 'include',
+          headers: authHeaders,
+        });
+        if (!qr.ok) throw new Error(`trace_query_${qr.status}`);
+        const qd = await safeJson(qr);
+        if (!mounted || !qd) return;
+        setTrace(qd as any);
+        if (Array.isArray((qd as any).events)) setEvents((qd as any).events);
       } catch {
-        try {
-          await fetchTraceViaQuery();
-        } catch {
-          if (mounted) setTrace(null);
-        }
+        if (mounted) setTrace(null);
       } finally {
         if (mounted) setUpdating(false);
       }
     };
 
-    const fetchExplainReplay = async () => {
-      try {
-        const [reExplain, reReplay] = await Promise.all([
-          fetch(apiUrl(`/api/v1/decisions/${traceId}/explain`), {
-            credentials: 'include',
-            headers: authHeaders,
-          }).then(safeJson),
-          fetch(apiUrl(`/api/v1/decisions/${traceId}/replay`), {
-            credentials: 'include',
-            headers: authHeaders,
-          }).then(safeJson),
-        ]);
-        if (mounted) {
-          setExplain(reExplain);
-          setReplay(reReplay);
-        }
-      } catch {
-        if (mounted) {
-          setExplain(null);
-          setReplay(null);
-        }
-      }
-    };
-
-    const fetchTimeline = async () => {
-      try {
-        const r = await fetch(apiUrl(`/api/v1/trace/${traceId}/timeline`), {
-          credentials: 'include',
-          headers: authHeaders,
-        });
-        if (r.ok) {
-          const j = await safeJson(r);
-          if (mounted && Array.isArray(j.events)) setEvents(j.events);
-          return;
-        }
-        await fetchTraceViaQuery();
-      } catch {
-        try {
-          await fetchTraceViaQuery();
-        } catch {
-          // Fallback: keep synthetic events from trace
-        }
-      }
-    };
-
-    // Prefer WebSocket streaming; if it fails, try SSE; else poll.
+    // Try WS first; give it 5 s to connect before falling back to SSE
+    let wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const url = wsUrl(`/api/v1/decisions/${traceId}/events/ws`);
+      const url = wsUrl(`/api/v1/decisions/${currentTraceId}/events/ws`);
       ws = new WebSocket(url);
+      wsConnectTimer = setTimeout(() => {
+        if (ws && ws.readyState !== WebSocket.OPEN) {
+          try { ws.close(); } catch {}
+          ws = null;
+        }
+      }, 5000);
+      ws.onopen = () => {
+        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+        if (mounted) setStreamMode('ws');
+      };
       ws.onmessage = (ev: MessageEvent) => {
         try {
           const data = JSON.parse(ev.data);
           const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-          if (mounted && Array.isArray(incoming)) {
-            setEvents((prev) => {
-              const byId = new Map<string, any>();
-              (prev || []).forEach(e => { if (e.id) byId.set(e.id, e); });
-              incoming.forEach((e: any) => { if (e.id) byId.set(e.id, e); });
-              return Array.from(byId.values()).sort((a: any, b: any) => (a.seq || 0) - (b.seq || 0));
-            });
-          }
+          mergeEvents(incoming);
         } catch {}
       };
-      ws.onopen = () => { if (mounted) setStreamMode('ws'); };
-      ws.onerror = () => { try { ws && ws.close(); } catch {}; ws = null; };
+      ws.onerror = () => {
+        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+        try { ws?.close(); } catch {} ws = null;
+      };
     } catch {
       ws = null;
     }
 
+    // Fall back to SSE if WS unavailable
     if (!ws) {
       try {
         if ((window as any).EventSource) {
-          const wire = (source: EventSource | null) => {
-            if (!source) return null;
+          const wire = (source: EventSource) => {
             source.onmessage = (ev: MessageEvent) => {
               try {
                 const data = JSON.parse(ev.data);
                 const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-                if (mounted && Array.isArray(incoming)) {
-                  setEvents((prev) => {
-                    const byId = new Map<string, any>();
-                    (prev || []).forEach(e => { if (e.id) byId.set(e.id, e); });
-                    incoming.forEach((e: any) => { if (e.id) byId.set(e.id, e); });
-                    return Array.from(byId.values()).sort((a: any, b: any) => (a.seq || 0) - (b.seq || 0));
-                  });
-                }
+                mergeEvents(incoming);
               } catch {}
             };
-            source.onerror = () => {
-              try { source.close(); } catch {}
-              if (es === source) es = null;
-            };
+            source.onerror = () => { try { source.close(); } catch {} if (es === source) es = null; };
             return source;
           };
           try {
-            es = wire(new EventSource(apiUrl(`/api/v1/decisions/${traceId}/events/stream`)));
-          } catch {
-            es = null;
-          }
-          if (!es) {
-            try {
-              es = wire(new EventSource(apiUrl(`/api/v1/trace/${traceId}/events/stream`)));
-            } catch {
-              es = null;
-            }
-          }
+            es = wire(new EventSource(apiUrl(`/api/v1/decisions/${currentTraceId}/events/stream`)));
+          } catch { es = null; }
           if (es && mounted) setStreamMode('sse');
         }
-      } catch {
-        es = null;
-      }
+      } catch { es = null; }
     }
 
-    fetchTrace();
-    fetchExplainReplay();
-    // If SSE not connected, poll as fallback
-    if (!es && !ws) {
-      fetchTimeline();
-      const iv = setInterval(() => { fetchTrace(); fetchExplainReplay(); }, 5000);
-      const iv2 = setInterval(fetchTimeline, 4000);
-      if (mounted) setStreamMode('poll');
-      return () => {
-        mounted = false;
-        ctl.abort();
-        clearInterval(iv);
-        clearInterval(iv2);
-        if (es) try { es.close(); } catch {}
-        if (ws) try { ws.close(); } catch {}
-      };
+    // Always do an initial snapshot fetch; if neither WS nor SSE connected, also poll
+    fetchCanonicalTrace();
+    if (!ws && !es) {
+      setStreamMode('poll');
+      pollIv = setInterval(fetchCanonicalTrace, 5000);
     }
 
     return () => {
       mounted = false;
       ctl.abort();
-      if (es) try { es.close(); } catch {}
-      if (ws) try { ws.close(); } catch {}
+      if (pollIv !== null) clearInterval(pollIv);
+      if (wsConnectTimer !== null) clearTimeout(wsConnectTimer);
+      try { ws?.close(); } catch {}
+      try { es?.close(); } catch {}
+      try {
+        if (explainReplayAbortRef.current) explainReplayAbortRef.current.abort();
+      } catch {}
     };
-  }, [traceId]);
+  }, [effectiveTraceId]);
+
+  useEffect(() => {
+    if (!effectiveTraceId) return;
+    if (!(activeTab === 'summary' || activeTab === 'audit' || activeTab === 'raw')) return;
+    if (explain || replay || explainReplayLoading) return;
+    fetchExplainReplayLazy();
+  }, [effectiveTraceId, activeTab, explain, replay, explainReplayLoading, fetchExplainReplayLazy]);
 
   const toggleRow = (id: string) => {
     setExpandedRows(prev => {
@@ -586,8 +607,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     source_id: 'ui',
     payload: {
       trace_id: traceId,
-      status: updating ? 'loading' : 'pending',
-      summary: updating ? 'Loading trace data...' : 'Trace id captured; waiting for timeline events.',
+      status: updating ? 'checking' : 'pending',
+      summary: updating ? 'Checking trace snapshot...' : 'Trace id captured; waiting for timeline events.',
     },
     timestamp: new Date().toISOString(),
   }] : [];
@@ -669,6 +690,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (Array.isArray(raw.mitre_attack) && !Array.isArray(merged.mitre_attack)) merged.mitre_attack = raw.mitre_attack;
     if (Array.isArray(raw.owasp_llm_top10) && !Array.isArray(merged.owasp_llm_top10)) merged.owasp_llm_top10 = raw.owasp_llm_top10;
     if (Array.isArray(raw.stride_categories) && !Array.isArray(merged.stride_categories)) merged.stride_categories = raw.stride_categories;
+    if (Array.isArray(raw.maestro) && !Array.isArray(merged.maestro)) merged.maestro = raw.maestro;
     if (raw.pasta && typeof raw.pasta === 'object' && (!merged.pasta || typeof merged.pasta !== 'object')) merged.pasta = raw.pasta;
     if (raw.pasta_stage != null && merged.pasta_stage == null) merged.pasta_stage = raw.pasta_stage;
     if (raw.dread && typeof raw.dread === 'object' && (!merged.dread || typeof merged.dread !== 'object')) merged.dread = raw.dread;
@@ -724,14 +746,65 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return normalizeSecurityPayload(securityLikeEvent?.payload);
   };
 
-  const security = extractSecurity();
+  const fallbackSecurity = (() => {
+    const tr: any = trace || {};
+    const recPayload: any = recommendationEventPayload || {};
+    const triage = (Array.isArray(imageTriage) && imageTriage.length > 0) ? (imageTriage[0] || {}) : {};
+    const triageSec = (triage?.security && typeof triage.security === 'object') ? triage.security : triage;
+    const triageSignals = (triageSec?.signals && typeof triageSec.signals === 'object') ? triageSec.signals : {};
+    const imageSecurity =
+      (tr?.image_security && typeof tr.image_security === 'object')
+      ? tr.image_security
+      : ((recPayload?.image_security && typeof recPayload.image_security === 'object') ? recPayload.image_security : {});
+    const matrix =
+      (tr?.right_panel?.security_matrix && typeof tr.right_panel.security_matrix === 'object')
+      ? tr.right_panel.security_matrix
+      : ((recPayload?.right_panel_contract?.security_matrix && typeof recPayload.right_panel_contract.security_matrix === 'object')
+        ? recPayload.right_panel_contract.security_matrix
+        : {});
+
+    if (
+      Object.keys(triageSignals || {}).length === 0
+      && Object.keys(imageSecurity || {}).length === 0
+      && Object.keys(matrix || {}).length === 0
+    ) {
+      return null;
+    }
+
+    const unsafeFlags = Array.isArray(imageSecurity?.unsafe_flags) ? imageSecurity.unsafe_flags : [];
+    const mergedSignals: Record<string, any> = {
+      ...triageSignals,
+      raw_payload_quarantined: imageSecurity?.raw_payload_quarantined ?? true,
+      recommendation_allowed: true,
+      deep_security_pending: true,
+    };
+    for (const flag of unsafeFlags) {
+      mergedSignals[String(flag)] = true;
+    }
+    return {
+      severity: imageSecurity?.trust_state === 'under_review' ? 'review' : 'info',
+      policy_route: matrix?.policy_action || 'allow_recommendation_quarantine_payload',
+      route: matrix?.policy_action || 'allow_recommendation_quarantine_payload',
+      owasp_llm_top10: Array.isArray(matrix?.owasp) ? matrix.owasp : [],
+      mitre_atlas: Array.isArray(matrix?.mitre) ? matrix.mitre : [],
+      maestro: Array.isArray(matrix?.maestro) ? matrix.maestro : [],
+      signals: mergedSignals,
+      raw_payload_quarantined: imageSecurity?.raw_payload_quarantined ?? true,
+      recommendation_allowed: true,
+      deep_security_pending: true,
+      image_triage: Array.isArray(imageTriage) ? imageTriage : [],
+      image_security: imageSecurity,
+    };
+  })();
+
+  const security = extractSecurity() || fallbackSecurity;
 
   // Collect MAESTRO agent_guardrail events from the trace event stream.
   // These are emitted by the orchestrator and recommend ingress with
   // maestro_checked, maestro_boundary, and maestro_violations.
-  const maestroGuardrailEvents: Array<{ agent: string; boundary: string; violations: any[]; tags: string[] }> = (() => {
+  const maestroGuardrailEvents: Array<{ agent: string; boundary: string; violations: any[]; tags: string[]; control?: string; verdict?: string; action?: string }> = (() => {
     const allEvts = events.length > 0 ? events : displayEvents;
-    return allEvts
+    const guardrailRows = allEvts
       .filter((e) => String(e.event_type || '').toLowerCase() === 'agent_guardrail' && e.payload?.maestro_checked)
       .map((e) => ({
         agent: String(e.source_id || e.payload?.maestro_boundary || ''),
@@ -739,6 +812,18 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         violations: Array.isArray(e.payload?.maestro_violations) ? e.payload.maestro_violations : [],
         tags: Array.isArray(e.payload?.tags) ? e.payload.tags : [],
       }));
+    const matrixRows = Array.isArray((security as any)?.maestro)
+      ? ((security as any).maestro || []).map((row: any) => ({
+        agent: String(row?.agent || row?.boundary || row?.control || 'MAESTRO'),
+        boundary: String(row?.boundary || ''),
+        violations: [],
+        tags: ['maestro', String(row?.control || '').trim()].filter(Boolean),
+        control: String(row?.control || ''),
+        verdict: String(row?.verdict || ''),
+        action: String(row?.action || ''),
+      }))
+      : [];
+    return [...guardrailRows, ...matrixRows];
   })();
   const maestroViolationCount = maestroGuardrailEvents.reduce((acc, ev) => acc + ev.violations.length, 0);
 
@@ -811,7 +896,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     return [];
   })();
 
-  /** One-line "why this fired" for the analyst â€” driven by hypothesis first, signals as fallback. */
+  /** One-line "why this fired" for the analyst ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â driven by hypothesis first, signals as fallback. */
   function buildWhyFiredLine(sigs: Record<string, any>, payloadAnalysis: any): string | null {
     const hyp = payloadAnalysis?.attack_hypothesis;
     const DETECTION_MAP: Record<string, string> = {
@@ -853,7 +938,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     if (sigs.adversarial_detected) parts.push('Adversarial perturbation signature found; image may be crafted to mislead the classifier.');
     if (sigs.ai_generated_suspected) parts.push('High diffusion-model score ? image may be AI-generated.');
     if (payloadAnalysis.attack_hypothesis === 'ransomware' || sigs.ransomware_indicator) {
-      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR â€” sandbox detonation required before any further processing. Do NOT execute on a live host.');
+      parts.push('\u26a0\ufe0f RANSOMWARE INDICATOR ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â sandbox detonation required before any further processing. Do NOT execute on a live host.');
     } else if (payloadAnalysis.attack_hypothesis && payloadAnalysis.attack_hypothesis !== 'unknown') {
       parts.push(`Passive triage suggests ${String(payloadAnalysis.attack_hypothesis).replace(/_/g, ' ')} behavior.`);
     } else if (sigs.steg_suspicious) {
@@ -1064,7 +1149,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         const _profileSummary = _profiles.length > 0
           ? ` ${_profiles.map((p: any) => `${p.full_name || p.binary} (${p.mitre_sub_technique || 'MITRE'})`).join(' | ')}.`
           : '';
-        const _ransomwareWarning = _ransomware ? ' âš \ufe0f Ransomware indicator â€” do NOT execute outside sandbox.' : '';
+        const _ransomwareWarning = _ransomware ? ' ÃƒÂ¢Ã…Â¡Ã‚Â \ufe0f Ransomware indicator ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â do NOT execute outside sandbox.' : '';
         const _hypothesis = String(payloadAnalysis?.attack_hypothesis || 'unknown').replace(/_/g, ' ');
         const _payloadType = String(payloadAnalysis?.payload_type || 'unknown').replace(/_/g, ' ');
         const _nextStep = String(payloadAnalysis?.suggested_next_step || 'allow').replace(/_/g, ' ');
@@ -1141,6 +1226,10 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
     <div className={styles.overlay}>
       <div
         ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Decision Trace"
+        data-testid="decision-trace-modal"
         className={`${styles.modal} ${minimized ? styles.minimized : ''}`}
         style={{ left: position.x, top: position.y }}
         onClick={e => e.stopPropagation()}
@@ -1174,7 +1263,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
             <button className={styles.iconBtn} onClick={() => setMinimized(!minimized)} title={minimized ? 'Expand' : 'Minimize'}>
               <MinimizeIcon />
             </button>
-            <button className={styles.iconBtn} onClick={handleDetach} disabled={!traceId} title={traceId ? 'Pop-out to new window' : 'Pop-out available after a trace id is created'}>
+            <button className={styles.iconBtn} onClick={handleDetach} disabled={!traceIdText} title={traceIdText ? 'Pop-out to new window' : 'Pop-out available after a trace id is created'}>
               <DetachIcon />
             </button>
             <button className={styles.iconBtn} onClick={onClose} title="Close">
@@ -1197,9 +1286,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
               <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
               <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
                 setActiveTab('audit');
-                if (!auditTrail && traceId && !auditLoading) {
+                if (!auditTrail && traceIdText && !auditLoading) {
                   setAuditLoading(true);
-                  fetch(apiUrl(`/api/v1/decisions/${traceId}/audit-trail`), { headers: authHeaders })
+                  fetch(apiUrl(`/api/v1/decisions/${traceIdText}/audit-trail`), { headers: authHeaders })
                     .then(r => r.json()).then(d => setAuditTrail(d)).catch(() => {}).finally(() => setAuditLoading(false));
                 }
               }}>Audit Trail</button>
@@ -1243,7 +1332,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                       const rowId = evt.id || `evt-${idx}`;
                       const isExpanded = expandedRows.has(rowId);
                       return (
-                        <>
+                        <Fragment key={rowId}>
                           <tr key={rowId} className={`${styles.row} ${String(evt.event_type || '').toLowerCase() === 'turn_envelope_diff' ? styles.rowEnvelopeDiff : ''}`} onClick={() => toggleRow(rowId)}>
                             <td><ChevronIcon expanded={isExpanded} /></td>
                             <td className={styles.time}>{formatTime(evt.timestamp || evt.created_at)}</td>
@@ -1300,7 +1389,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       );
                     })}
                     {displayEvents.length === 0 && (
@@ -1333,6 +1422,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   </div>
                   {/* Explain summary from backend */}
                   <div className={styles.sectionTitle}>Explanation</div>
+                  {explainReplayLoading && <div className={styles.muted}>Loading explanation...</div>}
                   {!explain && <div className={styles.muted}>No explanation available.</div>}
                   {explain && typeof explain.summary === 'string' && (
                     <div className={styles.kvRow}><span>Summary</span><span>{explain.summary}</span></div>
@@ -1509,7 +1599,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         <div className={styles.sectionTitle}>{sec?.title || `Image ${idx + 1}`}</div>
                         <div className={styles.kvRow}>
                           <span>Match basis</span>
-                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ') : '?'}</span>
+                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ') : '?'}</span>
                         </div>
                         {sec?.summary && <div className={styles.whyNarrative}>{sec.summary}</div>}
                         {Array.isArray(sec?.top_products) && sec.top_products.slice(0, 3).map((p: any, pIdx: number) => (
@@ -2165,11 +2255,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           <span className={trustChannels?.visual_embedding_trusted ? styles.booleanYes : styles.booleanNo}>
                             visual:{trustChannels?.visual_embedding_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' Ã‚Â· '}
+                          {' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· '}
                           <span className={trustChannels?.ocr_trusted ? styles.booleanYes : styles.booleanNo}>
                             ocr:{trustChannels?.ocr_trusted ? 'trusted' : 'untrusted'}
                           </span>
-                          {' Ã‚Â· '}
+                          {' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· '}
                           <span className={trustChannels?.qr_trusted ? styles.booleanYes : styles.booleanNo}>
                             qr:{trustChannels?.qr_trusted ? 'trusted' : 'untrusted'}
                           </span>
@@ -2281,7 +2371,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             <span>Violations</span>
                             <span>
                               {maestroViolationCount === 0
-                                ? <span className={styles.booleanYes}>None — all agents within scope</span>
+                                ? <span className={styles.booleanYes}>None - all agents within scope</span>
                                 : <span className={styles.tagRed}>{maestroViolationCount} violation{maestroViolationCount > 1 ? 's' : ''}</span>
                               }
                             </span>
@@ -2298,17 +2388,21 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             <tbody>
                               {maestroGuardrailEvents.map((ev, idx) => (
                                 <tr key={`maestro-${idx}`}>
-                                  <td>{ev.agent || '—'}</td>
-                                  <td>{ev.boundary || '—'}</td>
+                                  <td>{ev.agent || '-'}</td>
                                   <td>
-                                    {ev.violations.length === 0
-                                      ? <span className={styles.booleanYes}>✓ within boundary</span>
-                                      : <span className={styles.tagWarn}>{ev.violations.length} violation{ev.violations.length > 1 ? 's' : ''}</span>
-                                    }
+                                    {ev.boundary || '-'}
+                                    {ev.control && <div className={styles.muted}>{ev.control}</div>}
                                   </td>
                                   <td>
                                     {ev.violations.length === 0
-                                      ? <span className={styles.muted}>—</span>
+                                      ? <span className={styles.booleanYes}>{ev.verdict || 'within boundary'}</span>
+                                      : <span className={styles.tagWarn}>{ev.violations.length} violation{ev.violations.length > 1 ? 's' : ''}</span>
+                                    }
+                                    {ev.action && <div className={styles.muted}>{ev.action}</div>}
+                                  </td>
+                                  <td>
+                                    {ev.violations.length === 0
+                                      ? <span className={styles.muted}>-</span>
                                       : (
                                         <ul className={styles.playbookList}>
                                           {ev.violations.map((v: any, vi: number) => (
@@ -2517,7 +2611,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               <span>{filename}</span>
                               <span className={clean ? styles.tagGreen : styles.tagRed}>{clean ? 'Clean' : 'Flagged'}</span>
                             </div>
-                            {/* Why this fired â€” one-liner analyst detection reason */}
+                            {/* Why this fired ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â one-liner analyst detection reason */}
                             {!clean && (() => {
                               const _why = buildWhyFiredLine(sigs, payloadAnalysis);
                               return _why ? (
@@ -2650,7 +2744,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                     <div className={styles.sectionSubTitle}>Linked Artifact Provenance</div>
                                     <ul className={styles.playbookList}>
                                       {linkedArtifact.linked_artifact_provenance.map((row: any, pi: number) => (
-                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} • ${row?.extraction_method || 'extract'} • ${row?.match_ref || 'match'} • ${row?.confidence || 'unknown'}${row?.reason ? ` • ${row.reason}` : ''}`}</li>
+                                        <li key={`lap-${pi}`}>{`${row?.source_file || 'artifact'} Ã¢â‚¬Â¢ ${row?.extraction_method || 'extract'} Ã¢â‚¬Â¢ ${row?.match_ref || 'match'} Ã¢â‚¬Â¢ ${row?.confidence || 'unknown'}${row?.reason ? ` Ã¢â‚¬Â¢ ${row.reason}` : ''}`}</li>
                                       ))}
                                     </ul>
                                   </>
@@ -2747,7 +2841,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 <div className={styles.sectionSubTitle}>Artifact Provenance</div>
                                 <ul className={styles.playbookList}>
                                   {artifactProvenance.map((row: any, pi: number) => (
-                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} • ${row?.extraction_method || 'extract'} • ${row?.match_ref || 'match'} • ${row?.confidence || 'unknown'}${row?.reason ? ` • ${row.reason}` : ''}`}</li>
+                                    <li key={`ap-${pi}`}>{`${row?.source_file || 'artifact'} Ã¢â‚¬Â¢ ${row?.extraction_method || 'extract'} Ã¢â‚¬Â¢ ${row?.match_ref || 'match'} Ã¢â‚¬Â¢ ${row?.confidence || 'unknown'}${row?.reason ? ` Ã¢â‚¬Â¢ ${row.reason}` : ''}`}</li>
                                   ))}
                                 </ul>
                               </>
@@ -2791,6 +2885,13 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                 })}
                               {sigs.steg_score != null && (
                                 <span className={styles.tagWarn}>steg score: {sigs.steg_score}</span>
+                              )}
+                              {sigs.steganography?.decoded_content && (
+                                <div className={styles.stegDecodedBlock} style={{marginTop: '6px', padding: '6px 8px', background: '#1a0000', border: '1px solid #c0392b', borderRadius: '4px', fontFamily: 'monospace', fontSize: '11px', color: '#e74c3c', wordBreak: 'break-all'}}>
+                                  <strong style={{color: '#ff6b6b'}}>⚠ LSB Payload Extracted:</strong>{' '}
+                                  {sigs.steganography.decoded_content.slice(0, 300)}
+                                  {sigs.steganography.decoded_content.length > 300 ? '…' : ''}
+                                </div>
                               )}
                             </div>
                             {!clean && (
@@ -2921,11 +3022,25 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
               )}
 
               {activeTab === 'raw' && trace && (
-                <pre className={styles.rawJson}>{JSON.stringify(trace, null, 2)}</pre>
+                <>
+                  {explainReplayLoading && <div className={styles.muted}>Loading replay payload...</div>}
+                  {replay && (
+                    <>
+                      <div className={styles.sectionTitle}>Replay</div>
+                      <pre className={styles.rawJson}>{JSON.stringify(replay, null, 2)}</pre>
+                    </>
+                  )}
+                  <div className={styles.sectionTitle}>Trace Payload</div>
+                  <pre className={styles.rawJson}>{JSON.stringify(trace, null, 2)}</pre>
+                </>
               )}
 
               {!trace && (
-                <div className={styles.empty}>{traceIdText ? `Loading trace data for ${traceIdText}...` : 'Loading trace data...'}</div>
+                <div className={styles.empty}>
+                  {traceIdText
+                    ? `Trace snapshot is not available yet for ${traceIdText}.`
+                    : 'No backend trace id is available yet. Showing local image triage only.'}
+                </div>
               )}
             </div>
           </>

@@ -4,9 +4,27 @@ These products are modelled on real 2024/2025 SKUs so the LLM has accurate specs
 Run: python scripts/seed_gaming_laptops.py
 """
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+
+
+def _svg_for_name(name: str) -> str:
+    label = (name or "").replace("<", "&lt;").replace(">", "&gt;")[:40]
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">'
+        f'<rect width="600" height="400" fill="#1a1a2e"/>'
+        f'<rect x="40" y="60" width="520" height="280" rx="12" fill="#16213e" stroke="#0f3460" stroke-width="2"/>'
+        f'<rect x="80" y="100" width="440" height="200" rx="4" fill="#0a0a1a"/>'
+        f'<text x="300" y="210" font-family="Arial,sans-serif" font-size="16" fill="#e94560" text-anchor="middle">{label}</text>'
+        f'<rect x="220" y="340" width="160" height="8" rx="4" fill="#0f3460"/>'
+        f'</svg>'
+    )
+
+
+_STATIC_IMAGES_DIR = Path(__file__).parent.parent / "static" / "images"
 
 DB_PATH = "tmp/demo.sqlite"
 
@@ -230,30 +248,44 @@ def main() -> None:
     inserted = 0
     skipped = 0
 
+    # Ensure static images directory exists (for local dev; Docker bakes these at build time)
+    try:
+        _STATIC_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
     for lap in GAMING_LAPTOPS:
         cur.execute("SELECT sku FROM products WHERE sku = ?", (lap["sku"],))
         if cur.fetchone():
             print(f"  SKIP (exists): {lap['sku']} {lap['name'][:50]}")
             skipped += 1
-            continue
+        else:
+            cur.execute(
+                """INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at, image_url)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(uuid.uuid4()),
+                    lap["sku"],
+                    lap["name"],
+                    lap["price_cents"],
+                    "USD",
+                    json.dumps(lap["specs"]),
+                    1,
+                    now,
+                    f"/static/images/{lap['sku']}.svg",
+                ),
+            )
+            print(f"  INSERTED: {lap['sku']}  ${lap['price_cents']//100:,}  {lap['name'][:55]}")
+            inserted += 1
 
-        cur.execute(
-            """INSERT INTO products (id, sku, name, price_cents, currency, specs, active, updated_at, image_url)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                str(uuid.uuid4()),
-                lap["sku"],
-                lap["name"],
-                lap["price_cents"],
-                "USD",
-                json.dumps(lap["specs"]),
-                1,
-                now,
-                f"/static/images/{lap['sku']}.svg",
-            ),
-        )
-        print(f"  INSERTED: {lap['sku']}  ${lap['price_cents']//100:,}  {lap['name'][:55]}")
-        inserted += 1
+        # Generate SVG placeholder so product cards have an image to display
+        svg_path = _STATIC_IMAGES_DIR / f"{lap['sku']}.svg"
+        if not svg_path.exists():
+            try:
+                svg_path.write_text(_svg_for_name(lap["name"]), encoding="utf-8")
+                print(f"  SVG: {svg_path.name}")
+            except Exception as exc:
+                print(f"  SVG write failed for {lap['sku']}: {exc}")
 
     conn.commit()
     conn.close()

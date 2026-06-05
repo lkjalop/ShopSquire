@@ -1,0 +1,244 @@
+{
+  "_version": "1.0.0",
+  "_description": "High-level use-case knowledge base. Maps canonical use-case keys to required specs, soft requirements, and exclusion rules. Used by NQE, LLM summarizer persona context, and candidate ranking adjustments.",
+  "use_cases": {
+    "gaming": {
+      "label": "Gaming",
+      "nqe_persona": "You are helping a gamer find their ideal gaming laptop.",
+      "required_specs": {
+        "gpu_tier": "discrete",
+        "ram_gb_min": 16,
+        "refresh_hz_min": 144,
+        "storage_gb_min": 512
+      },
+      "soft_requirements": [
+        "RTX or AMD RX dedicated GPU",
+        "High-refresh display (144Hz or higher)",
+        "Adequate thermal headroom (not fanless design)",
+        "Per-key RGB or backlit keyboard"
+      ],
+      "exclusion_rules": [
+        "fanless_design",
+        "integrated_gpu_only",
+        "refresh_hz_below_60"
+      ],
+      "budget_floor": 900,
+      "budget_tiers": {
+        "entry": [900, 1300],
+        "mid": [1300, 1800],
+        "high": [1800, 2500],
+        "ultra": [2500, null]
+      },
+      "emphasize_specs": ["gpu_model", "refresh_hz", "ram_gb"],
+      "nqe_must_ask": ["gpu_preference", "target_games", "budget"],
+      "nqe_skip": ["battery_priority"]
+    },
+    "university": {
+      "label": "University / Student",
+      "nqe_persona": "You are helping a university student find a reliable laptop for academic work.",
+      "required_specs": {
+        "ram_gb_min": 8,
+        "storage_gb_min": 256,
+        "battery_hr_min": 8
+      },
+      "soft_requirements": [
+        "Lightweight build (under 2 kg preferred)",
+        "Long battery life (10h+ ideal)",
+        "Good keyboard for extended typing",
+        "Webcam for online lectures"
+      ],
+      "exclusion_rules": [],
+      "budget_floor": 400,
+      "budget_tiers": {
+        "entry": [400, 700],
+        "mid": [700, 1100],
+        "high": [1100, 1600],
+        "ultra": [1600, null]
+      },
+      "emphasize_specs": ["battery_hr", "weight_kg", "ram_gb"],
+      "nqe_must_ask": ["university_subject", "budget", "portability_priority"],
+      "nqe_skip": ["gpu_preference"]
+    },
+    "engineering_student": {
+      "label": "Engineering / Architecture Student",
+      "nqe_persona": "You are helping an engineering or architecture student who runs CAD, simulation, or rendering software.",
+      "required_specs": {
+        "ram_gb_min": 16,
+        "storage_gb_min": 512,
+        "gpu_tier": "discrete_6gb"
+      },
+      "soft_requirements": [
+        "Dedicated GPU with 6GB+ VRAM for CAD/render workloads",
+        "16GB+ RAM (32GB strongly preferred for simulation)",
+        "Accurate color display for design work",
+        "ISV-certified GPU (Quadro/AMD Pro) for professional CAD tools"
+      ],
+      "exclusion_rules": [
+        "integrated_gpu_only"
+      ],
+      "budget_floor": 1000,
+      "budget_tiers": {
+        "entry": [1000, 1500],
+        "mid": [1500, 2200],
+        "high": [2200, 3500],
+        "ultra": [3500, null]
+      },
+      "emphasize_specs": ["gpu_model", "ram_gb", "display_color_accuracy"],
+      "nqe_must_ask": ["software_requirements", "budget", "gpu_preference"],
+      "nqe_skip": ["gaming_depth"]
+    },
+    "creative": {
+      "label": "Content Creator / Video Editor",
+      "nqe_persona": "You are helping a content creator, video editor, or graphic designer choose a laptop.",
+      "required_specs": {
+        "ram_gb_min": 16,
+        "storage_gb_min": 512,
+        "display_color_gamut": "srgb_99_or_dcip3"
+      },
+      "soft_requirements": [
+        "Wide color gamut display (99% sRGB or DCI-P3)",
+        "Dedicated GPU for hardware video encoding",
+        "Fast NVMe SSD for video project files",
+        "Thunderbolt 4 port for external storage and monitors"
+      ],
+      "exclusion_rules": [],
+      "budget_floor": 1100,
+      "budget_tiers": {
+        "entry": [1100, 1600],
+        "mid": [1600, 2200],
+        "high": [2200, 3500],
+        "ultra": [3500, null]
+      },
+      "emphasize_specs": ["gpu_model", "display_color_accuracy", "ram_gb", "storage_gb"],
+      "nqe_must_ask": ["video_resolution", "software_requirements", "budget"],
+      "nqe_skip": []
+    },
+    "corporate": {
+      "label": "Corporate / Business Professional",
+      "nqe_persona": "You are helping a business professional find a laptop for corporate work including meetings, office applications, and travel.",
+      "required_specs": {
+        "ram_gb_min": 8,
+        "storage_gb_min": 256,
+        "battery_hr_min": 8,
+        "ir_camera": "preferred"
+      },
+      "soft_requirements": [
+        "Windows Hello IR camera for secure login",
+        "MIL-SPEC durability or business-class build",
+        "LTE/5G optional for connectivity on the road",
+        "IT-managed platforms preferred (ThinkPad, EliteBook, Latitude)",
+        "TPM 2.0 for BitLocker encryption"
+      ],
+      "exclusion_rules": [
+        "consumer_gaming_aesthetic",
+        "rgb_keyboard_mandatory"
+      ],
+      "budget_floor": 600,
+      "budget_tiers": {
+        "entry": [600, 1000],
+        "mid": [1000, 1500],
+        "high": [1500, 2500],
+        "ultra": [2500, null]
+      },
+      "emphasize_specs": ["battery_hr", "weight_kg", "security_features"],
+      "nqe_must_ask": ["work_type", "it_management", "portability_priority"],
+      "nqe_skip": ["gaming_depth", "gpu_preference"]
+    },
+    "calls_productivity": {
+      "label": "Calls / Video Conferencing / Productivity",
+      "nqe_persona": "You are helping someone find a laptop primarily for video calls, Microsoft Teams, Zoom, and everyday productivity.",
+      "required_specs": {
+        "ram_gb_min": 8,
+        "storage_gb_min": 256,
+        "webcam": "hd_720p_min",
+        "battery_hr_min": 8
+      },
+      "soft_requirements": [
+        "1080p or higher webcam for professional calls",
+        "Good microphone (noise cancellation preferred)",
+        "Reliable Wi-Fi 6 or better",
+        "Microsoft Teams / Zoom certified hardware is a plus"
+      ],
+      "exclusion_rules": [],
+      "budget_floor": 400,
+      "budget_tiers": {
+        "entry": [400, 700],
+        "mid": [700, 1100],
+        "high": [1100, 1600],
+        "ultra": [1600, null]
+      },
+      "emphasize_specs": ["webcam_quality", "battery_hr", "microphone"],
+      "nqe_must_ask": ["call_frequency", "budget", "home_office_vs_travel"],
+      "nqe_skip": ["gpu_preference", "gaming_depth"]
+    },
+    "ai_ml_workstation": {
+      "label": "AI / ML / Data Science Workstation",
+      "nqe_persona": "You are helping an AI/ML engineer or data scientist find a laptop powerful enough for model training and inference.",
+      "required_specs": {
+        "ram_gb_min": 32,
+        "storage_gb_min": 1000,
+        "gpu_vram_gb_min": 8,
+        "gpu_tier": "discrete_8gb"
+      },
+      "soft_requirements": [
+        "CUDA-capable NVIDIA GPU with 8GB+ VRAM",
+        "32GB+ RAM (64GB ideal for large models)",
+        "Fast NVMe SSD for dataset loading",
+        "High thermal headroom for sustained GPU compute"
+      ],
+      "exclusion_rules": [
+        "integrated_gpu_only",
+        "fanless_design"
+      ],
+      "budget_floor": 1500,
+      "budget_tiers": {
+        "entry": [1500, 2000],
+        "mid": [2000, 3000],
+        "high": [3000, 4500],
+        "ultra": [4500, null]
+      },
+      "emphasize_specs": ["gpu_model", "gpu_vram_gb", "ram_gb", "cuda_cores"],
+      "nqe_must_ask": ["model_size_target", "framework_preference", "budget"],
+      "nqe_skip": []
+    }
+  },
+  "soft_requirement_weights": {
+    "required_spec_match": 1.0,
+    "soft_spec_match": 0.4,
+    "exclusion_violation": -2.0
+  },
+  "use_case_aliases": {
+    "gaming_laptop": "gaming",
+    "game": "gaming",
+    "gamer": "gaming",
+    "student": "university",
+    "uni": "university",
+    "college": "university",
+    "school": "university",
+    "work": "corporate",
+    "business": "corporate",
+    "office": "corporate",
+    "enterprise": "corporate",
+    "video editing": "creative",
+    "content creation": "creative",
+    "youtube": "creative",
+    "streamer": "creative",
+    "streaming": "creative",
+    "zoom": "calls_productivity",
+    "teams": "calls_productivity",
+    "calls": "calls_productivity",
+    "ml": "ai_ml_workstation",
+    "machine learning": "ai_ml_workstation",
+    "deep learning": "ai_ml_workstation",
+    "data science": "ai_ml_workstation",
+    "pytorch": "ai_ml_workstation",
+    "tensorflow": "ai_ml_workstation",
+    "cad": "engineering_student",
+    "autocad": "engineering_student",
+    "solidworks": "engineering_student",
+    "blender": "creative",
+    "3d render": "creative",
+    "davinci resolve": "creative",
+    "premiere pro": "creative"
+  }
+}

