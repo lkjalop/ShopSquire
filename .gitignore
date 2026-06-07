@@ -58,7 +58,7 @@ venv/
 .venv_new/
 
 # Editor / tool local state
-.claude/settings.local.json
+.claude/
 
 # Local test log captures (run artifacts, never source)
 .testlogs/
@@ -105,6 +105,10 @@ _tmp_write_test.txt
 
 # Playwright MCP runtime state
 .playwright-mcp/
+
+# Root-level Playwright / latency test screenshots (run artifacts)
+pw-*.png
+latency-*.png
 
 # Resume / personal files accidentally placed in repo root
 resume_*.md
