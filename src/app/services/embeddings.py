@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from typing import Any, Dict, List, Optional, Tuple
 import os
@@ -9,6 +10,15 @@ import httpx
 from src.app.security.provider_boundary import sanitize_for_provider
 
 _log = logging.getLogger("shopsquire.embeddings")
+
+
+def embedding_dim() -> int:
+    """The product-embedding contract dimension. Must match the pgvector
+    `product_embeddings` column (vector(1536)). Override with EMBEDDINGS_DIM."""
+    try:
+        return int(os.getenv("EMBEDDINGS_DIM", "1536") or 1536)
+    except Exception:
+        return 1536
 try:
     import faiss  # type: ignore
     _HAS_FAISS = True
@@ -208,12 +218,23 @@ class VectorStoreEmbeddings(SimpleEmbeddings):
             except Exception:
                 # fallback to bow below
                 pass
-        # Default/fallback: convert bag-of-words dict into a dense vector using sorted tokens
+        # Default/fallback: deterministic FIXED-DIMENSION vector via feature hashing.
+        # The pgvector `product_embeddings` column is vector(EMBEDDINGS_DIM, default
+        # 1536); a variable-length bag-of-words vector silently fails to index. Hash
+        # each token into one of `dim` buckets (signed) and L2-normalize so every
+        # vector is exactly `dim` long and unit-norm — matching the OpenAI path.
+        dim = embedding_dim()
         bag = self.embed_text(text)
+        vec = [0.0] * dim
         if not bag:
-            return []
-        keys = sorted(bag.keys())
-        return [bag[k] for k in keys]
+            return vec  # valid-length zero vector (never [] — that breaks the schema)
+        for tok, weight in bag.items():
+            h = int(hashlib.sha1(str(tok).encode("utf-8")).hexdigest(), 16)
+            idx = h % dim
+            sign = 1.0 if ((h >> 8) & 1) == 0 else -1.0
+            vec[idx] += sign * float(weight)
+        norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+        return [x / norm for x in vec]
 
     def index(self, id: str, text: str, payload: Dict | None = None) -> Dict[str, any]:
         emb = self.embed_text_vector(text)

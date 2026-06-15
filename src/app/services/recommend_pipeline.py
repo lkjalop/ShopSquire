@@ -83,6 +83,20 @@ def _sync_vector_search(query: str, top_k: int) -> List[Dict[str, Any]]:
     return from_vector(query, top_k=top_k)
 
 
+async def _scatter_caption(query: str, top_k: int = 20) -> List[Dict[str, Any]]:
+    """Async wrapper for multimodal caption-RAG (pgvector product_embeddings)."""
+    try:
+        return await asyncio.to_thread(_sync_caption_search, query, top_k)
+    except Exception as exc:
+        logger.debug("scatter_caption failed: %s", exc)
+        return []
+
+
+def _sync_caption_search(query: str, top_k: int) -> List[Dict[str, Any]]:
+    from src.app.services.candidate_retriever import from_caption
+    return from_caption(query, top_k=top_k)
+
+
 async def _scatter_fraud(uid: str, context: Dict[str, Any]) -> Dict[str, Any]:
     """Async wrapper for fraud scoring."""
     try:
@@ -219,27 +233,40 @@ async def run_recommend_pipeline(
     timings: Dict[str, float] = {}
 
     # ── Stage 1: Parallel scatter ─────────────────────────────────────────────
+    # Three retrieval sources (db-keyword + CLIP-visual + caption-RAG) + fraud,
+    # plus CV when an image is present. Index-safe unpacking so adding/removing a
+    # leg can't silently misalign results.
     scatter_tasks = [
-        _scatter_db(query, budget_min, budget_max, brands, category),
-        _scatter_vector(query, top_k=top_n * 2),
-        _scatter_fraud(uid, payload),
+        _scatter_db(query, budget_min, budget_max, brands, category),   # 0
+        _scatter_vector(query, top_k=top_n * 2),                        # 1
+        _scatter_fraud(uid, payload),                                   # 2
+        _scatter_caption(query, top_k=top_n * 2),                       # 3
     ]
+    cv_idx = None
     if image_bytes:
+        cv_idx = len(scatter_tasks)
         scatter_tasks.append(_scatter_cv(image_bytes, query, trace_id))
 
     scatter_results = await asyncio.gather(*scatter_tasks, return_exceptions=True)
 
-    db_hits = scatter_results[0] if not isinstance(scatter_results[0], Exception) else []
-    vec_hits = scatter_results[1] if not isinstance(scatter_results[1], Exception) else []
-    fraud_signals = scatter_results[2] if not isinstance(scatter_results[2], Exception) else {}
-    cv_signals = scatter_results[3] if (image_bytes and not isinstance(scatter_results[3], Exception)) else {}
+    def _res(i, default):
+        if i is None or i >= len(scatter_results):
+            return default
+        r = scatter_results[i]
+        return default if isinstance(r, Exception) else r
+
+    db_hits = _res(0, [])
+    vec_hits = _res(1, [])
+    fraud_signals = _res(2, {})
+    cap_hits = _res(3, [])
+    cv_signals = _res(cv_idx, {})
 
     timings["scatter_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
     # ── Stage 2: Gather + merge ───────────────────────────────────────────────
     from src.app.services.candidate_retriever import merge_rrf, apply_inventory_filter
 
-    candidates = merge_rrf(db_hits, vec_hits, top_n=top_n * 2)
+    candidates = merge_rrf(db_hits, vec_hits, cap_hits, top_n=top_n * 2)
     candidates = _apply_fraud_gate(candidates, fraud_signals)
 
     # Batch inventory check for merged candidates

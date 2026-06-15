@@ -290,16 +290,23 @@ def sync_inventory(
                                 ),
                                 {"pid": pid, "wh": r.warehouse, "stock": int(r.stock or 0), "ts": _now_iso()},
                             )
-                        # Best-effort: upsert product embedding (name/specs unknown here, use sku)
+                        # Best-effort: upsert product embedding from canonical rich text
+                        # (build_embedding_text; falls back to SKU when only SKU is known).
+                        # Dimension is validated in upsert_product_embedding; failures are
+                        # skipped+logged, not silently swallowed.
                         try:
                             provider = (os.getenv("EMBEDDINGS_PROVIDER") or "bow").strip().lower()
                         except Exception:
                             provider = "bow"
                         if provider in ("openai", "vector", "pgvector"):
                             try:
+                                from src.app.services.product_embedding_text import build_embedding_text
                                 emb_svc = VectorStoreEmbeddings()
-                                # Minimal text using SKU; richer text will be indexed elsewhere when product details are available
-                                vec = emb_svc.embed_text_vector(r.sku or "")
+                                # Canonical rich embedding text (name/brand/specs when present,
+                                # else SKU). The full multimodal text (+VLM caption) is produced
+                                # by the batch reindex (scripts/build_visual_index.py --captions).
+                                emb_text = build_embedding_text(r) or (r.sku or "")
+                                vec = emb_svc.embed_text_vector(emb_text)
                                 upsert_product_embedding(db, pid, vec)
                             except Exception:
                                 pass

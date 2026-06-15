@@ -128,7 +128,10 @@ def evaluate_and_persist(decision_id: str) -> Dict[str, Any]:
             if base is None and rows:
                 # Initialize baseline if missing
                 db.execute(
-                    sql_text("INSERT OR REPLACE INTO ragas_baseline (id, baseline_score) VALUES ('default', :s)"),
+                    sql_text(
+                        "INSERT INTO ragas_baseline (id, baseline_score) VALUES ('default', :s)"
+                        " ON CONFLICT (id) DO UPDATE SET baseline_score = EXCLUDED.baseline_score, updated_at = CURRENT_TIMESTAMP"
+                    ),
                     {"s": avg},
                 )
                 try:
@@ -223,7 +226,13 @@ def ci_guard_check(window: int = 200, drop_pct: float = 0.1) -> Dict[str, Any]:
         base = base_row.scalar() if base_row is not None else None
         if base is None:
             # Initialize baseline on first run
-            db.execute(sql_text("INSERT OR REPLACE INTO ragas_baseline (id, baseline_score) VALUES ('default', :s)"), {"s": avg})
+            db.execute(
+                sql_text(
+                    "INSERT INTO ragas_baseline (id, baseline_score) VALUES ('default', :s)"
+                    " ON CONFLICT (id) DO UPDATE SET baseline_score = EXCLUDED.baseline_score, updated_at = CURRENT_TIMESTAMP"
+                ),
+                {"s": avg},
+            )
             try:
                 db.commit()
             except Exception:

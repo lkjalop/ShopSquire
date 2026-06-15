@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+"""Generic vector index over the `vectors` table (docs/FAQ/ad-hoc).
+
+CONSOLIDATION NOTE (2026-06-15): this is NOT the product retrieval store. Product
+embeddings live in the dedicated `product_embeddings` table (pgvector + HNSW) and
+are written/read via `repositories/embeddings.py` and queried for recommendations
+by `candidate_retriever.from_caption` (multimodal caption-RAG). Visual CLIP
+similarity is a third, separate index in `visual_search.py`. Keep product vectors
+out of this generic store to avoid a fourth ad-hoc path.
+"""
+
 from typing import Any, Dict, Iterable, List
 
 from src.app.services.embeddings import VectorStoreEmbeddings
@@ -7,7 +17,7 @@ from src.app.services.vector_store import PgVectorStore, get_default_vector_stor
 
 
 class EmbeddingPipeline:
-    """Small production-oriented wrapper for indexing/querying vectors."""
+    """Small production-oriented wrapper for indexing/querying generic doc vectors."""
 
     def __init__(
         self,

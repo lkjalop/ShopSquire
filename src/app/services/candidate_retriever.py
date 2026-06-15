@@ -25,11 +25,22 @@ import logging
 import math
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import text as _text
+from sqlalchemy import text as _text, bindparam
 
 from src.app.models.db import db_session
 
 logger = logging.getLogger("shopsquire.candidate_retriever")
+
+
+def _obs(source: str, n: int, *, error: bool = False) -> None:
+    """Make retrieval-source outcomes observable (these paths swallow errors and
+    return [] — a silently-empty index should show up as a metric, not vanish)."""
+    try:
+        from src.app.observability.metrics import record_retrieval_source
+        outcome = "error" if error else ("empty" if n == 0 else "hit")
+        record_retrieval_source(source, outcome)
+    except Exception:
+        pass
 
 
 # ── RRF (Reciprocal Rank Fusion) ──────────────────────────────────────────────
@@ -114,9 +125,11 @@ def from_db(
         # Keyword relevance: simple LIKE matching (pgvector handles semantic)
         if query:
             q_safe = str(query or "")[:100]
+            # CAST(... AS TEXT) is portable (Postgres + SQLite); `p.specs::text`
+            # was Postgres-only and made from_db raise → empty results on SQLite.
             conditions.append(
-                "(LOWER(p.name) LIKE :qt OR LOWER(p.brand) LIKE :qt "
-                "OR LOWER(COALESCE(p.specs::text, p.specs, '')) LIKE :qt)"
+                "(LOWER(p.name) LIKE :qt OR LOWER(COALESCE(p.brand,'')) LIKE :qt "
+                "OR LOWER(COALESCE(CAST(p.specs AS TEXT), '')) LIKE :qt)"
             )
             params["qt"] = f"%{q_safe.lower()}%"
 
@@ -128,7 +141,7 @@ def from_db(
         with db_session() as db:
             rows = db.execute(_text(sql), params).fetchall()
 
-        return [
+        out = [
             {
                 "sku": str(r[0]),
                 "name": str(r[1] or ""),
@@ -140,8 +153,11 @@ def from_db(
             }
             for r in rows
         ]
+        _obs("db", len(out))
+        return out
     except Exception as exc:
         logger.debug("from_db failed: %s", exc)
+        _obs("db", 0, error=True)
         return []
 
 
@@ -161,8 +177,9 @@ def from_vector(
         from src.app.services.visual_search import search_by_text
         results = search_by_text(query, top_k=top_k)
         if not results:
+            _obs("vector", 0)
             return []
-        return [
+        out = [
             {
                 "sku": str(r.get("sku") or ""),
                 "name": str(r.get("name") or ""),
@@ -174,8 +191,67 @@ def from_vector(
             for r in results
             if r.get("sku")
         ]
+        _obs("vector", len(out))
+        return out
     except Exception as exc:
         logger.debug("from_vector failed: %s", exc)
+        _obs("vector", 0, error=True)
+        return []
+
+
+# ── Caption / multimodal-RAG retrieval (pgvector product_embeddings) ──────────
+
+def from_caption(query: str, *, top_k: int = 20) -> List[Dict[str, Any]]:
+    """Semantic retrieval over the `product_embeddings` pgvector index — the rich
+    text embedding (name + specs + VLM visual caption). This is the multimodal-RAG
+    source: it reuses the EXISTING production embedding table + HNSW index +
+    `search_products_by_embedding`, not a new store. Empty on SQLite / cold index
+    (fail-open). RRF-merged alongside DB-keyword and CLIP-visual."""
+    try:
+        from src.app.services.embeddings import VectorStoreEmbeddings
+        from src.app.repositories.embeddings import search_products_by_embedding
+
+        emb = VectorStoreEmbeddings().embed_text_vector(query or "")
+        if not emb:
+            _obs("caption", 0)
+            return []
+        with db_session() as db:
+            hits = search_products_by_embedding(db, emb, top_k=top_k)
+            if not hits:
+                _obs("caption", 0)
+                return []
+            dist = {str(h.get("product_id")): float(h.get("distance") or 0.0) for h in hits if h.get("product_id") is not None}
+            ids = list(dist.keys())
+            if not ids:
+                _obs("caption", 0)
+                return []
+            rows = db.execute(
+                _text(
+                    "SELECT id, sku, name, brand, price_cents, image_url, specs "
+                    "FROM products WHERE CAST(id AS TEXT) IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": ids},
+            ).fetchall()
+        out = [
+            {
+                "sku": str(r[1] or ""),
+                "name": str(r[2] or ""),
+                "brand": str(r[3] or ""),
+                "price_cents": int(r[4] or 0),
+                "image_url": str(r[5] or ""),
+                "specs": r[6] if isinstance(r[6], dict) else {},
+                "score": round(1.0 - dist.get(str(r[0]), 1.0), 6),
+                "_source": "caption",
+            }
+            for r in rows
+            if str(r[1] or "")
+        ]
+        out.sort(key=lambda x: -float(x.get("score") or 0.0))
+        _obs("caption", len(out))
+        return out
+    except Exception as exc:
+        logger.debug("from_caption failed: %s", exc)
+        _obs("caption", 0, error=True)
         return []
 
 
@@ -245,12 +321,15 @@ def retrieve_and_merge(
     top_n: int = 12,
     hide_oos: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Single-call retrieval: DB + vector → RRF merge → inventory filter.
+    """Single-call retrieval: DB-keyword + CLIP-visual + caption-RAG → RRF merge →
+    inventory filter.
 
-    This is the synchronous wrapper for the full pipeline. In Sprint R5, this
-    will be replaced by the async scatter-gather version using asyncio.gather().
+    Three RRF sources: DB keyword/filter (`from_db`), CLIP visual similarity
+    (`from_vector`), and multimodal caption-RAG over pgvector (`from_caption`).
+    Each fails open to [], so the merge degrades gracefully if any index is cold.
     """
     db_hits = from_db(query, budget_min=budget_min, budget_max=budget_max, brands=brands, category=category)
     vec_hits = from_vector(query, top_k=top_n)
-    merged = merge_rrf(db_hits, vec_hits, top_n=top_n * 2)
+    cap_hits = from_caption(query, top_k=top_n)
+    merged = merge_rrf(db_hits, vec_hits, cap_hits, top_n=top_n * 2)
     return apply_inventory_filter(merged, hide_oos=hide_oos)[:top_n]
