@@ -12757,6 +12757,33 @@ def suggest(
             query, results, constraints, _summ_model, trace_id,
             context_preamble=_combined_preamble,
         )
+        # 0.4 Grounded narration guard (flag: COMMERCE_NARRATION_GUARD). The LLM is
+        # a narrator over evidence, not a source of truth — if it invents a
+        # product/price/spec or parrots a quarantined payload, reject and fall back
+        # to deterministic prose. Flag-off = no behavior change.
+        try:
+            from src.app.services.product_claim_guard import guard_enabled, verify_product_narration
+            if guard_enabled() and assistant_message and results:
+                _gr = verify_product_narration(
+                    assistant_message, results,
+                    budget_min=constraints.get("budget_min"),
+                    budget_max=constraints.get("budget_max"),
+                )
+                if not _gr.grounded:
+                    assistant_message = _deterministic_assistant_message(
+                        query, results, constraints, brand_budget_answer=brand_budget_answer)
+                    try:
+                        log_trace_event(
+                            trace_id=trace_id, event_type="narration_guard_rejected",
+                            source_type="agent", source_id="Product_Claim_Guard",
+                            target_type="system", target_id=None,
+                            payload={"violations": _gr.violations[:6], "used_llm": False,
+                                     "fallback_reason": "ungrounded_product_claim"},
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     if explanation_request:
         payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
         try:
