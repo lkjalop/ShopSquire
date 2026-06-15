@@ -31,7 +31,7 @@ def enqueue_approval(capability: str, payload: Dict, reason: str | None = None, 
     try:
         with db_session() as db:
             db.execute(
-                sql_text("INSERT OR REPLACE INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id, :capability, :payload, :reason, :status, :created_by)"),
+                sql_text("INSERT INTO approvals (id, capability, payload, reason, status, created_by) VALUES (:id, :capability, :payload, :reason, :status, :created_by) ON CONFLICT (id) DO UPDATE SET capability = EXCLUDED.capability, payload = EXCLUDED.payload, reason = EXCLUDED.reason, status = EXCLUDED.status"),
                 {
                     "id": approval_id,
                     "capability": capability,

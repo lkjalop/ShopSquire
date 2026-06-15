@@ -1,0 +1,92 @@
+{
+  "_doc": "Deterministic Authorization Engine policy (Tier-1 control). AI proposes; this policy disposes. Every privileged action passes through authorize(). Externalized + versioned so tuning needs no code change. See docs/SHOPSQUIRE_AUTONOMY_COMPLIANCE_GAP_2026-06-14.md.",
+  "version": "authz-v1-2026-06-14",
+  "default_mode": "shadow",
+  "terminal_outcomes": [
+    "execute",
+    "reject_under_policy",
+    "request_customer_evidence",
+    "substitute",
+    "quarantine",
+    "safe_pause",
+    "defer_retry",
+    "escalate_governance"
+  ],
+  "actions": {
+    "refund": {
+      "data_scope": "orders",
+      "allowed_requesters": ["Returns_Refund_Automation", "AI_Customer_Support", "Exception_Recovery_Controller"],
+      "min_confidence": 0.75,
+      "value_cap_usd": 50,
+      "governance_cap_usd": 500,
+      "prohibited_when": ["order_not_found", "already_refunded", "chargeback_open"],
+      "default_terminal": "reject_under_policy",
+      "_aligns_with": "action_authority_matrix REF-01/02/03 (AUD): <=$50 auto, <=$500 governance, >$500 pause"
+    },
+    "return_approval": {
+      "data_scope": "orders",
+      "allowed_requesters": ["Returns_Refund_Automation", "AI_Customer_Support"],
+      "min_confidence": 0.7,
+      "value_cap_usd": 1000,
+      "governance_cap_usd": 3000,
+      "prohibited_when": ["order_not_found", "return_window_expired", "claim_contradicted"],
+      "default_terminal": "request_customer_evidence"
+    },
+    "order_modification": {
+      "data_scope": "orders",
+      "allowed_requesters": ["Order_Orchestration", "AI_Customer_Support"],
+      "min_confidence": 0.8,
+      "value_cap_usd": 1000,
+      "governance_cap_usd": 5000,
+      "prohibited_when": ["order_shipped", "order_not_found"],
+      "default_terminal": "reject_under_policy"
+    },
+    "reshipment": {
+      "data_scope": "orders",
+      "allowed_requesters": ["Shipping_Fulfillment", "Exception_Recovery_Controller", "AI_Customer_Support"],
+      "min_confidence": 0.75,
+      "value_cap_usd": 1500,
+      "governance_cap_usd": 4000,
+      "prohibited_when": ["order_not_found", "already_reshipped_twice"],
+      "default_terminal": "defer_retry"
+    },
+    "supplier_order": {
+      "data_scope": "suppliers",
+      "allowed_requesters": ["Inventory_Agent", "Supplier_Sourcing_Procurement"],
+      "min_confidence": 0.7,
+      "value_cap_usd": 5000,
+      "governance_cap_usd": 25000,
+      "prohibited_when": ["supplier_unverified", "supplier_domain_untrusted", "duplicate_po_open"],
+      "default_terminal": "safe_pause"
+    },
+    "fraud_disposition": {
+      "data_scope": "fraud",
+      "allowed_requesters": ["Fraud_Trust_Engine", "Security_Observer_Agent"],
+      "min_confidence": 0.6,
+      "value_cap_usd": 100000,
+      "governance_cap_usd": 100000,
+      "prohibited_when": [],
+      "default_terminal": "quarantine"
+    },
+    "bank_change": {
+      "data_scope": "payments",
+      "hard_block": true,
+      "default_terminal": "reject_under_policy",
+      "_aligns_with": "action_authority_matrix BANK-01 — bank-detail changes need out-of-band verification; AI cannot authorise"
+    },
+    "pii_export": {
+      "data_scope": "pii",
+      "hard_block": true,
+      "default_terminal": "reject_under_policy",
+      "_aligns_with": "action_authority_matrix PII-01 — bulk PII export uses the approved DSR workflow"
+    },
+    "supplier_pay": {
+      "data_scope": "suppliers",
+      "never_auto": true,
+      "value_cap_usd": 0,
+      "governance_cap_usd": 100000,
+      "default_terminal": "escalate_governance",
+      "_aligns_with": "action_authority_matrix SUP-02/03 — supplier payment always needs governance approval"
+    }
+  }
+}

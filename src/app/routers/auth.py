@@ -28,6 +28,27 @@ import httpx
 
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+# ── Argon2id support (OWASP-recommended for new passwords) ──────────────────
+# Falls back to PBKDF2-HMAC-SHA256 when argon2-cffi is not installed.
+# Existing PBKDF2 hashes are detected by absence of the "$argon2" prefix and
+# verified against legacy iterations; successful login triggers a lazy upgrade.
+try:
+    from argon2 import PasswordHasher as _Argon2PH
+    from argon2.exceptions import VerifyMismatchError as _ArgonMismatch, InvalidHashError as _ArgonInvalid
+    _ARGON2_PH: "_Argon2PH | None" = _Argon2PH(
+        time_cost=int(os.getenv("ARGON2_TIME_COST", "3")),
+        memory_cost=int(os.getenv("ARGON2_MEMORY_COST_KB", "65536")),
+        parallelism=int(os.getenv("ARGON2_PARALLELISM", "4")),
+        hash_len=32,
+        salt_len=16,
+    )
+    _ARGON2_AVAILABLE = True
+except ImportError:
+    _ARGON2_PH = None
+    _ARGON2_AVAILABLE = False
+    _ArgonMismatch = Exception  # type: ignore[misc,assignment]
+    _ArgonInvalid = Exception  # type: ignore[misc,assignment]
 tracer = get_tracer("auth-router")
 
 SESSION_COOKIE_NAME = "shopsquire_session"
@@ -287,7 +308,45 @@ def _clear_forced_reauth(user_id: str | None = None, email: str | None = None) -
 
 
 def _hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    """Hash a new password for storage.  Uses argon2id when available (salt embedded
+    in the returned hash string); falls back to PBKDF2-HMAC-SHA256 600k iterations."""
+    if _ARGON2_AVAILABLE and _ARGON2_PH is not None:
+        return _ARGON2_PH.hash(password)  # salt is embedded; `salt` param ignored
+    return hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), 600_000
+    ).hex()
+
+
+def _verify_password(password: str, stored_hash: str, salt: str) -> tuple[bool, str | None]:
+    """Verify *password* against *stored_hash*.
+
+    Returns ``(is_valid, upgraded_hash_or_None)``.  When ``upgraded_hash_or_None``
+    is not None the caller should persist it so the account migrates to argon2id.
+    Supports three hash formats (detected automatically):
+      1. ``$argon2id$…`` — argon2id (current default)
+      2. 64-char hex     — PBKDF2-HMAC-SHA256 with 100 000 iterations (legacy)
+      3. anything else   — treated as PBKDF2 100k (safest fallback)
+    """
+    if stored_hash.startswith("$argon2"):
+        if not _ARGON2_AVAILABLE or _ARGON2_PH is None:
+            return False, None
+        try:
+            _ARGON2_PH.verify(stored_hash, password)
+            new_hash = _ARGON2_PH.hash(password) if _ARGON2_PH.check_needs_rehash(stored_hash) else None
+            return True, new_hash
+        except (_ArgonMismatch, _ArgonInvalid, Exception):  # type: ignore[misc]
+            return False, None
+    # Legacy PBKDF2-HMAC-SHA256 path — always 100 000 iterations (historical value)
+    try:
+        expected = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000
+        ).hex()
+        if hmac.compare_digest(expected, stored_hash):
+            upgraded = _ARGON2_PH.hash(password) if (_ARGON2_AVAILABLE and _ARGON2_PH is not None) else None
+            return True, upgraded
+    except Exception:
+        pass
+    return False, None
 
 
 def _jwt_secret() -> str:
@@ -580,7 +639,7 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
                 )
                 # Keep customers table in sync for account UI convenience
                 db.execute(
-                    "INSERT OR IGNORE INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP)",
+                    "INSERT INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) ON CONFLICT (id) DO NOTHING",
                     {
                         "id": user_id,
                         "email": "REDACTED",
@@ -625,7 +684,8 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                     pass
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             user_id, ph, salt, name = row[0], row[1], row[2], row[3]
-            if _hash_password(payload.password, salt) != ph:
+            _pw_valid, _pw_upgrade = _verify_password(payload.password, ph, salt)
+            if not _pw_valid:
                 try:
                     log_iam_event("login_failure", email, request.client.host if request.client else "unknown", request.headers.get("user-agent", ""), False, {"reason": "bad_password"})
                     reason = check_bruteforce(email)
@@ -634,6 +694,16 @@ def login(payload: LoginPayload, request: Request, response: Response) -> Dict:
                 except Exception:
                     pass
                 raise HTTPException(status_code=401, detail="Invalid credentials")
+            # Lazy hash migration: PBKDF2 → argon2id (or argon2id param refresh)
+            if _pw_upgrade:
+                try:
+                    db.execute(
+                        sql_text("UPDATE user_accounts SET password_hash = :h, salt = '' WHERE id = :uid"),
+                        {"h": _pw_upgrade, "uid": str(user_id)},
+                    )
+                    db.commit()
+                except Exception:
+                    pass
         # Forced reauth policy requires explicit step-up token before issuing a new session.
         if _is_forced_reauth(user_id=str(user_id or ""), email=email):
             provided = str(payload.mfa_stepup_token or "").strip()
@@ -749,9 +819,10 @@ def request_account_recovery(payload: AccountRecoveryRequestPayload) -> Dict:
                 known_user_id = str(row[0]).strip()
                 db.execute(
                     """
-                    INSERT OR REPLACE INTO security_forced_reauth_flags
+                    INSERT INTO security_forced_reauth_flags
                     (id, target_type, target_value, reason, created_at)
                     VALUES (:id, 'email', :target_value, :reason, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                     """,
                     {
                         "id": f"fr-{secrets.token_hex(12)}",
@@ -761,9 +832,10 @@ def request_account_recovery(payload: AccountRecoveryRequestPayload) -> Dict:
                 )
                 db.execute(
                     """
-                    INSERT OR REPLACE INTO security_forced_reauth_flags
+                    INSERT INTO security_forced_reauth_flags
                     (id, target_type, target_value, reason, created_at)
                     VALUES (:id, 'user_id', :target_value, :reason, CURRENT_TIMESTAMP)
+                    ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                     """,
                     {
                         "id": f"fr-{secrets.token_hex(12)}",
@@ -981,7 +1053,7 @@ def google_callback(code: str | None = None, state: str | None = None):
                     },
                 )
             db.execute(
-                "INSERT OR IGNORE INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP)",
+                "INSERT INTO customers (id, email, email_hash, email_encrypted, name, created_at) VALUES (:id, :email, :email_hash, :email_encrypted, :name, CURRENT_TIMESTAMP) ON CONFLICT (id) DO NOTHING",
                 {
                     "id": user_id,
                     "email": "REDACTED",
