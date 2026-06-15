@@ -175,8 +175,22 @@ def _ensure_redteam_tables() -> None:
                     """
                 )
             )
-            cols = db.execute(text("PRAGMA table_info(redteam_benchmark_results)")).fetchall()
-            colnames = {str(c[1]) for c in (cols or [])}
+            try:
+                cols = db.execute(text("PRAGMA table_info(redteam_benchmark_results)")).fetchall()
+                colnames = {str(c[1]) for c in (cols or [])}
+            except Exception:
+                # PostgreSQL fallback: PRAGMA is SQLite-only
+                try:
+                    cols = db.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns"
+                            " WHERE table_name = 'redteam_benchmark_results'"
+                            "   AND table_schema IN (current_schema(), 'public')"
+                        )
+                    ).fetchall()
+                    colnames = {str(c[0]) for c in (cols or [])}
+                except Exception:
+                    colnames = set()
             if "attack_family" not in colnames:
                 try:
                     db.execute(text("ALTER TABLE redteam_benchmark_results ADD COLUMN attack_family TEXT"))

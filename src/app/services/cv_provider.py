@@ -81,6 +81,17 @@ class ManagedCVProvider:
         otherwise ``None``.
         """
         product_identity: Optional[Dict] = None
+        # Image-hash cache: same image (demo/retry/fan-out) skips the 50-86s vision call.
+        # Namespaced by mode so triage vs visual_search prompts don't collide. Fail-open.
+        _vc_key = None
+        try:
+            from src.app.services import vision_cache as _vcache
+            _vc_key = _vcache.image_key(image_bytes, f"labels:{mode}")
+            _vc_hit = _vcache.get(_vc_key)
+            if isinstance(_vc_hit, tuple) and len(_vc_hit) == 3:
+                return _vc_hit
+        except Exception:
+            _vc_key = None
         if self.provider == "google":
             try:
                 from google.cloud import vision  # type: ignore
@@ -117,6 +128,13 @@ class ManagedCVProvider:
                     cv_model_confidence=None,
                     cv_extraction_method="managed_ollama_vision",
                 )
+                # Only cache a non-empty result so a transient miss isn't poisoned.
+                if _vc_key and (labels or text or product_identity):
+                    try:
+                        from src.app.services import vision_cache as _vcache
+                        _vcache.put(_vc_key, (labels, text, product_identity))
+                    except Exception:
+                        pass
                 return labels, text, product_identity
             except Exception:
                 # Fall through to local OCR so the pipeline still has text evidence.

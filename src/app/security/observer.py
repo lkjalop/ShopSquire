@@ -470,6 +470,14 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         mitre_score += float(mitre.get("AML.T0048", {}).get("weight", 1.0)) * 60
     if signals.get("data_exfiltration"):
         mitre_score += float(mitre.get("AML.T0048", {}).get("weight", 1.0)) * 80
+    # Privilege abuse / code execution / rogue-agent are high-impact agentic
+    # threats — detected in _detect_signals but previously unscored (eval caught it).
+    if signals.get("identity_abuse"):
+        mitre_score += float(mitre.get("AML.T0048", {}).get("weight", 1.0)) * 85
+    if signals.get("unexpected_code_exec"):
+        mitre_score += float(mitre.get("AML.T0048", {}).get("weight", 1.0)) * 90
+    if signals.get("rogue_agent"):
+        mitre_score += float(mitre.get("AML.T0043", {}).get("weight", 1.0)) * 75
     if signals.get("training_poisoning") or signals.get("poisoning_attempt"):
         mitre_score += float(mitre.get("AML.T0020", {}).get("weight", 1.0)) * 90
     if signals.get("pcap_dns_tunnel") or signals.get("pcap_high_entropy_dns"):
@@ -545,6 +553,9 @@ def compute_risk(payload: Dict[str, Any], actor_context: Dict[str, Any] | None =
         or signals.get("pci")
         or signals.get("data_exfiltration")
         or signals.get("agentic_tool_abuse")
+        or signals.get("identity_abuse")
+        or signals.get("unexpected_code_exec")
+        or signals.get("rogue_agent")
         or cv_signals.get("ocr_prompt_injection")
         or cv_signals.get("qr_prompt_injection")
         or cv_signals.get("qr_external_url_detected")

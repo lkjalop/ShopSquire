@@ -107,7 +107,7 @@ def identify_product_from_image(
     *,
     user_query: str | None = None,
     trace_id: str | None = None,
-    timeout_s: float = 12.0,
+    timeout_s: float | None = None,
 ) -> Dict[str, Any]:
     """Extract structured product specs from an image via vision LLM.
 
@@ -131,8 +131,29 @@ def identify_product_from_image(
         "confidence": 0.0,
         "notes": "",
     }
+    # The vision model needs enough TOTAL budget to finish ONE inference (cold
+    # qwen2.5vl/llava can take 20-40s) — otherwise it times out, returns degraded,
+    # and there is nothing to cache. The deadline below still prevents the url×model
+    # loop from STACKING beyond this single budget. Tune via CV_IDENTITY_TIMEOUT_SEC;
+    # for fast demos point CV_IDENTITY_MODEL at a small model (e.g. moondream).
+    if timeout_s is None:
+        timeout_s = float(os.getenv("CV_IDENTITY_TIMEOUT_SEC", "30") or 30)
+
     if not image_bytes:
         return {**empty, "error": "no_image_bytes"}
+
+    # Image-hash cache: the vision call is the dominant latency (measured 50-86s).
+    # A repeat of the SAME image — every live demo, retry, or multi-agent fan-out on
+    # one upload — returns instantly instead of re-running the model. Fail-open.
+    _cache_key = None
+    try:
+        from src.app.services import vision_cache as _vcache
+        _cache_key = _vcache.image_key(image_bytes, "identity")
+        _cached = _vcache.get(_cache_key)
+        if isinstance(_cached, dict):
+            return {**_cached, "from_cache": True}
+    except Exception:
+        _cache_key = None
 
     # Normalize to PNG for reliable vision model processing
     norm_bytes = image_bytes
@@ -158,8 +179,16 @@ def identify_product_from_image(
     models = _get_model_candidates()
     last_err = None
 
+    # Bound TOTAL time to ~timeout_s. The url×model loop previously waited up to
+    # timeout_s PER iteration, so a slow/unreachable first model could stack to
+    # N×timeout_s (a major contributor to the 50-86s image path).
+    _deadline = time.time() + float(timeout_s)
     for url in urls:
         for m in models:
+            _remaining = _deadline - time.time()
+            if _remaining <= 0.5:
+                last_err = last_err or {"error": "deadline_exceeded"}
+                break
             started = time.time()
             try:
                 resp = requests.post(
@@ -171,7 +200,7 @@ def identify_product_from_image(
                         "stream": False,
                         "options": {"temperature": 0.0},
                     },
-                    timeout=timeout_s,
+                    timeout=max(1.0, min(float(timeout_s), _remaining)),
                 )
                 ms = int((time.time() - started) * 1000)
                 if resp.status_code >= 400:
@@ -186,6 +215,12 @@ def identify_product_from_image(
                     continue
 
                 result = {**empty, **parsed, "ok": True, "ms": ms, "model_used": m}
+                if _cache_key:
+                    try:
+                        from src.app.services import vision_cache as _vcache
+                        _vcache.put(_cache_key, result)
+                    except Exception:
+                        pass
                 if trace_id:
                     try:
                         log_trace_event(
@@ -215,7 +250,14 @@ def identify_product_from_image(
                 last_err = {"error": str(exc)[:200], "ms": int((time.time() - started) * 1000)}
                 continue
 
-    return {**empty, **(last_err or {})}
+    # All attempts failed — make the otherwise-silent empty identity OBSERVABLE so a
+    # vision outage shows up as a metric instead of just "no grounding" downstream.
+    try:
+        from src.app.observability.metrics import record_vision_extract_failure
+        record_vision_extract_failure(str((last_err or {}).get("error") or "unknown"))
+    except Exception:
+        pass
+    return {**empty, **(last_err or {}), "degraded": True}
 
 
 def specs_to_constraints(identity: Dict[str, Any]) -> Dict[str, Any]:

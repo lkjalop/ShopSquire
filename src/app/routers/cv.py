@@ -404,29 +404,41 @@ async def analyze(
                     _log.warning("QR/barcode decode failed: %s", _exc, exc_info=True)
                 return _qr_hits, _qr_reasons, _qr_injection, _diag_count
 
-            # Run all three in parallel, bounded by a wall-clock timeout so the
-            # endpoint never hangs indefinitely (e.g. when Ollama / OCR / YOLO is
-            # unavailable in test environments).
-            # Default is 15s (was 8s) — images are pre-shrunk to CV_TIER2_MAX_DIM
-            # (default 1024px) so steg+adversarial+YOLO finish well within budget.
-            # Override with CV_ANALYZE_TIMEOUT_SEC env var.
-            _cv_analyze_timeout = float(
-                (os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "15").strip() or "15"
+            # Run the independent analyses CONCURRENTLY but each under its OWN
+            # timeout, so a slow/unavailable vision-LLM (tier2) or consistency task
+            # can NEVER cancel the fast, deterministic security detectors (QR/steg).
+            #
+            # Previously all three shared a single wait_for(gather(...)): a tier2 /
+            # Ollama hang cancelled the QR decode too, silently FAILING OPEN on QR /
+            # SSN-exfil detection (the <100ms pyzbar decode was killed alongside the
+            # slow model task). Per-task budgets keep the security-critical detector
+            # independent of the LLM's availability.
+            # Override with CV_ANALYZE_TIMEOUT_SEC (heavy tasks) / CV_QR_TIMEOUT_SEC.
+            _cv_analyze_timeout = float((os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "15").strip() or "15")
+            _cv_qr_timeout = float((os.getenv("CV_QR_TIMEOUT_SEC") or "6").strip() or "6")
+
+            async def _bounded(coro, timeout, default, name):
+                try:
+                    return await _asyncio.wait_for(coro, timeout=timeout)
+                except _asyncio.TimeoutError:
+                    _log.warning("cv.analyze %s task timed out after %.1fs (case_id=%s)", name, timeout, req.case_id)
+                except Exception as _be:
+                    _log.warning("cv.analyze %s task failed: %s", name, _be, exc_info=True)
+                return default
+
+            # SECURITY-CRITICAL deterministic QR/barcode decode runs FIRST and
+            # ALONE. It is fast (<1s) but CPU-bound in a worker thread; if it shared
+            # the executor with the heavy vision task (YOLO/steg) it gets starved and
+            # times out — silently failing OPEN on QR/SSN-exfil (observed 2026-06-15).
+            # Running it uncontended first guarantees the security signal surfaces;
+            # the heavy/LLM tasks then run concurrently afterward.
+            (_qr_hits, _qr_reasons, _qr_inj, _diag_cnt) = await _bounded(
+                _run_qr_task(), _cv_qr_timeout, ([], [], False, 0), "qr"
             )
-            try:
-                tier2_result, image_consistency, (_qr_hits, _qr_reasons, _qr_inj, _diag_cnt) = await _asyncio.wait_for(
-                    _asyncio.gather(
-                        _run_tier2_task(), _run_consistency_task(), _run_qr_task(),
-                    ),
-                    timeout=_cv_analyze_timeout,
-                )
-            except _asyncio.TimeoutError:
-                _log.warning(
-                    "cv.analyze parallel tasks timed out after %.1fs (case_id=%s)",
-                    _cv_analyze_timeout, req.case_id,
-                )
-                tier2_result, image_consistency = {}, None
-                _qr_hits, _qr_reasons, _qr_inj, _diag_cnt = [], [], False, 0
+            tier2_result, image_consistency = await _asyncio.gather(
+                _bounded(_run_tier2_task(), _cv_analyze_timeout, {}, "tier2"),
+                _bounded(_run_consistency_task(), _cv_analyze_timeout, None, "consistency"),
+            )
             tier2_evidence_tags = list((tier2_result or {}).get("evidence_tags") or [])
             tier2_security = ((tier2_result or {}).get("security_analysis") or {}) if isinstance((tier2_result or {}).get("security_analysis"), dict) else {}
             qr_decode_hits = _qr_hits

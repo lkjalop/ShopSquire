@@ -19,8 +19,8 @@
       "name": "medium",
       "score_min": 5,
       "score_max": 6,
-      "model": "qwen3.6:27b",
-      "description": "High-capacity text reasoning. Gaming, budget reasoning, multi-constraint queries, use-case specific recommendations. qwen3.6:27b (Qwen3.5 27B Q4_K_M): strong reasoning, text-only."
+      "model": "qwen3:14b",
+      "description": "Mid-capacity text reasoning. Gaming, budget reasoning, multi-constraint queries, use-case specific recommendations. qwen3:14b: ~12s, strong quality, ~2x faster than 27B (de-collapsed from large tier 2026-06-11 for latency)."
     },
     {
       "name": "large",
