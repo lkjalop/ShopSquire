@@ -814,13 +814,16 @@ def log_trace_event(
                             conn.execute(
                                 text(
                                     """
-                                    INSERT OR REPLACE INTO decision_trace_events (
+                                    INSERT INTO decision_trace_events (
                                         id, trace_id, event_type, source_type, source_id,
                                         target_type, target_id, payload, created_at
                                     ) VALUES (
                                         :id, :trace_id, :event_type, :source_type, :source_id,
                                         :target_type, :target_id, :payload, :created_at
                                     )
+                                    ON CONFLICT (id) DO UPDATE SET
+                                        payload = EXCLUDED.payload,
+                                        created_at = EXCLUDED.created_at
                                     """
                                 ),
                                 {

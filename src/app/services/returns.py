@@ -502,16 +502,16 @@ def mark_evidence_as_fraud(evidence_id: str) -> int:
                     continue
                 try:
                     db.execute(
-                        sql_text("INSERT OR IGNORE INTO fraud_image_hashes (phash, first_seen_case_id, times_seen, confirmed_fraud, created_at) VALUES (:phash, :case, 1, 1, CURRENT_TIMESTAMP)"),
+                        sql_text(
+                            "INSERT INTO fraud_image_hashes (phash, first_seen_case_id, times_seen, confirmed_fraud, created_at)"
+                            " VALUES (:phash, :case, 1, 1, CURRENT_TIMESTAMP)"
+                            " ON CONFLICT (phash) DO UPDATE SET times_seen = fraud_image_hashes.times_seen + 1, confirmed_fraud = 1"
+                        ),
                         {"phash": phash, "case": evidence_id},
                     )
                     inserted += 1
                 except Exception:
-                    try:
-                        # Try update times_seen if exists
-                        db.execute(sql_text("UPDATE fraud_image_hashes SET times_seen = times_seen + 1, confirmed_fraud = 1 WHERE phash = :phash"), {"phash": phash})
-                    except Exception:
-                        pass
+                    pass
             try:
                 db.commit()
             except Exception:

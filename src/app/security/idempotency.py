@@ -94,7 +94,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         try:
             with db_session() as db:
                 db.execute(
-                    "INSERT OR REPLACE INTO idempotency_keys (key, fingerprint, response_status, response_body) VALUES (:k, :fp, :st, :rb)",
+                    "INSERT INTO idempotency_keys (key, fingerprint, response_status, response_body) VALUES (:k, :fp, :st, :rb) ON CONFLICT (key) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, response_status = EXCLUDED.response_status, response_body = EXCLUDED.response_body",
                     {"k": key, "fp": fingerprint, "st": status, "rb": json.dumps(resp_payload, ensure_ascii=False)},
                 )
                 try:

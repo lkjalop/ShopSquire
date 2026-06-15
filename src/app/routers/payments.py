@@ -62,7 +62,7 @@ def _idempotent(path: str, key: str | None) -> bool:
             # INSERT OR IGNORE silently skips UNIQUE violations on SQLite.
             # rowcount == 1 → new key (allow); rowcount == 0 → duplicate (reject).
             result = db.execute(
-                text("INSERT OR IGNORE INTO idempotency_keys (key, fingerprint) VALUES (:k, :fp)"),
+                text("INSERT INTO idempotency_keys (key, fingerprint) VALUES (:k, :fp) ON CONFLICT (key) DO NOTHING"),
                 {"k": k, "fp": path},
             )
             db.commit()

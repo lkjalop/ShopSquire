@@ -355,6 +355,36 @@ def cancel_order(order_id: str, role: str = Depends(require_role([ROLE_MERCHANT,
         status = _get_order_status(order_id, db)
         if "cancelled" not in ALLOWED_TRANSITIONS.get(status, set()):
             raise HTTPException(status_code=400, detail=f"Cannot cancel from status {status}")
+
+        # ── Unified Authorization Engine gate (shadow) ──
+        # Human-authenticated route (require_role), so enforce_lane=False — there is
+        # no autonomous-agent lane to police; the engine provides the unified policy
+        # + audit trail. Inert in shadow mode; enforces once flipped to active.
+        try:
+            from src.app.security.authorization_engine import authorize_action
+            _conditions = [] if status is None else ([] if status not in ("shipped", "delivered") else ["order_shipped"])
+            if not status:
+                _conditions.append("order_not_found")
+            _authz = authorize_action(
+                "order_modification",
+                requester=str(role or "merchant"),
+                conditions=_conditions,
+                subject_id=order_id,
+                idempotency_key=f"cancel:{order_id}",
+                enforce_lane=False,
+            )
+            if _authz.should_block():  # inert in shadow
+                raise HTTPException(status_code=409, detail={
+                    "error": "authorization_engine_denied",
+                    "action": "order_modification",
+                    "reason": _authz.reason,
+                    "terminal_outcome": _authz.terminal_outcome,
+                    "residual": _authz.residual,
+                })
+        except HTTPException:
+            raise
+        except Exception:
+            pass
         res = db.execute(
             "UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = :id",
             {"id": order_id},

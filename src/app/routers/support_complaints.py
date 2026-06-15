@@ -506,9 +506,10 @@ def _qr_redirect_cache_set(url: str, result: Dict[str, Any]) -> None:
             _db.execute(
                 _text(
                     """
-                    INSERT OR REPLACE INTO qr_redirect_cache
+                    INSERT INTO qr_redirect_cache
                     (url_hash, url_prefix, result_json, updated_at, expires_at)
                     VALUES (:h, :p, :r, :u, :e)
+                    ON CONFLICT (url_hash) DO UPDATE SET url_prefix = EXCLUDED.url_prefix, result_json = EXCLUDED.result_json, updated_at = EXCLUDED.updated_at, expires_at = EXCLUDED.expires_at
                     """
                 ),
                 {

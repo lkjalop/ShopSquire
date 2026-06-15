@@ -2428,11 +2428,19 @@ def decision_audit_trail(
         "events": trace_events[:200],
         "hash_chain": hash_chain,
         "immutability": {
-            "method": "sha256_chain",
+            # Honest scope: this chain is RECOMPUTED at read time for replay /
+            # visualisation. It is not (yet) verified against persisted prev_hash /
+            # record_hash columns or an external WORM anchor, so it is not proof of
+            # tamper-evidence on its own. Persisted-hash verification lives in
+            # security/audit_chain.py (WORM archive) and should be wired here before
+            # this is represented as "tamper-proof".
+            "method": "sha256_chain_read_time",
             "chain_length": len(hash_chain),
             "genesis_hash": "genesis",
             "tip_hash": prev_hash,
-            "verified": True,
+            "verified": False,
+            "verification_scope": "read_time_replay",
+            "note": "read-time replay chain; persisted + externally-anchored verification pending",
         },
         "retention_policy": retention,
         "storage": {
