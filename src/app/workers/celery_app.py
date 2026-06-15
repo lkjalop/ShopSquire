@@ -271,6 +271,32 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "args": (),
         }
 
+    # Auth token expiry cleanup — prune expired session_tokens + refresh_tokens daily.
+    # Without this, both tables grow unboundedly and auth query latency degrades over months.
+    beat_schedule["auth-token-prune"] = {
+        "task": "src.app.tasks.security_poll_tasks.prune_expired_auth_tokens",
+        "schedule": crontab(minute="15", hour="3"),  # 03:15 UTC daily, low-traffic window
+        "args": (),
+    }
+
+    # Email security polling — DMARC filesystem and inbox connector
+    dmarc_poll_enabled = str(os.getenv("DMARC_POLL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    dmarc_poll_min = max(1, int(os.getenv("DMARC_POLL_INTERVAL_SEC", "900"))) // 60
+    if dmarc_poll_enabled:
+        beat_schedule["dmarc-filesystem-poll"] = {
+            "task": "src.app.tasks.email_poll_tasks.poll_dmarc_filesystem",
+            "schedule": crontab(minute=f"*/{dmarc_poll_min}"),
+            "args": (),
+        }
+    email_connector_enabled = str(os.getenv("EMAIL_CONNECTOR_POLL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    email_connector_min = max(1, int(os.getenv("EMAIL_CONNECTOR_POLL_INTERVAL_SEC", "300"))) // 60
+    if email_connector_enabled:
+        beat_schedule["email-connector-poll"] = {
+            "task": "src.app.tasks.email_poll_tasks.poll_email_connector",
+            "schedule": crontab(minute=f"*/{email_connector_min}"),
+            "args": (),
+        }
+
     celery.conf.update(
         timezone="UTC",
         enable_utc=True,
@@ -292,7 +318,10 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.security_poll_tasks.check_config_integrity": {"queue": default_q},
             "src.app.tasks.security_poll_tasks.verify_prompt_hashes": {"queue": default_q},
             "src.app.tasks.security_poll_tasks.verify_audit_chain": {"queue": default_q},
+            "src.app.tasks.security_poll_tasks.prune_expired_auth_tokens": {"queue": default_q},
             "sandbox.detonate": {"queue": "security"},
+            "src.app.tasks.email_poll_tasks.poll_dmarc_filesystem": {"queue": default_q},
+            "src.app.tasks.email_poll_tasks.poll_email_connector": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -301,11 +330,19 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.incident_ops_tasks",
             "src.app.tasks.anomaly_tasks",
             "src.app.tasks.sandbox_tasks",
+            "src.app.tasks.email_poll_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
         worker_prefetch_multiplier=1,
         task_acks_late=True,
+        # If a worker process is killed mid-task (OOM, SIGKILL), reject the message
+        # back to the broker so it gets requeued rather than silently lost.
+        task_reject_on_worker_lost=True,
+        # Global time limits: soft limit sends SIGTERM to the task (allowing cleanup);
+        # hard limit sends SIGKILL after an extra 60s. Both configurable via env.
+        task_soft_time_limit=int(os.getenv("CELERY_TASK_SOFT_TIMEOUT_SEC", "300")),
+        task_time_limit=int(os.getenv("CELERY_TASK_HARD_TIMEOUT_SEC", "360")),
     )
     return celery
 

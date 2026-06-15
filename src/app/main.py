@@ -1578,6 +1578,11 @@ def create_app() -> FastAPI:
     app.include_router(sla_router)
     app.include_router(session_memory_router)
     app.include_router(decisions_router)
+    try:
+        from src.app.routers.authz_audit import router as authz_audit_router
+        app.include_router(authz_audit_router)
+    except Exception as e:
+        logging.getLogger("shopsquire.startup").exception("failed to include authz_audit router: %s", e)
     app.include_router(voice_router)
     app.include_router(vision_router)
     app.include_router(image_sidecar_router)

@@ -1,7 +1,7 @@
 """enforce pgvector extension and product embedding indexes
 
 Revision ID: 20260325_pgvector_hnsw
-Revises: 20260310_add_order_warranty_fields
+Revises: 20260310_order_warranty_fields
 Create Date: 2026-03-25
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 
 
 revision = "20260325_pgvector_hnsw"
-down_revision = "20260310_add_order_warranty_fields"
+down_revision = "20260310_order_warranty_fields"
 branch_labels = None
 depends_on = None
 

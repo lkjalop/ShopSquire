@@ -35,7 +35,13 @@ def _register_sqlite_now(engine):
     @event.listens_for(engine, "before_cursor_execute", retval=True)
     def _rewrite_insert(conn, cursor, statement, parameters, context, executemany):
         try:
-            if isinstance(statement, str) and re.search(r"\bINSERT\s+INTO\b", statement, flags=re.IGNORECASE):
+            if (
+                isinstance(statement, str)
+                and re.search(r"\bINSERT\s+INTO\b", statement, flags=re.IGNORECASE)
+                # Skip statements that already use standard ON CONFLICT — SQLite 3.24+
+                # handles those natively; rewriting would produce invalid syntax.
+                and not re.search(r"\bON\s+CONFLICT\b", statement, flags=re.IGNORECASE)
+            ):
                 statement = re.sub(r"\bINSERT\s+INTO\b", "INSERT OR REPLACE INTO", statement, flags=re.IGNORECASE)
         except Exception:
             pass
@@ -68,7 +74,24 @@ def _create_engine_with_fallback(url: str):
     # Do not fallback silently to SQLite; always honor configured URL.
     # create_engine does not connect immediately, so this is safe even if the
     # database is not yet ready. Test bootstrap ensures readiness and schema.
-    eng = create_engine(url, pool_pre_ping=True, future=True)
+    eng = create_engine(
+        url,
+        pool_pre_ping=True,
+        future=True,
+        # Production pool sizing: 10 base + 20 overflow = 30 max connections.
+        # Recycle after 30 minutes to prevent stale connections across PG restarts.
+        # statement_timeout kills runaway queries so they don't hold pool slots.
+        pool_size=int(os.getenv("DB_POOL_SIZE", "10")),
+        max_overflow=int(os.getenv("DB_POOL_MAX_OVERFLOW", "20")),
+        pool_recycle=int(os.getenv("DB_POOL_RECYCLE_SEC", "1800")),
+        pool_timeout=int(os.getenv("DB_POOL_TIMEOUT_SEC", "30")),
+        connect_args={
+            "options": (
+                f"-c statement_timeout={os.getenv('DB_STATEMENT_TIMEOUT_MS', '30000')}"
+                f" -c idle_in_transaction_session_timeout={os.getenv('DB_IDLE_TX_TIMEOUT_MS', '60000')}"
+            )
+        },
+    )
     # For Postgres, set a default search_path so unqualified table names
     # resolve to our logical schemas in order: oltp, audit, security, public.
     try:
@@ -79,6 +102,10 @@ def _create_engine_with_fallback(url: str):
                 try:
                     cursor = dbapi_connection.cursor()
                     cursor.execute("SET search_path TO oltp, audit, security, public")
+                    # Clear tenant GUC on every new connection from the pool so
+                    # pooled connections never carry a previous request's tenant
+                    # context into the next request (RLS safety net).
+                    cursor.execute("SET app.current_tenant TO ''")
                     cursor.close()
                 except Exception:
                     pass
@@ -1021,7 +1048,10 @@ def db_session():
             # INSERTs into INSERT OR REPLACE to avoid UNIQUE constraint
             # failures while preserving semantics for the test harness.
             try:
-                if "sqlite" in str(session.bind.dialect.name).lower():
+                if (
+                    "sqlite" in str(session.bind.dialect.name).lower()
+                    and not re.search(r"\bON\s+CONFLICT\b", s, flags=re.IGNORECASE)
+                ):
                     s = re.sub(r"\bINSERT\s+INTO\b", "INSERT OR REPLACE INTO", s, flags=re.IGNORECASE)
             except Exception:
                 pass

@@ -62,10 +62,16 @@ def _create_redis_client() -> redis.Redis | None:
             require_tls = str(os.getenv("REDIS_REQUIRE_TLS", "1") or "1").strip().lower() in ("1", "true", "yes", "on")
             if require_tls and not _redis_url_is_tls(redis_url):
                 raise RuntimeError("redis_tls_required")
+        # Connect timeout: time to establish TCP connection.
+        # Operation timeout: time for a single Redis command to complete.
+        # 10ms was too aggressive for production — SMEMBERS on large seen-sets
+        # or any network jitter caused spurious failures across all Redis-backed features.
+        _connect_t = float(os.getenv("REDIS_CONNECT_TIMEOUT", "0.5"))
+        _op_t = float(os.getenv("REDIS_SOCKET_TIMEOUT", "2.0"))
         kwargs = {
             "decode_responses": True,
-            "socket_connect_timeout": 0.01,
-            "socket_timeout": 0.01,
+            "socket_connect_timeout": _connect_t,
+            "socket_timeout": _op_t,
         }
         if acl_user:
             kwargs["username"] = acl_user
@@ -141,7 +147,17 @@ def scrub_pii(text: str) -> str:
     # Preserve known system IDs that can look like phone numbers.
     text = re.sub(r"\b(?:TKT|INC|CASE|ORD|ORDER|REQ|DEC|TRACE|EVT|EVENT)-\d{6,}\b", _protect, text, flags=re.I)
     text = PII_EMAIL.sub("[REDACTED_EMAIL]", text)
-    text = PII_PHONE.sub("[REDACTED_PHONE]", text)
+
+    # Only redact a phone match when the MATCHED TOKEN itself holds 10–15 digits
+    # (E.164 range). The regex lookahead counts digits anywhere downstream, which
+    # over-redacts product model numbers like "Dell Inspiron 14 7440 14\"" as a
+    # phone (P2 fix from the 2026-06-15 clickthrough).
+    def _phone_sub(m: re.Match) -> str:
+        token = m.group(1)
+        digits = sum(1 for ch in token if ch.isdigit())
+        return "[REDACTED_PHONE]" if 10 <= digits <= 15 else token
+
+    text = PII_PHONE.sub(_phone_sub, text)
     text = PII_SSN.sub("[REDACTED_SSN]", text)
     text = PII_IP.sub("[REDACTED_IP]", text)
     text = API_KEY_PAT.sub("[REDACTED_API_KEY]", text)

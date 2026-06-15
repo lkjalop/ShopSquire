@@ -89,3 +89,66 @@ def verify_audit_chain(self) -> Dict[str, Any]:
     except Exception as exc:
         logger.error("verify_audit_chain task error: %s", exc)
         return {"tampered": False, "signal": None, "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Auth token expiry cleanup — runs daily at 03:15 UTC
+# ---------------------------------------------------------------------------
+
+@celery_app.task(
+    bind=True,
+    name="src.app.tasks.security_poll_tasks.prune_expired_auth_tokens",
+    max_retries=2,
+    default_retry_delay=300,
+)
+def prune_expired_auth_tokens(self) -> Dict[str, Any]:
+    """Delete expired session_tokens and refresh_tokens rows.
+
+    Both tables grow unboundedly without this cleanup.  Auth query latency
+    degrades as the tables accumulate millions of expired rows over months.
+    Safe to retry: DELETE WHERE expires_at < NOW() is idempotent.
+    """
+    import os
+    from sqlalchemy import text as _sql
+
+    try:
+        from src.app.models.db import db_session
+
+        cutoff = os.getenv("TOKEN_PRUNE_KEEP_DAYS", "7")
+        with db_session() as db:
+            r1 = db.execute(
+                _sql(
+                    "DELETE FROM session_tokens"
+                    " WHERE expires_at IS NOT NULL"
+                    f" AND expires_at < (CURRENT_TIMESTAMP - INTERVAL '{cutoff} days')"
+                )
+            )
+            r2 = db.execute(
+                _sql(
+                    "DELETE FROM refresh_tokens"
+                    " WHERE expires_at IS NOT NULL"
+                    f" AND expires_at < (CURRENT_TIMESTAMP - INTERVAL '{cutoff} days')"
+                )
+            )
+            try:
+                db.commit()
+            except Exception:
+                pass
+        session_pruned = getattr(r1, "rowcount", 0) or 0
+        refresh_pruned = getattr(r2, "rowcount", 0) or 0
+        logger.info(
+            "prune_expired_auth_tokens: pruned %d session_tokens, %d refresh_tokens",
+            session_pruned,
+            refresh_pruned,
+        )
+        return {
+            "ok": True,
+            "session_tokens_pruned": int(session_pruned),
+            "refresh_tokens_pruned": int(refresh_pruned),
+        }
+    except Exception as exc:
+        logger.error("prune_expired_auth_tokens failed: %s", exc)
+        try:
+            raise self.retry(exc=exc)
+        except Exception:
+            return {"ok": False, "error": str(exc)}

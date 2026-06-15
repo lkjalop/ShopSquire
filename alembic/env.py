@@ -88,6 +88,18 @@ def run_migrations_online():
                     subprocess.run([pre], check=False)
         except Exception:
             pass
+        # Pin migrations to the public schema so all Alembic-managed tables land
+        # in a predictable location regardless of role search_path defaults.
+        # (Runtime engine sets search_path=oltp,audit,security,public via connect
+        # event; Alembic uses a separate NullPool connection and must be anchored
+        # explicitly. The oltp schema is used only for product_embeddings which
+        # are fully schema-qualified in their migration.)
+        try:
+            from sqlalchemy import text as _alembic_text
+            if connection.dialect.name != "sqlite":
+                connection.execute(_alembic_text("SET search_path TO public"))
+        except Exception:
+            pass
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

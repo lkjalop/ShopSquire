@@ -278,6 +278,48 @@ decision_trace_write_failures_total = Counter(
     labelnames=["stage"],
 )
 
+authz_decisions_total = Counter(
+    "shopsquire_authz_decisions_total",
+    "Authorization Engine verdicts emitted",
+    labelnames=["action", "decision", "mode"],
+)
+
+authz_write_failures_total = Counter(
+    "shopsquire_authz_write_failures_total",
+    "Authorization Engine control-plane side-effect failures (otherwise silent)",
+    labelnames=["stage"],
+)
+
+authz_parity_total = Counter(
+    "shopsquire_authz_parity_total",
+    "Engine-vs-legacy-matrix shadow agreement at the route_enforcement seam",
+    labelnames=["action", "agree"],
+)
+
+vision_cache_total = Counter(
+    "shopsquire_vision_cache_total",
+    "Image-hash vision cache outcomes (hit avoids a 50-86s vision-LLM call)",
+    labelnames=["outcome"],
+)
+
+vision_extract_failures_total = Counter(
+    "shopsquire_vision_extract_failures_total",
+    "Vision-LLM extraction failures (timeout/unreachable) — otherwise a silent empty identity",
+    labelnames=["stage"],
+)
+
+retrieval_source_total = Counter(
+    "shopsquire_retrieval_source_total",
+    "Candidate retrieval per source/outcome (surfaces silently-empty vector indexes)",
+    labelnames=["source", "outcome"],
+)
+
+pipeline_v2_shadow_total = Counter(
+    "shopsquire_pipeline_v2_shadow_total",
+    "RECOMMEND_PIPELINE_V2 shadow runs (non-blocking; not customer-affecting)",
+    labelnames=["outcome"],
+)
+
 alertmanager_test_last_ts = Gauge(
     "shopsquire_alertmanager_test_last_ts",
     "Unix timestamp of last AlertManager test alert sent",
@@ -460,6 +502,65 @@ def record_email_detonation_latency(provider: str | None, latency_seconds: float
 
 def record_decision_trace_write_failure(stage: str | None):
     decision_trace_write_failures_total.labels(stage=str(stage or "unknown")).inc()
+
+
+def record_authz_decision(action: str | None, decision: str | None, mode: str | None):
+    try:
+        authz_decisions_total.labels(
+            action=str(action or "unknown"),
+            decision=str(decision or "unknown"),
+            mode=str(mode or "unknown"),
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_authz_write_failure(stage: str | None):
+    try:
+        authz_write_failures_total.labels(stage=str(stage or "unknown")).inc()
+    except Exception:
+        pass
+
+
+def record_authz_parity(action: str | None, agree: bool):
+    try:
+        authz_parity_total.labels(
+            action=str(action or "unknown"),
+            agree="true" if agree else "false",
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_vision_cache(outcome: str | None):
+    try:
+        vision_cache_total.labels(outcome=str(outcome or "unknown")).inc()
+    except Exception:
+        pass
+
+
+def record_vision_extract_failure(stage: str | None):
+    try:
+        vision_extract_failures_total.labels(stage=str(stage or "unknown")).inc()
+    except Exception:
+        pass
+
+
+def record_retrieval_source(source: str | None, outcome: str | None):
+    try:
+        retrieval_source_total.labels(
+            source=str(source or "unknown"),
+            outcome=str(outcome or "unknown"),
+        ).inc()
+    except Exception:
+        pass
+
+
+def record_pipeline_v2_shadow(*, ms: int = 0, count: int = 0, error: bool = False):
+    try:
+        pipeline_v2_shadow_total.labels(outcome="error" if error else "ok").inc()
+    except Exception:
+        pass
 
 
 def record_alertmanager_test():
