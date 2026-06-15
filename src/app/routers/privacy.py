@@ -296,10 +296,11 @@ def delete_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
             db.commit()
 
         try:
-            redis.delete(f"session:{uid}:summary")
-            redis.delete(f"session:{uid}:kv_state")
-            redis.delete(f"session:{uid}:recent_retrieval")
-            deleted["session_memory"] = True
+            # DSR erasure across ALL user-linked Redis keys (8 memory + typed
+            # artifacts) via the single inventory — not just the 3 keys cleared
+            # historically (GDPR/APP right-to-erasure).
+            from src.app.services.user_data_inventory import erase_redis
+            deleted["session_memory"] = erase_redis(redis, uid)
         except Exception:
             deleted["session_memory"] = False
 
@@ -409,13 +410,15 @@ def export_user_data(uid: str, redis=Depends(get_redis), redact: bool = False, r
                         item["metadata"] = _redact_json(item["metadata"]) if isinstance(item["metadata"], (dict, list)) else item["metadata"]
                     audits.append(item)
                 export["decision_audits"] = audits
-        summary = redis.get(f"session:{uid}:summary")
-        kv = redis.get(f"session:{uid}:kv_state")
-        if summary or kv:
-            export["session_memory"] = {
-                "summary": _safe_json(summary) if summary else None,
-                "kv_state": _safe_json(kv) if kv else None,
-            }
+        # Export ALL user-linked Redis keys (8 memory families + typed artifacts)
+        # via the single inventory, not just summary/kv_state.
+        try:
+            from src.app.services.user_data_inventory import export_redis
+            _session_mem = export_redis(redis, uid)
+            if _session_mem:
+                export["session_memory"] = _session_mem
+        except Exception:
+            pass
         sanitized, _hits = dlp_sanitize_export_value(export)
         return sanitized if isinstance(sanitized, dict) else {"export": sanitized}
     except Exception as exc:
@@ -568,8 +571,8 @@ def redact_user_data(uid: str, redis=Depends(get_redis), role: str = Depends(req
                 redacted["customers"] = 0
             db.commit()
         try:
-            redis.delete(f"session:{uid}:summary")
-            redis.delete(f"session:{uid}:kv_state")
+            from src.app.services.user_data_inventory import redact_redis
+            redacted["session_memory"] = redact_redis(redis, uid)
         except Exception:
             pass
         return {"status": "redacted", "uid": uid, "uid_hash": uid_hash, "redacted_counts": redacted}
