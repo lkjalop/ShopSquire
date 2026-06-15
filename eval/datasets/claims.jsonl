@@ -1,0 +1,8 @@
+{"id": "cl01", "claim": "the screen is cracked", "cv_damage": "physical", "cv_conf": 0.85, "receipt": true, "expect_verdict": "supported"}
+{"id": "cl02", "claim": "the screen is cracked", "cv_damage": null, "receipt": false, "expect_verdict": "needs_evidence"}
+{"id": "cl03", "claim": "my screen is completely cracked and shattered", "cv_damage": "cosmetic", "cv_conf": 0.8, "receipt": false, "expect_verdict": "contradicted"}
+{"id": "cl04", "claim": "i want to return this", "cv_damage": "physical", "cv_conf": 0.7, "receipt": false, "expect_verdict": "supported"}
+{"id": "cl05", "claim": "there is water damage and it won't turn on", "cv_damage": "water", "cv_conf": 0.75, "receipt": true, "expect_verdict": "supported"}
+{"id": "cl06", "claim": "the laptop is dead and won't boot", "cv_damage": null, "receipt": false, "expect_verdict": "needs_evidence"}
+{"id": "cl07", "claim": "the charger was missing from the box", "cv_damage": null, "receipt": true, "expect_verdict": "needs_evidence"}
+{"id": "cl08", "claim": "just a tiny scratch on the lid", "cv_damage": "physical", "cv_conf": 0.8, "receipt": false, "expect_verdict": "contradicted"}
