@@ -186,11 +186,50 @@ def _frameworks_for_security(*, signals: Dict[str, Any], severity: str) -> Dict[
     }
 
 
+# WS2.2 — context stash so the universal return wrapper can answer comparison/
+# knowledge questions on ANY early-return path (the monolith has ~10 of them).
+from contextvars import ContextVar as _ContextVar
+_KNOWLEDGE_QUERY_CTX: "_ContextVar" = _ContextVar("recommend_knowledge_ctx", default=None)
+
+
+def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None) -> None:
+    """If this is a comparison/knowledge turn and the message is empty or a generic
+    disambiguation/no-results fallback, replace it with a real conceptual answer."""
+    try:
+        _kq = _KNOWLEDGE_QUERY_CTX.get()
+        if not _kq:
+            return
+        _plan = _kq.get("plan")
+        if _plan is None or not getattr(_plan, "answer_without_products", False):
+            return
+        _msg = str(payload.get("assistant_message") or "").strip().lower()
+        _generic = (not _msg) or any(
+            t in _msg for t in (
+                "i can narrow this", "narrow this quickly", "couldn't find", "could not find",
+                "no products found", "no exact in-catalog", "no confident in-catalog",
+            )
+        )
+        if not _generic:
+            return
+        _ans = _build_knowledge_answer(
+            _kq.get("query") or "", _plan, payload.get("results") or [],
+            os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b")),
+            trace_id,
+        )
+        if _ans:
+            payload["assistant_message"] = _ans
+            payload["intent_kind"] = getattr(_plan, "intent", "knowledge")
+    except Exception:
+        pass
+
+
 def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
     try:
         payload = security_sanitize(payload or {})
     except Exception:
         payload = payload or {}
+    # WS2.2 — comparison/knowledge conceptual answer (covers all early returns).
+    _maybe_inject_knowledge_answer(payload, trace_id)
     try:
         locale = (
             payload.get("locale")
@@ -833,13 +872,16 @@ def _fast_path_catalog_recommendation(
             budget_max=budget_max,
         )
         item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
+        _price = int(item.get("price_cents") or 0) / 100.0
         item["factors"] = {
-            "positive": [
-                "fast_path_catalog",
-                *(["safe_image_brand_hint"] if safe_hints.get("brand_hints") else []),
-                *(["gaming_use_case_match"] if "gaming" in safe_hints.get("use_case_hints", []) or "gaming" in str(query).lower() else []),
-                *(["in_stock"] if item.get("stock", 0) > 0 else []),
-            ],
+            "positive": list(filter(None, [
+                "price_fit" if (budget_max is not None and _price <= float(budget_max)) else (
+                    "query_match" if any(tok in str(item.get("name") or "").lower() for tok in str(query or "").lower().split()) else "catalog_match"
+                ),
+                "safe_image_brand_hint" if safe_hints.get("brand_hints") else None,
+                "gaming_use_case_match" if ("gaming" in safe_hints.get("use_case_hints", []) or "gaming" in str(query).lower()) else None,
+                "in_stock" if item.get("stock", 0) > 0 else None,
+            ]))[:4],
             "negative": [],
         }
         item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
@@ -895,8 +937,13 @@ def _fast_path_catalog_recommendation(
                 budget_max=budget_max,
             )
             item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
+            _fb_price = int(item.get("price_cents") or 0) / 100.0
             item["factors"] = {
-                "positive": ["local_deterministic_fallback", "gaming_use_case_match", "in_stock"],
+                "positive": list(filter(None, [
+                    "price_fit" if (budget_max is not None and _fb_price <= float(budget_max)) else "query_match",
+                    "gaming_use_case_match" if ("gaming" in safe_hints.get("use_case_hints", []) or "gaming" in str(query).lower()) else None,
+                    "in_stock" if item.get("stock", 0) > 0 else None,
+                ]))[:3],
                 "negative": ["catalog_query_timeout"] if query_elapsed_ms > 2500 else [],
             }
             item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
@@ -906,6 +953,8 @@ def _fast_path_catalog_recommendation(
     for item in results:
         reasons = [str(x) for x in ((item.get("factors") or {}).get("positive") or [])[:3]]
         item["reasons"] = reasons
+        # why is what the frontend product card renders via _prettyReason(p.why[0])
+        item["why"] = reasons
         if not item.get("reason_codes"):
             item["reason_codes"] = [
                 {
@@ -956,7 +1005,36 @@ def _fast_path_catalog_recommendation(
             "policy_action": "allow_recommendation_quarantine_payload",
         },
         "image_flagged": image_flagged,
-        "anchor_sections": [],
+        "image_untrusted": image_flagged,
+        "anchor_sections": [
+            {
+                "title": "Catalog match — safe image hints",
+                "match_basis": (
+                    (safe_hints.get("brand_hints") or [])
+                    + (safe_hints.get("category_hints") or [])
+                    + (safe_hints.get("use_case_hints") or [])
+                ) or ["query_text"],
+                "summary": (
+                    (
+                        f"⚠️ Raw image payload quarantined. Recommendations based on safe structural hints only. "
+                        if image_flagged else ""
+                    )
+                    + f"Matched {len(results)} product{'s' if len(results) != 1 else ''} "
+                    f"from query constraints"
+                    + (f" and budget ${budget_min or 0}–${budget_max}" if budget_max else "")
+                    + "."
+                ).strip(),
+                "top_products": [
+                    {
+                        "name": str(p.get("name") or ""),
+                        "sku": str(p.get("sku") or ""),
+                        "score_norm": p.get("score_norm"),
+                        "reasons": p.get("reasons") or [],
+                    }
+                    for p in results[:3]
+                ],
+            }
+        ] if results else [],
     }
     shopper_intent = {
         "persona": "value_conscious_gamer" if "gaming" in str(query or "").lower() else "general_shopper",
@@ -1167,8 +1245,15 @@ def _fast_path_catalog_recommendation(
         "results": results,
         "products": results,
         "assistant_message": (
-            "Showing safe catalog matches from sanitized image hints while the uploaded image remains under review."
-            if safe_hints.get("trust_state") == "under_review"
+            (
+                "⚠️ [SECURITY] Image flagged"
+                + (
+                    " — " + ", ".join(k for k, v in (safe_hints.get("unsafe_flags") or {}).items() if v)
+                    if any((safe_hints.get("unsafe_flags") or {}).values()) else ""
+                )
+                + ". Showing safe catalog matches from sanitized hints while the uploaded image remains under review."
+            )
+            if image_flagged
             else "Showing fast catalog matches from the query and image hints."
         ),
         "decision_trace_id": trace_id,
@@ -1186,6 +1271,7 @@ def _fast_path_catalog_recommendation(
                 "score_norm": p.get("score_norm"),
                 "reason_codes": (p.get("reason_codes") or [])[:5],
                 "reasons": (p.get("reasons") or [])[:5],
+                "why": (p.get("why") or p.get("reasons") or [])[:3],
             }
             for p in (results or [])
             if isinstance(p, dict)
@@ -1203,6 +1289,14 @@ def _fast_path_catalog_recommendation(
         "timing_breakdown": timing,
         "next_questions": [],
         "_trace_recommendation_persisted": True,
+        # Signal frontend to auto-open Decision Trace when image was flagged.
+        **(
+            {
+                "status": "image_flagged_text_results",
+                "security_alert": True,
+            }
+            if image_flagged else {}
+        ),
     }
 
 
@@ -2834,6 +2928,24 @@ def _apply_persona_confidence_fallback(
     return out[:3]
 
 
+def _inject_grounding_residual_question(
+    questions: list[dict] | None, constraints: dict | None
+) -> list[dict]:
+    """Surface the grounding ladder's SPECIFIC identity question (e.g. 'Is this a
+    Razer?' / 'is it Dell or Asus?') in place of the generic ask_image_model, so
+    the bounded-autonomy boundary the ladder found is what the user actually sees.
+    """
+    rq = (constraints or {}).get("_identity_residual_question") if isinstance(constraints, dict) else None
+    if not isinstance(rq, dict) or not str(rq.get("text") or "").strip():
+        return list(questions or [])
+    rid = str(rq.get("id") or "clarify_product_identity")
+    nq = [
+        q for q in (questions or [])
+        if isinstance(q, dict) and str(q.get("id") or "") not in ("ask_image_model", rid)
+    ]
+    return [rq] + nq
+
+
 def _dedupe_next_questions_for_render(questions: list[dict] | None) -> list[dict]:
     out: list[dict] = []
     seen_ids: set[str] = set()
@@ -4201,6 +4313,139 @@ def _build_persona_prompt_context(
     return None
 
 
+def _build_knowledge_answer(
+    query: str,
+    plan: Any,
+    results: list[dict],
+    model: str | None,
+    trace_id: str | None = None,
+) -> str | None:
+    """WS2.2 — answer a comparison/knowledge question CONCEPTUALLY.
+
+    These queries ("RTX 4060 vs 4070?", "do I need 32GB for gaming?") used to
+    return a blank message because retrieval found no literal product match.
+    Now we answer the concept directly (and reference matching products if any).
+    """
+    try:
+        subjects = list(getattr(plan, "comparison_subjects", []) or [])
+        use_cases = list(getattr(plan, "use_cases", []) or [])
+        intent = str(getattr(plan, "intent", "") or "")
+        _uc_phrase = (" for " + " and ".join(uc.replace("_", " ") for uc in use_cases)) if use_cases else ""
+        _subj_line = (f"Specifically compare: {', '.join(subjects)}.\n" if len(subjects) >= 2 else "")
+        # A few real product names to ground the answer when we have them.
+        _prod_hint = ""
+        if results:
+            _names = [str(r.get("name") or "") for r in results[:3] if r.get("name")]
+            if _names:
+                _prod_hint = "Matching products we carry: " + "; ".join(_names) + ".\n"
+        prompt = (
+            "You are ShopSquire, a knowledgeable shopping assistant. The shopper asked a "
+            f"{'comparison' if intent == 'comparison' else 'knowledge'} question"
+            f"{_uc_phrase}.\n"
+            f"Question: \"{query}\"\n"
+            f"{_subj_line}{_prod_hint}"
+            "Answer the question DIRECTLY and concisely in plain English (max 80 words). "
+            "Explain what actually matters for their use case (translate specs into outcomes — "
+            "e.g. 'the 4070 runs games ~30% faster at 1440p'). Do NOT start with 'I found' or list "
+            "products mechanically. If we carry relevant products, end with one short sentence offering "
+            "to show them. Do not fabricate prices or specs."
+        )
+        _km = model or os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b"))
+        if not _km or "rule-based" in str(_km) or " " in str(_km):
+            _km = os.getenv("OLLAMA_SUMMARY_MODEL", "qwen3:14b")
+        _is_q3 = "qwen3" in _km.lower()
+        # Knowledge/comparison answers are short and factual — no chain-of-thought
+        # needed (it ~doubled latency to 29s for negligible quality gain in testing).
+        payload = {
+            "model": _km,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.3, "num_predict": 448},
+        }
+        if _is_q3:
+            payload["think"] = False
+        from src.app.services.dependency_resilience import call_with_resilience
+        data = call_with_resilience(
+            "ollama.knowledge",
+            lambda: _llm_generate_payload(payload),
+            timeout_s=float(os.getenv("OLLAMA_SUMMARY_TIMEOUT_S", "25")),
+            retries=1,
+        )
+        if isinstance(data, dict):
+            txt = str(data.get("response") or "").strip()
+            import re as _re_k
+            txt = _re_k.sub(r"<think>[\s\S]*?</think>\s*", "", txt).strip()
+            if txt:
+                try:
+                    log_trace_event(trace_id, "knowledge_answer", "agent", "NLP_Search_Agent",
+                                    "system", None, {"intent": intent, "subjects": subjects[:2]})
+                except Exception:
+                    pass
+                return txt
+    except Exception as exc:
+        try:
+            log_trace_event(None, "llm_error", "llm", model or None, "system", None, {"error": str(exc), "stage": "knowledge"})
+        except Exception:
+            pass
+    return None
+
+
+def _apply_query_plan_filters(results: list, plan: Any) -> tuple[list, dict]:
+    """WS3.1/WS3.2 — drop accessories and hard-constraint violators.
+
+    Conservative by design: only drops on CONFIDENT violations (spec known and
+    breaks the floor; name clearly an accessory). If filtering would empty the
+    list, it reverts — never blank the screen.
+    """
+    if not results or plan is None:
+        return results, {}
+    try:
+        hc = getattr(plan, "hard_constraints", {}) or {}
+        category = getattr(plan, "category", None)
+        intent = str(getattr(plan, "intent", "") or "")
+        dropped: dict = {}
+        _ACCESSORY_RE = re.compile(
+            r"\b(stand|cable|adapter|charger|dock|hub|sleeve|case|bag|mouse ?pad|"
+            r"cooling pad|screen protector|cleaning kit|warranty|insurance|webcam cover|"
+            r"keyboard|mouse|headset|backpack)\b",
+            re.I,
+        )
+        _DEVICE_CATS = {"laptop", "desktop", "phone", "tablet"}
+        is_device_query = (category in _DEVICE_CATS) or (
+            intent in ("product_search", "recommendation_multi") and category not in ("keyboard", "mouse", "headset", "storage", "gpu", "cpu")
+        )
+        rmin = hc.get("refresh_hz_min")
+        rammin = hc.get("ram_gb_min")
+        need_dgpu = bool(hc.get("must_have_dedicated_gpu"))
+        out: list = []
+        for r in results:
+            if not isinstance(r, dict):
+                out.append(r)
+                continue
+            name = str(r.get("name") or "")
+            if is_device_query and _ACCESSORY_RE.search(name):
+                dropped["accessory"] = dropped.get("accessory", 0) + 1
+                continue
+            specs = _extract_candidate_numeric_specs(r)
+            # dGPU required but candidate is a clearly-integrated, non-gaming machine
+            if need_dgpu and (specs.get("has_dedicated_gpu") is False) and (not specs.get("gaming_style")):
+                dropped["needs_dgpu"] = dropped.get("needs_dgpu", 0) + 1
+                continue
+            if rmin and specs.get("refresh_hz") is not None and float(specs["refresh_hz"]) < float(rmin):
+                dropped["refresh"] = dropped.get("refresh", 0) + 1
+                continue
+            if rammin and specs.get("ram_gb") is not None and float(specs["ram_gb"]) < float(rammin):
+                dropped["ram"] = dropped.get("ram", 0) + 1
+                continue
+            out.append(r)
+        if not out:  # never blank the screen
+            dropped["reverted"] = True
+            return results, dropped
+        return out, dropped
+    except Exception:
+        return results, {}
+
+
 def _summarize_results(
     query: str,
     results: list[dict],
@@ -4211,6 +4456,17 @@ def _summarize_results(
 ) -> tuple[str | None, str | None]:
     if not os.getenv("USE_LLM_SUMMARY", "1").lower() in ("1", "true", "yes"):
         return None, None
+    # WS2.2 — comparison/knowledge intent gets a conceptual answer, even when
+    # product retrieval is empty (was returning a blank message).
+    try:
+        from src.app.services.query_decomposer import decompose
+        _plan_sum = decompose(query)
+        if getattr(_plan_sum, "answer_without_products", False):
+            _ka = _build_knowledge_answer(query, _plan_sum, results, model, trace_id)
+            if _ka:
+                return _ka, None
+    except Exception:
+        pass
     # For zero-result turns: generate guidance when we know who the shopper is
     # (ai_ml, engineering, creative) rather than returning silent None.
     if not results:
@@ -4346,9 +4602,29 @@ def _summarize_results(
                 "Do NOT mention that an image was uploaded.\n\n"
             )
 
+        # Identity grounding fence (generation-layer anti-hallucination): the
+        # grounding ladder asserts identity only to the verified tier, so forbid
+        # the LLM from claiming more than that (e.g. naming "MSI Raider" when only
+        # "gaming laptop" was grounded).
+        _grounded_tier = str(constraints.get("_grounded_tier") or "").strip()
+        _identity_fence = ""
+        if _grounded_tier in ("category", "query_only"):
+            _identity_fence = (
+                "GROUNDING CONSTRAINT: The product's exact brand and model could NOT be verified from the "
+                "image. Do NOT name or imply a specific brand, model, or product line — refer to items only "
+                "by their [N] catalog label and the generic category.\n\n"
+            )
+        elif _grounded_tier == "brand_category":
+            _gb = str(constraints.get("brand") or "").title()
+            _identity_fence = (
+                f"GROUNDING CONSTRAINT: Only the brand '{_gb}' is verified — do NOT invent a specific model "
+                "or product line beyond what the [N] catalog options actually show.\n\n"
+            )
+
         prompt = (
             "You are ShopSquire, a helpful shopping assistant. Write like a knowledgeable friend, not a search engine.\n"
             + _security_fence
+            + _identity_fence
             + "RULE 1: Answer the user's EXACT question directly in the first sentence.\n"
             "  - YES/NO questions ('Is $800 enough?', 'Will this handle gaming?',\n"
             "    'Can I afford this?', 'Would $1500 cover it?', 'Can I run AutoCAD?'):\n"
@@ -4402,7 +4678,10 @@ def _summarize_results(
                         distance = float(hit.get("distance") or 1.0)
                         payload_hit = hit.get("payload") or {}
                         cached_at_str = str(payload_hit.get("cached_at") or "")
-                        if distance < 0.08 and cached_at_str:
+                        # WS1.4 — tunable cache gate. Default 0.08 (tight); raise to
+                        # ~0.12 (SEMANTIC_CACHE_MAX_DISTANCE) for more hits in demos.
+                        _cache_max_dist = float(os.getenv("SEMANTIC_CACHE_MAX_DISTANCE", "0.08") or 0.08)
+                        if distance < _cache_max_dist and cached_at_str:
                             try:
                                 cached_at = datetime.fromisoformat(cached_at_str)
                                 if datetime.now(timezone.utc) - cached_at < timedelta(hours=_cache_ttl_hours):
@@ -4446,8 +4725,30 @@ def _summarize_results(
         )
         # If the passed model is still a display name, fall back to summary model
         if not _llm_model or "rule-based" in str(_llm_model) or " " in str(_llm_model):
-            _llm_model = _summ_model_env or os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:30b")
+            _llm_model = _summ_model_env or os.getenv("OLLAMA_SUMMARY_MODEL_FALLBACK", "qwen3:14b")
         _is_qwen3 = "qwen3" in _llm_model.lower()
+        # Gate qwen3 thinking-mode: chain-of-thought roughly doubles latency and
+        # needs 2048+ tokens, so reserve it for queries that actually need
+        # reasoning (yes/no, why, compare, "is it enough/worth it"). Simple
+        # "show me X" lookups run no-think with a 512-token budget → much faster.
+        # OLLAMA_SUMMARY_THINK=always|never|auto (default auto) overrides this.
+        _think_mode = os.getenv("OLLAMA_SUMMARY_THINK", "auto").strip().lower()
+        if _think_mode in ("1", "true", "yes", "always", "on"):
+            _needs_think = _is_qwen3
+        elif _think_mode in ("0", "false", "no", "never", "off"):
+            _needs_think = False
+        else:  # auto
+            _ql = str(query or "").lower()
+            _needs_think = _is_qwen3 and (
+                bool(yes_no_query)
+                or any(
+                    t in _ql
+                    for t in (
+                        "why", "compare", " vs ", "versus", "difference", "trade",
+                        "explain", "justify", "enough", "worth it", "better",
+                    )
+                )
+            )
         # With think=True, qwen3 routes chain-of-thought to `thinking` and puts
         # the clean final answer in `response`.  Needs 2048+ tokens so thinking
         # phase doesn't exhaust the budget before the response is written.
@@ -4455,10 +4756,10 @@ def _summarize_results(
             "model": _llm_model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 2048 if _is_qwen3 else 512},
+            "options": {"temperature": 0.3, "num_predict": 2048 if _needs_think else 512},
         }
         if _is_qwen3:
-            payload["think"] = True
+            payload["think"] = bool(_needs_think)
         from src.app.services.dependency_resilience import call_with_resilience
 
         data = call_with_resilience(
@@ -5051,6 +5352,25 @@ def _references_previous_shortlist(query: str | None) -> bool:
         r"\bthe (?:same|previous|earlier) (?:one|ones|results|options)\b",
     )
     return any(re.search(pattern, q_low) for pattern in explicit_patterns)
+
+
+def _query_is_standalone_search(query: str | None) -> bool:
+    """True when the query carries its OWN search intent (a product category or a
+    budget) — i.e. it stands alone and is NOT a bare back-reference to prior context.
+    Used to suppress the "previous shortlist vs fresh search" disambiguation on
+    first-turn searches like "which gaming laptop should I get" while still prompting
+    it for pure references like "show me those and why" (P1 fix, 2026-06-15)."""
+    q_low = str(query or "").strip().lower()
+    if not q_low:
+        return False
+    if _extract_explicit_budget_override(q_low):
+        return True
+    _category_words = (
+        "laptop", "notebook", "ultrabook", "macbook", "chromebook", "desktop",
+        "tower", "workstation", "tablet", "ipad", "phone", "smartphone", "monitor",
+        "pc", "computer", "headset", "keyboard", "mouse",
+    )
+    return any(re.search(rf"\b{re.escape(w)}\b", q_low) for w in _category_words)
 
 
 def _extract_explicit_budget_override(query: str | None) -> Dict[str, Any]:
@@ -5774,6 +6094,7 @@ def suggest(
     image_product_identity: Optional[str] = None,
     image_cv_signals: Optional[str] = None,
     fast_path: Optional[bool] = None,
+    include_summary: Optional[bool] = None,
     copywriting_enabled: Optional[bool] = None,
     copywriting_profile: Optional[str] = None,
     response: Response = None,
@@ -5833,45 +6154,55 @@ def suggest(
                     "score": probe_result.get("score"),
                 },
             )
-    # ── RECOMMEND_PIPELINE_V2 feature flag ───────────────────────────────────
-    # When RECOMMEND_PIPELINE_V2=1, Stage 1 (DB+vector+fraud+inventory+CV) runs
-    # via scatter-gather in recommend_pipeline.py and produces the initial candidate
-    # list.  Stage 3+ (NQE, LLM summary, response assembly) still uses the monolith.
-    # Currently the pipeline result supplements but does not replace candidate retrieval.
+    # ── RECOMMEND_PIPELINE_V2 — SHADOW only (non-blocking, NOT customer-affecting) ──
+    # When RECOMMEND_PIPELINE_V2=1 the scatter-gather pipeline (DB + CLIP-visual +
+    # caption-RAG + fraud) runs in a BACKGROUND thread purely to measure parity and
+    # latency. It does NOT block the response and is NOT injected into results — the
+    # monolith retrieval below is authoritative. Promote to fusion only after shadow
+    # parity is validated (avoids the prior 30s-blocking-then-discarded anti-pattern).
     _pipeline_v2_enabled = str(os.getenv("RECOMMEND_PIPELINE_V2", "0")).strip().lower() in ("1", "true", "yes")
-    _pipeline_v2_candidates: list[dict] = []
     if _pipeline_v2_enabled:
         try:
-            import asyncio as _asyncio_v2
-            import concurrent.futures as _cf_v2
-            from src.app.services.recommend_pipeline import run_recommend_pipeline as _run_pipeline
+            import threading as _thr_v2
+            _v2_args = (uid, query or "", budget_min, budget_max)
 
-            async def _pipeline_run():
-                return await _run_pipeline(
-                    {},
-                    uid=uid,
-                    query=query or "",
-                    budget_min=budget_min,
-                    budget_max=budget_max,
-                    top_n=20,
-                )
+            def _v2_shadow(_uid, _q, _bmin, _bmax):
+                import asyncio as _a, time as _t
+                t0 = _t.perf_counter()
+                err = False
+                count = 0
+                top: list = []
+                try:
+                    from src.app.services.recommend_pipeline import run_recommend_pipeline as _run_pipeline
+                    res = _a.run(_run_pipeline({}, uid=_uid, query=_q, budget_min=_bmin, budget_max=_bmax, top_n=20))
+                    cands = list((res or {}).get("candidates") or [])
+                    count = len(cands)
+                    top = [c.get("sku") for c in cands[:5] if isinstance(c, dict)]
+                except Exception:
+                    err = True
+                ms = int((_t.perf_counter() - t0) * 1000)
+                try:
+                    from src.app.observability.metrics import record_pipeline_v2_shadow
+                    record_pipeline_v2_shadow(ms=ms, count=count, error=err)
+                except Exception:
+                    pass
+                try:
+                    tid = _current_trace_id()
+                    if tid:
+                        log_trace_event(
+                            trace_id=tid, event_type="recommend_pipeline_v2_shadow",
+                            source_type="agent", source_id="Recommend_Pipeline_V2",
+                            target_type="system", target_id=None,
+                            payload={"shadow": True, "customer_affecting": False,
+                                     "candidate_count": count, "latency_ms": ms,
+                                     "top_skus": top, "error": err},
+                        )
+                except Exception:
+                    pass
 
-            try:
-                _loop = _asyncio_v2.get_running_loop()
-                with _cf_v2.ThreadPoolExecutor(max_workers=1) as _pool:
-                    _pv2_result = _pool.submit(_asyncio_v2.run, _pipeline_run()).result(timeout=30)
-            except RuntimeError:
-                _pv2_result = _asyncio_v2.run(_pipeline_run())
-
-            _pipeline_v2_candidates = list((_pv2_result or {}).get("candidates") or [])
-        except Exception as _pv2_exc:
-            import logging as _pv2_log
-            _pv2_log.getLogger("shopsquire.recommend").debug(
-                "RECOMMEND_PIPELINE_V2: pipeline call failed, falling back to monolith: %s", _pv2_exc
-            )
-            _pipeline_v2_candidates = []
-    # _pipeline_v2_candidates is injected into the candidate pool after retrieval.
-    # See injection point near the candidate retrieval block below.
+            _thr_v2.Thread(target=_v2_shadow, args=_v2_args, daemon=True).start()
+        except Exception:
+            pass
     flags_path = os.getenv("FEATURE_FLAGS_PATH") or get_settings().feature_flags_path
     flags = load_feature_flags(flags_path)
     skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
@@ -5900,6 +6231,17 @@ def suggest(
         pass
     image_context = {"labels": [], "ocr": "", "hash": None, "intent": None, "product_identity": {}}
     fast_path_enabled = bool(fast_path)
+    # WS2.2 — decompose once; stash the plan so the universal return wrapper can
+    # answer comparison/knowledge questions on any path, and route those off the
+    # fast path (which only does catalog lookup → blank for "4060 vs 4070").
+    try:
+        from src.app.services.query_decomposer import decompose as _dq_top
+        _top_plan = _dq_top(query)
+        _KNOWLEDGE_QUERY_CTX.set({"query": query, "plan": _top_plan})
+        if fast_path_enabled and getattr(_top_plan, "answer_without_products", False):
+            fast_path_enabled = False
+    except Exception:
+        pass
     if fast_path_enabled:
         copywriting_enabled = False
         _fast_path_image_context, _fast_path_image_cv_signals = _parse_fast_path_image_inputs(
@@ -8506,6 +8848,48 @@ def suggest(
         # If labels/OCR were successfully parsed from triage, assume decent confidence.
         _id_conf_raw = 0.7 if (image_context.get("labels") or image_context.get("ocr")) else (0.35 if incoming_image_payload else 1.0)
     image_identity_confidence = float(_id_conf_raw)
+    # ── Grounding ladder (anti-hallucination): assert product identity only to the
+    # level the catalog can confirm. A VLM/OCR-guessed brand the catalog can't
+    # fulfil is DROPPED (not asserted), and the residual lowers identity confidence
+    # so the existing NQE `ask_image_model` clarifying question fires. Env-gated.
+    if incoming_image_payload and str(os.getenv("GROUNDING_LADDER_ENABLED", "1")).strip().lower() in ("1", "true", "yes"):
+        try:
+            from src.app.services.grounding_ladder import resolve_grounded_identity, get_catalog_brands
+            _gl_src = str(locals().get("_id_source") or "")
+            _grounded = resolve_grounded_identity(
+                query=query,
+                text_identity=_id_result if _gl_src == "text_heuristic" else None,
+                vision_identity=_id_result if _gl_src in ("vision_image", "vision_brand_rescue") else None,
+                image_bytes=locals().get("_image_blob"),
+                catalog_brands=get_catalog_brands(db),
+                budget_max=float(constraints.get("budget_max")) if constraints.get("budget_max") else None,
+            )
+            # Grounding gate: drop an ungrounded/conflicted brand rather than assert it.
+            if constraints.get("brand") and not _grounded.brand:
+                _dropped = constraints.pop("brand", None)
+                constraints.pop("_request_brand_hint", None)
+                if isinstance(constraints.get("brands"), list):
+                    _kept = [b for b in constraints["brands"] if str(b).strip().lower() != str(_dropped).strip().lower()]
+                    constraints["brands"] = _kept or None
+                    if not constraints["brands"]:
+                        constraints.pop("brands", None)
+                strict_image_brand_hint = None
+                log_trace_event(
+                    trace_id, "grounding_ladder_brand_dropped", "agent", "Product_Identity_Agent",
+                    "system", None, {"dropped_brand": _dropped, "tier": _grounded.tier_name, "reason": "ungrounded_or_conflict"},
+                )
+            # Identity confidence now reflects the grounded tier (drives NQE residual).
+            image_identity_confidence = float(_grounded.confidence)
+            constraints["_grounded_tier"] = _grounded.tier_name
+            constraints["_identity_confidence_label"] = _grounded.confidence_label
+            if _grounded.residual_question:
+                constraints["_identity_residual_question"] = _grounded.residual_question
+            log_trace_event(
+                trace_id, "grounding_ladder", "agent", "Product_Identity_Agent",
+                "system", None, _grounded.to_dict(),
+            )
+        except Exception:
+            pass
     if incoming_image_payload and image_identity_confidence < 0.45:
         image_reupload_reasons.append("identity_confidence_low")
     if incoming_image_payload and bool(catalog_relevance.get("off_domain")):
@@ -9226,6 +9610,7 @@ def suggest(
                 turn_intent=turn_intent,
                 oos_fraction=_oos_fraction,
                 stock_filter_opted_in=_stock_filter_opted,
+                identity_residual_question=constraints.get("_identity_residual_question"),
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
@@ -9718,6 +10103,24 @@ def suggest(
             )
         except Exception:
             pass
+        # P0 fix (2026-06-15): the explicit budget API params are AUTHORITATIVE.
+        # An upstream constraint rebuild on the image+text / multi-intent path was
+        # silently dropping them — an uploaded image made the budget filter skip
+        # entirely, returning $1,919–$5,999 laptops for a $1,200–1,800 request.
+        # Re-assert the explicit params here so EVERY path (text, image, multi-intent)
+        # enforces the user's stated budget. Observable when it has to correct drift.
+        if budget_min is not None and constraints.get("budget_min") != budget_min:
+            constraints["budget_min"] = budget_min
+        if budget_max is not None and constraints.get("budget_max") != budget_max:
+            constraints["budget_max"] = budget_max
+            try:
+                log_trace_event(
+                    trace_id=trace_id, event_type="agent_process", source_type="agent",
+                    source_id="Price_Filter_Agent", target_type="system", target_id=None,
+                    payload={"reasserted_explicit_budget": True, "budget_min": budget_min, "budget_max": budget_max},
+                )
+            except Exception:
+                pass
         budget_min_val = constraints.get("budget_min")
         budget_max_val = constraints.get("budget_max")
         if (budget_min_val is not None or budget_max_val is not None) and not shortlist_lock_active:
@@ -11523,6 +11926,23 @@ def suggest(
             "baseline_rank": baseline_rank,
             "rerank_delta": rerank_delta,
         })
+    # WS2.4 / WS3.1 / WS3.2 — enforce query-plan hard constraints + accessory guard
+    # on the full ranked list before the display slice. Conservative + self-reverting.
+    try:
+        from src.app.services.query_decomposer import decompose as _decompose_q
+        _qplan = _decompose_q(query)
+        results, _plan_drops = _apply_query_plan_filters(results, _qplan)
+        if _plan_drops and trace_id:
+            try:
+                log_trace_event(
+                    trace_id, "query_plan_filters", "agent", "Candidate_Retrieval_Agent",
+                    "system", None,
+                    {"intent": _qplan.intent, "hard_constraints": _qplan.hard_constraints, "dropped": _plan_drops},
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
     # Apply user-requested result display limit ("top 3", "best 5", etc.)
     # This is distinct from bulk-order quantity — it controls how many cards
     # are shown, preserving the full ranked list for context tracking.
@@ -11889,6 +12309,7 @@ def suggest(
                 chat_history_summary=_session_context_summary,
                 user_profile=_user_profile_dict,
                 turn_intent=turn_intent,
+                identity_residual_question=constraints.get("_identity_residual_question"),
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
@@ -12074,7 +12495,17 @@ def suggest(
                 ],
             }
         ]
-    if memory_confidence < 0.4 and followup_contract.get("memory_carry_forward_required"):
+    # Prompt the "previous shortlist vs fresh search" disambiguation when the user
+    # makes a bare REFERENCE ("show me those and why") under low memory confidence —
+    # even with no shortlist, a reference-to-nothing is ambiguous and must be resolved.
+    # But SUPPRESS it for first-turn standalone searches ("which gaming laptop should
+    # I get") which carry their own intent — asking "previous shortlist?" there is
+    # nonsensical (P1 fix from the 2026-06-15 clickthrough).
+    if (
+        memory_confidence < 0.4
+        and followup_contract.get("memory_carry_forward_required")
+        and not _query_is_standalone_search(query)
+    ):
         payload["next_questions"] = [
             {
                 "id": "resolve_reference",
@@ -12196,6 +12627,8 @@ def suggest(
     constraints["_inferred_image_brand"] = inferred_image_brand
     brand_budget_answer = _build_brand_budget_answer_v2(query, results, constraints)
     llm_summary_job_id = None
+    # WS2.2 — comparison/knowledge answers are injected at the universal return
+    # wrapper (_with_trace) so they survive every early-return path. Nothing to do here.
     # Force LLM summary whenever the query has enough context to deserve a real response.
     # Rule-based fallback leaks "+in_stock" tokens and misses nuance for budget/gaming/work queries.
     _reason = ollama_meta.get("reason") or {}
@@ -12213,7 +12646,15 @@ def suggest(
         or explanation_request
     )
     llm_summary_requested = (not fast_path_enabled) and bool(nlp.get("llm_fallback") or _llm_force)
-    if llm_summary_requested and rule_eval.get("recommend_llm", True):
+    # WS1.2 — products-first: when include_summary=False the caller renders product
+    # cards immediately and fetches the prose separately, so skip the blocking LLM.
+    if include_summary is False:
+        llm_summary_requested = False
+        try:
+            payload["summary_pending"] = True
+        except Exception:
+            pass
+    if assistant_message is None and llm_summary_requested and rule_eval.get("recommend_llm", True):
         # ── Build frontier-style memory injection for LLM prompt ──────────────
         # Mirrors Kimi K2 / Claude extended context: structured slot state prepended
         # to each turn so the LLM never loses conversation context.
@@ -12285,7 +12726,9 @@ def suggest(
         # actually runs.
         _summ_model = llm_model
         if not _summ_model or "rule-based" in str(_summ_model) or " " in str(_summ_model):
-            _summ_model = os.getenv("OLLAMA_MEDIUM_MODEL", os.getenv("OLLAMA_BIG_MODEL", "qwen3:30b"))
+            # Summary prose defaults to the faster qwen3:14b (≈12s vs ≈25s for 27B,
+            # equivalent quality in testing). Override with OLLAMA_SUMMARY_MODEL.
+            _summ_model = os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b"))
         # Thread image trust verdict into constraints so _summarize_results
         # can inject the security fence (Approach 1).
         try:
@@ -12657,7 +13100,15 @@ def suggest(
                 )
         except Exception:
             pass
-        if not results and str(turn_intent or "").upper() != "SUPPORT_CLAIM":
+        # WS2.2 — a comparison/knowledge answer is valid with zero products; don't
+        # clobber it with the "couldn't find products" copy.
+        _is_knowledge_q = False
+        try:
+            from src.app.services.query_decomposer import decompose as _dq_guard
+            _is_knowledge_q = bool(getattr(_dq_guard(query), "answer_without_products", False))
+        except Exception:
+            _is_knowledge_q = False
+        if not results and not _is_knowledge_q and str(turn_intent or "").upper() != "SUPPORT_CLAIM":
             _msg_low = str(assistant_message or "").lower()
             _explicit_no_results = any(
                 tok in _msg_low

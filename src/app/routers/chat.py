@@ -771,6 +771,202 @@ def _derive_image_security_posture(sig: Dict[str, Any] | None) -> Dict[str, Any]
     }
 
 
+def _derive_attack_intent_and_repercussions(cv_signals: Dict[str, Any] | None) -> tuple[str, str]:
+    """Map detected CV signals to a plain-English attacker intent + likely repercussions.
+
+    Briefs the human SOC reviewer on *why* an upload was flagged and what could go
+    wrong if the image-derived signals were trusted blindly.
+    """
+    s = cv_signals if isinstance(cv_signals, dict) else {}
+    intents: List[str] = []
+    repercussions: List[str] = []
+    if s.get("qr_prompt_injection") or s.get("qr_external_url_detected") or s.get("qr_code_detected"):
+        intents.append(
+            "QR-borne indirect prompt injection / redirect to an external "
+            "(possible credential-harvest or malware) URL"
+        )
+        repercussions.append(
+            "agent goal hijack, shopper redirected to a malicious site, possible "
+            "credential/account compromise"
+        )
+    if s.get("ocr_prompt_injection"):
+        intents.append("text-in-image prompt injection to override system instructions")
+        repercussions.append("policy bypass, unauthorised tool or action execution by the agent")
+    if s.get("steg_suspicious"):
+        intents.append("steganographic payload smuggling (covert data/command channel)")
+        repercussions.append("covert data exfiltration or staged second-stage payload delivery")
+    if float(s.get("adversarial_score") or 0.0) >= 0.5:
+        intents.append("adversarial perturbation crafted to evade the CV classifiers")
+        repercussions.append("model evasion, mislabelled product, downstream fraud")
+    if s.get("manipulation_detected"):
+        intents.append("image manipulation / forgery")
+        repercussions.append("return or warranty fraud, fabricated evidence")
+    if s.get("encoded_payload_detected") or s.get("polyglot_suspected"):
+        intents.append("encoded / polyglot file payload (a file valid as two formats at once)")
+        repercussions.append("parser confusion, sandbox escape, malware delivery")
+    if not intents:
+        intents.append("untrusted or anomalous image upload")
+        repercussions.append("elevated review required before any image-derived signal can be trusted")
+    return "; ".join(intents), "; ".join(repercussions)
+
+
+def _summarize_recognized_product(labels: List[str] | None) -> Optional[str]:
+    """Best-effort short human label for what the image shows, from SAFE visual labels.
+
+    Lets us keep shopping context in the user-facing message even when the image
+    was flagged — we still recognised the product, we just quarantined the
+    malicious channel (QR/OCR/steg). Returns None when nothing is recognisable.
+    """
+    toks = [str(x).lower() for x in (labels or []) if str(x).strip()]
+    if not toks:
+        return None
+    blob = " ".join(toks)
+    _is_gaming = any(
+        t in blob for t in ("gaming", "rog", "legion", "raider", "predator", "nitro", "alienware", "omen", "tuf")
+    )
+    if any(t in blob for t in ("laptop", "notebook", "macbook")):
+        return "gaming laptop" if _is_gaming else "laptop"
+    if any(t in blob for t in ("desktop", "tower", "workstation")) or "pc" in toks:
+        return "gaming PC" if _is_gaming else "desktop PC"
+    if any(t in blob for t in ("phone", "smartphone", "iphone")):
+        return "phone"
+    if any(t in blob for t in ("tablet", "ipad")):
+        return "tablet"
+    if any(t in blob for t in ("monitor", "display", "screen")):
+        return "monitor"
+    if any(t in blob for t in ("headphone", "headset", "earphone")):
+        return "headset"
+    return toks[0]
+
+
+def _assess_image_compromise_breach(
+    *,
+    merged_text: str,
+    cv_signals: Dict[str, Any] | None,
+    source_ip: str | None,
+    uid: str | None,
+    image_hash: str | None,
+    posture: Dict[str, Any],
+    request: Any = None,
+) -> Dict[str, Any]:
+    """Run a synchronous breach assessment for a compromised image upload.
+
+    Enriches the requester IP via ASN/GeoIP (known-bad-actor scoring), maps the
+    attack to MITRE ATLAS / OWASP tags, and notifies humans by persisting a
+    security event that auto-routes to an incident + WORM audit. Returns a
+    structured summary for the chat response.
+
+    NEVER blocks the recommendation — this is the warn-and-continue path.
+    """
+    from src.app.security.observer import analyze_payload, emit_security_event
+
+    intent, repercussions = _derive_attack_intent_and_repercussions(cv_signals)
+    sec_payload: Dict[str, Any] = {
+        "query": str(merged_text or "")[:1000],
+        "source": "chat_image_compromise",
+    }
+    if source_ip:
+        sec_payload["ip"] = source_ip
+    if uid:
+        sec_payload["uid"] = uid
+    if cv_signals:
+        sec_payload["cv_signals"] = cv_signals
+
+    severity = str(posture.get("severity") or "high")
+    details: Dict[str, Any] = {}
+    try:
+        analysis = analyze_payload(sec_payload)
+        if isinstance(analysis, dict):
+            severity = str(analysis.get("severity") or severity)
+            details = analysis.get("details") if isinstance(analysis.get("details"), dict) else {}
+    except Exception:
+        details = {}
+
+    geo: Dict[str, Any] = {}
+    signals: Dict[str, Any] = {}
+    try:
+        geo = ((details.get("network") or {}).get("geo")) or {}
+        signals = details.get("signals") or {}
+    except Exception:
+        geo, signals = {}, {}
+
+    # Known-bad-actor determination via ASN / GeoIP risk.
+    bad_asn: set = set()
+    try:
+        from src.app.security.observer import _load_bad_asn
+        bad_asn = set(_load_bad_asn())
+    except Exception:
+        bad_asn = set()
+    is_bad_actor = bool(
+        signals.get("ip_risk")
+        or float(geo.get("risk") or 0.0) >= 0.7
+        or geo.get("is_hosting")
+        or geo.get("is_vpn")
+        or (geo.get("asn") in bad_asn if geo.get("asn") is not None else False)
+    )
+    ip_assessment = {
+        "ip_hash": ((details.get("network") or {}).get("ip_hash")),
+        "asn": geo.get("asn"),
+        "asn_org": geo.get("asn_org"),
+        "country": geo.get("country"),
+        "is_hosting": bool(geo.get("is_hosting")),
+        "is_vpn": bool(geo.get("is_vpn")),
+        "risk": float(geo.get("risk") or 0.0),
+        "known_bad_actor": is_bad_actor,
+        "geo_country_mismatch": bool(signals.get("geo_country_mismatch")),
+    }
+
+    # Notify humans: persist a security event that auto-routes to an incident + WORM.
+    human_notified = False
+    try:
+        emit_security_event(
+            path="/api/v1/chat/image-compromise",
+            payload={
+                **sec_payload,
+                "attack_intent": intent,
+                "repercussions": repercussions,
+                "image_hash": str(image_hash or "")[:64],
+                "ip_assessment": ip_assessment,
+            },
+            request=request,
+        )
+        human_notified = True
+    except Exception:
+        human_notified = False
+
+    assessment = {
+        "severity": severity,
+        "attack_intent": intent,
+        "potential_repercussions": repercussions,
+        "ip_assessment": ip_assessment,
+        "mitre_atlas": (details.get("mitre_atlas") or [])[:8],
+        "owasp_llm_top10": (details.get("owasp_llm_top10") or [])[:8],
+        "owasp_agentic_top10": (details.get("owasp_agentic_top10") or [])[:8],
+        "human_notified": human_notified,
+        "route": str(posture.get("route") or "escalate"),
+    }
+    try:
+        log_trace_event(
+            trace_id=None,
+            event_type="image_compromise_breach_assessment",
+            source_type="agent",
+            source_id="Security_Observer_Agent",
+            target_type="chat",
+            target_id=uid,
+            payload={
+                "severity": severity,
+                "attack_intent": intent,
+                "known_bad_actor": is_bad_actor,
+                "asn": geo.get("asn"),
+                "country": geo.get("country"),
+                "image_hash": str(image_hash or "")[:64],
+            },
+        )
+    except Exception:
+        pass
+    return assessment
+
+
 def _derive_qr_details(sig: Dict[str, Any] | None, posture: Dict[str, Any] | None = None) -> Dict[str, Any]:
     p = posture if isinstance(posture, dict) else {}
     route = str(p.get("route") or "allow")
@@ -1023,6 +1219,12 @@ async def chat_query(
                 merged["qr_redirect_probe"] = sig.get("qr_redirect_probe")
         image_cv_signals_in = merged
     image_security_posture = _derive_image_security_posture(image_cv_signals_in)
+    breach_assessment: Optional[Dict[str, Any]] = None
+    # How the (untrusted) image was handled downstream:
+    #   "sanitized_visual" = kept safe product recognition, quarantined QR/OCR/steg
+    #   "text_only_fallback" = pixels themselves suspect (adversarial/manipulated) → ask to clarify
+    image_handling_mode: Optional[str] = None
+    recognized_image_label: Optional[str] = None
 
     if not q.strip():
         raise HTTPException(status_code=400, detail="query_required")
@@ -1123,6 +1325,10 @@ async def chat_query(
 
         from src.app.security.observer import analyze_payload
         _sec_payload: Dict[str, Any] = {"query": merged_text, "source": "chat_multimodal"}
+        if source_ip:
+            _sec_payload["ip"] = source_ip
+        if uid:
+            _sec_payload["uid"] = uid
         if image_cv_signals_in:
             _sec_payload["cv_signals"] = image_cv_signals_in
         sec_result = analyze_payload(_sec_payload)
@@ -1135,6 +1341,21 @@ async def chat_query(
                     target_type="chat", target_id=None,
                     payload={"severity": sev, "signals": sec_result.get("signals")},
                 )
+                # Warn-and-continue: when an image is involved, run a full breach
+                # assessment (IP/ASN/GeoIP + human escalation). Products still flow.
+                if image_cv_signals_in and breach_assessment is None:
+                    try:
+                        breach_assessment = _assess_image_compromise_breach(
+                            merged_text=merged_text,
+                            cv_signals=image_cv_signals_in,
+                            source_ip=source_ip,
+                            uid=uid,
+                            image_hash=image_hash_in,
+                            posture=image_security_posture,
+                            request=request,
+                        )
+                    except Exception:
+                        breach_assessment = None
     except Exception:
         pass
 
@@ -1279,7 +1500,11 @@ async def chat_query(
         except Exception:
             pass
 
-    if bool(image_security_posture.get("chat_lockdown")):
+    # Legacy hard-lock (deny products) is OFF by default. Policy is warn-and-continue:
+    # a compromised image must NOT deny the shopping result — see the fall-through block
+    # below. Set IMAGE_COMPROMISE_HARD_LOCK=1 only if you explicitly want the old deny.
+    _image_hard_lock_enabled = str(os.getenv("IMAGE_COMPROMISE_HARD_LOCK", "0")).strip().lower() in ("1", "true", "yes", "on")
+    if bool(image_security_posture.get("chat_lockdown")) and _image_hard_lock_enabled:
         decision_trace_id = str(uuid.uuid4())
         _sec_signals = {str(k): bool(v) for k, v in (image_cv_signals_in or {}).items() if isinstance(v, bool)}
         _qr = _derive_qr_details(image_cv_signals_in, image_security_posture)
@@ -1352,6 +1577,53 @@ async def chat_query(
             pass
         return out
 
+    # ── Severe image threat → warn-and-continue (default policy) ──────────────
+    # A malicious-image posture must NOT deny the shopping result. We run a full
+    # breach assessment (IP/ASN/GeoIP + human escalation), strengthen the
+    # user-facing warning, and fall through to text-only recommendations. The
+    # downstream recommend call runs in text_only_fallback because the image is
+    # marked untrusted (image_security_posture.image_untrusted).
+    if bool(image_security_posture.get("chat_lockdown")) and not _image_hard_lock_enabled:
+        if breach_assessment is None:
+            try:
+                breach_assessment = _assess_image_compromise_breach(
+                    merged_text=str(q or ""),
+                    cv_signals=image_cv_signals_in,
+                    source_ip=source_ip,
+                    uid=uid,
+                    image_hash=image_hash_in,
+                    posture=image_security_posture,
+                    request=request,
+                )
+            except Exception:
+                breach_assessment = None
+        # Short, accurate badge summary for the right-panel (the detailed,
+        # mode-aware user message is built later in the response surface). Override
+        # the stale "Chat is temporarily locked…" copy from the posture since we
+        # are NOT locking — we continue with the safe channels.
+        image_security_posture["route"] = "escalate_continue"
+        image_security_posture["warning_message"] = (
+            "Suspicious image element detected and neutralised — recommendations "
+            "continue; flagged for security review."
+        )
+        image_security_posture["image_untrusted"] = True
+        try:
+            log_trace_event(
+                trace_id=None,
+                event_type="image_compromise_warn_and_continue",
+                source_type="agent",
+                source_id="Security_Observer_Agent",
+                target_type="chat",
+                target_id=uid,
+                payload={
+                    "severity": str(image_security_posture.get("severity") or "high"),
+                    "route": "escalate_continue",
+                    "human_notified": bool((breach_assessment or {}).get("human_notified")),
+                },
+            )
+        except Exception:
+            pass
+
     # Call internal recommend endpoint to leverage agentic pipeline
     base = str(request.base_url).rstrip("/")
     url = f"{base}/api/v1/recommend/suggest"
@@ -1392,12 +1664,40 @@ async def chat_query(
                 params["nqe_option_value"] = oval[:120]
     try:
         security_risky_image = bool(image_security_posture.get("image_untrusted"))
+        # Channel-separated trust (A-10 resilience): the attack vector is usually
+        # in ONE channel (QR / OCR text / steg payload), independent of the visual
+        # product recognition. We quarantine the malicious channel but keep the
+        # safe visual signal so recommendations stay anchored to the real product.
+        # The visual channel itself is only suspect when the *pixels* are attacked
+        # (adversarial perturbation or manipulation/forgery).
+        _sig = image_cv_signals_in or {}
+        _qr_or_text_threat = bool(
+            _sig.get("qr_code_detected")
+            or _sig.get("qr_external_url_detected")
+            or _sig.get("qr_prompt_injection")
+            or _sig.get("ocr_prompt_injection")
+            or _sig.get("steg_suspicious")
+        )
+        _adversarial = float(_sig.get("adversarial_score") or 0.0)
+        _manip = bool(_sig.get("manipulation_detected"))
+        # The visual product recognition is only untrustworthy when the *pixels*
+        # are directly attacked: a strong adversarial perturbation (targets the
+        # classifier), or manipulation with NO QR/OCR/steg overlay to explain it
+        # (i.e. a likely forged photo). A QR pasted onto a real product photo does
+        # NOT invalidate "this is a gaming laptop" — we keep that and quarantine
+        # only the QR/OCR/steg channel.
+        _visual_attacked = bool(_adversarial >= 0.7 or (_manip and not _qr_or_text_threat))
+        _visual_trusted = not _visual_attacked
+
         labels_list: List[str] = []
+        if isinstance(image_labels_in, list):
+            labels_list = [str(x).strip() for x in image_labels_in if str(x).strip()]
+        elif isinstance(image_labels_in, str):
+            labels_list = [s.strip() for s in image_labels_in.split(",") if s.strip()]
+        recognized_image_label = _summarize_recognized_product(labels_list)
+
         if not security_risky_image:
-            if isinstance(image_labels_in, list):
-                labels_list = [str(x).strip() for x in image_labels_in if str(x).strip()]
-            elif isinstance(image_labels_in, str):
-                labels_list = [s.strip() for s in image_labels_in.split(",") if s.strip()]
+            # Full trust — pass every channel (unchanged behavior).
             if labels_list:
                 params["image_labels"] = ",".join(labels_list[:12])
             if isinstance(image_ocr_text_in, str) and image_ocr_text_in.strip():
@@ -1406,9 +1706,25 @@ async def chat_query(
                 params["image_hash"] = image_hash_in.strip()[:128]
             if isinstance(image_intent_in, str) and image_intent_in.strip():
                 params["image_intent"] = image_intent_in.strip()[:32]
+        elif _visual_trusted and labels_list:
+            # Untrusted upload BUT visual recognition is intact → keep the safe
+            # product labels (recommend's image_feature_gate will apply the
+            # "sanitized" verdict: anchor on category, strip brand/OCR). We
+            # deliberately DO NOT forward OCR text (injection vector) or intent.
+            params["image_labels"] = ",".join(labels_list[:12])
+            if isinstance(image_hash_in, str) and image_hash_in.strip():
+                params["image_hash"] = image_hash_in.strip()[:128]
+            params["image_security_mode"] = "sanitized_visual"
+            image_handling_mode = "sanitized_visual"
         else:
+            # Pixels themselves are suspect (adversarial/manipulated) or nothing
+            # was recognizable → text only, and we'll ask the user to clarify the
+            # product so we don't lose the shopping context.
             params["image_security_mode"] = "text_only_fallback"
-        if isinstance(image_product_identity_in, dict) and image_product_identity_in:
+            image_handling_mode = "text_only_fallback"
+        # Product identity is forwarded for both trusted and sanitized paths; the
+        # recommend-side gate strips brand/identity under the "sanitized" verdict.
+        if isinstance(image_product_identity_in, dict) and image_product_identity_in and image_handling_mode != "text_only_fallback":
             params["image_product_identity"] = json.dumps(image_product_identity_in, separators=(",", ":"))[:1000]
         if image_cv_signals_in:
             params["image_cv_signals"] = json.dumps(image_cv_signals_in, separators=(",", ":"))[:1000]
@@ -1718,6 +2034,19 @@ async def chat_query(
     except Exception:
         pass
     next_questions = data.get("next_questions") or []
+    # Grounding ladder: guarantee the SPECIFIC identity clarification ("Is this a
+    # Razer?") leads when the ladder couldn't confirm the product — robust against
+    # the NQE cap/transform ordering that can drop it on some paths.
+    try:
+        _gl_rq = (data.get("constraints_used") or {}).get("_identity_residual_question") if isinstance(data.get("constraints_used"), dict) else None
+        if isinstance(_gl_rq, dict) and str(_gl_rq.get("text") or "").strip():
+            _grid = str(_gl_rq.get("id") or "clarify_product_identity")
+            next_questions = [_gl_rq] + [
+                q for q in next_questions
+                if isinstance(q, dict) and str(q.get("id") or "") not in ("ask_image_model", _grid)
+            ]
+    except Exception:
+        pass
     if turn_intent in ("EXPLAIN", "SUPPORT_CLAIM"):
         next_questions = [x for x in next_questions if isinstance(x, dict) and not _is_budget_question(x)]
     if not next_questions and not products and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
@@ -1963,6 +2292,58 @@ async def chat_query(
             str(out.get("assistant_message") or ""),
             query=q,
         )
+    # ── Image-compromise warn-and-continue surface ───────────────────────────
+    # Products still flow; we prepend a clear warning and attach the breach
+    # assessment (IP/ASN/GeoIP + intent + repercussions + human-notified) so the
+    # user knows the upload is under review and the SOC has the evidence.
+    if breach_assessment is not None or bool(image_security_posture.get("chat_lockdown")):
+        _ba = breach_assessment if isinstance(breach_assessment, dict) else None
+        _prod = recognized_image_label or "the product in your photo"
+        if image_handling_mode == "sanitized_visual":
+            # We kept the legitimate product recognition; only the QR/OCR/steg
+            # channel was quarantined. Stay anchored on the recognised product.
+            _warn_msg = (
+                f"⚠️ Heads up: a suspicious element (e.g. QR code / hidden payload) in your image "
+                f"was detected and neutralised — I did not open or follow it, and it's been logged for "
+                f"security review. I still recognised {_prod} in the photo, so these recommendations are "
+                f"anchored to that. Let me know if I read the product wrong."
+            )
+        elif image_handling_mode == "text_only_fallback":
+            # Pixels themselves looked altered → ask the user to recover context.
+            _warn_msg = (
+                f"⚠️ Your image looked altered or unreadable, so I couldn't safely identify the product "
+                f"from it (this has been logged for security review). I've used your text for now — to get "
+                f"you the right match, can you tell me the model or type you're after?"
+            )
+            _clarify_q = {
+                "id": "clarify_product_identity",
+                "text": "Which product is it? (model name or type, e.g. '17\" gaming laptop, RTX 4070')",
+                "goal": "clarify_product_identity",
+            }
+            _nq = out.get("next_questions")
+            if isinstance(_nq, list):
+                if not any(isinstance(x, dict) and x.get("id") == "clarify_product_identity" for x in _nq):
+                    out["next_questions"] = [_clarify_q] + _nq
+            else:
+                out["next_questions"] = [_clarify_q]
+            out["needs_disambiguation"] = True
+        else:
+            _warn_msg = (
+                "⚠️ Your uploaded image was flagged by our security system and logged for review. "
+                f"I've based these recommendations on {_prod} and your text."
+            )
+        if _ba and (_ba.get("ip_assessment") or {}).get("known_bad_actor"):
+            _warn_msg = _warn_msg + " Note: this request originated from a network flagged as high-risk."
+        _am = str(out.get("assistant_message") or "")
+        if _warn_msg and "neutralised" not in _am.lower() and "flagged" not in _am.lower() and "[security]" not in _am.lower():
+            out["assistant_message"] = f"{_warn_msg}\n\n{_am}".strip()
+        out["platform_compromise"] = True
+        out["needs_human_review"] = True
+        out["security_warning"] = _warn_msg
+        out["image_handling_mode"] = image_handling_mode
+        out["recognized_product"] = recognized_image_label
+        if _ba is not None:
+            out["breach_assessment"] = _ba
     if isinstance(data.get("agent_steps"), list):
         out["agent_steps_readable"] = ResponseNormalizer.agent_steps_to_english(
             data.get("agent_steps") or []

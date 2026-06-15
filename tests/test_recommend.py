@@ -2154,6 +2154,35 @@ def test_followup_reference_without_shortlist_prompts_disambiguation():
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
+def test_first_turn_standalone_search_does_not_prompt_shortlist_disambiguation():
+    # P1 (2026-06-15): a first-turn STANDALONE search ("which gaming laptop should I
+    # get") carries its own intent — the "previous shortlist vs fresh search" prompt
+    # must NOT fire. Only bare references ("show me those") prompt it.
+    orig_retrieve = RecommendationService.retrieve_candidates
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
+            {"id": "p1", "sku": "G-1", "name": "MSI Gaming Laptop", "price_cents": 150000, "currency": "USD", "stock": 4, "specs": {"ram_gb": 16}},
+        ]
+        _write_flags({
+            "USE_AGENT_CAPABILITIES": True,
+            "AGENT_ROLLOUT_PERCENT": 100,
+            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+            "KILL_SWITCH": False,
+            "DECISION_LOG_WRITES_ENABLED": False,
+            "DEGRADATION": {"enabled": True},
+            "TEST_FORCE_BAD_SKU": False,
+        })
+        r = client.get("/api/v1/recommend/suggest", params={
+            "uid": "u-standalone-1", "query": "which gaming laptop should I get", "budget_max": 1800,
+        })
+        assert r.status_code == 200
+        body = r.json()
+        nqs = body.get("next_questions") or []
+        assert not any(str((q or {}).get("id") or "") == "resolve_reference" for q in nqs if isinstance(q, dict)), nqs
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+
+
 def test_nqe_questions_do_not_repeat_without_constraint_change(monkeypatch):
     orig_retrieve = RecommendationService.retrieve_candidates
     try:

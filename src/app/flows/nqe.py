@@ -69,6 +69,9 @@ class NQEInput(BaseModel):
     # Stock context (set by recommend.py after candidate retrieval)
     oos_fraction: float = 0.0  # fraction of candidates that are out of stock (0.0–1.0)
     stock_filter_opted_in: bool = False  # True when user already chose "in-stock only"
+    # Grounding-ladder residual: the SPECIFIC identity clarification to ask when the
+    # ladder couldn't confirm the product (e.g. "Is this a Razer?"). Leads when set.
+    identity_residual_question: Optional[Dict[str, Any]] = None
 
 
 # ── Game / software detection from query text ──
@@ -509,14 +512,19 @@ class NextQuestionEngine:
             )
 
         # ── Image-aware questions ──
-        if inp.has_image and inp.image_identity_confidence < 0.6:
+        if inp.has_image and (inp.image_identity_confidence < 0.6 or inp.identity_residual_question):
+            _rq = inp.identity_residual_question if isinstance(inp.identity_residual_question, dict) else None
             questions.append(
                 NextQuestion(
                     id="ask_image_model",
-                    text="I can see the product in your photo but couldn't identify the exact model. Could you share the model number (usually on the bottom label or settings screen)?",
+                    text=(
+                        str(_rq["text"]) if _rq and _rq.get("text")
+                        else "I can see the product in your photo but couldn't identify the exact model. Could you share the model number (usually on the bottom label or settings screen)?"
+                    ),
                     goal="clarify_product_identity",
                     evidence_needed=["model_number"],
                     source="image_context",
+                    options=(_rq.get("options") if _rq and isinstance(_rq.get("options"), list) else []),
                 )
             )
 
@@ -912,7 +920,7 @@ class NextQuestionEngine:
                 _keep_set.add('ask_corporate_work_type')
             if touch_needed:
                 _keep_set.add('ask_touch_screen_type')
-            if inp.has_image and inp.image_identity_confidence < 0.6:
+            if inp.has_image and (inp.image_identity_confidence < 0.6 or inp.identity_residual_question):
                 _keep_set.add('ask_image_model')
 
             # 2. Generic slot coverage comes after domain-specific questions
@@ -924,6 +932,11 @@ class NextQuestionEngine:
                 'ask_university_subject', 'ask_gaming_depth', 'ask_software_confirm',
                 'ask_corporate_work_type', 'ask_touch_screen_type', 'ask_image_model',
             ]
+            # When the ladder genuinely couldn't identify the uploaded product, the
+            # identity clarification LEADS — it's the bounded-autonomy boundary
+            # (ask the human exactly when the evidence ran out).
+            if inp.identity_residual_question and 'ask_image_model' in _keep_set:
+                _domain_priority = ['ask_image_model'] + [p for p in _domain_priority if p != 'ask_image_model']
             _generic_priority = ['ask_budget_tier', 'ask_budget', 'ask_use_case', 'ask_platform', 'ask_brand_pref']
             _ordered_priority = _domain_priority + _generic_priority
             # Map each template id to the missing-field it covers so we never
