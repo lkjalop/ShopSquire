@@ -166,8 +166,24 @@ def scrub_pii(text: str) -> str:
     return text
 
 
-def hash_uid(uid: str) -> str:
-    return hashlib.sha256((uid or "").encode("utf-8")).hexdigest()[:16]
+def hash_uid(uid: str, *, tenant_id: str | None = None) -> str:
+    """Stable PSEUDONYM for a user id, for telemetry/audit/spans (NOT a data key).
+
+    - Always 16 hex chars so the pseudonym is CONSISTENT across every call site
+      (some routes used [:12], others [:16] -- fragmenting one user across two ids).
+    - HMAC-SHA256 with IDENTITY_HASH_SECRET (or AUDIT_CHAIN_SECRET) when set --
+      salted, resistant to enumeration/rainbow attacks. Falls back to plain
+      SHA-256 when no secret is configured (backward-compatible; no value change
+      for existing deployments until they opt in by setting the secret).
+    - Optional tenant_id scopes the pseudonym so the same raw id in two tenants
+      does not collide.
+    """
+    raw = f"{tenant_id}:{uid or ''}" if tenant_id else (uid or "")
+    secret = os.getenv("IDENTITY_HASH_SECRET") or os.getenv("AUDIT_CHAIN_SECRET")
+    if secret:
+        import hmac
+        return hmac.new(secret.encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def hash_value(value: str) -> str:

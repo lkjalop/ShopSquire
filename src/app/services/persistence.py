@@ -3,6 +3,7 @@ import uuid
 from typing import Dict, Any, List
 from sqlalchemy import text
 
+from src.app.deps import hash_uid as _hash_uid
 from src.app.models.db import db_session
 from src.app.models.event_log import ensure_event_log_table
 from src.app.services.decision_log import log_decision
@@ -28,7 +29,7 @@ def persist_decision_and_audits(
         dec_id = log_decision(
             agent_name=agent_name,
             input_data={
-                "uid_hash": __import__("hashlib").sha256((uid or "").encode("utf-8")).hexdigest()[:12],
+                "uid_hash": _hash_uid(uid),  # centralized salted pseudonym (was sha256[:12])
                 "proposal": proposal,
             },
             retrieved_context={"live": {"cart_total_cents": proposal.get("cart_total_cents"), "sku": proposal.get("sku")}},

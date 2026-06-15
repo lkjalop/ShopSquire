@@ -6127,7 +6127,7 @@ def suggest(
     timing_breakdown: Dict[str, Any] = {"ollama_summary_ms": None}
     span = trace.get_current_span()
     try:
-        uid_hash = hashlib.sha256(uid.encode("utf-8")).hexdigest()[:12]
+        uid_hash = hash_uid(uid)  # centralized salted pseudonym (was local sha256[:12])
     except Exception:
         uid_hash = "unknown"
     span.set_attribute("recommend.uid_hash", uid_hash)
