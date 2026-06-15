@@ -20,6 +20,7 @@ from src.app.services.inventory_supplier_guard import (
     evaluate_auto_po_policy,
 )
 from src.app.services.decision_bundle import write_immutable_decision_bundle
+from src.app.security.authorization_engine import authorize_action
 import os
 
 
@@ -394,7 +395,7 @@ class InventoryAgent:
                 if "postgres" in dialect:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - (:days * INTERVAL '1 day')) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -402,7 +403,7 @@ class InventoryAgent:
                 else:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND datetime(o.created_at) >= datetime('now', :window) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -446,7 +447,7 @@ class InventoryAgent:
                 if "postgres" in dialect:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND o.created_at >= (CURRENT_DATE - (:days * INTERVAL '1 day')) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -454,7 +455,7 @@ class InventoryAgent:
                 else:
                     sql = (
                         "SELECT date(o.created_at) as d, count(*) as daily_sales "
-                        "FROM orders_items oi JOIN orders o ON o.id = oi.order_id "
+                        "FROM order_items oi JOIN orders o ON o.id = oi.order_id "
                         "WHERE oi.sku = :sku AND datetime(o.created_at) >= datetime('now', :window) "
                         "GROUP BY date(o.created_at) ORDER BY date(o.created_at) ASC"
                     )
@@ -983,6 +984,34 @@ class InventoryAgent:
             supplier_risk=(1.0 - trust_score),
             anomaly_score=anomaly_score,
         )
+
+        # ── Unified Authorization Engine gate (Tier-1 control) ──
+        # This is the genuinely AUTONOMOUS supplier-order decision, so it carries
+        # an agent lane (requester="Inventory_Agent"). In shadow mode the verdict
+        # is logged + traced but NOT enforced (should_block() is always False), so
+        # the existing gates below remain authoritative until this action is flipped
+        # to active via AUTHZ_ENGINE_MODE. authorize_action never raises.
+        _est_cost = float(getattr(recommendation, "estimated_cost", 0.0) or 0.0)
+        _conditions: List[str] = []
+        if trust_band == "low" or trust_score < 0.5:
+            _conditions.append("supplier_unverified")
+        _authz = authorize_action(
+            "supplier_order",
+            requester="Inventory_Agent",
+            value_usd=_est_cost,
+            conditions=_conditions,
+            subject_id=str(getattr(recommendation, "supplier_id", "") or getattr(recommendation, "sku", "") or ""),
+            idempotency_key=f"reorder:{getattr(recommendation, 'sku', '')}:{_est_cost}",
+            metadata={"urgency": getattr(recommendation, "urgency", ""), "anomaly_score": anomaly_score},
+        )
+        if _authz.should_block():  # inert in shadow; enforces once flipped to active
+            return {
+                "status": "blocked_by_authorization_engine",
+                "reason": _authz.reason,
+                "terminal_outcome": _authz.terminal_outcome,
+                "residual": _authz.residual,
+            }
+
         # Enforce supplier trust and policy gates before downstream execution/data thresholds.
         if trust_band == "low" or trust_score < 0.5:
             try:

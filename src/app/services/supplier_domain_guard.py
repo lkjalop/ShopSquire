@@ -43,8 +43,9 @@ CREATE TABLE IF NOT EXISTS trusted_supplier_domains (
 """
 
 _INSERT_DEFAULT = """
-INSERT OR IGNORE INTO trusted_supplier_domains (id, domain, supplier_id, added_by, notes)
+INSERT INTO trusted_supplier_domains (id, domain, supplier_id, added_by, notes)
 VALUES (:id, :domain, :supplier_id, :added_by, :notes)
+ON CONFLICT (domain) DO NOTHING
 """
 
 

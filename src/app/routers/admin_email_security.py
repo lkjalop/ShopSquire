@@ -236,9 +236,10 @@ def _upsert_forced_reauth_flags(*, user_ids: List[str], emails: List[str], reaso
                 db.execute(
                     text(
                         """
-                        INSERT OR REPLACE INTO security_forced_reauth_flags
+                        INSERT INTO security_forced_reauth_flags
                         (id, target_type, target_value, reason, created_at)
                         VALUES (:id, 'user_id', :target_value, :reason, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                         """
                     ),
                     {"id": f"fr-{uuid.uuid4().hex}", "target_value": uid, "reason": reason},
@@ -248,9 +249,10 @@ def _upsert_forced_reauth_flags(*, user_ids: List[str], emails: List[str], reaso
                 db.execute(
                     text(
                         """
-                        INSERT OR REPLACE INTO security_forced_reauth_flags
+                        INSERT INTO security_forced_reauth_flags
                         (id, target_type, target_value, reason, created_at)
                         VALUES (:id, 'email', :target_value, :reason, CURRENT_TIMESTAMP)
+                        ON CONFLICT (id) DO UPDATE SET reason = EXCLUDED.reason, created_at = EXCLUDED.created_at
                         """
                     ),
                     {"id": f"fr-{uuid.uuid4().hex}", "target_value": email, "reason": reason},

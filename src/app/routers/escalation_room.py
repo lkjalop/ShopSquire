@@ -281,6 +281,152 @@ def _log_path(incident_id: str) -> Path:
     return p
 
 
+def _inject_security_context(incident_id: str, trace_id: str | None) -> None:
+    """Post a system message with security trace findings so staff can triage
+    without leaving the escalation room.  Best-effort — all errors are swallowed."""
+    if not trace_id:
+        return
+    try:
+        eng = _current_incident_engine()
+        with eng.begin() as conn:
+            row = conn.execute(
+                sql_text(
+                    "SELECT payload FROM decision_trace_events "
+                    "WHERE trace_id = :tid AND event_type = 'security_scan' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                ),
+                {"tid": trace_id},
+            ).fetchone()
+        if not row or not row[0]:
+            return
+        payload = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        severity = str(payload.get("severity") or "")
+        dread = payload.get("dread") or {}
+        signals = {k: v for k, v in (payload.get("signals") or {}).items() if v}
+        mitre_atlas = [str(m) for m in (payload.get("mitre_atlas") or [])[:4]]
+        mitre_attack = [str(m) for m in (payload.get("mitre_attack") or [])[:4]]
+        owasp = [str(m) for m in (payload.get("owasp_llm_top10") or [])[:3]]
+        if not (severity or signals):
+            return
+        lines = ["[Automated Security Analysis]"]
+        if severity:
+            lines.append(f"Severity: {severity.upper()}")
+        dread_total = dread.get("total") or dread.get("score")
+        if dread_total is not None:
+            lines.append(f"DREAD: {dread_total}/50")
+        if signals:
+            top = list(signals.keys())[:6]
+            lines.append(f"Signals: {', '.join(top)}")
+        if mitre_atlas:
+            lines.append(f"MITRE ATLAS: {', '.join(mitre_atlas)}")
+        if mitre_attack:
+            lines.append(f"MITRE ATT&CK: {', '.join(mitre_attack)}")
+        if owasp:
+            lines.append(f"OWASP LLM: {', '.join(owasp)}")
+        _append_chat(
+            incident_id,
+            role="system",
+            message="\n".join(lines),
+            meta={"source": "security_trace", "trace_id": trace_id, "severity": severity},
+            event_type="security_context",
+        )
+    except Exception:
+        logging.getLogger(__name__).debug("_inject_security_context failed for %s", incident_id)
+
+
+def _notify_staff_new_buyer_message(incident_id: str, msg_snippet: str) -> None:
+    """Dispatch a staff notification when a buyer posts in an escalation room.
+
+    Rate-limited to one alert per incident per 5 minutes via Redis SETNX so
+    rapid buyer typing does not produce an alert storm.
+    """
+    try:
+        from src.app.deps import get_redis, DummyRedis as _DummyRedis
+        r = get_redis()
+        rate_key = f"irt:staff_notify:{incident_id}"
+        if isinstance(r, _DummyRedis):
+            # No Redis — fire unconditionally (local demo mode)
+            pass
+        else:
+            if not r.set(rate_key, "1", nx=True, ex=300):
+                return  # already notified within 5 min
+        dispatch_incident_alert(
+            "new_buyer_message",
+            {
+                "id": incident_id,
+                "severity": "info",
+                "title": "New buyer message — escalation room awaiting staff",
+                "description": msg_snippet[:200],
+                "status": "open",
+            },
+        )
+    except Exception:
+        pass
+
+
+def _create_incident_review_task(incident_id: str, reviewer_id: str | None, team: str | None) -> None:
+    """Insert an incident_review_task record on assignment. Idempotent."""
+    try:
+        eng = _current_incident_engine()
+        with eng.begin() as conn:
+            existing = conn.execute(
+                sql_text(
+                    "SELECT id FROM incident_review_tasks "
+                    "WHERE incident_id = :iid AND status NOT IN ('completed','cancelled') LIMIT 1"
+                ),
+                {"iid": incident_id},
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    sql_text(
+                        "UPDATE incident_review_tasks "
+                        "SET reviewer_id = :rev, team = :team, status = 'in_progress', updated_at = :ts "
+                        "WHERE id = :id"
+                    ),
+                    {
+                        "id": str(existing[0]),
+                        "rev": reviewer_id,
+                        "team": team,
+                        "ts": _utc_now().isoformat(),
+                    },
+                )
+            else:
+                conn.execute(
+                    sql_text(
+                        "INSERT INTO incident_review_tasks "
+                        "(id, incident_id, status, reviewer_id, team, created_at) "
+                        "VALUES (:id, :iid, 'in_progress', :rev, :team, :ts)"
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "iid": incident_id,
+                        "rev": reviewer_id,
+                        "team": team,
+                        "ts": _utc_now().isoformat(),
+                    },
+                )
+    except Exception:
+        logging.getLogger(__name__).debug("_create_incident_review_task failed for %s", incident_id)
+
+
+def _resolve_incident_review_task(incident_id: str, rationale: str | None) -> None:
+    """Mark open incident_review_tasks as completed on incident resolution."""
+    try:
+        eng = _current_incident_engine()
+        now = _utc_now().isoformat()
+        with eng.begin() as conn:
+            conn.execute(
+                sql_text(
+                    "UPDATE incident_review_tasks "
+                    "SET status = 'completed', rationale = :rat, updated_at = :ts "
+                    "WHERE incident_id = :iid AND status NOT IN ('completed','cancelled')"
+                ),
+                {"iid": incident_id, "rat": rationale or "Resolved by staff", "ts": now},
+            )
+    except Exception:
+        logging.getLogger(__name__).debug("_resolve_incident_review_task failed for %s", incident_id)
+
+
 def _append_chat(
     incident_id: str,
     role: str,
@@ -571,6 +717,20 @@ def update_incident_status(
                 )
             except Exception:
                 pass
+        if status in ("resolved", "closed"):
+            # Request CSAT from buyer — appears in the room chat
+            _append_chat(
+                incident_id,
+                role="system",
+                message=(
+                    "This incident has been resolved. "
+                    "Please rate your experience (1 = poor, 5 = excellent) and "
+                    "share any feedback to help us improve."
+                ),
+                meta={"source": "system", "csat_prompt": True},
+                event_type="csat_request",
+            )
+            _resolve_incident_review_task(incident_id, rationale=f"Status set to {status}")
         return {"ok": True, "incident_id": incident_id, "status": status, "sla": _apply_sla_if_missing(incident_id)}
     except Exception:
         raise HTTPException(status_code=500, detail="db_error")
@@ -977,6 +1137,7 @@ def assign_incident(
             {"id": incident_id, "assigned_to": body.assigned_to, "team": body.team},
         )
     _append_chat(incident_id, "system", "Incident assignment updated.", meta={"assigned_to": body.assigned_to, "team": body.team})
+    _create_incident_review_task(incident_id, reviewer_id=body.assigned_to, team=body.team)
     return {"ok": True, "incident_id": incident_id, "assigned_to": body.assigned_to, "team": body.team}
 
 
@@ -1377,6 +1538,10 @@ def _seed_incident_chat_context(
                 "trace_context": trace_ctx,
             },
         )
+
+        # Inject security trace findings as a staff-facing system message so
+        # agents don't have to navigate to Decision Trace separately.
+        _inject_security_context(incident_id, trace_id=trace_id)
     except Exception:
         pass
 
@@ -1713,6 +1878,27 @@ def public_send_message(
             )
             return {"sent": True, "role": role}
         _append_chat(incident_id, role, msg.strip(), meta={"actor": role, "channel": "public"})
+        # Staff notification (rate-limited to 1 per 5 min) when buyer posts
+        if role == "buyer":
+            _notify_staff_new_buyer_message(incident_id, msg.strip())
+        # Buyer intent detection — enrich chat with structured intent when confident
+        if role == "buyer":
+            try:
+                from src.app.services.nlp_complaints import ComplaintNLP
+                intent_result = ComplaintNLP().classify(msg.strip())
+                if intent_result and intent_result.get("confidence", 0) >= 0.4:
+                    _append_chat(
+                        incident_id,
+                        role="system",
+                        message=(
+                            f"[Intent detected: {intent_result['intent']} "
+                            f"(confidence {intent_result['confidence']:.0%})]"
+                        ),
+                        meta={"source": "nlp_complaints", "intent": intent_result},
+                        event_type="intent_detected",
+                    )
+            except Exception:
+                pass
     except HTTPException:
         raise
     except Exception:

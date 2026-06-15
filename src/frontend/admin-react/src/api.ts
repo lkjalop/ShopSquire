@@ -996,6 +996,7 @@ export async function fetchMaestroBoundaries(opts?: {
 }
 
 
+export async function runEmailSecurityReplayLab(payload?: {
   tenant_id?: string;
   incident_ids?: string[];
   decision_ids?: string[];

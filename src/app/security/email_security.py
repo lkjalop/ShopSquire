@@ -3011,6 +3011,19 @@ def _persist_incident(
                 except Exception:
                     cols = []
                 if not cols:
+                    # PostgreSQL fallback: PRAGMA is SQLite-only
+                    try:
+                        rows = db.execute(
+                            text(
+                                "SELECT column_name FROM information_schema.columns"
+                                " WHERE table_name = 'email_security_incidents'"
+                                "   AND table_schema IN (current_schema(), 'public')"
+                            )
+                        ).fetchall()
+                        cols = [str(r[0]) for r in (rows or [])]
+                    except Exception:
+                        cols = []
+                if not cols:
                     return None
                 colset = set(str(c) for c in cols)
                 full_cols = {
@@ -5056,5 +5069,40 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
                 v["risk_label"] = "high"
         except Exception:
             pass
+
+    # Route suspicious email attachments to the sandbox detonation queue.
+    # Complements detonate_targets() (IOC URLs) — covers macro-enabled and
+    # executable file types that often bypass URL-only sandbox pipelines.
+    _SANDBOX_EXTENSIONS = {
+        ".doc", ".docx", ".xls", ".xlsx", ".xlsm", ".docm",
+        ".exe", ".dll", ".bat", ".cmd", ".ps1", ".vbs",
+        ".jar", ".pdf", ".lnk", ".hta", ".js",
+    }
+    _SANDBOX_MIN_BYTES = 10 * 1024  # skip tiny stubs
+    try:
+        from src.app.services.sandbox_queue import queue_sandbox_detonation
+        _trace_id = str(v.get("trace_id") or v.get("decision_id") or "")
+        _att_hashes: list[str] = []
+        for _att in (email.get("attachments") or []):
+            _fname = str(_att.get("filename") or _att.get("name") or "")
+            _ext = "." + _fname.rsplit(".", 1)[-1].lower() if "." in _fname else ""
+            _size = int(_att.get("size") or _att.get("size_bytes") or 0)
+            if _ext in _SANDBOX_EXTENSIONS and _size >= _SANDBOX_MIN_BYTES and _att.get("sha256"):
+                _att_hashes.append(str(_att["sha256"]))
+        if _att_hashes:
+            _sq = queue_sandbox_detonation(
+                hypothesis="ransomware",
+                trace_id=_trace_id,
+                tenant_id=tenant_id,
+                decoded_content=None,
+                urls=[],
+                attachment_hashes=_att_hashes,
+                steg_score=0.0,
+                source="email_scan",
+            )
+            v["sandbox_attachment_queued"] = _sq.get("queued", False)
+            v["sandbox_attachment_path"] = _sq.get("path")
+    except Exception:
+        pass
 
     return v
