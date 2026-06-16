@@ -223,6 +223,59 @@ def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None
         pass
 
 
+def _formatter_enabled() -> bool:
+    """COMMERCE_FORMATTER flag — when on, _with_trace runs the single-formatter
+    normalization (_finalize_answer). Default off = byte-identical to today."""
+    return str(os.getenv("COMMERCE_FORMATTER", "0")).strip().lower() in ("1", "true", "yes")
+
+
+def _recovery_answer(constraints: Dict[str, Any] | None) -> str:
+    """Verdict-first no-match recovery (CRAG): never a dead end, always an upgrade
+    path; budget/brand-aware. Shared by the no-candidates branch and the formatter."""
+    c = constraints or {}
+    bmax = c.get("budget_max")
+    bmin = c.get("budget_min")
+    brands = c.get("brands") or c.get("brand_hints") or []
+    try:
+        brand_txt = f" {str(brands[0]).upper()}" if brands else ""
+    except Exception:
+        brand_txt = ""
+    band = ""
+    try:
+        if bmax is not None:
+            band = f" under ${int(bmax):,}"
+        elif bmin is not None:
+            band = f" above ${int(bmin):,}"
+    except Exception:
+        band = ""
+    return (
+        f"No in-stock{brand_txt} match{band} right now. "
+        "You can raise your budget, allow other brands, or I can show the "
+        "nearest in-stock options."
+    )
+
+
+def _finalize_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Single-formatter normalization (COMMERCE_FORMATTER): guarantee assistant_message
+    is never empty. Every response funnels through _with_trace, so this ONE pass
+    retires the empty-answer-across-branches class. Behavior-preserving when an answer
+    already exists (the 95% path). Never raises."""
+    try:
+        if str(payload.get("assistant_message") or "").strip():
+            return payload  # already answered -> unchanged
+        msg = str(payload.get("message") or "").strip()
+        if msg:
+            payload["assistant_message"] = msg
+            return payload
+        rec = _recovery_answer(payload.get("constraints_used"))
+        payload["assistant_message"] = rec
+        if not str(payload.get("message") or "").strip():
+            payload["message"] = rec
+    except Exception:
+        pass
+    return payload
+
+
 def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
     try:
         payload = security_sanitize(payload or {})
@@ -230,6 +283,10 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
         payload = payload or {}
     # WS2.2 — comparison/knowledge conceptual answer (covers all early returns).
     _maybe_inject_knowledge_answer(payload, trace_id)
+    # Single formatter (COMMERCE_FORMATTER): guarantee a non-empty answer at the one
+    # choke point every response funnels through — retires the empty-answer class.
+    if _formatter_enabled():
+        payload = _finalize_answer(payload)
     try:
         locale = (
             payload.get("locale")
@@ -11302,25 +11359,8 @@ def suggest(
             except Exception:
                 pass
             # Recovery answer (CRAG): a no-match must NEVER be empty or a dead end.
-            # Set assistant_message (was missing -> blank answer) with an explicit
-            # upgrade path. Budget/brand-aware.
-            _bmax = constraints.get("budget_max"); _bmin = constraints.get("budget_min")
-            _brands = constraints.get("brands") or constraints.get("brand_hints") or []
-            try:
-                _brand_txt = f" {str(_brands[0]).upper()}" if _brands else ""
-            except Exception:
-                _brand_txt = ""
-            if _bmax is not None:
-                _band = f" under ${int(_bmax):,}"
-            elif _bmin is not None:
-                _band = f" above ${int(_bmin):,}"
-            else:
-                _band = ""
-            _no_match_msg = (
-                f"No in-stock{_brand_txt} match{_band} right now. "
-                "You can raise your budget, allow other brands, or I can show the "
-                "nearest in-stock options."
-            )
+            # Shared verdict-first builder (also used by the single formatter).
+            _no_match_msg = _recovery_answer(constraints)
             # Ensure schema keys are present even when no candidates
             payload = {
                 "results": [],
