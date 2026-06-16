@@ -17,13 +17,50 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# Brands we can recognise by name — if the prose names one of these and it is NOT
-# in the evidence brands, that is an invented product.
-_KNOWN_BRANDS = {
+# ── Store vocabulary (FLAVOUR, not core) ──────────────────────────────────────
+# The grounding MECHANISM (reject invented product/price/spec) is product-agnostic.
+# WHICH brands/specs exist is store-specific -> loaded from config/store_vocab.json
+# (override with STORE_VOCAB_PATH). Defaults below are the laptop/computer demo
+# vocabulary so the guard works out of the box; another store ships another file.
+_DEFAULT_BRANDS = {
     "msi", "asus", "lenovo", "dell", "hp", "acer", "razer", "apple", "macbook",
     "gigabyte", "alienware", "samsung", "microsoft", "surface", "lg", "sony",
     "intel", "amd", "nvidia",
 }
+_DEFAULT_SPEC_UNITS = ["gb", "tb", "hz", "ghz"]
+_DEFAULT_GPU_PREFIXES = ["rtx", "gtx", "rx"]
+
+_VOCAB_CACHE: dict | None = None
+
+
+def _load_store_vocab() -> dict:
+    """Load store vocabulary (cached). Falls back to laptop defaults if no config."""
+    global _VOCAB_CACHE
+    if _VOCAB_CACHE is not None:
+        return _VOCAB_CACHE
+    brands, units, gpus = set(_DEFAULT_BRANDS), list(_DEFAULT_SPEC_UNITS), list(_DEFAULT_GPU_PREFIXES)
+    try:
+        import json
+        import os
+        path = os.getenv("STORE_VOCAB_PATH") or os.path.join("config", "store_vocab.json")
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+            if data.get("known_brands"):
+                brands = {str(b).lower() for b in data["known_brands"]}
+            if data.get("spec_units"):
+                units = [str(u).lower() for u in data["spec_units"]]
+            if data.get("gpu_prefixes"):
+                gpus = [str(g).lower() for g in data["gpu_prefixes"]]
+    except Exception:
+        pass
+    _VOCAB_CACHE = {
+        "brands": brands,
+        "spec_unit_re": re.compile(r"(\d[\d.]*)\s?(" + "|".join(re.escape(u) for u in units) + r")\b", re.IGNORECASE),
+        "gpu_re": re.compile(r"\b(?:" + "|".join(re.escape(g) for g in gpus) + r")\s?(\d{3,4})\b", re.IGNORECASE),
+    }
+    return _VOCAB_CACHE
+
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _INJECTION_RE = re.compile(
@@ -31,9 +68,6 @@ _INJECTION_RE = re.compile(
     re.IGNORECASE,
 )
 _PRICE_RE = re.compile(r"\$\s?(\d[\d,]*)(?:\.\d+)?")
-# spec tokens: "16gb", "240hz", "1tb", "3.5ghz", GPU models "rtx 4070" / "4070"
-_SPEC_UNIT_RE = re.compile(r"(\d[\d.]*)\s?(gb|tb|hz|ghz)\b", re.IGNORECASE)
-_GPU_RE = re.compile(r"\b(?:rtx|gtx|rx)\s?(\d{3,4})\b", re.IGNORECASE)
 
 
 @dataclass
@@ -67,7 +101,7 @@ def _evidence_brands(results: list[dict[str, Any]]) -> set[str]:
         if not isinstance(r, dict):
             continue
         blob = f"{r.get('brand') or ''} {r.get('name') or ''}".lower()
-        for b in _KNOWN_BRANDS:
+        for b in _load_store_vocab()["brands"]:
             if re.search(rf"\b{re.escape(b)}\b", blob):
                 out.add(b)
     return out
@@ -115,7 +149,8 @@ def verify_product_narration(
         violations.append("injection_marker")
 
     # 2. Invented product: a known brand named in prose but not in the evidence.
-    for b in _KNOWN_BRANDS:
+    _vocab = _load_store_vocab()
+    for b in _vocab["brands"]:
         if re.search(rf"\b{re.escape(b)}\b", low) and b not in ev_brands:
             violations.append(f"ungrounded_product:{b}")
 
@@ -144,8 +179,8 @@ def verify_product_narration(
         isinstance(r, dict) and isinstance(r.get("specs"), dict) and r.get("specs")
         for r in (results or [])
     )
-    spec_tokens = [f"{n}{u}".lower() for n, u in _SPEC_UNIT_RE.findall(text)] if _has_spec_evidence else []
-    spec_tokens += _GPU_RE.findall(text) if _has_spec_evidence else []
+    spec_tokens = [f"{n}{u}".lower() for n, u in _vocab["spec_unit_re"].findall(text)] if _has_spec_evidence else []
+    spec_tokens += _vocab["gpu_re"].findall(text) if _has_spec_evidence else []
     for tok in spec_tokens:
         t = str(tok).lower()
         # match the bare number too (e.g. "4070" from "rtx 4070")

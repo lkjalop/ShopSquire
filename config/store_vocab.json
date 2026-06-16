@@ -1,0 +1,10 @@
+{
+  "_comment": "Store-specific vocabulary for the product claim-guard (agnostic-core principle). The grounding MECHANISM lives in services/product_claim_guard.py; this FLAVOUR (which brands/specs exist) is per-store config. Swap this file per ecommerce vertical. Defaults below are the laptop/computer demo vocabulary.",
+  "known_brands": [
+    "msi", "asus", "lenovo", "dell", "hp", "acer", "razer", "apple", "macbook",
+    "gigabyte", "alienware", "samsung", "microsoft", "surface", "lg", "sony",
+    "intel", "amd", "nvidia"
+  ],
+  "spec_units": ["gb", "tb", "hz", "ghz"],
+  "gpu_prefixes": ["rtx", "gtx", "rx"]
+}

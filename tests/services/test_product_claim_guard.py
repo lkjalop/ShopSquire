@@ -51,3 +51,25 @@ def test_budget_paraphrase_is_allowed():
     prose = "For your $1300-$1800 budget, the MSI Katana 15 at $1599 is the best fit."
     r = verify_product_narration(prose, _RESULTS, budget_min=1300, budget_max=1800)
     assert r.grounded, r.violations
+
+
+def test_vocab_is_config_driven_agnostic(monkeypatch, tmp_path):
+    """De-flavour proof: the grounding mechanism is agnostic; brands/specs are config.
+    Swap to a furniture store -> laptop brands are no longer 'known', furniture brands are."""
+    import json
+    import src.app.services.product_claim_guard as g
+    vocab = {"known_brands": ["ikea", "herman miller"], "spec_units": ["cm", "kg"], "gpu_prefixes": []}
+    p = tmp_path / "vocab.json"
+    p.write_text(json.dumps(vocab), encoding="utf-8")
+    monkeypatch.setenv("STORE_VOCAB_PATH", str(p))
+    g._VOCAB_CACHE = None  # reset cache so the new path loads
+    try:
+        results = [{"name": "IKEA Markus", "brand": "IKEA", "price_cents": 19900, "specs": {}}]
+        # 'Razer' is NOT a furniture brand -> not flagged as invented product
+        r = g.verify_product_narration("The Razer Blade is great.", results)
+        assert not any(v.startswith("ungrounded_product:razer") for v in r.violations)
+        # an unknown furniture brand IS flagged
+        r2 = g.verify_product_narration("The Herman Miller chair is best.", results)
+        assert any("herman miller" in v for v in r2.violations)
+    finally:
+        g._VOCAB_CACHE = None  # reset for other tests
