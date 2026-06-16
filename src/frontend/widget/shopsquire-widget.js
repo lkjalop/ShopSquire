@@ -631,7 +631,9 @@ class ShopSquireWidget extends HTMLElement {
         policy: data.policy_version || 'v1',
         riskScore: data.risk_score,
         whyNot: data.why_not || [],
-        traceId: data.trace_id || null
+        traceId: data.trace_id || null,
+        timing: data.timing_breakdown || null,
+        sourceStatuses: data.source_statuses || []
       };
       this.state.traceEvents = [];
       if (this.state.decisionMeta.traceId) {
@@ -1353,13 +1355,33 @@ class ShopSquireWidget extends HTMLElement {
       </div>
     ` : '<div style="font-size:12px;color:#6b7280;">No NLP quality gate event yet.</div>';
 
+    // Evidence Sources + latency (item 1) — turns retrieval/timing into on-screen
+    // credibility. Null-safe; renders nothing extra when the fields are absent.
+    const ss = meta.sourceStatuses || [];
+    const tb = meta.timing || {};
+    const _statusColor = (s) => s === 'full' ? '#059669' : (s === 'empty' ? '#9ca3af' : '#dc2626');
+    const sourceRows = ss.length ? ss.map(s => `
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:#374151;">
+        <span>${s.source}</span>
+        <span style="color:${_statusColor(s.status)}">${s.status} · ${s.hit_count} hits · ${s.latency_ms}ms</span>
+      </div>`).join('') : '<div style="font-size:12px;color:#6b7280;">No source status.</div>';
+    const timingRows = Object.keys(tb).filter(k => k.endsWith('_ms')).map(k => `
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;"><span>${k.replace(/_ms$/, '')}</span><span>${tb[k]}ms</span></div>`).join('');
+    const evidenceHtml = `
+      <div data-test="evidence-sources" style="margin-top:8px;padding:8px;border:1px solid #eef2f7;border-radius:8px;background:#fff;">
+        <div style="font-weight:600;">Evidence Sources</div>
+        ${sourceRows}
+        ${timingRows ? `<div style="font-weight:600;margin-top:8px;">Latency</div>${timingRows}` : ''}
+      </div>`;
+
     const summaryHtml = `
       <div style="margin-bottom:10px;">
         <div style="font-weight:600;">Model Selection</div>
         <div class="meta">Selected model: ${model}</div>
       </div>
       <div style="margin-bottom:10px; font-size:12px; color:#6b7280;">Trace ID: ${traceId || 'n/a'}</div>
-      <div style="font-weight:600; margin-bottom:6px;">Contract & Quality</div>
+      ${evidenceHtml}
+      <div style="font-weight:600; margin:10px 0 6px;">Contract & Quality</div>
       ${contractHtml}
       ${gateHtml}
       ${why}

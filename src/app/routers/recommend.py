@@ -5364,6 +5364,21 @@ def _summarize_timing_safe(tb: dict) -> dict:
         return tb
 
 
+def _build_source_statuses(results: list, timing_breakdown: dict) -> list:
+    """Per-source retrieval status for the trace panel (1.2 surfaced in the response).
+
+    Honest: reflects the SYNCHRONOUS catalog retrieval that produced the answer
+    (caption-RAG / CLIP-visual run in the RECOMMEND_PIPELINE_V2 shadow, off the hot
+    path). Lets the trace say 'catalog_db: full, 18 hits, 42ms' instead of leaving
+    retrieval invisible. Never raises."""
+    try:
+        from src.app.services.commerce_source_status import SourceStatus
+        rt = int((timing_breakdown or {}).get("retrieve_ms") or 0)
+        return [SourceStatus.from_hits("catalog_db", results or [], rt).to_dict()]
+    except Exception:
+        return []
+
+
 def _image_security_preamble_note(image_cv_signals_parsed: dict | None) -> str | None:
     """Sanitized image-security note for the LLM narrator preamble.
 
@@ -11314,6 +11329,7 @@ def suggest(
                 "policy_version": flags.get("POLICY_VERSION", "v1"),
                 "message": _no_match_msg,
                 "assistant_message": _no_match_msg,
+                "source_statuses": _build_source_statuses([], timing_breakdown),
                 "degraded": use_rules,
                 "eligible": not simulate,
                 "view_mode": view_hint.get("view_mode"),
@@ -12213,6 +12229,7 @@ def suggest(
             **timing_breakdown,
             "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
         }),
+        "source_statuses": _build_source_statuses(results, timing_breakdown),
         "fraud": fraud_summary,
         "turn_type": turn_type,
         "turn_intent": turn_intent,
