@@ -74,3 +74,12 @@ def test_exclude_noop_for_non_computer_query():
     from src.app.routers.recommend import _exclude_off_category_in_payload
     p = {"results": [{"name": "A"}, {"name": "B Router"}], "constraints_used": {"query": "something vague"}}
     assert len(_exclude_off_category_in_payload(p)["results"]) == 2
+
+
+def test_dereference_drops_redundant_label_after_name():
+    from src.app.routers.recommend import _dereference_product_labels
+    p = {"assistant_message": "The HP Victus 15-fa2364TX [1] is the top pick.",
+         "results": [{"name": "HP Victus 15-fa2364TX 15.6 Gaming Laptop"}]}
+    out = _dereference_product_labels(p)["assistant_message"]
+    assert "[1]" not in out
+    assert out.lower().count("hp victus") == 1, out  # not doubled

@@ -289,13 +289,23 @@ def _dereference_product_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
         am = payload.get("assistant_message")
         results = payload.get("results") or []
         if am and "[" in am and results:
-            def _sub(m):
+            def _repl(m):
                 i = int(m.group(1)) - 1
-                if 0 <= i < len(results) and isinstance(results[i], dict):
-                    nm = str(results[i].get("name") or "").strip()
-                    return nm or m.group(0)
-                return m.group(0)
-            payload["assistant_message"] = re.sub(r"\[(\d+)\]", _sub, str(am))
+                if not (0 <= i < len(results) and isinstance(results[i], dict)):
+                    return m.group(0)
+                nm = str(results[i].get("name") or "").strip()
+                if not nm:
+                    return m.group(0)
+                # If the product name already precedes this label (LLM wrote
+                # "Name [N]"), the label is redundant -> drop it instead of doubling.
+                pre = m.string[max(0, m.start() - len(nm) - 6):m.start()].lower()
+                key = " ".join(nm.lower().split()[:2])
+                if key and key in pre:
+                    return ""
+                return " " + nm
+            out = re.sub(r"\s*\[(\d+)\]", _repl, str(am))
+            out = re.sub(r"\s{2,}", " ", out).replace(" .", ".").replace(" ,", ",")
+            payload["assistant_message"] = out.strip()
     except Exception:
         pass
     return payload
@@ -13918,6 +13928,12 @@ def suggest(
     except Exception:
         pass
 
+    # Final-word transforms on the actual returned payload (the _with_trace choke point
+    # runs BEFORE the LLM summary is generated on the main path): replace [N] citation
+    # labels with product names, and guarantee a non-empty answer.
+    redacted = _dereference_product_labels(redacted)
+    if _formatter_enabled():
+        redacted = _finalize_answer(redacted)
     return redacted
 
 
