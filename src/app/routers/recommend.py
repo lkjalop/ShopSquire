@@ -5354,6 +5354,16 @@ def _references_previous_shortlist(query: str | None) -> bool:
     return any(re.search(pattern, q_low) for pattern in explicit_patterns)
 
 
+def _summarize_timing_safe(tb: dict) -> dict:
+    """Add accounted_ms/unaccounted_ms so unexplained latency is visible (0.5).
+    Never raises — returns the dict unchanged on any error."""
+    try:
+        from src.app.observability.stage_timer import summarize_timing
+        return summarize_timing(tb)
+    except Exception:
+        return tb
+
+
 def _image_security_preamble_note(image_cv_signals_parsed: dict | None) -> str | None:
     """Sanitized image-security note for the LLM narrator preamble.
 
@@ -12125,10 +12135,10 @@ def suggest(
         "llm_model": llm_model,
         "model_tier": model_tier,
         "complexity_signals": complexity_signals,
-        "timing_breakdown": {
+        "timing_breakdown": _summarize_timing_safe({
             **timing_breakdown,
             "route_total_ms": int((time.perf_counter() - route_t0) * 1000),
-        },
+        }),
         "fraud": fraud_summary,
         "turn_type": turn_type,
         "turn_intent": turn_intent,
@@ -12753,10 +12763,12 @@ def suggest(
                 )
         except Exception:
             pass
-        assistant_message, llm_summary_job_id = _summarize_results(
-            query, results, constraints, _summ_model, trace_id,
-            context_preamble=_combined_preamble,
-        )
+        from src.app.observability.stage_timer import StageTimer as _StageTimer
+        with _StageTimer(timing_breakdown, "summary_ms"):  # time the dominant LLM cost
+            assistant_message, llm_summary_job_id = _summarize_results(
+                query, results, constraints, _summ_model, trace_id,
+                context_preamble=_combined_preamble,
+            )
         # 0.4 Grounded narration guard (flag: COMMERCE_NARRATION_GUARD). The LLM is
         # a narrator over evidence, not a source of truth — if it invents a
         # product/price/spec or parrots a quarantined payload, reject and fall back
