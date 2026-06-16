@@ -311,6 +311,44 @@ def apply_inventory_filter(
 
 # ── Full retrieval pipeline (convenience wrapper for Sprint R5) ───────────────
 
+def retrieve_with_statuses(
+    query: str,
+    *,
+    budget_min: Optional[int] = None,
+    budget_max: Optional[int] = None,
+    brands: Optional[List[str]] = None,
+    category: Optional[str] = None,
+    top_n: int = 12,
+    hide_oos: bool = False,
+):
+    """Like retrieve_and_merge, but ALSO returns a typed per-source status map so a
+    degraded answer can say which leg errored/was empty (1.2). Each leg is timed and
+    classified full/empty/error; the merged candidates are identical to
+    retrieve_and_merge. Returns (candidates, {source: SourceStatus})."""
+    import time as _t
+    from src.app.services.commerce_source_status import SourceStatus
+
+    statuses: Dict[str, Any] = {}
+
+    def _timed(name: str, fn):
+        t0 = _t.perf_counter()
+        try:
+            hits = fn() or []
+            statuses[name] = SourceStatus.from_hits(name, hits, int((_t.perf_counter() - t0) * 1000))
+            return hits
+        except Exception as exc:  # legs fail-open, but defend the wrapper too
+            statuses[name] = SourceStatus.errored(name, str(exc), int((_t.perf_counter() - t0) * 1000))
+            return []
+
+    db_hits = _timed("catalog_db", lambda: from_db(
+        query, budget_min=budget_min, budget_max=budget_max, brands=brands, category=category))
+    vec_hits = _timed("clip_visual", lambda: from_vector(query, top_k=top_n))
+    cap_hits = _timed("caption_rag", lambda: from_caption(query, top_k=top_n))
+    merged = merge_rrf(db_hits, vec_hits, cap_hits, top_n=top_n * 2)
+    merged = apply_inventory_filter(merged, hide_oos=hide_oos)[:top_n]
+    return merged, statuses
+
+
 def retrieve_and_merge(
     query: str,
     *,
