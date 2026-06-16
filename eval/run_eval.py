@@ -199,6 +199,13 @@ def eval_answer_shape() -> Dict[str, Any]:
     Reuses create_app + the production claim-guard; seeds a small deterministic
     catalog so the numbers are reproducible (not demo-data dependent).
     """
+    import os as _os
+    # Deterministic gate: disable LLM narration so the eval measures the DETERMINISTIC
+    # answer builders (stable, reproducible). LLM-narration faithfulness is enforced
+    # separately by the claim-guard GATE (COMMERCE_NARRATION_GUARD) in production, not
+    # by this offline eval (live LLM prose varies run-to-run -> noisy numbers).
+    _os.environ["USE_LLM_SUMMARY"] = "0"
+
     from fastapi.testclient import TestClient
     from sqlalchemy import text as _sql
     from src.app.main import create_app
