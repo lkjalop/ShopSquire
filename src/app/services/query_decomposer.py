@@ -73,7 +73,7 @@ _USE_CASE_PATTERNS: Dict[str, re.Pattern] = {
     "cad_3d": re.compile(r"\b(cad|autocad|solidworks|revit|3d model\w*|blender|rendering|engineering student)\b", re.I),
     "photo": re.compile(r"\b(photo edit\w*|photoshop|lightroom|raw photo)\b", re.I),
     "office": re.compile(r"\b(office work|excel|spreadsheet|word processing|email|business use|productivity)\b", re.I),
-    "study": re.compile(r"\b(student|university|college|study|school work|note ?taking)\b", re.I),
+    "study": re.compile(r"\b(student|university|uni|college|study|school work|note ?taking)\b", re.I),
 }
 
 # Use cases that imply a dedicated GPU.

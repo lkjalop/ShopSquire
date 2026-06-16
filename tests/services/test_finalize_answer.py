@@ -70,9 +70,19 @@ def test_exclude_off_category_drops_router_for_laptop():
     assert len(out["products"]) == len(out["results"])  # products stays in sync
 
 
-def test_exclude_noop_for_non_computer_query():
+def test_exclude_drops_peripheral_regardless_of_query():
+    # Query-INDEPENDENT contract (2026-06): for a laptop store a peripheral is dropped
+    # whenever a real product is also present — even on a vague query ("uni work").
     from src.app.routers.recommend import _exclude_off_category_in_payload
-    p = {"results": [{"name": "A"}, {"name": "B Router"}], "constraints_used": {"query": "something vague"}}
+    p = {"results": [{"name": "Dell XPS 13"}, {"name": "B Router"}], "constraints_used": {"query": "something vague"}}
+    out = _exclude_off_category_in_payload(p)["results"]
+    assert [r["name"] for r in out] == ["Dell XPS 13"]
+
+
+def test_exclude_keeps_all_when_only_peripherals():
+    # If EVERY result is a peripheral (user actually searched "headset"), keep them all.
+    from src.app.routers.recommend import _exclude_off_category_in_payload
+    p = {"results": [{"name": "HyperX Cloud Flight"}, {"name": "Logitech Keyboard"}], "constraints_used": {"query": "headset"}}
     assert len(_exclude_off_category_in_payload(p)["results"]) == 2
 
 

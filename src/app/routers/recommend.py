@@ -279,6 +279,24 @@ def _finalize_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _ensure_result_prices(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Frontend product cards read result['price'] (dollars); the pipeline carries
+    'price_cents'. Populate 'price' from 'price_cents' so cards don't render $0.
+    Never raises."""
+    try:
+        for key in ("results", "products"):
+            items = payload.get(key)
+            if isinstance(items, list):
+                for r in items:
+                    if isinstance(r, dict) and not r.get("price"):
+                        pc = r.get("price_cents")
+                        if pc:
+                            r["price"] = round(int(pc) / 100)
+    except Exception:
+        pass
+    return payload
+
+
 def _dereference_product_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Replace LLM '[N]' citation placeholders in the answer with the product NAME.
 
@@ -329,7 +347,8 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
         pass
     # Run AFTER localize (which re-expands results) so these are the final word:
     # off-category exclusion -> never-empty formatter -> [N] dereference.
-    payload = _exclude_off_category_in_payload(payload)  # drop router-for-laptop etc.
+    payload = _exclude_off_category_in_payload(payload)  # drop off-TYPE (router/monitor…)
+    payload = _annotate_type_and_price_integrity(payload)  # product_type + price-poisoning guard
     if _formatter_enabled():
         payload = _finalize_answer(payload)
     payload = _dereference_product_labels(payload)  # [N] -> product name (always-on)
@@ -5496,36 +5515,88 @@ def _image_security_preamble_note(image_cv_signals_parsed: dict | None) -> str |
 
 _OFF_CATEGORY_PERIPHERAL_RE = re.compile(
     r"\b(router|modem|mouse|keyboard|webcam|hdmi|ethernet cable|charger|adapter|"
-    r"docking station|usb hub|printer|scanner|headset|earbuds|speaker|microphone|"
-    r"flash drive|sd card|laptop stand|sleeve|backpack|carry bag|cooling pad)\b",
+    r"docking station|usb hub|printer|scanner|head ?set|cloud flight|earbuds|"
+    r"speaker|microphone|monitor|flash drive|sd card|laptop stand|sleeve|"
+    r"backpack|carry bag|cooling pad)\b",
     re.IGNORECASE,
 )
 
 
 def _demote_off_category(results: list, query: str | None) -> list:
-    """When the shopper clearly asked for a computer (laptop/desktop/PC), EXCLUDE
-    obvious peripherals (router/modem/mouse...) so an off-category item never reaches
-    the buyer for a 'laptop' query. Excludes only when in-category items remain (never
-    empties); returns the input unchanged otherwise. (Was a demote/reorder, which a
-    later ranking sort could undo — exclusion is robust.)
+    """EXCLUDE non-primary products (accessories: router/monitor/headset/bag/SSD/…)
+    from headline results whenever PRIMARY products (laptop/desktop) are also present —
+    so an off-TYPE item never reaches the buyer for a 'laptop for uni' query.
 
-    NOTE: the peripheral keyword list is laptop/computer FLAVOUR and belongs in store
-    config when the core is de-flavoured (agnostic-base principle); kept inline for the
-    laptop demo."""
+    Gates on product TYPE, not a price band or a keyword denylist: a $59 product can be
+    perfectly valid (it's a real range-extender price) — the problem is it's the wrong
+    TYPE for a laptop request. Type classification + the type→primary mapping are the
+    agnostic core (services/product_classifier.py + config/store_vocab.json). Excluded
+    accessories aren't discarded — they're the cart-upsell pool (companion_types_for).
+
+    Keeps everything if results are ALL accessories (user searched 'headset') or ALL
+    primary. Query-independent; safe on every path; never empties."""
     try:
         if not isinstance(results, list) or len(results) < 2:
             return results
-        from src.app.services.query_classifier import coarse_product_category
-        cat = str(coarse_product_category(query or "") or "").lower()
-        if cat not in ("laptop", "desktop", "pc", "computer", "gaming_laptop"):
-            return results
-        in_cat, off_cat = [], []
+        from src.app.services.product_classifier import is_primary_product
+        primary, accessory = [], []
         for r in results:
-            name = str((r or {}).get("name") or "") if isinstance(r, dict) else ""
-            (off_cat if _OFF_CATEGORY_PERIPHERAL_RE.search(name) else in_cat).append(r)
-        return in_cat if in_cat else results
+            if not isinstance(r, dict):
+                primary.append(r)
+                continue
+            specs = r.get("specs") if isinstance(r.get("specs"), dict) else None
+            (primary if is_primary_product(r.get("name"), specs) else accessory).append(r)
+        return primary if (primary and accessory) else results
     except Exception:
         return results
+
+
+def _annotate_type_and_price_integrity(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Tag every result with product_type and run the price-anomaly (poisoning) guard.
+
+    SECURITY (shift-left, agnostic core): a price outside its TYPE band is a data-
+    integrity signal, not a pricing opinion. Underpriced is the dangerous case — a
+    poisoned feed/import/DB row that reads a $1,800 laptop as $45 bleeds margin on
+    every checkout, at scale. We DON'T silently sell it: anomalous items are dropped
+    from buyer results (when priced items remain) and summarised in payload
+    ['data_integrity'] for the admin trace / source_statuses. Never raises."""
+    try:
+        from src.app.services.product_classifier import annotate_product
+        results = payload.get("results")
+        if not isinstance(results, list) or not results:
+            return payload
+        flagged: List[Dict[str, Any]] = []
+        clean: List[Dict[str, Any]] = []
+        for r in results:
+            if not isinstance(r, dict):
+                clean.append(r)
+                continue
+            annotate_product(r)
+            if r.get("price_anomaly"):
+                flagged.append({
+                    "sku": r.get("sku"), "name": r.get("name"),
+                    "price": r.get("price"), "product_type": r.get("product_type"),
+                    "anomaly": r.get("price_anomaly"),
+                })
+            else:
+                clean.append(r)
+        if flagged:
+            # Quarantine poisoned-price items from buyer results when clean ones remain;
+            # always surface them for the admin/security trace.
+            if clean:
+                payload["results"] = clean
+                if isinstance(payload.get("products"), list):
+                    payload["products"] = clean
+            payload["data_integrity"] = {
+                "price_anomalies": flagged,
+                "quarantined": bool(clean),
+                "note": "Price(s) outside expected type band — possible catalog/feed poisoning. "
+                        "Quarantined from buyer results pending review." if clean else
+                        "Price(s) outside expected type band — flagged for review.",
+            }
+    except Exception:
+        pass
+    return payload
 
 
 def _exclude_off_category_in_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -10244,6 +10315,9 @@ def suggest(
             candidates = service.retrieve_candidates(query_effective, limit=limit)
             retrieve_ms = int((time.perf_counter() - _t0) * 1000)
             timing_breakdown["retrieve_ms"] = retrieve_ms
+        # Drop off-category peripherals early so ranking, the budget answer (min price),
+        # and results all use the clean set (fixes "starting from $45" accessory min).
+        candidates = _demote_off_category(candidates, query_effective)
         retrieved_count = len(candidates or [])
         logging.info(f"recommend.suggest: retrieved {retrieved_count} candidates (ms={retrieve_ms})")
         if _is_laptop_focused_query(query_effective, constraints):
@@ -13931,6 +14005,11 @@ def suggest(
     # Final-word transforms on the actual returned payload (the _with_trace choke point
     # runs BEFORE the LLM summary is generated on the main path): replace [N] citation
     # labels with product names, and guarantee a non-empty answer.
+    redacted = _ensure_result_prices(redacted)       # price_cents -> price (no $0 cards)
+    redacted["results"] = _demote_off_category(redacted.get("results") or [], None)  # off-TYPE guard
+    if isinstance(redacted.get("products"), list):
+        redacted["products"] = redacted["results"]
+    redacted = _annotate_type_and_price_integrity(redacted)  # price-poisoning guard
     redacted = _dereference_product_labels(redacted)
     if _formatter_enabled():
         redacted = _finalize_answer(redacted)
