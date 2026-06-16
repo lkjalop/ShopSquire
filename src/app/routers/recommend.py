@@ -10743,14 +10743,9 @@ def suggest(
                                     )
                                 except Exception:
                                     pass
-                                if budget_min_val is not None and budget_max_val is not None:
-                                    message = f"No products found between ${budget_min_val} and ${budget_max_val}."
-                                elif budget_max_val is not None:
-                                    message = f"No products found under ${budget_max_val}."
-                                elif budget_min_val is not None:
-                                    message = f"No products found above ${budget_min_val}."
-                                else:
-                                    message = "No products found in your price range."
+                                # Recovery answer (CRAG) with an explicit upgrade path,
+                                # not a bare "No products found" dead end (shared builder).
+                                message = _recovery_answer(constraints)
                                 payload = {
                                     "results": [],
                                     "proposal": {"decision_mode": "rules", "ranked_skus": []},
