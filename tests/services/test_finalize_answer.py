@@ -56,3 +56,21 @@ def test_dereference_leaves_unknown_labels_and_no_results():
     p = {"assistant_message": "See [5].", "results": [{"name": "X"}]}
     assert _dereference_product_labels(p)["assistant_message"] == "See [5]."  # out of range -> unchanged
     assert _dereference_product_labels({"assistant_message": "hi", "results": []})["assistant_message"] == "hi"
+
+
+def test_exclude_off_category_drops_router_for_laptop():
+    from src.app.routers.recommend import _exclude_off_category_in_payload
+    p = {"results": [{"name": "ASUS Vivobook S16"}, {"name": "ASUS RT-AX54HP Wi-Fi 6 Router"}, {"name": "Dell XPS 13"}],
+         "products": [{"name": "ASUS Vivobook S16"}, {"name": "ASUS RT-AX54HP Wi-Fi 6 Router"}, {"name": "Dell XPS 13"}],
+         "constraints_used": {"query": "asus laptop for university under 1500"}}
+    out = _exclude_off_category_in_payload(p)
+    names = [r["name"].lower() for r in out["results"]]
+    assert not any("router" in n for n in names), names
+    assert any("vivobook" in n for n in names)
+    assert len(out["products"]) == len(out["results"])  # products stays in sync
+
+
+def test_exclude_noop_for_non_computer_query():
+    from src.app.routers.recommend import _exclude_off_category_in_payload
+    p = {"results": [{"name": "A"}, {"name": "B Router"}], "constraints_used": {"query": "something vague"}}
+    assert len(_exclude_off_category_in_payload(p)["results"]) == 2

@@ -26,14 +26,15 @@ _SCREEN_RE = re.compile(r"(\d{1,2}(?:\.\d)?)\"")
 
 
 def _default_product_source() -> str:
+    # laptop-products-new-short.txt is the canonical expanded inventory list.
     for candidate in (
-        "docs/laptop-products-new.txt",
         "docs/laptop-products-new-short.txt",
+        "docs/laptop-products-new.txt",
         "docs/laptop-products-exp.txt",
     ):
         if Path(candidate).exists():
             return candidate
-    return "docs/laptop-products-new.txt"
+    return "docs/laptop-products-new-short.txt"
 
 
 def _split_blocks(text: str) -> list[list[str]]:

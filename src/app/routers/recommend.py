@@ -190,6 +190,9 @@ def _frameworks_for_security(*, signals: Dict[str, Any], severity: str) -> Dict[
 # knowledge questions on ANY early-return path (the monolith has ~10 of them).
 from contextvars import ContextVar as _ContextVar
 _KNOWLEDGE_QUERY_CTX: "_ContextVar" = _ContextVar("recommend_knowledge_ctx", default=None)
+# Request-scoped query so the response choke point (_with_trace) can derive intent
+# (e.g. off-category exclusion) regardless of which branch built the payload.
+_CURRENT_QUERY_CTX: "_ContextVar" = _ContextVar("recommend_current_query", default="")
 
 
 def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None) -> None:
@@ -305,11 +308,6 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
         payload = payload or {}
     # WS2.2 — comparison/knowledge conceptual answer (covers all early returns).
     _maybe_inject_knowledge_answer(payload, trace_id)
-    # Single formatter (COMMERCE_FORMATTER): guarantee a non-empty answer at the one
-    # choke point every response funnels through — retires the empty-answer class.
-    if _formatter_enabled():
-        payload = _finalize_answer(payload)
-    payload = _dereference_product_labels(payload)  # [N] -> product name (always-on)
     try:
         locale = (
             payload.get("locale")
@@ -319,6 +317,12 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
         payload = localize_recommend_payload(payload, locale)
     except Exception:
         pass
+    # Run AFTER localize (which re-expands results) so these are the final word:
+    # off-category exclusion -> never-empty formatter -> [N] dereference.
+    payload = _exclude_off_category_in_payload(payload)  # drop router-for-laptop etc.
+    if _formatter_enabled():
+        payload = _finalize_answer(payload)
+    payload = _dereference_product_labels(payload)  # [N] -> product name (always-on)
     if not trace_id:
         return payload
     # Enforce canonical trace correlation fields after sanitization/redaction
@@ -4760,7 +4764,7 @@ def _summarize_results(
                         cached_at_str = str(payload_hit.get("cached_at") or "")
                         # WS1.4 — tunable cache gate. Default 0.08 (tight); raise to
                         # ~0.12 (SEMANTIC_CACHE_MAX_DISTANCE) for more hits in demos.
-                        _cache_max_dist = float(os.getenv("SEMANTIC_CACHE_MAX_DISTANCE", "0.08") or 0.08)
+                        _cache_max_dist = float(os.getenv("SEMANTIC_CACHE_MAX_DISTANCE", "0.12") or 0.12)
                         if distance < _cache_max_dist and cached_at_str:
                             try:
                                 cached_at = datetime.fromisoformat(cached_at_str)
@@ -5489,9 +5493,11 @@ _OFF_CATEGORY_PERIPHERAL_RE = re.compile(
 
 
 def _demote_off_category(results: list, query: str | None) -> list:
-    """When the shopper clearly asked for a computer (laptop/desktop/PC), move obvious
-    peripherals/accessories to the END so an off-category item (e.g. a router) never
-    leads a 'gaming laptop' query. DEMOTES (reorders), never removes — safe on any input.
+    """When the shopper clearly asked for a computer (laptop/desktop/PC), EXCLUDE
+    obvious peripherals (router/modem/mouse...) so an off-category item never reaches
+    the buyer for a 'laptop' query. Excludes only when in-category items remain (never
+    empties); returns the input unchanged otherwise. (Was a demote/reorder, which a
+    later ranking sort could undo — exclusion is robust.)
 
     NOTE: the peripheral keyword list is laptop/computer FLAVOUR and belongs in store
     config when the core is de-flavoured (agnostic-base principle); kept inline for the
@@ -5507,9 +5513,38 @@ def _demote_off_category(results: list, query: str | None) -> list:
         for r in results:
             name = str((r or {}).get("name") or "") if isinstance(r, dict) else ""
             (off_cat if _OFF_CATEGORY_PERIPHERAL_RE.search(name) else in_cat).append(r)
-        return (in_cat + off_cat) if in_cat else results
+        return in_cat if in_cat else results
     except Exception:
         return results
+
+
+def _exclude_off_category_in_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply the off-category exclusion at the response choke point (after ALL ranking
+    and on every return branch). Reads the query from constraints_used so a router can
+    never reach the buyer for a laptop query. Never raises."""
+    try:
+        results = payload.get("results")
+        if not isinstance(results, list) or len(results) < 2:
+            return payload
+        # Query from the request-scoped contextvar (reliable on every branch), with
+        # payload fields as a fallback.
+        try:
+            q = str(_CURRENT_QUERY_CTX.get() or "")
+        except Exception:
+            q = ""
+        if not q:
+            c = payload.get("constraints_used")
+            if isinstance(c, dict):
+                q = str(c.get("query") or "")
+            q = q or str(payload.get("query") or "")
+        filtered = _demote_off_category(results, q)
+        if filtered is not results and len(filtered) != len(results):
+            payload["results"] = filtered
+            if isinstance(payload.get("products"), list):
+                payload["products"] = filtered
+    except Exception:
+        pass
+    return payload
 
 
 def _query_is_standalone_search(query: str | None) -> bool:
@@ -6282,6 +6317,10 @@ def suggest(
     db=Depends(get_db),
 ) -> Dict:
     route_t0 = time.perf_counter()
+    try:
+        _CURRENT_QUERY_CTX.set(query or "")
+    except Exception:
+        pass
     timing_breakdown: Dict[str, Any] = {"ollama_summary_ms": None}
     span = trace.get_current_span()
     try:
@@ -12791,6 +12830,7 @@ def suggest(
             stock_filter_opted=_stock_filter_opted,
         )
         results = _fin.results
+        results = _demote_off_category(results, query)  # drop off-category (router for laptop)
         payload["results"] = results
         payload["products"] = results
         if _fin.oos_removed:
@@ -13507,6 +13547,7 @@ def suggest(
                     else:
                         _r["stock_status"] = "in_stock"
                 results = sorted(results, key=lambda r: float(r.get("_rank_penalty") or 0.0))
+                results = _demote_off_category(results, query)  # drop router-for-laptop etc.
                 payload["results"] = results
                 payload["products"] = results
     except Exception:

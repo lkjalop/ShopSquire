@@ -197,7 +197,7 @@ class ShopSquireWidget extends HTMLElement {
         setTimeout(() => run(idx + 1), 3500);
       } else {
         setTimeout(() => {
-          window.open('/ui/status', '_blank');
+          window.open('/docs', '_blank');
           this.demoRunning = false;
         }, 3500);
       }
@@ -746,7 +746,7 @@ class ShopSquireWidget extends HTMLElement {
         ${wfRows ? `<div class="waterfall">${wfRows}</div>` : ''}
         ${latest && latest.id ? `<div class="decision-notice">Last log: ${latest.id} | ${latest.execution_status} | ${latest.valid_from}</div>` : ''}
         <div class="decision-links">
-          <a href="/ui/status" target="_blank">View live decisions</a>
+          <a href="/docs" target="_blank">API & decisions</a>
           ${meta.traceId ? ` | <a href="http://localhost:16686/trace/${meta.traceId}" target="_blank">View last trace</a>` : ''}
         </div>
       </div>
