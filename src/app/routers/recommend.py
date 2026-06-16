@@ -276,6 +276,28 @@ def _finalize_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _dereference_product_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Replace LLM '[N]' citation placeholders in the answer with the product NAME.
+
+    The summary prompt asks the model to cite products by their [N] catalog label;
+    that notation must NOT leak into buyer-facing prose ("the [1] is a solid pick").
+    Map [N] -> results[N-1].name. Always-on (a buyer-visible bug fix). Never raises."""
+    try:
+        am = payload.get("assistant_message")
+        results = payload.get("results") or []
+        if am and "[" in am and results:
+            def _sub(m):
+                i = int(m.group(1)) - 1
+                if 0 <= i < len(results) and isinstance(results[i], dict):
+                    nm = str(results[i].get("name") or "").strip()
+                    return nm or m.group(0)
+                return m.group(0)
+            payload["assistant_message"] = re.sub(r"\[(\d+)\]", _sub, str(am))
+    except Exception:
+        pass
+    return payload
+
+
 def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
     try:
         payload = security_sanitize(payload or {})
@@ -287,6 +309,7 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
     # choke point every response funnels through — retires the empty-answer class.
     if _formatter_enabled():
         payload = _finalize_answer(payload)
+    payload = _dereference_product_labels(payload)  # [N] -> product name (always-on)
     try:
         locale = (
             payload.get("locale")

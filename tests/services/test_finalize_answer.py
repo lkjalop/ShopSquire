@@ -40,3 +40,19 @@ def test_recovery_answer_verdict_first_with_upgrade_path():
     assert msg.lower().startswith("no")
     assert "$1,200" in msg
     assert "raise your budget" in msg.lower()
+
+
+def test_dereference_replaces_labels_with_product_names():
+    from src.app.routers.recommend import _dereference_product_labels
+    p = {"assistant_message": "The [1] is a solid pick; [2] is cheaper.",
+         "results": [{"name": "MSI Katana 15"}, {"name": "Dell G15"}]}
+    out = _dereference_product_labels(p)
+    assert out["assistant_message"] == "The MSI Katana 15 is a solid pick; Dell G15 is cheaper."
+    assert "[1]" not in out["assistant_message"] and "[2]" not in out["assistant_message"]
+
+
+def test_dereference_leaves_unknown_labels_and_no_results():
+    from src.app.routers.recommend import _dereference_product_labels
+    p = {"assistant_message": "See [5].", "results": [{"name": "X"}]}
+    assert _dereference_product_labels(p)["assistant_message"] == "See [5]."  # out of range -> unchanged
+    assert _dereference_product_labels({"assistant_message": "hi", "results": []})["assistant_message"] == "hi"

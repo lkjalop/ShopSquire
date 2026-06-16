@@ -621,6 +621,8 @@ class ShopSquireWidget extends HTMLElement {
         why_not: r.why_not
       }));
       this.state.results = ranked;
+      // Surface the answer-first narration above the product cards (was invisible).
+      this.state.answer = data.assistant_message || data.message || '';
       this.state.decisionMeta = {
         proposal: data.proposal || {},
         security: data.security || {},
@@ -749,9 +751,14 @@ class ShopSquireWidget extends HTMLElement {
         </div>
       </div>
     `;
+    // Answer-first banner: the buyer-facing narration, above the product cards.
+    const _ans = String(this.state.answer || '').trim();
+    const answerBanner = _ans
+      ? `<div data-test="answer-banner" style="margin:0 0 12px;padding:12px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;font-size:14px;line-height:1.5;color:#0c4a6e;">${_ans.replace(/</g, '&lt;')}</div>`
+      : '';
     // render variants: grid, list, compact
     if (view === 'compact') {
-      c.innerHTML = decisionPanel + `<div class="compact-list">${this.state.results.map((p, idx) => `
+      c.innerHTML = answerBanner + decisionPanel + `<div class="compact-list">${this.state.results.map((p, idx) => `
         <div class="card" style="padding:8px;display:flex;justify-content:space-between;align-items:center;">
           <div style="flex:1;min-width:0;">
             <div style="font-weight:600;">${idx + 1}. ${p.name}</div>
@@ -764,7 +771,7 @@ class ShopSquireWidget extends HTMLElement {
         </div>
       `).join('')}</div>`;
     } else if (view === 'list') {
-      c.innerHTML = decisionPanel + `<div class="list-view">${this.state.results.map((p, idx) => `
+      c.innerHTML = answerBanner + decisionPanel + `<div class="list-view">${this.state.results.map((p, idx) => `
         <div class="card" style="display:flex;gap:12px;align-items:flex-start;">
           <div style="width:120px;height:80px;background:#f6f4f2;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#6b7280;">Img</div>
           <div style="flex:1;">
@@ -781,7 +788,7 @@ class ShopSquireWidget extends HTMLElement {
       `).join('')}</div>`;
     } else {
       // default grid
-      c.innerHTML = decisionPanel + this.state.results.map((p, idx) => `
+      c.innerHTML = answerBanner + decisionPanel + this.state.results.map((p, idx) => `
       <div class="card">
         <div class="card-title">${idx + 1}. ${p.name}</div>
         <div class="card-sub">$${p.price} | ${p.ram}GB | ${p.storage} | ${p.display || ''} ${p.cpu || ''} | Rating: ${p.rating || 'n/a'} | Stock: ${p.stock ?? 'n/a'} | Ship: ${p.shippingDays ?? 'n/a'}d</div>
