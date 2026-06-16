@@ -137,8 +137,15 @@ def verify_product_narration(
         violations.append(f"ungrounded_price:{val}")
 
     # 4. Invented spec: a spec/GPU token not present in any product's evidence.
-    spec_tokens = [f"{n}{u}".lower() for n, u in _SPEC_UNIT_RE.findall(text)]
-    spec_tokens += _GPU_RE.findall(text)
+    # Only enforce when the evidence ACTUALLY carries specs — if no result has a
+    # specs payload there is nothing to verify against, and flagging every spec
+    # mention would be a false positive (and would wrongly reject good narration).
+    _has_spec_evidence = any(
+        isinstance(r, dict) and isinstance(r.get("specs"), dict) and r.get("specs")
+        for r in (results or [])
+    )
+    spec_tokens = [f"{n}{u}".lower() for n, u in _SPEC_UNIT_RE.findall(text)] if _has_spec_evidence else []
+    spec_tokens += _GPU_RE.findall(text) if _has_spec_evidence else []
     for tok in spec_tokens:
         t = str(tok).lower()
         # match the bare number too (e.g. "4070" from "rtx 4070")

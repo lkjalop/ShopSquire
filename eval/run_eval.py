@@ -216,6 +216,14 @@ def eval_answer_shape() -> Dict[str, Any]:
 
     try:
         with db_session() as db:
+            # Deterministic catalog: clear any demo-seeded products so the numbers
+            # reflect ONLY the known seed (otherwise off-catalog items, e.g. a router,
+            # leak in and make the eval non-reproducible).
+            try:
+                db.execute(_sql("DELETE FROM inventory"))
+                db.execute(_sql("DELETE FROM products"))
+            except Exception:
+                pass
             for pid, sku, name, price, specs in _ANSWER_SHAPE_SEED:
                 db.execute(_sql(
                     "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "

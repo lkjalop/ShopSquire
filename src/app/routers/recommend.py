@@ -5385,6 +5385,38 @@ def _image_security_preamble_note(image_cv_signals_parsed: dict | None) -> str |
     return None
 
 
+_OFF_CATEGORY_PERIPHERAL_RE = re.compile(
+    r"\b(router|modem|mouse|keyboard|webcam|hdmi|ethernet cable|charger|adapter|"
+    r"docking station|usb hub|printer|scanner|headset|earbuds|speaker|microphone|"
+    r"flash drive|sd card|laptop stand|sleeve|backpack|carry bag|cooling pad)\b",
+    re.IGNORECASE,
+)
+
+
+def _demote_off_category(results: list, query: str | None) -> list:
+    """When the shopper clearly asked for a computer (laptop/desktop/PC), move obvious
+    peripherals/accessories to the END so an off-category item (e.g. a router) never
+    leads a 'gaming laptop' query. DEMOTES (reorders), never removes — safe on any input.
+
+    NOTE: the peripheral keyword list is laptop/computer FLAVOUR and belongs in store
+    config when the core is de-flavoured (agnostic-base principle); kept inline for the
+    laptop demo."""
+    try:
+        if not isinstance(results, list) or len(results) < 2:
+            return results
+        from src.app.services.query_classifier import coarse_product_category
+        cat = str(coarse_product_category(query or "") or "").lower()
+        if cat not in ("laptop", "desktop", "pc", "computer", "gaming_laptop"):
+            return results
+        in_cat, off_cat = [], []
+        for r in results:
+            name = str((r or {}).get("name") or "") if isinstance(r, dict) else ""
+            (off_cat if _OFF_CATEGORY_PERIPHERAL_RE.search(name) else in_cat).append(r)
+        return (in_cat + off_cat) if in_cat else results
+    except Exception:
+        return results
+
+
 def _query_is_standalone_search(query: str | None) -> bool:
     """True when the query carries its OWN search intent (a product category or a
     budget) — i.e. it stands alone and is NOT a bare back-reference to prior context.
@@ -5766,7 +5798,28 @@ def _build_budget_reasoning_note(query: str | None, results: list[dict], constra
 
 def _deterministic_assistant_message(query: str, results: list[dict], constraints: dict, brand_budget_answer: str = "") -> str | None:
     if not results:
-        return None
+        # No in-budget/in-catalog match → RECOVERY answer (CRAG): never a dead end
+        # and never empty. Always offer an explicit upgrade path. This is also the
+        # never-empty safety net for the main path (used at the `if not assistant_message`
+        # fallback) so a budget question on a thin result set still gets a verdict.
+        _bmax = constraints.get("budget_max")
+        _bmin = constraints.get("budget_min")
+        _brands = constraints.get("brands") or constraints.get("brand_hints") or []
+        try:
+            _brand_txt = f" {str(_brands[0]).upper()}" if _brands else ""
+        except Exception:
+            _brand_txt = ""
+        if _bmax is not None:
+            _band = f" under ${int(_bmax):,}"
+        elif _bmin is not None:
+            _band = f" above ${int(_bmin):,}"
+        else:
+            _band = ""
+        _path = ("You can raise your budget, allow other brands, or I can show the "
+                 "nearest in-stock options.")
+        if brand_budget_answer:
+            return f"{brand_budget_answer.rstrip()} {_path}"
+        return f"I couldn't find an in-stock{_brand_txt} match{_band}. {_path}"
     budget_min = constraints.get("budget_min")
     budget_max = constraints.get("budget_max")
 
@@ -11233,13 +11286,34 @@ def suggest(
                 )
             except Exception:
                 pass
+            # Recovery answer (CRAG): a no-match must NEVER be empty or a dead end.
+            # Set assistant_message (was missing -> blank answer) with an explicit
+            # upgrade path. Budget/brand-aware.
+            _bmax = constraints.get("budget_max"); _bmin = constraints.get("budget_min")
+            _brands = constraints.get("brands") or constraints.get("brand_hints") or []
+            try:
+                _brand_txt = f" {str(_brands[0]).upper()}" if _brands else ""
+            except Exception:
+                _brand_txt = ""
+            if _bmax is not None:
+                _band = f" under ${int(_bmax):,}"
+            elif _bmin is not None:
+                _band = f" above ${int(_bmin):,}"
+            else:
+                _band = ""
+            _no_match_msg = (
+                f"No in-stock{_brand_txt} match{_band} right now. "
+                "You can raise your budget, allow other brands, or I can show the "
+                "nearest in-stock options."
+            )
             # Ensure schema keys are present even when no candidates
             payload = {
                 "results": [],
                 "proposal": {"decision_mode": "rules", "ranked_skus": []},
                 "constraints_used": constraints,
                 "policy_version": flags.get("POLICY_VERSION", "v1"),
-                "message": "No matching products found.",
+                "message": _no_match_msg,
+                "assistant_message": _no_match_msg,
                 "degraded": use_rules,
                 "eligible": not simulate,
                 "view_mode": view_hint.get("view_mode"),
@@ -12656,6 +12730,10 @@ def suggest(
     constraints["_price_filter_meta"] = filter_meta_price or {}
     constraints["_strict_image_brand_hint"] = strict_image_brand_hint
     constraints["_inferred_image_brand"] = inferred_image_brand
+    # Off-category relevance guard: a computer query must not be led by a peripheral
+    # (e.g. a router for "gaming laptop"). Demote, never remove — propagates to both
+    # the product cards and the LLM summary below.
+    results = _demote_off_category(results, query)
     brand_budget_answer = _build_brand_budget_answer_v2(query, results, constraints)
     llm_summary_job_id = None
     # WS2.2 — comparison/knowledge answers are injected at the universal return
