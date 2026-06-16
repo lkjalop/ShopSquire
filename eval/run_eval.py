@@ -183,9 +183,94 @@ def eval_faithfulness_live() -> Dict[str, Any]:
     return {"n": len(cases), "ok": ok, "acc": ok / len(cases), "misses": misses}
 
 
+_ANSWER_SHAPE_SEED = [
+    ("p-as-msi", "AS-MSI", "MSI Katana 15", 159900, '{"gpu":"rtx 4060","display":"144hz","ram":"16gb"}'),
+    ("p-as-dell", "AS-DELL", "Dell G15", 139900, '{"gpu":"rtx 4050","display":"120hz","ram":"16gb"}'),
+    ("p-as-asus", "AS-ASUS", "ASUS Vivobook S16", 127800, '{"gpu":"integrated","display":"60hz","ram":"16gb"}'),
+    ("p-as-legion", "AS-LEG", "Lenovo Legion 5", 179900, '{"gpu":"rtx 4070","display":"165hz","ram":"32gb"}'),
+    ("p-as-creator", "AS-CRE", "ASUS ProArt Studio", 229900, '{"gpu":"rtx 4070","display":"4k","ram":"32gb"}'),
+    ("p-as-hp", "AS-HP", "HP Victus 15", 119900, '{"gpu":"rtx 4050","display":"144hz","ram":"16gb"}'),
+]
+
+
+def eval_answer_shape() -> Dict[str, Any]:
+    """Live answer-QUALITY: relevancy / faithfulness / recovery via real /suggest.
+
+    Reuses create_app + the production claim-guard; seeds a small deterministic
+    catalog so the numbers are reproducible (not demo-data dependent).
+    """
+    from fastapi.testclient import TestClient
+    from sqlalchemy import text as _sql
+    from src.app.main import create_app
+    from src.app.models.db import db_session
+    from eval.answer_shape_scorers import score_relevancy, score_recovery, score_faithfulness
+
+    try:
+        from tests.utils import default_headers
+        _headers = default_headers()
+    except Exception:
+        _headers = {}
+
+    app = create_app()
+    client = TestClient(app, headers=_headers)
+
+    try:
+        with db_session() as db:
+            for pid, sku, name, price, specs in _ANSWER_SHAPE_SEED:
+                db.execute(_sql(
+                    "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
+                    "VALUES (:id,:sku,:name,:price,'USD',:specs,1)"),
+                    {"id": pid, "sku": sku, "name": name, "price": price, "specs": specs})
+                db.execute(_sql(
+                    "INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
+                    "VALUES (:iid,:pid,5,'default')"),
+                    {"iid": f"inv-{pid}", "pid": pid})
+            db.commit()
+    except Exception as exc:
+        return {"metrics": {}, "misses": [f"seed failed: {exc}"]}
+
+    rows = _load("answer_shape.jsonl")
+    metrics = {"relevancy": [0, 0], "faithfulness": [0, 0], "recovery": [0, 0]}
+    misses: List[str] = []
+    for r in rows:
+        metric = r.get("metric", "relevancy")
+        params: Dict[str, Any] = {"uid": f"eval-{r['id']}", "query": r["query"]}
+        if r.get("budget_min") is not None:
+            params["budget_min"] = r["budget_min"]
+        if r.get("budget_max") is not None:
+            params["budget_max"] = r["budget_max"]
+        try:
+            resp = client.get("/api/v1/recommend/suggest", params=params)
+            body = resp.json() if resp.status_code == 200 else {}
+        except Exception as exc:
+            body = {}
+            misses.append(f"{r['id']}: request failed {exc}")
+        msg = str(body.get("assistant_message") or "")
+        results = body.get("results") or []
+        metrics[metric][1] += 1
+        if metric == "faithfulness":
+            grounded, viol = score_faithfulness(msg, results,
+                                                budget_min=r.get("budget_min"), budget_max=r.get("budget_max"))
+            ok = grounded
+            if not ok:
+                misses.append(f"{r['id']} [faith]: {','.join(viol[:3])}")
+        elif metric == "recovery":
+            ok = score_recovery(msg, r)
+            if not ok:
+                misses.append(f"{r['id']} [recovery]: {msg[:90]!r}")
+        else:
+            ok = score_relevancy(msg, r)
+            if not ok:
+                misses.append(f"{r['id']} [relevancy]: {msg[:90]!r}")
+        if ok:
+            metrics[metric][0] += 1
+    return {"metrics": metrics, "misses": misses}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true", help="also run live faithfulness (needs Ollama)")
+    ap.add_argument("--answer-shape", action="store_true", help="run live 3-metric answer-shape eval (needs DB + route)")
     ap.add_argument("-v", "--verbose", action="store_true", help="print individual misses")
     args = ap.parse_args()
 
@@ -223,6 +308,17 @@ def main() -> int:
         print(f"\n  Faithfulness (live)      {_pct(faith['ok'], faith['n'])}  no dropped-brand hallucination  ({faith['ok']}/{faith['n']})")
         if args.verbose:
             for m in faith["misses"]:
+                print(f"      - {m}")
+
+    if args.answer_shape:
+        ash = eval_answer_shape()
+        mtr = ash.get("metrics") or {}
+        print(f"\n  Answer-shape (live, 3-metric)")
+        for _label, _key in (("relevancy ", "relevancy"), ("faithfulness", "faithfulness"), ("recovery  ", "recovery")):
+            ok, n = (mtr.get(_key) or [0, 0])
+            print(f"    {_label}           {_pct(ok, n)}  ({ok}/{n})")
+        if args.verbose:
+            for m in ash.get("misses", []):
                 print(f"      - {m}")
 
     if args.verbose:
