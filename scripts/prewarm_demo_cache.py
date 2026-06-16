@@ -14,8 +14,15 @@ the cache is warmed for the SAME model the live server uses.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
+
+# Bootstrap repo root onto sys.path so `import src...` works when run as
+# `python scripts/prewarm_demo_cache.py` (the documented demo-day invocation).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # The canonical demo script. Edit to match what you'll actually type on stage.
 DEMO_QUERIES = [
