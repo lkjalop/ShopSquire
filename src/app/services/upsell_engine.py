@@ -108,10 +108,13 @@ def _hydrate_candidates(skus: List[str], stock_map: Dict[str, int]) -> List[Dict
     try:
         params = {f"s{i}": s for i, s in enumerate(skus)}
         placeholders = ", ".join(f":{k}" for k in params)
+        # NOTE: the products schema has no `brand` column (only sku/name/price_cents/
+        # image_url/specs) — selecting it threw and silently zeroed every upsell. Brand
+        # is derived from the name's leading token instead.
         with db_session() as db:
             rows = db.execute(
                 _text(
-                    f"SELECT sku, name, brand, price_cents, image_url "
+                    f"SELECT sku, name, price_cents, image_url "
                     f"FROM products WHERE sku IN ({placeholders}) AND COALESCE(active, 1) = 1"
                 ),
                 params,
@@ -122,12 +125,13 @@ def _hydrate_candidates(skus: List[str], stock_map: Dict[str, int]) -> List[Dict
             stock = stock_map.get(sku, 0)
             if stock == 0:
                 continue  # Only surface in-stock items
+            name = str(r[1] or "")
             out.append({
                 "sku": sku,
-                "name": str(r[1] or ""),
-                "brand": str(r[2] or ""),
-                "price_cents": int(r[3] or 0),
-                "image_url": str(r[4] or ""),
+                "name": name,
+                "brand": name.split()[0] if name.split() else "",
+                "price_cents": int(r[2] or 0),
+                "image_url": str(r[3] or ""),
                 "stock": stock,
             })
         return out
@@ -169,6 +173,60 @@ def _category_expansion_candidates(
         return []
 
 
+# ── Companion-type expansion (product_type classifier) ───────────────────────
+# The schema has no `category` column, so the use-case SQL above silently returns
+# nothing. This path uses the agnostic-core classifier instead: once a PRIMARY item
+# (laptop) is carted, surface the accessory TYPES that complete it (bag/audio/storage
+# /monitor/peripheral). Classification is by product name (bounded scan), so it needs
+# no schema change. The same taxonomy that EXCLUDES these from laptop search results
+# routes them here, to the cart, where they belong.
+
+def _product_type_for_sku(sku: str) -> Optional[str]:
+    try:
+        from src.app.services.product_classifier import classify_product_type
+        with db_session() as db:
+            row = db.execute(
+                _text("SELECT name FROM products WHERE sku = :s LIMIT 1"), {"s": sku}
+            ).fetchone()
+        return classify_product_type(row[0]) if row else None
+    except Exception as exc:
+        logger.debug("_product_type_for_sku failed: %s", exc)
+        return None
+
+
+def _companion_type_candidates(
+    added_type: str, exclude_skus: List[str], limit: int = 10
+) -> List[str]:
+    """In-stock SKUs whose product_type is a cart companion for *added_type*
+    (laptop -> bag/audio/storage/monitor/peripheral/networking)."""
+    try:
+        from src.app.services.product_classifier import (
+            classify_product_type,
+            companion_types_for,
+        )
+        wanted = set(companion_types_for(added_type))
+        if not wanted:
+            return []
+        excl = set(exclude_skus or [])
+        with db_session() as db:
+            rows = db.execute(
+                _text("SELECT sku, name FROM products WHERE COALESCE(active, 1) = 1 LIMIT 500")
+            ).fetchall()
+        out: List[str] = []
+        for sku, name in rows:
+            sku = str(sku)
+            if sku in excl:
+                continue
+            if classify_product_type(name) in wanted:
+                out.append(sku)
+                if len(out) >= limit:
+                    break
+        return out
+    except Exception as exc:
+        logger.debug("_companion_type_candidates failed: %s", exc)
+        return []
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def get_upsell_candidates(
@@ -193,14 +251,24 @@ def get_upsell_candidates(
     co_raw = _co_purchase_candidates(added_sku, limit=20)
     co_skus = [c["sku"] for c in co_raw if c["sku"] not in exclude_skus]
 
-    # Step 2: Use-case expansion
+    # Step 2: Use-case expansion (legacy; relies on p.category which the demo schema
+    # lacks, so usually empty — kept for stores that DO have a category column).
     use_case = _detect_use_case(session_query)
     uc_skus: List[str] = []
     if use_case:
         uc_skus = _category_expansion_candidates(use_case, exclude_skus=exclude_skus + co_skus, limit=10)
 
+    # Step 2b: Companion-TYPE expansion (classifier-driven; schema-free). When a laptop
+    # is carted, pull the accessory types that complete it (bag/audio/storage/...).
+    comp_skus: List[str] = []
+    added_type = _product_type_for_sku(added_sku)
+    if added_type:
+        comp_skus = _companion_type_candidates(
+            added_type, exclude_skus=exclude_skus + co_skus + uc_skus, limit=10
+        )
+
     # Step 3: Fetch stock levels for all candidates
-    all_candidate_skus = list(dict.fromkeys(co_skus + uc_skus))[:30]
+    all_candidate_skus = list(dict.fromkeys(co_skus + uc_skus + comp_skus))[:30]
     if not all_candidate_skus:
         return []
 
@@ -215,13 +283,35 @@ def get_upsell_candidates(
 
     # Assign reason label
     co_sku_set = set(co_skus)
+    comp_sku_set = set(comp_skus)
     for p in hydrated:
         if p["sku"] in co_sku_set:
             p["reason"] = "Frequently bought together"
+        elif p["sku"] in comp_sku_set:
+            p["reason"] = "Completes your setup"
         else:
             p["reason"] = f"Popular for {use_case.replace('_', ' ')} setups" if use_case else "You might also need"
 
     # Sort: co-purchase items first, then use-case items
     hydrated.sort(key=lambda p: (0 if p["sku"] in co_sku_set else 1, -p.get("stock", 0)))
+
+    # Diversify companion picks by type so the buyer sees a varied set (bag + monitor +
+    # audio + storage), not four bags. Co-purchase items are exempt (they're the signal).
+    try:
+        from src.app.services.product_classifier import classify_product_type
+        per_type: Dict[str, int] = {}
+        diversified: List[Dict[str, Any]] = []
+        for p in hydrated:
+            if p["sku"] in co_sku_set:
+                diversified.append(p)
+                continue
+            t = classify_product_type(p.get("name"))
+            if per_type.get(t, 0) >= 2:
+                continue
+            per_type[t] = per_type.get(t, 0) + 1
+            diversified.append(p)
+        hydrated = diversified
+    except Exception:
+        pass
 
     return hydrated[:max_results]
