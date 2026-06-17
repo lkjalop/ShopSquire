@@ -39,10 +39,31 @@ Usage (Sprint R5):
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("shopsquire.recommend_pipeline")
+
+# ── Per-leg timeout budgets (silent-hang guard) ───────────────────────────────
+# A hung scatter leg (slow vector DB / LLM caption / CV / fraud lookup) must NEVER
+# block the whole scatter-gather. Each leg gets a hard budget; on timeout it logs,
+# the gather(return_exceptions=True) captures the TimeoutError, and the leg falls back
+# to its empty default — the rest of the results still return within the request budget.
+_LEG_TIMEOUT_S = float(os.getenv("RECOMMEND_LEG_TIMEOUT_S", "8.0"))
+_CV_TIMEOUT_S = float(os.getenv("RECOMMEND_CV_TIMEOUT_S", "12.0"))
+_DEEP_TIMEOUT_S = float(os.getenv("RECOMMEND_DEEP_TIMEOUT_S", "10.0"))
+
+
+async def _bounded(coro, budget_s: float, label: str):
+    """Run `coro` under a hard timeout. On timeout, log + re-raise asyncio.TimeoutError
+    so the caller's gather(return_exceptions=True) captures it and falls back to default.
+    This is the single guard that turns an unbounded gather into a bounded one."""
+    try:
+        return await asyncio.wait_for(coro, timeout=budget_s)
+    except asyncio.TimeoutError:
+        logger.warning("scatter leg timed out: %s (budget=%.1fs)", label, budget_s)
+        raise
 
 
 # ── Stage 1 scatter agents ────────────────────────────────────────────────────
@@ -237,17 +258,25 @@ async def run_recommend_pipeline(
     # plus CV when an image is present. Index-safe unpacking so adding/removing a
     # leg can't silently misalign results.
     scatter_tasks = [
-        _scatter_db(query, budget_min, budget_max, brands, category),   # 0
-        _scatter_vector(query, top_k=top_n * 2),                        # 1
-        _scatter_fraud(uid, payload),                                   # 2
-        _scatter_caption(query, top_k=top_n * 2),                       # 3
+        _bounded(_scatter_db(query, budget_min, budget_max, brands, category), _LEG_TIMEOUT_S, "db"),       # 0
+        _bounded(_scatter_vector(query, top_k=top_n * 2), _LEG_TIMEOUT_S, "vector"),                        # 1
+        _bounded(_scatter_fraud(uid, payload), _LEG_TIMEOUT_S, "fraud"),                                    # 2
+        _bounded(_scatter_caption(query, top_k=top_n * 2), _LEG_TIMEOUT_S, "caption"),                      # 3
     ]
+    _leg_labels = ["db", "vector", "fraud", "caption"]
     cv_idx = None
     if image_bytes:
         cv_idx = len(scatter_tasks)
-        scatter_tasks.append(_scatter_cv(image_bytes, query, trace_id))
+        scatter_tasks.append(_bounded(_scatter_cv(image_bytes, query, trace_id), _CV_TIMEOUT_S, "cv"))
+        _leg_labels.append("cv")
 
     scatter_results = await asyncio.gather(*scatter_tasks, return_exceptions=True)
+
+    # Surface which legs timed out / errored (visible in trace; never silent).
+    _timed_out = [lbl for lbl, r in zip(_leg_labels, scatter_results) if isinstance(r, asyncio.TimeoutError)]
+    if _timed_out:
+        timings["scatter_timeouts"] = _timed_out
+        logger.warning("scatter legs timed out: %s", _timed_out)
 
     def _res(i, default):
         if i is None or i >= len(scatter_results):
@@ -283,8 +312,8 @@ async def run_recommend_pipeline(
     deepened = False
     if complexity_score >= 7 and candidates:
         deep_results = await asyncio.gather(
-            _deep_usecase(candidates, payload),
-            _deep_budget(candidates, budget_max),
+            _bounded(_deep_usecase(candidates, payload), _DEEP_TIMEOUT_S, "deep_usecase"),
+            _bounded(_deep_budget(candidates, budget_max), _DEEP_TIMEOUT_S, "deep_budget"),
             return_exceptions=True,
         )
         uc_ranked = deep_results[0] if not isinstance(deep_results[0], Exception) else None
