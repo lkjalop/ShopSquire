@@ -226,6 +226,15 @@ def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None
         pass
 
 
+# P1 strangler: these answer-shaping helpers now live in recommend_response_finalizer
+# (single owner). Re-exported here so existing call-sites + imports are unchanged.
+from src.app.services.recommend_response_finalizer import (  # noqa: E402
+    _recovery_answer,
+    _ensure_result_prices,
+    _dereference_product_labels,
+)
+
+
 def _formatter_enabled() -> bool:
     """COMMERCE_FORMATTER flag — when on, _with_trace runs the single-formatter
     normalization (_finalize_answer). Default off = byte-identical to today."""
@@ -339,32 +348,6 @@ def _maybe_apply_security_challenge(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _recovery_answer(constraints: Dict[str, Any] | None) -> str:
-    """Verdict-first no-match recovery (CRAG): never a dead end, always an upgrade
-    path; budget/brand-aware. Shared by the no-candidates branch and the formatter."""
-    c = constraints or {}
-    bmax = c.get("budget_max")
-    bmin = c.get("budget_min")
-    brands = c.get("brands") or c.get("brand_hints") or []
-    try:
-        brand_txt = f" {str(brands[0]).upper()}" if brands else ""
-    except Exception:
-        brand_txt = ""
-    band = ""
-    try:
-        if bmax is not None:
-            band = f" under ${int(bmax):,}"
-        elif bmin is not None:
-            band = f" above ${int(bmin):,}"
-    except Exception:
-        band = ""
-    return (
-        f"No in-stock{brand_txt} match{band} right now. "
-        "You can raise your budget, allow other brands, or I can show the "
-        "nearest in-stock options."
-    )
-
-
 def _finalize_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Single-formatter normalization (COMMERCE_FORMATTER): guarantee assistant_message
     is never empty. Every response funnels through _with_trace, so this ONE pass
@@ -381,56 +364,6 @@ def _finalize_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload["assistant_message"] = rec
         if not str(payload.get("message") or "").strip():
             payload["message"] = rec
-    except Exception:
-        pass
-    return payload
-
-
-def _ensure_result_prices(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Frontend product cards read result['price'] (dollars); the pipeline carries
-    'price_cents'. Populate 'price' from 'price_cents' so cards don't render $0.
-    Never raises."""
-    try:
-        for key in ("results", "products"):
-            items = payload.get(key)
-            if isinstance(items, list):
-                for r in items:
-                    if isinstance(r, dict) and not r.get("price"):
-                        pc = r.get("price_cents")
-                        if pc:
-                            r["price"] = round(int(pc) / 100)
-    except Exception:
-        pass
-    return payload
-
-
-def _dereference_product_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Replace LLM '[N]' citation placeholders in the answer with the product NAME.
-
-    The summary prompt asks the model to cite products by their [N] catalog label;
-    that notation must NOT leak into buyer-facing prose ("the [1] is a solid pick").
-    Map [N] -> results[N-1].name. Always-on (a buyer-visible bug fix). Never raises."""
-    try:
-        am = payload.get("assistant_message")
-        results = payload.get("results") or []
-        if am and "[" in am and results:
-            def _repl(m):
-                i = int(m.group(1)) - 1
-                if not (0 <= i < len(results) and isinstance(results[i], dict)):
-                    return m.group(0)
-                nm = str(results[i].get("name") or "").strip()
-                if not nm:
-                    return m.group(0)
-                # If the product name already precedes this label (LLM wrote
-                # "Name [N]"), the label is redundant -> drop it instead of doubling.
-                pre = m.string[max(0, m.start() - len(nm) - 6):m.start()].lower()
-                key = " ".join(nm.lower().split()[:2])
-                if key and key in pre:
-                    return ""
-                return " " + nm
-            out = re.sub(r"\s*\[(\d+)\]", _repl, str(am))
-            out = re.sub(r"\s{2,}", " ", out).replace(" .", ".").replace(" ,", ",")
-            payload["assistant_message"] = out.strip()
     except Exception:
         pass
     return payload
