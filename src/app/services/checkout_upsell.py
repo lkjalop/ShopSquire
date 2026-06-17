@@ -21,6 +21,31 @@ _SUSPICIOUS_NAME_PAT = re.compile(
     r"(?i)(ignore\s+previous|jailbreak|system\s+prompt|developer\s+mode|override|drop\s+table|<script)"
 )
 
+# Adaptive price-guard crossover. cart_price and candidate price are BOTH in CENTS.
+# Above this, the cart is "substantial" → only show upsells priced <= 70% of cart total.
+# At/below this, the cart is "low-value" → allow upsells up to 1.9x the cart (an accessory
+# cart can be grown). The literal 1200 here was a cents/dollars bug ($12, not $1200): every
+# real cart exceeded it, so the strict branch ALWAYS fired and the relaxed branch was dead.
+# $200 keeps laptop carts in the strict branch (unchanged) while reviving the relaxed branch
+# for genuine accessory carts. TODO(Phase 1): move to a StoreProfile policy slot per vertical.
+_ADAPTIVE_CART_CROSSOVER_CENTS = 20000  # $200.00
+
+
+def _passes_price_guard(price_cents: int, cart_price_cents: int) -> bool:
+    """Adaptive upsell price guard. All values in CENTS.
+
+    - Substantial cart (> crossover): accept only upsells priced <= 70% of cart total
+      (don't upsell something nearly as expensive as the whole cart).
+    - Low-value cart (0 < cart <= crossover): accept upsells up to 1.9x the cart
+      (an accessory cart can reasonably be grown).
+    - Unknown/zero cart: no guard.
+    """
+    if cart_price_cents > _ADAPTIVE_CART_CROSSOVER_CENTS:
+        return price_cents <= int(cart_price_cents * 0.7)
+    if 0 < cart_price_cents <= _ADAPTIVE_CART_CROSSOVER_CENTS:
+        return price_cents <= int(cart_price_cents * 1.9)
+    return True
+
 
 @dataclass
 class UpsellCandidate:
@@ -665,10 +690,8 @@ def recommend_checkout_upsell(
         if int(p.get("stock") or 0) <= 0:
             continue
         price = int(p.get("price_cents") or 0)
-        # Keep price guard adaptive: strict for expensive carts, relaxed for low-value carts.
-        if cart_price > 1200 and price > int(cart_price * 0.7):
-            continue
-        if cart_price > 0 and cart_price <= 1200 and price > int(cart_price * 1.9):
+        # Adaptive price guard (cents): strict for substantial carts, relaxed for low-value ones.
+        if not _passes_price_guard(price, cart_price):
             continue
         name = str(p.get("name") or sku)
         specs_dict = p.get("specs") or {}
