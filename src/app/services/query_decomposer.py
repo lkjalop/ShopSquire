@@ -65,7 +65,11 @@ _PRODUCT_LISTY_RE = re.compile(
 )
 
 # ── Use cases (multi-intent detection) ────────────────────────────────────────
-_USE_CASE_PATTERNS: Dict[str, re.Pattern] = {
+# FLAVOUR excised to the StoreProfile (R2). The inline dicts below are the proven
+# fallback (parity-tested in test_query_decomposer_profile.py); the active patterns are
+# loaded from config/store_profiles/<vertical>.json so a pharmacy store decomposes with
+# pharmacy use-cases, not laptop gaming/GPU assumptions.
+_USE_CASE_PATTERNS_FALLBACK: Dict[str, "re.Pattern"] = {
     "gaming": re.compile(r"\b(gaming|gamer|esports|fps|valorant|fortnite|cyberpunk|aaa|triple ?a|ray ?tracing)\b", re.I),
     "video_editing": re.compile(r"\b(video edit\w*|premiere|davinci|resolve|4k edit\w*|content creat\w*|youtub\w*|streaming|render\w*)\b", re.I),
     "programming": re.compile(r"\b(coding|programming|developer|software dev|docker|compile|android studio|xcode|ide)\b", re.I),
@@ -75,12 +79,47 @@ _USE_CASE_PATTERNS: Dict[str, re.Pattern] = {
     "office": re.compile(r"\b(office work|excel|spreadsheet|word processing|email|business use|productivity)\b", re.I),
     "study": re.compile(r"\b(student|university|uni|college|study|school work|note ?taking)\b", re.I),
 }
+_DGPU_USE_CASES_FALLBACK = {"gaming", "video_editing", "ml_ai", "cad_3d"}
+_PORTABLE_RE_FALLBACK = re.compile(r"\b(portable|lightweight|light ?weight|thin and light|ultrabook|ultra ?portable|travel|carry around|commut\w*)\b", re.I)
 
-# Use cases that imply a dedicated GPU.
-_DGPU_USE_CASES = {"gaming", "video_editing", "ml_ai", "cad_3d"}
 
-# Portability phrasing.
-_PORTABLE_RE = re.compile(r"\b(portable|lightweight|light ?weight|thin and light|ultrabook|ultra ?portable|travel|carry around|commut\w*)\b", re.I)
+def _load_use_case_patterns() -> Dict[str, "re.Pattern"]:
+    try:
+        from src.app.platform.store_profile import profile_slot
+        raw = profile_slot("use_case_patterns", default=None)
+        if isinstance(raw, dict) and raw:
+            return {uc: re.compile(p, re.I) for uc, p in raw.items()}
+    except Exception:
+        pass
+    return _USE_CASE_PATTERNS_FALLBACK
+
+
+def _load_dgpu_use_cases() -> set:
+    try:
+        from src.app.platform.store_profile import profile_slot
+        ucs = profile_slot("use_cases", default={}) or {}
+        s = {uc for uc, meta in ucs.items() if isinstance(meta, dict) and meta.get("needs_dedicated_gpu")}
+        if s:
+            return s
+    except Exception:
+        pass
+    return _DGPU_USE_CASES_FALLBACK
+
+
+def _load_portable_re() -> "re.Pattern":
+    try:
+        from src.app.platform.store_profile import profile_slot
+        p = profile_slot("portable_pattern", default=None)
+        if p:
+            return re.compile(p, re.I)
+    except Exception:
+        pass
+    return _PORTABLE_RE_FALLBACK
+
+
+_USE_CASE_PATTERNS: Dict[str, "re.Pattern"] = _load_use_case_patterns()
+_DGPU_USE_CASES = _load_dgpu_use_cases()
+_PORTABLE_RE = _load_portable_re()
 
 
 @dataclass

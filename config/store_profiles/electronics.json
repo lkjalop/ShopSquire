@@ -50,6 +50,19 @@
     "gpu_model":  {"pattern": "\\brtx\\s*(\\d{3,4})\\b", "field": "gpu_model_hint", "prefix": "rtx "}
   },
 
+  "_use_case_patterns_comment": "Detection regexes excised from query_decomposer._USE_CASE_PATTERNS (R2). Sources are byte-identical to the inline fallback (parity-tested). dgpu_use_cases derives from use_cases[*].needs_dedicated_gpu.",
+  "use_case_patterns": {
+    "gaming": "\\b(gaming|gamer|esports|fps|valorant|fortnite|cyberpunk|aaa|triple ?a|ray ?tracing)\\b",
+    "video_editing": "\\b(video edit\\w*|premiere|davinci|resolve|4k edit\\w*|content creat\\w*|youtub\\w*|streaming|render\\w*)\\b",
+    "programming": "\\b(coding|programming|developer|software dev|docker|compile|android studio|xcode|ide)\\b",
+    "ml_ai": "\\b(machine learning|deep learning|ai training|train\\w* (a )?model|llm|cuda|tensor|pytorch|data science)\\b",
+    "cad_3d": "\\b(cad|autocad|solidworks|revit|3d model\\w*|blender|rendering|engineering student)\\b",
+    "photo": "\\b(photo edit\\w*|photoshop|lightroom|raw photo)\\b",
+    "office": "\\b(office work|excel|spreadsheet|word processing|email|business use|productivity)\\b",
+    "study": "\\b(student|university|uni|college|study|school work|note ?taking)\\b"
+  },
+  "portable_pattern": "\\b(portable|lightweight|light ?weight|thin and light|ultrabook|ultra ?portable|travel|carry around|commut\\w*)\\b",
+
   "upsell_companions": {
     "laptop":  ["bag","audio","storage","monitor","peripheral","networking"],
     "desktop": ["monitor","peripheral","audio","storage","networking"],
