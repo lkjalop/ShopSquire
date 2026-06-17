@@ -5576,14 +5576,6 @@ def _image_security_preamble_note(image_cv_signals_parsed: dict | None) -> str |
     return None
 
 
-_OFF_CATEGORY_PERIPHERAL_RE = re.compile(
-    r"\b(router|modem|mouse|keyboard|webcam|hdmi|ethernet cable|charger|adapter|"
-    r"docking station|usb hub|printer|scanner|head ?set|cloud flight|earbuds|"
-    r"speaker|microphone|monitor|flash drive|sd card|laptop stand|sleeve|"
-    r"backpack|carry bag|cooling pad)\b",
-    re.IGNORECASE,
-)
-
 
 def _exclude_off_category_in_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Apply the off-category exclusion at the response choke point (after ALL ranking
