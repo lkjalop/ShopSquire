@@ -8605,7 +8605,10 @@ def suggest(
         # Each brand has a realistic price floor (USD). When the stated budget is below
         # the floor we surface a clarifying question so the user can confirm intent
         # rather than silently returning mismatched results.
-        _BRAND_PRICE_FLOORS = {
+        # FLAVOUR excised to the StoreProfile (R1: first core/adapter cut). The inline
+        # dict is the proven fallback if the profile is unavailable — characterization
+        # test asserts the two are identical for electronics.
+        _BRAND_PRICE_FLOORS_FALLBACK = {
             "apple":     1200,   # MacBook Air starts ~$1099, Pro from $1599
             "msi":       900,    # MSI gaming laptops rarely below $900
             "razer":     1200,   # Razer Blade thin/stealth starts ~$1200
@@ -8618,6 +8621,11 @@ def suggest(
             "microsoft": 900,    # Surface Pro/Laptop
             "samsung":   800,    # Galaxy Book Pro
         }
+        try:
+            from src.app.platform.store_profile import brand_price_floors as _bpf
+            _BRAND_PRICE_FLOORS = _bpf() or _BRAND_PRICE_FLOORS_FALLBACK
+        except Exception:
+            _BRAND_PRICE_FLOORS = _BRAND_PRICE_FLOORS_FALLBACK
         _budget_mismatch_question: Dict[str, Any] | None = None
         if (
             inferred_brand
