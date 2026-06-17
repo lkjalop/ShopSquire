@@ -2414,25 +2414,14 @@ _PERSONA_PATTERNS: dict[str, list[str]] = {
 }
 
 
-_CHECKOUT_INTENT_PHRASES = (
-    "buy this", "buy now", "buy it", "purchase this", "purchase it",
-    "add to cart", "add to my cart", "add it to cart",
-    "i want to buy", "i'll buy", "i want this one",
-    "i'll take it", "i'll take this", "i'll get this",
-    "get this one", "order this", "place order", "proceed to checkout",
-    "go to checkout", "checkout now", "i'm ready to buy",
-    "ready to purchase", "take my money", "how do i buy",
-    "how to buy", "how to order", "where do i buy",
-    "can i buy", "let me buy", "i want to order",
+# Strangler: checkout-handoff leaf extracted to services/checkout_handoff.py.
+# Re-exported so existing call-sites + imports are unchanged.
+from src.app.services.checkout_handoff import (  # noqa: E402
+    CHECKOUT_INTENT_PHRASES as _CHECKOUT_INTENT_PHRASES,
+    detect_checkout_intent as _detect_checkout_intent,
+    apply_checkout_handoff,
 )
-
-
-def _detect_checkout_intent(query: str | None) -> bool:
-    """Return True if the query contains a clear purchase-intent signal."""
-    q = str(query or "").lower().strip()
-    if not q:
-        return False
-    return any(phrase in q for phrase in _CHECKOUT_INTENT_PHRASES)
+from src.app.services.recommend_context import RecommendContext  # noqa: E402
 
 
 def _detect_buyer_persona(query: str | None) -> str | None:
@@ -13976,35 +13965,10 @@ def suggest(
     except Exception:
         pass
 
-    # ── Checkout handoff: detect purchase intent and surface a checkout_action ──
-    # The AI stays in advisory mode — it never touches money directly.  When the
-    # user signals intent to buy we emit a structured checkout_action so the
-    # frontend can route them to the deterministic payment flow.
-    try:
-        if _detect_checkout_intent(query):
-            _top_result = (redacted.get("results") or [{}])[0] if redacted.get("results") else {}
-            _top_sku = str(_top_result.get("sku") or "").strip()
-            _top_price = _top_result.get("price_cents") or (
-                int(float(_top_result.get("price") or 0) * 100) if _top_result.get("price") else None
-            )
-            redacted["checkout_action"] = {
-                "intent": "checkout",
-                "suggested_sku": _top_sku or None,
-                "suggested_price_cents": _top_price,
-                "endpoint": "/api/v1/payments/checkout-initiate",
-                "order_create_endpoint": "/api/v1/orders/create",
-                "message": (
-                    f"Ready to buy {_top_result.get('name', 'this item')}? "
-                    "Create an order and proceed to checkout."
-                ) if _top_sku else "Ready to proceed? Create an order and go to checkout.",
-                "flow": [
-                    {"step": 1, "action": "POST /api/v1/orders/create", "description": "Create order record with SKUs"},
-                    {"step": 2, "action": "POST /api/v1/payments/checkout-initiate", "description": "Initiate Stripe payment"},
-                    {"step": 3, "action": "Stripe Elements (client-side)", "description": "Collect and confirm payment"},
-                ],
-            }
-    except Exception:
-        pass
+    # ── Checkout handoff (extracted leaf stage → services/checkout_handoff.py) ──
+    # Advisory-only: emits a structured checkout_action routing the buyer to the
+    # deterministic payment flow. The AI never settles money. See module docstring.
+    redacted = apply_checkout_handoff(redacted, RecommendContext(query=query, uid=uid))
 
     # Final-word transforms on the actual returned payload (the _with_trace choke point
     # runs BEFORE the LLM summary is generated on the main path): replace [N] citation
