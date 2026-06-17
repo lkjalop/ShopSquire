@@ -30,12 +30,27 @@ def test_products_has_required_base_columns():
     assert not missing, f"products schema missing base columns: {missing}"
 
 
-@pytest.mark.xfail(reason="schema hardening pending (Thread 2 / step 5): brand/category/"
-                          "product_type are referenced by candidate_retriever.py + "
-                          "upsell_engine.py but not in the products schema", strict=False)
 def test_products_has_columns_referenced_by_code():
+    # P2 landed these: candidate_retriever + upsell SELECT p.brand/p.category, and the
+    # product_classifier persists product_type. (Was xfail before schema hardening.)
     cols = _products_columns()
-    # Columns the codebase SELECTs from products (grep: p.brand / p.category / product_type).
-    referenced = {"brand", "category", "product_type"}
+    referenced = {"brand", "category", "product_type", "attributes"}
     missing = referenced - cols
     assert not missing, f"code references products columns that do not exist: {missing}"
+
+
+def test_autonomy_support_tables_exist():
+    # P2: the moat's data foundation (bounded autonomy + replay + data gravity).
+    from sqlalchemy import text as _t
+    with db_session() as db:
+        names = {
+            str(r[0]) for r in db.execute(
+                _t("SELECT name FROM sqlite_master WHERE type='table'")
+            ).fetchall()
+        }
+    required = {
+        "decision_logs", "policy_evaluation_log", "exception_queue",
+        "retry_tracking", "ai_interaction_log", "price_history", "inventory_level_history",
+    }
+    missing = required - names
+    assert not missing, f"autonomy-support tables missing: {missing}"

@@ -285,6 +285,39 @@ def _ensure_minimal_sqlite_tables(bind):
                     ))
                 except Exception:
                     pass
+                # ── Autonomy-support tables (P2) ──────────────────────────────
+                # The moat's data foundation: bounded autonomy needs a full policy/
+                # exception/retry/AI-interaction trace + price/inventory history for
+                # replay and forecasting. decision_logs (above) is the WHY; these are
+                # the policy trace, resilience layer, and forecasting substrate.
+                for _ddl in (
+                    "CREATE TABLE IF NOT EXISTS policy_evaluation_log (\n"
+                    "  id TEXT PRIMARY KEY, decision_id TEXT, tenant_id TEXT, action TEXT,\n"
+                    "  value_cents INT, decision TEXT, rule_id TEXT, reason TEXT,\n"
+                    "  authority TEXT, context TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    "CREATE TABLE IF NOT EXISTS exception_queue (\n"
+                    "  id TEXT PRIMARY KEY, tenant_id TEXT, domain TEXT, kind TEXT,\n"
+                    "  payload TEXT, outcome TEXT, status TEXT DEFAULT 'open',\n"
+                    "  created_at TEXT DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)",
+                    "CREATE TABLE IF NOT EXISTS retry_tracking (\n"
+                    "  id TEXT PRIMARY KEY, ref_id TEXT, operation TEXT, attempts INT DEFAULT 0,\n"
+                    "  max_attempts INT DEFAULT 3, last_error TEXT, next_attempt TEXT,\n"
+                    "  status TEXT DEFAULT 'pending', created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    "CREATE TABLE IF NOT EXISTS ai_interaction_log (\n"
+                    "  id TEXT PRIMARY KEY, tenant_id TEXT, surface TEXT, model TEXT,\n"
+                    "  request TEXT, response TEXT, outcome TEXT, latency_ms INT,\n"
+                    "  created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    "CREATE TABLE IF NOT EXISTS price_history (\n"
+                    "  id TEXT PRIMARY KEY, sku TEXT, price_cents INT, currency TEXT,\n"
+                    "  source TEXT, recorded_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    "CREATE TABLE IF NOT EXISTS inventory_level_history (\n"
+                    "  id TEXT PRIMARY KEY, sku TEXT, warehouse TEXT, stock INT,\n"
+                    "  recorded_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                ):
+                    try:
+                        conn.execute(sql_text(_ddl))
+                    except Exception:
+                        pass
                 # Rules definitions (used by RuleStore / RuleEngine)
                 try:
                     conn.execute(
@@ -843,17 +876,27 @@ def _ensure_minimal_sqlite_tables(bind):
                         "  currency TEXT NOT NULL DEFAULT 'USD',\n"
                         "  image_url TEXT,\n"
                         "  specs TEXT,\n"
+                        "  product_type TEXT,\n"
+                        "  brand TEXT,\n"
+                        "  category TEXT,\n"
+                        "  attributes TEXT,\n"
                         "  active INTEGER DEFAULT 1,\n"
                         "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n"
                         ")"
                     ))
                 except Exception:
                     pass
-                # Backfill columns on existing tables if created before schema update
-                try:
-                    conn.execute(sql_text("ALTER TABLE products ADD COLUMN image_url TEXT"))
-                except Exception:
-                    pass
+                # Backfill columns on existing tables if created before schema update.
+                # product_type/brand/category/attributes are the agnostic-core keystone
+                # (the brand/category cols candidate_retriever + upsell already SELECT).
+                for _col, _type in (
+                    ("image_url", "TEXT"), ("product_type", "TEXT"), ("brand", "TEXT"),
+                    ("category", "TEXT"), ("attributes", "TEXT"),
+                ):
+                    try:
+                        conn.execute(sql_text(f"ALTER TABLE products ADD COLUMN {_col} {_type}"))
+                    except Exception:
+                        pass
                 try:
                     conn.execute(sql_text(
                         "CREATE TABLE IF NOT EXISTS inventory (\n"
