@@ -55,3 +55,30 @@ def test_strict_mode_raises_on_missing_dir(monkeypatch):
     with pytest.raises(Exception):
         get_store_profile("electronics")
     reset_cache()
+
+
+def test_strict_mode_fails_closed_on_missing_named_profile(monkeypatch):
+    # P0 fix: a typo'd / unknown tenant profile must NOT silently become electronics in
+    # strict mode — it must fail closed so pharmacy can't be routed through laptop rules.
+    monkeypatch.setenv("STORE_PROFILE_STRICT", "1")
+    reset_cache()
+    with pytest.raises(FileNotFoundError):
+        get_store_profile("pharmacy_typo_zzz")
+    reset_cache()
+
+
+def test_strict_mode_loads_existing_profile(monkeypatch):
+    # Fail-closed must not break the happy path: a real profile still loads under strict.
+    monkeypatch.setenv("STORE_PROFILE_STRICT", "1")
+    reset_cache()
+    assert get_store_profile("pharmacy").get("id") == "pharmacy"
+    assert get_store_profile("electronics").get("id") == "electronics"
+    reset_cache()
+
+
+def test_nonstrict_still_falls_back_on_missing_named_profile(monkeypatch):
+    # Dev/test convenience preserved: without strict, unknown profile falls back to electronics.
+    monkeypatch.setenv("STORE_PROFILE_STRICT", "0")
+    reset_cache()
+    assert get_store_profile("pharmacy_typo_zzz").get("id") == "electronics"
+    reset_cache()

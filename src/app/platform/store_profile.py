@@ -48,6 +48,12 @@ def get_store_profile(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, Any]:
     pid = (profile_id or _DEFAULT_PROFILE_ID).strip() or _DEFAULT_PROFILE_ID
     path = _profiles_dir() / f"{pid}.json"
     if not path.exists():
+        # Fail-closed: in strict mode (prod/CI) a missing requested profile MUST NOT silently
+        # become electronics — a tenant/profile typo routing pharmacy through laptop rules is a
+        # correctness + compliance hazard. Only dev/test (non-strict) falls back for convenience.
+        if strict and pid != _DEFAULT_PROFILE_ID:
+            _log.error("store profile %r not found at %s and STORE_PROFILE_STRICT=1 — failing closed", pid, path)
+            raise FileNotFoundError(f"store profile {pid!r} not found (strict mode forbids electronics fallback)")
         path = _profiles_dir() / f"{_DEFAULT_PROFILE_ID}.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
