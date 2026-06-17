@@ -96,7 +96,7 @@ def is_requirements_query(query: Optional[str]) -> bool:
 _BUDGET_QUESTION_RE = re.compile(
     r"\b(is\s+\$|is\s+that\s+enough|is\s+my\s+budget|enough\s+for|"
     r"can\s+i\s+(afford|get)|will\s+\$|how\s+much\s+does|"
-    r"is\s+\d+\s+(dollars?|usd|aud|gbp|eur)?\s+(enough|ok|okay|sufficient)|"
+    r"is\s+\$?\d+\s+(?:(?:dollars?|usd|aud|gbp|eur|k)\s+)?(?:enough|ok|okay|sufficient)|"
     r"(good|decent|ok)\s+budget)\b",
     re.IGNORECASE,
 )
