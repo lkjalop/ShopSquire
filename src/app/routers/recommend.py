@@ -236,15 +236,11 @@ from src.app.services.recommend_response_finalizer import (  # noqa: E402
     _demote_off_category,
     _annotate_type_and_price_integrity,
     _composer_enabled,
+    _formatter_enabled,
     _build_security_challenge_text,
     _maybe_apply_security_challenge,
+    finalize_response_payload,
 )
-
-
-def _formatter_enabled() -> bool:
-    """COMMERCE_FORMATTER flag — when on, _with_trace runs the single-formatter
-    normalization (_finalize_answer). Default off = byte-identical to today."""
-    return str(os.getenv("COMMERCE_FORMATTER", "0")).strip().lower() in ("1", "true", "yes")
 
 
 def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
@@ -14005,16 +14001,11 @@ def suggest(
     # Final-word transforms on the actual returned payload (the _with_trace choke point
     # runs BEFORE the LLM summary is generated on the main path): replace [N] citation
     # labels with product names, and guarantee a non-empty answer.
-    redacted = _ensure_result_prices(redacted)       # price_cents -> price (no $0 cards)
-    redacted["results"] = _demote_off_category(redacted.get("results") or [], None)  # off-TYPE guard
-    if isinstance(redacted.get("products"), list):
-        redacted["products"] = redacted["results"]
-    redacted = _annotate_type_and_price_integrity(redacted)  # price-poisoning guard
-    redacted = _dereference_product_labels(redacted)
-    redacted = _compose_compound_if_needed(redacted, redacted.get("trace_id"))  # multi-part answer
-    redacted = _maybe_apply_security_challenge(redacted)  # educational image-security challenge
-    if _formatter_enabled():
-        redacted = _finalize_answer(redacted)
+    # LLM-orchestration (compound multi-part answer) stays in the route — it needs a
+    # model call + request context. Then the SINGLE pure-transform pipeline owns all
+    # answer shaping (price-fill, off-type, poisoning guard, [N] deref, security, formatter).
+    redacted = _compose_compound_if_needed(redacted, redacted.get("trace_id"))
+    redacted = finalize_response_payload(redacted)
     return redacted
 
 

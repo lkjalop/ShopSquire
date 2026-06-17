@@ -206,6 +206,37 @@ def _composer_enabled() -> bool:
     return str(os.getenv("COMMERCE_COMPOSER", "0")).strip().lower() in ("1", "true", "yes")
 
 
+def _formatter_enabled() -> bool:
+    """COMMERCE_FORMATTER flag — gates the never-empty single-formatter pass."""
+    return str(os.getenv("COMMERCE_FORMATTER", "0")).strip().lower() in ("1", "true", "yes")
+
+
+def finalize_response_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """SINGLE owner of buyer-facing answer shaping (P1 one-writer).
+
+    Runs the pure response transforms in one fixed order so the result is identical
+    no matter which branch produced the payload. Idempotent (each step only fills/
+    excludes/flags what isn't already done), so it is safe to call at more than one
+    choke point. Does NOT do I/O — the LLM-dependent compound composition stays in the
+    route (it needs a model call + request context) and runs BEFORE this.
+
+    Order: price-fill -> off-type exclusion -> price-poisoning guard -> [N] deref ->
+    security challenge -> never-empty formatter. Never raises."""
+    try:
+        payload = _ensure_result_prices(payload)                       # price_cents -> price
+        payload["results"] = _demote_off_category(payload.get("results") or [], None)
+        if isinstance(payload.get("products"), list):
+            payload["products"] = payload["results"]
+        payload = _annotate_type_and_price_integrity(payload)          # price-poisoning guard
+        payload = _dereference_product_labels(payload)                 # [N] -> product name
+        payload = _maybe_apply_security_challenge(payload)             # educational image-security
+        if _formatter_enabled():
+            payload = _finalize_answer(payload)                        # never-empty guarantee
+    except Exception:
+        pass
+    return payload
+
+
 def _build_security_challenge_text(payload: Dict[str, Any]) -> str | None:
     """Gather image-security signals from the payload and produce ONE educational,
     category-specific buyer challenge. Never echoes the payload."""
