@@ -173,7 +173,11 @@ class EgressDomainGuard:
             return True
         hostname = self._extract_hostname(url)
         if not hostname:
-            return True  # can't resolve — let the request proceed
+            # FAIL CLOSED: an unparseable hostname on an ENABLED allowlist must be
+            # denied, not allowed. (Was `return True` — a fail-open hole: a malformed
+            # or obfuscated URL bypassed the SSRF/exfil allowlist entirely.)
+            _log.warning("egress_allowlist deny: unparseable hostname for url=%r", url)
+            return False
         # Dead-drop check overrides allowlist
         if self._is_dead_drop(hostname):
             return False

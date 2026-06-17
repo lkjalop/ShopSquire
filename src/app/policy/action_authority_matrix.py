@@ -248,12 +248,30 @@ def evaluate(
             )
             return verdict
 
-        # No matching rule — default allow with audit log
-        logger.info("policy_matrix no_rule action=%s value_cents=%d — default allow", action, value_aud_cents)
+        # No matching rule — FAIL CLOSED. An unmapped privileged action is an unknown
+        # risk, so it must not execute silently. Freeze + queue for human review (not a
+        # hard BLOCK, which would over-alert) and raise it to SIEM for visibility.
+        # (Was default-ALLOW — a fail-open hole: any action without an explicit rule
+        # executed unchecked. All current callers pass mapped actions, so this only
+        # affects genuinely unknown actions.) Override via POLICY_MATRIX_DEFAULT_ALLOW=1
+        # ONLY for a deliberate, audited migration window.
+        import os as _os
+        if str(_os.getenv("POLICY_MATRIX_DEFAULT_ALLOW", "0")).strip().lower() in ("1", "true", "yes"):
+            logger.warning("policy_matrix no_rule action=%s value_cents=%d — default ALLOW (override flag set)", action, value_aud_cents)
+            return PolicyVerdict(
+                decision=AuthDecision.ALLOW,
+                reason="No matching policy rule — default allow (POLICY_MATRIX_DEFAULT_ALLOW override)",
+                rule_id="DEFAULT_ALLOW_OVERRIDE",
+                context=ctx,
+            )
+        logger.warning("policy_matrix no_rule action=%s value_cents=%d — FAIL CLOSED (human_review)", action, value_aud_cents)
         return PolicyVerdict(
-            decision=AuthDecision.ALLOW,
-            reason="No matching policy rule — default allow",
-            rule_id="DEFAULT",
+            decision=AuthDecision.HUMAN_REVIEW,
+            reason="No matching policy rule — fail closed (unknown action requires human review)",
+            rule_id="DEFAULT_FAIL_CLOSED",
+            alert_siem=True,
+            create_ticket=True,
+            ticket_priority="high",
             context=ctx,
         )
 
