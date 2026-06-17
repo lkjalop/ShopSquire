@@ -1,0 +1,42 @@
+{
+  "_comment": "PHARMACY StoreProfile — the agnostic proof. Same shape as electronics.json, totally different flavour. As each electronics flavour slot is excised from the core into a profile read, this profile proves the core stays agnostic: a pharmacy query must NOT inherit laptop brands, GPU specs, or laptop price bands. Today only brand_price_floors + nqe_brand_detect are profile-backed; this profile grows as R2/R3 excise more slots. A high-stakes/regulated vertical is the right proof because the control/evidence moat (claim-guard, policy gate, audit) matters most here.",
+  "id": "pharmacy",
+  "version": "2026-06-18",
+
+  "known_brands": ["panadol","nurofen","chemists own","blackmores","swisse","cenovis","bioglan","sukin","cetaphil","dettol","listerine","betadine"],
+  "nqe_brand_detect": ["panadol","nurofen","blackmores","swisse","cenovis","bioglan","sukin","cetaphil","dettol"],
+
+  "primary_types": ["medicine","supplement","personal_care"],
+  "price_bands_usd": {"medicine":[2,80],"supplement":[5,120],"personal_care":[3,60],"first_aid":[2,50],"baby":[3,90],"device":[10,400]},
+  "brand_price_floors_usd": {"blackmores":10,"swisse":8,"cetaphil":8,"cenovis":6},
+
+  "use_cases": {
+    "pain_relief":  {"nqe_question": "ask_symptom_type"},
+    "cold_flu":     {"nqe_question": "ask_symptom_type"},
+    "allergy":      {"nqe_question": "ask_drowsy_preference"},
+    "vitamins":     {"nqe_question": "ask_health_goal"},
+    "skincare":     {"nqe_question": "ask_skin_type"},
+    "baby_care":    {"nqe_question": "ask_age_band"}
+  },
+
+  "spec_constraints": {
+    "pack_size":   {"pattern": "\\b(\\d{1,3})\\s*(pack|tablets|capsules|caps)\\b", "field": "pack_size_min"},
+    "strength_mg": {"pattern": "\\b(\\d{2,4})\\s*mg\\b", "field": "strength_mg"}
+  },
+
+  "_regulatory_comment": "Pharmacy is WHY the control moat matters: dosage/age/schedule are POLICY, not recommendation. These belong in the merchant policy + execution gate, not the recommender.",
+  "policy_flags": {
+    "schedule_gated": true,
+    "age_restricted_types": ["medicine"],
+    "no_health_claims_without_evidence": true,
+    "max_pack_per_order_enforced": true
+  },
+
+  "upsell_companions": {
+    "medicine":      ["first_aid","device"],
+    "supplement":    ["personal_care"],
+    "personal_care": ["supplement"]
+  },
+
+  "cv_returns_pack": "electronics"
+}
