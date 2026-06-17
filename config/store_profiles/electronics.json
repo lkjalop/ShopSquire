@@ -1,0 +1,58 @@
+{
+  "_comment": "ELECTRONICS StoreProfile (P5, electronics-first). This is the CONSOLIDATED home for everything laptop/electronics-SPECIFIC that is currently hardcoded across recommend.py (~115 flavour lines), use_case_advisor.py, query_decomposer.py, nqe.py, plus the existing store_vocab.json + verticals/electronics.json. It is BOTH the scaffold for the agnostic core AND the excision map: every slot below names a place in code that should READ from here instead of hardcoding. The agents (Candidate_Retrieval, Product_Ranking, Spec_Filter, Device_Match, Budget_Guard, NQE, Policy_Gate, ...) are agnostic MECHANISMS and do NOT move; only this FLAVOUR moves. Adding a second profile (pharmacy.json) with the same shape is the agnostic proof.",
+  "id": "electronics",
+  "version": "2026-06-18",
+
+  "_excision_source": {
+    "known_brands": "recommend.py _BRAND_LABEL_PATTERNS + store_vocab.known_brands",
+    "brand_price_floors": "recommend.py _BRAND_PRICE_FLOORS (~line 8645)",
+    "product_type_rules": "store_vocab.product_type_rules (already config)",
+    "use_cases": "use_case_advisor.py + query_decomposer._USE_CASE_PATTERNS + _DGPU_USE_CASES",
+    "spec_constraints": "query_decomposer._extract_hard_constraints (refresh_hz/ram/storage/gpu regexes)",
+    "nqe_domain_questions": "flows/nqe.py ask_high_school_activity / ask_university_subject / ask_corporate_work_type",
+    "off_category / primary_types": "store_vocab.primary_types (already config)",
+    "cv_returns": "config/verticals/electronics.json (views/damage/ocr/roi)"
+  },
+
+  "known_brands": ["msi","asus","lenovo","dell","hp","acer","razer","apple","macbook","gigabyte","alienware","samsung","microsoft","surface","lg","sony","intel","amd","nvidia","toshiba"],
+  "brand_label_patterns": {
+    "apple": ["macbook","imac","mac mini","mac pro","apple"],
+    "lenovo": ["thinkpad","ideapad","legion","yoga","lenovo"],
+    "dell": ["xps","inspiron","alienware","latitude","dell"],
+    "hp": ["spectre","envy","omen","elitebook","probook","hp"],
+    "asus": ["rog","zenbook","vivobook","tuf","asus"],
+    "acer": ["predator","aspire","swift","nitro","acer"],
+    "msi": ["msi","stealth","raider","titan","creator","katana"]
+  },
+  "brand_price_floors_usd": {"apple":1200,"msi":900,"razer":1200,"gigabyte":1000,"lenovo":500,"dell":500,"hp":400,"asus":400,"acer":350,"microsoft":900,"samsung":800},
+
+  "primary_types": ["laptop","desktop"],
+  "price_bands_usd": {"laptop":[350,6000],"desktop":[400,9000],"tablet":[150,3000],"monitor":[80,3000],"networking":[25,900],"audio":[10,600],"storage":[10,800],"bag":[15,400],"peripheral":[5,500],"printer":[40,1500]},
+
+  "use_cases": {
+    "gaming":        {"needs_dedicated_gpu": true,  "spec_floors": {"refresh_hz_min": 144}, "nqe_question": "ask_gaming_depth"},
+    "video_editing": {"needs_dedicated_gpu": true,  "spec_floors": {"ram_gb_min": 16}},
+    "ml_ai":         {"needs_dedicated_gpu": true,  "spec_floors": {"ram_gb_min": 16}},
+    "cad_3d":        {"needs_dedicated_gpu": true},
+    "programming":   {"spec_floors": {"ram_gb_min": 16}},
+    "study":         {"nqe_question": "ask_university_subject"},
+    "high_school":   {"nqe_question": "ask_high_school_activity"},
+    "business":      {"nqe_question": "ask_corporate_work_type"},
+    "office":        {}
+  },
+
+  "spec_constraints": {
+    "refresh_hz": {"pattern": "\\b(60|75|90|120|144|165|240|360)\\s*(hz|fps|frames?)\\b", "field": "refresh_hz_min"},
+    "ram_gb":     {"pattern": "\\b(8|16|24|32|64)\\s*gb\\b", "field": "ram_gb_min"},
+    "storage_tb": {"pattern": "\\b([1248])\\s*tb\\b", "field": "storage_gb_min", "multiplier": 1024},
+    "gpu_model":  {"pattern": "\\brtx\\s*(\\d{3,4})\\b", "field": "gpu_model_hint", "prefix": "rtx "}
+  },
+
+  "upsell_companions": {
+    "laptop":  ["bag","audio","storage","monitor","peripheral","networking"],
+    "desktop": ["monitor","peripheral","audio","storage","networking"],
+    "tablet":  ["bag","audio","storage","peripheral"]
+  },
+
+  "cv_returns_pack": "electronics"
+}
