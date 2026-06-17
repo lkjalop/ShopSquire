@@ -11,6 +11,7 @@ canonical stock-annotation path.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -194,6 +195,58 @@ def _annotate_type_and_price_integrity(payload: Dict[str, Any]) -> Dict[str, Any
                         "Quarantined from buyer results pending review." if clean else
                         "Price(s) outside expected type band — flagged for review.",
             }
+    except Exception:
+        pass
+    return payload
+
+
+def _composer_enabled() -> bool:
+    """COMMERCE_COMPOSER flag — gates the educational security challenge + compound
+    answer composition. Default off = today's behaviour unchanged."""
+    return str(os.getenv("COMMERCE_COMPOSER", "0")).strip().lower() in ("1", "true", "yes")
+
+
+def _build_security_challenge_text(payload: Dict[str, Any]) -> str | None:
+    """Gather image-security signals from the payload and produce ONE educational,
+    category-specific buyer challenge. Never echoes the payload."""
+    try:
+        from src.app.services.answer_composer import security_challenge
+        signals: Dict[str, Any] = {}
+        sh = payload.get("safe_image_hints") if isinstance(payload.get("safe_image_hints"), dict) else {}
+        uf = sh.get("unsafe_flags") if isinstance(sh.get("unsafe_flags"), dict) else {}
+        signals.update(uf or {})
+        isec = payload.get("image_security") if isinstance(payload.get("image_security"), dict) else {}
+        for k, v in (isec or {}).items():
+            if isinstance(v, (bool, int, float)):
+                signals[k] = v
+        if sh.get("trust_state"):
+            signals["trust_state"] = sh.get("trust_state")
+        if payload.get("image_flagged") or payload.get("image_untrusted"):
+            signals["image_flagged"] = True
+        return security_challenge(signals)
+    except Exception:
+        return None
+
+
+def _maybe_apply_security_challenge(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Prepend the educational security challenge to the buyer message for ANY flagged
+    image (not just compound queries). Content-idempotent — safe to call at multiple
+    choke points. Replaces the older terse '⚠️ [SECURITY] Image flagged — …' prefix
+    with the category-specific challenge. Flag-gated by COMMERCE_COMPOSER. Never raises."""
+    try:
+        if not _composer_enabled():
+            return payload
+        txt = _build_security_challenge_text(payload)
+        if not txt:
+            return payload
+        msg = str(payload.get("assistant_message") or "").strip()
+        if txt[:40] in msg:  # already applied (idempotent by content)
+            return payload
+        # Drop the older terse security prefix if present, then prepend the challenge.
+        msg = re.sub(r"^⚠️\s*\[SECURITY\][^.]*\.\s*", "", msg).strip()
+        composed = ("⚠️ " + txt + (" " + msg if msg else "")).strip()
+        payload["assistant_message"] = composed
+        payload["message"] = composed
     except Exception:
         pass
     return payload
