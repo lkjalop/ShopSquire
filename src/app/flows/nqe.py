@@ -172,8 +172,16 @@ def _personalize_q(template: str, query_text: str, context: Optional[Dict[str, A
         except Exception:
             pass
 
-    # Extract brand from query (common laptop brands)
-    _BRANDS = ["lenovo", "dell", "hp", "asus", "acer", "apple", "microsoft", "samsung", "razer", "msi", "lg"]
+    # Brand vocabulary is store FLAVOUR — read laptop-MAKER detection list from the
+    # StoreProfile (its own slot, NOT known_brands, which includes component makers like
+    # intel/amd/nvidia that must not be detected as a buyer's brand preference). Inline
+    # list kept as the proven fallback (parity-tested).
+    _BRANDS_FALLBACK = ["lenovo", "dell", "hp", "asus", "acer", "apple", "microsoft", "samsung", "razer", "msi", "lg"]
+    try:
+        from src.app.platform.store_profile import profile_slot as _ps
+        _BRANDS = [str(b).lower() for b in (_ps("nqe_brand_detect", default=_BRANDS_FALLBACK) or _BRANDS_FALLBACK)]
+    except Exception:
+        _BRANDS = _BRANDS_FALLBACK
     detected_brand: Optional[str] = next((b.title() for b in _BRANDS if b in q), None)
     if not detected_brand:
         detected_brand = str(ctx.get("brand") or "").strip().title() or None
