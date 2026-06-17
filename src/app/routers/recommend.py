@@ -232,6 +232,9 @@ from src.app.services.recommend_response_finalizer import (  # noqa: E402
     _recovery_answer,
     _ensure_result_prices,
     _dereference_product_labels,
+    _finalize_answer,
+    _demote_off_category,
+    _annotate_type_and_price_integrity,
 )
 
 
@@ -343,27 +346,6 @@ def _maybe_apply_security_challenge(payload: Dict[str, Any]) -> Dict[str, Any]:
         composed = ("⚠️ " + txt + (" " + msg if msg else "")).strip()
         payload["assistant_message"] = composed
         payload["message"] = composed
-    except Exception:
-        pass
-    return payload
-
-
-def _finalize_answer(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Single-formatter normalization (COMMERCE_FORMATTER): guarantee assistant_message
-    is never empty. Every response funnels through _with_trace, so this ONE pass
-    retires the empty-answer-across-branches class. Behavior-preserving when an answer
-    already exists (the 95% path). Never raises."""
-    try:
-        if str(payload.get("assistant_message") or "").strip():
-            return payload  # already answered -> unchanged
-        msg = str(payload.get("message") or "").strip()
-        if msg:
-            payload["assistant_message"] = msg
-            return payload
-        rec = _recovery_answer(payload.get("constraints_used"))
-        payload["assistant_message"] = rec
-        if not str(payload.get("message") or "").strip():
-            payload["message"] = rec
     except Exception:
         pass
     return payload
@@ -5601,83 +5583,6 @@ _OFF_CATEGORY_PERIPHERAL_RE = re.compile(
     r"backpack|carry bag|cooling pad)\b",
     re.IGNORECASE,
 )
-
-
-def _demote_off_category(results: list, query: str | None) -> list:
-    """EXCLUDE non-primary products (accessories: router/monitor/headset/bag/SSD/…)
-    from headline results whenever PRIMARY products (laptop/desktop) are also present —
-    so an off-TYPE item never reaches the buyer for a 'laptop for uni' query.
-
-    Gates on product TYPE, not a price band or a keyword denylist: a $59 product can be
-    perfectly valid (it's a real range-extender price) — the problem is it's the wrong
-    TYPE for a laptop request. Type classification + the type→primary mapping are the
-    agnostic core (services/product_classifier.py + config/store_vocab.json). Excluded
-    accessories aren't discarded — they're the cart-upsell pool (companion_types_for).
-
-    Keeps everything if results are ALL accessories (user searched 'headset') or ALL
-    primary. Query-independent; safe on every path; never empties."""
-    try:
-        if not isinstance(results, list) or len(results) < 2:
-            return results
-        from src.app.services.product_classifier import is_primary_product
-        primary, accessory = [], []
-        for r in results:
-            if not isinstance(r, dict):
-                primary.append(r)
-                continue
-            specs = r.get("specs") if isinstance(r.get("specs"), dict) else None
-            (primary if is_primary_product(r.get("name"), specs) else accessory).append(r)
-        return primary if (primary and accessory) else results
-    except Exception:
-        return results
-
-
-def _annotate_type_and_price_integrity(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Tag every result with product_type and run the price-anomaly (poisoning) guard.
-
-    SECURITY (shift-left, agnostic core): a price outside its TYPE band is a data-
-    integrity signal, not a pricing opinion. Underpriced is the dangerous case — a
-    poisoned feed/import/DB row that reads a $1,800 laptop as $45 bleeds margin on
-    every checkout, at scale. We DON'T silently sell it: anomalous items are dropped
-    from buyer results (when priced items remain) and summarised in payload
-    ['data_integrity'] for the admin trace / source_statuses. Never raises."""
-    try:
-        from src.app.services.product_classifier import annotate_product
-        results = payload.get("results")
-        if not isinstance(results, list) or not results:
-            return payload
-        flagged: List[Dict[str, Any]] = []
-        clean: List[Dict[str, Any]] = []
-        for r in results:
-            if not isinstance(r, dict):
-                clean.append(r)
-                continue
-            annotate_product(r)
-            if r.get("price_anomaly"):
-                flagged.append({
-                    "sku": r.get("sku"), "name": r.get("name"),
-                    "price": r.get("price"), "product_type": r.get("product_type"),
-                    "anomaly": r.get("price_anomaly"),
-                })
-            else:
-                clean.append(r)
-        if flagged:
-            # Quarantine poisoned-price items from buyer results when clean ones remain;
-            # always surface them for the admin/security trace.
-            if clean:
-                payload["results"] = clean
-                if isinstance(payload.get("products"), list):
-                    payload["products"] = clean
-            payload["data_integrity"] = {
-                "price_anomalies": flagged,
-                "quarantined": bool(clean),
-                "note": "Price(s) outside expected type band — possible catalog/feed poisoning. "
-                        "Quarantined from buyer results pending review." if clean else
-                        "Price(s) outside expected type band — flagged for review.",
-            }
-    except Exception:
-        pass
-    return payload
 
 
 def _exclude_off_category_in_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
