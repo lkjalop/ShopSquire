@@ -232,6 +232,67 @@ def _formatter_enabled() -> bool:
     return str(os.getenv("COMMERCE_FORMATTER", "0")).strip().lower() in ("1", "true", "yes")
 
 
+def _composer_enabled() -> bool:
+    """COMMERCE_COMPOSER flag — when on, compound queries get a composed multi-part
+    answer (conceptual sub-answer + product/budget). Default off = today's behaviour."""
+    return str(os.getenv("COMMERCE_COMPOSER", "0")).strip().lower() in ("1", "true", "yes")
+
+
+def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
+    """Phase B — when the stashed plan is COMPOUND (a conceptual sub-question alongside a
+    product/budget one), make sure the conceptual part is never dropped: answer it and
+    compose [security?][knowledge][product] into one message. Idempotent and subsumption-
+    aware (won't repeat a concept the product summary already states). Never raises."""
+    try:
+        if not _composer_enabled():
+            return payload
+        _kq = _KNOWLEDGE_QUERY_CTX.get()
+        plan = (_kq or {}).get("plan") if isinstance(_kq, dict) else None
+        from src.app.services.answer_composer import (
+            needs_composition, conceptual_sub_questions, compose_answer, AnswerSection,
+        )
+        if not needs_composition(plan):
+            return payload
+        existing = str(payload.get("assistant_message") or "").strip()
+        # Pick the first conceptual sub-question and answer it on its OWN text (so the
+        # knowledge clause's specs don't pollute the product clause).
+        concept_texts = conceptual_sub_questions(plan)
+        sub_obj = None
+        for sq in getattr(plan, "sub_questions", []) or []:
+            if str(getattr(sq, "text", "")) in concept_texts:
+                sub_obj = sq
+                break
+        knowledge_txt = None
+        if sub_obj is not None:
+            _model = os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b"))
+            knowledge_txt = _build_knowledge_answer(
+                str(getattr(sub_obj, "text", "")), sub_obj, payload.get("results") or [], _model, trace_id
+            )
+        sections: list = []
+        # Security challenge leads when present (Thread 3 plugs in here).
+        if payload.get("image_flagged") or payload.get("image_untrusted"):
+            _flags = payload.get("image_security") or {}
+            sections.append(AnswerSection("security",
+                "⚠️ The uploaded image is under security review; recommendations use sanitized hints only."))
+        if knowledge_txt:
+            sections.append(AnswerSection("knowledge", knowledge_txt))
+        sections.append(AnswerSection("product" if (payload.get("results") or []) else "recovery", existing))
+        composed = compose_answer(sections)
+        if composed and composed != existing:
+            payload["assistant_message"] = composed
+            payload["message"] = composed
+            payload["compound_answer"] = True
+            try:
+                log_trace_event(trace_id, "compound_answer_composed", "agent", "Answer_Composer",
+                                "system", None, {"sub_questions": concept_texts[:3],
+                                                 "sections": [s.kind for s in sections]})
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return payload
+
+
 def _recovery_answer(constraints: Dict[str, Any] | None) -> str:
     """Verdict-first no-match recovery (CRAG): never a dead end, always an upgrade
     path; budget/brand-aware. Shared by the no-candidates branch and the formatter."""
@@ -6579,6 +6640,16 @@ def suggest(
         _KNOWLEDGE_QUERY_CTX.set({"query": query, "plan": _top_plan})
         if fast_path_enabled and getattr(_top_plan, "answer_without_products", False):
             fast_path_enabled = False
+        # Compound queries need the slow path: it carries the per-sub-question retrieval
+        # scoping + the answer composer (the fast path would over-constrain and drop the
+        # conceptual part). Flag-gated so default behaviour is unchanged.
+        if fast_path_enabled and _composer_enabled():
+            try:
+                from src.app.services.answer_composer import needs_composition as _nc_top
+                if _nc_top(_top_plan):
+                    fast_path_enabled = False
+            except Exception:
+                pass
     except Exception:
         pass
     if fast_path_enabled:
@@ -6968,6 +7039,35 @@ def suggest(
         catalog_profile = {}
         catalog_relevance = {}
     query_effective = query
+    # Compound scoping (decomposition Phase B): when the query mixes a conceptual clause
+    # with a product clause ("is an RTX 4060 enough... and what do you have under 1500?"),
+    # route ONLY the product clause to retrieval so the knowledge clause's specs (RTX 4060)
+    # don't become a hard product filter and zero out results. The conceptual clause is
+    # answered separately by the composer at the choke point. Compound-only + flag-gated.
+    try:
+        if _composer_enabled():
+            _kq_scope = _KNOWLEDGE_QUERY_CTX.get()
+            _plan_scope = (_kq_scope or {}).get("plan") if isinstance(_kq_scope, dict) else None
+            from src.app.services.answer_composer import needs_composition as _needs_comp
+            if _needs_comp(_plan_scope):
+                _prod_sub = next(
+                    (sq for sq in (getattr(_plan_scope, "sub_questions", []) or [])
+                     if str(getattr(sq, "intent", "")) in ("product_search", "recommendation_multi")
+                     and not getattr(sq, "is_budget_question", False)
+                     and not getattr(sq, "answer_without_products", False)),
+                    None,
+                )
+                _prod_text = str(getattr(_prod_sub, "text", "") or "").strip() if _prod_sub else ""
+                if _prod_text:
+                    query_effective = _prod_text
+                    log_trace_event(
+                        trace_id=trace_id, event_type="compound_retrieval_scoped",
+                        source_type="agent", source_id="Query_Decomposition_Agent",
+                        target_type="system", target_id=None,
+                        payload={"product_clause": _prod_text[:120]},
+                    )
+    except Exception:
+        pass
     if image_context.get("labels") or image_context.get("ocr"):
         _ocr_for_query = image_context.get("ocr") or ""
         if any(r in image_reupload_reasons for r in ("pii_detected_ssn", "pii_detected", "pci_card_exposed")):
@@ -14084,6 +14184,7 @@ def suggest(
         redacted["products"] = redacted["results"]
     redacted = _annotate_type_and_price_integrity(redacted)  # price-poisoning guard
     redacted = _dereference_product_labels(redacted)
+    redacted = _compose_compound_if_needed(redacted, redacted.get("trace_id"))  # multi-part answer
     if _formatter_enabled():
         redacted = _finalize_answer(redacted)
     return redacted
