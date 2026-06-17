@@ -3287,6 +3287,46 @@ def _brand_display_name(brand: str | None) -> str:
     }.get(key, key.capitalize() if key else "")
 
 
+def _cross_modal_brand_conflict_question(
+    text_brands: Any, image_brand: str | None
+) -> tuple[str | None, dict | None]:
+    """Vision ⟂ NLP consistency check: the buyer's TEXT brand differs from the brand
+    the uploaded IMAGE looks like ("show me Asus" + an MSI photo).
+
+    Returns (mismatch_note, clarifying_question) or (None, None). Pure + testable.
+    Policy: never auto-switch — keep the STATED (text) brand and ASK. The mismatch is
+    both a UX signal (wrong photo grabbed) and a weak manipulation signal (a mismatched
+    image can be an attempt to steer brand routing), so it is also trace-logged."""
+    try:
+        tb = [str(b).lower() for b in (text_brands or []) if str(b).strip()]
+        ib = str(image_brand or "").lower()
+        if not ib or not tb or ib in tb:
+            return None, None
+        img_disp = _brand_display_name(ib)
+        txt_disp = _brand_display_name(tb[0])
+        note = (
+            f"You asked for {txt_disp}, but the uploaded image looks like a {img_disp}. "
+            f"I've kept your {txt_disp} request — let me know if you'd rather match the image."
+        )
+        question = {
+            "id": "ask_image_text_brand_conflict",
+            "text": (
+                f"Quick check: your text says {txt_disp} but the photo looks like {img_disp}. "
+                f"Which should I match?"
+            ),
+            "options": [
+                {"id": "conflict_keep_text", "label": f"Keep my {txt_disp} request"},
+                {"id": "conflict_use_image", "label": f"Actually, match the image ({img_disp})"},
+                {"id": "conflict_compare", "label": f"Compare {txt_disp} vs {img_disp}"},
+            ],
+            "priority": 0,
+            "source": "image_text_brand_conflict",
+        }
+        return note, question
+    except Exception:
+        return None, None
+
+
 def _brand_sql_predicate(brand: str | None) -> str:
     key = str(brand or "").strip().lower()
     if key == "apple":
@@ -8685,6 +8725,39 @@ def suggest(
                     "priority": 0,
                     "source": "image_budget_mismatch",
                 }
+
+        # ── Cross-modal brand consistency (vision ⟂ NLP) ──────────────────────
+        # The buyer's TEXT asked for one brand but the uploaded IMAGE looks like a
+        # different brand ("show me Asus" + an MSI photo). Today text silently wins
+        # and the disconnect is never surfaced. Treat it as (a) a UX clarification —
+        # the user may have grabbed the wrong photo — and (b) a weak manipulation
+        # signal: a mismatched image can be an attempt to steer brand routing. We do
+        # NOT auto-switch; we keep the stated brand and ASK.
+        if not _budget_mismatch_question:  # budget mismatch takes precedence
+            _x_note, _x_question = _cross_modal_brand_conflict_question(
+                constraints.get("brands"), inferred_image_brand
+            )
+            if _x_question:
+                image_brand_mismatch_note = _x_note
+                _budget_mismatch_question = _x_question
+                try:
+                    log_trace_event(
+                        trace_id=trace_id,
+                        event_type="cross_modal_brand_conflict",
+                        source_type="agent",
+                        source_id="Image_Text_Fusion_Agent",
+                        target_type="system",
+                        target_id=None,
+                        payload={
+                            "text_brand": _x_question.get("options", [{}])[0],
+                            "image_brand": str(inferred_image_brand or "").lower(),
+                            "resolution": "kept_text_pending_user_confirmation",
+                            **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"),
+                                                  context_ids=["query_brand", "image_brand"]),
+                        },
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass
     # Stash the budget-mismatch question so it can be injected into next_questions later
