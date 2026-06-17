@@ -6,6 +6,7 @@ from src.app.services.answer_composer import (
     compose_answer,
     needs_composition,
     conceptual_sub_questions,
+    security_challenge,
 )
 from src.app.services.query_decomposer import decompose
 
@@ -76,3 +77,34 @@ def test_needs_composition_true_for_product_plus_budget_question():
 def test_needs_composition_false_for_simple_query():
     assert not needs_composition(decompose("good laptop for university under 1500"))
     assert not needs_composition(decompose("show me lenovo laptops"))
+
+
+# ── security challenge (Thread 3) ─────────────────────────────────────────────
+
+def test_security_challenge_qr_is_educational_not_payload():
+    msg = security_challenge({"qr_prompt_injection": True})
+    assert msg and "QR" in msg and "ignored" in msg.lower()
+    # must NOT echo any decoded URL/payload — only the category + action
+    assert "http" not in msg.lower()
+
+
+def test_security_challenge_steg_outranks_pii():
+    # steg is higher severity than pii — steg wins when both present
+    msg = security_challenge({"steg_suspicious": True, "pii_detected": True})
+    assert "steganography" in msg.lower()
+
+
+def test_security_challenge_adversarial_score_threshold():
+    assert security_challenge({"adversarial_score": 0.9}) is not None
+    assert security_challenge({"adversarial_score": 0.1}) is None
+
+
+def test_security_challenge_generic_when_only_under_review():
+    msg = security_challenge({"trust_state": "under_review"})
+    assert msg and "security review" in msg.lower()
+
+
+def test_security_challenge_none_when_clean():
+    assert security_challenge({}) is None
+    assert security_challenge({"trust_state": "trusted"}) is None
+    assert security_challenge(None) is None

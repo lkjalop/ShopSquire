@@ -117,6 +117,66 @@ def needs_composition(plan: object) -> bool:
         return False
 
 
+# ── Security challenge (Thread 3) ─────────────────────────────────────────────
+# Map a detected image-security signal to an EDUCATIONAL, category-specific challenge
+# the buyer actually understands — naming the RISK CATEGORY and the action taken, but
+# NEVER echoing the payload (a decoded malicious URL/instruction is itself a delivery
+# vector). Severity-ranked: the most serious present signal wins. The signal→category
+# mapping is the mechanism; the wording is flavour.
+_SECURITY_CHALLENGES = [
+    ("steg_suspicious",
+     "Heads up: the uploaded image shows signs of hidden embedded data (steganography) — "
+     "a technique used to smuggle instructions or beacons inside an ordinary-looking photo. "
+     "I've isolated it for security review and used only safe, visible features."),
+    ("c2_beacon",
+     "Heads up: the uploaded image matched a command-and-control beacon pattern. I've "
+     "quarantined it for detonation analysis and ignored its contents entirely."),
+    ("qr_prompt_injection",
+     "Heads up: the uploaded image contains a QR code with embedded instructions — unusual "
+     "for a product photo and a common phishing/injection vector. I've quarantined it and "
+     "ignored what it points to."),
+    ("qr_quarantined",
+     "Heads up: I found a QR code in the uploaded image. That's unusual for a product photo, "
+     "so I've quarantined it and based recommendations only on the visible product."),
+    ("ocr_prompt_injection",
+     "Heads up: the uploaded image contains text that reads like an instruction to me rather "
+     "than a product label. I've treated it as a potential prompt-injection and ignored it."),
+    ("manipulation_detected",
+     "Heads up: the uploaded image appears digitally manipulated to fool image recognition. "
+     "I've flagged it and relied on your typed request instead."),
+    ("adversarial",
+     "Heads up: the uploaded image looks adversarially perturbed (engineered to mislead vision "
+     "models). I've flagged it and used your text request instead."),
+    ("pii_detected",
+     "Heads up: the uploaded image appears to contain personal or sensitive information. I've "
+     "redacted it from processing and won't store it."),
+]
+
+
+def security_challenge(signals: Optional[Dict[str, object]]) -> Optional[str]:
+    """Return one educational buyer-facing security challenge for the highest-severity
+    signal present, or a generic one if flagged without a specific signal, or None."""
+    try:
+        sig = signals or {}
+        def _on(k: str) -> bool:
+            v = sig.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return float(v) >= 0.5  # e.g. adversarial_score
+            return bool(v)
+        # adversarial can arrive as a score field
+        if _on("adversarial_score"):
+            sig = {**sig, "adversarial": True}
+        for key, text in _SECURITY_CHALLENGES:
+            if _on(key):
+                return text
+        if str(sig.get("trust_state") or "").lower() == "under_review" or _on("image_flagged"):
+            return ("Heads up: the uploaded image is under security review, so I've based "
+                    "recommendations on sanitized hints only.")
+        return None
+    except Exception:
+        return None
+
+
 def conceptual_sub_questions(plan: object) -> List[str]:
     """The sub-question texts that want a conceptual (non-product) answer — these are
     what the caller should answer with the knowledge/comparison helper and pass back."""

@@ -269,11 +269,10 @@ def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -
                 str(getattr(sub_obj, "text", "")), sub_obj, payload.get("results") or [], _model, trace_id
             )
         sections: list = []
-        # Security challenge leads when present (Thread 3 plugs in here).
-        if payload.get("image_flagged") or payload.get("image_untrusted"):
-            _flags = payload.get("image_security") or {}
-            sections.append(AnswerSection("security",
-                "⚠️ The uploaded image is under security review; recommendations use sanitized hints only."))
+        # Security challenge leads when present (Thread 3).
+        _sec_txt = _build_security_challenge_text(payload)
+        if _sec_txt:
+            sections.append(AnswerSection("security", "⚠️ " + _sec_txt))
         if knowledge_txt:
             sections.append(AnswerSection("knowledge", knowledge_txt))
         sections.append(AnswerSection("product" if (payload.get("results") or []) else "recovery", existing))
@@ -288,6 +287,53 @@ def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -
                                                  "sections": [s.kind for s in sections]})
             except Exception:
                 pass
+    except Exception:
+        pass
+    return payload
+
+
+def _build_security_challenge_text(payload: Dict[str, Any]) -> str | None:
+    """Gather image-security signals from the payload and produce ONE educational,
+    category-specific buyer challenge (Thread 3). Never echoes the payload."""
+    try:
+        from src.app.services.answer_composer import security_challenge
+        signals: Dict[str, Any] = {}
+        sh = payload.get("safe_image_hints") if isinstance(payload.get("safe_image_hints"), dict) else {}
+        uf = sh.get("unsafe_flags") if isinstance(sh.get("unsafe_flags"), dict) else {}
+        signals.update(uf or {})
+        isec = payload.get("image_security") if isinstance(payload.get("image_security"), dict) else {}
+        for k, v in (isec or {}).items():
+            if isinstance(v, (bool, int, float)):
+                signals[k] = v
+        if sh.get("trust_state"):
+            signals["trust_state"] = sh.get("trust_state")
+        if payload.get("image_flagged") or payload.get("image_untrusted"):
+            signals["image_flagged"] = True
+        return security_challenge(signals)
+    except Exception:
+        return None
+
+
+def _maybe_apply_security_challenge(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Prepend the educational security challenge to the buyer message for ANY flagged
+    image (not just compound queries). Content-idempotent — safe to call at multiple
+    choke points (fast path via _with_trace, main path at the true exit). Replaces the
+    older terse '⚠️ [SECURITY] Image flagged — …' prefix with the category-specific
+    challenge. Flag-gated by COMMERCE_COMPOSER. Never raises."""
+    try:
+        if not _composer_enabled():
+            return payload
+        txt = _build_security_challenge_text(payload)
+        if not txt:
+            return payload
+        msg = str(payload.get("assistant_message") or "").strip()
+        if txt[:40] in msg:  # already applied (idempotent by content)
+            return payload
+        # Drop the older terse security prefix if present, then prepend the challenge.
+        msg = re.sub(r"^⚠️\s*\[SECURITY\][^.]*\.\s*", "", msg).strip()
+        composed = ("⚠️ " + txt + (" " + msg if msg else "")).strip()
+        payload["assistant_message"] = composed
+        payload["message"] = composed
     except Exception:
         pass
     return payload
@@ -413,6 +459,7 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
     if _formatter_enabled():
         payload = _finalize_answer(payload)
     payload = _dereference_product_labels(payload)  # [N] -> product name (always-on)
+    payload = _maybe_apply_security_challenge(payload)  # educational image-security challenge
     if not trace_id:
         return payload
     # Enforce canonical trace correlation fields after sanitization/redaction
@@ -14185,6 +14232,7 @@ def suggest(
     redacted = _annotate_type_and_price_integrity(redacted)  # price-poisoning guard
     redacted = _dereference_product_labels(redacted)
     redacted = _compose_compound_if_needed(redacted, redacted.get("trace_id"))  # multi-part answer
+    redacted = _maybe_apply_security_challenge(redacted)  # educational image-security challenge
     if _formatter_enabled():
         redacted = _finalize_answer(redacted)
     return redacted
