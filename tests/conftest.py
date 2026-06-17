@@ -352,6 +352,25 @@ def _restore_feature_flags_file():
 
 
 @pytest.fixture(autouse=True)
+def _reset_store_profile_cache():
+    """Clear the StoreProfile lru_cache between tests so a profile loaded under one
+    vertical (e.g. pharmacy) can't leak into the next test's reads. PROVABLY SAFE and
+    NON-masking: it reloads identical static JSON, so it can never change a test's
+    verdict (unlike the catalog/Redis clears that masked NQE — see docs/DETERMINISM.md)."""
+    try:
+        from src.app.platform.store_profile import reset_cache as _rc
+        _rc()
+    except Exception:
+        pass
+    yield
+    try:
+        from src.app.platform.store_profile import reset_cache as _rc
+        _rc()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _restore_db_engine():
     """Snapshot and restore the module-level DB engine after each test.
 
