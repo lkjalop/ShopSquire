@@ -47,6 +47,22 @@ fixture ships. Isolation must be **scoped per-test** (e.g. the `_make_isolated_e
 | `…_nqe_refinement[university]` | flaky (order-dependent) | **WORKS in isolation** (probe: `detected_use_case=university_general`, `ask_university_subject` generated). Order-dependence, not logic. |
 | `…_nqe_refinement[corporate]` | fails (real bug) | **Localized: NQE engine is CORRECT; the bug is in recommend.py post-NQE processing.** Decisive probe — `NextQuestionEngine.propose()` for the corp input returns `['ask_corporate_work_type', 'ask_budget_tier', 'ask_use_case']` (the domain question IS generated, for both `detected_use_case=office_general` and `None`). But the full `/suggest` request returns only `['ask_use_case']`. So `ask_corporate_work_type` is dropped by a recommend.py step AFTER `propose()` and AFTER `_filter_nqe_questions_by_missing_fields` (the filter *allows* it when `use_case` ∈ missing_fields). Next: trace the `next_questions` reassignments between the NQE call (`recommend.py:~10135`) and the response for the `office_general` path. Deferred to focused recommend.py work — do NOT hasty-fix (hs/uni currently work in isolation; a careless change to the shared path breaks them). |
 
+## Pre-existing failures (fail even in isolation — NOT order-dependence, NOT regressions)
+
+These fail when run **alone**, so they are genuine pre-existing logic gaps in recommend.py,
+not flakiness and not caused by the strangler-fig extraction. Verified by stashing the
+checkout-handoff extraction (commit `292a2b4`) and re-running at baseline: **identical**
+failures. Listed here so future stage-extraction work does not mistake them for new breakage.
+
+| Test | Assertion that fails (baseline + HEAD, identical) |
+|---|---|
+| `test_recommend.py::test_followup_reference_without_shortlist_prompts_disambiguation` | `body.get("needs_disambiguation") is True` → `False` (returns `ambiguity_reason: missing_budget` but not the disambiguation flag) |
+| `test_recommend.py::test_nqe_post_results_uses_image_product_type_category` | `assert []` — empty `results` for the image-product-type path |
+
+Protocol for the next extraction: if a test fails after your change, run it **alone** and
+also at baseline (`git stash -u` the change). A failure present in *both* is pre-existing;
+only a failure your change *introduces* (passes at baseline, fails at HEAD) is a regression.
+
 ## Rule going forward
 
 - New tests must run consistently alone and in-suite (`determinism_check.py` in CI).
