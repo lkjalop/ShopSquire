@@ -7,7 +7,8 @@ hint detection therefore behaves exactly as before.
 from __future__ import annotations
 
 from src.app.platform.store_profile import brand_label_patterns as _profile_blp
-from src.app.routers.recommend import _BRAND_LABEL_PATTERNS_FALLBACK, _brand_label_patterns
+# Now lives in the extracted image-hints service (re-exported by recommend.py for back-compat).
+from src.app.services.recommend_image_hints import _BRAND_LABEL_PATTERNS_FALLBACK, _brand_label_patterns
 
 
 def test_derived_patterns_match_inline_fallback_setwise():

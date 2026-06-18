@@ -110,10 +110,10 @@ def brand_label_patterns(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, lis
 
 def product_line_index(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, Dict[str, Any]]:
     """token → {manufacturer, line} index, DERIVED from `manufacturers`. The new line-aware
-    axis: lets the platform resolve a sub-brand/range (e.g. 'thinkpad' → lenovo / ThinkPad)
-    independently of product TYPE — for brand-alias normalisation, identity, and line-aware
-    upsell (a ThinkPad dock for a ThinkPad). An alias token maps to its manufacturer with
-    line=None (it's the company, not a specific range)."""
+    axis: lets the platform resolve a sub-brand/product-range token to its manufacturer + the
+    line itself, independently of product TYPE — for brand-alias normalisation, identity, and
+    line-aware upsell (a line-matched accessory for a line-matched primary item). An alias token
+    maps to its manufacturer with line=None (it's the company, not a specific range)."""
     mfrs = profile_slot("manufacturers", profile_id=profile_id, default=None)
     out: Dict[str, Dict[str, Any]] = {}
     if isinstance(mfrs, dict):
