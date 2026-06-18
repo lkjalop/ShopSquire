@@ -8,6 +8,7 @@ from __future__ import annotations
 from src.app.services.recommend_utils import (
     _brand_display_name,
     _candidate_matches_brand,
+    _extract_candidate_numeric_specs,
     _result_price_dollars,
 )
 
@@ -41,6 +42,31 @@ def test_result_price_dollars_prefers_price_then_cents():
     assert _result_price_dollars(None) is None
 
 
+def test_extract_candidate_numeric_specs_from_structured_specs():
+    out = _extract_candidate_numeric_specs(
+        {"name": "Legion 5", "specs": {"ram_gb": 16, "storage_gb": 512, "gpu": "RTX 4060"}}
+    )
+    assert out["ram_gb"] == 16.0
+    assert out["storage_gb"] == 512.0
+    assert out["has_dedicated_gpu"] is True
+    assert out["gaming_style"] is True  # "legion" in text
+
+
+def test_extract_candidate_numeric_specs_parses_from_name_text():
+    out = _extract_candidate_numeric_specs({"name": "Office Ultrabook 16GB RAM 512GB 14 inch"})
+    assert out["ram_gb"] == 16.0
+    assert out["storage_gb"] == 512.0
+    assert out["display_inches"] == 14.0
+    assert out["portable"] is True  # ultrabook + <=14.5"
+    assert out["has_dedicated_gpu"] is False
+
+
+def test_extract_candidate_numeric_specs_empty():
+    out = _extract_candidate_numeric_specs({})
+    assert out["ram_gb"] is None
+    assert out["has_dedicated_gpu"] is False
+
+
 def test_router_reexports_same_objects():
     # Foundation invariant: the router shim re-exports the identical functions (no copies).
     from src.app.routers import recommend as r
@@ -48,3 +74,4 @@ def test_router_reexports_same_objects():
     assert r._candidate_matches_brand is _candidate_matches_brand
     assert r._brand_display_name is _brand_display_name
     assert r._result_price_dollars is _result_price_dollars
+    assert r._extract_candidate_numeric_specs is _extract_candidate_numeric_specs

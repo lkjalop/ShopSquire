@@ -261,6 +261,7 @@ from src.app.services.recommend_utils import (  # noqa: E402
     _candidate_matches_brand,
     _brand_display_name,
     _result_price_dollars,
+    _extract_candidate_numeric_specs,
 )
 
 
@@ -5489,96 +5490,6 @@ def _extract_explicit_budget_override(query: str | None) -> Dict[str, Any]:
         floor = int(str(m_over.group(1)).replace(",", ""))
         return {"budget_min": floor, "budget_max": None, "mode": "floor"}
     return {}
-
-
-def _extract_candidate_numeric_specs(candidate: Dict[str, Any]) -> Dict[str, Any]:
-    specs = candidate.get("specs") if isinstance(candidate.get("specs"), dict) else {}
-    text = " ".join(
-        [
-            str(candidate.get("name") or ""),
-            " ".join(str(x) for x in (candidate.get("features") or []) if x is not None),
-            json.dumps(specs, ensure_ascii=False, default=str),
-        ]
-    ).lower()
-
-    def _as_float(value: Any) -> float | None:
-        try:
-            if value is None or value == "":
-                return None
-            return float(value)
-        except Exception:
-            return None
-
-    ram = _as_float(specs.get("ram_gb"))
-    storage = _as_float(specs.get("storage_gb"))
-    display = _as_float(specs.get("display_inches"))
-    refresh = _as_float(specs.get("refresh_hz"))
-    gpu_vram = _as_float(specs.get("gpu_vram_gb"))
-    if ram is None:
-        m = re.search(r"\b(8|12|16|24|32|64)\s*gb\s*ram\b", text)
-        ram = float(m.group(1)) if m else None
-    if storage is None:
-        m = re.search(r"\b(256|512|1024|2048)\s*gb\b", text)
-        if m:
-            storage = float(m.group(1))
-        else:
-            m_tb = re.search(r"\b([12])\s*tb\b", text)
-            storage = float(m_tb.group(1)) * 1024.0 if m_tb else None
-    if display is None:
-        m = re.search(r"\b(13(?:\.\d)?|14(?:\.\d)?|15(?:\.\d)?|16(?:\.\d)?|17(?:\.\d)?)\s*(?:in|inch|\"|”)", text)
-        display = float(m.group(1)) if m else None
-    if refresh is None:
-        m = re.search(r"\b(90|120|144|165|240)\s*hz\b", text)
-        refresh = float(m.group(1)) if m else None
-    if gpu_vram is None:
-        m = re.search(r"\b(4|6|8|12|16)\s*gb\s*(?:vram|gpu)\b", text)
-        gpu_vram = float(m.group(1)) if m else None
-
-    gpu_text = str(specs.get("gpu") or "").lower()
-    integrated_gpu = any(
-        tok in f"{gpu_text} {text}"
-        for tok in (
-            "integrated",
-            "intel uhd",
-            "intel iris",
-            "intel graphics",
-            "radeon graphics",
-            "amd radeon graphics",
-            "qualcomm adreno",
-            "adreno graphics",
-        )
-    )
-    discrete_gpu = any(
-        tok in f"{gpu_text} {text}"
-        for tok in ("rtx", "gtx", "geforce", "rx 6", "rx 7", "rx 8", "arc a", "nvidia", "dedicated gpu")
-    ) or (
-        bool(gpu_text)
-        and not integrated_gpu
-        and any(tok in gpu_text for tok in ("radeon rx", "geforce", "rtx", "gtx", "arc a", "quadro"))
-    )
-    gaming_style = any(
-        tok in text for tok in ("gaming", "rog", "tuf", "legion", "raider", "katana", "predator", "nitro", "alienware", "omen")
-    )
-    portable = bool(
-        ("thin" in text or "light" in text or "ultrabook" in text or "air" in text)
-        or (display is not None and display <= 14.5)
-    )
-    workstation_hint = any(tok in text for tok in ("workstation", "quadro", "rtx a", "studio"))
-    nvidia = any(tok in text for tok in ("rtx", "gtx", "geforce", "nvidia"))
-    creator_hint = any(tok in text for tok in ("creator", "studio", "oled", "premiere", "davinci"))
-    return {
-        "ram_gb": ram,
-        "storage_gb": storage,
-        "display_inches": display,
-        "refresh_hz": refresh,
-        "gpu_vram_gb": gpu_vram,
-        "has_dedicated_gpu": discrete_gpu,
-        "gaming_style": gaming_style,
-        "portable": portable,
-        "workstation_hint": workstation_hint,
-        "nvidia": nvidia,
-        "creator_hint": creator_hint,
-    }
 
 
 def _use_case_rank_adjustment(
