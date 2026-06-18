@@ -21,10 +21,15 @@
     "apple": ["macbook","imac","mac mini","mac pro","apple"],
     "lenovo": ["thinkpad","ideapad","legion","yoga","lenovo"],
     "dell": ["xps","inspiron","alienware","latitude","dell"],
-    "hp": ["spectre","envy","omen","elitebook","probook","hp"],
-    "asus": ["rog","zenbook","vivobook","tuf","asus"],
+    "hp": ["spectre","envy","omen","elitebook","probook","hp laptop","hp"],
+    "asus": ["rog","zenbook","vivobook","asus"],
     "acer": ["predator","aspire","swift","nitro","acer"],
-    "msi": ["msi","stealth","raider","titan","creator","katana"]
+    "msi": ["msi","dragon logo","stealth","raider","titan","creator"],
+    "razer": ["razer","blade"],
+    "microsoft": ["surface","surface pro","surface laptop"],
+    "samsung": ["galaxy book","samsung"],
+    "gigabyte": ["aorus","gigabyte"],
+    "toshiba": ["dynabook","toshiba"]
   },
   "brand_price_floors_usd": {"apple":1200,"msi":900,"razer":1200,"gigabyte":1000,"lenovo":500,"dell":500,"hp":400,"asus":400,"acer":350,"microsoft":900,"samsung":800},
 

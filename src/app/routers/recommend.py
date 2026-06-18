@@ -243,6 +243,37 @@ from src.app.services.recommend_response_finalizer import (  # noqa: E402
 )
 
 
+# Image→brand label patterns: FLAVOUR, excised to the StoreProfile (brand_label_patterns slot).
+# The inline fallback is byte-identical to the profile (parity-tested) so behaviour is unchanged
+# if the profile is unreadable. A non-electronics vertical supplies its own patterns (or none).
+_BRAND_LABEL_PATTERNS_FALLBACK: Dict[str, List[str]] = {
+    "apple":     ["macbook", "imac", "mac mini", "mac pro", "apple"],
+    "lenovo":    ["thinkpad", "ideapad", "legion", "yoga", "lenovo"],
+    "dell":      ["xps", "inspiron", "alienware", "latitude", "dell"],
+    "hp":        ["spectre", "envy", "omen", "elitebook", "probook", "hp laptop", "hp"],
+    "asus":      ["rog", "zenbook", "vivobook", "asus"],
+    "acer":      ["predator", "aspire", "swift", "nitro", "acer"],
+    "msi":       ["msi", "dragon logo", "stealth", "raider", "titan", "creator"],
+    "razer":     ["razer", "blade"],
+    "microsoft": ["surface", "surface pro", "surface laptop"],
+    "samsung":   ["galaxy book", "samsung"],
+    "gigabyte":  ["aorus", "gigabyte"],
+    "toshiba":   ["dynabook", "toshiba"],
+}
+
+
+def _brand_label_patterns() -> Dict[str, List[str]]:
+    """Image→brand label patterns from the StoreProfile, falling back to the inline copy."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        val = profile_slot("brand_label_patterns", default=None)
+        if isinstance(val, dict) and val:
+            return val
+    except Exception:
+        pass
+    return _BRAND_LABEL_PATTERNS_FALLBACK
+
+
 def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
     """Phase B — when the stashed plan is COMPOUND (a conceptual sub-question alongside a
     product/budget one), make sure the conceptual part is never dropped: answer it and
@@ -8521,20 +8552,7 @@ def suggest(
     _budget_mismatch_question: Dict[str, Any] | None = None
     # A2 gate: if allowlist denies brand hint, skip the entire brand extraction block
     _gate_allows_brand = getattr(_image_feature_allowlist, "allow_brand_hint", True)
-    _BRAND_LABEL_PATTERNS = {
-        "apple":     ["macbook", "imac", "mac mini", "mac pro", "apple"],
-        "lenovo":    ["thinkpad", "ideapad", "legion", "yoga", "lenovo"],
-        "dell":      ["xps", "inspiron", "alienware", "latitude", "dell"],
-        "hp":        ["spectre", "envy", "omen", "elitebook", "probook", "hp laptop", "hp"],
-        "asus":      ["rog", "zenbook", "vivobook", "asus"],
-        "acer":      ["predator", "aspire", "swift", "nitro", "acer"],
-        "msi":       ["msi", "dragon logo", "stealth", "raider", "titan", "creator"],
-        "razer":     ["razer", "blade"],
-        "microsoft": ["surface", "surface pro", "surface laptop"],
-        "samsung":   ["galaxy book", "samsung"],
-        "gigabyte":  ["aorus", "gigabyte"],
-        "toshiba":   ["dynabook", "toshiba"],
-    }
+    _BRAND_LABEL_PATTERNS = _brand_label_patterns()  # excised → StoreProfile.brand_label_patterns
     try:
         if not _gate_allows_brand:
             # A2/A3 enforcement: Policy Gate denied brand hint — skip extraction entirely.
