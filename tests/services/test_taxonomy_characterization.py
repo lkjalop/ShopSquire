@@ -21,20 +21,23 @@ from src.app.services.product_classifier import (
 from src.app.services.product_taxonomy import infer_product_family
 
 
-# (name, classify_product_type, infer_product_family) — captured 2026-06-18.
+# (name, classify_product_type, infer_product_family).
+# Phase 1 (One StoreTaxonomy, commit-this-change): infer_product_family now DERIVES from
+# classify_product_type (one brain), so the family code agrees with the type. The four ✓FIXED
+# rows below changed from the 0c baseline — that diff IS the F2 fix record.
 _CORPUS = [
     ("ASUS ROG Strix G16 Gaming Laptop", "laptop", "LAP"),
     ("MacBook Pro 14", "laptop", "LAP"),
-    ("Dell XPS 13", "laptop", "UNK"),               # ⚠ F2: family fails to recognize XPS
-    ("Lenovo ThinkPad X1", "laptop", "UNK"),        # ⚠ F2: family fails to recognize ThinkPad
+    ("Dell XPS 13", "laptop", "LAP"),               # ✓FIXED (was UNK) — derives from classify=laptop
+    ("Lenovo ThinkPad X1", "laptop", "LAP"),        # ✓FIXED (was UNK) — derives from classify=laptop
     ("LG UltraGear 27 Monitor", "monitor", "MON"),
     ("Logitech MX Master 3 Mouse", "peripheral", "PERIPH"),
     ("Keychron K2 Mechanical Keyboard", "peripheral", "PERIPH"),
     ("SteelSeries Arctis 7 Headset", "audio", "HEAD"),
     ("Samsung T7 External SSD", "storage", "ACC"),
     ("Anker USB-C Hub", "peripheral", "ACC"),
-    ("Razer Laptop Cooling Pad", "peripheral", "LAP"),   # ⚠ F2: accessory mis-filed as PRIMARY
-    ("Targus Laptop Backpack", "bag", "LAP"),            # ⚠ F2: bag mis-filed as PRIMARY
+    ("Razer Laptop Cooling Pad", "peripheral", "COOL"),  # ✓FIXED (was LAP) — accessory, not primary
+    ("Targus Laptop Backpack", "bag", "BAG"),            # ✓FIXED (was LAP) — bag, not primary
     ("HP Pavilion Desktop Tower", "desktop", "UNK"),
     ("Generic Widget 9000", "accessory", "UNK"),
     ("iPhone 15 Pro", "accessory", "UNK"),
@@ -57,15 +60,24 @@ def test_companion_and_primary_baseline():
     assert companion_types_for("laptop") == ["bag", "audio", "storage", "monitor", "peripheral", "networking"]
 
 
-def test_documents_known_f2_divergences():
-    """Explicit record of the disagreements Phase 1 (One StoreTaxonomy) must resolve."""
-    # 1. Brand/model laptops the family classifier doesn't recognize (returns UNK):
+def test_f2_divergences_are_resolved():
+    """Phase 1: the two F2 divergences are now FIXED by the unified taxonomy (one brain)."""
+    # 1. Brand/model laptops now recognised as LAP (family derives from classify=laptop):
     for n in ("Dell XPS 13", "Lenovo ThinkPad X1"):
         assert classify_product_type(n) == "laptop"
-        assert infer_product_family(name=n) == "UNK"   # divergence
+        assert infer_product_family(name=n) == "LAP"   # was UNK — resolved
 
-    # 2. Accessories the family classifier mis-files as the PRIMARY product (LAP) via the
-    #    'laptop' substring — a real bug: a cooling pad / backpack must NOT look like a laptop.
-    for n in ("Razer Laptop Cooling Pad", "Targus Laptop Backpack"):
-        assert classify_product_type(n) in ("peripheral", "bag")   # correct
-        assert infer_product_family(name=n) == "LAP"               # WRONG (documented)
+    # 2. "Laptop"-named accessories are NO LONGER mis-filed as the primary product:
+    assert infer_product_family(name="Razer Laptop Cooling Pad") == "COOL"   # was LAP
+    assert infer_product_family(name="Targus Laptop Backpack") == "BAG"      # was LAP
+    # Neither is treated as a primary laptop now.
+    assert infer_product_family(name="Razer Laptop Cooling Pad") != "LAP"
+    assert infer_product_family(name="Targus Laptop Backpack") != "LAP"
+
+
+def test_sku_prefix_remains_authoritative():
+    # The SKU family code wins over name substrings (a SYN-ACC- item named "Gaming Laptop"
+    # is still an accessory) — the prefix path must survive the unification.
+    from src.app.services.product_taxonomy import infer_product_family as f
+    assert f(sku="ACC-9", name="Gaming Laptop") == "ACC"
+    assert f(sku="LAP-001", name="anything") == "LAP"

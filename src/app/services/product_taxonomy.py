@@ -124,6 +124,26 @@ def _text_parts(*parts: Any) -> str:
     return " ".join(buf).strip().lower()
 
 
+# Phase 1 (One StoreTaxonomy): the PRIMARY product type comes from ONE brain —
+# product_classifier.classify_product_type — and the SKU-family code is a deterministic
+# projection of it. This map covers the types classify expresses directly; the finer
+# accessory sub-families (COOL/ACC/PERIPH/HEAD/BAG) classify can't express are recovered by
+# the keyword fallback below. This kills the old divergence where infer_product_family did
+# its own greedy substring matching (XPS/ThinkPad -> UNK; "Laptop Cooling Pad" -> LAP).
+_TYPE_TO_FAMILY = {
+    "laptop": "LAP",
+    "monitor": "MON",
+    "bag": "BAG",
+    "audio": "HEAD",
+    "storage": "ACC",
+}
+
+# Fallback families for classify's coarse buckets (peripheral/accessory/desktop/tablet/unknown).
+# LAP and MON are deliberately EXCLUDED: classify owns "is this a primary laptop/monitor", so a
+# stray "laptop"/"monitor" substring in an accessory name must not promote it to the primary type.
+_FALLBACK_FAMILY_ORDER = ("COOL", "BAG", "ACC", "PERIPH", "HEAD")
+
+
 def infer_product_family(*, sku: str | None = None, name: str | None = None, specs: Dict[str, Any] | None = None) -> str:
     raw_sku = str(sku or "").strip().upper()
     for prefix, family in _SKU_PREFIX_FAMILY.items():
@@ -131,9 +151,22 @@ def infer_product_family(*, sku: str | None = None, name: str | None = None, spe
             return family
 
     specs_dict = specs if isinstance(specs, dict) else {}
+
+    # One brain: derive the primary family from the unified product-type classifier.
+    try:
+        from src.app.services.product_classifier import classify_product_type
+        ptype = classify_product_type(name, specs_dict)
+    except Exception:
+        ptype = None
+    fam = _TYPE_TO_FAMILY.get(ptype or "")
+    if fam:
+        return fam
+
+    # Coarse bucket (peripheral/accessory/desktop/tablet/unknown): recover the finer accessory
+    # sub-family from keywords (NOT LAP/MON — classify already ruled those out).
     haystack = _text_parts(raw_sku, name, specs_dict.get("category"), specs_dict.get("tags"), specs_dict)
-    for family, keywords in _FAMILY_KEYWORDS.items():
-        if any(token in haystack for token in keywords):
+    for family in _FALLBACK_FAMILY_ORDER:
+        if any(token in haystack for token in _FAMILY_KEYWORDS[family]):
             return family
     return "UNK"
 
