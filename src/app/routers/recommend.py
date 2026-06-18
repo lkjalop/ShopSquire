@@ -8230,6 +8230,7 @@ def suggest(
                 image_bytes=locals().get("_image_blob"),
                 catalog_brands=get_catalog_brands(db),
                 budget_max=float(constraints.get("budget_max")) if constraints.get("budget_max") else None,
+                trace_id=trace_id,
             )
             # Grounding gate: drop an ungrounded/conflicted brand rather than assert it.
             if constraints.get("brand") and not _grounded.brand:

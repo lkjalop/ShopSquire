@@ -449,23 +449,46 @@ def resolve_grounded_identity(
     catalog_brands: Optional[set] = None,
     budget_max: Optional[float] = None,
     enable_visual_search: Optional[bool] = None,
+    trace_id: Optional[str] = None,
 ) -> GroundingResult:
     """Gather visual-match evidence (best-effort) and ground the identity.
 
     `text_identity` / `vision_identity` are the dicts already produced by
     product_identity_agent in the recommend flow — passed in to avoid recomputing.
+    `trace_id` ties any DEGRADED visual-search outcome (model unavailable / search error) to the
+    decision trace, so image-based similarity being off is VISIBLE, not a silent no-op.
     """
     visual_matches: Optional[List[Dict[str, Any]]] = None
     _vs_on = enable_visual_search
     if _vs_on is None:
         _vs_on = str(os.getenv("GROUNDING_VISUAL_SEARCH", "1")).strip().lower() in ("1", "true", "yes")
     if image_bytes and _vs_on:
-        try:
-            from src.app.services import visual_search
-            if visual_search.is_available():
-                visual_matches = visual_search.search(image_bytes=image_bytes, k=5, budget_max=budget_max)
-        except Exception:
-            visual_matches = None
+        from src.app.services import visual_search
+        if visual_search.is_available():
+            from src.app.services.safe_stage import safe_stage
+            visual_matches = safe_stage(
+                "visual_search",
+                lambda: visual_search.search(image_bytes=image_bytes, k=5, budget_max=budget_max),
+                default=None,
+                trace_id=trace_id,
+            )
+        else:
+            # Visual similarity is configured ON but the CLIP model / FAISS index is not loaded
+            # (e.g. ML extras not installed) → grounding silently degrades to text-only. Record it
+            # so the capability being OFF is observable in the trace, not invisible. log_trace_event
+            # is itself defensive (no-ops on missing trace_id / backend), so no outer guard needed.
+            try:
+                _vs_status = visual_search.status()
+            except Exception:
+                _vs_status = {}
+            from src.app.services.decision_log import log_trace_event
+            log_trace_event(
+                trace_id, "stage_partial_failure", "system", "visual_search", "system", None,
+                {"stage": "visual_search", "degraded": True, "severity": "warn",
+                 "reason": "visual_search_unavailable",
+                 "model_loaded": _vs_status.get("model_loaded"),
+                 "faiss_available": _vs_status.get("faiss_available")},
+            )
     return ground_identity(
         query,
         text_identity=text_identity,

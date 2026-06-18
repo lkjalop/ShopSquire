@@ -112,3 +112,27 @@ def test_catalog_brands_cache_reset_is_exposed():
     _CATALOG_BRANDS_CACHE["brands"] = {"sentinel"}
     reset_catalog_brands_cache()
     assert _CATALOG_BRANDS_CACHE["brands"] is None
+
+
+def test_visual_search_unavailable_emits_degraded_trace(monkeypatch):
+    """Observability: when visual similarity is configured ON but the CLIP/FAISS backend is not
+    loaded, grounding degrades to text-only — and that must be VISIBLE in the trace, not a silent
+    no-op (the clip_unavailable silent gap)."""
+    import src.app.services.grounding_ladder as g
+    import src.app.services.visual_search as vs
+
+    monkeypatch.setattr(vs, "is_available", lambda: False)
+    monkeypatch.setattr(vs, "status", lambda: {"model_loaded": False, "faiss_available": False})
+
+    events = []
+    monkeypatch.setattr(
+        "src.app.services.decision_log.log_trace_event",
+        lambda *a, **k: events.append(a),
+    )
+    g.resolve_grounded_identity(
+        "msi raider", image_bytes=b"fake", enable_visual_search=True, trace_id="t-vs-1",
+    )
+    degraded = [e for e in events if len(e) > 6 and e[1] == "stage_partial_failure"
+                and isinstance(e[6], dict) and e[6].get("reason") == "visual_search_unavailable"]
+    assert degraded, "expected a visual_search_unavailable degraded trace event"
+    assert degraded[0][6]["degraded"] is True
