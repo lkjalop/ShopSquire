@@ -9,8 +9,9 @@ results. Gating on PRICE was the wrong axis (a $59 product can be perfectly vali
 gating on TYPE is correct.
 
 This module is the MECHANISM; the FLAVOUR (which name patterns map to which type,
-and the sane price band per type) lives in ``config/store_vocab.json`` so the same
-core serves any vertical. One classifier drives three surfaces:
+and the sane price band per type) lives in the StoreProfile
+(``config/store_profiles/<id>.json``) so the same core serves any vertical. One
+classifier drives three surfaces:
 
   1. Recommendation gating  — keep PRIMARY types in headline results (services/.. → recommend.py)
   2. Cart upsell            — route accessories to companion cross-sell (upsell_engine.py)
@@ -22,15 +23,11 @@ Pure functions, no I/O beyond a cached config read. Never raises.
 """
 from __future__ import annotations
 
-import json
-import os
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-_DEFAULT_VOCAB_PATH = os.path.join("config", "store_vocab.json")
-
-# Baked-in fallback so the core works even if the config file is missing.
+# Baked-in catastrophic fallback so the core still classifies if the profile is unreadable.
 _FALLBACK: Dict[str, Any] = {
     "primary_types": ["laptop", "desktop"],
     "product_type_rules": [
@@ -63,18 +60,36 @@ ACCESSORY_TYPE = "accessory"
 
 @lru_cache(maxsize=1)
 def _vocab() -> Dict[str, Any]:
-    path = os.getenv("STORE_VOCAB_PATH", _DEFAULT_VOCAB_PATH)
+    """Taxonomy vocab from the StoreProfile (SSOT — config/store_profiles/<id>.json).
+
+    Phase 1: this used to read config/store_vocab.json (a parallel, drifting second profile).
+    It now reads the canonical StoreProfile. `_FALLBACK` is dormant CATASTROPHIC insurance —
+    it only fires if the profile is entirely unreadable (the loader itself already falls back
+    to electronics for a missing/typo'd profile id)."""
+    merged = dict(_FALLBACK)
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        # Merge over fallback so a partial config still works.
-        merged = dict(_FALLBACK)
-        for k in ("primary_types", "product_type_rules", "price_bands", "upsell_companions"):
-            if data.get(k):
-                merged[k] = data[k]
-        return merged
+        from src.app.platform.store_profile import get_store_profile
+        prof = get_store_profile()  # default electronics; loader handles missing/typo'd ids
+        if prof.get("primary_types"):
+            merged["primary_types"] = prof["primary_types"]
+        if prof.get("product_type_rules"):
+            merged["product_type_rules"] = prof["product_type_rules"]
+        if prof.get("price_bands_usd"):
+            merged["price_bands"] = prof["price_bands_usd"]
+        if prof.get("upsell_companions"):
+            merged["upsell_companions"] = prof["upsell_companions"]
     except Exception:
-        return dict(_FALLBACK)
+        pass
+    return merged
+
+
+def reset_cache() -> None:
+    """Clear the taxonomy caches — call when the active profile changes (tests/determinism)."""
+    for fn in (_vocab, _compiled_rules):
+        try:
+            fn.cache_clear()
+        except Exception:
+            pass
 
 
 @lru_cache(maxsize=1)

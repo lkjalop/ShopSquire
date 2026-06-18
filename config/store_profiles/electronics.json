@@ -29,7 +29,23 @@
   "brand_price_floors_usd": {"apple":1200,"msi":900,"razer":1200,"gigabyte":1000,"lenovo":500,"dell":500,"hp":400,"asus":400,"acer":350,"microsoft":900,"samsung":800},
 
   "primary_types": ["laptop","desktop"],
-  "price_bands_usd": {"laptop":[350,6000],"desktop":[400,9000],"tablet":[150,3000],"monitor":[80,3000],"networking":[25,900],"audio":[10,600],"storage":[10,800],"bag":[15,400],"peripheral":[5,500],"printer":[40,1500]},
+  "price_bands_usd": {"laptop":[350,6000],"desktop":[400,9000],"tablet":[150,3000],"monitor":[80,3000],"networking":[25,900],"audio":[10,600],"storage":[10,800],"bag":[15,400],"peripheral":[5,500],"printer":[40,1500],"accessory":[5,1500]},
+
+  "_product_type_rules_comment": "Ordered classification rules (FIRST match wins; accessory/specific types BEFORE 'laptop' so 'Laptop Brief' -> bag). Migrated VERBATIM from the archived store_vocab.json so product_classifier (the one taxonomy brain) reads flavour from the profile. spec_units/gpu_prefixes feed product_claim_guard.",
+  "spec_units": ["gb","tb","hz","ghz"],
+  "gpu_prefixes": ["rtx","gtx","rx"],
+  "product_type_rules": [
+    {"type": "networking", "pattern": "\\b(router|modem|range extender|wi-?fi extender|mesh|access point|nighthawk|powerline)\\b"},
+    {"type": "monitor",    "pattern": "\\b(monitor|display)\\b(?!.*\\blaptop\\b)"},
+    {"type": "audio",      "pattern": "\\b(head ?set|cloud flight|earbuds?|ear ?phones?|speakers?|microphone|mic\\b|soundbar)\\b"},
+    {"type": "storage",    "pattern": "\\b(ssd|hdd|hard drive|flash drive|usb drive|sd card|micro ?sd|memory card|portable ssd|external drive|nvme drive)\\b"},
+    {"type": "bag",        "pattern": "\\b(backpack|brief|attache|folio|sleeve|carry ?bag|carry case|laptop case|messenger|gauntlet|tote)\\b"},
+    {"type": "peripheral", "pattern": "\\b(mouse|keyboard|webcam|docking station|dock\\b|usb hub|hub\\b|laptop stand|stand\\b|cooling pad|charger|power adapter|adapter|hdmi|ethernet cable|cable|card reader)\\b"},
+    {"type": "printer",    "pattern": "\\b(printer|scanner|ink|toner)\\b"},
+    {"type": "tablet",     "pattern": "\\b(ipad|tablet|galaxy tab|surface go|surface pro\\b)\\b"},
+    {"type": "desktop",    "pattern": "\\b(desktop|tower pc|gaming pc|all-in-one|aio pc|mini pc|nuc)\\b"},
+    {"type": "laptop",     "pattern": "\\b(laptop|notebook|macbook|ultrabook|2-in-1|chromebook|thinkpad|ideapad|vivobook|zenbook|spectre|pavilion|victus|nitro|swift|tuf|rog|katana|stealth|omen|legion|aspire|inspiron|latitude|xps|copilot\\+? pc|copilot pc)\\b"}
+  ],
 
   "use_cases": {
     "gaming":        {"needs_dedicated_gpu": true,  "spec_floors": {"refresh_hz_min": 144}, "nqe_question": "ask_gaming_depth"},

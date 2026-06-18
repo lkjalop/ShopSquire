@@ -55,14 +55,24 @@ def test_budget_paraphrase_is_allowed():
 
 def test_vocab_is_config_driven_agnostic(monkeypatch, tmp_path):
     """De-flavour proof: the grounding mechanism is agnostic; brands/specs are config.
-    Swap to a furniture store -> laptop brands are no longer 'known', furniture brands are."""
+    Swap to a furniture store -> laptop brands are no longer 'known', furniture brands are.
+    Phase 1: the vocab source is now the StoreProfile (was config/store_vocab.json), so we
+    swap by writing a temp profiles dir and pointing STORE_PROFILES_DIR at it."""
     import json
     import src.app.services.product_claim_guard as g
-    vocab = {"known_brands": ["ikea", "herman miller"], "spec_units": ["cm", "kg"], "gpu_prefixes": []}
-    p = tmp_path / "vocab.json"
-    p.write_text(json.dumps(vocab), encoding="utf-8")
-    monkeypatch.setenv("STORE_VOCAB_PATH", str(p))
-    g._VOCAB_CACHE = None  # reset cache so the new path loads
+    from src.app.platform import store_profile as sp
+    pdir = tmp_path / "profiles"
+    pdir.mkdir()
+    # The loader requests the default id ("electronics"); override that file's CONTENT.
+    (pdir / "electronics.json").write_text(json.dumps({
+        "id": "electronics",
+        "known_brands": ["ikea", "herman miller"],
+        "spec_units": ["cm", "kg"],
+        "gpu_prefixes": [],
+    }), encoding="utf-8")
+    monkeypatch.setenv("STORE_PROFILES_DIR", str(pdir))
+    sp.reset_cache()
+    g.reset_vocab_cache()
     try:
         results = [{"name": "IKEA Markus", "brand": "IKEA", "price_cents": 19900, "specs": {}}]
         # 'Razer' is NOT a furniture brand -> not flagged as invented product
@@ -72,4 +82,5 @@ def test_vocab_is_config_driven_agnostic(monkeypatch, tmp_path):
         r2 = g.verify_product_narration("The Herman Miller chair is best.", results)
         assert any("herman miller" in v for v in r2.violations)
     finally:
-        g._VOCAB_CACHE = None  # reset for other tests
+        sp.reset_cache()
+        g.reset_vocab_cache()

@@ -131,7 +131,7 @@ def _demote_off_category(results: list, query: str | None) -> list:
     Gates on product TYPE, not a price band or a keyword denylist: a $59 product can be
     perfectly valid (it's a real range-extender price) — the problem is it's the wrong
     TYPE for a laptop request. Type classification + the type→primary mapping are the
-    agnostic core (services/product_classifier.py + config/store_vocab.json). Excluded
+    agnostic core (services/product_classifier.py + the StoreProfile). Excluded
     accessories aren't discarded — they're the cart-upsell pool (companion_types_for).
 
     Keeps everything if results are ALL accessories (user searched 'headset') or ALL

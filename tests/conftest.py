@@ -353,21 +353,24 @@ def _restore_feature_flags_file():
 
 @pytest.fixture(autouse=True)
 def _reset_store_profile_cache():
-    """Clear the StoreProfile lru_cache between tests so a profile loaded under one
-    vertical (e.g. pharmacy) can't leak into the next test's reads. PROVABLY SAFE and
-    NON-masking: it reloads identical static JSON, so it can never change a test's
-    verdict (unlike the catalog/Redis clears that masked NQE — see docs/DETERMINISM.md)."""
-    try:
-        from src.app.platform.store_profile import reset_cache as _rc
-        _rc()
-    except Exception:
-        pass
+    """Clear the StoreProfile lru_cache (and the profile-derived taxonomy/vocab caches)
+    between tests so a profile loaded under one vertical (e.g. pharmacy) can't leak into the
+    next test's reads. PROVABLY SAFE and NON-masking: it reloads identical static JSON, so it
+    can never change a test's verdict (unlike the catalog/Redis clears that masked NQE — see
+    docs/DETERMINISM.md)."""
+    def _reset_all():
+        for mod, fn in (
+            ("src.app.platform.store_profile", "reset_cache"),
+            ("src.app.services.product_classifier", "reset_cache"),
+            ("src.app.services.product_claim_guard", "reset_vocab_cache"),
+        ):
+            try:
+                getattr(__import__(mod, fromlist=[fn]), fn)()
+            except Exception:
+                pass
+    _reset_all()
     yield
-    try:
-        from src.app.platform.store_profile import reset_cache as _rc
-        _rc()
-    except Exception:
-        pass
+    _reset_all()
 
 
 @pytest.fixture(autouse=True)

@@ -19,9 +19,9 @@ from typing import Any
 
 # ── Store vocabulary (FLAVOUR, not core) ──────────────────────────────────────
 # The grounding MECHANISM (reject invented product/price/spec) is product-agnostic.
-# WHICH brands/specs exist is store-specific -> loaded from config/store_vocab.json
-# (override with STORE_VOCAB_PATH). Defaults below are the laptop/computer demo
-# vocabulary so the guard works out of the box; another store ships another file.
+# WHICH brands/specs exist is store-specific -> loaded from the StoreProfile
+# (config/store_profiles/<id>.json: known_brands/spec_units/gpu_prefixes). Defaults below
+# are catastrophic insurance (laptop demo) used only if the profile is unreadable.
 _DEFAULT_BRANDS = {
     "msi", "asus", "lenovo", "dell", "hp", "acer", "razer", "apple", "macbook",
     "gigabyte", "alienware", "samsung", "microsoft", "surface", "lg", "sony",
@@ -34,32 +34,41 @@ _VOCAB_CACHE: dict | None = None
 
 
 def _load_store_vocab() -> dict:
-    """Load store vocabulary (cached). Falls back to laptop defaults if no config."""
+    """Load store vocabulary (cached) from the StoreProfile (SSOT). Falls back to the
+    laptop defaults only if the profile is unreadable. Phase 1: this used to read
+    config/store_vocab.json (a parallel second profile); that file is now archived."""
     global _VOCAB_CACHE
     if _VOCAB_CACHE is not None:
         return _VOCAB_CACHE
     brands, units, gpus = set(_DEFAULT_BRANDS), list(_DEFAULT_SPEC_UNITS), list(_DEFAULT_GPU_PREFIXES)
     try:
-        import json
-        import os
-        path = os.getenv("STORE_VOCAB_PATH") or os.path.join("config", "store_vocab.json")
-        if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f) or {}
-            if data.get("known_brands"):
-                brands = {str(b).lower() for b in data["known_brands"]}
-            if data.get("spec_units"):
-                units = [str(u).lower() for u in data["spec_units"]]
-            if data.get("gpu_prefixes"):
-                gpus = [str(g).lower() for g in data["gpu_prefixes"]]
+        from src.app.platform.store_profile import get_store_profile
+        prof = get_store_profile()
+        if prof.get("known_brands"):
+            brands = {str(b).lower() for b in prof["known_brands"]}
+        if prof.get("spec_units"):
+            units = [str(u).lower() for u in prof["spec_units"]]
+        if prof.get("gpu_prefixes") is not None:  # explicit [] (e.g. pharmacy) must be honoured
+            gpus = [str(g).lower() for g in prof["gpu_prefixes"]]
     except Exception:
         pass
+    # Empty gpu list (a non-electronics vertical) must match NOTHING, not every 3-4 digit number.
+    if gpus:
+        gpu_re = re.compile(r"\b(?:" + "|".join(re.escape(g) for g in gpus) + r")\s?(\d{3,4})\b", re.IGNORECASE)
+    else:
+        gpu_re = re.compile(r"a^")  # never matches
     _VOCAB_CACHE = {
         "brands": brands,
         "spec_unit_re": re.compile(r"(\d[\d.]*)\s?(" + "|".join(re.escape(u) for u in units) + r")\b", re.IGNORECASE),
-        "gpu_re": re.compile(r"\b(?:" + "|".join(re.escape(g) for g in gpus) + r")\s?(\d{3,4})\b", re.IGNORECASE),
+        "gpu_re": gpu_re,
     }
     return _VOCAB_CACHE
+
+
+def reset_vocab_cache() -> None:
+    """Clear the cached vocab — call when the active profile changes (tests/determinism)."""
+    global _VOCAB_CACHE
+    _VOCAB_CACHE = None
 
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
