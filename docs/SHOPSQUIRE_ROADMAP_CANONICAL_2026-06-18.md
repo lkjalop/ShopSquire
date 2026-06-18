@@ -92,3 +92,61 @@ mParticle, 3rd-party supplier) is classified once, on entry, by latency + trust:
 Do not build connectors speculatively. Build the **port + one reference adapter**, prove agnostic
 with a **second** (the electronics+pharmacy discipline). Core sees normalized
 `LoyaltyTier=gold, freshness=18h, consent=[personalization]` — never the vendor schema.
+
+---
+
+# Execution status + integrated next-steps (updated 2026-06-18, after Phase-5 stage #2)
+
+## Phase 5 (`recommend.py` split) — actual progress
+
+| Step | New module | Result |
+|---|---|---|
+| ✅ checkout-handoff | `services/checkout_handoff.py` | first leaf, RecommendContext seed |
+| ✅ image-hint stage | `services/recommend_image_hints.py` | safe image hints + brand patterns, profile-backed |
+| ✅ **foundation** | `services/recommend_utils.py` | shared pure leaf utils (brand match/display, price, spec parser) — **breaks the circular-import knot for every later stage** |
+| ✅ **#2 budget advisor** | `services/recommend_budget_advisor.py` | 9 pure builders (AST byte-identical move) |
+| ⏳ #3 NQE → #4 narration → #5 fast-path → #6 routes | — | not started |
+
+**recommend.py 14,588 → 13,731.** ⚠️ **`suggest()` is STILL ~7,683 lines** ([recommend.py:5370](../src/app/routers/recommend.py)).
+Everything extracted so far was a **module-level helper CALLED BY suggest()**, not an **inline block
+INSIDE it**. The file shrank; the monster function did not. **suggest() only shrinks from #3 on**,
+when inline blocks become `stage(state) -> state` calls — which needs the minimal
+`RecommendStageState` to land first.
+
+## The "5 consolidations" map onto existing phases — do NOT create parallel plans
+
+| Consolidation (codebase-grounded) | Canonical phase | Status |
+|---|---|---|
+| #1 collapse 334 `except Exception` in recommend.py (4,894 in `src/app`) into a traced `_safe()` wrapper | **cross-cutting reliability** (not yet in this roadmap — add it) | new |
+| #2 one budget-floor authority (`_USE_CASE_BUDGET_FLOORS` + KB + 2 divergent `_generic_budget_floor`) | Phase 1/2 (taxonomy + flavour) | pending — land *with* stage #3 |
+| #3 brand vocabulary → StoreProfile `manufacturers` map (4 inline copies) | Phase 2 (flavour excision) | started (image hints); finish for `recommend_utils.py` |
+| #4 `suggest()` 7.7k → `RecommendStageState` pipeline | Phase 5 (this split) | in progress |
+| #5 ONE recommendation entry point (`recommend.py` vs `services/recommendations.py` vs `recommend_pipeline.py` V2) | Phase 5 / architecture | **needs a decision** |
+
+Core-logic items likewise map: **QueryUnderstanding = Phase 4**; **assumption ledger / NQE depth =
+Phase 4**; **agents-as-typed-stages = Phase 5 (the split is the vehicle)**.
+
+## The sequencing rule (resolves "keep splitting" vs "stop and consolidate")
+
+**Each split stage CARRIES its consolidation.** Extract the inline block → profile-back its flavour
+→ unify its duplicated logic, in the *same* PR. Phase 5 and Phase 2 fuse, exactly as the reorder
+principle intends. Do **not** "finish the split then consolidate" (relocates the mess) **nor** "stop
+the split to consolidate" (loses the natural vehicle). The one exception is #1 (`_safe()` wrapper),
+which is genuinely cross-cutting and ships as its own reliability PR anytime.
+
+## What to do next (ordered)
+
+1. **NOW (trivial, in just-touched code):** fix code-review #1 (dead `_extract_budget_value` /
+   `_generic_budget_floor` in `_build_brand_budget_answer` v1) + #2 (operator-precedence smell at
+   `recommend_budget_advisor.py:362`).
+2. **Next PR — stage #3 (NQE), the first *inline-block* extraction:** introduce the minimal
+   `RecommendStageState`, lift the in-`suggest()` NQE block into `recommend_nqe_stage.py`, and
+   **fold in**: budget-floor consolidation (#2), the corporate-NQE post-propose drop fix (altitude),
+   and the **seed of `QueryUnderstanding`** (decompose budget/use_case/brands ONCE so NQE consumes
+   structured intent instead of re-parsing). This is where Phase 5 + Phase 2 + Phase 4 converge and
+   where suggest() finally starts shrinking.
+3. **Parallel reliability PR (independent):** the `_safe(stage, default)` wrapper (#1) — highest
+   observability win, low risk.
+4. **Then** #4 narration, #5 fast-path (DB-bound, needs the state object), #6 routes.
+5. **Decision needed from the owner:** canonical recommendation entry point (#5) — pick one of the
+   three paths before more fixes compound across them.
