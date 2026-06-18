@@ -272,7 +272,6 @@ def _build_budget_reasoning_note(query: str | None, results: list[dict], constra
 
 
 def _build_brand_budget_answer(query: str, results: list[dict], constraints: dict) -> str:
-    import re as _re_bba
     q_low = str(query or "").lower()
     asks_budget = any(
         tok in q_low for tok in (
@@ -285,36 +284,6 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
     )
     if not asks_budget:
         return ""
-
-    def _extract_budget_value(text: str) -> float | None:
-        patterns = (
-            r"[\$€£]\s*(\d[\d,]+)",
-            r"\b(?:only have|have|budget(?:\s+is|\s+of)?|under|below|max(?:imum)?|up to|around|about|for)\s+\$?\s*(\d[\d,]+)\b",
-            r"\b(\d[\d,]{2,5})\s*(?:dollars|bucks)\b",
-        )
-        for pattern in patterns:
-            match = _re_bba.search(pattern, text)
-            if not match:
-                continue
-            try:
-                value = float(match.group(1).replace(",", ""))
-            except Exception:
-                continue
-            if 100 <= value <= 10000:
-                return value
-        return None
-
-    def _generic_budget_floor(use_case_text: str, query_text: str) -> tuple[int, str]:
-        combined = f"{use_case_text} {query_text}".strip().lower()
-        if any(tok in combined for tok in ("gaming", "esports", "rtx", "fps")):
-            return 1200, "gaming laptop"
-        if any(tok in combined for tok in ("creator", "video editing", "render", "3d", "cad", "architecture", "engineering", "ai", "ml")):
-            return 1200, "creator or engineering laptop"
-        if any(tok in combined for tok in ("school", "student", "high school", "university", "college")):
-            return 700, "school laptop"
-        if any(tok in combined for tok in ("business", "office", "corporate", "work")):
-            return 800, "business laptop"
-        return 600, "laptop"
 
     # ── Extract budget from query text when not already in constraints ──────
     # Handles ranges ("$1200 to $1800"), single values ("under $1800"), and
@@ -359,7 +328,7 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
         )
     )
     _use_case = str(constraints.get("use_case") or "").lower()
-    if not _is_corporate and "office" in _use_case or "corporate" in _use_case:
+    if (not _is_corporate) and ("office" in _use_case or "corporate" in _use_case):
         _is_corporate = True
     if _is_corporate:
         _bmax = float(constraints.get("budget_max") or constraints.get("_request_budget_max") or 0)

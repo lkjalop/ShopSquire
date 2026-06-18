@@ -277,6 +277,12 @@ from src.app.services.recommend_budget_advisor import (  # noqa: E402
     _build_brand_budget_answer_v2,
     _deterministic_assistant_message,
 )
+from src.app.services.recommend_nqe_stage import (  # noqa: E402
+    RecommendNQEHooks,
+    RecommendStageState,
+    prioritize_domain_refinement_questions,
+    run_recommend_nqe_stage,
+)
 
 
 def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
@@ -8984,6 +8990,7 @@ def suggest(
                 query=query_effective,
                 constraints=constraints,
             )
+            next_questions = prioritize_domain_refinement_questions(next_questions)
             next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
             next_questions, fatigue_blocked_ids = _question_fatigue_filter(
                 next_questions,
@@ -9070,6 +9077,7 @@ def suggest(
             persona=constraints.get("buyer_persona") or constraints.get("buyer_persona_candidate"),
             persona_confidence=constraints.get("buyer_persona_confidence"),
         )
+        next_questions = prioritize_domain_refinement_questions(next_questions)
         next_questions = _adapt_nqe_questions_for_sentiment(
             next_questions,
             sentiment=str(nlp.get("sentiment") or "neutral"),
@@ -11603,263 +11611,61 @@ def suggest(
         )
     except Exception:
         pass
-    next_questions = []
-    try:
-        # When the user is asking for an explanation or ranking of results they
-        # already have (e.g. "explain top 3", "list those", "why these?"), skip
-        # the clarifying-question loop entirely — they don't need "What budget?"
-        # while they're reviewing a shortlist.  NQE still fires on fresh queries.
-        _skip_nqe_clarify = bool(str(turn_intent or "").upper() == "EXPLAIN" or followup_explain or shortlist_lock_active)
-        missing_fields = _suppress_missing_fields_for_turn_intent(
-            _infer_missing_fields(
-                constraints=constraints,
-                nlp=nlp if isinstance(nlp, dict) else {},
-                kv=kv if isinstance(kv, dict) else None,
-            ),
+    _nqe_state = run_recommend_nqe_stage(
+        RecommendStageState(
+            query=query,
+            query_effective=query_effective,
+            uid=uid,
+            constraints=constraints,
+            nlp=nlp if isinstance(nlp, dict) else {},
+            kv=kv if isinstance(kv, dict) else {},
+            structured_state=structured_state if isinstance(structured_state, dict) else {},
+            payload=payload,
+            image_context=image_context if isinstance(image_context, dict) else {},
+            question_plan=question_plan,
+            trace_id=trace_id,
+            flags=flags,
             turn_intent=turn_intent,
-        )
-        if missing_fields and not _skip_nqe_clarify:
-            category = _resolve_nqe_product_category(
-                query=query,
-                constraints=constraints,
-                identity_constraints=_identity_constraints,
-                identity_result=_id_result,
-            )
-            _nqe_asked2 = list((structured_state.get("nqe_asked_ids") or kv.get("nqe_asked_ids") or []))
-            for _e in (recent_asked_entries or []):
-                _turn = int((_e or {}).get("turn") or 0)
-                _slot = str((_e or {}).get("slot") or "").strip().lower()
-                _qid = str((_e or {}).get("id") or "").strip().lower()
-                if (
-                    _qid
-                    and _turn > 0
-                    and (current_turn - _turn) <= fatigue_turns
-                    and _slot not in contradicted_slots
-                    and _qid not in _nqe_asked2
-                ):
-                    _nqe_asked2.append(_qid)
-            _nqe_answered2 = dict((structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {}))
-            # ── Fix 1: bridge text-extracted constraints into NQE answered_fields ──
-            for _ck, _cv in (
-                ("budget_min", constraints.get("budget_min")),
-                ("budget_max", constraints.get("budget_max")),
-                ("use_case", constraints.get("use_case")),
-                ("brand_preference", (constraints.get("brands") or [None])[0]),
-                ("gpu_preference", constraints.get("gpu_preference")),
-            ):
-                if _ck == "use_case" and _use_case_needs_nqe_refinement(_cv):
-                    continue
-                if _cv and not _nqe_answered2.get(_ck):
-                    _nqe_answered2[_ck] = _cv
-            nqe_input = NQEInput(
-                intent="product_search",
-                product_category=category,
-                symptom=None,
-                timeline_days=None,
-                risk_score=0.0,
-                missing_fields=missing_fields,
-                tenant_id=request.headers.get("X-Tenant-Id") if request is not None else None,
-                template_variant=request.headers.get("X-NQE-Template-Variant") if request is not None else None,
-                template_version=request.headers.get("X-NQE-Template-Version") if request is not None else None,
-                trace_id=trace_id,
-                previously_asked_ids=_nqe_asked2,
-                answered_fields=_nqe_answered2,
-                has_image=bool(image_context.get("labels") or image_context.get("ocr")),
-                image_identity_confidence=float(image_identity_confidence),
-                image_labels=image_context.get("labels") or [],
-                detected_use_case=_use_case_match,
-                query=query or "",
-                detected_games=detect_games_in_text(query or ""),
-                detected_software=detect_software_in_text(query or ""),
-                chat_history_summary=_session_context_summary,
-                user_profile=_user_profile_dict,
-                turn_intent=turn_intent,
-                identity_residual_question=constraints.get("_identity_residual_question"),
-            )
-            engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
-            next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
-            next_questions = _filter_nqe_questions_by_missing_fields(
-                next_questions,
-                missing_fields=missing_fields,
-            )
-            next_questions = _apply_intent_specific_question_bank(
-                next_questions,
-                query=query_effective,
-                constraints=constraints,
-            )
-            next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
-            next_questions, fatigue_blocked_ids2 = _question_fatigue_filter(
-                next_questions,
-                recent_asked=recent_asked_entries,
-                current_turn=current_turn,
-                window_turns=fatigue_turns,
-                contradicted_slots=contradicted_slots,
-            )
-            if fatigue_blocked_ids2:
-                try:
-                    log_trace_event(
-                        trace_id=trace_id,
-                        event_type="nqe_question_fatigue_guard",
-                        source_type="agent",
-                        source_id="NQE_Agent",
-                        target_type="system",
-                        target_id=None,
-                        payload={
-                            "blocked_question_ids": fatigue_blocked_ids2[:10],
-                            "window_turns": fatigue_turns,
-                            "current_turn": current_turn,
-                            "contradicted_slots": sorted(list(contradicted_slots)),
-                        },
-                    )
-                except Exception:
-                    pass
-            # BUG-1 fix: persist newly-asked question IDs to Redis
-            try:
-                _new_ids2 = [str(q.get("id") or "") for q in next_questions if q.get("id")]
-                if _new_ids2:
-                    _asked_updated2 = list(dict.fromkeys(_nqe_asked2 + _new_ids2))
-                    structured_state["nqe_asked_ids"] = _asked_updated2
-                    kv["nqe_asked_ids"] = _asked_updated2
-                    _recent2 = _normalize_recent_nqe_asked(
-                        structured_state.get("nqe_recent_asked")
-                        if isinstance(structured_state.get("nqe_recent_asked"), list)
-                        else kv.get("nqe_recent_asked")
-                    )
-                    for _q in (next_questions or []):
-                        if not isinstance(_q, dict) or not _q.get("id"):
-                            continue
-                        _qid = str(_q.get("id") or "").strip().lower()
-                        _recent2.append(
-                            {
-                                "id": _qid,
-                                "slot": _question_slot_from_id(_qid),
-                                "turn": int(current_turn),
-                            }
-                        )
-                    _recent2 = _recent2[-60:]
-                    structured_state["nqe_recent_asked"] = _recent2
-                    kv["nqe_recent_asked"] = _recent2
-                    mem.set_structured_state(uid, structured_state)
-                    mem.set_kv(uid, kv)
-            except Exception:
-                pass
-            next_questions = (next_questions or [])[:2]
-            if gpu_followup_question_needed:
-                next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
-            # Inject image-budget mismatch question at top priority when applicable.
-            try:
-                if _budget_mismatch_question and not any(
-                    str((q or {}).get("id") or "") == "ask_image_budget_mismatch"
-                    for q in (next_questions or [])
-                ):
-                    next_questions = [_budget_mismatch_question] + (next_questions or [])
-                    next_questions = next_questions[:2]
-            except Exception:
-                pass
-            next_questions = _suppress_nqe_questions_for_turn_intent(next_questions, turn_intent=turn_intent)
-            next_questions = _append_standard_nqe_options(next_questions, query_effective)
-            next_questions = _apply_nqe_confidence_gating(
-                next_questions, query=query_effective, confidence_band=question_plan.get("confidence_band")
-            )
-            next_questions = _apply_persona_confidence_fallback(
-                next_questions,
-                persona=constraints.get("buyer_persona") or constraints.get("buyer_persona_candidate"),
-                persona_confidence=constraints.get("buyer_persona_confidence"),
-            )
-            next_questions = _adapt_nqe_questions_for_sentiment(
-                next_questions,
-                sentiment=str(nlp.get("sentiment") or "neutral"),
-            )
-            next_questions = _dedupe_next_questions_for_render(next_questions)
-            if next_questions:
-                payload["next_questions"] = next_questions
-                # Also attach follow-ups into the NLP bundle so frontends reading
-                # `proposal.nlp.followups` or `nlp.followups` will surface questions.
-                try:
-                    if isinstance(nlp, dict):
-                        nlp.setdefault("followups", [])
-                        # prefer existing followups first, then append
-                        for q in next_questions:
-                            if q not in nlp["followups"]:
-                                nlp["followups"].append(q)
-                except Exception:
-                    pass
-                try:
-                    log_trace_event(
-                        trace_id=trace_id,
-                        event_type="nqe_question_shown",
-                        source_type="agent",
-                        source_id="NQE_Agent",
-                        target_type="user",
-                        target_id=None,
-                        payload={
-                            "intent": "product_search",
-                            "category": category,
-                            "missing_fields": missing_fields,
-                            "questions": next_questions,
-                            **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["nqe_templates"]),
-                        },
-                    )
-                    # Backward-compatible alias for existing consumers/tests.
-                    log_trace_event(
-                        trace_id=trace_id,
-                        event_type="next_questions",
-                        source_type="agent",
-                        source_id="NQE_Agent",
-                        target_type="user",
-                        target_id=None,
-                        payload={
-                            "intent": "product_search",
-                            "category": category,
-                            "missing_fields": missing_fields,
-                            "questions": next_questions,
-                            **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["nqe_templates"]),
-                        },
-                    )
-                except Exception:
-                    pass
-    except Exception:
-        next_questions = []
-    if gpu_followup_question_needed:
-        next_questions = _append_gpu_disambiguation_question(next_questions, query_effective)
-        payload["next_questions"] = next_questions
-    if isinstance(payload.get("next_questions"), list):
-        payload["next_questions"] = _append_standard_nqe_options(payload.get("next_questions"), query_effective)
-        payload["next_questions"] = _apply_nqe_confidence_gating(
-            payload.get("next_questions"),
-            query=query_effective,
-            confidence_band=question_plan.get("confidence_band"),
-        )
-        payload["next_questions"] = _apply_persona_confidence_fallback(
-            payload.get("next_questions"),
-            persona=constraints.get("buyer_persona") or constraints.get("buyer_persona_candidate"),
-            persona_confidence=constraints.get("buyer_persona_confidence"),
-        )
-        payload["next_questions"] = _dedupe_next_questions_for_render(payload.get("next_questions"))
-    if (
-        str(turn_intent or "").upper() in {"SEARCH", "FILTER"}
-        and not followup_explain
-        and not isinstance(payload.get("next_questions"), list)
-    ):
-        payload["next_questions"] = []
-    if (
-        str(turn_intent or "").upper() in {"SEARCH", "FILTER"}
-        and not followup_explain
-        and isinstance(payload.get("next_questions"), list)
-        and len(payload.get("next_questions") or []) == 0
-    ):
-        payload["next_questions"] = [
-            {
-                "id": "ask_use_case",
-                "text": "What will you primarily use it for (notes, office, coding, gaming, video editing, AI)?",
-                "goal": "clarify_use_case",
-                "options": [
-                    {"id": "uc_notes", "label": "Notes / Office"},
-                    {"id": "uc_coding", "label": "Coding / Engineering"},
-                    {"id": "uc_gaming", "label": "Gaming / Creative"},
-                ],
-            }
-        ]
+            followup_explain=followup_explain,
+            shortlist_lock_active=shortlist_lock_active,
+        ),
+        hooks=RecommendNQEHooks(
+            suppress_missing_fields_for_turn_intent=_suppress_missing_fields_for_turn_intent,
+            infer_missing_fields=_infer_missing_fields,
+            resolve_nqe_product_category=_resolve_nqe_product_category,
+            use_case_needs_nqe_refinement=_use_case_needs_nqe_refinement,
+            filter_nqe_questions_by_missing_fields=_filter_nqe_questions_by_missing_fields,
+            apply_intent_specific_question_bank=_apply_intent_specific_question_bank,
+            suppress_nqe_questions_for_turn_intent=_suppress_nqe_questions_for_turn_intent,
+            question_fatigue_filter=_question_fatigue_filter,
+            normalize_recent_nqe_asked=_normalize_recent_nqe_asked,
+            question_slot_from_id=_question_slot_from_id,
+            append_gpu_disambiguation_question=_append_gpu_disambiguation_question,
+            append_standard_nqe_options=_append_standard_nqe_options,
+            apply_nqe_confidence_gating=_apply_nqe_confidence_gating,
+            apply_persona_confidence_fallback=_apply_persona_confidence_fallback,
+            adapt_nqe_questions_for_sentiment=_adapt_nqe_questions_for_sentiment,
+            dedupe_next_questions_for_render=_dedupe_next_questions_for_render,
+            trace_meta_payload=_trace_meta_payload,
+        ),
+        request=request,
+        mem=mem,
+        recent_asked_entries=recent_asked_entries,
+        current_turn=current_turn,
+        fatigue_turns=fatigue_turns,
+        contradicted_slots=contradicted_slots,
+        identity_constraints=_identity_constraints,
+        identity_result=_id_result,
+        use_case_match=_use_case_match,
+        image_identity_confidence=image_identity_confidence,
+        session_context_summary=_session_context_summary,
+        user_profile_dict=_user_profile_dict,
+        gpu_followup_question_needed=gpu_followup_question_needed,
+        budget_mismatch_question=_budget_mismatch_question,
+    )
+    payload = _nqe_state.payload
+    structured_state = _nqe_state.structured_state
+    kv = _nqe_state.kv
     # Prompt the "previous shortlist vs fresh search" disambiguation when the user
     # makes a bare REFERENCE ("show me those and why") under low memory confidence —
     # even with no shortlist, a reference-to-nothing is ambiguous and must be resolved.
@@ -13728,4 +13534,3 @@ def nqe_feedback_summary(
         c = int(r[2] or 0)
         items.append({"variant": str(r[0] or "control"), "samples": n, "conversion_rate": (float(c) / float(max(1, n)))})
     return {"status": "ok", "tenant_id": tenant_id, "days": days, "items": items}
-

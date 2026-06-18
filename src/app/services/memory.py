@@ -105,6 +105,28 @@ class Memory:
         except Exception:
             pass
 
+    def clear_session(self, uid: str) -> None:
+        keys = [
+            SUMMARY_KEY.format(uid=uid),
+            KV_KEY.format(uid=uid),
+            RETRIEVAL_KEY.format(uid=uid),
+            AGENT_STEPS_KEY.format(uid=uid),
+            STRUCTURED_STATE_KEY.format(uid=uid),
+            PRODUCT_MEMORY_BANK_KEY.format(uid=uid),
+            OBSERVATION_LOG_KEY.format(uid=uid),
+            OBSERVATION_SUMMARY_KEY.format(uid=uid),
+        ]
+        try:
+            self.redis.delete(*keys)
+        except Exception:
+            pass
+        try:
+            with self._LOCAL_LOCK:
+                for key in keys:
+                    self._LOCAL_STORE.pop(key, None)
+        except Exception:
+            pass
+
     def set_summary(self, uid: str, summary: Dict[str, Any], ttl_seconds: int | None = None) -> None:
         try:
             ttl = self.summary_ttl if ttl_seconds is None else ttl_seconds

@@ -72,7 +72,11 @@ def _override_app_engine(eng):
     orig_app_engine = getattr(app.state, "engine", None)
     orig_dbmod_engine = _recommend_dbmod.engine
     app.state.engine = eng
-    _recommend_dbmod.engine = eng
+    try:
+        client.app.state.engine = eng
+    except Exception:
+        pass
+    _recommend_dbmod.set_engine(eng)
     from tests.conftest import _SINGLETONS, _SINGLETONS_LOCK
     with _SINGLETONS_LOCK:
         for _app_inst in _SINGLETONS.values():
@@ -84,13 +88,18 @@ def _override_app_engine(eng):
 
 
 def _restore_app_engine(orig_app_engine, orig_dbmod_engine):
-    app.state.engine = orig_app_engine
-    _recommend_dbmod.engine = orig_dbmod_engine
+    restored_app_engine = orig_dbmod_engine
+    app.state.engine = restored_app_engine
+    try:
+        client.app.state.engine = restored_app_engine
+    except Exception:
+        pass
+    _recommend_dbmod.set_engine(orig_dbmod_engine)
     from tests.conftest import _SINGLETONS, _SINGLETONS_LOCK
     with _SINGLETONS_LOCK:
         for _app_inst in _SINGLETONS.values():
             try:
-                _app_inst.state.engine = orig_dbmod_engine
+                _app_inst.state.engine = restored_app_engine
             except Exception:
                 pass
     try:
@@ -491,6 +500,8 @@ def test_flagged_macbook_image_forces_apple_brand_family_before_generic_windows(
 
 def test_image_hint_asus_uses_specific_brand_fallback_before_generic_windows(monkeypatch):
     orig_retrieve = RecommendationService.retrieve_candidates
+    mem = Memory(get_redis())
+    mem.clear_session("u-asus-nearest")
     try:
         RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
         with db_session() as db:
@@ -534,6 +545,7 @@ def test_image_hint_asus_uses_specific_brand_fallback_before_generic_windows(mon
             "db_price_range_brand",
         }
     finally:
+        mem.clear_session("u-asus-nearest")
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
@@ -1251,6 +1263,8 @@ def test_nqe_budget_option_applies_budget_constraints():
 )
 def test_broad_inferred_use_case_still_gets_domain_nqe_refinement(uid, query, expected_question_id):
     orig_retrieve = RecommendationService.retrieve_candidates
+    mem = Memory(get_redis())
+    mem.clear_session(uid)
     try:
         RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
             {
@@ -1289,6 +1303,7 @@ def test_broad_inferred_use_case_still_gets_domain_nqe_refinement(uid, query, ex
         answered = ((body.get("structured_state") or {}).get("nqe_answered_fields") or {})
         assert answered.get("buyer_persona") is None
     finally:
+        mem.clear_session(uid)
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
@@ -1986,6 +2001,7 @@ def test_nqe_open_ended_uses_image_product_type_category(monkeypatch):
 def test_nqe_post_results_uses_image_product_type_category(monkeypatch):
     import src.app.services.product_identity_agent as pia
 
+    Memory(get_redis()).clear_session("u-nqe-post-cat-1")
     _write_flags({
         "USE_AGENT_CAPABILITIES": True,
         "AGENT_ROLLOUT_PERCENT": 100,
@@ -2051,6 +2067,7 @@ def test_nqe_post_results_uses_image_product_type_category(monkeypatch):
         and str((e.get("payload") or {}).get("category") or "") == "tablet"
     ]
     assert shown
+    Memory(get_redis()).clear_session("u-nqe-post-cat-1")
 
 
 def test_recommend_includes_fraud_summary_from_tls_geo_context(monkeypatch):
@@ -2130,6 +2147,8 @@ def test_update_pinned_context_persists_priority_slots():
 
 def test_followup_reference_without_shortlist_prompts_disambiguation():
     orig_retrieve = RecommendationService.retrieve_candidates
+    mem = Memory(get_redis())
+    mem.clear_session("u-ref-miss-1")
     try:
         RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
             {"id": "p1", "sku": "R-1", "name": "Laptop A", "price_cents": 99900, "currency": "USD", "stock": 4, "specs": {"ram_gb": 16}},
@@ -2151,6 +2170,7 @@ def test_followup_reference_without_shortlist_prompts_disambiguation():
         nqs = body.get("next_questions") or []
         assert any(str((q or {}).get("id") or "") == "resolve_reference" for q in nqs if isinstance(q, dict))
     finally:
+        mem.clear_session("u-ref-miss-1")
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
