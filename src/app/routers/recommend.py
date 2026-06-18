@@ -8255,8 +8255,14 @@ def suggest(
                 trace_id, "grounding_ladder", "agent", "Product_Identity_Agent",
                 "system", None, _grounded.to_dict(),
             )
-        except Exception:
-            pass
+        except Exception as _gl_exc:
+            # P1: never swallow a grounding failure silently — it degrades brand grounding
+            # (the ASUS-class bug) invisibly. Record it against the trace, then continue.
+            log_trace_event(
+                trace_id, "stage_partial_failure", "system", "image_grounding", "system", None,
+                {"stage": "image_grounding", "error": f"{type(_gl_exc).__name__}: {_gl_exc}",
+                 "severity": "warn", "degraded": True},
+            )
     if incoming_image_payload and image_identity_confidence < 0.45:
         image_reupload_reasons.append("identity_confidence_low")
     if incoming_image_payload and bool(catalog_relevance.get("off_domain")):
