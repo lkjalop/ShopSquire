@@ -139,7 +139,19 @@ Concrete, buildable plan. Every task lists **files+lines**, **what to wire**, **
 | `recommend_budget_advisor` | use-case/budget floors, gaming/office prose | `use_case_floors`, `budget_copy` | parity: inline == profile floors; pharmacy floors differ |
 | `recommend_utils` | brand alias/display, spec tokens | `manufacturers` (exists), `spec_tokens` | parity: inline ⊆ profile union |
 | `recommend_vision_stage` | supported-brand list | reuse `manufacturers` keys | parity: list == manufacturers keys |
-| `upsell_engine` | gaming/university/office cross-sell | `upsell_companions` (exists) | parity per use-case |
+| `upsell_engine` | gaming/university/office cross-sell map (`_USE_CASE_CROSS_SELL`) | `upsell_companions` (exists) | parity + **pharmacy companions actually fire** |
+
+> **Upsell finding (portability bug, not just flavour):** `upsell_engine` uses a hardcoded
+> `_USE_CASE_CROSS_SELL` map keyed by **use-case** (gaming/university/office) at
+> `upsell_engine.py:149`, and **never reads** the profile `upsell_companions` slot — so that slot is
+> **dead config**. Worse, the slot is keyed by **product-type** (electronics: laptop/desktop/tablet;
+> pharmacy: medicine/supplement/personal_care), a *different model* from the hardcoded map. Net: a
+> pharmacy deployment gets **zero** companion upsell (its `medicine→[first_aid, device]` mapping is
+> ignored; `_detect_use_case` only returns electronics use-cases). The **co-purchase affinity** half
+> (basket co-occurrence SQL) IS already agnostic and works for any vertical. Fix: migrate companion
+> upsell to **product-type-keyed**, sourced from `profile_slot("upsell_companions")` (product type is
+> universal; "use_case" is electronics flavour), hardcoded map as electronics fallback (parity), then
+> a pharmacy test asserting `medicine→first_aid` fires.
 | `use_case_advisor` | electronics use-case map | `use_cases` (exists) | parity per use-case |
 
 **Method per slot (proven on grounding vocab):** literal → profile slot → accessor with
