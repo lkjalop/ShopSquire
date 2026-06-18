@@ -34,6 +34,10 @@
   },
   "brand_price_floors_usd": {"apple":1200,"msi":900,"razer":1200,"gigabyte":1000,"lenovo":500,"dell":500,"hp":400,"asus":400,"acer":350,"microsoft":900,"samsung":800},
 
+  "_safe_image_comment": "Curated SAFE allow-list for fast-path image hinting (a bounded subset that may steer retrieval). Separate from manufacturers/primary_types so the security allow-list is explicit and auditable per vertical.",
+  "safe_image_brands": ["acer","alienware","apple","asus","dell","hp","lenovo","macbook","microsoft","msi","samsung","surface"],
+  "safe_image_categories": ["chromebook","computer","desktop","gaming","laptop","macbook","notebook","pc","tablet","windows"],
+
   "primary_types": ["laptop","desktop"],
   "price_bands_usd": {"laptop":[350,6000],"desktop":[400,9000],"tablet":[150,3000],"monitor":[80,3000],"networking":[25,900],"audio":[10,600],"storage":[10,800],"bag":[15,400],"peripheral":[5,500],"printer":[40,1500],"accessory":[5,1500]},
 

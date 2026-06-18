@@ -59,3 +59,13 @@ def test_gaming_use_case_hint_from_spec_tokens():
 def test_brand_patterns_come_from_profile():
     pats = _brand_label_patterns()
     assert "lenovo" in pats and "thinkpad" in pats["lenovo"]
+
+
+def test_safe_image_allowlists_come_from_profile_and_match_fallback():
+    # The safe brand/category allow-lists are now profile-backed; parity with the inline fallback.
+    from src.app.services.recommend_image_hints import (
+        _safe_image_brands, _safe_image_categories,
+        _SAFE_IMAGE_BRANDS_FALLBACK, _SAFE_IMAGE_CATEGORIES_FALLBACK,
+    )
+    assert _safe_image_brands() == _SAFE_IMAGE_BRANDS_FALLBACK
+    assert _safe_image_categories() == _SAFE_IMAGE_CATEGORIES_FALLBACK

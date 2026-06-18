@@ -52,15 +52,44 @@ _SUPPORTED_IMAGE_BRAND_HINTS = {
     "alienware", "microsoft", "acer", "samsung", "razer", "gigabyte", "toshiba",
 }
 
-_SAFE_IMAGE_BRANDS = {
+_SAFE_IMAGE_BRANDS_FALLBACK = frozenset({
     "acer", "alienware", "apple", "asus", "dell", "hp", "lenovo",
     "macbook", "microsoft", "msi", "samsung", "surface",
-}
+})
 
-_SAFE_IMAGE_CATEGORIES = {
+_SAFE_IMAGE_CATEGORIES_FALLBACK = frozenset({
     "chromebook", "computer", "desktop", "gaming", "laptop", "macbook",
     "notebook", "pc", "tablet", "windows",
-}
+})
+
+
+def _safe_image_brands() -> frozenset:
+    """Curated safe brand allow-list from the StoreProfile (safe_image_brands slot)."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        val = profile_slot("safe_image_brands", default=None)
+        if isinstance(val, (list, set, tuple)) and val:
+            return frozenset(str(x).lower() for x in val)
+    except Exception:
+        pass
+    return _SAFE_IMAGE_BRANDS_FALLBACK
+
+
+def _safe_image_categories() -> frozenset:
+    """Curated safe category allow-list from the StoreProfile (safe_image_categories slot)."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        val = profile_slot("safe_image_categories", default=None)
+        if isinstance(val, (list, set, tuple)) and val:
+            return frozenset(str(x).lower() for x in val)
+    except Exception:
+        pass
+    return _SAFE_IMAGE_CATEGORIES_FALLBACK
+
+
+# Back-compat module attributes (some call-sites/tests reference these names directly).
+_SAFE_IMAGE_BRANDS = _SAFE_IMAGE_BRANDS_FALLBACK
+_SAFE_IMAGE_CATEGORIES = _SAFE_IMAGE_CATEGORIES_FALLBACK
 
 # CV-signal fields that are UNTRUSTED content (OCR/QR/links) — never a ranking signal.
 _UNSAFE_IMAGE_SIGNAL_KEYS = {
@@ -79,20 +108,23 @@ def _safe_image_hints_for_fast_path(
     product_identity = image_context.get("product_identity") if isinstance(image_context.get("product_identity"), dict) else {}
     text_blob = " ".join(labels + [str(query or "").lower()])
 
+    safe_brands = _safe_image_brands()
+    safe_categories = _safe_image_categories()
+
     brand_hints: list[str] = []
-    for brand in _SAFE_IMAGE_BRANDS:
+    for brand in safe_brands:
         if re.search(rf"(?<![a-z0-9]){re.escape(brand)}(?![a-z0-9])", text_blob):
             brand_hints.append("apple" if brand == "macbook" else brand)
     pi_brand = str(product_identity.get("brand") or "").strip().lower()
-    if pi_brand in _SAFE_IMAGE_BRANDS:
+    if pi_brand in safe_brands:
         brand_hints.append("apple" if pi_brand == "macbook" else pi_brand)
 
     category_hints: list[str] = []
-    for category in _SAFE_IMAGE_CATEGORIES:
+    for category in safe_categories:
         if re.search(rf"(?<![a-z0-9]){re.escape(category)}(?![a-z0-9])", text_blob):
             category_hints.append("laptop" if category in {"gaming", "notebook", "pc", "windows"} else category)
     pi_category = str(product_identity.get("category") or product_identity.get("product_type") or "").strip().lower()
-    if pi_category in _SAFE_IMAGE_CATEGORIES:
+    if pi_category in safe_categories:
         category_hints.append("laptop" if pi_category in {"gaming", "notebook", "pc", "windows"} else pi_category)
 
     use_case_hints: list[str] = []
