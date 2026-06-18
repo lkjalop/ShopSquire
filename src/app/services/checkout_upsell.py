@@ -640,6 +640,7 @@ def recommend_checkout_upsell(
     use_case: str | None = None,
     query: str | None = None,
     persona: str | None = None,
+    trace_id: str | None = None,
 ) -> list[dict]:
     clean_cart = [str(s).strip() for s in (cart_skus or []) if str(s).strip()]
     cart_set = set(clean_cart)
@@ -683,6 +684,7 @@ def recommend_checkout_upsell(
     cart_price = sum(int((by_sku.get(s) or {}).get("price_cents") or 0) for s in cart_set)
     feature_rows: list[dict[str, Any]] = []
     candidates: list[UpsellCandidate] = []
+    poison_hits: list[dict[str, Any]] = []  # B3: surfaced to the SOC after the loop
     for p in products:
         sku = p["sku"]
         if sku in cart_set:
@@ -793,6 +795,7 @@ def recommend_checkout_upsell(
         }
         poisoned, poison_reason = _looks_poisoned(name, sku, factors, ints, recent)
         if poisoned:
+            poison_hits.append({"sku": sku, "reason": poison_reason or "unknown"})
             continue
         feature_rows.append(
             {
@@ -887,6 +890,24 @@ def recommend_checkout_upsell(
                 model_source="rules_heuristic",
             )
         )
+
+    # B3: surface poisoned upsell signals to the SOC. Per-call guards EMIT; the observer
+    # correlates aggregate velocity. external_analytical evidence (co-purchase/interactions)
+    # filtered here must be visible, not silently dropped.
+    if poison_hits and trace_id:
+        try:
+            from src.app.services.decision_log import log_trace_event
+            log_trace_event(
+                trace_id, "commerce_integrity", "agent", "Upsell_Poison_Guard", "sku", None,
+                {
+                    "signal": "upsell_signal_poisoning",
+                    "blocked": len(poison_hits),
+                    "detections": poison_hits[:20],
+                    "surface": "checkout_upsell",
+                },
+            )
+        except Exception:
+            pass
 
     conversion_scores, model_source = _train_and_score_conversion_model(candidates=feature_rows, interactions=interactions)
     rescored: list[UpsellCandidate] = []

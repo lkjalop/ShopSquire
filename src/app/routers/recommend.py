@@ -14032,6 +14032,7 @@ def checkout_upsell(
             query=query,
             persona=persona,
             use_case=use_case,
+            trace_id=trace_id,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"checkout_upsell_failed: {exc}")
