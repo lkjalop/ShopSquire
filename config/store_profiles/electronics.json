@@ -17,19 +17,20 @@
   "known_brands": ["msi","asus","lenovo","dell","hp","acer","razer","apple","macbook","gigabyte","alienware","samsung","microsoft","surface","lg","sony","intel","amd","nvidia","toshiba"],
   "_nqe_brand_detect_comment": "Laptop MAKERS only (for NQE brand-preference detection) — deliberately excludes component makers (intel/amd/nvidia) that appear in known_brands for claim-guard but must not be read as a buyer's brand choice. Matches the list excised from nqe.py.",
   "nqe_brand_detect": ["lenovo","dell","hp","asus","acer","apple","microsoft","samsung","razer","msi","lg"],
-  "brand_label_patterns": {
-    "apple": ["macbook","imac","mac mini","mac pro","apple"],
-    "lenovo": ["thinkpad","ideapad","legion","yoga","lenovo"],
-    "dell": ["xps","inspiron","alienware","latitude","dell"],
-    "hp": ["spectre","envy","omen","elitebook","probook","hp laptop","hp"],
-    "asus": ["rog","zenbook","vivobook","asus"],
-    "acer": ["predator","aspire","swift","nitro","acer"],
-    "msi": ["msi","dragon logo","stealth","raider","titan","creator"],
-    "razer": ["razer","blade"],
-    "microsoft": ["surface","surface pro","surface laptop"],
-    "samsung": ["galaxy book","samsung"],
-    "gigabyte": ["aorus","gigabyte"],
-    "toshiba": ["dynabook","toshiba"]
+  "_manufacturers_comment": "3-AXIS brand identity (separates manufacturer / product line / from product TYPE which lives in product_type_rules). 'lines' are the sub-brands / product ranges (ThinkPad, XPS, ROG); 'aliases' are manufacturer-name tokens. brand_label_patterns (image->manufacturer) and the brand alias index are DERIVED from this single source (store_profile.brand_label_patterns / product_line_index) so the three scattered brand dicts in recommend.py collapse to one. A vertical fills the same three axes with its own flavour.",
+  "manufacturers": {
+    "apple":     {"lines": ["macbook","imac","mac mini","mac pro"], "aliases": ["apple"]},
+    "lenovo":    {"lines": ["thinkpad","ideapad","legion","yoga"], "aliases": ["lenovo"]},
+    "dell":      {"lines": ["xps","inspiron","alienware","latitude"], "aliases": ["dell"]},
+    "hp":        {"lines": ["spectre","envy","omen","elitebook","probook"], "aliases": ["hp laptop","hp"]},
+    "asus":      {"lines": ["rog","zenbook","vivobook"], "aliases": ["asus"]},
+    "acer":      {"lines": ["predator","aspire","swift","nitro"], "aliases": ["acer"]},
+    "msi":       {"lines": ["stealth","raider","titan","creator"], "aliases": ["msi","dragon logo"]},
+    "razer":     {"lines": ["blade"], "aliases": ["razer"]},
+    "microsoft": {"lines": ["surface","surface pro","surface laptop"], "aliases": []},
+    "samsung":   {"lines": ["galaxy book"], "aliases": ["samsung"]},
+    "gigabyte":  {"lines": ["aorus"], "aliases": ["gigabyte"]},
+    "toshiba":   {"lines": ["dynabook"], "aliases": ["toshiba"]}
   },
   "brand_price_floors_usd": {"apple":1200,"msi":900,"razer":1200,"gigabyte":1000,"lenovo":500,"dell":500,"hp":400,"asus":400,"acer":350,"microsoft":900,"samsung":800},
 

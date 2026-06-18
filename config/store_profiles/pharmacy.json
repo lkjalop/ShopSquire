@@ -6,6 +6,15 @@
   "known_brands": ["panadol","nurofen","chemists own","blackmores","swisse","cenovis","bioglan","sukin","cetaphil","dettol","listerine","betadine"],
   "nqe_brand_detect": ["panadol","nurofen","blackmores","swisse","cenovis","bioglan","sukin","cetaphil","dettol"],
 
+  "_manufacturers_comment": "Agnostic proof: the SAME 3-axis schema (manufacturer / product line / vs type) with pharmacy flavour and zero laptop/GPU tokens. Lines are product ranges (Panadol Osteo, Swisse Ultiboost).",
+  "manufacturers": {
+    "panadol":    {"lines": ["panadol osteo","panadol rapid"], "aliases": ["panadol"]},
+    "nurofen":    {"lines": ["nurofen zavance"], "aliases": ["nurofen"]},
+    "blackmores": {"lines": ["bio c","fish oil"], "aliases": ["blackmores"]},
+    "swisse":     {"lines": ["ultiboost"], "aliases": ["swisse"]},
+    "cetaphil":   {"lines": ["gentle cleanser","daily moisturiser"], "aliases": ["cetaphil"]}
+  },
+
   "primary_types": ["medicine","supplement","personal_care"],
   "price_bands_usd": {"medicine":[2,80],"supplement":[5,120],"personal_care":[3,60],"first_aid":[2,50],"baby":[3,90],"device":[10,400],"accessory":[2,200]},
 

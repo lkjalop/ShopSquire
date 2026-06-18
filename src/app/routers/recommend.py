@@ -263,10 +263,11 @@ _BRAND_LABEL_PATTERNS_FALLBACK: Dict[str, List[str]] = {
 
 
 def _brand_label_patterns() -> Dict[str, List[str]]:
-    """Image→brand label patterns from the StoreProfile, falling back to the inline copy."""
+    """Image→manufacturer label patterns, DERIVED from the profile's 3-axis `manufacturers`
+    map (store_profile.brand_label_patterns). Falls back to the inline copy if unavailable."""
     try:
-        from src.app.platform.store_profile import profile_slot
-        val = profile_slot("brand_label_patterns", default=None)
+        from src.app.platform.store_profile import brand_label_patterns as _blp
+        val = _blp()
         if isinstance(val, dict) and val:
             return val
     except Exception:

@@ -6,17 +6,23 @@ hint detection therefore behaves exactly as before.
 """
 from __future__ import annotations
 
-from src.app.platform.store_profile import get_store_profile
+from src.app.platform.store_profile import brand_label_patterns as _profile_blp
 from src.app.routers.recommend import _BRAND_LABEL_PATTERNS_FALLBACK, _brand_label_patterns
 
 
-def test_profile_slot_matches_inline_fallback_verbatim():
-    prof = get_store_profile("electronics").get("brand_label_patterns")
-    assert prof == _BRAND_LABEL_PATTERNS_FALLBACK
+def test_derived_patterns_match_inline_fallback_setwise():
+    # brand_label_patterns is now DERIVED from the 3-axis `manufacturers` map; image-hint uses
+    # any(p in label) so order within a manufacturer is irrelevant — compare sets.
+    derived = _profile_blp("electronics")
+    assert set(derived) == set(_BRAND_LABEL_PATTERNS_FALLBACK)
+    for mfr, pats in _BRAND_LABEL_PATTERNS_FALLBACK.items():
+        assert set(derived[mfr]) == {p.lower() for p in pats}
 
 
-def test_helper_reads_profile():
-    assert _brand_label_patterns() == _BRAND_LABEL_PATTERNS_FALLBACK
+def test_helper_reads_derived_patterns():
+    derived = _brand_label_patterns()
+    for mfr, pats in _BRAND_LABEL_PATTERNS_FALLBACK.items():
+        assert set(derived[mfr]) == {p.lower() for p in pats}
 
 
 def test_image_brand_hint_mappings_unchanged():

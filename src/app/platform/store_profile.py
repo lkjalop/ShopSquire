@@ -90,6 +90,43 @@ def brand_price_floors(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, int]:
     return out
 
 
+def brand_label_patterns(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, list]:
+    """Image→MANUFACTURER label patterns, DERIVED from the 3-axis `manufacturers` map
+    ({mfr: lines + aliases}). This is the single source for the brand dicts that were
+    scattered/duplicated across recommend.py. Falls back to a legacy flat
+    `brand_label_patterns` slot if a profile predates the manufacturers schema."""
+    mfrs = profile_slot("manufacturers", profile_id=profile_id, default=None)
+    if isinstance(mfrs, dict) and mfrs:
+        out: Dict[str, list] = {}
+        for mfr, spec in mfrs.items():
+            spec = spec if isinstance(spec, dict) else {}
+            lines = [str(x).lower() for x in (spec.get("lines") or [])]
+            aliases = [str(x).lower() for x in (spec.get("aliases") or [])]
+            out[str(mfr).lower()] = lines + aliases
+        return out
+    legacy = profile_slot("brand_label_patterns", profile_id=profile_id, default=None)
+    return legacy if isinstance(legacy, dict) else {}
+
+
+def product_line_index(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, Dict[str, Any]]:
+    """token → {manufacturer, line} index, DERIVED from `manufacturers`. The new line-aware
+    axis: lets the platform resolve a sub-brand/range (e.g. 'thinkpad' → lenovo / ThinkPad)
+    independently of product TYPE — for brand-alias normalisation, identity, and line-aware
+    upsell (a ThinkPad dock for a ThinkPad). An alias token maps to its manufacturer with
+    line=None (it's the company, not a specific range)."""
+    mfrs = profile_slot("manufacturers", profile_id=profile_id, default=None)
+    out: Dict[str, Dict[str, Any]] = {}
+    if isinstance(mfrs, dict):
+        for mfr, spec in mfrs.items():
+            spec = spec if isinstance(spec, dict) else {}
+            m = str(mfr).lower()
+            for line in (spec.get("lines") or []):
+                out[str(line).lower()] = {"manufacturer": m, "line": str(line).lower()}
+            for alias in (spec.get("aliases") or []):
+                out.setdefault(str(alias).lower(), {"manufacturer": m, "line": None})
+    return out
+
+
 def reset_cache() -> None:
     """Clear the profile cache — MUST be called by the test isolation fixture so a
     profile loaded under one tenant/vertical can't leak into the next test."""
