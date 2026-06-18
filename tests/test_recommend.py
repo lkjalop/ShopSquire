@@ -1813,6 +1813,19 @@ def test_recommend_uses_vision_product_identity_from_cached_image_blob(monkeypat
             "TEST_FORCE_BAD_SKU": False,
         })
         uid = "u-vision-identity-1"
+        # Self-contained grounding: the vision identity (Lenovo) is only asserted if the
+        # catalog can fulfil it — so seed a Lenovo row instead of relying on cross-test
+        # cache pollution to make "lenovo" appear grounded.
+        with db_session() as db:
+            db.execute(text(
+                "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
+                "VALUES ('p-vision-lenovo-1','VID-LEN-1','Lenovo IdeaPad 5',120000,'USD','{}',1)"
+            ))
+            db.execute(text(
+                "INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
+                "VALUES ('inv-vision-lenovo-1','p-vision-lenovo-1',5,'default')"
+            ))
+            db.commit()
         mem = Memory(get_redis())
         kv = mem.get_kv(uid) or {}
         kv["image_blob_cache"] = {"img-hash-1": base64.b64encode(b"fake-image-bytes").decode("ascii")}

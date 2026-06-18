@@ -420,7 +420,33 @@ def resolve_grounded_identity(
 # ---------------------------------------------------------------------------
 import time as _time
 
-_CATALOG_BRANDS_CACHE: Dict[str, Any] = {"brands": None, "ts": 0.0}
+_CATALOG_BRANDS_CACHE: Dict[str, Any] = {"brands": None, "ts": 0.0, "stamp": None}
+
+
+def reset_catalog_brands_cache() -> None:
+    """Invalidate the catalog-brands cache. Call on catalog mutation (and in tests that
+    insert products) so a newly-added product/brand is grounded immediately rather than
+    after the TTL — a stale set silently drops over-budget image brands to generic."""
+    _CATALOG_BRANDS_CACHE.update({"brands": None, "ts": 0.0, "stamp": None})
+
+
+def _catalog_stamp(db: Any = None) -> Any:
+    """Cheap catalog-change stamp (row count). When it differs from the cached stamp the
+    brand set is stale and must be rebuilt — so new products appear at once, not after TTL.
+    Returns None on failure (caller then falls back to TTL-only freshness)."""
+    from sqlalchemy import text as _sql
+
+    def _run(_db):
+        return _db.execute(_sql("SELECT COUNT(*) FROM products")).scalar()
+
+    try:
+        if db is not None:
+            return _run(db)
+        from src.app.models.db import db_session
+        with db_session() as _db:
+            return _run(_db)
+    except Exception:
+        return None
 
 
 def get_catalog_brands(db: Any = None, ttl_seconds: int = 300) -> Optional[set]:
@@ -430,8 +456,13 @@ def get_catalog_brands(db: Any = None, ttl_seconds: int = 300) -> Optional[set]:
     Pass the request's db session when available so we read the SAME engine the
     request uses (avoids cross-engine/empty reads in tests and multi-DB setups)."""
     now = _time.time()
+    stamp = _catalog_stamp(db)
     cached = _CATALOG_BRANDS_CACHE.get("brands")
-    if cached and (now - float(_CATALOG_BRANDS_CACHE.get("ts") or 0.0)) < ttl_seconds:
+    if (
+        cached
+        and (now - float(_CATALOG_BRANDS_CACHE.get("ts") or 0.0)) < ttl_seconds
+        and (stamp is None or stamp == _CATALOG_BRANDS_CACHE.get("stamp"))
+    ):
         return cached
     def _run(_db) -> list:
         from sqlalchemy import text as _sql
@@ -469,6 +500,7 @@ def get_catalog_brands(db: Any = None, ttl_seconds: int = 300) -> Optional[set]:
         if brands:
             _CATALOG_BRANDS_CACHE["brands"] = brands
             _CATALOG_BRANDS_CACHE["ts"] = now
+            _CATALOG_BRANDS_CACHE["stamp"] = stamp
         return brands
     except Exception:
         return cached  # stale set, or None if never populated
