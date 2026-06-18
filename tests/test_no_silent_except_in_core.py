@@ -23,8 +23,9 @@ import pytest
 # Max allowed silent swallows per module. RATCHET DOWN ONLY — never raise a baseline to land a
 # change; convert the swallow to safe_stage / a trace-visible except instead.
 _BASELINE = {
-    # the monster — the bulk of the legacy debt; shrinks as suggest() stages are extracted.
-    "src/app/routers/recommend.py": 227,
+    # the monster — the bulk of the legacy debt; shrinks as suggest() stages are extracted
+    # and critical-path swallows are converted to safe_stage / trace-visible excepts.
+    "src/app/routers/recommend.py": 226,
     # safe_stage's two inner guards (payload-merge + the trace sink) ARE the recorder — the one
     # place silence is legitimate.
     "src/app/services/safe_stage.py": 2,

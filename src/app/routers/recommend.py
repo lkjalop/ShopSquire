@@ -9515,8 +9515,16 @@ def suggest(
                                     filter_meta_price.update(nearest_meta)
                                     filter_meta_price["candidates_after"] = len(candidates)
                                     filter_meta_price["over_budget_tolerance"] = _over_tol
-                except Exception:
-                    pass
+                except Exception as _pf_exc:
+                    # P1: the brand-aware price fallback (in-budget → db-band → nearest-above-budget,
+                    # the ASUS path) must not fail silently — that yields generic results with no
+                    # signal. Record the degradation against the trace, then continue.
+                    log_trace_event(
+                        trace_id, "stage_partial_failure", "system", "price_brand_fallback",
+                        "system", None,
+                        {"stage": "price_brand_fallback", "error": f"{type(_pf_exc).__name__}: {_pf_exc}",
+                         "severity": "warn", "degraded": True},
+                    )
                 try:
                     log_trace_event(
                         trace_id=trace_id,
