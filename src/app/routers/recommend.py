@@ -255,6 +255,14 @@ from src.app.services.recommend_image_hints import (  # noqa: E402
     _UNSAFE_IMAGE_SIGNAL_KEYS,
 )
 
+# Shared pure leaf utilities extracted → services/recommend_utils.py (foundation for the
+# core/adapter stage split). Re-exported so internal call-sites + imports stay unchanged.
+from src.app.services.recommend_utils import (  # noqa: E402
+    _candidate_matches_brand,
+    _brand_display_name,
+    _result_price_dollars,
+)
+
 
 def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
     """Phase B — when the stashed plan is COMPOUND (a conceptual sub-question alongside a
@@ -3132,56 +3140,6 @@ def _candidate_looks_like_device(candidate: Dict[str, Any] | None) -> bool:
         "desktop", "all-in-one", "pc",
     )
     return any(t in text_blob for t in positive_terms)
-
-
-def _candidate_matches_brand(candidate: Dict[str, Any] | None, brands: List[str] | None) -> bool:
-    c = candidate or {}
-    req = [str(b or "").strip().lower() for b in (brands or []) if str(b or "").strip()]
-    if not req:
-        return False
-    name = str(c.get("name") or "").lower()
-    sku = str(c.get("sku") or "").lower()
-    text_blob = f"{name} {sku}"
-    alias = {
-        "apple": ["apple", "macbook", "imac"],
-        "microsoft": ["microsoft", "surface"],
-        "asus": ["asus", "vivobook", "zenbook", "rog", "tuf"],
-        "lenovo": ["lenovo", "ideapad", "thinkpad", "yoga", "legion"],
-        "hp": ["hp", "envy", "victus", "omen", "omnibook", "elitebook", "probook"],
-        "dell": ["dell", "inspiron", "xps", "latitude", "vostro"],
-        "msi": ["msi", "stealth", "raider", "titan"],
-        "alienware": ["alienware"],
-        "acer": ["acer", "swift", "aspire", "predator", "nitro"],
-        "samsung": ["samsung", "galaxy book"],
-        "razer": ["razer", "blade"],
-        "gigabyte": ["gigabyte", "aorus"],
-        "toshiba": ["toshiba", "dynabook"],
-    }
-    for b in req:
-        probes = alias.get(b, [b])
-        if any(p in text_blob for p in probes):
-            return True
-    return False
-
-
-def _brand_display_name(brand: str | None) -> str:
-    key = str(brand or "").strip().lower()
-    return {
-        "apple": "Apple",
-        "asus": "ASUS",
-        "lenovo": "Lenovo",
-        "hp": "HP",
-        "dell": "Dell",
-        "msi": "MSI",
-        "alienware": "Alienware",
-        "microsoft": "Microsoft Surface",
-        "acer": "Acer",
-        "samsung": "Samsung",
-        "razer": "Razer",
-        "gigabyte": "Gigabyte",
-        "toshiba": "Toshiba",
-        "windows": "Windows",
-    }.get(key, key.capitalize() if key else "")
 
 
 def _cross_modal_brand_conflict_question(
@@ -6128,25 +6086,6 @@ def _emit_inventory_brand_notice(
         return None, []
     except Exception:
         return None, []
-
-
-def _result_price_dollars(row: Dict[str, Any] | None) -> float | None:
-    r = row or {}
-    try:
-        if isinstance(r.get("price"), (int, float)):
-            p = float(r.get("price"))
-            if p > 0:
-                return p
-    except Exception:
-        pass
-    try:
-        if isinstance(r.get("price_cents"), (int, float)):
-            pc = float(r.get("price_cents"))
-            if pc > 0:
-                return round(pc / 100.0, 2)
-    except Exception:
-        pass
-    return None
 
 
 def _build_price_buckets(
