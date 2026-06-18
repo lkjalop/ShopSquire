@@ -94,12 +94,72 @@ _GPU_RE = re.compile(r"\b(rtx|gtx|rx)\s*(\d{3,4})\b", re.IGNORECASE)
 _RAM_RE = re.compile(r"\b(8|16|24|32|64)\s*gb\b", re.IGNORECASE)
 
 
+# ── Brand/category vocab: electronics FLAVOUR sourced from the StoreProfile ───────────────
+# The dicts above (_BRAND_ALIASES / _PRODUCT_LINES / _KNOWN_BRANDS / _CATEGORY_KW) are the inline
+# FALLBACK. The accessors below UNION them with the StoreProfile (3-axis `manufacturers` map +
+# `category_keywords` slot) so the profile is the source of truth while no inline entry is ever
+# lost (parity-safe). Merge rule: INLINE first (preserves the break-on-first-match order +
+# values), profile-only tokens appended — so behaviour is unchanged for every inline token and
+# the profile only ADDS recognition. Inline kept as fallback ⇒ not yet on the no-flavour lint
+# (same transitional state as recommend_image_hints.py / recommend_utils.py).
+def _known_brands() -> set:
+    try:
+        from src.app.platform.store_profile import brand_label_patterns
+        prof = {str(k).lower() for k in (brand_label_patterns() or {}).keys()}
+    except Exception:
+        prof = set()
+    return set(_KNOWN_BRANDS) | prof
+
+
+def _brand_aliases() -> Dict[str, str]:
+    out: Dict[str, str] = dict(_BRAND_ALIASES)  # inline wins
+    try:
+        from src.app.platform.store_profile import product_line_index
+        for token, spec in (product_line_index() or {}).items():
+            mfr = str((spec or {}).get("manufacturer") or "").lower()
+            tok = str(token).lower()
+            if mfr and tok not in out:
+                out[tok] = mfr
+    except Exception:
+        pass
+    return out
+
+
+def _product_lines() -> Dict[str, Tuple[str, str]]:
+    out: Dict[str, Tuple[str, str]] = dict(_PRODUCT_LINES)  # inline first (order + value)
+    try:
+        from src.app.platform.store_profile import product_line_index
+        for token, spec in (product_line_index() or {}).items():
+            mfr = str((spec or {}).get("manufacturer") or "").lower()
+            line = (spec or {}).get("line")
+            tok = str(token).lower()
+            if mfr and line and tok not in out:  # alias entries (line=None) are not lines
+                out[tok] = (mfr, str(line))
+    except Exception:
+        pass
+    return out
+
+
+def _category_kw() -> Dict[str, list]:
+    out: Dict[str, list] = {str(k): list(v) for k, v in _CATEGORY_KW.items()}  # inline first
+    try:
+        from src.app.platform.store_profile import profile_slot
+        prof = profile_slot("category_keywords", default=None)
+        if isinstance(prof, dict):
+            for cat, kws in prof.items():
+                if str(cat) not in out and isinstance(kws, (list, tuple)):
+                    out[str(cat)] = list(kws)
+    except Exception:
+        pass
+    return out
+
+
 def _norm_brand(value: Any) -> Optional[str]:
     s = str(value or "").strip().lower()
     if not s or s in ("unknown", "null", "none"):
         return None
-    s = re.split(r"[\s\-]", s)[0] if s not in _KNOWN_BRANDS else s
-    return _BRAND_ALIASES.get(s, s)
+    s = re.split(r"[\s\-]", s)[0] if s not in _known_brands() else s
+    return _brand_aliases().get(s, s)
 
 
 @dataclass
@@ -150,18 +210,18 @@ def _evidence_from_query(query: str) -> List[Dict[str, Any]]:
     q = str(query or "").lower()
     ev: List[Dict[str, Any]] = []
     # Product line (implies brand) — most specific.
-    for kw, (brand, line) in _PRODUCT_LINES.items():
+    for kw, (brand, line) in _product_lines().items():
         if re.search(rf"\b{re.escape(kw)}\b", q):
             ev.append({"field": "product_line", "value": line, "source": "user_text", "confidence": 1.0})
             ev.append({"field": "brand", "value": brand, "source": "user_text", "confidence": 1.0})
             break
     # Brand (explicit)
-    for b in _KNOWN_BRANDS:
+    for b in _known_brands():
         if re.search(rf"\b{re.escape(b)}\b", q):
             ev.append({"field": "brand", "value": b, "source": "user_text", "confidence": 1.0})
             break
     # Category
-    for cat, kws in _CATEGORY_KW.items():
+    for cat, kws in _category_kw().items():
         if any(k in q for k in kws):
             ev.append({"field": "category", "value": cat, "source": "user_text", "confidence": 1.0})
             break
@@ -214,7 +274,7 @@ def _evidence_from_visual(matches: Optional[List[Dict[str, Any]]]) -> List[Dict[
     if b:
         ev.append({"field": "brand", "value": b, "source": "visual_match", "confidence": score})
     name = str(top.get("name") or "").lower()
-    for kw, (brand, line) in _PRODUCT_LINES.items():
+    for kw, (brand, line) in _product_lines().items():
         if kw in name:
             ev.append({"field": "product_line", "value": line, "source": "visual_match", "confidence": score})
             break
@@ -480,6 +540,8 @@ def get_catalog_brands(db: Any = None, ttl_seconds: int = 300) -> Optional[set]:
             with db_session() as _db:
                 rows = _run(_db)
         brands: set = set()
+        _kb = _known_brands()          # hoisted: profile∪inline, built once per cache-miss
+        _pl = _product_lines()
         for r in rows or []:
             nm = str(r[0] or "").lower() if r is not None and len(r) > 0 else ""
             # Explicit brand column when present.
@@ -489,11 +551,11 @@ def get_catalog_brands(db: Any = None, ttl_seconds: int = 300) -> Optional[set]:
                     brands.add(b)
             # Derive brand from the product name (handles "MSI Thin A15" catalogs).
             if nm:
-                for kb in _KNOWN_BRANDS:
+                for kb in _kb:
                     if re.search(rf"\b{re.escape(kb)}\b", nm):
                         brands.add(kb)
                         break
-                for kw, (brand, _line) in _PRODUCT_LINES.items():
+                for kw, (brand, _line) in _pl.items():
                     if re.search(rf"\b{re.escape(kw)}\b", nm):
                         brands.add(brand)
                         break

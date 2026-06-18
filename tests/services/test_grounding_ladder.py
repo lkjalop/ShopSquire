@@ -87,3 +87,28 @@ def test_empty_query_is_safe():
     r = ground_identity("")
     assert r.tier == 4
     assert r.to_dict()["tier_name"] == "query_only"
+
+
+# ── Profile-backed vocab (core/adapter excision) — parity + freshness invariants ──────────
+def test_grounding_vocab_profile_union_keeps_all_inline_entries():
+    """Excision invariant: the profile-backed accessors UNION the StoreProfile with the inline
+    fallback, so no inline brand/line/alias/category is ever lost (parity-safe; profile only
+    ADDS recognition)."""
+    import src.app.services.grounding_ladder as g
+
+    assert set(g._KNOWN_BRANDS) <= g._known_brands()
+    assert set(g._BRAND_ALIASES.items()) <= set(g._brand_aliases().items())
+    assert set(g._PRODUCT_LINES.items()) <= set(g._product_lines().items())
+    assert set(g._CATEGORY_KW.keys()) <= set(g._category_kw().keys())
+
+
+def test_grounding_categories_sourced_from_profile():
+    from src.app.platform.store_profile import profile_slot
+    assert isinstance(profile_slot("category_keywords", default=None), dict)
+
+
+def test_catalog_brands_cache_reset_is_exposed():
+    from src.app.services.grounding_ladder import reset_catalog_brands_cache, _CATALOG_BRANDS_CACHE
+    _CATALOG_BRANDS_CACHE["brands"] = {"sentinel"}
+    reset_catalog_brands_cache()
+    assert _CATALOG_BRANDS_CACHE["brands"] is None

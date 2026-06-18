@@ -39,6 +39,14 @@
   "safe_image_categories": ["chromebook","computer","desktop","gaming","laptop","macbook","notebook","pc","tablet","windows"],
 
   "primary_types": ["laptop","desktop"],
+  "_category_keywords_comment": "grounding-ladder category vocab (excised from grounding_ladder._CATEGORY_KW). token lists per category for query/identity grounding. A non-electronics vertical supplies its own.",
+  "category_keywords": {
+    "laptop": ["laptop", "notebook", "ultrabook", "macbook", "chromebook"],
+    "desktop": ["desktop", "tower", "workstation", "imac", "mac mini"],
+    "tablet": ["tablet", "ipad", "surface go"],
+    "phone": ["phone", "smartphone", "iphone", "galaxy"],
+    "monitor": ["monitor", "display screen", "gaming monitor"]
+  },
   "price_bands_usd": {"laptop":[350,6000],"desktop":[400,9000],"tablet":[150,3000],"monitor":[80,3000],"networking":[25,900],"audio":[10,600],"storage":[10,800],"bag":[15,400],"peripheral":[5,500],"printer":[40,1500],"accessory":[5,1500]},
 
   "_product_type_rules_comment": "Ordered classification rules (FIRST match wins; accessory/specific types BEFORE 'laptop' so 'Laptop Brief' -> bag). Migrated VERBATIM from the archived store_vocab.json so product_classifier (the one taxonomy brain) reads flavour from the profile. spec_units/gpu_prefixes feed product_claim_guard.",
