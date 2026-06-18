@@ -4,11 +4,9 @@ Single source of truth for decomposing `src/app/routers/recommend.py`. Reconcile
 plan with completed work and **re-verified current line numbers** (GPT-5.5's were stale after the
 image-hint extraction). Supersedes the loose line refs in that plan.
 
-## Current state (verified)
+## Current state (verified, 2026-06-18 — after stage #2)
 
-- `recommend.py` = **14,588 lines**.
-- `suggest()` = lines **6227 → 13910** (≈ **7,683 lines**, 53% of the file).
-- 8 non-suggest `@router` endpoints below suggest (13910–14588, ≈ 680 lines).
+- `recommend.py` = **13,731 lines** (was 14,588 at session start).
 - ~356 `except Exception` blocks (splitting each stage shrinks the silent-fail surface).
 
 ## Completed splits
@@ -17,6 +15,31 @@ image-hint extraction). Supersedes the loose line refs in that plan.
 |---|---|---|
 | ✅ checkout-handoff leaf | `services/checkout_handoff.py` | first stage, RecommendContext seed (commit `292a2b4`) |
 | ✅ image-hint stage | `services/recommend_image_hints.py` | `_safe_image_hints_for_fast_path` + brand patterns + constants; 14,680→14,588 |
+| ✅ **foundation (PR-A)** | `services/recommend_utils.py` | shared **pure leaf utils** `_candidate_matches_brand`, `_brand_display_name`, `_result_price_dollars`, `_extract_candidate_numeric_specs` — used by BOTH ranking and stage builders. Breaks the circular-import knot so stage services never import the router (commits `8d901a4`, `5482470`) |
+| ✅ **#2 Budget/Brand advisor** | `services/recommend_budget_advisor.py` | 9 pure builders moved (AST byte-identical): `_build_brand_budget_answer(+_v2)`, `_deterministic_assistant_message`, `_build_budget_reasoning_note`, `_budget_reasoning_requested`, `_assess_budget_fitness`, `_build_minimum_recommended_tiers`, `_persona_summary_label`, `_USE_CASE_BUDGET_FLOORS`. 14,438→13,731 (commit `de90d66`) |
+
+## Foundation finding (the keystone — discovered while executing #2)
+
+GPT-5.5 (and my own first pass) called the budget builders "pure ⇒ safest, low risk." True for
+*purity*, but the naive lift is unsafe for two reasons found in execution:
+
+1. **The shared-helper web is real.** The budget builders depend on `_candidate_matches_brand`,
+   `_brand_display_name`, `_result_price_dollars`, `_extract_candidate_numeric_specs` — all of
+   which are ALSO used elsewhere in `suggest()`/ranking. Moving the builders while those stay in
+   the router would force the new service to import the router → **circular import**. Fix:
+   `recommend_utils.py` first (PR-A/#2a), then the stage imports from there. **Every later stage
+   needs this same shared module.**
+2. **The duplicated nested helpers DIVERGE — never dedup them.** `_extract_budget_value` and
+   `_generic_budget_floor` exist as nested copies in both `_build_brand_budget_answer` and `_v2`,
+   but the copies differ (v2's `_extract_budget_value` handles ranges; its gaming floor is 900 vs
+   1200). A "dedupe to one shared helper" would silently change behaviour. The AST source-span
+   move keeps each copy with its owner → byte-identical, parity by construction.
+
+**Method that worked:** mechanical AST source-span extraction (a throwaway script reads the exact
+`lineno..end_lineno` of each target node, writes the new module verbatim, deletes the spans from
+the router) → moved code is byte-for-byte identical, so behaviour is preserved *by construction*;
+characterization tests + the full suite then confirm. Re-export-identity is asserted in each test
+(`router.fn is service.fn`).
 
 ## The implementation rule (shared by every stage)
 
@@ -41,13 +64,16 @@ fast-path is **DB-bound** (`_top_up_image_results`/`_fast_path_catalog_recommend
 4937–6227 region). Pure stages extract with characterization parity alone; DB-bound stages need
 the `RecommendStageState` threaded first or they just relocate coupling. So:
 
-| # | Stage | New file | Verified targets (current lines) | Purity | Risk |
+Line numbers below are **pre-#2** and now stale (the #2 move shifted everything after ~2500).
+Re-verify with grep before each stage (the proven loop, step 1). Stages #3–#6 remain:
+
+| # | Stage | New file | Targets (re-grep before starting) | Purity | Risk |
 |---|---|---|---|---|---|
-| **2** | **Budget/Brand advisor** | `services/recommend_budget_advisor.py` | `_build_brand_budget_answer` **4937**, `_build_brand_budget_answer_v2` **5164**, `_deterministic_assistant_message` **5862**, `_assess_budget_fitness` **2493**, `_build_minimum_recommended_tiers` **2541** (+ helpers `_extract_budget_value`, `_generic_budget_floor`) | **pure** | low |
-| 3 | NQE stage | `services/recommend_nqe_stage.py` | `_resolve_nqe_product_category` **1440**, `_build_question_plan` **1650**, `_apply_nqe_selection_to_constraints` **3481**, main NQE block (in-suggest ~12400) | mostly pure (Redis for slot state) | med |
-| 4 | Narration / Why | `services/recommend_narration_stage.py` | `_build_persona_prompt_context` **4188**, `_summarize_results` **4499** | pure builders + 1 LLM call | med (claim-grounding) |
-| 5 | Fast catalog path | `services/recommend_fast_path.py` | `_fast_path_product_score` **741**, `_fast_path_catalog_recommendation` **837**, `_top_up_image_results` **628**, `_parse_fast_path_image_inputs` **784** | **DB-bound** | med — needs `RecommendStageState` |
-| 6 | Non-suggest routes | `routers/recommend_feedback.py` (+ split) | `/checkout_upsell` **13910**, `/why_product` **14114**, `/interaction` **14193**, `/feedback` **14273**, `/cf/train` **14377**, `/nqe_slots` **14397**, `/nqe_feedback` **14458**, `/admin/nqe_feedback_summary` **14553** | route-local | low (mechanical) |
+| ✅ **2** | ~~Budget/Brand advisor~~ **DONE** | `services/recommend_budget_advisor.py` | see Completed splits | pure | shipped |
+| 3 | NQE stage | `services/recommend_nqe_stage.py` | `_resolve_nqe_product_category`, `_build_question_plan`, `_apply_nqe_selection_to_constraints`, main NQE block (in-suggest) | mostly pure (Redis for slot state) | med |
+| 4 | Narration / Why | `services/recommend_narration_stage.py` | `_build_persona_prompt_context`, `_summarize_results` | pure builders + 1 LLM call | med (claim-grounding) |
+| 5 | Fast catalog path | `services/recommend_fast_path.py` | `_fast_path_product_score`, `_fast_path_catalog_recommendation`, `_top_up_image_results`, `_parse_fast_path_image_inputs` | **DB-bound** | med — needs `RecommendStageState` |
+| 6 | Non-suggest routes | `routers/recommend_feedback.py` (+ split) | `/checkout_upsell`, `/why_product`, `/interaction`, `/feedback`, `/cf/train`, `/nqe_slots`, `/nqe_feedback`, `/admin/nqe_feedback_summary` | route-local | low–med (each route drags ~15 router-level helpers/imports — NOT as mechanical as first assumed; audit before moving) |
 
 ### Why each stage (the rationale GPT-5.5 gave, kept)
 
@@ -65,13 +91,16 @@ the `RecommendStageState` threaded first or they just relocate coupling. So:
 ## Projected size after each split
 
 ```
-now:           recommend.py 14,588 | suggest() 7,683
-after #2:      ~14,150 | suggest() ~7,400   (budget builders out)
-after #3:      ~13,700 | suggest() ~7,000
-after #4:      ~13,100 | suggest() ~6,500
-after #5:      ~12,600 | suggest() ~6,100
-after #6:      ~11,900 | non-suggest routes out of this file
-+ big builders (_fast_path_catalog 493, _summarize_results 367) as services → < 11k, suggest() ~5k
+session start: recommend.py 14,588
+after PR-A:    14,527  (shared brand/price leaf utils out)
+after #2a:     14,438  (shared spec parser out)
+after #2:      13,731  ✅ ACTUAL (budget cluster out — bigger than the ~14,150 estimate: the
+                        cluster was 707 net lines incl. _deterministic_assistant_message 147 +
+                        _build_brand_budget_answer 225)
+after #3:      ~13,200  (NQE)
+after #4:      ~12,700  (narration)
+after #5:      ~12,200  (fast-path, DB-bound)
+after #6:      ~11,500  (non-suggest routes out of this file)
 ```
 
 The **< 7k file** target is reached around #4–#5; the **< 2k suggest()** target needs the
