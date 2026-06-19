@@ -700,6 +700,15 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
+    # Batch the recommend route's durable trace writes into one bulk insert (latency): begins a
+    # trace batch on entry, flushes after the response. Pure-ASGI so the batch ContextVar reaches
+    # the threadpool-run sync route. Scoped to /api/v1/recommend.
+    try:
+        from src.app.platform.trace_batch_middleware import TraceBatchMiddleware
+        app.add_middleware(TraceBatchMiddleware)
+    except Exception:
+        pass
+
     @app.middleware("http")
     async def backpressure_middleware(request: Request, call_next):
         from time import time

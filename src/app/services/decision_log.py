@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextvars import ContextVar
 from typing import Any, Dict, Optional
 import logging
 import os
@@ -36,6 +37,65 @@ except Exception:
 _DECISION_LOG_COL_CACHE: dict[str, list[str]] = {}
 _TRACE_TABLE_ENSURED = False
 _OUTBOX_TABLE_ENSURED = False
+
+# ── Trace-event batching (latency) ─────────────────────────────────────────────────────────────
+# When a batch is active for the current context, durable log_trace_event calls BUFFER their row
+# instead of doing a per-event sync INSERT; flush_trace_batch persists them in ONE executemany.
+# This collapses the tens-of-sync-DB-writes-per-request audit cost into a single write at request
+# end. The in-process trace cache (_cache_trace_event) still fires per event, so in-request readers
+# (SSE / get_cached_trace_events) lose nothing. Batching is bypassed when the per-event outbox is
+# enabled (that path keeps its exact current behaviour).
+_TRACE_BATCH: "ContextVar[Optional[dict]]" = ContextVar("trace_event_batch", default=None)
+
+_TRACE_INSERT_SQL = """
+    INSERT INTO decision_trace_events (
+        id, trace_id, event_type, source_type, source_id,
+        target_type, target_id, payload, created_at
+    ) VALUES (
+        :id, :trace_id, :event_type, :source_type, :source_id,
+        :target_type, :target_id, :payload, :created_at
+    )
+"""
+
+
+def begin_trace_batch():
+    """Start buffering durable trace events for this context. Returns a token for flush/reset."""
+    return _TRACE_BATCH.set({"events": []})
+
+
+def flush_trace_batch(token=None) -> int:
+    """Persist all buffered trace events in ONE bulk insert, then end the batch. Returns the count.
+    On bulk failure, falls back to per-event best-effort so audit is never silently lost."""
+    batch = _TRACE_BATCH.get()
+    events = list((batch or {}).get("events") or [])
+    written = 0
+    if events:
+        try:
+            with db_session() as db:
+                db.execute(text(_TRACE_INSERT_SQL), events)  # list of dicts → executemany
+                db.commit()
+            written = len(events)
+        except Exception as exc:
+            logging.info("trace batch bulk insert failed (%s) — falling back per-event", exc)
+            for ev in events:
+                try:
+                    with db_session() as db:
+                        db.execute(text(_TRACE_INSERT_SQL), ev)
+                        db.commit()
+                    written += 1
+                except Exception:
+                    try:
+                        record_decision_trace_write_failure("batch_flush")
+                    except Exception:
+                        pass
+    if token is not None:
+        try:
+            _TRACE_BATCH.reset(token)
+        except Exception:
+            _TRACE_BATCH.set(None)
+    else:
+        _TRACE_BATCH.set(None)
+    return written
 _TRACE_EVENT_CACHE: dict[str, list[dict[str, Any]]] = defaultdict(list)
 _TRACE_EVENT_CACHE_LOCK = threading.Lock()
 _TRACE_EVENT_CACHE_MAX_PER_TRACE = 256
@@ -769,22 +829,35 @@ def log_trace_event(
         except Exception:
             pass
 
+        # Trace-event batching: if a batch is active for this context, buffer the row and let
+        # flush_trace_batch() persist them in ONE bulk insert (the latency win). The in-process
+        # cache above already served any in-request reader, so buffering loses no mid-request
+        # observability, and decision_trace_events (the audit/UI source of truth) is fully written
+        # at flush. TRADE-OFF (documented, not silent): batched events bypass the per-event CDC
+        # OUTBOX below — acceptable because the decision trace is preserved and the outbox is a
+        # secondary downstream stream; a deployment needing recommend traces in the outbox should
+        # not enable batching for that path (it's scoped to /api/v1/recommend via middleware).
+        _batch = _TRACE_BATCH.get()
+        if _batch is not None:
+            _batch["events"].append({
+                "id": event_id,
+                "trace_id": trace_id,
+                "event_type": event_type,
+                "source_type": source_type,
+                "source_id": source_id,
+                "target_type": target_type,
+                "target_id": target_id,
+                "payload": json.dumps(safe_payload, ensure_ascii=False),
+                "created_at": now_ts,
+            })
+            return
+
         # Try to persist to DB, but never block broker publication on DB availability.
         try:
             with db_session() as db:
                 try:
                     db.execute(
-                        text(
-                            """
-                            INSERT INTO decision_trace_events (
-                                id, trace_id, event_type, source_type, source_id,
-                                target_type, target_id, payload, created_at
-                            ) VALUES (
-                                :id, :trace_id, :event_type, :source_type, :source_id,
-                                :target_type, :target_id, :payload, :created_at
-                            )
-                            """
-                        ),
+                        text(_TRACE_INSERT_SQL),
                         {
                             "id": event_id,
                             "trace_id": trace_id,
