@@ -18,6 +18,7 @@ from src.app.flows.nqe import (
 )
 from src.app.rag.retrieve import Retriever
 from src.app.services.decision_log import log_trace_event
+from src.app.services.query_understanding import QueryUnderstanding, build_query_understanding
 
 
 DOMAIN_REFINEMENT_QUESTION_IDS = {
@@ -46,6 +47,7 @@ class RecommendStageState:
     turn_intent: str | None = None
     followup_explain: bool = False
     shortlist_lock_active: bool = False
+    query_understanding: QueryUnderstanding | None = None
     next_questions: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -118,6 +120,44 @@ def _header(request: Any, name: str) -> str | None:
         return None
 
 
+def refine_missing_fields_with_query_understanding(
+    legacy_missing_fields: list[str] | None,
+    query_understanding: QueryUnderstanding | None,
+) -> list[str]:
+    """Use QueryUnderstanding to suppress stale NQE gaps without expanding scope.
+
+    The legacy NQE API uses field ids like ``budget`` and ``brand_preference``.
+    QueryUnderstanding uses normalized fields like ``budget_max`` and ``brands``.
+    For phase 2 migration, only remove a legacy missing field when the unified
+    interpretation already has evidence for it; do not add new fields yet.
+    """
+    legacy = [str(x or "").strip() for x in (legacy_missing_fields or []) if str(x or "").strip()]
+    if query_understanding is None:
+        return legacy
+    missing = {str(x or "").strip() for x in (query_understanding.missing or []) if str(x or "").strip()}
+    represented = {
+        "budget": "budget_max",
+        "use_case": "use_case",
+        "brand_preference": "brands",
+    }
+    out: list[str] = []
+    for field in legacy:
+        qfield = represented.get(field)
+        if qfield and qfield not in missing:
+            continue
+        out.append(field)
+    return out
+
+
+def _query_understanding_for_state(state: RecommendStageState) -> QueryUnderstanding:
+    if state.query_understanding is not None:
+        return state.query_understanding
+    return build_query_understanding(
+        state.query_effective or state.query or "",
+        state.constraints if isinstance(state.constraints, dict) else {},
+    )
+
+
 def _persist_nqe_asked(
     *,
     state: RecommendStageState,
@@ -183,6 +223,7 @@ def run_recommend_nqe_stage(
             or state.followup_explain
             or state.shortlist_lock_active
         )
+        query_understanding = _query_understanding_for_state(state)
         missing_fields = hooks.suppress_missing_fields_for_turn_intent(
             hooks.infer_missing_fields(
                 constraints=state.constraints,
@@ -190,6 +231,10 @@ def run_recommend_nqe_stage(
                 kv=state.kv if isinstance(state.kv, dict) else None,
             ),
             turn_intent=state.turn_intent,
+        )
+        missing_fields = refine_missing_fields_with_query_understanding(
+            missing_fields,
+            query_understanding,
         )
         if missing_fields and not skip_nqe_clarify:
             category = hooks.resolve_nqe_product_category(
@@ -231,6 +276,15 @@ def run_recommend_nqe_stage(
                     continue
                 if value and not answered.get(key):
                     answered[key] = value
+            if query_understanding is not None:
+                if query_understanding.budget_min is not None and not answered.get("budget_min"):
+                    answered["budget_min"] = query_understanding.budget_min
+                if query_understanding.budget_max is not None and not answered.get("budget_max"):
+                    answered["budget_max"] = query_understanding.budget_max
+                if query_understanding.use_case and not answered.get("use_case"):
+                    answered["use_case"] = query_understanding.use_case
+                if query_understanding.brands and not answered.get("brand_preference"):
+                    answered["brand_preference"] = query_understanding.brands[0]
 
             nqe_input = NQEInput(
                 intent="product_search",
@@ -248,7 +302,7 @@ def run_recommend_nqe_stage(
                 has_image=bool(state.image_context.get("labels") or state.image_context.get("ocr")),
                 image_identity_confidence=float(image_identity_confidence),
                 image_labels=state.image_context.get("labels") or [],
-                detected_use_case=use_case_match,
+                detected_use_case=use_case_match or (query_understanding.use_case if query_understanding is not None else None),
                 query=state.query or "",
                 detected_games=detect_games_in_text(state.query or ""),
                 detected_software=detect_software_in_text(state.query or ""),

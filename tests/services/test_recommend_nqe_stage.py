@@ -12,8 +12,10 @@ from src.app.services.recommend_nqe_stage import (
     RecommendNQEHooks,
     RecommendStageState,
     prioritize_domain_refinement_questions,
+    refine_missing_fields_with_query_understanding,
     run_recommend_nqe_stage,
 )
+from src.app.services.query_understanding import build_query_understanding
 
 
 def _ids(qs):
@@ -62,6 +64,24 @@ def test_stage_state_constructs_with_defaults():
         trace_id=None, flags={},
     )
     assert st.next_questions == [] and st.followup_explain is False
+
+
+def test_query_understanding_suppresses_stale_missing_fields():
+    qu = build_query_understanding(
+        "asus gaming laptop under 1800",
+        {"budget_max": 1800, "_inferred_image_brand": "asus", "use_case": "gaming"},
+    )
+    out = refine_missing_fields_with_query_understanding(
+        ["budget", "use_case", "brand_preference", "specs"],
+        qu,
+    )
+    assert out == ["specs"]
+
+
+def test_query_understanding_refinement_does_not_add_new_missing_fields():
+    qu = build_query_understanding("show me something", {})
+    assert refine_missing_fields_with_query_understanding(["budget"], qu) == ["budget"]
+    assert refine_missing_fields_with_query_understanding([], qu) == []
 
 
 def test_router_reexports_same_objects():
