@@ -18,6 +18,7 @@ Pure functions, no LLM, no I/O — fast and unit-testable. Builds on
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from src.app.services.query_classifier import (
@@ -122,6 +123,74 @@ _DGPU_USE_CASES = _load_dgpu_use_cases()
 _PORTABLE_RE = _load_portable_re()
 
 
+# ── Per-request (active-vertical) resolution ─────────────────────────────────────────────────────
+# The constants above are computed at IMPORT (electronics default) and kept only for back-compat.
+# The decision path below resolves the ACTIVE vertical's patterns PER REQUEST, cached by profile id
+# (cache-by-resolved-id, like store_profile) — so the request-boundary selector actually reaches the
+# decomposer and a pharmacy/fashion request is NOT scored against electronics use-cases.
+@lru_cache(maxsize=8)
+def _use_case_patterns_for(profile_id: str) -> Dict[str, "re.Pattern"]:
+    try:
+        from src.app.platform.store_profile import profile_slot
+        raw = profile_slot("use_case_patterns", profile_id=profile_id, default=None)
+        if isinstance(raw, dict) and raw:
+            return {uc: re.compile(p, re.I) for uc, p in raw.items()}
+    except Exception:
+        pass
+    return _USE_CASE_PATTERNS_FALLBACK
+
+
+@lru_cache(maxsize=8)
+def _dgpu_use_cases_for(profile_id: str) -> set:
+    try:
+        from src.app.platform.store_profile import profile_slot
+        ucs = profile_slot("use_cases", profile_id=profile_id, default={}) or {}
+        s = {uc for uc, meta in ucs.items() if isinstance(meta, dict) and meta.get("needs_dedicated_gpu")}
+        # An empty set is a VALID answer for a non-electronics vertical (no dGPU concept) — only fall
+        # back to the electronics set when the profile has no use_cases at all.
+        if ucs:
+            return s
+    except Exception:
+        pass
+    return _DGPU_USE_CASES_FALLBACK
+
+
+@lru_cache(maxsize=8)
+def _portable_re_for(profile_id: str) -> "re.Pattern":
+    try:
+        from src.app.platform.store_profile import profile_slot
+        p = profile_slot("portable_pattern", profile_id=profile_id, default=None)
+        if p:
+            return re.compile(p, re.I)
+    except Exception:
+        pass
+    return _PORTABLE_RE_FALLBACK
+
+
+def _active_use_case_patterns() -> Dict[str, "re.Pattern"]:
+    from src.app.platform.store_profile import active_profile_id
+    return _use_case_patterns_for(active_profile_id())
+
+
+def _active_dgpu_use_cases() -> set:
+    from src.app.platform.store_profile import active_profile_id
+    return _dgpu_use_cases_for(active_profile_id())
+
+
+def _active_portable_re() -> "re.Pattern":
+    from src.app.platform.store_profile import active_profile_id
+    return _portable_re_for(active_profile_id())
+
+
+def reset_cache() -> None:
+    """Clear the per-profile decomposer caches (test isolation / profile reload)."""
+    for fn in (_use_case_patterns_for, _dgpu_use_cases_for, _portable_re_for):
+        try:
+            fn.cache_clear()
+        except Exception:
+            pass
+
+
 @dataclass
 class SubQuestion:
     """One atomic ask inside a compound query ("…uni work? is $1400 enough?")."""
@@ -205,7 +274,7 @@ def _extract_hard_constraints(q: str, use_cases: List[str]) -> Dict[str, Any]:
     if m:
         out["refresh_hz_min"] = int(m.group(1))
     # Portability → weight cap
-    if _PORTABLE_RE.search(ql):
+    if _active_portable_re().search(ql):
         out["weight_kg_max"] = 2.0
     m = re.search(r"\bunder\s*([0-9](?:\.[0-9])?)\s*kg\b", ql)
     if m:
@@ -223,7 +292,7 @@ def _extract_hard_constraints(q: str, use_cases: List[str]) -> Dict[str, Any]:
     if m:
         out["storage_gb_min"] = int(m.group(1)) * 1024
     # Dedicated GPU requirement from use cases
-    if any(uc in _DGPU_USE_CASES for uc in use_cases):
+    if any(uc in _active_dgpu_use_cases() for uc in use_cases):
         out["must_have_dedicated_gpu"] = True
     # Esports competitive tier → high refresh implied if not stated
     if "gaming" in use_cases and re.search(r"\b(esports|competitive|valorant|cs2|counter ?strike|240)\b", ql):
@@ -234,7 +303,7 @@ def _extract_hard_constraints(q: str, use_cases: List[str]) -> Dict[str, Any]:
 def _classify_clause(q: str) -> SubQuestion:
     """Classify ONE clause/segment into a SubQuestion (intent + extracted bits).
     Shared by the top-level plan and each compound sub-question so they agree."""
-    use_cases = [uc for uc, pat in _USE_CASE_PATTERNS.items() if pat.search(q)]
+    use_cases = [uc for uc, pat in _active_use_case_patterns().items() if pat.search(q)]
     hc = _extract_hard_constraints(q, use_cases)
     budget_q = is_budget_question(q)
     listy = bool(_PRODUCT_LISTY_RE.search(q))
@@ -339,7 +408,7 @@ def decompose(query: Optional[str], *, has_image: bool = False) -> QueryPlan:
         top = _classify_clause(q)
         plan.intent = top.intent
         plan.use_cases = top.use_cases
-        plan.needs_dedicated_gpu = any(uc in _DGPU_USE_CASES for uc in plan.use_cases)
+        plan.needs_dedicated_gpu = any(uc in _active_dgpu_use_cases() for uc in plan.use_cases)
         plan.hard_constraints = top.hard_constraints
         plan.comparison_subjects = top.comparison_subjects
         plan.answer_without_products = top.answer_without_products

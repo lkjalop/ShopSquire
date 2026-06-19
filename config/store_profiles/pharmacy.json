@@ -31,6 +31,14 @@
   ],
   "brand_price_floors_usd": {"blackmores":10,"swisse":8,"cetaphil":8,"cenovis":6},
   "use_case_budget_floors": {"pain_relief":5,"cold_flu":6,"allergy":8,"vitamins":10,"skincare":8,"baby_care":6},
+  "use_case_patterns": {
+    "pain_relief": "\\b(pain|headache|migraine|ache|aches|sore|cramp|analgesic|paracetamol|ibuprofen|nurofen|panadol)\\b",
+    "cold_flu": "\\b(cold|flu|cough|congestion|sore throat|fever|decongestant|sinus|blocked nose)\\b",
+    "allergy": "\\b(allerg\\w*|antihistamine|hay ?fever|itch\\w*|hives|sneez\\w*)\\b",
+    "vitamins": "\\b(vitamin|multivitamin|supplement|immune|wellness|mineral|fish oil|omega|probiotic)\\b",
+    "skincare": "\\b(skin ?care|skin|moisturi\\w*|cleanser|acne|eczema|dry skin|sunscreen|spf)\\b",
+    "baby_care": "\\b(baby|infant|nappy|nappies|diaper|formula|teething|baby wipe)\\b"
+  },
 
   "use_cases": {
     "pain_relief":  {"nqe_question": "ask_symptom_type"},

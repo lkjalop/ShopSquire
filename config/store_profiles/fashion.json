@@ -31,6 +31,12 @@
   ],
   "brand_price_floors_usd": {"nike":40,"adidas":40,"levis":30,"converse":35},
   "use_case_budget_floors": {"casual":25,"formal":60,"athletic":40,"outdoor":50},
+  "use_case_patterns": {
+    "casual": "\\b(casual|everyday|relaxed|weekend|streetwear|loungewear)\\b",
+    "formal": "\\b(formal|business|office|wedding|interview|smart|dress up|black ?tie)\\b",
+    "athletic": "\\b(athletic|gym|workout|running|sport\\w*|training|active ?wear|exercise)\\b",
+    "outdoor": "\\b(outdoor|hiking|camping|winter|rain\\w*|cold weather|trail)\\b"
+  },
 
   "use_cases": {
     "casual":   {"nqe_question": "ask_occasion"},
