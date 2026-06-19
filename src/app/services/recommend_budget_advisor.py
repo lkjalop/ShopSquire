@@ -5,10 +5,11 @@ budget/brand verdict ("Yes, $1,800 covers these…", "No, that's short for gamin
 human-readable assistant message — never copywriting, always derived from the actual result
 prices + use-case floors. Pure builders: no DB, no request locals, no LLM.
 
-ADAPTER (flavour): the use-case price floors, persona labels and gpu/brand vocabulary below are
-electronics flavour. They are the Phase-2 profile-back target (a non-electronics vertical supplies
-its own floors/labels via the StoreProfile) — which is why this module is intentionally NOT yet on
-the no-flavour-in-core lint, exactly like recommend_image_hints.py / recommend_utils.py.
+ADAPTER (flavour): use-case price floors are now sourced from the active StoreProfile
+(`use_case_budget_floors` slot) — see _use_case_budget_floors. The persona labels and the gpu/spec
+vocabulary in _build_minimum_recommended_tiers remain inline electronics flavour, which is why this
+module is still NOT on the no-flavour-in-core lint — profile-backing those is the remaining Phase-2
+work here.
 """
 from __future__ import annotations
 
@@ -31,11 +32,11 @@ from src.app.services.use_case_advisor import get_use_case_min_price_floor
 # pharmacy/fashion supply their own floors; a non-electronics vertical must NOT inherit these — so
 # the accessor PREFERS the profile (returns it outright when present), it does not union.
 def _use_case_budget_floors(profile_id: str | None = None) -> dict[str, int]:
-    """Use-case → minimum viable price for the ACTIVE vertical. Prefer the StoreProfile
-    `use_case_budget_floors` slot (vertical-exclusive); fall back to the inline electronics map
-    only when the profile lacks the slot. No try/except needed: profile_slot is defensive (never
-    raises), and the isinstance guard makes the int() cast safe (keeps this off the silent-except
-    ratchet)."""
+    """Use-case → minimum viable price for the ACTIVE vertical, from the StoreProfile
+    `use_case_budget_floors` slot. Vertical-EXCLUSIVE: returns {} when the profile lacks the slot —
+    NO cross-vertical fallback (a non-electronics vertical must not inherit electronics floors).
+    No try/except needed: profile_slot is defensive (never raises) and the isinstance guard makes
+    the int() cast safe (keeps this off the silent-except ratchet)."""
     from src.app.platform.store_profile import profile_slot
     prof = profile_slot("use_case_budget_floors", profile_id=profile_id, default=None)
     if isinstance(prof, dict) and prof:
