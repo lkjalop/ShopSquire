@@ -1622,29 +1622,6 @@ _GPU_WITHOUT_TERMS = (
     "no graphics card",
 )
 
-_TECHY_QUERY_TOKENS = (
-    "gpu",
-    "rtx",
-    "radeon",
-    "cuda",
-    "vram",
-    "ram",
-    "ssd",
-    "tb",
-    "i7",
-    "i9",
-    "ryzen",
-    "threadripper",
-    "cores",
-    "ghz",
-    "fps",
-    "gaming",
-    "gamer",
-    "esports",
-    "144hz",
-    "240hz",
-)
-
 
 def _now_iso() -> str:
     return datetime.utcnow().isoformat()
@@ -2582,29 +2559,21 @@ def _infer_account_warranty_status(uid: str | None) -> dict[str, Any]:
         return {"status": "unknown", "message": "Coverage lookup unavailable right now; proceed with receipt verification."}
 
 
-def _question_slot_from_id(question_id: str | None) -> str:
-    qid = str(question_id or "").strip().lower()
-    if qid in {"ask_budget", "ask_budget_tier"}:
-        return "budget"
-    if qid in {
-        "ask_use_case",
-        "ask_platform",
-        "ask_university_subject",
-        "ask_corporate_work_type",
-        "ask_gaming_depth",
-        "ask_high_school_activity",
-        "ask_software_confirm",
-    }:
-        return "use_case"
-    if qid in {"ask_brand_pref", "ask_brand"}:
-        return "brand_preference"
-    if qid in {"ask_gpu_preference", "ask_specs", "ask_requirements", "ask_system_requirements"}:
-        return "specs"
-    if qid in {"ask_touch_screen_type"}:
-        return "touch_form_factor"
-    if qid in {"ask_image_model", "reupload_clean_image"}:
-        return "image_quality"
-    return "unknown"
+# Strangler: NQE question helpers extracted to services/recommend_nqe_helpers.py.
+from src.app.services.recommend_nqe_helpers import (  # noqa: E402
+    question_slot_from_id as _question_slot_from_id,
+    normalize_recent_nqe_asked as _normalize_recent_nqe_asked,
+    contradicted_slots as _contradicted_slots,
+    question_fatigue_filter as _question_fatigue_filter_impl,
+    apply_persona_confidence_fallback as _apply_persona_confidence_fallback_impl,
+    inject_grounding_residual_question as _inject_grounding_residual_question_impl,
+    dedupe_next_questions_for_render as _dedupe_next_questions_for_render_impl,
+    question_flow as _question_flow_impl,
+    apply_intent_specific_question_bank as _apply_intent_specific_question_bank_impl,
+    is_techy_query as _is_techy_query_impl,
+    append_gpu_disambiguation_question as _append_gpu_disambiguation_question_impl,
+    append_standard_nqe_options as _append_standard_nqe_options_impl,
+)
 
 
 def _use_case_needs_nqe_refinement(value: Any) -> bool:
@@ -2623,83 +2592,6 @@ def _use_case_needs_nqe_refinement(value: Any) -> bool:
     }
 
 
-def _normalize_recent_nqe_asked(raw: Any) -> list[dict]:
-    out: list[dict] = []
-    if not isinstance(raw, list):
-        return out
-    for item in raw:
-        if isinstance(item, dict):
-            qid = str(item.get("id") or item.get("question_id") or "").strip().lower()
-            if not qid:
-                continue
-            try:
-                turn = int(item.get("turn") or 0)
-            except Exception:
-                turn = 0
-            slot = str(item.get("slot") or _question_slot_from_id(qid)).strip().lower()
-            out.append({"id": qid, "slot": slot or "unknown", "turn": turn})
-        else:
-            qid = str(item or "").strip().lower()
-            if qid:
-                out.append({"id": qid, "slot": _question_slot_from_id(qid), "turn": 0})
-    return out[-60:]
-
-
-def _contradicted_slots(
-    *,
-    query: str | None,
-    constraints: Dict[str, Any],
-    prior_constraints: Dict[str, Any] | None,
-    nqe_selection_applied: Dict[str, Any] | None,
-) -> set[str]:
-    q = str(query or "").lower()
-    prior = prior_constraints if isinstance(prior_constraints, dict) else {}
-    applied = nqe_selection_applied if isinstance(nqe_selection_applied, dict) else {}
-    contradicted: set[str] = set()
-
-    if "budget_min" in applied or "budget_max" in applied:
-        contradicted.add("budget")
-    if "use_case" in applied or "use_case_tags" in applied:
-        contradicted.add("use_case")
-    if "gpu_preference" in applied:
-        contradicted.add("specs")
-
-    try:
-        old_min = prior.get("budget_min")
-        old_max = prior.get("budget_max")
-        new_min = constraints.get("budget_min")
-        new_max = constraints.get("budget_max")
-        if (new_min is not None or new_max is not None) and (old_min != new_min or old_max != new_max):
-            contradicted.add("budget")
-    except Exception:
-        pass
-    try:
-        if prior.get("brands") is not None and list(prior.get("brands") or []) != list(constraints.get("brands") or []):
-            contradicted.add("brand_preference")
-    except Exception:
-        pass
-    try:
-        if prior.get("specs") is not None and list(prior.get("specs") or []) != list(constraints.get("specs") or []):
-            contradicted.add("specs")
-    except Exception:
-        pass
-    try:
-        if prior.get("use_case") and prior.get("use_case") != constraints.get("use_case"):
-            contradicted.add("use_case")
-    except Exception:
-        pass
-
-    contradiction_cues = ("actually", "instead", "changed", "change", "not anymore", "rather", "switch")
-    if any(c in q for c in contradiction_cues):
-        if any(x in q for x in ("budget", "$", "under", "between")):
-            contradicted.add("budget")
-        if any(x in q for x in ("use case", "for work", "for school", "for uni", "for office", "gaming", "rendering")):
-            contradicted.add("use_case")
-        if any(x in q for x in ("brand", "apple", "dell", "lenovo", "asus", "hp", "msi")):
-            contradicted.add("brand_preference")
-        if any(x in q for x in ("gpu", "ram", "ssd", "storage", "cpu", "cores")):
-            contradicted.add("specs")
-    return contradicted
 
 
 def _question_fatigue_filter(
@@ -2710,36 +2602,10 @@ def _question_fatigue_filter(
     window_turns: int,
     contradicted_slots: set[str] | None = None,
 ) -> tuple[list[dict], list[str]]:
-    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
-    if not out:
-        return [], []
-    contradicted = {str(s or "").strip().lower() for s in (contradicted_slots or set()) if str(s or "").strip()}
-    recent = _normalize_recent_nqe_asked(recent_asked or [])
-    blocked: list[str] = []
-    filtered: list[dict] = []
-    seen_slots: set[str] = set()
-    for q in out:
-        qid = str(q.get("id") or "").strip().lower()
-        slot = _question_slot_from_id(qid)
-        q["question_slot"] = slot
-        asked_recently = False
-        for e in recent:
-            turn = int(e.get("turn") or 0)
-            same_slot = str(e.get("slot") or "").strip().lower() == slot
-            same_qid = str(e.get("id") or "").strip().lower() == qid
-            if not (same_slot or same_qid):
-                continue
-            if turn > 0 and (current_turn - turn) <= max(1, int(window_turns)):
-                asked_recently = True
-                break
-        if asked_recently and slot not in contradicted:
-            blocked.append(qid or slot)
-            continue
-        if slot in seen_slots and slot not in contradicted:
-            continue
-        seen_slots.add(slot)
-        filtered.append(q)
-    return filtered, blocked
+    return _question_fatigue_filter_impl(
+        questions, recent_asked=recent_asked, current_turn=current_turn,
+        window_turns=window_turns, contradicted_slots_set=contradicted_slots,
+    )
 
 
 def _apply_persona_confidence_fallback(
@@ -2748,79 +2614,19 @@ def _apply_persona_confidence_fallback(
     persona: str | None,
     persona_confidence: float | None,
 ) -> list[dict]:
-    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
-    if not out:
-        return out
-    conf = float(persona_confidence or 0.0)
-    min_conf = float(os.getenv("PERSONA_CONFIDENCE_MIN", "0.34") or 0.34)
-    if conf >= min_conf:
-        return out
-    # Low-confidence persona inference: ask broad use-case first to avoid overfitting.
-    fallback = {
-        "id": "ask_use_case",
-        "text": "To avoid guessing, what will you mostly do: general office/school work, creator/engineering tools, or gaming?",
-        "goal": "resolve_use_case",
-        "question_slot": "use_case",
-        "options": [
-            {"id": "use_case_general", "label": "General office/school"},
-            {"id": "use_case_creator", "label": "Creator/engineering tools"},
-            {"id": "use_case_gaming", "label": "Gaming"},
-        ],
-    }
-    existing_ids = {str((q or {}).get("id") or "").strip().lower() for q in out}
-    if "ask_use_case" not in existing_ids:
-        out.insert(0, fallback)
-    else:
-        out = [fallback if str((q or {}).get("id") or "").strip().lower() == "ask_use_case" else q for q in out]
-    return out[:3]
+    return _apply_persona_confidence_fallback_impl(
+        questions, persona=persona, persona_confidence=persona_confidence,
+    )
 
 
 def _inject_grounding_residual_question(
     questions: list[dict] | None, constraints: dict | None
 ) -> list[dict]:
-    """Surface the grounding ladder's SPECIFIC identity question (e.g. 'Is this a
-    Razer?' / 'is it Dell or Asus?') in place of the generic ask_image_model, so
-    the bounded-autonomy boundary the ladder found is what the user actually sees.
-    """
-    rq = (constraints or {}).get("_identity_residual_question") if isinstance(constraints, dict) else None
-    if not isinstance(rq, dict) or not str(rq.get("text") or "").strip():
-        return list(questions or [])
-    rid = str(rq.get("id") or "clarify_product_identity")
-    nq = [
-        q for q in (questions or [])
-        if isinstance(q, dict) and str(q.get("id") or "") not in ("ask_image_model", rid)
-    ]
-    return [rq] + nq
+    return _inject_grounding_residual_question_impl(questions, constraints)
 
 
 def _dedupe_next_questions_for_render(questions: list[dict] | None) -> list[dict]:
-    out: list[dict] = []
-    seen_ids: set[str] = set()
-    seen_slots: set[str] = set()
-    seen_text: set[str] = set()
-    for q in (questions or []):
-        if not isinstance(q, dict):
-            continue
-        qq = dict(q)
-        qid = str(qq.get("id") or "").strip().lower()
-        qtext = " ".join(str(qq.get("text") or "").strip().lower().split())
-        slot = str(qq.get("question_slot") or _question_slot_from_id(qid)).strip().lower()
-        if qid and qid in seen_ids:
-            continue
-        if qtext and qtext in seen_text:
-            continue
-        # Final render guard: only one question per slot unless slot unknown.
-        if slot and slot != "unknown" and slot in seen_slots:
-            continue
-        if qid:
-            seen_ids.add(qid)
-        if qtext:
-            seen_text.add(qtext)
-        if slot and slot != "unknown":
-            seen_slots.add(slot)
-        qq["question_slot"] = slot or "unknown"
-        out.append(qq)
-    return out[:3]
+    return _dedupe_next_questions_for_render_impl(questions)
 
 
 def _question_flow(
@@ -2828,24 +2634,7 @@ def _question_flow(
     query: str | None,
     constraints: Dict[str, Any] | None,
 ) -> str:
-    q = str(query or "").lower()
-    c = constraints or {}
-    use_case = str(c.get("use_case") or "").lower()
-    use_case_tags = [str(x).lower() for x in (c.get("use_case_tags") or [])]
-
-    if use_case in {"content_creator", "content_creation", "ai_ml_workstation", "engineering_student", "architecture_student", "data_science_student"}:
-        return "creator"
-    if use_case.startswith("office_") or any("office_" in t for t in use_case_tags):
-        return "office"
-    if "student" in use_case or "university" in use_case or any(("student" in t or "university" in t) for t in use_case_tags):
-        return "student"
-    if any(t in q for t in ("video editing", "rendering", "creator", "blender", "autocad", "solidworks", "davinci", "premiere", "ai training", "ml training")):
-        return "creator"
-    if any(t in q for t in ("university", "college", "student", "school", "lecture", "assignment")):
-        return "student"
-    if any(t in q for t in ("office", "work", "corporate", "business", "excel", "teams", "outlook")):
-        return "office"
-    return "general"
+    return _question_flow_impl(query=query, constraints=constraints)
 
 
 def _apply_intent_specific_question_bank(
@@ -2854,58 +2643,7 @@ def _apply_intent_specific_question_bank(
     query: str | None,
     constraints: Dict[str, Any] | None,
 ) -> list[dict]:
-    out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
-    if not out:
-        return out
-    flow = _question_flow(query=query, constraints=constraints)
-    if flow == "creator":
-        out = _append_gpu_disambiguation_question(out, query)
-    for q in out:
-        qid = str(q.get("id") or "").strip().lower()
-        if qid in {"ask_specs", "ask_requirements", "ask_system_requirements"} and flow in {"student", "office"}:
-            q["text"] = "What matters most: lighter weight, longer battery life, larger screen/keyboard, or extra performance?"
-            if not isinstance(q.get("options"), list):
-                q["options"] = [
-                    {"id": "priority_portability", "label": "Lightweight portability"},
-                    {"id": "priority_battery", "label": "Long battery life"},
-                    {"id": "priority_screen", "label": "Larger screen/keyboard"},
-                    {"id": "priority_performance", "label": "More performance headroom"},
-                ]
-        if qid in {"ask_specs", "ask_requirements", "ask_system_requirements"} and flow == "creator":
-            q["text"] = "For creator/engineering workloads, what minimums do you want for GPU/VRAM, RAM, and storage?"
-        if qid == "ask_gpu_preference" and flow == "creator":
-            q["text"] = "What matters more for creator workloads: dedicated GPU + VRAM headroom, or battery and lighter weight?"
-    if flow in {"student", "office"}:
-        rank = {
-            "ask_specs": 0,
-            "ask_requirements": 0,
-            "ask_system_requirements": 0,
-            "ask_budget": 1,
-            "ask_budget_tier": 1,
-            "ask_use_case": 2,
-            "ask_university_subject": 2,
-            "ask_high_school_activity": 2,
-            "ask_corporate_work_type": 2,
-            "ask_gaming_depth": 2,
-            "ask_brand_pref": 3,
-            "ask_brand": 3,
-        }
-    elif flow == "creator":
-        rank = {
-            "ask_gpu_preference": 0,
-            "ask_specs": 1,
-            "ask_requirements": 1,
-            "ask_system_requirements": 1,
-            "ask_use_case": 2,
-            "ask_budget": 3,
-            "ask_budget_tier": 3,
-            "ask_brand_pref": 4,
-            "ask_brand": 4,
-        }
-    else:
-        rank = {}
-    out = sorted(out, key=lambda q: rank.get(str(q.get("id") or "").strip().lower(), 9))
-    return out[:3]
+    return _apply_intent_specific_question_bank_impl(questions, query=query, constraints=constraints)
 
 
 def _candidate_looks_like_laptop(candidate: Dict[str, Any] | None) -> bool:
@@ -3049,105 +2787,15 @@ def _safe_float(value: Any, default: float) -> float:
 
 
 def _append_gpu_disambiguation_question(existing: list[dict] | None, query: str | None = None) -> list[dict]:
-    out = [q for q in (existing or []) if isinstance(q, dict)]
-    qid = "ask_gpu_preference"
-    if any(str((q or {}).get("id") or "") == qid for q in out):
-        return out
-    techy = _is_techy_query(query)
-    q_low = str(query or "").lower()
-    gaming_query = any(tok in q_low for tok in ("gaming", "gamer", "game", "esports", "fps"))
-
-    if gaming_query:
-        # For gaming queries: ask what tier of gaming to get the right GPU level
-        question_text = "What kind of games will you mainly play? This determines the GPU tier needed."
-        options = [
-            {"id": "gaming_light", "label": "Light (Minecraft, Roblox, League of Legends)", "value": "gaming_light"},
-            {"id": "gaming_casual", "label": "Casual (Fortnite, Apex, Valorant at 60fps)", "value": "gaming_casual"},
-            {"id": "gaming_competitive", "label": "Competitive Esports (CS2, Valorant at 144fps+)", "value": "gaming_competitive"},
-            {"id": "gaming_aaa_heavy", "label": "AAA Heavy (Cyberpunk, Starfield, Space Marines 2)", "value": "gaming_aaa_heavy"},
-        ]
-    elif techy:
-        question_text = "Do you want a dedicated GPU (RTX/Radeon) or integrated graphics only?"
-        options = [
-            {"id": "with_discrete", "label": "Dedicated GPU (RTX/Radeon)"},
-            {"id": "without_discrete", "label": "Integrated graphics only"},
-            {"id": "no_preference", "label": "No strong preference"},
-        ]
-    else:
-        question_text = "What matters more for your laptop: faster heavy-task performance, or longer battery life and lower cost?"
-        options = [
-            {"id": "with_discrete", "label": "Better performance for gaming/creative work"},
-            {"id": "without_discrete", "label": "Longer battery life and lower price"},
-            {"id": "no_preference", "label": "Show both"},
-        ]
-    out.append(
-        {
-            "id": qid,
-            "text": question_text,
-            "goal": "narrow_results",
-            "why_hint": "GPU choice changes performance, battery life, heat, and price more than most other specs.",
-            "options": options,
-        }
-    )
-    return out[:3]
+    return _append_gpu_disambiguation_question_impl(existing, query)
 
 
 def _append_standard_nqe_options(existing: list[dict] | None, query: str | None = None) -> list[dict]:
-    q_low = str(query or "").strip().lower()
-    gaming_like = any(tok in q_low for tok in ("gaming", "esports", "rtx", "render", "video editing", "creative", "3d", "cad", "ml", "ai"))
-    student_like = any(tok in q_low for tok in ("student", "school", "high school", "university", "college", "note taking", "notes"))
-    out: list[dict] = []
-    for item in (existing or []):
-        if not isinstance(item, dict):
-            continue
-        q = dict(item)
-        qid = str(q.get("id") or "").strip().lower()
-        if qid == "ask_budget" and not q.get("options"):
-            if gaming_like:
-                q["why_hint"] = "Gaming and creative workloads usually need a higher budget for GPU + cooling than note-taking or basic school use."
-                q["options"] = [
-                    {"id": "budget_under_1000", "label": "Under $1,200 (entry gaming; tradeoffs likely)", "value": "0-1200"},
-                    {"id": "budget_1000_1500", "label": "$1,200-$1,800 (balanced gaming value)", "value": "1200-1800"},
-                    {"id": "budget_1500_2200", "label": "$1,800-$2,500 (higher FPS / creator headroom)", "value": "1800-2500"},
-                    {"id": "budget_2200_plus", "label": "$2,500+ (premium/high-end gaming)", "value": "2500+"},
-                ]
-            elif student_like:
-                q["why_hint"] = "For school and note-taking, you can often stay lower budget unless you also need gaming or heavy creative workloads."
-                q["options"] = [
-                    {"id": "budget_under_1000", "label": "Under $1,000 (best value for school basics)", "value": "0-1000"},
-                    {"id": "budget_1000_1500", "label": "$1,000-$1,500 (better battery/build longevity)", "value": "1000-1500"},
-                    {"id": "budget_1500_2200", "label": "$1,500-$2,200 (premium; often optional for note-taking)", "value": "1500-2200"},
-                    {"id": "budget_2200_plus", "label": "$2,200+ (usually overkill for basic study)", "value": "2200+"},
-                ]
-            else:
-                q["why_hint"] = "Budget keeps recommendations realistic and prevents irrelevant high-end results."
-                q["options"] = [
-                    {"id": "budget_under_1000", "label": "Under $1,000", "value": "0-1000"},
-                    {"id": "budget_1000_1500", "label": "$1,000-$1,500", "value": "1000-1500"},
-                    {"id": "budget_1500_2200", "label": "$1,500-$2,200", "value": "1500-2200"},
-                    {"id": "budget_2200_plus", "label": "$2,200+", "value": "2200+"},
-                ]
-        elif qid == "ask_use_case" and not q.get("options"):
-            q["why_hint"] = "Use-case helps rank for what you care about most (battery, performance, portability, value)."
-            q["options"] = [
-                {"id": "use_case_student", "label": "School and everyday"},
-                {"id": "use_case_business", "label": "Work and productivity"},
-                {"id": "use_case_gaming", "label": "Gaming"},
-                {"id": "use_case_video_editing", "label": "Video editing / creative"},
-                {"id": "use_case_ai_training", "label": "AI training / ML"},
-            ]
-        out.append(q)
-    # Ensure GPU disambiguation card is preserved if requested.
-    if any(str((q or {}).get("id") or "") == "ask_gpu_preference" for q in out):
-        out = _append_gpu_disambiguation_question(out, query)
-    return out[:3]
+    return _append_standard_nqe_options_impl(existing, query)
 
 
 def _is_techy_query(query: str | None) -> bool:
-    q = str(query or "").lower()
-    if not q:
-        return False
-    return any(tok in q for tok in _TECHY_QUERY_TOKENS)
+    return _is_techy_query_impl(query)
 
 
 def _is_selection_rationale_query(query: str | None) -> bool:
@@ -4428,146 +4076,16 @@ def _humanize_spec_list(specs: list) -> str:
     return ", ".join(out) if out else ""
 
 
-_BUDGET_BRACKETS = [
-    (500,   "entry"),
-    (900,   "mid"),
-    (1500,  "high"),
-    (float("inf"), "ultra"),
-]
-
-
-def _classify_budget_bracket(budget_max: float | int | None) -> str | None:
-    """Map a numeric budget_max to a bracket label: entry / mid / high / ultra."""
-    if budget_max is None:
-        return None
-    try:
-        bmax = float(budget_max)
-    except (TypeError, ValueError):
-        return None
-    for threshold, label in _BUDGET_BRACKETS:
-        if bmax <= threshold:
-            return label
-    return "ultra"
-
-
-_CAPABILITY_KB_CACHE: dict | None = None
-_CAPABILITY_KB_LOADED: bool = False
-
-
-def _load_capability_kb() -> dict:
-    global _CAPABILITY_KB_CACHE, _CAPABILITY_KB_LOADED
-    if _CAPABILITY_KB_LOADED:
-        return _CAPABILITY_KB_CACHE or {}
-    try:
-        import json as _json
-        _kb_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "use_case_kb.json")
-        )
-        with open(_kb_path, "r", encoding="utf-8") as _f:
-            _CAPABILITY_KB_CACHE = _json.load(_f)
-    except Exception:
-        _CAPABILITY_KB_CACHE = {}
-    _CAPABILITY_KB_LOADED = True
-    return _CAPABILITY_KB_CACHE or {}
-
-
-def _capability_preface(query: str, results: list[dict], constraints: dict) -> str:
-    """Return a yes/no sentence for software/use-case capability queries.
-
-    Fires when the query is a yes/no capability test ('can this run Premiere Pro?',
-    'will this handle gaming?') but no budget_preface was generated.  Checks the
-    top result against use_case_kb.json required_specs and exclusion_rules.
-    """
-    if not results:
-        return ""
-    q_low = str(query or "").lower()
-    _cap_patterns = (
-        "can this run", "can it run", "will this run", "will it run",
-        "can this handle", "can it handle", "will this handle", "will it handle",
-        "can i play", "can i run", "can this play", "can you run",
-        "will this work for", "suitable for", "meant for", "compatible with",
-    )
-    if not any(tok in q_low for tok in _cap_patterns):
-        return ""
-    try:
-        _kb = _load_capability_kb()
-    except Exception:
-        return ""
-    aliases: dict = _kb.get("use_case_aliases") or {}
-    use_cases: dict = _kb.get("use_cases") or {}
-    detected_uc = str(constraints.get("use_case") or "").lower().strip()
-    if not detected_uc:
-        for _alias, _uc in aliases.items():
-            if _alias.lower() in q_low:
-                detected_uc = _uc
-                break
-    if not detected_uc:
-        return ""
-    kb_entry: dict = use_cases.get(detected_uc) or {}
-    if not kb_entry:
-        return ""
-    req: dict = kb_entry.get("required_specs") or {}
-    excl: list = kb_entry.get("exclusion_rules") or []
-    label: str = kb_entry.get("label") or detected_uc.replace("_", " ").title()
-    top = results[0] if results else {}
-    specs: dict = top.get("specs") if isinstance(top.get("specs"), dict) else {}
-    full_text = f"{(top.get('name') or '').lower()} {str(specs).lower()}"
-    _discrete_markers = ("rtx", "geforce", "nvidia", "radeon rx", "radeon 6", "radeon 7",
-                          "radeon 8", "arc a", "discrete")
-    has_discrete = any(k in full_text for k in _discrete_markers)
-    violations: list[str] = []
-    if "integrated_gpu_only" in excl and not has_discrete:
-        violations.append("lacks a dedicated GPU")
-    if "fanless_design" in excl and "fanless" in full_text:
-        violations.append("fanless design limits sustained performance")
-    unmet: list[str] = []
-    if req.get("gpu_tier") and "discrete" in str(req["gpu_tier"]) and not has_discrete:
-        unmet.append("dedicated GPU")
-    ram_req = req.get("ram_gb_min")
-    if ram_req:
-        try:
-            ram_val = int(specs.get("ram_gb") or 0)
-            if 0 < ram_val < int(ram_req):
-                unmet.append(f"RAM ({ram_val}GB, needs {ram_req}GB+)")
-        except Exception:
-            pass
-    top_name = str(top.get("name") or "The top result")
-    if violations or unmet:
-        missing = (violations + unmet)[0]
-        return f"No — {top_name} isn't ideal for {label}: it {missing}."
-    return f"Yes — {top_name} handles {label} tasks well."
-
-
-def _is_budget_shopping_query(query: str | None) -> bool:
-    q_low = str(query or "").strip().lower()
-    if not q_low:
-        return False
-    if any(
-        tok in q_low
-        for tok in (
-            "budget",
-            "price range",
-            "under",
-            "below",
-            "up to",
-            "between",
-            "only have",
-            "is that enough",
-            "is this enough",
-            "is $",
-            "for school",
-            "for high school",
-            "for university",
-            "for work",
-            "for gaming",
-        )
-    ):
-        return True
-    return bool(
-        re.search(r"\b\d{3,5}\s*(?:-|to|and)\s*\d{3,5}\b", q_low)
-        or re.search(r"\$\s*\d{3,5}\b", q_low)
-        or re.search(r"\b(?:for|around|about)\s+\d{3,5}\b", q_low)
-    )
+# Strangler: budget parsing/classification extracted to services/recommend_budget_parsing.py.
+from src.app.services.recommend_budget_parsing import (  # noqa: E402
+    BUDGET_BRACKETS as _BUDGET_BRACKETS,
+    classify_budget_bracket as _classify_budget_bracket,
+    is_budget_shopping_query as _is_budget_shopping_query,
+    extract_explicit_budget_override as _extract_explicit_budget_override,
+    build_price_buckets as _build_price_buckets,
+    load_capability_kb as _load_capability_kb,
+    capability_preface as _capability_preface,
+)
 
 
 def _references_previous_shortlist(query: str | None) -> bool:
@@ -4683,39 +4201,6 @@ def _query_is_standalone_search(query: str | None) -> bool:
     )
     return any(re.search(rf"\b{re.escape(w)}\b", q_low) for w in _category_words)
 
-
-def _extract_explicit_budget_override(query: str | None) -> Dict[str, Any]:
-    q_low = str(query or "").strip().lower()
-    if not q_low:
-        return {}
-    m_between = re.search(r"\bbetween\s*\$?([\d,]+)\s*(?:and|to|-)\s*\$?([\d,]+)\b", q_low)
-    if m_between:
-        lo = int(str(m_between.group(1)).replace(",", ""))
-        hi = int(str(m_between.group(2)).replace(",", ""))
-        return {"budget_min": min(lo, hi), "budget_max": max(lo, hi), "mode": "between"}
-    # Range pattern: "budget is $1200 to $1800", "price range 1200-1800", "$1200 to $1800"
-    m_range = re.search(
-        r"(?:budget(?:\s+is|\s+of)?|price\s+range|range)?\s*\$?\s*([\d,]+)\s*(?:to|-)\s*\$?\s*([\d,]+)",
-        q_low,
-    )
-    if m_range:
-        lo = int(str(m_range.group(1)).replace(",", ""))
-        hi = int(str(m_range.group(2)).replace(",", ""))
-        if lo != hi and max(lo, hi) <= 100_000:
-            return {"budget_min": min(lo, hi), "budget_max": max(lo, hi), "mode": "range"}
-    m_under = re.search(r"\b(?:under|below|max(?:imum)?|up to|only have|have|budget(?:\s+is|\s+of)?|for)\s+\$?\s*(\d[\d,]+)\b", q_low)
-    if m_under and ("enough" in q_low or any(tok in q_low for tok in ("under", "below", "up to", "only have", "budget"))):
-        cap = int(str(m_under.group(1)).replace(",", ""))
-        return {"budget_min": None, "budget_max": cap, "mode": "cap"}
-    m_enough = re.search(r"\b(?:is|will)\s+\$?\s*(\d[\d,]+)\s+enough\b", q_low)
-    if m_enough:
-        cap = int(str(m_enough.group(1)).replace(",", ""))
-        return {"budget_min": None, "budget_max": cap, "mode": "cap"}
-    m_over = re.search(r"\b(?:over|above|min(?:imum)?|at least)\s+\$?\s*(\d[\d,]+)\b", q_low)
-    if m_over:
-        floor = int(str(m_over.group(1)).replace(",", ""))
-        return {"budget_min": floor, "budget_max": None, "mode": "floor"}
-    return {}
 
 
 # Strangler: use-case ranking extracted to services/recommend_ranking.py.
@@ -4866,78 +4351,6 @@ def _emit_inventory_brand_notice(
         return None, []
 
 
-def _build_price_buckets(
-    *,
-    results: List[Dict[str, Any]] | None,
-    constraints: Dict[str, Any] | None,
-    cap: int = 4,
-) -> Dict[str, List[Dict[str, Any]]]:
-    """Build explicit UI-friendly price buckets for recommendation alternatives."""
-    out = {
-        "within_budget": [],
-        "closest_above_budget": [],
-        "closest_below_budget": [],
-    }
-    rows = [r for r in (results or []) if isinstance(r, dict)]
-    if not rows:
-        return out
-
-    c = constraints or {}
-    bmin = c.get("budget_min")
-    bmax = c.get("budget_max")
-    try:
-        bmin = int(bmin) if bmin is not None else None
-    except Exception:
-        bmin = None
-    try:
-        bmax = int(bmax) if bmax is not None else None
-    except Exception:
-        bmax = None
-
-    priced: List[tuple[Dict[str, Any], float]] = []
-    for r in rows:
-        p = _result_price_dollars(r)
-        if p is None:
-            continue
-        priced.append((r, p))
-
-    if not priced:
-        return out
-
-    within: List[Dict[str, Any]] = []
-    above: List[tuple[Dict[str, Any], float]] = []
-    below: List[tuple[Dict[str, Any], float]] = []
-
-    for r, p in priced:
-        if bmin is not None and bmax is not None:
-            if bmin <= p <= bmax:
-                within.append(r)
-            elif p > bmax:
-                above.append((r, p - float(bmax)))
-            elif p < bmin:
-                below.append((r, float(bmin) - p))
-            continue
-        if bmax is not None:
-            if p <= bmax:
-                within.append(r)
-            else:
-                above.append((r, p - float(bmax)))
-            continue
-        if bmin is not None:
-            if p >= bmin:
-                within.append(r)
-            else:
-                below.append((r, float(bmin) - p))
-            continue
-        within.append(r)
-
-    above_sorted = [r for r, _ in sorted(above, key=lambda x: x[1])]
-    below_sorted = [r for r, _ in sorted(below, key=lambda x: x[1])]
-
-    out["within_budget"] = within[:cap]
-    out["closest_above_budget"] = above_sorted[:cap]
-    out["closest_below_budget"] = below_sorted[:cap]
-    return out
 
 
 @router.get("/suggest")
