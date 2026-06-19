@@ -79,6 +79,72 @@
     "office":        {}
   },
 
+  "_nqe_question_packs_comment": "Domain-specific NQE clarifying questions (excised from nqe.py hardcoded packs). Each entry is keyed by question id and contains: text, goal, evidence_needed, source, options. NQE reads these from the active profile; non-electronics verticals supply their own domain questions.",
+  "nqe_question_packs": {
+    "ask_high_school_activity": {
+      "trigger_use_cases": ["high_school", "student", "high_schooler"],
+      "skip_if_query_contains": ["gaming", "game", "video edit", "editing", "music", "coding", "code", "design", "art", "graphics"],
+      "answered_field": "high_school_activity",
+      "text": "Any hobbies or after-school activities that need the laptop? This helps us pick the right specs without overspending.",
+      "goal": "refine_use_case",
+      "evidence_needed": ["high_school_activity"],
+      "source": "use_case_disambiguation",
+      "options": [
+        {"label": "School notes / browsing only — keep it light", "value": "high_school_basic"},
+        {"label": "Casual gaming (Minecraft, Roblox, Fortnite)", "value": "gaming_light"},
+        {"label": "Video editing / YouTube / content creation", "value": "content_creator"},
+        {"label": "Music production / audio software", "value": "music_production"},
+        {"label": "Coding / programming projects", "value": "engineering_student"},
+        {"label": "Digital art / graphic design", "value": "design_student"}
+      ]
+    },
+    "ask_university_subject": {
+      "trigger_use_cases": ["university_general"],
+      "answered_field": "academic_field",
+      "text": "What subject or field are you studying? This helps me match specs to your workload.",
+      "goal": "refine_use_case",
+      "evidence_needed": ["academic_field"],
+      "source": "use_case_disambiguation",
+      "options": [
+        {"label": "Computer Science / IT", "value": "computer_science_student"},
+        {"label": "Engineering / CAD", "value": "engineering_student"},
+        {"label": "Data Science / ML", "value": "data_science_student"},
+        {"label": "Design / Visual Arts", "value": "design_student"},
+        {"label": "Architecture", "value": "architecture_student"},
+        {"label": "Medical / Health Sciences", "value": "medical_student"},
+        {"label": "Law", "value": "law_student"},
+        {"label": "General Studies / Arts / Humanities", "value": "university_general"}
+      ]
+    },
+    "ask_gaming_depth": {
+      "trigger_query_keywords": ["gaming", "game", "gamer", "play games", "fps", "esports"],
+      "answered_field": "gaming_depth",
+      "text": "What kind of games will you play? This determines the GPU level needed.",
+      "goal": "refine_gaming_tier",
+      "evidence_needed": ["game_titles", "gaming_tier"],
+      "source": "use_case_disambiguation",
+      "options": [
+        {"label": "Light (Minecraft, Roblox, LoL)", "value": "gaming_light"},
+        {"label": "Casual (Fortnite, Apex, Valorant at 60fps)", "value": "gaming_casual"},
+        {"label": "Competitive Esports (CS2, Valorant at 144fps+)", "value": "gaming_competitive"},
+        {"label": "AAA Heavy (Cyberpunk, Space Marines 2, Starfield)", "value": "gaming_aaa_heavy"}
+      ]
+    },
+    "ask_corporate_work_type": {
+      "trigger_query_keywords": ["office", "corporate", "work", "business", "professional"],
+      "answered_field": "corporate_subtype",
+      "text": "What type of work will you mainly do? This helps me match the right specs.",
+      "goal": "refine_use_case",
+      "evidence_needed": ["work_type"],
+      "source": "use_case_disambiguation",
+      "options": [
+        {"label": "General Office (Email, Teams, Documents)", "value": "office_general"},
+        {"label": "Finance / Data Analysis (Excel, Power BI, SAP)", "value": "office_finance"},
+        {"label": "Executive / Travel (Presentations, Premium Build)", "value": "office_executive"}
+      ]
+    }
+  },
+
   "spec_constraints": {
     "refresh_hz": {"pattern": "\\b(60|75|90|120|144|165|240|360)\\s*(hz|fps|frames?)\\b", "field": "refresh_hz_min"},
     "ram_gb":     {"pattern": "\\b(8|16|24|32|64)\\s*gb\\b", "field": "ram_gb_min"},

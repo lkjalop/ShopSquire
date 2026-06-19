@@ -11,6 +11,25 @@ from src.app.rag.retrieve import Retriever
 from src.app.services.decision_log import log_trace_event
 
 
+def _load_nqe_question_packs() -> Dict[str, Dict[str, Any]]:
+    """Load NQE question packs from the active StoreProfile.
+
+    Returns a dict keyed by question id (e.g. 'ask_gaming_depth') containing the
+    full question definition (text, goal, evidence_needed, source, options, triggers).
+    Falls back to empty dict if the profile lacks the slot — the inline transitional
+    packs fire in that case.
+    """
+    try:
+        from src.app.platform.store_profile import get_store_profile
+        profile = get_store_profile()
+        packs = profile.get("nqe_question_packs")
+        if isinstance(packs, dict):
+            return packs
+    except Exception:
+        pass
+    return {}
+
+
 @lru_cache(maxsize=1)
 def _load_use_case_kb() -> Dict[str, Any]:
     """Load data/use_case_kb.json once. Returns {} on any error."""
@@ -536,11 +555,14 @@ class NextQuestionEngine:
                 )
             )
 
-        # ── High school hobby/extracurricular probe ──
-        # Fire when use_case = high_school AND the user hasn't mentioned gaming/editing/
-        # music yet AND we haven't already asked.  One question routes a $699 mainstream
-        # pick to a $899 creator/gaming spec without requiring the user to know what RAM
-        # or GPU they need.
+        # ── Profile-driven domain question packs ──────────────────────────────
+        # Load question definitions from the active StoreProfile. Each pack defines
+        # trigger conditions, text, options, and goal. This replaces the hardcoded
+        # high_school / university / gaming / corporate blocks with config-driven
+        # questions so each vertical asks its own domain questions.
+        _nqe_packs = _load_nqe_question_packs()
+
+        # Detection flags (used both here and in the keep-set below)
         _hs_probe_not_asked = "high_school_activity" not in set(
             str(k).lower() for k in (inp.answered_fields or {})
         )
@@ -548,56 +570,6 @@ class NextQuestionEngine:
             w in (query_text or "").lower()
             for w in ("gaming", "game", "video edit", "editing", "music", "coding", "code", "design", "art", "graphics")
         )
-        if (
-            inp.detected_use_case in ("high_school", "student", "high_schooler")
-            and _hs_probe_not_asked
-            and _no_activity_signal
-        ):
-            questions.append(
-                NextQuestion(
-                    id="ask_high_school_activity",
-                    text=_personalize_q(
-                        "Any hobbies or after-school activities that need the laptop? "
-                        "This helps us pick the right specs without overspending.",
-                        query_text,
-                    ),
-                    goal="refine_use_case",
-                    evidence_needed=["high_school_activity"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "School notes / browsing only — keep it light", "value": "high_school_basic"},
-                        {"label": "Casual gaming (Minecraft, Roblox, Fortnite)", "value": "gaming_light"},
-                        {"label": "Video editing / YouTube / content creation", "value": "content_creator"},
-                        {"label": "Music production / audio software", "value": "music_production"},
-                        {"label": "Coding / programming projects", "value": "engineering_student"},
-                        {"label": "Digital art / graphic design", "value": "design_student"},
-                    ],
-                )
-            )
-
-        # ── University subject specialization ──
-        if inp.detected_use_case == "university_general":
-            questions.append(
-                NextQuestion(
-                    id="ask_university_subject",
-                    text=_personalize_q("What subject or field are you studying? This helps me match specs to your workload.", query_text),
-                    goal="refine_use_case",
-                    evidence_needed=["academic_field"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "Computer Science / IT", "value": "computer_science_student"},
-                        {"label": "Engineering / CAD", "value": "engineering_student"},
-                        {"label": "Data Science / ML", "value": "data_science_student"},
-                        {"label": "Design / Visual Arts", "value": "design_student"},
-                        {"label": "Architecture", "value": "architecture_student"},
-                        {"label": "Medical / Health Sciences", "value": "medical_student"},
-                        {"label": "Law", "value": "law_student"},
-                        {"label": "General Studies / Arts / Humanities", "value": "university_general"},
-                    ],
-                )
-            )
-
-        # ── Gaming depth question — what kind of games? ──
         _gaming_detected = any(
             w in (query_text or "").lower()
             for w in ["gaming", "game", "gamer", "play games", "fps", "esports"]
@@ -605,22 +577,133 @@ class NextQuestionEngine:
         _gaming_not_yet_asked = "gaming_depth" not in set(
             str(k).lower() for k in (inp.answered_fields or {})
         )
-        if _gaming_detected and _gaming_not_yet_asked and not detected_games:
-            questions.append(
-                NextQuestion(
-                    id="ask_gaming_depth",
-                    text=_personalize_q("What kind of games will you play? This determines the GPU level needed.", query_text),
-                    goal="refine_gaming_tier",
-                    evidence_needed=["game_titles", "gaming_tier"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "Light (Minecraft, Roblox, LoL)", "value": "gaming_light"},
-                        {"label": "Casual (Fortnite, Apex, Valorant at 60fps)", "value": "gaming_casual"},
-                        {"label": "Competitive Esports (CS2, Valorant at 144fps+)", "value": "gaming_competitive"},
-                        {"label": "AAA Heavy (Cyberpunk, Space Marines 2, Starfield)", "value": "gaming_aaa_heavy"},
-                    ],
+        _corporate_detected = any(
+            w in (query_text or "").lower()
+            for w in ["office", "corporate", "work", "business", "professional"]
+        )
+        _corp_not_yet_asked = "corporate_subtype" not in set(
+            str(k).lower() for k in (inp.answered_fields or {})
+        )
+
+        # Fire profile-backed questions
+        for _pack_id, _pack in _nqe_packs.items():
+            if not isinstance(_pack, dict):
+                continue
+            # Check answered_field gate
+            _af = _pack.get("answered_field", "")
+            if _af and _af in set(str(k).lower() for k in (inp.answered_fields or {})):
+                continue
+            # Check trigger_use_cases
+            _trigger_ucs = _pack.get("trigger_use_cases") or []
+            _trigger_kws = _pack.get("trigger_query_keywords") or []
+            _skip_kws = _pack.get("skip_if_query_contains") or []
+            _should_fire = False
+            if _trigger_ucs and inp.detected_use_case in _trigger_ucs:
+                _should_fire = True
+                # Apply skip_if_query_contains
+                if _skip_kws and any(w in (query_text or "").lower() for w in _skip_kws):
+                    _should_fire = False
+            elif _trigger_kws and any(w in (query_text or "").lower() for w in _trigger_kws):
+                _should_fire = True
+                # For gaming: skip if specific games already detected
+                if _pack_id == "ask_gaming_depth" and detected_games:
+                    _should_fire = False
+                # For corporate: skip if subtype already resolved
+                if _pack_id == "ask_corporate_work_type" and corporate_sub:
+                    _should_fire = False
+
+            if _should_fire:
+                questions.append(
+                    NextQuestion(
+                        id=_pack_id,
+                        text=_personalize_q(str(_pack.get("text", "")), query_text),
+                        goal=str(_pack.get("goal", "refine_use_case")),
+                        evidence_needed=list(_pack.get("evidence_needed") or []),
+                        source=str(_pack.get("source", "use_case_disambiguation")),
+                        options=list(_pack.get("options") or []),
+                    )
                 )
-            )
+
+        # ── Transitional fallback: fire inline electronics packs when profile lacks slot ──
+        if not _nqe_packs:
+            if (
+                inp.detected_use_case in ("high_school", "student", "high_schooler")
+                and _hs_probe_not_asked
+                and _no_activity_signal
+            ):
+                questions.append(
+                    NextQuestion(
+                        id="ask_high_school_activity",
+                        text=_personalize_q(
+                            "Any hobbies or after-school activities that need the laptop? "
+                            "This helps us pick the right specs without overspending.",
+                            query_text,
+                        ),
+                        goal="refine_use_case",
+                        evidence_needed=["high_school_activity"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "School notes / browsing only — keep it light", "value": "high_school_basic"},
+                            {"label": "Casual gaming (Minecraft, Roblox, Fortnite)", "value": "gaming_light"},
+                            {"label": "Video editing / YouTube / content creation", "value": "content_creator"},
+                            {"label": "Music production / audio software", "value": "music_production"},
+                            {"label": "Coding / programming projects", "value": "engineering_student"},
+                            {"label": "Digital art / graphic design", "value": "design_student"},
+                        ],
+                    )
+                )
+            if inp.detected_use_case == "university_general":
+                questions.append(
+                    NextQuestion(
+                        id="ask_university_subject",
+                        text=_personalize_q("What subject or field are you studying? This helps me match specs to your workload.", query_text),
+                        goal="refine_use_case",
+                        evidence_needed=["academic_field"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "Computer Science / IT", "value": "computer_science_student"},
+                            {"label": "Engineering / CAD", "value": "engineering_student"},
+                            {"label": "Data Science / ML", "value": "data_science_student"},
+                            {"label": "Design / Visual Arts", "value": "design_student"},
+                            {"label": "Architecture", "value": "architecture_student"},
+                            {"label": "Medical / Health Sciences", "value": "medical_student"},
+                            {"label": "Law", "value": "law_student"},
+                            {"label": "General Studies / Arts / Humanities", "value": "university_general"},
+                        ],
+                    )
+                )
+            if _gaming_detected and _gaming_not_yet_asked and not detected_games:
+                questions.append(
+                    NextQuestion(
+                        id="ask_gaming_depth",
+                        text=_personalize_q("What kind of games will you play? This determines the GPU level needed.", query_text),
+                        goal="refine_gaming_tier",
+                        evidence_needed=["game_titles", "gaming_tier"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "Light (Minecraft, Roblox, LoL)", "value": "gaming_light"},
+                            {"label": "Casual (Fortnite, Apex, Valorant at 60fps)", "value": "gaming_casual"},
+                            {"label": "Competitive Esports (CS2, Valorant at 144fps+)", "value": "gaming_competitive"},
+                            {"label": "AAA Heavy (Cyberpunk, Space Marines 2, Starfield)", "value": "gaming_aaa_heavy"},
+                        ],
+                    )
+                )
+            if _corporate_detected and _corp_not_yet_asked and not corporate_sub:
+                questions.append(
+                    NextQuestion(
+                        id="ask_corporate_work_type",
+                        text=_personalize_q("What type of work will you mainly do? This helps me match the right specs.", query_text),
+                        goal="refine_use_case",
+                        evidence_needed=["work_type"],
+                        source="use_case_disambiguation",
+                        options=[
+                            {"label": "General Office (Email, Teams, Documents)", "value": "office_general"},
+                            {"label": "Finance / Data Analysis (Excel, Power BI, SAP)", "value": "office_finance"},
+                            {"label": "Executive / Travel (Presentations, Premium Build)", "value": "office_executive"},
+                        ],
+                    )
+                )
+
         # If specific game was mentioned, auto-resolve tier — no need to ask
         if detected_games and inp.trace_id:
             try:
@@ -635,30 +718,6 @@ class NextQuestionEngine:
                 )
             except Exception:
                 pass
-
-        # ── Corporate work type question ──
-        _corporate_detected = any(
-            w in (query_text or "").lower()
-            for w in ["office", "corporate", "work", "business", "professional"]
-        )
-        _corp_not_yet_asked = "corporate_subtype" not in set(
-            str(k).lower() for k in (inp.answered_fields or {})
-        )
-        if _corporate_detected and _corp_not_yet_asked and not corporate_sub:
-            questions.append(
-                NextQuestion(
-                    id="ask_corporate_work_type",
-                    text=_personalize_q("What type of work will you mainly do? This helps me match the right specs.", query_text),
-                    goal="refine_use_case",
-                    evidence_needed=["work_type"],
-                    source="use_case_disambiguation",
-                    options=[
-                        {"label": "General Office (Email, Teams, Documents)", "value": "office_general"},
-                        {"label": "Finance / Data Analysis (Excel, Power BI, SAP)", "value": "office_finance"},
-                        {"label": "Executive / Travel (Presentations, Premium Build)", "value": "office_executive"},
-                    ],
-                )
-            )
 
         # ── Touch screen / pen input question ──
         if touch_needed and "touch_screen" not in set(

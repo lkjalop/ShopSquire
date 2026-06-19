@@ -67,6 +67,54 @@
     "workwear": "tradesperson"
   },
 
+  "_nqe_question_packs_comment": "Fashion-domain NQE clarifying questions. Zero laptop/GPU/gaming content.",
+  "nqe_question_packs": {
+    "ask_occasion": {
+      "trigger_use_cases": ["casual", "formal"],
+      "answered_field": "occasion",
+      "text": "What's the occasion? This helps me suggest the right style.",
+      "goal": "refine_use_case",
+      "evidence_needed": ["occasion"],
+      "source": "use_case_disambiguation",
+      "options": [
+        {"label": "Everyday / casual wear", "value": "everyday"},
+        {"label": "Work / office", "value": "office"},
+        {"label": "Wedding / formal event", "value": "event"},
+        {"label": "Date night / going out", "value": "going_out"},
+        {"label": "Travel / holiday", "value": "travel"}
+      ]
+    },
+    "ask_activity": {
+      "trigger_use_cases": ["athletic"],
+      "answered_field": "activity_type",
+      "text": "What activity is this for? Different sports need different fabrics and fits.",
+      "goal": "refine_use_case",
+      "evidence_needed": ["activity_type"],
+      "source": "use_case_disambiguation",
+      "options": [
+        {"label": "Running / cardio", "value": "running"},
+        {"label": "Gym / weights", "value": "gym"},
+        {"label": "Yoga / pilates", "value": "yoga"},
+        {"label": "Team sports (football, basketball)", "value": "team_sport"},
+        {"label": "General fitness / walking", "value": "general_fitness"}
+      ]
+    },
+    "ask_climate": {
+      "trigger_use_cases": ["outdoor"],
+      "answered_field": "climate",
+      "text": "What weather conditions will you face? This determines the right materials.",
+      "goal": "refine_specs",
+      "evidence_needed": ["climate"],
+      "source": "use_case_disambiguation",
+      "options": [
+        {"label": "Cold / winter", "value": "cold"},
+        {"label": "Rain / wet conditions", "value": "rain"},
+        {"label": "Wind / exposed terrain", "value": "wind"},
+        {"label": "Mixed / layering needed", "value": "mixed"}
+      ]
+    }
+  },
+
   "spec_constraints": {
     "size": {"pattern": "\\b(xs|s|m|l|xl|xxl|\\d{1,2})\\b", "field": "size"}
   },
