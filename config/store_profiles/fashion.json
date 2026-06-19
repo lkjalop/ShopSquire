@@ -1,0 +1,55 @@
+{
+  "_comment": "FASHION (clothing + shoes) StoreProfile — the THIRD agnostic proof. Same shape as electronics.json / pharmacy.json, totally different flavour. Demonstrates that the SAME upsell core does 'complete the outfit' (mix-and-match) purely from profile data: cart shoes -> socks + belt; cart a top -> bottom + outerwear. Zero laptop/medicine tokens. Proves the core demarcates cleanly and does not bleed across tenants.",
+  "id": "fashion",
+  "version": "2026-06-19",
+
+  "known_brands": ["nike","adidas","new balance","levis","zara","uniqlo","h&m","gap","calvin klein","tommy hilfiger","converse","vans"],
+  "nqe_brand_detect": ["nike","adidas","levis","zara","uniqlo","converse","vans"],
+
+  "_manufacturers_comment": "Same 3-axis schema (manufacturer / line / vs type), fashion flavour. Lines are product ranges (Air Max, 501).",
+  "manufacturers": {
+    "nike":    {"lines": ["air max","air force 1","dunk"], "aliases": ["nike"]},
+    "adidas":  {"lines": ["ultraboost","stan smith","samba"], "aliases": ["adidas"]},
+    "levis":   {"lines": ["501","511"], "aliases": ["levis","levi's"]},
+    "converse":{"lines": ["chuck taylor","all star"], "aliases": ["converse"]}
+  },
+
+  "primary_types": ["top","bottom","shoes","dress","outerwear"],
+  "price_bands_usd": {"top":[10,150],"bottom":[15,200],"shoes":[20,300],"dress":[20,400],"outerwear":[30,600],"sock":[3,40],"belt":[10,120],"accessory":[2,200]},
+
+  "_product_type_rules_comment": "Ordered, first-match-wins, specific (sock/belt) before primary garment types so 'Ankle Socks' -> sock not accessory and 'Denim Jacket' -> outerwear not top.",
+  "spec_units": ["xs","s","m","l","xl","xxl"],
+  "gpu_prefixes": [],
+  "product_type_rules": [
+    {"type": "sock",      "pattern": "\\b(socks?)\\b"},
+    {"type": "belt",      "pattern": "\\b(belts?)\\b"},
+    {"type": "shoes",     "pattern": "\\b(shoes?|sneakers?|trainers?|boots?|loafers?|heels?|sandals?|runners?|footwear|pumps?)\\b"},
+    {"type": "outerwear", "pattern": "\\b(jackets?|coats?|blazers?|parkas?|cardigans?|hoodies?|windbreakers?)\\b"},
+    {"type": "dress",     "pattern": "\\b(dress(es)?|gowns?|frocks?)\\b"},
+    {"type": "top",       "pattern": "\\b(shirts?|t-?shirts?|tees?|blouses?|tops?|sweaters?|jumpers?|polos?|knits?|tanks?)\\b"},
+    {"type": "bottom",    "pattern": "\\b(jeans|pants|trousers|chinos?|shorts|skirts?|leggings|joggers|slacks)\\b"}
+  ],
+  "brand_price_floors_usd": {"nike":40,"adidas":40,"levis":30,"converse":35},
+
+  "use_cases": {
+    "casual":   {"nqe_question": "ask_occasion"},
+    "formal":   {"nqe_question": "ask_occasion"},
+    "athletic": {"nqe_question": "ask_activity"},
+    "outdoor":  {"nqe_question": "ask_climate"}
+  },
+
+  "spec_constraints": {
+    "size": {"pattern": "\\b(xs|s|m|l|xl|xxl|\\d{1,2})\\b", "field": "size"}
+  },
+
+  "_upsell_comment": "Outfit mix-and-match: the SAME companion engine that pairs a laptop with a bag pairs shoes with socks/belt and a top with a bottom/outerwear. Pure profile data, zero code change.",
+  "upsell_companions": {
+    "shoes":     ["sock","belt"],
+    "top":       ["bottom","outerwear"],
+    "bottom":    ["top","belt"],
+    "dress":     ["outerwear","shoes"],
+    "outerwear": ["top","bottom"]
+  },
+
+  "cv_returns_pack": "electronics"
+}

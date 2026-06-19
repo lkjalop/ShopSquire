@@ -8,31 +8,27 @@ NEVER surface an electronics companion. The same core code, a different profile.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 from sqlalchemy import text
 
 from src.app.models.db import db_session
 
 
-def _pharmacy_profile() -> dict:
-    return json.loads(Path("config/store_profiles/pharmacy.json").read_text(encoding="utf-8"))
-
-
 @pytest.fixture
-def pharmacy_active(monkeypatch):
-    """Activate the pharmacy profile for the classifier/upsell vocab (no active-profile env exists
-    yet — _vocab() calls get_store_profile() no-arg → electronics; so we patch it)."""
+def pharmacy_active():
+    """Activate the pharmacy vertical via the REAL runtime selector — no monkeypatch. This is the
+    acceptance test for the active-profile selector: flip the ContextVar to pharmacy and the same
+    core resolves pharmacy taxonomy/upsell (closing the 'portable in tests, not deployable' gap)."""
     import src.app.platform.store_profile as sp
     import src.app.services.product_classifier as pc
 
-    prof = _pharmacy_profile()
-    monkeypatch.setattr(sp, "get_store_profile", lambda *a, **k: prof)
-    pc.reset_cache()
-    yield
-    pc.reset_cache()
+    token = sp.set_active_profile_id("pharmacy")
+    pc.reset_cache()  # taxonomy caches must rebuild against the now-active vertical
+    try:
+        yield
+    finally:
+        sp.reset_active_profile_id(token)
+        pc.reset_cache()
 
 
 def _seed(db, sku: str, name: str, stock: int = 9):

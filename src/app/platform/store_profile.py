@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -23,6 +24,43 @@ _log = logging.getLogger(__name__)
 _PROFILES_DIR_ENV = "STORE_PROFILES_DIR"
 _DEFAULT_DIR = os.path.join("config", "store_profiles")
 _DEFAULT_PROFILE_ID = "electronics"
+
+# ── Active-vertical selector ─────────────────────────────────────────────────────────────────
+# Which StoreProfile is active for THIS request/tenant. Resolution order:
+#   explicit profile_id arg  →  per-request ContextVar  →  STORE_PROFILE_ID env  →  electronics.
+# The ContextVar makes the core tenant-aware WITHOUT threading profile_id through every consumer:
+# a request handler sets it once, every no-arg get_store_profile() reads the active vertical.
+_ACTIVE_PROFILE_ID: "ContextVar[Optional[str]]" = ContextVar("active_store_profile_id", default=None)
+
+
+def active_profile_id() -> str:
+    """Resolve the active vertical id (never empty): ContextVar → STORE_PROFILE_ID env → default."""
+    cv = _ACTIVE_PROFILE_ID.get()
+    if cv and str(cv).strip():
+        return str(cv).strip()
+    env = os.getenv("STORE_PROFILE_ID")
+    if env and env.strip():
+        return env.strip()
+    return _DEFAULT_PROFILE_ID
+
+
+def set_active_profile_id(profile_id: Optional[str]):
+    """Set the active vertical for the current context (request/tenant). Returns a token; pass it
+    to reset_active_profile_id() to restore. An empty/None id clears the override (→ env/default)."""
+    return _ACTIVE_PROFILE_ID.set((str(profile_id).strip() or None) if profile_id else None)
+
+
+def reset_active_profile_id(token) -> None:
+    """Restore the previous active vertical (use the token from set_active_profile_id)."""
+    try:
+        _ACTIVE_PROFILE_ID.reset(token)
+    except Exception:
+        _ACTIVE_PROFILE_ID.set(None)
+
+
+def clear_active_profile_id() -> None:
+    """Hard-clear the override (→ env/default). Used by the test-isolation fixture."""
+    _ACTIVE_PROFILE_ID.set(None)
 
 # Slots a profile is expected to carry. Missing slots are tolerated at read time
 # (callers default), but in strict mode (CI/test) a malformed profile fails closed.
@@ -38,14 +76,15 @@ def _profiles_dir() -> Path:
 
 
 @lru_cache(maxsize=16)
-def get_store_profile(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, Any]:
-    """Load + validate a store profile by id. Cached. Falls back to the electronics
-    profile if the requested id is missing. Returns {} only if nothing loads.
+def _load_profile(pid: str) -> Dict[str, Any]:
+    """Load + validate ONE profile by its CONCRETE id (cached PER id — never by a dynamic
+    default, so different verticals can't share a single cache entry).
 
-    Strict mode (STORE_PROFILE_STRICT=1, set in CI/test) raises on malformed JSON so a
-    broken profile fails the build rather than silently degrading recommendations."""
+    Strict mode (STORE_PROFILE_STRICT=1, set in CI/test) raises on malformed JSON / a missing
+    non-default profile so a broken or mis-routed profile fails the build rather than silently
+    degrading recommendations."""
     strict = str(os.getenv("STORE_PROFILE_STRICT", "0")).strip().lower() in ("1", "true", "yes")
-    pid = (profile_id or _DEFAULT_PROFILE_ID).strip() or _DEFAULT_PROFILE_ID
+    pid = (pid or _DEFAULT_PROFILE_ID).strip() or _DEFAULT_PROFILE_ID
     path = _profiles_dir() / f"{pid}.json"
     if not path.exists():
         # Fail-closed: in strict mode (prod/CI) a missing requested profile MUST NOT silently
@@ -67,7 +106,15 @@ def get_store_profile(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, Any]:
         return {}
 
 
-def profile_slot(slot: str, *, profile_id: str = _DEFAULT_PROFILE_ID, default: Any = None) -> Any:
+def get_store_profile(profile_id: Optional[str] = None) -> Dict[str, Any]:
+    """Load the StoreProfile for the ACTIVE vertical. Resolution: explicit ``profile_id`` →
+    per-request ContextVar → STORE_PROFILE_ID env → electronics. Cached by the RESOLVED concrete
+    id. No-arg callers (the common case) automatically get the active vertical — that is what
+    makes the core tenant-aware without threading profile_id through every consumer."""
+    return _load_profile(profile_id or active_profile_id())
+
+
+def profile_slot(slot: str, *, profile_id: Optional[str] = None, default: Any = None) -> Any:
     """Read one slot from a profile with a default. The canonical accessor for excised
     flavour (e.g. brand_price_floors_usd) so call-sites never inline literals."""
     try:
@@ -77,7 +124,7 @@ def profile_slot(slot: str, *, profile_id: str = _DEFAULT_PROFILE_ID, default: A
         return default
 
 
-def brand_price_floors(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, int]:
+def brand_price_floors(profile_id: Optional[str] = None) -> Dict[str, int]:
     """Per-brand realistic price floor (USD) — excised from recommend.py
     _BRAND_PRICE_FLOORS. Used to surface a budget-mismatch clarifying question."""
     raw = profile_slot("brand_price_floors_usd", profile_id=profile_id, default={}) or {}
@@ -90,7 +137,7 @@ def brand_price_floors(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, int]:
     return out
 
 
-def brand_label_patterns(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, list]:
+def brand_label_patterns(profile_id: Optional[str] = None) -> Dict[str, list]:
     """Image→MANUFACTURER label patterns, DERIVED from the 3-axis `manufacturers` map
     ({mfr: lines + aliases}). This is the single source for the brand dicts that were
     scattered/duplicated across recommend.py. Falls back to a legacy flat
@@ -108,7 +155,7 @@ def brand_label_patterns(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, lis
     return legacy if isinstance(legacy, dict) else {}
 
 
-def product_line_index(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, Dict[str, Any]]:
+def product_line_index(profile_id: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     """token → {manufacturer, line} index, DERIVED from `manufacturers`. The new line-aware
     axis: lets the platform resolve a sub-brand/product-range token to its manufacturer + the
     line itself, independently of product TYPE — for brand-alias normalisation, identity, and
@@ -128,9 +175,14 @@ def product_line_index(profile_id: str = _DEFAULT_PROFILE_ID) -> Dict[str, Dict[
 
 
 def reset_cache() -> None:
-    """Clear the profile cache — MUST be called by the test isolation fixture so a
-    profile loaded under one tenant/vertical can't leak into the next test."""
+    """Clear the profile cache + the active-vertical override — MUST be called by the test
+    isolation fixture so a profile loaded (or activated) under one tenant/vertical can't leak
+    into the next test."""
     try:
-        get_store_profile.cache_clear()
+        _load_profile.cache_clear()
+    except Exception:
+        pass
+    try:
+        clear_active_profile_id()
     except Exception:
         pass
