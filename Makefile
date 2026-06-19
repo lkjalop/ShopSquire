@@ -28,6 +28,14 @@ test-determinism:
 	  tests/services/test_recommend_utils.py tests/services/test_recommend_budget_advisor.py \
 	  tests/services/test_recommend_nqe_stage.py tests/test_no_flavour_in_core.py -p no:randomly -q
 
+.PHONY: bench
+
+# Latency baseline for the recommend route (p50/p95 per timing_breakdown stage). Capture BEFORE
+# any latency-improvement change (trace batching, narration skip), then re-run and compare.
+# Needs a running stack (default http://localhost:8080). Override: make bench URL=... N=...
+bench:
+	python scripts/bench_recommend.py --url $(or $(URL),http://localhost:8080) --n $(or $(N),20)
+
 .PHONY: playwright-install playwright-smoke
 
 playwright-install:
