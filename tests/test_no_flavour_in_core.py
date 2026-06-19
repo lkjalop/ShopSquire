@@ -28,6 +28,7 @@ _CORE_MODULES = [
     "src/app/services/checkout_handoff.py",
     "src/app/services/recommend_context.py",
     "src/app/services/upsell_engine.py",
+    "src/app/services/query_understanding.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
