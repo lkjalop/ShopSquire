@@ -5,6 +5,8 @@ and behaviour must be unchanged after extraction.
 """
 from __future__ import annotations
 
+import contextlib
+
 from src.app.services.recommend_utils import (
     _brand_display_name,
     _candidate_matches_brand,
@@ -13,11 +15,28 @@ from src.app.services.recommend_utils import (
 )
 
 
+@contextlib.contextmanager
+def _vertical(profile_id: str):
+    from src.app.platform.store_profile import reset_active_profile_id, set_active_profile_id
+
+    token = set_active_profile_id(profile_id)
+    try:
+        yield
+    finally:
+        reset_active_profile_id(token)
+
+
 def test_candidate_matches_brand_alias_and_direct():
     assert _candidate_matches_brand({"name": "MacBook Pro 16"}, ["apple"]) is True
     assert _candidate_matches_brand({"name": "Legion 5 Pro"}, ["lenovo"]) is True
     assert _candidate_matches_brand({"sku": "ROG-STRIX-1"}, ["asus"]) is True
     assert _candidate_matches_brand({"name": "ThinkPad X1"}, ["dell"]) is False
+
+
+def test_candidate_matches_brand_uses_active_profile_no_bleed():
+    with _vertical("pharmacy"):
+        assert _candidate_matches_brand({"name": "Panadol Osteo 96 Tablets"}, ["panadol"]) is True
+        assert _candidate_matches_brand({"name": "ROG Zephyrus Laptop"}, ["asus"]) is False
 
 
 def test_candidate_matches_brand_empty_inputs():
@@ -32,6 +51,12 @@ def test_brand_display_name_known_and_fallback():
     assert _brand_display_name("framework") == "Framework"  # capitalize fallback
     assert _brand_display_name(None) == ""
     assert _brand_display_name("") == ""
+
+
+def test_brand_display_name_uses_active_profile():
+    with _vertical("pharmacy"):
+        assert _brand_display_name("panadol") == "Panadol"
+        assert _brand_display_name("asus") == "Asus"
 
 
 def test_result_price_dollars_prefers_price_then_cents():

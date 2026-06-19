@@ -19,6 +19,27 @@ import re
 from typing import Any, Dict, List
 
 
+def _manufacturer_specs() -> Dict[str, Dict[str, Any]]:
+    from src.app.platform.store_profile import profile_slot
+
+    raw = profile_slot("manufacturers", default={}) or {}
+    return {
+        str(k).strip().lower(): (v if isinstance(v, dict) else {})
+        for k, v in raw.items()
+        if str(k).strip()
+    } if isinstance(raw, dict) else {}
+
+
+def _brand_alias_map() -> Dict[str, List[str]]:
+    out: Dict[str, List[str]] = {}
+    for manufacturer, spec in _manufacturer_specs().items():
+        tokens = [manufacturer]
+        tokens.extend(str(x).strip().lower() for x in (spec.get("aliases") or []) if str(x).strip())
+        tokens.extend(str(x).strip().lower() for x in (spec.get("lines") or []) if str(x).strip())
+        out[manufacturer] = list(dict.fromkeys(tokens))
+    return out
+
+
 def _candidate_matches_brand(candidate: Dict[str, Any] | None, brands: List[str] | None) -> bool:
     c = candidate or {}
     req = [str(b or "").strip().lower() for b in (brands or []) if str(b or "").strip()]
@@ -27,21 +48,7 @@ def _candidate_matches_brand(candidate: Dict[str, Any] | None, brands: List[str]
     name = str(c.get("name") or "").lower()
     sku = str(c.get("sku") or "").lower()
     text_blob = f"{name} {sku}"
-    alias = {
-        "apple": ["apple", "macbook", "imac"],
-        "microsoft": ["microsoft", "surface"],
-        "asus": ["asus", "vivobook", "zenbook", "rog", "tuf"],
-        "lenovo": ["lenovo", "ideapad", "thinkpad", "yoga", "legion"],
-        "hp": ["hp", "envy", "victus", "omen", "omnibook", "elitebook", "probook"],
-        "dell": ["dell", "inspiron", "xps", "latitude", "vostro"],
-        "msi": ["msi", "stealth", "raider", "titan"],
-        "alienware": ["alienware"],
-        "acer": ["acer", "swift", "aspire", "predator", "nitro"],
-        "samsung": ["samsung", "galaxy book"],
-        "razer": ["razer", "blade"],
-        "gigabyte": ["gigabyte", "aorus"],
-        "toshiba": ["toshiba", "dynabook"],
-    }
+    alias = _brand_alias_map()
     for b in req:
         probes = alias.get(b, [b])
         if any(p in text_blob for p in probes):
@@ -51,22 +58,11 @@ def _candidate_matches_brand(candidate: Dict[str, Any] | None, brands: List[str]
 
 def _brand_display_name(brand: str | None) -> str:
     key = str(brand or "").strip().lower()
-    return {
-        "apple": "Apple",
-        "asus": "ASUS",
-        "lenovo": "Lenovo",
-        "hp": "HP",
-        "dell": "Dell",
-        "msi": "MSI",
-        "alienware": "Alienware",
-        "microsoft": "Microsoft Surface",
-        "acer": "Acer",
-        "samsung": "Samsung",
-        "razer": "Razer",
-        "gigabyte": "Gigabyte",
-        "toshiba": "Toshiba",
-        "windows": "Windows",
-    }.get(key, key.capitalize() if key else "")
+    if not key:
+        return ""
+    spec = _manufacturer_specs().get(key) or {}
+    display = str(spec.get("display") or "").strip()
+    return display or key.title()
 
 
 def _result_price_dollars(row: Dict[str, Any] | None) -> float | None:
