@@ -48,21 +48,15 @@ _USE_CASE_BUDGET_FLOORS_FALLBACK: dict[str, int] = {
 def _use_case_budget_floors() -> dict[str, int]:
     """Use-case → minimum viable price for the ACTIVE vertical. Prefer the StoreProfile
     `use_case_budget_floors` slot (vertical-exclusive); fall back to the inline electronics map
-    only when the profile lacks the slot (dev convenience — strict mode supplies it)."""
-    try:
-        from src.app.platform.store_profile import profile_slot
-        prof = profile_slot("use_case_budget_floors", default=None)
-        if isinstance(prof, dict) and prof:
-            out: dict[str, int] = {}
-            for k, v in prof.items():
-                try:
-                    out[str(k).strip().lower()] = int(v)
-                except Exception:
-                    continue
-            if out:
-                return out
-    except Exception:
-        pass
+    only when the profile lacks the slot. No try/except needed: profile_slot is defensive (never
+    raises), and the isinstance guard makes the int() cast safe (keeps this off the silent-except
+    ratchet)."""
+    from src.app.platform.store_profile import profile_slot
+    prof = profile_slot("use_case_budget_floors", default=None)
+    if isinstance(prof, dict) and prof:
+        out = {str(k).strip().lower(): int(v) for k, v in prof.items() if isinstance(v, (int, float))}
+        if out:
+            return out
     return _USE_CASE_BUDGET_FLOORS_FALLBACK
 
 
