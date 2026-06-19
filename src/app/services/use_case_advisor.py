@@ -2,7 +2,9 @@
 
 Loads the structured knowledge base from config/use_case_knowledge_base.json
 and provides lookup + suitability assessment functions for the recommendation
-pipeline.
+pipeline. Use-case keyword matching and persona inference are now profile-backed:
+the active StoreProfile supplies use_case_keyword_map and use_case_to_persona so
+non-electronics verticals get their own domain use-cases (not gaming/GPU).
 """
 from __future__ import annotations
 
@@ -71,94 +73,24 @@ def list_use_cases() -> List[str]:
 
 
 def match_use_case_from_query(query: str) -> Optional[str]:
-    """Best-effort match a user query to a use-case key via keyword mapping."""
+    """Best-effort match a user query to a use-case key via keyword mapping.
+
+    Profile-backed: reads use_case_keyword_map and use_case_keyword_priority from the active
+    StoreProfile. Falls back to the electronics-era inline map ONLY when the profile lacks the
+    slot (transitional compatibility). Once all profiles carry the slot, the inline fallback
+    can be deleted and this module added to test_no_flavour_in_core.
+    """
+    from src.app.platform.store_profile import get_store_profile
+
     q = (query or "").lower()
-    keyword_map = {
-        "high_school": [
-            "high school", "highschool", "yr 7", "yr 8", "yr 9", "yr 10",
-            "yr 11", "yr 12", "year 7", "year 8", "year 9", "year 10",
-            "year 11", "year 12", "teen", "hsc", "vce", "gcse", "secondary school",
-        ],
-        "university_general": ["university", "college", "student", "study", "coursework", "campus", "uni student", "for uni"],
-        "engineering_student": [
-            "engineering", "cad", "autocad", "solidworks", "mechanical", "civil eng",
-            "electrical eng", "engineering student", "matlab", "ansys", "fea simulation",
-        ],
-        "computer_science_student": [
-            "computer science", "compsci", "cs student", "programming student", "coding student",
-            "software dev", "cs degree", "software engineering", "it degree",
-        ],
-        "data_science_student": [
-            "data science", "machine learning student", "ml student", "data analytics",
-            "data scientist", "data analyst", "analytics laptop", "python notebook",
-            "jupyter", "pandas", "scikit", "data engineering",
-        ],
-        "design_student": [
-            "graphic design", "visual arts", "design student", "illustrat",
-            "figma", "indesign", "adobe", "ui design", "ux design", "branding",
-        ],
-        "gaming_casual": ["casual gam", "light gaming", "some games", "occasional gaming"],
-        "gaming_competitive": [
-            "competitive gam", "esports", "high fps", "144hz", "240hz",
-            "valorant", "fortnite", "csgo", "cs2", "overwatch", "apex legends",
-        ],
-        "gaming_light": ["minecraft", "roblox", "league of legends", "lol", "indie game", "light games"],
-        "gaming_aaa_heavy": [
-            "cyberpunk", "space marines", "starfield", "aaa gam", "ultra settings",
-            "4k gaming", "ray tracing", "dlss", "max settings",
-        ],
-        "content_creator": [
-            "video edit", "content creat", "youtube", "streaming", "premiere", "davinci",
-            "creator laptop", "after effects", "color grading", "4k edit", "vlog",
-            "twitch", "podcast", "screencast",
-        ],
-        "business_professional": [
-            "business", "office work", "corporate", "enterprise", "professional",
-            "work laptop", "for work", "office laptop", "for the office",
-        ],
-        "office_general": ["general office", "email", "teams", "admin", "clerical", "wfh", "work from home"],
-        "office_finance": [
-            "finance", "accounting", "excel", "spreadsheet", "power bi", "tableau",
-            "sap", "bloomberg", "financial modelling", "pivot table",
-        ],
-        "office_executive": [
-            "executive", "c-suite", "ceo", "cfo", "director", "boardroom", "travel laptop",
-            "premium laptop", "luxury laptop",
-        ],
-        "note_taking_student": ["note taking", "handwriting", "stylus", "pen input", "2-in-1", "tablet mode"],
-        "ai_ml_workstation": [
-            "ai training", "deep learning", "model training", "cuda", "ml workstation",
-            "llm training", "ai engineer", "ml engineer", "machine learning engineer",
-            "llm engineer", "pytorch", "tensorflow", "hugging face", "vram for training",
-            "gpu for ai", "ai developer", "ml developer", "train models",
-        ],
-        "music_production": [
-            "music prod", "audio engineer", "daw", "ableton", "fl studio", "logic pro",
-            "music making", "beat making", "recording studio", "sound design",
-        ],
-        "architecture_student": ["architect", "revit", "sketchup", "3d render", "bim", "rhino"],
-        "medical_student": [
-            "medical student", "anatomy", "medical school", "clinical rotation",
-            "nursing student", "health science", "med student",
-        ],
-        "law_student": [
-            "law student", "legal", "case brief", "law school",
-            "paralegal", "legal research", "westlaw",
-        ],
-    }
-    # Specificity priority: more-specific keys beat broader ones at equal score.
-    # Ordered from most specific to least — when tied, the earlier key wins.
-    _PRIORITY = [
-        "ai_ml_workstation", "data_science_student", "engineering_student",
-        "computer_science_student", "architecture_student",
-        "gaming_aaa_heavy", "gaming_competitive", "gaming_casual", "gaming_light",
-        "content_creator", "design_student",
-        "music_production", "note_taking_student",
-        "office_finance", "office_executive",
-        "medical_student", "law_student",
-        "business_professional", "office_general",
-        "high_school", "university_general",
-    ]
+    profile = get_store_profile()
+    keyword_map: Dict[str, List[str]] = profile.get("use_case_keyword_map") or {}
+    priority: List[str] = profile.get("use_case_keyword_priority") or []
+
+    # ── Transitional: inline electronics fallback (only when profile lacks the slot) ──
+    if not keyword_map:
+        keyword_map = _ELECTRONICS_USE_CASE_KEYWORD_MAP
+        priority = _ELECTRONICS_USE_CASE_KEYWORD_PRIORITY
 
     scores: dict = {}
     for key, keywords in keyword_map.items():
@@ -170,11 +102,99 @@ def match_use_case_from_query(query: str) -> Optional[str]:
         return None
     max_score = max(scores.values())
     # Among keys at max score, pick the highest-priority (most specific) one.
-    for key in _PRIORITY:
+    for key in priority:
         if scores.get(key, 0) == max_score:
             return key
     # Fallback: any key at max score
     return next(k for k, v in scores.items() if v == max_score)
+
+
+# ── Transitional inline electronics fallback (removed once electronics.json confirmed carrying the slot) ──
+_ELECTRONICS_USE_CASE_KEYWORD_MAP: Dict[str, List[str]] = {
+    "high_school": [
+        "high school", "highschool", "yr 7", "yr 8", "yr 9", "yr 10",
+        "yr 11", "yr 12", "year 7", "year 8", "year 9", "year 10",
+        "year 11", "year 12", "teen", "hsc", "vce", "gcse", "secondary school",
+    ],
+    "university_general": ["university", "college", "student", "study", "coursework", "campus", "uni student", "for uni"],
+    "engineering_student": [
+        "engineering", "cad", "autocad", "solidworks", "mechanical", "civil eng",
+        "electrical eng", "engineering student", "matlab", "ansys", "fea simulation",
+    ],
+    "computer_science_student": [
+        "computer science", "compsci", "cs student", "programming student", "coding student",
+        "software dev", "cs degree", "software engineering", "it degree",
+    ],
+    "data_science_student": [
+        "data science", "machine learning student", "ml student", "data analytics",
+        "data scientist", "data analyst", "analytics laptop", "python notebook",
+        "jupyter", "pandas", "scikit", "data engineering",
+    ],
+    "design_student": [
+        "graphic design", "visual arts", "design student", "illustrat",
+        "figma", "indesign", "adobe", "ui design", "ux design", "branding",
+    ],
+    "gaming_casual": ["casual gam", "light gaming", "some games", "occasional gaming"],
+    "gaming_competitive": [
+        "competitive gam", "esports", "high fps", "144hz", "240hz",
+        "valorant", "fortnite", "csgo", "cs2", "overwatch", "apex legends",
+    ],
+    "gaming_light": ["minecraft", "roblox", "league of legends", "lol", "indie game", "light games"],
+    "gaming_aaa_heavy": [
+        "cyberpunk", "space marines", "starfield", "aaa gam", "ultra settings",
+        "4k gaming", "ray tracing", "dlss", "max settings",
+    ],
+    "content_creator": [
+        "video edit", "content creat", "youtube", "streaming", "premiere", "davinci",
+        "creator laptop", "after effects", "color grading", "4k edit", "vlog",
+        "twitch", "podcast", "screencast",
+    ],
+    "business_professional": [
+        "business", "office work", "corporate", "enterprise", "professional",
+        "work laptop", "for work", "office laptop", "for the office",
+    ],
+    "office_general": ["general office", "email", "teams", "admin", "clerical", "wfh", "work from home"],
+    "office_finance": [
+        "finance", "accounting", "excel", "spreadsheet", "power bi", "tableau",
+        "sap", "bloomberg", "financial modelling", "pivot table",
+    ],
+    "office_executive": [
+        "executive", "c-suite", "ceo", "cfo", "director", "boardroom", "travel laptop",
+        "premium laptop", "luxury laptop",
+    ],
+    "note_taking_student": ["note taking", "handwriting", "stylus", "pen input", "2-in-1", "tablet mode"],
+    "ai_ml_workstation": [
+        "ai training", "deep learning", "model training", "cuda", "ml workstation",
+        "llm training", "ai engineer", "ml engineer", "machine learning engineer",
+        "llm engineer", "pytorch", "tensorflow", "hugging face", "vram for training",
+        "gpu for ai", "ai developer", "ml developer", "train models",
+    ],
+    "music_production": [
+        "music prod", "audio engineer", "daw", "ableton", "fl studio", "logic pro",
+        "music making", "beat making", "recording studio", "sound design",
+    ],
+    "architecture_student": ["architect", "revit", "sketchup", "3d render", "bim", "rhino"],
+    "medical_student": [
+        "medical student", "anatomy", "medical school", "clinical rotation",
+        "nursing student", "health science", "med student",
+    ],
+    "law_student": [
+        "law student", "legal", "case brief", "law school",
+        "paralegal", "legal research", "westlaw",
+    ],
+}
+
+_ELECTRONICS_USE_CASE_KEYWORD_PRIORITY: List[str] = [
+    "ai_ml_workstation", "data_science_student", "engineering_student",
+    "computer_science_student", "architecture_student",
+    "gaming_aaa_heavy", "gaming_competitive", "gaming_casual", "gaming_light",
+    "content_creator", "design_student",
+    "music_production", "note_taking_student",
+    "office_finance", "office_executive",
+    "medical_student", "law_student",
+    "business_professional", "office_general",
+    "high_school", "university_general",
+]
 
 
 def assess_suitability(
@@ -516,8 +536,8 @@ class ShopperIntentResult:
         }
 
 
-# ── Persona inference map ──
-_USE_CASE_TO_PERSONA: Dict[str, str] = {
+# ── Persona inference (profile-backed) ──
+_ELECTRONICS_USE_CASE_TO_PERSONA: Dict[str, str] = {
     "gaming_competitive": "gamer",
     "gaming_aaa_heavy": "gamer",
     "gaming_casual": "gamer",
@@ -537,6 +557,16 @@ _USE_CASE_TO_PERSONA: Dict[str, str] = {
     "ai_ml_workstation": "developer",
     "design": "creator",
 }
+
+
+def _get_use_case_to_persona() -> Dict[str, str]:
+    """Resolve persona map from active StoreProfile, fallback to electronics inline."""
+    from src.app.platform.store_profile import get_store_profile
+    profile = get_store_profile()
+    persona_map = profile.get("use_case_to_persona")
+    if persona_map and isinstance(persona_map, dict):
+        return persona_map
+    return _ELECTRONICS_USE_CASE_TO_PERSONA
 
 
 def extract_shopper_intent(
@@ -583,13 +613,14 @@ def extract_shopper_intent(
     uc_hints = list(getattr(pq, "use_case_hints", None) or slots.get("use_case_hints", []))
     uc_key = slots.get("use_case") or (uc_hints[0] if uc_hints else None)
     result.use_case_key = uc_key
-    result.persona = _USE_CASE_TO_PERSONA.get(uc_key or "", "unknown")
+    persona_map = _get_use_case_to_persona()
+    result.persona = persona_map.get(uc_key or "", "unknown")
 
     # user profile fallback
     if result.persona == "unknown" and user_profile is not None:
         typical = getattr(user_profile, "typical_use_cases", None) or []
         for tc in typical:
-            p = _USE_CASE_TO_PERSONA.get(tc, "")
+            p = persona_map.get(tc, "")
             if p:
                 result.persona = p
                 result.use_case_key = result.use_case_key or tc

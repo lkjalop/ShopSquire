@@ -45,6 +45,28 @@
     "outdoor":  {"nqe_question": "ask_climate"}
   },
 
+  "_use_case_keyword_map_comment": "Fashion use-case keyword matching (excised from use_case_advisor). Vertical-exclusive — zero laptop/GPU tokens.",
+  "use_case_keyword_map": {
+    "casual": ["casual", "everyday", "relaxed", "weekend", "streetwear", "loungewear", "comfy", "laid back", "daily wear"],
+    "formal": ["formal", "business", "office", "wedding", "interview", "smart", "dress up", "black tie", "suit", "blazer", "cocktail"],
+    "athletic": ["athletic", "gym", "workout", "running", "sport", "training", "activewear", "exercise", "yoga", "pilates", "cycling"],
+    "outdoor": ["outdoor", "hiking", "camping", "winter", "rain", "cold weather", "trail", "waterproof", "insulated", "layering"],
+    "summer": ["summer", "beach", "holiday", "vacation", "warm weather", "lightweight", "linen", "tropical"],
+    "workwear": ["workwear", "uniform", "hi-vis", "steel cap", "safety", "tradesman"]
+  },
+  "use_case_keyword_priority": [
+    "workwear", "outdoor", "athletic",
+    "formal", "summer", "casual"
+  ],
+  "use_case_to_persona": {
+    "casual": "shopper",
+    "formal": "professional",
+    "athletic": "athlete",
+    "outdoor": "adventurer",
+    "summer": "shopper",
+    "workwear": "tradesperson"
+  },
+
   "spec_constraints": {
     "size": {"pattern": "\\b(xs|s|m|l|xl|xxl|\\d{1,2})\\b", "field": "size"}
   },

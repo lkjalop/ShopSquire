@@ -49,6 +49,33 @@
     "baby_care":    {"nqe_question": "ask_age_band"}
   },
 
+  "_use_case_keyword_map_comment": "Pharmacy use-case keyword matching (excised from use_case_advisor). Vertical-exclusive — must NOT contain gaming/laptop/GPU keywords.",
+  "use_case_keyword_map": {
+    "pain_relief": ["pain", "headache", "migraine", "body pain", "ache", "sore", "cramp", "back pain", "neck pain", "joint pain", "period pain", "menstrual", "toothache", "analgesic"],
+    "cold_flu": ["cold", "flu", "cough", "sore throat", "congestion", "blocked nose", "sinus", "runny nose", "fever", "chills", "phlegm"],
+    "allergy": ["allergy", "allergies", "antihistamine", "hay fever", "hayfever", "itchy", "hives", "sneezing", "dust mite", "pollen"],
+    "vitamins": ["vitamin", "vitamins", "supplement", "multivitamin", "immune", "immunity", "energy boost", "iron", "fish oil", "omega", "probiotic", "magnesium", "zinc"],
+    "skincare": ["skincare", "skin care", "moisturiser", "moisturizer", "cleanser", "acne", "eczema", "dry skin", "oily skin", "sunscreen", "spf", "anti-aging"],
+    "baby_care": ["baby", "infant", "nappy", "nappies", "diaper", "formula", "teething", "baby wipe", "colic", "gripe water"],
+    "first_aid": ["first aid", "bandage", "plaster", "antiseptic", "wound", "dressing", "burn", "sting"],
+    "digestive": ["digestive", "indigestion", "heartburn", "antacid", "bloating", "constipation", "laxative", "diarrhoea", "nausea"]
+  },
+  "use_case_keyword_priority": [
+    "first_aid", "baby_care", "digestive",
+    "pain_relief", "cold_flu", "allergy",
+    "skincare", "vitamins"
+  ],
+  "use_case_to_persona": {
+    "pain_relief": "patient",
+    "cold_flu": "patient",
+    "allergy": "patient",
+    "vitamins": "wellness",
+    "skincare": "wellness",
+    "baby_care": "parent",
+    "first_aid": "patient",
+    "digestive": "patient"
+  },
+
   "spec_constraints": {
     "pack_size":   {"pattern": "\\b(\\d{1,3})\\s*(pack|tablets|capsules|caps)\\b", "field": "pack_size_min"},
     "strength_mg": {"pattern": "\\b(\\d{2,4})\\s*mg\\b", "field": "strength_mg"}
