@@ -60,6 +60,26 @@ def test_vertical_classifies_and_companions_no_bleed(pid, name, ptype, companion
         assert classify_product_type(foreign) == "accessory", f"{pid}: {foreign!r} bled in as a known type"
 
 
+def test_budget_floors_are_profile_scoped_no_bleed():
+    """Budget floors are vertical-EXCLUSIVE (prefer-profile): a pharmacy must not inherit the
+    electronics gaming floor, and must get its own pharmacy floors."""
+    from src.app.services.recommend_budget_advisor import _use_case_budget_floors
+
+    with _vertical("electronics"):
+        elec = _use_case_budget_floors()
+        assert elec.get("gaming_aaa_heavy") == 1200
+
+    with _vertical("pharmacy"):
+        ph = _use_case_budget_floors()
+        assert "gaming_aaa_heavy" not in ph, "electronics floor bled into pharmacy"
+        assert ph.get("pain_relief") == 5
+
+    with _vertical("fashion"):
+        fa = _use_case_budget_floors()
+        assert "gaming_aaa_heavy" not in fa
+        assert fa.get("formal") == 60
+
+
 def _seed(db, sku, name, stock=9):
     db.execute(text(
         "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "

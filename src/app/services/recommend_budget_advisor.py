@@ -26,7 +26,11 @@ from src.app.services.use_case_advisor import get_use_case_min_price_floor
 
 
 
-_USE_CASE_BUDGET_FLOORS: dict[str, int] = {
+# Inline FALLBACK for the use-case budget floors (electronics). The live source is the active
+# StoreProfile's `use_case_budget_floors` slot (see _use_case_budget_floors). Vertical-EXCLUSIVE:
+# pharmacy/fashion supply their own floors; a non-electronics vertical must NOT inherit these — so
+# the accessor PREFERS the profile (returns it outright when present), it does not union.
+_USE_CASE_BUDGET_FLOORS_FALLBACK: dict[str, int] = {
     # Minimum viable new-laptop price (AUD/USD rough floor) per workload tier
     "high_school": 400,
     "gaming_casual": 600, "gaming_competitive": 900, "gaming_light": 500,
@@ -39,6 +43,33 @@ _USE_CASE_BUDGET_FLOORS: dict[str, int] = {
     "office_general": 350, "office_finance": 500, "office_executive": 600,
     "medical_student": 500, "law_student": 400,
 }
+
+
+def _use_case_budget_floors() -> dict[str, int]:
+    """Use-case → minimum viable price for the ACTIVE vertical. Prefer the StoreProfile
+    `use_case_budget_floors` slot (vertical-exclusive); fall back to the inline electronics map
+    only when the profile lacks the slot (dev convenience — strict mode supplies it)."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        prof = profile_slot("use_case_budget_floors", default=None)
+        if isinstance(prof, dict) and prof:
+            out: dict[str, int] = {}
+            for k, v in prof.items():
+                try:
+                    out[str(k).strip().lower()] = int(v)
+                except Exception:
+                    continue
+            if out:
+                return out
+    except Exception:
+        pass
+    return _USE_CASE_BUDGET_FLOORS_FALLBACK
+
+
+# Back-compat alias: the inline fallback IS the electronics floor table. Existing re-exports /
+# call-sites that reference the electronics table directly keep working; the profile-preferred
+# live source is _use_case_budget_floors().
+_USE_CASE_BUDGET_FLOORS = _USE_CASE_BUDGET_FLOORS_FALLBACK
 
 
 def _persona_summary_label(persona: str | None, use_case: str | None) -> str:
@@ -81,7 +112,7 @@ def _assess_budget_fitness(
     """
     if not use_case or not budget_max:
         return {"status": "unknown"}
-    floor = get_use_case_min_price_floor(str(use_case)) or _USE_CASE_BUDGET_FLOORS.get(use_case)
+    floor = get_use_case_min_price_floor(str(use_case)) or _use_case_budget_floors().get(use_case)
     if not floor:
         return {"status": "unknown"}
     bmax = float(budget_max)

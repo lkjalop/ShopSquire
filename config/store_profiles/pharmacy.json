@@ -30,6 +30,7 @@
     {"type": "medicine",      "pattern": "\\b(paracetamol|ibuprofen|aspirin|antihistamine|panadol|nurofen|tablet|capsule|syrup|lozenge|cough|cold|flu|pain relief|antacid|laxative)\\b"}
   ],
   "brand_price_floors_usd": {"blackmores":10,"swisse":8,"cetaphil":8,"cenovis":6},
+  "use_case_budget_floors": {"pain_relief":5,"cold_flu":6,"allergy":8,"vitamins":10,"skincare":8,"baby_care":6},
 
   "use_cases": {
     "pain_relief":  {"nqe_question": "ask_symptom_type"},

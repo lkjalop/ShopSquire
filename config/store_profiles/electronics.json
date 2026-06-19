@@ -33,6 +33,8 @@
     "toshiba":   {"lines": ["dynabook"], "aliases": ["toshiba"]}
   },
   "brand_price_floors_usd": {"apple":1200,"msi":900,"razer":1200,"gigabyte":1000,"lenovo":500,"dell":500,"hp":400,"asus":400,"acer":350,"microsoft":900,"samsung":800},
+  "_use_case_budget_floors_comment": "Minimum viable price (USD) per use-case — excised from recommend_budget_advisor._USE_CASE_BUDGET_FLOORS. Vertical-EXCLUSIVE (prefer-profile, not union): a pharmacy must not inherit gaming floors.",
+  "use_case_budget_floors": {"high_school":400,"gaming_casual":600,"gaming_competitive":900,"gaming_light":500,"gaming_aaa_heavy":1200,"engineering_student":1000,"architecture_student":1000,"ai_ml_workstation":1500,"data_science_student":900,"content_creator":900,"music_production":800,"computer_science_student":600,"design_student":700,"university_general":400,"note_taking_student":350,"office_general":350,"office_finance":500,"office_executive":600,"medical_student":500,"law_student":400},
 
   "_safe_image_comment": "Curated SAFE allow-list for fast-path image hinting (a bounded subset that may steer retrieval). Separate from manufacturers/primary_types so the security allow-list is explicit and auditable per vertical.",
   "safe_image_brands": ["acer","alienware","apple","asus","dell","hp","lenovo","macbook","microsoft","msi","samsung","surface"],
