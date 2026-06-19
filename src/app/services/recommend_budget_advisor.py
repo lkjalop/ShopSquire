@@ -30,40 +30,25 @@ from src.app.services.use_case_advisor import get_use_case_min_price_floor
 # StoreProfile's `use_case_budget_floors` slot (see _use_case_budget_floors). Vertical-EXCLUSIVE:
 # pharmacy/fashion supply their own floors; a non-electronics vertical must NOT inherit these — so
 # the accessor PREFERS the profile (returns it outright when present), it does not union.
-_USE_CASE_BUDGET_FLOORS_FALLBACK: dict[str, int] = {
-    # Minimum viable new-laptop price (AUD/USD rough floor) per workload tier
-    "high_school": 400,
-    "gaming_casual": 600, "gaming_competitive": 900, "gaming_light": 500,
-    "gaming_aaa_heavy": 1200,
-    "engineering_student": 1000, "architecture_student": 1000,
-    "ai_ml_workstation": 1500, "data_science_student": 900,
-    "content_creator": 900, "music_production": 800,
-    "computer_science_student": 600, "design_student": 700,
-    "university_general": 400, "note_taking_student": 350,
-    "office_general": 350, "office_finance": 500, "office_executive": 600,
-    "medical_student": 500, "law_student": 400,
-}
-
-
-def _use_case_budget_floors() -> dict[str, int]:
+def _use_case_budget_floors(profile_id: str | None = None) -> dict[str, int]:
     """Use-case → minimum viable price for the ACTIVE vertical. Prefer the StoreProfile
     `use_case_budget_floors` slot (vertical-exclusive); fall back to the inline electronics map
     only when the profile lacks the slot. No try/except needed: profile_slot is defensive (never
     raises), and the isinstance guard makes the int() cast safe (keeps this off the silent-except
     ratchet)."""
     from src.app.platform.store_profile import profile_slot
-    prof = profile_slot("use_case_budget_floors", default=None)
+    prof = profile_slot("use_case_budget_floors", profile_id=profile_id, default=None)
     if isinstance(prof, dict) and prof:
         out = {str(k).strip().lower(): int(v) for k, v in prof.items() if isinstance(v, (int, float))}
         if out:
             return out
-    return _USE_CASE_BUDGET_FLOORS_FALLBACK
+    return {}
 
 
 # Back-compat alias: the inline fallback IS the electronics floor table. Existing re-exports /
 # call-sites that reference the electronics table directly keep working; the profile-preferred
 # live source is _use_case_budget_floors().
-_USE_CASE_BUDGET_FLOORS = _USE_CASE_BUDGET_FLOORS_FALLBACK
+_USE_CASE_BUDGET_FLOORS = _use_case_budget_floors("electronics")
 
 
 def _persona_summary_label(persona: str | None, use_case: str | None) -> str:
@@ -106,7 +91,12 @@ def _assess_budget_fitness(
     """
     if not use_case or not budget_max:
         return {"status": "unknown"}
-    floor = get_use_case_min_price_floor(str(use_case)) or _use_case_budget_floors().get(use_case)
+    use_case_key = str(use_case).strip().lower()
+    profile_floors = _use_case_budget_floors()
+    floor = profile_floors.get(use_case_key)
+    if not floor and profile_floors:
+        return {"status": "unknown"}
+    floor = floor or get_use_case_min_price_floor(use_case_key)
     if not floor:
         return {"status": "unknown"}
     bmax = float(budget_max)
@@ -121,7 +111,7 @@ def _assess_budget_fitness(
                 "consider_refurbished_or_previous_gen",
             ],
             "advice": (
-                f"For {use_case.replace('_', ' ')}, most new laptops start around ${floor}. "
+                f"For {use_case_key.replace('_', ' ')}, most new options start around ${floor}. "
                 f"At ${int(bmax)} you'll be looking at older or refurbished models. "
                 f"Would you like the best option at your budget, or would you consider raising it a bit?"
             ),

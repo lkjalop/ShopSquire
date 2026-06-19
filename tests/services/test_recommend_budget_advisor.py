@@ -38,6 +38,19 @@ def test_assess_budget_fitness_low_high_unknown():
     assert _assess_budget_fitness("gaming_aaa_heavy", None, None)["status"] == "unknown"
 
 
+def test_assess_budget_fitness_uses_active_profile_without_cross_vertical_fallback():
+    from src.app.platform.store_profile import reset_active_profile_id, set_active_profile_id
+
+    token = set_active_profile_id("pharmacy")
+    try:
+        low = _assess_budget_fitness("pain_relief", None, 2)
+        assert low["status"] == "low"
+        assert "laptop" not in str(low.get("advice") or "").lower()
+        assert _assess_budget_fitness("gaming_aaa_heavy", None, 2000)["status"] == "unknown"
+    finally:
+        reset_active_profile_id(token)
+
+
 def test_persona_summary_label():
     assert _persona_summary_label(None, "gaming") == "gaming"
     assert _persona_summary_label(None, "office_finance") == "finance work"
