@@ -5315,105 +5315,18 @@ def suggest(
     image_gate_warning: str | None = None
     catalog_profile: Dict[str, Any] = {}
     catalog_relevance: Dict[str, Any] = {}
-    try:
-        if image_labels:
-            labels = [s.strip() for s in str(image_labels).split(",") if str(s).strip()]
-            image_context["labels"] = labels[:12]
-        if image_ocr_text:
-            image_context["ocr"] = str(image_ocr_text)[:500]
-        if image_hash:
-            image_context["hash"] = str(image_hash)[:128]
-        if image_intent:
-            image_context["intent"] = str(image_intent)[:32]
-        if image_product_identity:
-            parsed_pi = json.loads(str(image_product_identity))
-            if isinstance(parsed_pi, dict):
-                image_context["product_identity"] = parsed_pi
-        if image_cv_signals:
-            parsed_cv = json.loads(str(image_cv_signals))
-            if isinstance(parsed_cv, dict):
-                damage_score = 0.0
-                try:
-                    damage_score = float(parsed_cv.get("damage_score") or 0.0)
-                except Exception:
-                    damage_score = 0.0
-                qr_detected = bool(
-                    parsed_cv.get("qr_code_detected")
-                    or parsed_cv.get("qr_detected")
-                    or parsed_cv.get("qr_url_present")
-                    or parsed_cv.get("qr_url_suspicious")
-                )
-                qr_external = bool(
-                    parsed_cv.get("qr_external_url_detected")
-                    or parsed_cv.get("qr_external_url")
-                    or parsed_cv.get("qr_url_present")
-                    or parsed_cv.get("qr_url_suspicious")
-                )
-                qr_injection = bool(
-                    parsed_cv.get("qr_prompt_injection")
-                    or parsed_cv.get("prompt_injection_text_suspected")
-                )
-                manipulation = bool(
-                    parsed_cv.get("manipulation_detected")
-                    or parsed_cv.get("adversarial_detected")
-                    or parsed_cv.get("steg_suspicious")
-                    or parsed_cv.get("duplicate_image_detected")
-                )
-                adversarial = float(parsed_cv.get("adversarial_score") or 0.0)
-                image_cv_signals_parsed = {
-                    "qr_code_detected": qr_detected,
-                    "qr_prompt_injection": qr_injection,
-                    "qr_external_url_detected": qr_external,
-                    "ocr_prompt_injection": bool(parsed_cv.get("ocr_prompt_injection")),
-                    "manipulation_detected": manipulation,
-                    "adversarial_score": adversarial,
-                    "intent_cv_triage": bool(parsed_cv.get("intent_cv_triage")),
-                    "damage_score": damage_score,
-                    "steg_suspicious": bool(parsed_cv.get("steg_suspicious")),
-                    "pii_detected": bool(parsed_cv.get("pii_detected")),
-                    "ssn_detected": bool(parsed_cv.get("ssn_detected")),
-                    "fast_triage_timeout": bool(parsed_cv.get("fast_triage_timeout")),
-                    "ssn_count": int(parsed_cv.get("ssn_count") or 0) if parsed_cv.get("ssn_count") is not None else 0,
-                    "qr_payload_types": parsed_cv.get("qr_payload_types") if isinstance(parsed_cv.get("qr_payload_types"), list) else [],
-                    "qr_payloads": parsed_cv.get("qr_payloads") if isinstance(parsed_cv.get("qr_payloads"), list) else [],
-                    "qr_redirect_probe": parsed_cv.get("qr_redirect_probe") if isinstance(parsed_cv.get("qr_redirect_probe"), dict) else {},
-                    "image_relevance": str(parsed_cv.get("image_relevance") or "relevant"),
-                    "image_relevance_note": str(parsed_cv.get("image_relevance_note") or ""),
-                }
-                if not image_context.get("intent") and image_cv_signals_parsed.get("intent_cv_triage"):
-                    image_context["intent"] = "cv_triage"
-                if qr_detected:
-                    image_reupload_reasons.append("qr_code_detected")
-                if qr_external:
-                    image_reupload_reasons.append("qr_external_url_detected")
-                # ── suggest endpoint: if frontend already quarantined the QR payload
-                # (sent qr_quarantined=true), do NOT hard_lock — serve products with
-                # brand signals intact. Log the security event but continue.
-                _already_quarantined = bool(parsed_cv.get("qr_quarantined"))
-                if qr_injection and not _already_quarantined:
-                    image_reupload_reasons.append("qr_prompt_injection")
-                elif qr_injection and _already_quarantined:
-                    image_reupload_reasons.append("qr_code_detected")  # softer flag — no hard_lock
-                if manipulation:
-                    image_reupload_reasons.append("manipulation_detected")
-                if adversarial >= 0.35:
-                    image_reupload_reasons.append("adversarial_score_high")
-                if bool(parsed_cv.get("ssn_detected")):
-                    image_reupload_reasons.append("pii_detected_ssn")
-                elif bool(parsed_cv.get("pii_detected")):
-                    image_reupload_reasons.append("pii_detected")
-                if bool(parsed_cv.get("fast_triage_timeout")):
-                    image_reupload_reasons.append("fast_triage_timeout")
-        if image_context.get("ocr"):
-            ocr_aug = _augment_image_cv_signals_from_ocr(image_context.get("ocr"))
-            for _k, _v in ocr_aug.items():
-                if _v:
-                    image_cv_signals_parsed[_k] = True
-                    image_reupload_reasons.append(_k)
-    except Exception:
-        image_context = {"labels": [], "ocr": "", "hash": None, "intent": None}
-        image_cv_signals_parsed = {}
-        image_reupload_reasons = []
+    # ── Image input parsing (extracted to suggest_context.parse_image_inputs) ──
+    from src.app.services.suggest_context import parse_image_inputs as _parse_image_inputs
+    image_context, image_cv_signals_parsed, image_reupload_reasons = _parse_image_inputs(
+        image_labels=image_labels,
+        image_ocr_text=image_ocr_text,
+        image_hash=image_hash,
+        image_intent=image_intent,
+        image_product_identity=image_product_identity,
+        image_cv_signals=image_cv_signals,
+        image_reupload_reasons=image_reupload_reasons,
+        _augment_fn=_augment_image_cv_signals_from_ocr,
+    )
     if incoming_image_payload and not image_cv_signals_parsed and not (image_context.get("labels") or image_context.get("ocr")):
         image_reupload_reasons.append("insufficient_image_signals")
 
