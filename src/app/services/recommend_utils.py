@@ -1,16 +1,26 @@
 """Shared recommend leaf utilities — the foundation for the core/adapter stage split.
 
-These are the small, PURE helpers (no DB, no request locals, no closures) that more than one
-extracted stage needs. Pulling them here breaks the circular-import knot: a stage service
-(budget advisor, narration, fast-path …) can import these without importing the router, and the
-router re-exports them so its own call-sites stay unchanged.
+ARCHITECTURE NOTE — Core vs Adapter demarcation:
+─────────────────────────────────────────────────
+CORE (vertical-agnostic):
+  • _brand_alias_map() / _manufacturer_specs() — reads from StoreProfile, already generic.
+  • _brand_display_name() — normalized display name lookup via profile.
+  • _candidate_matches_brand() — token-matching algorithm, works with any brand set.
+  • _result_price_dollars() — extracts numeric price from candidate dict.
 
-CORE mechanism: brand-token matching, brand display, price normalisation.
-ADAPTER (flavour): the brand alias / display maps below are still inline electronics flavour
-(thinkpad/legion/alienware …). They are the Phase-2 profile-back target (a non-electronics
-vertical supplies its own aliases via the StoreProfile `manufacturers` map) — which is why this
-module is intentionally NOT yet on the no-flavour-in-core lint list, exactly like
-recommend_image_hints.py. Tracked, not hidden.
+ADAPTER (product-type-specific, currently hardcoded electronics):
+  • _extract_candidate_numeric_specs() — parses laptop-specific spec fields:
+    ram_gb, storage_gb, display_inches, refresh_hz, gpu_vram_gb, has_dedicated_gpu,
+    gaming_style, portable, nvidia, creator_hint, workstation_hint.
+    A pharmacy vertical would parse: dosage_mg, interaction_count, schedule_class.
+    A fashion vertical would parse: fabric_gsm, size_range, season.
+  • The regex patterns inside _extract_candidate_numeric_specs that look for
+    "rtx", "gtx", "geforce", "rog", "tuf", "legion", "alienware", etc.
+
+MIGRATION PATH (Phase 2):
+  Add `spec_extraction_rules` slot to StoreProfile — defines which fields to
+  extract and how to regex-parse them from product text. The function becomes
+  a generic rule executor rather than hardcoded electronics parser.
 """
 from __future__ import annotations
 
@@ -83,6 +93,13 @@ def _result_price_dollars(row: Dict[str, Any] | None) -> float | None:
         pass
     return None
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADAPTER — Electronics-specific spec extraction.
+# Parses laptop/electronics product fields. The regex patterns, field names,
+# and token lists ("rtx", "rog", "tuf", "legion") are all electronics-specific.
+# Phase 2: replace with StoreProfile["spec_extraction_rules"].
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _extract_candidate_numeric_specs(candidate: Dict[str, Any]) -> Dict[str, Any]:
     specs = candidate.get("specs") if isinstance(candidate.get("specs"), dict) else {}

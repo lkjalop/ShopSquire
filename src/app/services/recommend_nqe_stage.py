@@ -3,6 +3,18 @@
 This is a strangler-stage extraction from ``routers/recommend.py``. It keeps the
 legacy route helpers as injected hooks for now so the first split moves the
 inline block without creating router/service import cycles.
+
+ARCHITECTURE NOTE — Core vs Adapter demarcation:
+─────────────────────────────────────────────────
+CORE (vertical-agnostic):
+  • NQE stage orchestration — propose/filter/cap logic, Redis slot persistence.
+  • NextQuestionEngine integration — profile-driven question packs (already done).
+
+ADAPTER (product-type-specific):
+  • detect_games_in_text() / detect_software_in_text() — electronics-specific
+    game/software detection. Phase 2: generalize to profile-driven "domain
+    entity detection" (e.g., drug interactions for pharmacy, fabric types for
+    fashion).
 """
 from __future__ import annotations
 

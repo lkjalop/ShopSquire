@@ -1,7 +1,26 @@
-"""Strangler extraction: use-case-aware ranking adjustments.
+"""Use-case-aware ranking adjustments.
 
-Extracted from src/app/routers/recommend.py (Pass 9) to reduce the monolith.
-All public symbols are re-exported from recommend.py for backward compat.
+ARCHITECTURE NOTE — Core vs Adapter demarcation:
+─────────────────────────────────────────────────
+CORE (vertical-agnostic):
+  • apply_use_case_rank_adjustments() — the FRAMEWORK that iterates candidates,
+    calls the scoring function, merges bonuses into factors, and re-sorts.
+    This works for ANY vertical.
+
+ADAPTER (product-type-specific, currently hardcoded electronics):
+  • use_case_rank_adjustment() — the BODY of this function is 100% electronics.
+    It reads laptop-specific metrics (RAM GB, GPU VRAM, refresh Hz, "gaming style",
+    "portable", "NVIDIA") and applies electronics-specific heuristics (gamers need
+    GPU, students don't, engineers need 16GB RAM minimum, etc.).
+  • _extract_candidate_numeric_specs() in recommend_utils.py — parses laptop spec
+    fields (ram_gb, gpu_vram_gb, refresh_hz, display_inches).
+
+MIGRATION PATH (Phase 2):
+  Add `ranking_rules` slot to StoreProfile — a list of {use_case, spec_key, op,
+  threshold, score_delta, reason} entries. The CORE framework reads these rules
+  and applies them generically. Electronics rules would match the current logic;
+  pharmacy rules would score on "interaction_count", "dosage_flexibility", etc.
+  Transitional: inline electronics heuristics retained as fallback.
 """
 from __future__ import annotations
 
@@ -9,6 +28,13 @@ from typing import Any, Dict, List, Tuple
 
 from src.app.services.recommend_utils import _extract_candidate_numeric_specs
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADAPTER — Electronics-specific use-case rank scoring.
+# Every metric (ram, gpu_vram, refresh_hz, gaming_style, portable, nvidia) and
+# every heuristic threshold is laptop/electronics-specific.
+# Phase 2: replace with profile-driven rule table from StoreProfile["ranking_rules"].
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def use_case_rank_adjustment(
     candidate: Dict[str, Any],
@@ -145,6 +171,12 @@ def use_case_rank_adjustment(
             score += 0.4
     return round(score, 4), plus[:3], minus[:3]
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CORE — Generic ranking adjustment framework (vertical-agnostic).
+# Iterates candidates, calls the scoring function, merges bonuses, re-sorts.
+# The per-candidate scoring function is the ADAPTER entry point above.
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def apply_use_case_rank_adjustments(
     scored: List[Dict[str, Any]],

@@ -7,6 +7,13 @@ MUST be called before _summarize_results() so the LLM, trace, and payload
 all describe products in the same finalized order.  The late stock-annotation
 pass at the bottom of recommend.py is a fallback only; this service is the
 canonical stock-annotation path.
+
+ARCHITECTURE NOTE — Core vs Adapter demarcation:
+─────────────────────────────────────────────────
+This module is entirely CORE (vertical-agnostic).
+  • Stock annotation, deduplication, price capping, contract validation —
+    none of these depend on whether the product is a laptop or a medicine.
+  • No electronics-specific tokens, spec names, or heuristics.
 """
 from __future__ import annotations
 

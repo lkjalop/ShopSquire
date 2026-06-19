@@ -1,14 +1,37 @@
-"""Strangler extraction: buyer persona detection + persona-calibrated LLM prompt context.
+"""Buyer persona detection + persona-calibrated LLM prompt context.
 
-Extracted from src/app/routers/recommend.py (Pass 9) to reduce the monolith.
-All public symbols are re-exported from recommend.py for backward compat.
+ARCHITECTURE NOTE — Core vs Adapter demarcation:
+─────────────────────────────────────────────────
+CORE (vertical-agnostic):
+  • detect_buyer_persona() / detect_buyer_persona_with_confidence() — the matching
+    ALGORITHM (iterate patterns, score, return best).  Works for any vertical.
+  • build_persona_prompt_context() — the DISPATCH mechanism (look up persona→prompt).
+
+ADAPTER (product-type-specific, currently hardcoded electronics):
+  • PERSONA_PATTERNS — the keywords are electronics/laptop-centric (ray tracing,
+    CUDA, refresh rate, gaming titles). A pharmacy vertical would have different
+    persona patterns (pharmacist, patient, caregiver, aged-care).
+  • The prompt strings in build_persona_prompt_context() — every block references
+    laptop specs (RAM, GPU VRAM, battery, display inches). Pharmacy/fashion would
+    have entirely different emphasis guidance.
+
+MIGRATION PATH (Phase 2):
+  Add `persona_patterns` and `persona_prompt_templates` slots to StoreProfile.
+  The CORE algorithm stays; the ADAPTER data moves to config/store_profiles/*.json.
+  Transitional: inline electronics data retained as fallback when profile lacks slots.
 """
 from __future__ import annotations
 
 import re
 from typing import Dict, Tuple
 
-# ── Buyer persona detection (Layer 1: keyword/regex, deterministic) ──────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADAPTER DATA — Electronics-specific persona detection patterns.
+# These should migrate to StoreProfile["persona_patterns"] in Phase 2.
+# A pharmacy vertical would define: pharmacist, patient, caregiver, aged-care, etc.
+# A fashion vertical would define: trend-follower, minimalist, plus-size, athleisure, etc.
+# ═══════════════════════════════════════════════════════════════════════════════
 PERSONA_PATTERNS: dict[str, list[str]] = {
     "student": [
         r"\buniversity\b", r"\bcollege\b", r"\bstudent\b", r"\bstudying\b",
@@ -58,6 +81,11 @@ PERSONA_PATTERNS: dict[str, list[str]] = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# CORE — Persona detection algorithm (vertical-agnostic).
+# Works against ANY set of patterns; the pattern dict is the adapter input.
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def detect_buyer_persona(query: str | None) -> str | None:
     """Classify the buyer persona from query text. Returns the best-match persona or None."""
     q = str(query or "").lower()
@@ -91,6 +119,13 @@ def detect_buyer_persona_with_confidence(query: str | None) -> Tuple[str | None,
     conf = max(0.0, min(1.0, float(best_score) / 2.0))
     return best, conf, scores
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADAPTER DATA — Electronics-specific persona prompt templates.
+# The DISPATCH mechanism (match persona → return string) is CORE.
+# The CONTENT of each string is ADAPTER (laptop specs, GPU, battery, etc.).
+# Phase 2: move templates to StoreProfile["persona_prompt_templates"].
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def build_persona_prompt_context(
     use_case: str,
