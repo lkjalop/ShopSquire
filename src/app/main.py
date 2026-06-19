@@ -691,6 +691,15 @@ def create_app() -> FastAPI:
     except Exception:
         pass
 
+    # Scope the active StoreProfile (vertical) per request: X-Store-Profile header → STORE_PROFILE_ID
+    # env → electronics. Pure-ASGI so the ContextVar reaches the (threadpool-run) sync routes — turns
+    # the agnostic core from env-level into per-tenant runtime selection.
+    try:
+        from src.app.platform.store_profile_middleware import StoreProfileMiddleware
+        app.add_middleware(StoreProfileMiddleware)
+    except Exception:
+        pass
+
     @app.middleware("http")
     async def backpressure_middleware(request: Request, call_next):
         from time import time

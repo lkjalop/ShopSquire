@@ -10,11 +10,15 @@ that branches on vertical flavour must do so via the profile, never via inline l
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from src.app.platform.store_profile import active_profile_id
 
 
 @dataclass(frozen=True)
 class RecommendContext:
     query: str | None = None
     uid: str | None = None
-    store_profile_id: str = "electronics"
+    # Resolves to the ACTIVE vertical at construction time (request ContextVar → env → electronics)
+    # rather than a hardcoded "electronics" — so a stage reading the envelope sees the live tenant.
+    store_profile_id: str = field(default_factory=active_profile_id)
