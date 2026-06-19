@@ -31,6 +31,7 @@ _CORE_MODULES = [
     "src/app/services/query_understanding.py",
     "src/app/platform/tenant_registry.py",
     "src/app/services/recommend_narration_stage.py",
+    "src/app/services/suggest_context.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
