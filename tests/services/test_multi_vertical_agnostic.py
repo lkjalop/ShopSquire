@@ -80,6 +80,21 @@ def test_budget_floors_are_profile_scoped_no_bleed():
         assert fa.get("formal") == 60
 
 
+def test_vision_brand_resolution_is_profile_scoped_no_bleed():
+    """Vision brand-hint resolution is profile-driven: electronics resolves macbook→apple; pharmacy
+    resolves its own brand and does NOT recognise an electronics brand (no bleed)."""
+    from src.app.services.recommend_vision_stage import _resolve_supported_brand_hint
+
+    with _vertical("electronics"):
+        assert _resolve_supported_brand_hint(None, None, "looking for a macbook") == "apple"
+        assert _resolve_supported_brand_hint("asus") == "asus"
+
+    with _vertical("pharmacy"):
+        assert _resolve_supported_brand_hint(None, None, "panadol for a headache") == "panadol"
+        assert _resolve_supported_brand_hint("asus") == "", "electronics brand bled into pharmacy"
+        assert _resolve_supported_brand_hint(None, None, "a macbook") == "", "mac bled into pharmacy"
+
+
 def _seed(db, sku, name, stock=9):
     db.execute(text(
         "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "

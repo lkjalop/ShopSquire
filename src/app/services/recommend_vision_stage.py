@@ -63,27 +63,52 @@ def _cross_modal_brand_conflict_question(
         return None, None
 
 
+def _supported_brands() -> set:
+    """Brands the ACTIVE vertical recognises — the StoreProfile `manufacturers` keys
+    (prefer-profile: pharmacy → panadol/nurofen…, fashion → nike/adidas…), falling back to the
+    inline electronics set only if the profile carries no manufacturers."""
+    try:
+        from src.app.platform.store_profile import brand_label_patterns
+        prof = {str(k).strip().lower() for k in (brand_label_patterns() or {}).keys()}
+        if prof:
+            return prof
+    except Exception:
+        pass
+    return set(_SUPPORTED_IMAGE_BRAND_HINTS)
+
+
 def _resolve_supported_brand_hint(
     explicit: str | None,
     constraints: dict | None = None,
     query_text: str | None = None,
 ) -> str:
+    supported = _supported_brands()
     direct = str(explicit or "").strip().lower()
-    if direct in _SUPPORTED_IMAGE_BRAND_HINTS:
+    if direct in supported:
         return direct
     c = constraints if isinstance(constraints, dict) else {}
     for key in ("_request_brand_hint", "_inferred_image_brand"):
         val = str(c.get(key) or "").strip().lower()
-        if val in _SUPPORTED_IMAGE_BRAND_HINTS:
+        if val in supported:
             return val
     for raw in (c.get("brands") or []):
         val = str(raw or "").strip().lower()
-        if val in _SUPPORTED_IMAGE_BRAND_HINTS:
+        if val in supported:
             return val
     q = str(query_text or "").lower()
-    if any(tok in q for tok in ("macbook", "mac book", "imac", "apple")):
-        return "apple"
-    for brand in ("msi", "asus", "lenovo", "dell", "hp", "alienware", "microsoft", "acer", "samsung", "razer", "gigabyte", "toshiba"):
-        if brand in q:
+    # Profile-driven query-token resolution: a brand/line/alias token maps to its manufacturer when
+    # supported (electronics macbook→apple, vivobook→asus; pharmacy panadol→panadol; fashion
+    # "air max"→nike). No hardcoded brand list — the active StoreProfile is the source of truth.
+    try:
+        from src.app.platform.store_profile import product_line_index
+        for token, spec in (product_line_index() or {}).items():
+            if token and token in q:
+                mfr = str((spec or {}).get("manufacturer") or "").strip().lower()
+                if mfr in supported:
+                    return mfr
+    except Exception:
+        pass
+    for brand in supported:
+        if brand and brand in q:
             return brand
     return ""
