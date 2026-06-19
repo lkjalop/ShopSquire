@@ -3,6 +3,14 @@
   "id": "fashion",
   "version": "2026-06-19",
 
+  "_complexity_keywords_comment": "Domain-specific terms that signal a complex query needing medium+ model tier. Zero laptop/GPU tokens.",
+  "complexity_keywords": [
+    "fabric", "composition", "thread count", "gsm", "denier", "moisture wicking",
+    "waterproof", "breathable", "gore-tex", "merino", "sizing", "fit guide",
+    "tailoring", "sustainable", "ethical", "organic cotton", "recycled",
+    "colour matching", "capsule wardrobe", "layering system"
+  ],
+
   "known_brands": ["nike","adidas","new balance","levis","zara","uniqlo","h&m","gap","calvin klein","tommy hilfiger","converse","vans"],
   "nqe_brand_detect": ["nike","adidas","levis","zara","uniqlo","converse","vans"],
 
@@ -127,6 +135,18 @@
     "dress":     ["outerwear","shoes"],
     "outerwear": ["top","bottom"]
   },
+
+  "_image_relevance_comment": "Tokens for CV triage relevance gate. An image matching relevant_image_tokens is on-topic; matching off_topic_image_tokens is flagged. Zero laptop/GPU tokens.",
+  "relevant_image_tokens": [
+    "shirt", "dress", "shoes", "sneakers", "boots", "jacket", "coat", "pants",
+    "jeans", "skirt", "hoodie", "hat", "bag", "clothing", "garment", "fabric",
+    "nike", "adidas", "levis", "converse", "vans", "zara", "uniqlo",
+    "mannequin", "hanger", "outfit", "fashion"
+  ],
+  "off_topic_image_tokens": [
+    "laptop", "computer", "gpu", "keyboard", "mouse", "monitor", "gaming",
+    "medicine", "pill", "capsule", "pharmacy", "syringe"
+  ],
 
   "cv_returns_pack": "electronics"
 }

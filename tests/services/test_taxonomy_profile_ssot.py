@@ -71,7 +71,10 @@ def test_pharmacy_taxonomy_classifies_from_profile():
 def test_pharmacy_profile_has_zero_electronics_flavour():
     prof = get_store_profile("pharmacy")
     # DATA slots only — _comment/_*-prose legitimately says "must not inherit laptop brands".
-    data = {k: v for k, v in prof.items() if not str(k).startswith("_")}
+    # Also exclude off_topic_image_tokens: it's a negative-match list (tokens to REJECT),
+    # so containing "laptop" there is correct and expected.
+    data = {k: v for k, v in prof.items()
+            if not str(k).startswith("_") and k != "off_topic_image_tokens"}
     blob = json.dumps(data).lower()
     for flavour in ("rtx", "gtx", "macbook", "thinkpad", "vivobook", "laptop", "refresh_hz"):
         assert flavour not in blob, f"pharmacy profile leaked electronics flavour: {flavour!r}"

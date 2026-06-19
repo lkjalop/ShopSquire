@@ -72,18 +72,46 @@ COMPARISON_KEYWORDS = [
     "better", "which one", "pros and cons",
 ]
 
-TECHNICAL_KEYWORDS = [
-    "explain", "justify", "policy", "compliance", "virtualization", "cad",
-    "passthrough", "architecture", "train", "training", "fine-tune", "finetune",
+# Core technical keywords (vertical-agnostic reasoning signals).
+_CORE_TECHNICAL_KEYWORDS = [
+    "explain", "justify", "policy", "compliance",
+    "architecture", "benchmark", "specs",
+]
+
+# Electronics-specific technical keywords (transitional fallback).
+_ELECTRONICS_TECHNICAL_KEYWORDS = [
+    "virtualization", "cad", "passthrough", "train", "training", "fine-tune", "finetune",
     "llm", "gpu", "vram", "cuda", "tensor", "inference", "quantization",
     "rag", "embedding", "transformer",
     "rtx", "radeon", "ram", "ssd", "nvme", "cpu", "cores", "threads",
-    "benchmark", "specs", "resolution", "refresh rate", "thunderbolt",
-    # Gaming / use-case hardware terms
+    "resolution", "refresh rate", "thunderbolt",
     "gaming", "fps", "esports", "144hz", "240hz", "high refresh", "frame rate",
     "ray tracing", "dlss", "fsr", "anti-cheat", "overclocking", "thermal",
     "oled", "mini-led", "g-sync", "freesync",
 ]
+
+
+def _get_technical_keywords() -> List[str]:
+    """Resolve technical complexity keywords from the active StoreProfile.
+
+    Profile slot: `complexity_keywords` — a list of domain-specific terms that indicate
+    a query needs medium+ model tier. Falls back to electronics keywords when the profile
+    lacks the slot.
+    """
+    try:
+        from src.app.platform.store_profile import get_store_profile
+        profile = get_store_profile()
+        kws = profile.get("complexity_keywords")
+        if isinstance(kws, list) and kws:
+            return _CORE_TECHNICAL_KEYWORDS + [str(k).lower() for k in kws]
+    except Exception:
+        pass
+    return _CORE_TECHNICAL_KEYWORDS + _ELECTRONICS_TECHNICAL_KEYWORDS
+
+
+# Backward-compatible module-level alias (used by score_query_complexity).
+# Resolved per-call now via _get_technical_keywords().
+TECHNICAL_KEYWORDS = _CORE_TECHNICAL_KEYWORDS + _ELECTRONICS_TECHNICAL_KEYWORDS
 
 # Use-case keywords that on their own indicate a higher-complexity product search.
 # Gaming, creative, and engineering workloads need multi-constraint reasoning.
@@ -139,8 +167,9 @@ def score_query_complexity(
         signals["comparison_keywords"] = 2
         explanations.append(f"Comparison terms: {', '.join(matched_comp[:3])}")
 
-    # 3. Technical keywords — scale with match count
-    matched_tech = [k for k in TECHNICAL_KEYWORDS if k in q]
+    # 3. Technical keywords — scale with match count (profile-backed)
+    _active_tech_kws = _get_technical_keywords()
+    matched_tech = [k for k in _active_tech_kws if k in q]
     if len(matched_tech) >= 3:
         signals["technical_keywords"] = 2
         explanations.append(f"Heavy technical terms: {', '.join(matched_tech[:4])}")

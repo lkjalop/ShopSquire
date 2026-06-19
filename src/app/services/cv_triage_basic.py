@@ -106,46 +106,63 @@ class BasicCVTriage:
         if insufficient_data:
             severity_reason = "no_labels_or_text_extracted"
 
-        # ── Category relevance gate ───────────────────────────────────────────
-        # Flag images that are clearly not electronics so the recommend flow
-        # can surface an "off-topic image" warning rather than silently ignoring.
-        # NOTE: bare "apple" is intentionally NOT an electronics token — it
-        # collides with the fruit (COCO class 47). Apple-brand devices are still
-        # matched via "macbook"/"imac"/"iphone"/"ipad" or the generic "laptop".
-        _ELECTRONICS_TOKENS = frozenset({
-            "laptop", "computer", "notebook", "pc", "desktop", "tablet",
-            "phone", "smartphone", "keyboard", "mouse", "monitor", "screen",
-            "display", "gaming", "console", "camera", "lens", "headphone",
-            "headset", "earphone", "microphone", "router", "modem", "printer",
-            "scanner", "electronics", "device", "gadget", "charger", "cable",
-            "usb", "ssd", "ram", "gpu", "cpu", "processor", "motherboard",
-            "battery", "rtx", "radeon", "intel", "amd", "msi",
-            "asus", "dell", "lenovo", "hp", "acer", "macbook", "imac",
-            "iphone", "ipad",
-        })
-        # Food / produce tokens (mirrors _PRODUCT_TYPE_MAP["food"]) so a fruit or
-        # snack photo is flagged off-topic even though "apple" used to alias a brand.
-        _FOOD_PRODUCE_TOKENS = frozenset({
-            "apple", "banana", "orange", "fruit", "vegetable", "food", "snack",
-            "produce", "tomato", "potato", "grape", "berry", "meat", "bread",
-            "drink", "beverage", "salad", "pizza",
-        })
+        # ── Category relevance gate (profile-backed) ─────────────────────────
+        # Flag images that are clearly off-topic for the active vertical so the
+        # recommend flow can surface an "off-topic image" warning.
+        # Resolution: read relevant_image_tokens + off_topic_image_tokens from the
+        # active StoreProfile. Fall back to hardcoded electronics/food lists when
+        # profile lacks the slots (transitional).
+        try:
+            from src.app.platform.store_profile import get_store_profile
+            _cv_profile = get_store_profile()
+            _relevant_tokens = _cv_profile.get("relevant_image_tokens")
+            _offtopic_tokens = _cv_profile.get("off_topic_image_tokens")
+        except Exception:
+            _relevant_tokens = None
+            _offtopic_tokens = None
+
+        if isinstance(_relevant_tokens, list) and _relevant_tokens:
+            _RELEVANT_TOKENS = frozenset(str(t).lower() for t in _relevant_tokens)
+        else:
+            # Transitional electronics fallback
+            _RELEVANT_TOKENS = frozenset({
+                "laptop", "computer", "notebook", "pc", "desktop", "tablet",
+                "phone", "smartphone", "keyboard", "mouse", "monitor", "screen",
+                "display", "gaming", "console", "camera", "lens", "headphone",
+                "headset", "earphone", "microphone", "router", "modem", "printer",
+                "scanner", "electronics", "device", "gadget", "charger", "cable",
+                "usb", "ssd", "ram", "gpu", "cpu", "processor", "motherboard",
+                "battery", "rtx", "radeon", "intel", "amd", "msi",
+                "asus", "dell", "lenovo", "hp", "acer", "macbook", "imac",
+                "iphone", "ipad",
+            })
+
+        if isinstance(_offtopic_tokens, list) and _offtopic_tokens:
+            _OFFTOPIC_TOKENS = frozenset(str(t).lower() for t in _offtopic_tokens)
+        else:
+            # Transitional food/produce fallback
+            _OFFTOPIC_TOKENS = frozenset({
+                "apple", "banana", "orange", "fruit", "vegetable", "food", "snack",
+                "produce", "tomato", "potato", "grape", "berry", "meat", "bread",
+                "drink", "beverage", "salad", "pizza",
+            })
+
         _combined_lower = (" ".join(effective_labels) + " " + effective_text).lower()
-        _is_electronics = bool(effective_labels) and any(
-            tok in _combined_lower for tok in _ELECTRONICS_TOKENS
+        _is_relevant = bool(effective_labels) and any(
+            tok in _combined_lower for tok in _RELEVANT_TOKENS
         )
-        _is_food_or_produce = any(tok in _combined_lower for tok in _FOOD_PRODUCE_TOKENS)
-        # Food/produce with no electronics signal → off-topic (fixes the red-apple
-        # case). Otherwise: relevant if electronics detected or no labels at all
+        _is_offtopic = any(tok in _combined_lower for tok in _OFFTOPIC_TOKENS)
+        # Off-topic tokens with no relevant signal → off-topic.
+        # Otherwise: relevant if domain tokens detected or no labels at all
         # (benefit of the doubt when the detector returned nothing).
-        if _is_food_or_produce and not _is_electronics:
+        if _is_offtopic and not _is_relevant:
             image_relevance = "off_topic"
-        elif _is_electronics or not effective_labels:
+        elif _is_relevant or not effective_labels:
             image_relevance = "relevant"
         else:
             image_relevance = "off_topic"
         image_relevance_note = (
-            "The uploaded image does not appear to be an electronics product. "
+            "The uploaded image does not appear to match this store's product category. "
             "Recommendations will be based on your text query only."
             if image_relevance == "off_topic"
             else ""

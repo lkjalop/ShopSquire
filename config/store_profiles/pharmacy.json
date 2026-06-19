@@ -1,7 +1,15 @@
 {
   "_comment": "PHARMACY StoreProfile — the agnostic proof. Same shape as electronics.json, totally different flavour. As each electronics flavour slot is excised from the core into a profile read, this profile proves the core stays agnostic: a pharmacy query must NOT inherit laptop brands, GPU specs, or laptop price bands. Today only brand_price_floors + nqe_brand_detect are profile-backed; this profile grows as R2/R3 excise more slots. A high-stakes/regulated vertical is the right proof because the control/evidence moat (claim-guard, policy gate, audit) matters most here.",
   "id": "pharmacy",
-  "version": "2026-06-18",
+  "version": "2026-06-19",
+
+  "_complexity_keywords_comment": "Domain-specific terms that signal a complex query needing medium+ model tier. Zero laptop/GPU tokens.",
+  "complexity_keywords": [
+    "interaction", "contraindication", "dosage", "schedule", "pregnancy", "breastfeeding",
+    "renal", "hepatic", "allergy", "adverse", "side effect", "overdose", "therapeutic",
+    "pharmacokinetic", "bioavailability", "half-life", "controlled substance", "schedule 4",
+    "schedule 8", "compounding", "formulation", "excipient"
+  ],
 
   "known_brands": ["panadol","nurofen","chemists own","blackmores","swisse","cenovis","bioglan","sukin","cetaphil","dettol","listerine","betadine"],
   "nqe_brand_detect": ["panadol","nurofen","blackmores","swisse","cenovis","bioglan","sukin","cetaphil","dettol"],
@@ -171,6 +179,18 @@
     "supplement":    ["personal_care"],
     "personal_care": ["supplement"]
   },
+
+  "_image_relevance_comment": "Tokens for CV triage relevance gate. An image matching relevant_image_tokens is on-topic; matching off_topic_image_tokens is flagged. Zero laptop/GPU tokens.",
+  "relevant_image_tokens": [
+    "medicine", "tablet", "capsule", "pill", "bottle", "box", "package", "blister",
+    "pharmacy", "supplement", "vitamin", "cream", "ointment", "inhaler", "syringe",
+    "bandage", "thermometer", "label", "barcode", "prescription", "receipt",
+    "panadol", "nurofen", "blackmores", "swisse", "cetaphil", "dettol"
+  ],
+  "off_topic_image_tokens": [
+    "laptop", "computer", "gpu", "keyboard", "mouse", "monitor", "gaming",
+    "shirt", "dress", "shoes", "pants", "jacket"
+  ],
 
   "cv_returns_pack": "electronics"
 }
