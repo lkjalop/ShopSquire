@@ -141,17 +141,21 @@ Concrete, buildable plan. Every task lists **files+lines**, **what to wire**, **
 | `recommend_vision_stage` | supported-brand list | reuse `manufacturers` keys | parity: list == manufacturers keys |
 | `upsell_engine` | gaming/university/office cross-sell map (`_USE_CASE_CROSS_SELL`) | `upsell_companions` (exists) | parity + **pharmacy companions actually fire** |
 
-> **Upsell finding (portability bug, not just flavour):** `upsell_engine` uses a hardcoded
-> `_USE_CASE_CROSS_SELL` map keyed by **use-case** (gaming/university/office) at
-> `upsell_engine.py:149`, and **never reads** the profile `upsell_companions` slot — so that slot is
-> **dead config**. Worse, the slot is keyed by **product-type** (electronics: laptop/desktop/tablet;
-> pharmacy: medicine/supplement/personal_care), a *different model* from the hardcoded map. Net: a
-> pharmacy deployment gets **zero** companion upsell (its `medicine→[first_aid, device]` mapping is
-> ignored; `_detect_use_case` only returns electronics use-cases). The **co-purchase affinity** half
-> (basket co-occurrence SQL) IS already agnostic and works for any vertical. Fix: migrate companion
-> upsell to **product-type-keyed**, sourced from `profile_slot("upsell_companions")` (product type is
-> universal; "use_case" is electronics flavour), hardcoded map as electronics fallback (parity), then
-> a pharmacy test asserting `medicine→first_aid` fires.
+> **Upsell finding (CORRECTED after full read — upsell is largely already agnostic):**
+> `recommend()` ([upsell_engine.py:248-289](../src/app/services/upsell_engine.py)) combines THREE
+> signals: (1) **co-purchase affinity** (basket co-occurrence SQL) — agnostic by nature; (2) a
+> **use-case** path (`_detect_use_case` + `_category_expansion_candidates` over `_USE_CASE_CROSS_SELL`)
+> — *documented legacy* (comment line 254: "relies on p.category which the demo schema lacks, so
+> usually empty — kept for stores that DO have a category column"); (3) **companion-TYPE expansion**
+> (`_companion_type_candidates` → `product_classifier.companion_types_for` → profile
+> `upsell_companions`, product_classifier.py:140) — **agnostic and profile-backed**. So the profile
+> slot is NOT dead and pharmacy IS covered via path (3) (`medicine→[first_aid, device]` fires when the
+> carted item classifies as `medicine`). The only remaining flavour is the LEGACY electronics
+> use-case map (path 2), which is inert on the demo schema. **Work is small:** (a) a **pharmacy
+> characterization test** proving path (3) fires cross-vertical (medicine→first_aid, no laptop leak) —
+> this PROVES the agnostic claim; (b) optional cleanup — remove path (2) or profile-back
+> `_USE_CASE_CROSS_SELL`/`_detect_use_case` so no electronics literal remains in core. Net: upsell is
+> ~80% agnostic already; the deliverable is the proof test + clearing the legacy literal.
 | `use_case_advisor` | electronics use-case map | `use_cases` (exists) | parity per use-case |
 
 **Method per slot (proven on grounding vocab):** literal → profile slot → accessor with
