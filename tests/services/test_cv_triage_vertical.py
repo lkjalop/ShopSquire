@@ -1,6 +1,5 @@
 """Tests proving cv_triage_basic uses profile-backed relevance tokens."""
 import json
-import asyncio
 import pytest
 from unittest.mock import patch
 
@@ -32,6 +31,7 @@ _FASHION_PROFILE = {
 
 def _run_triage(profile_data: dict, labels: list, text: str = ""):
     """Import and call BasicCVTriage.analyze with a mocked store profile."""
+    import asyncio
     from src.app.services.cv_triage_basic import BasicCVTriage
 
     triage = BasicCVTriage()
@@ -39,7 +39,7 @@ def _run_triage(profile_data: dict, labels: list, text: str = ""):
         "src.app.platform.store_profile.get_store_profile",
         return_value=profile_data,
     ):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             triage.analyze(labels=labels, extracted_text=text)
         )
     return result

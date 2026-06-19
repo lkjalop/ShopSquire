@@ -2353,53 +2353,14 @@ def _latest_query_use_case_override(query: str | None) -> tuple[str | None, list
 
 
 # ── Buyer persona detection (Layer 1: keyword/regex, deterministic) ──────────
-_PERSONA_PATTERNS: dict[str, list[str]] = {
-    "student": [
-        r"\buniversity\b", r"\bcollege\b", r"\bstudent\b", r"\bstudying\b",
-        r"\bassignment\b", r"\blecture\b", r"\bsemester\b", r"\bcoursework\b",
-        r"\bschool\b", r"\bclass\b", r"\bhomework\b", r"\bcampus\b",
-    ],
-    "high_schooler": [
-        r"\bhigh\s?school\b", r"\byr\s?(?:7|8|9|10|11|12)\b", r"\byear\s?(?:7|8|9|10|11|12)\b",
-        r"\bteen\b", r"\bHSC\b", r"\bVCE\b", r"\bATAR\b", r"\bgcse\b", r"\ba[\s-]?level\b",
-        r"\bsecondary\s?school\b",
-    ],
-    "corporate": [
-        r"\bcorporate\b", r"\boffice\b", r"\bwork\s?from\s?home\b", r"\bwfh\b",
-        r"\bteams\b", r"\bzoom\b", r"\boutlook\b", r"\bexcel\b", r"\bpresentation\b",
-        r"\bfor\s?work\b", r"\bwork\s?laptop\b", r"\bbusiness\b", r"\bprofessional\b",
-    ],
-    "job_hunter": [
-        r"\bjob\s?hunt\b", r"\binterview\b", r"\bnew\s?job\b", r"\bcareer\s?change\b",
-        r"\bjob\s?search\b", r"\bfreelance\b", r"\bstarting\s?a\s?new\s?job\b",
-    ],
-    "gamer": [
-        r"\bgaming\b", r"\bfps\b", r"\bgame\b", r"\bvalorant\b", r"\bfortnite\b",
-        r"\bcyberpunk\b", r"\bsteam\b", r"\belden\s?ring\b", r"\besports\b",
-        r"\bray\s?trac\b", r"\bdlss\b", r"\brefresh\s?rate\b",
-    ],
-    "creative": [
-        r"\bvideo\s?edit\b", r"\bcontent\s?creat\b", r"\byoutube\b", r"\bstreaming\b",
-        r"\bpremiere\b", r"\bdavinci\b", r"\bphotoshop\b", r"\bblender\b",
-        r"\bafter\s?effects\b", r"\bcolor\s?grad\b", r"\b4k\s?edit\b",
-    ],
-    "developer": [
-        r"\bai\s?engineer\b", r"\bml\s?engineer\b", r"\bdata\s?scientist\b",
-        r"\bpytorch\b", r"\btensorflow\b", r"\bcuda\b", r"\bdeep\s?learn\b",
-        r"\bmachine\s?learn\b", r"\bai\s?train\b", r"\bllm\s?train\b",
-        r"\bmodel\s?train\b", r"\bjupyter\b", r"\bnotebook\b",
-    ],
-    "engineer_student": [
-        r"\bengineering\s?student\b", r"\bautocad\b", r"\bsolidworks\b",
-        r"\bmatlab\b", r"\bfea\b", r"\bansys\b", r"\bmechanical\s?eng\b",
-        r"\bcivil\s?eng\b", r"\belectrical\s?eng\b",
-    ],
-    "traveler": [
-        r"\btravel\b", r"\bholiday\b", r"\bon\s?the\s?go\b", r"\bportable\b",
-        r"\blightweight\b", r"\bbackpack\b", r"\bcommut\b", r"\bairport\b",
-        r"\bdigital\s?nomad\b",
-    ],
-}
+# Strangler: persona logic extracted to services/recommend_persona.py.
+from src.app.services.recommend_persona import (  # noqa: E402
+    PERSONA_PATTERNS as _PERSONA_PATTERNS,
+    detect_buyer_persona as _detect_buyer_persona_impl,
+    detect_buyer_persona_with_confidence as _detect_buyer_persona_with_confidence_impl,
+    build_persona_prompt_context as _build_persona_prompt_context,
+)
+_PERSONA_PATTERNS = _PERSONA_PATTERNS  # module-level alias for any direct access
 
 
 # Strangler: checkout-handoff leaf extracted to services/checkout_handoff.py.
@@ -2413,40 +2374,12 @@ from src.app.services.recommend_context import RecommendContext  # noqa: E402
 
 
 def _detect_buyer_persona(query: str | None) -> str | None:
-    """Classify the buyer persona from query text. Returns the best-match persona or None."""
-    import re
-    q = str(query or "").lower()
-    if not q:
-        return None
-    best, best_score = None, 0
-    for persona, patterns in _PERSONA_PATTERNS.items():
-        score = sum(1 for p in patterns if re.search(p, q, re.IGNORECASE))
-        if score > best_score:
-            best_score = score
-            best = persona
-    return best if best_score > 0 else None
+    """Classify the buyer persona from query text. Delegates to recommend_persona."""
+    return _detect_buyer_persona_impl(query)
 
 
 def _detect_buyer_persona_with_confidence(query: str | None) -> Tuple[str | None, float, Dict[str, int]]:
-    import re
-    q = str(query or "").lower()
-    if not q:
-        return None, 0.0, {}
-    scores: Dict[str, int] = {}
-    best: str | None = None
-    best_score = 0
-    for persona, patterns in _PERSONA_PATTERNS.items():
-        score = sum(1 for p in patterns if re.search(p, q, re.IGNORECASE))
-        if score > 0:
-            scores[persona] = score
-        if score > best_score:
-            best_score = score
-            best = persona
-    if not best:
-        return None, 0.0, scores
-    # Confidence is normalized: single match = 0.5, two matches = 1.0.
-    conf = max(0.0, min(1.0, float(best_score) / 2.0))
-    return best, conf, scores
+    return _detect_buyer_persona_with_confidence_impl(query)
 
 
 def _stable_rollout_bucket(seed: str | None) -> int:
@@ -3936,182 +3869,8 @@ def _trace_to_context_summary(
         return ""
 
 
-def _build_persona_prompt_context(
-    use_case: str,
-    buyer_persona: str,
-    budget_bracket: str | None,
-) -> str | None:
-    """Return a persona-calibrated context block injected into the LLM prompt.
-
-    Maps use_case + buyer_persona to: who the shopper is, which specs matter
-    in plain English, and tone guidance.  Returns None for unknown personas.
-    """
-    uc = (use_case or "").lower().strip()
-    bp = (buyer_persona or "").lower().strip()
-    br = (budget_bracket or "").lower().strip()
-
-    # ── High schooler ────────────────────────────────────────────────────────
-    if bp == "high_schooler" or uc == "high_school":
-        return (
-            "Shopper: High school student (or a parent buying for them). Budget-conscious. Needs to survive a full school day.\n"
-            "Emphasize: Battery life (8+ hours for school), how light and easy it is to carry, screen quality for reading and note-taking. A 2-in-1 or stylus support is a bonus.\n"
-            "Tone: Simple and reassuring — no jargon. Say 'lasts all day on one charge' not '60Wh'. Say 'easy to carry to school' not '1.4kg'. Mention homework, notes, and streaming.\n"
-            "Avoid: Gaming GPU specs, benchmark numbers, enterprise language."
-        )
-
-    # ── University student (general) ─────────────────────────────────────────
-    if bp == "student" and uc in ("university_general", "note_taking_student", ""):
-        value_note = " Value for money matters — this needs to last 4 years." if br in ("entry", "mid") else ""
-        return (
-            f"Shopper: University student. Juggles lectures, assignments, research, light creative work, and maybe weekend gaming.{value_note}\n"
-            "Emphasize: RAM (multiple tabs and apps running at once), battery (full campus day without a charger), storage (4 years of files add up), reliability.\n"
-            "Tone: Practical and honest. Say 'handles multiple assignments at once', 'won't slow down in 3rd year', 'plenty of storage for your whole degree'. Avoid overselling.\n"
-            "Avoid: Enterprise buzzwords. Don't say '16GB DDR5' — say '16GB of memory for smooth multitasking'."
-        )
-
-    # ── Engineering / architecture / computer science student ─────────────────
-    if uc in ("engineering_student", "architecture_student", "computer_science_student"):
-        label_map = {
-            "engineering_student": "engineering",
-            "architecture_student": "architecture",
-            "computer_science_student": "computer science",
-        }
-        soft_map = {
-            "engineering_student": "AutoCAD, SolidWorks, or MATLAB",
-            "architecture_student": "Revit, AutoCAD, and 3D rendering tools",
-            "computer_science_student": "IDEs, virtual machines, and compilers",
-        }
-        label = label_map.get(uc, "technical")
-        soft = soft_map.get(uc, "technical software")
-        return (
-            f"Shopper: {label.title()} student. Regularly runs {soft} — needs real performance, not marketing specs.\n"
-            f"Emphasize: RAM (simulations and compilation need headroom — 16GB minimum), dedicated GPU (3D viewport and rendering), screen size (technical drawings need real estate), CPU speed.\n"
-            f"Tone: Matter-of-fact. Say 'handles {soft.split(',')[0]} without lag', 'big enough screen for technical drawings'. Flag if RAM is below 16GB.\n"
-            "Spec note: Integrated graphics is a red flag for heavy engineering/CAD work. Call it out if a product lacks a discrete GPU."
-        )
-
-    # ── Data science student / AI-ML engineer ────────────────────────────────
-    if uc in ("data_science_student", "ai_ml_workstation") or bp == "developer":
-        if uc == "ai_ml_workstation":
-            label = "AI/ML engineer or researcher"
-            ctx = "Trains models and runs large datasets. GPU VRAM is the single most important spec."
-        else:
-            label = "data science student"
-            ctx = "Runs Python notebooks, trains ML models, and processes datasets."
-        return (
-            f"Shopper: {label}. {ctx}\n"
-            "Emphasize: GPU VRAM (the hard limit for model training), RAM (large datasets need to fit in memory), storage speed (datasets can be huge), CUDA compatibility.\n"
-            "Tone: Technical but grounded. Say 'enough GPU memory for training models', 'handles PyTorch and TensorFlow without bottleneck', 'CUDA-ready for accelerated computing'. GPU VRAM matters more than CPU GHz here.\n"
-            "Spec note: RTX GPU with 8GB+ VRAM is near-essential. Flag it if a product lacks a dedicated GPU."
-        )
-
-    # ── Content creator / video editor ───────────────────────────────────────
-    if uc in ("content_creator", "content_creation") or bp == "creative":
-        return (
-            "Shopper: Content creator or video editor. Works in Premiere Pro, DaVinci Resolve, After Effects, or Blender.\n"
-            "Emphasize: Display color accuracy (color grading depends on it), RAM (video editing is memory-hungry), GPU (accelerated rendering), fast storage (4K video files are large).\n"
-            "Tone: Visual and creative. Say 'accurate colors for color grading', 'handles 4K timelines without dropping frames', 'renders exports faster'. Mention the screen if it looks great.\n"
-            "Avoid: Say 'accurate, vibrant display' not '98% sRGB'. Say 'fast for render exports' not 'CUDA cores'."
-        )
-
-    # ── Design student ───────────────────────────────────────────────────────
-    if uc == "design_student":
-        return (
-            "Shopper: Design student. Works in Photoshop, Illustrator, Figma, or InDesign. Display quality is paramount.\n"
-            "Emphasize: Display accuracy and resolution (design demands true colors), RAM (Photoshop layers), stylus/touch support if available, GPU for 3D work in Blender.\n"
-            "Tone: Creative and visual. Say 'sharp, color-accurate screen perfect for design work', 'handles Photoshop layers without stuttering'. Lead with the display.\n"
-            "Avoid: Gamer language. No frame rates. These users care about aesthetics and display quality."
-        )
-
-    # ── Music production ──────────────────────────────────────────────────────
-    if uc == "music_production":
-        return (
-            "Shopper: Music producer or audio engineer. Works in Ableton, FL Studio, or Logic. Needs low CPU latency and quiet thermals.\n"
-            "Emphasize: CPU speed (audio plugins are CPU-bound), RAM (large sample libraries), storage speed (fast SSD for sample libraries), fan noise (loud fans kill recordings).\n"
-            "Tone: Studio-aware. Say 'runs dozens of plugins without crackle', 'quiet enough for recording sessions', 'handles large sample libraries'. Mention Thunderbolt/USB-C for audio interface connection.\n"
-            "Avoid: GPU jargon — audio production doesn't need a gaming GPU."
-        )
-
-    # ── Corporate / business professional ────────────────────────────────────
-    if bp == "corporate" or uc in ("office_general", "business_professional"):
-        return (
-            "Shopper: Corporate or office professional. Daily tools: Microsoft 365, Teams video calls, email, presentations. May travel between meetings or offices.\n"
-            "Emphasize: Battery life (all-day away from a charger), thin and light (easy to carry to meetings), build quality (reliability matters when work depends on it), webcam quality (video calls every day).\n"
-            "Tone: Professional and practical. Say 'holds up through back-to-back meetings', 'slim enough for your bag', 'reliable for Teams calls and client presentations'. Mention how it looks in professional settings if build quality is premium.\n"
-            "Avoid: Gaming language, benchmark numbers. This person doesn't care about frame rates."
-        )
-
-    # ── Office executive ──────────────────────────────────────────────────────
-    if uc == "office_executive":
-        return (
-            "Shopper: Senior executive or C-suite professional. Values premium build, prestige, and effortless reliability. Performance is assumed — they want it to just work, everywhere.\n"
-            "Emphasize: Build quality (metal chassis, premium finish), display clarity (polished presentations), portability (light enough for airports), connectivity (Thunderbolt for boardroom AV), battery.\n"
-            "Tone: Premium and concise. Say 'investment-grade build', 'commands respect in boardroom settings', 'seamlessly moves from office to airport to client site'. This person expects perfection.\n"
-            "Avoid: Spec-sheet reciting. They care about it working everywhere, always — not GHz numbers."
-        )
-
-    # ── Finance / accounting professional ────────────────────────────────────
-    if uc == "office_finance":
-        return (
-            "Shopper: Finance professional. Heavy Excel, Power BI, or SAP usage. Large financial models, pivot tables, and data refreshes daily.\n"
-            "Emphasize: CPU speed (Excel is single-core, faster = snappier spreadsheets), RAM (large financial models in memory), security features (TPM, Windows Hello for sensitive data), reliability.\n"
-            "Tone: Dependable and direct. Say 'handles large Excel models without freezing', 'fast enough for Power BI dashboards to refresh instantly', 'secure for sensitive financial data'.\n"
-            "Spec note: Integrated graphics is fine for this role. CPU speed and RAM matter far more than GPU."
-        )
-
-    # ── Gamer ─────────────────────────────────────────────────────────────────
-    if bp == "gamer" or "gaming" in uc:
-        bracket_map = {
-            "entry": "entry-level gaming — smooth 1080p in older and indie titles, medium settings in recent AAA games",
-            "mid": "solid 1080p/1440p gaming — high settings in most modern titles, smooth competitive play",
-            "high": "high-end gaming — ultra settings at 1440p, ray tracing in most titles",
-            "ultra": "enthusiast gaming — max settings, 4K, ray tracing, maximum refresh rates",
-        }
-        perf_note = bracket_map.get(br or "", "solid gaming performance for the price")
-        return (
-            f"Shopper: Gamer. At this budget, expect {perf_note}.\n"
-            "Emphasize: GPU performance (the single biggest factor in gaming), display refresh rate (Hz matters for competitive games), thermals (gaming laptops run hot — cooling matters), VRAM.\n"
-            "Tone: Enthusiast but grounded. Say 'runs Fortnite/Valorant at 144+ fps', 'dedicated GPU that handles modern games', '144Hz screen for competitive gaming'. Be honest about what the budget tier can and can't do.\n"
-            "Avoid: Generic 'great for gaming' with no substance. Name what settings/fps this GPU tier delivers."
-        )
-
-    # ── Medical student ───────────────────────────────────────────────────────
-    if uc == "medical_student":
-        return (
-            "Shopper: Medical student. Marathon study sessions — anatomy, clinical notes, medical imaging software, PDF-heavy reading.\n"
-            "Emphasize: Battery life (12+ hours if possible), display clarity (reading dense text and viewing medical imagery), weight (carrying heavy textbooks + a laptop), reliability.\n"
-            "Tone: Endurance-focused. Say 'survives a full clinical study day', 'sharp display for reading dense medical content', 'reliable enough that you never worry about it failing before an exam'.\n"
-            "Avoid: Gaming specs. Medical students don't care about GPUs."
-        )
-
-    # ── Law student ───────────────────────────────────────────────────────────
-    if uc == "law_student":
-        return (
-            "Shopper: Law student. Case briefs, legal research databases, long reading/writing sessions. Pure productivity.\n"
-            "Emphasize: Battery life (long library sessions), keyboard comfort (typing-heavy work — briefs, essays, memos), display clarity (reading-heavy), reliability.\n"
-            "Tone: No-nonsense and direct. Say 'handles long case brief sessions without slowing down', 'comfortable to type on for hours'. Pure productivity focus.\n"
-            "Avoid: GPU/gaming specs. A discrete GPU is wasted spend for a law student."
-        )
-
-    # ── Traveler ─────────────────────────────────────────────────────────────
-    if bp == "traveler" or "travel" in uc:
-        return (
-            "Shopper: Frequent traveler. Works from airports, hotels, and client sites. Every gram and every hour of battery counts.\n"
-            "Emphasize: Weight (lighter is always better), battery life (8+ hours real-world), build quality (bumps happen in transit), USB-C charging (one less adapter to carry).\n"
-            "Tone: Practical and liberating. Say 'light enough to forget you're carrying it', 'lasts through a long-haul flight', 'tough enough for carry-on life'. Mention USB-C charging if available.\n"
-            "Avoid: Heavy workstation specs. Freedom from outlets and weight are the wins."
-        )
-
-    # ── Job hunter / career changer ───────────────────────────────────────────
-    if bp == "job_hunter":
-        return (
-            "Shopper: Job hunter or career changer. Starting a new chapter — needs something professional-looking, reliable, and interview-ready.\n"
-            "Emphasize: Professional build and appearance (makes an impression), reliability, webcam and microphone quality (video interviews), keyboard comfort.\n"
-            "Tone: Encouraging and practical. Say 'professional build for interviews and the first day on the job', 'reliable enough that it never lets you down in a crucial moment'.\n"
-            "Avoid: Gaming specs. Focus on professionalism, reliability, and first impressions."
-        )
-
-    return None
+# Strangler: _build_persona_prompt_context is now imported from recommend_persona.py
+# (see import block at PERSONA_PATTERNS above). The inline definition is removed.
 
 
 def _build_knowledge_answer(
@@ -4959,140 +4718,20 @@ def _extract_explicit_budget_override(query: str | None) -> Dict[str, Any]:
     return {}
 
 
+# Strangler: use-case ranking extracted to services/recommend_ranking.py.
+from src.app.services.recommend_ranking import (  # noqa: E402
+    use_case_rank_adjustment as _use_case_rank_adjustment_impl,
+    apply_use_case_rank_adjustments as _apply_use_case_rank_adjustments_impl,
+)
+
+
 def _use_case_rank_adjustment(
     candidate: Dict[str, Any],
     *,
     use_case_key: str | None,
     query: str,
 ) -> Tuple[float, List[str], List[str]]:
-    use_case = str(use_case_key or "").strip().lower()
-    q_low = str(query or "").lower()
-    if not use_case:
-        return 0.0, [], []
-
-    metrics = _extract_candidate_numeric_specs(candidate)
-    plus: List[str] = []
-    minus: List[str] = []
-    score = 0.0
-
-    ram = float(metrics.get("ram_gb") or 0.0)
-    storage = float(metrics.get("storage_gb") or 0.0)
-    display = float(metrics.get("display_inches") or 0.0)
-    refresh = float(metrics.get("refresh_hz") or 0.0)
-    gpu_vram = float(metrics.get("gpu_vram_gb") or 0.0)
-    has_gpu = bool(metrics.get("has_dedicated_gpu"))
-    gaming_style = bool(metrics.get("gaming_style"))
-    portable = bool(metrics.get("portable"))
-    nvidia = bool(metrics.get("nvidia"))
-    creator_hint = bool(metrics.get("creator_hint"))
-    workstation_hint = bool(metrics.get("workstation_hint"))
-
-    student_keys = {"high_school", "university_general", "note_taking_student", "medical_student", "law_student"}
-    work_keys = {"business_professional", "office_general", "office_finance", "office_executive"}
-    engineering_keys = {"engineering_student", "computer_science_student"}
-
-    if use_case in student_keys:
-        if portable:
-            score += 1.1
-            plus.append("portable for daily study")
-        if 16 <= ram <= 32:
-            score += 0.8
-            plus.append("enough RAM for schoolwork")
-        elif 8 <= ram < 16:
-            score += 0.2
-        if storage >= 512:
-            score += 0.4
-            plus.append("usable storage headroom")
-        if has_gpu:
-            score -= 0.8
-            minus.append("more GPU-heavy than most school needs")
-        if gaming_style:
-            score -= 1.3
-            minus.append("gaming-first design is less ideal for school")
-        if display and display >= 15.6:
-            score -= 0.35
-    elif use_case in work_keys:
-        if portable:
-            score += 1.0
-            plus.append("portable for work travel")
-        if 16 <= ram <= 32:
-            score += 0.7
-            plus.append("fits office multitasking")
-        if has_gpu and not creator_hint:
-            score -= 0.7
-            minus.append("dedicated GPU is usually unnecessary for office work")
-        if gaming_style:
-            score -= 1.4
-            minus.append("gaming chassis is a poor fit for business use")
-    elif use_case in {"gaming_casual", "gaming_competitive", "gaming_light", "gaming_aaa_heavy"} or "gaming" in q_low:
-        if has_gpu:
-            score += 2.0
-            plus.append("dedicated GPU for gaming")
-        else:
-            score -= 2.4
-            minus.append("no dedicated GPU for gaming")
-        if ram >= 16:
-            score += 0.9
-            plus.append("16GB+ RAM helps gaming")
-        elif ram and ram < 16:
-            score -= 0.6
-        if refresh >= 144:
-            score += 0.8
-            plus.append("high refresh display")
-        if gpu_vram >= 6:
-            score += 0.7
-        if gaming_style:
-            score += 0.5
-    elif use_case in {"content_creator", "content_creation", "design_student"}:
-        if ram >= 16:
-            score += 0.8
-            plus.append("strong RAM for editing apps")
-        if storage >= 1024:
-            score += 0.5
-            plus.append("more storage for creator files")
-        if has_gpu:
-            score += 1.0
-            plus.append("GPU helps creative workloads")
-        if creator_hint or workstation_hint:
-            score += 0.6
-    elif use_case in {"ai_ml_workstation"}:
-        if has_gpu:
-            score += 2.2
-            plus.append("dedicated GPU for local AI workloads")
-        else:
-            score -= 2.5
-            minus.append("local AI workloads need a stronger GPU")
-        if nvidia:
-            score += 0.8
-            plus.append("NVIDIA ecosystem is more practical for AI tooling")
-        if ram >= 32:
-            score += 1.0
-            plus.append("32GB+ RAM is better for AI workflows")
-        elif ram >= 16:
-            score += 0.3
-    elif use_case in {"data_science_student"}:
-        if ram >= 32:
-            score += 1.1
-            plus.append("32GB RAM helps data workflows")
-        elif ram >= 16:
-            score += 0.7
-            plus.append("16GB RAM is workable for notebooks and analysis")
-        if storage >= 1024:
-            score += 0.5
-        if has_gpu:
-            score += 0.5
-        if nvidia:
-            score += 0.4
-    elif use_case in engineering_keys:
-        if ram >= 16:
-            score += 0.8
-            plus.append("RAM headroom for coding and CAD-style tools")
-        if has_gpu:
-            score += 0.8
-            plus.append("GPU helps engineering workloads")
-        if workstation_hint:
-            score += 0.4
-    return round(score, 4), plus[:3], minus[:3]
+    return _use_case_rank_adjustment_impl(candidate, use_case_key=use_case_key, query=query)
 
 
 def _apply_use_case_rank_adjustments(
@@ -5101,32 +4740,7 @@ def _apply_use_case_rank_adjustments(
     use_case_key: str | None,
     query: str,
 ) -> List[Dict[str, Any]]:
-    if not scored or not use_case_key:
-        return scored
-    adjusted: List[Dict[str, Any]] = []
-    for item in scored:
-        if not isinstance(item, dict):
-            continue
-        candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
-        bonus, plus, minus = _use_case_rank_adjustment(candidate, use_case_key=use_case_key, query=query)
-        new_item = dict(item)
-        base_factors = dict(new_item.get("factors") or {})
-        pos = [str(x) for x in (base_factors.get("positive") or [])]
-        neg = [str(x) for x in (base_factors.get("negative") or [])]
-        for msg in plus:
-            if msg not in pos:
-                pos.append(msg)
-        for msg in minus:
-            if msg not in neg:
-                neg.append(msg)
-        base_factors["positive"] = pos[:6]
-        base_factors["negative"] = neg[:6]
-        base_factors["use_case_bonus"] = bonus
-        new_item["factors"] = base_factors
-        new_item["score"] = float(new_item.get("score") or 0.0) + float(bonus)
-        adjusted.append(new_item)
-    adjusted.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
-    return adjusted
+    return _apply_use_case_rank_adjustments_impl(scored, use_case_key=use_case_key, query=query)
 
 
 def _humanize_positive_factor_tokens(items: list[Any]) -> list[str]:
