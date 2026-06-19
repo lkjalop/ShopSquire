@@ -290,6 +290,13 @@ from src.app.services.recommend_nqe_stage import (  # noqa: E402
     prioritize_domain_refinement_questions,
     run_recommend_nqe_stage,
 )
+from src.app.services.query_understanding import build_query_understanding  # noqa: E402
+from src.app.services.recommend_narration_stage import (  # noqa: E402
+    NarrationInputs,
+    apply_narration_inputs_to_constraints,
+    build_narration_evidence_block,
+    build_narration_inputs,
+)
 
 
 def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
@@ -4247,6 +4254,7 @@ def _summarize_results(
     model: str | None,
     trace_id: str | None = None,
     context_preamble: str | None = None,
+    narration_inputs: NarrationInputs | None = None,
 ) -> tuple[str | None, str | None]:
     if not os.getenv("USE_LLM_SUMMARY", "1").lower() in ("1", "true", "yes"):
         return None, None
@@ -4296,6 +4304,8 @@ def _summarize_results(
                 pass
         return None, None
     try:
+        narration = narration_inputs or build_narration_inputs(query, constraints)
+        constraints = apply_narration_inputs_to_constraints(constraints, narration)
         budget_preface = _build_brand_budget_answer_v2(query, results, constraints)
         _q_lower = str(query or "").lower()
         yes_no_query = any(
@@ -4343,20 +4353,21 @@ def _summarize_results(
         product_lines = "\n".join(_spec_summary_for_llm(r, idx) for idx, r in enumerate(top))
 
         # Pull the most useful constraint signals for the prompt
-        budget_min = constraints.get("budget_min")
-        budget_max = constraints.get("budget_max")
-        _use_case_raw = str(constraints.get("use_case") or "").strip()
+        budget_min = narration.budget_min
+        budget_max = narration.budget_max
+        _use_case_raw = str(narration.use_case or constraints.get("use_case") or "").strip()
         _buyer_persona_raw = str(
-            constraints.get("buyer_persona")
+            narration.buyer_persona
+            or constraints.get("buyer_persona")
             or constraints.get("inferred_persona")
             or (constraints.get("shopper_intent") or {}).get("persona")
             or ""
         ).strip()
         use_case = (_use_case_raw or _buyer_persona_raw).replace("_", " ")
-        brands = constraints.get("brands") or []
+        brands = narration.brands or constraints.get("brands") or []
 
-        budget_str = ""
-        if budget_min and budget_max:
+        budget_str = narration.budget_text
+        if not budget_str and budget_min and budget_max:
             budget_str = f"${int(budget_min):,}–${int(budget_max):,}"
         elif budget_max:
             budget_str = f"under ${int(budget_max):,}"
@@ -4371,6 +4382,7 @@ def _summarize_results(
         # Rich persona context block — replaces the bare "Use case:" line.
         # Tells the LLM who the shopper is, which specs to emphasise, and the right tone.
         _persona_ctx = _build_persona_prompt_context(_use_case_raw, _buyer_persona_raw, _bracket)
+        _evidence_block = build_narration_evidence_block(narration)
 
         # For personas already covered by persona context, drop the redundant Use case line.
         _use_case_line = f"Use case: {use_case}\n" if (use_case and not _persona_ctx) else ""
@@ -4433,6 +4445,7 @@ def _summarize_results(
             "RULE 5: Max 70 words. Do not fabricate specs or invent prices.\n"
             "RULE 6: NEVER write technical tokens like +in_stock, +embedding_similarity, +cross_encoder, or any +tag or score numbers. Pure natural language only.\n\n"
             + (f"Prior context:\n{context_preamble}\n\n" if context_preamble else "")
+            + (f"{_evidence_block}\n\n" if _evidence_block else "")
             + (f"{_persona_ctx}\n\n" if _persona_ctx else "")
             + (f"Budget: {budget_str}\n" if budget_str else "")
             + _use_case_line
@@ -11753,6 +11766,12 @@ def suggest(
     constraints["_price_filter_meta"] = filter_meta_price or {}
     constraints["_strict_image_brand_hint"] = strict_image_brand_hint
     constraints["_inferred_image_brand"] = inferred_image_brand
+    narration_inputs = build_narration_inputs(
+        query_effective or query,
+        constraints,
+        query_understanding=build_query_understanding(query_effective or query or "", constraints),
+    )
+    constraints = apply_narration_inputs_to_constraints(constraints, narration_inputs)
     # Off-category relevance guard: a computer query must not be led by a peripheral
     # (e.g. a router for "gaming laptop"). Demote, never remove — propagates to both
     # the product cards and the LLM summary below.
@@ -11869,6 +11888,7 @@ def suggest(
             assistant_message, llm_summary_job_id = _summarize_results(
                 query, results, constraints, _summ_model, trace_id,
                 context_preamble=_combined_preamble,
+                narration_inputs=narration_inputs,
             )
         # 0.4 Grounded narration guard (flag: COMMERCE_NARRATION_GUARD). The LLM is
         # a narrator over evidence, not a source of truth — if it invents a
