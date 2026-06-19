@@ -20,7 +20,6 @@ from __future__ import annotations
 from typing import Any
 
 from src.app.services.recommend_utils import _brand_display_name
-from src.app.services.recommend_image_hints import _SUPPORTED_IMAGE_BRAND_HINTS
 
 
 def _cross_modal_brand_conflict_question(
@@ -64,17 +63,10 @@ def _cross_modal_brand_conflict_question(
 
 
 def _supported_brands() -> set:
-    """Brands the ACTIVE vertical recognises — the StoreProfile `manufacturers` keys
-    (prefer-profile: pharmacy → panadol/nurofen…, fashion → nike/adidas…), falling back to the
-    inline electronics set only if the profile carries no manufacturers."""
-    try:
-        from src.app.platform.store_profile import brand_label_patterns
-        prof = {str(k).strip().lower() for k in (brand_label_patterns() or {}).keys()}
-        if prof:
-            return prof
-    except Exception:
-        pass
-    return set(_SUPPORTED_IMAGE_BRAND_HINTS)
+    """Brands the active vertical recognises from the StoreProfile manufacturers map."""
+    from src.app.platform.store_profile import brand_label_patterns
+
+    return {str(k).strip().lower() for k in (brand_label_patterns() or {}).keys() if str(k).strip()}
 
 
 def _resolve_supported_brand_hint(
