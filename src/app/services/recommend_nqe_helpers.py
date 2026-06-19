@@ -27,7 +27,10 @@ ADAPTER (product-type-specific):
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List
+
+from src.app.services.recommend_budget_parsing import classify_budget_bracket
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ADAPTER — Electronics-specific techy query tokens
@@ -497,3 +500,184 @@ def apply_intent_specific_question_bank(
         rank = {}
     out = sorted(out, key=lambda q: rank.get(str(q.get("id") or "").strip().lower(), 9))
     return out[:3]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CORE framework + ADAPTER mappings — NQE selection → constraint application
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def apply_nqe_selection_to_constraints(
+    *,
+    constraints: Dict[str, Any],
+    nqe_question_id: str | None,
+    nqe_option_id: str | None,
+    nqe_option_label: str | None,
+    nqe_option_value: str | None = None,
+) -> Dict[str, Any]:
+    qid = str(nqe_question_id or "").strip().lower()
+    oid = str(nqe_option_id or "").strip().lower()
+    lbl = str(nqe_option_label or "").strip().lower()
+    val = str(nqe_option_value or "").strip().lower()
+    applied: Dict[str, Any] = {}
+    if not qid or not oid:
+        return applied
+
+    if qid == "ask_gpu_preference":
+        if "without" in oid or "integrated" in oid or "without" in lbl:
+            constraints["gpu_preference"] = "without_discrete"
+            constraints["specs"] = [s for s in (constraints.get("specs") or []) if "gpu:discrete" not in str(s).lower()]
+            applied["gpu_preference"] = "without_discrete"
+        elif "with" in oid or "dedicated" in oid or "discrete" in oid or "rtx" in lbl or "radeon" in lbl:
+            constraints["gpu_preference"] = "with_discrete"
+            applied["gpu_preference"] = "with_discrete"
+        elif "no_preference" in oid:
+            constraints.pop("gpu_preference", None)
+            applied["gpu_preference"] = "none"
+        return applied
+
+    if qid == "ask_budget":
+        range_value = ""
+        if oid == "budget_under_1000":
+            range_value = "0-1000"
+        elif oid == "budget_1000_1500":
+            range_value = "1000-1500"
+        elif oid == "budget_1500_2200":
+            range_value = "1500-2200"
+        elif oid == "budget_2200_plus":
+            range_value = "2200+"
+        elif re.search(r"\d", lbl):
+            range_value = lbl.replace("$", "").replace(",", "").replace(" ", "")
+        elif re.search(r"\d", val):
+            range_value = val.replace("$", "").replace(",", "").replace(" ", "")
+        if range_value.endswith("+"):
+            try:
+                constraints["budget_min"] = int(re.sub(r"[^\d]", "", range_value))
+                constraints["budget_max"] = None
+                applied["budget_min"] = constraints["budget_min"]
+            except Exception:
+                pass
+        elif "-" in range_value:
+            bits = [re.sub(r"[^\d]", "", x) for x in range_value.split("-", 1)]
+            try:
+                bmin = int(bits[0]) if bits and bits[0] else None
+                bmax = int(bits[1]) if len(bits) > 1 and bits[1] else None
+                if bmin is not None:
+                    constraints["budget_min"] = bmin
+                    applied["budget_min"] = bmin
+                if bmax is not None:
+                    constraints["budget_max"] = bmax
+                    applied["budget_max"] = bmax
+                    _bb = classify_budget_bracket(bmax)
+                    if _bb:
+                        constraints["budget_bracket"] = _bb
+                        applied["budget_bracket"] = _bb
+            except Exception:
+                pass
+        return applied
+
+    if qid == "ask_use_case":
+        mapping = {
+            "use_case_student": ("high_school", ["student", "high_school"]),
+            "use_case_business": ("office_general", ["office", "office_general"]),
+            "use_case_gaming": ("gaming", ["gaming"]),
+            "use_case_video_editing": ("content_creator", ["content_creator"]),
+            "use_case_ai_training": ("ai_ml_workstation", ["ai_ml_workstation"]),
+        }
+        use_case, tags = mapping.get(oid, (None, None))
+        if not use_case and val:
+            if "gaming" in val:
+                use_case, tags = ("gaming", ["gaming"])
+            elif any(tok in val for tok in ("ai", "ml", "training", "cuda", "llm")):
+                use_case, tags = ("ai_ml_workstation", ["ai_ml_workstation"])
+            elif any(tok in val for tok in ("video", "editing", "creative", "render")):
+                use_case, tags = ("content_creator", ["content_creator"])
+            elif "high school" in val or "school" in val or "student" in val:
+                use_case, tags = ("high_school", ["student", "high_school"])
+            elif any(tok in val for tok in ("work", "business", "office")):
+                use_case, tags = ("office_general", ["office", "office_general"])
+        if use_case:
+            constraints["use_case"] = use_case
+            constraints["use_case_tags"] = tags
+            applied["use_case"] = use_case
+            applied["use_case_tags"] = tags
+        return applied
+
+    if qid == "ask_high_school_activity":
+        hs_mapping = {
+            "high_school_basic": ("high_school", ["student", "high_school"]),
+            "gaming_light":      ("gaming",      ["gaming", "gaming_light"]),
+            "content_creator":   ("content_creator", ["content_creator"]),
+            "music_production":  ("music_production", ["music_production"]),
+            "engineering_student": ("engineering_student", ["student", "engineering_student"]),
+            "design_student":    ("design_student", ["student", "design_student"]),
+        }
+        _key = oid if oid in hs_mapping else (val if val in hs_mapping else None)
+        if _key:
+            _uc, _tags = hs_mapping[_key]
+            constraints["use_case"] = _uc
+            constraints["use_case_tags"] = _tags
+            applied["use_case"] = _uc
+            applied["use_case_tags"] = _tags
+            if _key == "gaming_light":
+                constraints["gpu_preference"] = "without_discrete"
+                applied["gpu_preference"] = "without_discrete"
+        return applied
+
+    if qid == "ask_university_subject":
+        uni_mapping = {
+            "computer_science_student":  (["student", "computer_science_student"],  "with_discrete"),
+            "engineering_student":        (["student", "engineering_student"],        "with_discrete"),
+            "data_science_student":       (["student", "data_science_student"],       "with_discrete"),
+            "design_student":             (["student", "design_student"],             "with_discrete"),
+            "architecture_student":       (["student", "architecture_student"],       "with_discrete"),
+            "medical_student":            (["student", "medical_student"],            None),
+            "law_student":                (["student", "law_student"],                None),
+            "university_general":         (["student", "university_general"],         None),
+        }
+        _key = oid if oid in uni_mapping else (val if val in uni_mapping else None)
+        if _key:
+            _tags, _gpu = uni_mapping[_key]
+            constraints["use_case"] = _key
+            constraints["use_case_tags"] = _tags
+            applied["use_case"] = _key
+            applied["use_case_tags"] = _tags
+            if _gpu:
+                constraints["gpu_preference"] = _gpu
+                applied["gpu_preference"] = _gpu
+        return applied
+
+    if qid == "ask_corporate_work_type":
+        corp_mapping = {
+            "office_general":   ("office_general",   ["office", "office_general"]),
+            "office_finance":   ("office_finance",   ["office", "office_finance"]),
+            "office_executive": ("office_executive", ["office", "office_executive"]),
+        }
+        _key = oid if oid in corp_mapping else (val if val in corp_mapping else None)
+        if _key:
+            _uc, _tags = corp_mapping[_key]
+            constraints["use_case"] = _uc
+            constraints["use_case_tags"] = _tags
+            applied["use_case"] = _uc
+            applied["use_case_tags"] = _tags
+        return applied
+
+    if qid in ("ask_gaming_depth", "ask_gpu_preference") and qid == "ask_gaming_depth":
+        gaming_gpu = {
+            "gaming_light":       ("gaming", ["gaming", "gaming_light"],       "without_discrete"),
+            "gaming_casual":      ("gaming", ["gaming", "gaming_casual"],       "with_discrete"),
+            "gaming_competitive": ("gaming", ["gaming", "gaming_competitive"],  "with_discrete"),
+            "gaming_aaa_heavy":   ("gaming", ["gaming", "gaming_aaa_heavy"],    "with_discrete"),
+        }
+        _key = oid if oid in gaming_gpu else (val if val in gaming_gpu else None)
+        if _key:
+            _uc, _tags, _gpu = gaming_gpu[_key]
+            constraints["use_case"] = _uc
+            constraints["use_case_tags"] = _tags
+            constraints["gpu_preference"] = _gpu
+            applied["use_case"] = _uc
+            applied["use_case_tags"] = _tags
+            applied["gpu_preference"] = _gpu
+        return applied
+
+    return applied
