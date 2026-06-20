@@ -88,6 +88,15 @@ _SECURITY_EXECUTOR = _futures.ThreadPoolExecutor(
     thread_name_prefix="sec_worker",
 )
 
+# Module-level thread pool for running the (slow, 20-40s cold) VLM product-identity call in
+# parallel with NLP + constraint building, instead of blocking the pipeline at the identity stage.
+# Flag-gated (PARALLEL_VISION_IDENTITY). Tasks are submitted via contextvars.copy_context().run so
+# the active StoreProfile propagates into the worker thread (no electronics bleed for other verticals).
+_VISION_EXECUTOR = _futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("VISION_WORKER_THREADS", "2")),
+    thread_name_prefix="vision_worker",
+)
+
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
 tracer = get_tracer("recommend-router")
 logger = logging.getLogger("shopsquire.recommend")
@@ -4785,6 +4794,28 @@ def suggest(
     except Exception:
         kv = {}
         pii_warn_count = 0
+
+    # ── Latency: pre-launch the VLM product-identity call in parallel (flag-gated, OFF by default) ──
+    # The vision identify is 20-40s cold and otherwise BLOCKS at the identity stage. Launching it here
+    # (kv is now loaded) overlaps it with NLP + constraint building. copy_context().run propagates the
+    # active StoreProfile into the worker so a non-electronics vision call is not scored as electronics.
+    _id_image_future = None
+    try:
+        if (
+            bool(flags.get("PARALLEL_VISION_IDENTITY", False))
+            and image_context.get("hash")
+            and getattr(_image_feature_allowlist, "allow_product_identity", True)
+        ):
+            _pv_blob = _decode_session_image_blob(kv if isinstance(kv, dict) else {}, image_context.get("hash"))
+            if _pv_blob:
+                import contextvars as _contextvars
+                from src.app.services.product_identity_agent import identify_product_from_image as _pv_identify
+                _pv_ctx = _contextvars.copy_context()
+                _id_image_future = _VISION_EXECUTOR.submit(
+                    _pv_ctx.run, _pv_identify, _pv_blob, user_query=query or "", trace_id=trace_id
+                )
+    except Exception:
+        _id_image_future = None
     if skip_recommend_observer:
         gate = SimpleNamespace(**{
             "decision": "allow",
@@ -6751,11 +6782,22 @@ def suggest(
             except Exception:
                 pass
         if _image_blob and not _id_result:
-            _id_candidate = identify_product_from_image(
-                _image_blob,
-                user_query=query or "",
-                trace_id=trace_id,
-            )
+            # Use the pre-launched parallel future if present (flag PARALLEL_VISION_IDENTITY);
+            # otherwise call inline. Fall back to inline if the future errored.
+            _id_candidate = None
+            if _id_image_future is not None:
+                try:
+                    _id_candidate = _id_image_future.result(
+                        timeout=float(os.getenv("CV_IDENTITY_TIMEOUT_SEC", "30") or 30)
+                    )
+                except Exception:
+                    _id_candidate = None
+            if not isinstance(_id_candidate, dict):
+                _id_candidate = identify_product_from_image(
+                    _image_blob,
+                    user_query=query or "",
+                    trace_id=trace_id,
+                )
             if isinstance(_id_candidate, dict):
                 _low_conf_brand_candidate = dict(_id_candidate)
             if bool(_id_candidate.get("identified")) and float(_id_candidate.get("confidence") or 0.0) >= _vision_min_conf:
