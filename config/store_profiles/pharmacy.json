@@ -192,5 +192,49 @@
     "shirt", "dress", "shoes", "pants", "jacket"
   ],
 
+  "_persona_patterns_comment": "ADAPTER: buyer-persona detection keywords (recommend_persona core algo is vertical-blind). Phase 2A P0.",
+  "persona_patterns": {
+    "patient": [
+      "\\bpain\\b",
+      "\\bheadache\\b",
+      "\\bache\\b",
+      "\\bsick\\b",
+      "\\bcold\\b",
+      "\\bflu\\b",
+      "\\bfever\\b",
+      "\\bcough\\b",
+      "\\ballerg\\w*\\b",
+      "\\bcongestion\\b",
+      "\\bwound\\b",
+      "\\bfirst\\s?aid\\b",
+      "\\bindigestion\\b",
+      "\\bheartburn\\b",
+      "\\bnausea\\b"
+    ],
+    "wellness": [
+      "\\bvitamin\\b",
+      "\\bsupplement\\b",
+      "\\bimmune\\b",
+      "\\benergy\\b",
+      "\\bwellness\\b",
+      "\\bskincare\\b",
+      "\\bmoisturi[sz]er\\b",
+      "\\bserum\\b",
+      "\\banti[\\s-]?aging\\b",
+      "\\bnutrition\\b"
+    ],
+    "parent": [
+      "\\bbaby\\b",
+      "\\binfant\\b",
+      "\\btoddler\\b",
+      "\\bnappy\\b",
+      "\\bdiaper\\b",
+      "\\bformula\\b",
+      "\\bnewborn\\b",
+      "\\bchild\\b",
+      "\\bkids?\\b"
+    ]
+  },
+
   "cv_returns_pack": "electronics"
 }

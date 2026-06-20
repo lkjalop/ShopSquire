@@ -148,5 +148,65 @@
     "medicine", "pill", "capsule", "pharmacy", "syringe"
   ],
 
+  "_persona_patterns_comment": "ADAPTER: buyer-persona detection keywords (recommend_persona core algo is vertical-blind). Phase 2A P0.",
+  "persona_patterns": {
+    "shopper": [
+      "\\bcasual\\b",
+      "\\beveryday\\b",
+      "\\brelaxed\\b",
+      "\\bweekend\\b",
+      "\\bstreetwear\\b",
+      "\\bloungewear\\b",
+      "\\bcomfy\\b",
+      "\\bdaily\\b",
+      "\\bbeach\\b",
+      "\\bholiday\\b",
+      "\\bvacation\\b"
+    ],
+    "professional": [
+      "\\bformal\\b",
+      "\\bbusiness\\b",
+      "\\boffice\\b",
+      "\\bwedding\\b",
+      "\\binterview\\b",
+      "\\bsmart\\b",
+      "\\bsuit\\b",
+      "\\bblazer\\b",
+      "\\bcocktail\\b",
+      "\\bdress\\s?up\\b"
+    ],
+    "athlete": [
+      "\\bgym\\b",
+      "\\bworkout\\b",
+      "\\brunning\\b",
+      "\\bsport\\w*\\b",
+      "\\btraining\\b",
+      "\\bactive\\s?wear\\b",
+      "\\bexercise\\b",
+      "\\byoga\\b",
+      "\\bpilates\\b",
+      "\\bcycling\\b"
+    ],
+    "adventurer": [
+      "\\bhiking\\b",
+      "\\bcamping\\b",
+      "\\boutdoor\\b",
+      "\\btrail\\b",
+      "\\bclimbing\\b",
+      "\\btrekking\\b",
+      "\\bexpedition\\b",
+      "\\bwaterproof\\b"
+    ],
+    "tradesperson": [
+      "\\bworkwear\\b",
+      "\\buniform\\b",
+      "\\bhi[\\s-]?vis\\b",
+      "\\bsteel\\s?cap\\b",
+      "\\bsafety\\b",
+      "\\btradesman\\b",
+      "\\bworksite\\b"
+    ]
+  },
+
   "cv_returns_pack": "electronics"
 }

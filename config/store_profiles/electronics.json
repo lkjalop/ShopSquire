@@ -708,5 +708,123 @@
     "HEAD"
   ],
 
+  "_persona_patterns_comment": "ADAPTER: buyer-persona detection keywords (recommend_persona core algo is vertical-blind). Phase 2A P0.",
+  "persona_patterns": {
+    "student": [
+      "\\buniversity\\b",
+      "\\bcollege\\b",
+      "\\bstudent\\b",
+      "\\bstudying\\b",
+      "\\bassignment\\b",
+      "\\blecture\\b",
+      "\\bsemester\\b",
+      "\\bcoursework\\b",
+      "\\bschool\\b",
+      "\\bclass\\b",
+      "\\bhomework\\b",
+      "\\bcampus\\b"
+    ],
+    "high_schooler": [
+      "\\bhigh\\s?school\\b",
+      "\\byr\\s?(?:7|8|9|10|11|12)\\b",
+      "\\byear\\s?(?:7|8|9|10|11|12)\\b",
+      "\\bteen\\b",
+      "\\bHSC\\b",
+      "\\bVCE\\b",
+      "\\bATAR\\b",
+      "\\bgcse\\b",
+      "\\ba[\\s-]?level\\b",
+      "\\bsecondary\\s?school\\b"
+    ],
+    "corporate": [
+      "\\bcorporate\\b",
+      "\\boffice\\b",
+      "\\bwork\\s?from\\s?home\\b",
+      "\\bwfh\\b",
+      "\\bteams\\b",
+      "\\bzoom\\b",
+      "\\boutlook\\b",
+      "\\bexcel\\b",
+      "\\bpresentation\\b",
+      "\\bfor\\s?work\\b",
+      "\\bwork\\s?laptop\\b",
+      "\\bbusiness\\b",
+      "\\bprofessional\\b"
+    ],
+    "job_hunter": [
+      "\\bjob\\s?hunt\\b",
+      "\\binterview\\b",
+      "\\bnew\\s?job\\b",
+      "\\bcareer\\s?change\\b",
+      "\\bjob\\s?search\\b",
+      "\\bfreelance\\b",
+      "\\bstarting\\s?a\\s?new\\s?job\\b"
+    ],
+    "gamer": [
+      "\\bgaming\\b",
+      "\\bfps\\b",
+      "\\bgame\\b",
+      "\\bvalorant\\b",
+      "\\bfortnite\\b",
+      "\\bcyberpunk\\b",
+      "\\bsteam\\b",
+      "\\belden\\s?ring\\b",
+      "\\besports\\b",
+      "\\bray\\s?trac\\b",
+      "\\bdlss\\b",
+      "\\brefresh\\s?rate\\b"
+    ],
+    "creative": [
+      "\\bvideo\\s?edit\\b",
+      "\\bcontent\\s?creat\\b",
+      "\\byoutube\\b",
+      "\\bstreaming\\b",
+      "\\bpremiere\\b",
+      "\\bdavinci\\b",
+      "\\bphotoshop\\b",
+      "\\bblender\\b",
+      "\\bafter\\s?effects\\b",
+      "\\bcolor\\s?grad\\b",
+      "\\b4k\\s?edit\\b"
+    ],
+    "developer": [
+      "\\bai\\s?engineer\\b",
+      "\\bml\\s?engineer\\b",
+      "\\bdata\\s?scientist\\b",
+      "\\bpytorch\\b",
+      "\\btensorflow\\b",
+      "\\bcuda\\b",
+      "\\bdeep\\s?learn\\b",
+      "\\bmachine\\s?learn\\b",
+      "\\bai\\s?train\\b",
+      "\\bllm\\s?train\\b",
+      "\\bmodel\\s?train\\b",
+      "\\bjupyter\\b",
+      "\\bnotebook\\b"
+    ],
+    "engineer_student": [
+      "\\bengineering\\s?student\\b",
+      "\\bautocad\\b",
+      "\\bsolidworks\\b",
+      "\\bmatlab\\b",
+      "\\bfea\\b",
+      "\\bansys\\b",
+      "\\bmechanical\\s?eng\\b",
+      "\\bcivil\\s?eng\\b",
+      "\\belectrical\\s?eng\\b"
+    ],
+    "traveler": [
+      "\\btravel\\b",
+      "\\bholiday\\b",
+      "\\bon\\s?the\\s?go\\b",
+      "\\bportable\\b",
+      "\\blightweight\\b",
+      "\\bbackpack\\b",
+      "\\bcommut\\b",
+      "\\bairport\\b",
+      "\\bdigital\\s?nomad\\b"
+    ]
+  },
+
   "cv_returns_pack": "electronics"
 }

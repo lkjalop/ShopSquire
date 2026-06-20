@@ -23,62 +23,41 @@ MIGRATION PATH (Phase 2):
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Dict, Tuple
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ADAPTER DATA — Electronics-specific persona detection patterns.
-# These should migrate to StoreProfile["persona_patterns"] in Phase 2.
-# A pharmacy vertical would define: pharmacist, patient, caregiver, aged-care, etc.
-# A fashion vertical would define: trend-follower, minimalist, plus-size, athleisure, etc.
+# ADAPTER DATA — persona detection patterns, resolved PER REQUEST from the active
+# StoreProfile's `persona_patterns` slot (Phase 2A P0: the electronics patterns moved
+# VERBATIM to config/store_profiles/electronics.json; fashion/pharmacy define their own,
+# so a non-electronics vertical detects ITS personas, never electronics ones).
+# The detection ALGORITHM below stays CORE (vertical-blind).
 # ═══════════════════════════════════════════════════════════════════════════════
-PERSONA_PATTERNS: dict[str, list[str]] = {
-    "student": [
-        r"\buniversity\b", r"\bcollege\b", r"\bstudent\b", r"\bstudying\b",
-        r"\bassignment\b", r"\blecture\b", r"\bsemester\b", r"\bcoursework\b",
-        r"\bschool\b", r"\bclass\b", r"\bhomework\b", r"\bcampus\b",
-    ],
-    "high_schooler": [
-        r"\bhigh\s?school\b", r"\byr\s?(?:7|8|9|10|11|12)\b", r"\byear\s?(?:7|8|9|10|11|12)\b",
-        r"\bteen\b", r"\bHSC\b", r"\bVCE\b", r"\bATAR\b", r"\bgcse\b", r"\ba[\s-]?level\b",
-        r"\bsecondary\s?school\b",
-    ],
-    "corporate": [
-        r"\bcorporate\b", r"\boffice\b", r"\bwork\s?from\s?home\b", r"\bwfh\b",
-        r"\bteams\b", r"\bzoom\b", r"\boutlook\b", r"\bexcel\b", r"\bpresentation\b",
-        r"\bfor\s?work\b", r"\bwork\s?laptop\b", r"\bbusiness\b", r"\bprofessional\b",
-    ],
-    "job_hunter": [
-        r"\bjob\s?hunt\b", r"\binterview\b", r"\bnew\s?job\b", r"\bcareer\s?change\b",
-        r"\bjob\s?search\b", r"\bfreelance\b", r"\bstarting\s?a\s?new\s?job\b",
-    ],
-    "gamer": [
-        r"\bgaming\b", r"\bfps\b", r"\bgame\b", r"\bvalorant\b", r"\bfortnite\b",
-        r"\bcyberpunk\b", r"\bsteam\b", r"\belden\s?ring\b", r"\besports\b",
-        r"\bray\s?trac\b", r"\bdlss\b", r"\brefresh\s?rate\b",
-    ],
-    "creative": [
-        r"\bvideo\s?edit\b", r"\bcontent\s?creat\b", r"\byoutube\b", r"\bstreaming\b",
-        r"\bpremiere\b", r"\bdavinci\b", r"\bphotoshop\b", r"\bblender\b",
-        r"\bafter\s?effects\b", r"\bcolor\s?grad\b", r"\b4k\s?edit\b",
-    ],
-    "developer": [
-        r"\bai\s?engineer\b", r"\bml\s?engineer\b", r"\bdata\s?scientist\b",
-        r"\bpytorch\b", r"\btensorflow\b", r"\bcuda\b", r"\bdeep\s?learn\b",
-        r"\bmachine\s?learn\b", r"\bai\s?train\b", r"\bllm\s?train\b",
-        r"\bmodel\s?train\b", r"\bjupyter\b", r"\bnotebook\b",
-    ],
-    "engineer_student": [
-        r"\bengineering\s?student\b", r"\bautocad\b", r"\bsolidworks\b",
-        r"\bmatlab\b", r"\bfea\b", r"\bansys\b", r"\bmechanical\s?eng\b",
-        r"\bcivil\s?eng\b", r"\belectrical\s?eng\b",
-    ],
-    "traveler": [
-        r"\btravel\b", r"\bholiday\b", r"\bon\s?the\s?go\b", r"\bportable\b",
-        r"\blightweight\b", r"\bbackpack\b", r"\bcommut\b", r"\bairport\b",
-        r"\bdigital\s?nomad\b",
-    ],
-}
+
+@lru_cache(maxsize=8)
+def _persona_patterns_for(pid: str) -> dict[str, list[str]]:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("persona_patterns", profile_id=pid, default=None)
+    return {k: list(v) for k, v in raw.items()} if isinstance(raw, dict) and raw else {}
+
+
+def _active_persona_patterns() -> dict[str, list[str]]:
+    from src.app.platform.store_profile import active_profile_id
+    return _persona_patterns_for(active_profile_id())
+
+
+def reset_cache() -> None:
+    """Clear the per-profile persona-pattern cache (test isolation / profile reload)."""
+    try:
+        _persona_patterns_for.cache_clear()
+    except Exception:
+        pass
+
+
+# Back-compat module constant (electronics default) for direct importers (recommend.py
+# aliases it). Runtime detection uses the per-request accessor via the functions below.
+PERSONA_PATTERNS: dict[str, list[str]] = _persona_patterns_for("electronics")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -92,7 +71,7 @@ def detect_buyer_persona(query: str | None) -> str | None:
     if not q:
         return None
     best, best_score = None, 0
-    for persona, patterns in PERSONA_PATTERNS.items():
+    for persona, patterns in _active_persona_patterns().items():
         score = sum(1 for p in patterns if re.search(p, q, re.IGNORECASE))
         if score > best_score:
             best_score = score
@@ -107,7 +86,7 @@ def detect_buyer_persona_with_confidence(query: str | None) -> Tuple[str | None,
     scores: Dict[str, int] = {}
     best: str | None = None
     best_score = 0
-    for persona, patterns in PERSONA_PATTERNS.items():
+    for persona, patterns in _active_persona_patterns().items():
         score = sum(1 for p in patterns if re.search(p, q, re.IGNORECASE))
         if score > 0:
             scores[persona] = score
