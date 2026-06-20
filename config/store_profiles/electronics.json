@@ -844,5 +844,128 @@
     "windows": "(LOWER(p.name) NOT LIKE '%apple%' AND LOWER(p.name) NOT LIKE '%macbook%' AND LOWER(p.name) NOT LIKE '%imac%' AND LOWER(p.sku) NOT LIKE 'mb%')"
   },
 
+  "_persona_prompt_templates_comment": "ADAPTER (Phase 2A P1): ordered first-match rules -> persona-calibrated LLM prompt block. Match if buyer_persona in personas OR use_case in use_cases OR any substring in use_cases_contains. Excised verbatim from recommend_persona.build_persona_prompt_context.",
+  "persona_prompt_templates": [
+    {
+      "personas": [
+        "high_schooler"
+      ],
+      "use_cases": [
+        "high_school"
+      ],
+      "use_cases_contains": [],
+      "text": "Shopper: High school student (or a parent buying for them). Budget-conscious. Needs to survive a full school day.\nEmphasize: Battery life (8+ hours for school), how light and easy it is to carry, screen quality for reading and note-taking. A 2-in-1 or stylus support is a bonus.\nTone: Simple and reassuring — no jargon. Say 'lasts all day on one charge' not '60Wh'. Say 'easy to carry to school' not '1.4kg'. Mention homework, notes, and streaming.\nAvoid: Gaming GPU specs, benchmark numbers, enterprise language."
+    },
+    {
+      "personas": [
+        "student"
+      ],
+      "use_cases": [
+        "university_general"
+      ],
+      "use_cases_contains": [],
+      "text": "Shopper: University student. Balances lectures, research, socializing, and light media. Moderate budget.\nEmphasize: Portability + build quality (campus life is rough), battery for lecture days, enough RAM (16 GB) for browser tabs + note-taking + the occasional assignment crunch. A good keyboard matters.\nTone: Relatable and encouraging — say 'handles 20 browser tabs and Zoom at the same time without breaking a sweat'. Mention real uni workflows (Google Docs, research PDFs, Netflix between classes).\nAvoid: Heavy workstation specs. Keep it practical and fun."
+    },
+    {
+      "personas": [
+        "engineer_student"
+      ],
+      "use_cases": [
+        "engineering_student",
+        "computer_science_student"
+      ],
+      "use_cases_contains": [],
+      "text": "Shopper: Engineering / CS / architecture student. Runs simulation, CAD, or ML workloads that push hardware.\nEmphasize: RAM (32 GB strongly preferred — MATLAB, Docker, multiple VMs), dedicated GPU (even mid-range helps with CUDA / rendering), fast storage (SSD for large projects), build quality.\nTone: Technically literate but outcome-focused — say 'compiles large projects 3× faster' not 'Intel i7-13700H at 4.9 GHz'. Reference real tools: MATLAB, SolidWorks, Docker, VS Code with containers.\nAvoid: Generic 'fast processor' language. These students know what CUDA cores do."
+    },
+    {
+      "personas": [
+        "developer"
+      ],
+      "use_cases": [
+        "data_science"
+      ],
+      "use_cases_contains": [],
+      "text": "Shopper: Data scientist / AI-ML engineer. Trains models, runs Jupyter notebooks, maybe fine-tunes LLMs locally.\nEmphasize: GPU VRAM (12 GB+ for training), RAM (32-64 GB for large datasets), fast NVMe (dataset I/O), CUDA support (NVIDIA). A big display helps with notebooks.\nTone: Peer-level technical — say '12 GB VRAM lets you fine-tune 7B-param models locally', 'enough RAM to keep your entire dataset in memory'. Reference PyTorch, HuggingFace, Jupyter.\nAvoid: Basic office specs. This shopper needs GPU horsepower."
+    },
+    {
+      "personas": [
+        "creative"
+      ],
+      "use_cases": [],
+      "use_cases_contains": [
+        "content_creat",
+        "video_edit"
+      ],
+      "text": "Shopper: Content creator / video editor. Works in Premiere Pro, DaVinci Resolve, or After Effects. Color-accuracy matters.\nEmphasize: Color-accurate display (100% sRGB / DCI-P3), GPU for timeline preview (dedicated GPU strongly preferred), 32+ GB RAM (timeline scrubbing with effects), fast storage (proxy + export).\nTone: Creative-pro — say 'scrubs 4K timelines without dropping frames', 'colors you can trust for client work'. Mention real workflows: color grading, multicam, After Effects compositions.\nAvoid: Gaming-focused language (refresh rate, FPS). These shoppers care about color, not frames."
+    },
+    {
+      "personas": [
+        "gamer"
+      ],
+      "use_cases": [],
+      "use_cases_contains": [
+        "gaming"
+      ],
+      "text": "Shopper: Gamer. Performance per dollar is king. Wants smooth frame rates in the titles they play.\nEmphasize: GPU tier (name the chip and what it means for their games — e.g. '4060 handles 1080p high settings at 80+ FPS in most titles'), high-refresh display (120+ Hz), thermal design (sustained performance, not throttling). RAM 16 GB is the sweet spot.\nTone: Enthusiast but practical — say 'runs Cyberpunk at 60 FPS on High' not just 'RTX 4070'. Translate specs into FPS/resolution outcomes. Mention specific popular games if the query names them.\nAvoid: Battery life focus (gamers usually plug in). Avoid enterprise/office language."
+    },
+    {
+      "personas": [
+        "corporate"
+      ],
+      "use_cases": [
+        "business_professional",
+        "office_general",
+        "office_executive"
+      ],
+      "use_cases_contains": [],
+      "text": "Shopper: Business professional / corporate user. Productivity, reliability, and security trump raw performance.\nEmphasize: Reliability and build quality (ThinkPad-tier), manageability (TPM, vPro if relevant), battery for meeting-to-meeting days, keyboard comfort, display clarity for spreadsheets and presentations.\nTone: Professional and outcome-focused — say 'reliable enough you'll never miss a deadline', 'crisp display for hours of spreadsheet work'. Mention Teams, Outlook, multi-monitor setups.\nAvoid: Gaming specs, RGB lighting references. This is a tool purchase, not a toy."
+    },
+    {
+      "personas": [],
+      "use_cases": [
+        "office_finance"
+      ],
+      "use_cases_contains": [
+        "finance",
+        "accounting"
+      ],
+      "text": "Shopper: Finance / accounting professional. Lives in Excel, ERP systems, and multi-monitor setups.\nEmphasize: Keyboard comfort (numbers entry for hours), display clarity (dense spreadsheets), multi-monitor support (Thunderbolt/USB-C docking), 32 GB RAM (large workbooks with pivot tables + Power Query).\nTone: Efficiency-focused — say 'handles your largest workbooks without lag', 'connects to dual monitors with a single cable'. Mention Excel, Power BI, ERP systems.\nAvoid: GPU/gaming language. A discrete GPU is wasted spend here."
+    },
+    {
+      "personas": [],
+      "use_cases": [
+        "medical_student"
+      ],
+      "use_cases_contains": [],
+      "text": "Shopper: Medical student. Long study sessions, anatomy software, and clinical placement demands.\nEmphasize: Battery life (clinical placements without outlets), portability (ward rounds), display quality (anatomy diagrams and imaging), reliability.\nTone: Supportive and practical — say 'lasts through a full day on the ward', 'clear enough for detailed anatomy diagrams'. Mention Anki, anatomy apps, clinical databases.\nAvoid: Gaming specs. A discrete GPU is unnecessary for med school."
+    },
+    {
+      "personas": [],
+      "use_cases": [
+        "law_student"
+      ],
+      "use_cases_contains": [],
+      "text": "Shopper: Law student. Case briefs, legal research databases, long reading/writing sessions. Pure productivity.\nEmphasize: Battery life (long library sessions), keyboard comfort (typing-heavy work — briefs, essays, memos), display clarity (reading-heavy), reliability.\nTone: No-nonsense and direct. Say 'handles long case brief sessions without slowing down', 'comfortable to type on for hours'. Pure productivity focus.\nAvoid: GPU/gaming specs. A discrete GPU is wasted spend for a law student."
+    },
+    {
+      "personas": [
+        "traveler"
+      ],
+      "use_cases": [],
+      "use_cases_contains": [
+        "travel"
+      ],
+      "text": "Shopper: Frequent traveler. Works from airports, hotels, and client sites. Every gram and every hour of battery counts.\nEmphasize: Weight (lighter is always better), battery life (8+ hours real-world), build quality (bumps happen in transit), USB-C charging (one less adapter to carry).\nTone: Practical and liberating. Say 'light enough to forget you're carrying it', 'lasts through a long-haul flight', 'tough enough for carry-on life'. Mention USB-C charging if available.\nAvoid: Heavy workstation specs. Freedom from outlets and weight are the wins."
+    },
+    {
+      "personas": [
+        "job_hunter"
+      ],
+      "use_cases": [],
+      "use_cases_contains": [],
+      "text": "Shopper: Job hunter or career changer. Starting a new chapter — needs something professional-looking, reliable, and interview-ready.\nEmphasize: Professional build and appearance (makes an impression), reliability, webcam and microphone quality (video interviews), keyboard comfort.\nTone: Encouraging and practical. Say 'professional build for interviews and the first day on the job', 'reliable enough that it never lets you down in a crucial moment'.\nAvoid: Gaming specs. Focus on professionalism, reliability, and first impressions."
+    }
+  ],
+
   "cv_returns_pack": "electronics"
 }
