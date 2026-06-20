@@ -97,6 +97,13 @@ _VISION_EXECUTOR = _futures.ThreadPoolExecutor(
     thread_name_prefix="vision_worker",
 )
 
+# Module-level pool for async LLM narration (RECOMMEND_NARRATION_MODE=async): the deterministic
+# answer returns instantly; the slow LLM prose is computed here and fetched via /narration/{job_id}.
+_NARRATION_EXECUTOR = _futures.ThreadPoolExecutor(
+    max_workers=int(os.getenv("NARRATION_WORKER_THREADS", "2")),
+    thread_name_prefix="narration_worker",
+)
+
 router = APIRouter(prefix="/api/v1/recommend", tags=["recommend"])
 tracer = get_tracer("recommend-router")
 logger = logging.getLogger("shopsquire.recommend")
@@ -10622,6 +10629,17 @@ def suggest(
             assistant_message, llm_summary_job_id = None, None
             timing_breakdown["summary_ms"] = 0
             timing_breakdown["narration_pending"] = (_narr_mode == "async")
+            if _narr_mode == "async":
+                # Enqueue the LLM prose in the background; the client polls /narration/{job_id}.
+                try:
+                    from src.app.services.recommend_narration_jobs import submit_narration
+                    llm_summary_job_id = submit_narration(
+                        _NARRATION_EXECUTOR, redis, _summarize_results,
+                        query, list(results or []), dict(constraints or {}), _summ_model, trace_id,
+                        context_preamble=_combined_preamble, narration_inputs=narration_inputs,
+                    )
+                except Exception:
+                    llm_summary_job_id = None
         # 0.4 Grounded narration guard (flag: COMMERCE_NARRATION_GUARD). The LLM is
         # a narrator over evidence, not a source of truth — if it invents a
         # product/price/spec or parrots a quarantined payload, reject and fall back
@@ -11772,6 +11790,17 @@ def _build_sku_explanation_payload(
         "reason_summary": " ".join(reasons),
         "query": str(query or ""),
     }
+
+
+@router.get("/narration/{job_id}")
+def get_narration_job(job_id: str, redis=Depends(get_redis)) -> Dict[str, Any]:
+    """Poll an async-narration job (RECOMMEND_NARRATION_MODE=async). Returns
+    {status: pending|done|error, assistant_message}. Unknown/expired -> pending."""
+    from src.app.services.recommend_narration_jobs import get_narration
+    out = get_narration(redis, job_id)
+    if not isinstance(out, dict):
+        return {"status": "pending", "assistant_message": None}
+    return out
 
 
 @router.get("/why_product")
