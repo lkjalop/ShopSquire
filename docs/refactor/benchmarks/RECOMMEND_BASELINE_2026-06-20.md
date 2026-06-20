@@ -41,6 +41,14 @@ claim must be backed by a re-run of this artifact.
 - **Implication**: skipping/decoupling narration takes a text recommendation from ~5s → <150ms.
   This is the Tier 1 target and the single highest user-facing ROI.
 
-## Re-run after Tier 1
-Expect `route_total_ms` p50 to collapse toward `security_analysis_ms + rerank_ms` (~50–150ms) in
-`skip` mode, with `summary_ms` either absent (skip) or off the critical path (async).
+## Re-run after Tier 1 — MEASURED (skip mode, `30f0ea5`)
+`RECOMMEND_NARRATION_MODE=skip`, same in-process harness:
+
+| metric | blocking (baseline) | **skip** | change |
+|---|---|---|---|
+| route wall p50 | 5176 ms | **615 ms** | **~8.4× faster** |
+| route wall p95 | ~34.7 s | **1171 ms** | ~30× faster |
+| summary_ms | 4414 ms | **0** | LLM removed from path |
+
+Confirmed: skipping LLM narration collapses text latency from multi-second to sub-second, returning
+the deterministic grounded answer. Turn on with `RECOMMEND_NARRATION_MODE=skip` (or `async`).
