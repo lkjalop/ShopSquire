@@ -44,6 +44,9 @@ _CORE_MODULES = [
     # graduated from _PENDING_EXCISION 2026-06-20: entity NER patterns excised verbatim to
     # electronics.json `entity_*` slots; non-electronics verticals derive from their own data.
     "src/app/services/category_router.py",
+    # graduated from _PENDING_EXCISION 2026-06-20: accessory FAMILY taxonomy excised verbatim to
+    # electronics.json taxonomy slots; non-electronics verticals get UNK families (no bleed).
+    "src/app/services/product_taxonomy.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
@@ -75,21 +78,17 @@ def test_lint_actually_detects_flavour():
 
 
 # ── Pending-excision RATCHET ─────────────────────────────────────────
-# Decision-path modules with KNOWN transitional electronics flavour. These are cross-vertical
-# in INTENT (category_router routes laptop/kitchen/clothing/produce; product_taxonomy gates
-# accessory-vs-primary) but still hardcode electronics literals because the StoreProfile slots
-# that would replace them don't yet have parity:
-#   * category_router._BRAND_PATTERNS  — 14 brands incl. nvidia/amd/intel (components, not in
-#     profile `manufacturers`, which has 12 LAPTOP makers); _USE_CASE_PATTERNS — 9 use-cases,
-#     6 absent from profile `use_case_patterns` (which also renames office/study). A blind swap
-#     would regress electronics brand/use-case detection, so parity must be built FIRST.
-#   * product_taxonomy._FAMILY_KEYWORDS — accessory-family keywords incl. laptop-brand tokens.
-# RATCHET DOWN ONLY — distinct flavour-token count may shrink but never grow. When a baseline
-# reaches 0, move the module into _CORE_MODULES.
-_PENDING_EXCISION = {
-    # category_router GRADUATED to _CORE_MODULES 2026-06-20 (entity_* slots → electronics.json).
-    "src/app/services/product_taxonomy.py": 2,
-}
+# Decision-path modules with KNOWN transitional electronics flavour: cross-vertical in INTENT
+# but still hardcoding electronics literals. Their distinct flavour-token count is recorded and
+# may only move DOWN (new flavour cannot be added; every excision pass lowers the baseline). At
+# 0 the module graduates to _CORE_MODULES (zero-tolerance).
+#
+# Currently EMPTY — both initial entries graduated 2026-06-20:
+#   * category_router  → entity_* slots in electronics.json (electronics byte-identical, no bleed)
+#   * product_taxonomy → accessory-taxonomy slots in electronics.json (electronics byte-identical)
+# Add a module here when a new transitional-flavour island is identified (e.g. when excising a
+# decision-path module whose profile-slot parity can't be built in the same pass).
+_PENDING_EXCISION: dict[str, int] = {}
 
 
 def _distinct_flavour_count(module: str) -> int:

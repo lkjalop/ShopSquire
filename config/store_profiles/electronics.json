@@ -528,5 +528,185 @@
     "tablet"
   ],
 
+  "_accessory_taxonomy_comment": "Accessory FAMILY taxonomy (family codes / SKU-prefix map / keyword + slug maps / type->family) excised VERBATIM from services/product_taxonomy.py so that module is vertical-blind. Non-electronics verticals that define no taxonomy slots get UNK families (no electronics-accessory bleed); they can add their own family taxonomy later.",
+  "accessory_families": [
+    "ACC",
+    "BAG",
+    "COOL",
+    "HEAD",
+    "MON",
+    "PERIPH"
+  ],
+  "sku_prefix_family": {
+    "LAP": "LAP",
+    "ACC": "ACC",
+    "PERIPH": "PERIPH",
+    "HEAD": "HEAD",
+    "MON": "MON",
+    "COOL": "COOL",
+    "BAG": "BAG"
+  },
+  "family_keywords": {
+    "LAP": [
+      "laptop",
+      "notebook",
+      "macbook",
+      "ultrabook",
+      "chromebook",
+      "copilot+ pc",
+      "copilot pc"
+    ],
+    "PERIPH": [
+      "mouse",
+      "keyboard",
+      "keypad",
+      "trackpad",
+      "keyboard_mouse_combo",
+      "gaming_mouse"
+    ],
+    "HEAD": [
+      "headset",
+      "headphone",
+      "headphones",
+      "earbuds",
+      "earphones",
+      "microphone",
+      "speaker"
+    ],
+    "MON": [
+      "monitor",
+      "display",
+      "portable monitor"
+    ],
+    "BAG": [
+      "sleeve",
+      "backpack",
+      "bag",
+      "case",
+      "messenger",
+      "carry"
+    ],
+    "COOL": [
+      "cooling pad",
+      "cooler",
+      "laptop stand",
+      "stand",
+      "ergonomic riser"
+    ],
+    "ACC": [
+      "dock",
+      "docking",
+      "hub",
+      "adapter",
+      "charger",
+      "charging cable",
+      "power bank",
+      "stylus",
+      "external ssd",
+      "ssd",
+      "card reader",
+      "audio interface",
+      "warranty",
+      "screen protector",
+      "cleaning kit",
+      "color calibrator"
+    ]
+  },
+  "accessory_slug_keywords": {
+    "screen_protector": [
+      "screen protector"
+    ],
+    "cleaning_kit": [
+      "cleaning kit"
+    ],
+    "laptop_sleeve": [
+      "laptop sleeve",
+      "sleeve"
+    ],
+    "usb_hub": [
+      "usb hub",
+      "usb-c hub",
+      "hub"
+    ],
+    "dock": [
+      "dock",
+      "docking station"
+    ],
+    "monitor": [
+      "monitor",
+      "portable monitor"
+    ],
+    "keyboard_mouse_combo": [
+      "keyboard_mouse_combo",
+      "keyboard + mouse",
+      "keyboard mouse combo"
+    ],
+    "compact_charger": [
+      "compact charger",
+      "charger"
+    ],
+    "power_bank": [
+      "power bank"
+    ],
+    "headset": [
+      "headset"
+    ],
+    "mouse": [
+      "mouse"
+    ],
+    "external_ssd": [
+      "external ssd"
+    ],
+    "stylus": [
+      "stylus",
+      "pen"
+    ],
+    "color_calibrator": [
+      "color calibrator"
+    ],
+    "extra_charging_cable": [
+      "charging cable",
+      "usb-c cable"
+    ],
+    "laptop_stand": [
+      "laptop stand",
+      "stand"
+    ],
+    "cooling_pad": [
+      "cooling pad"
+    ],
+    "gaming_mouse": [
+      "gaming mouse"
+    ],
+    "extended_warranty": [
+      "extended warranty",
+      "warranty"
+    ],
+    "card_reader": [
+      "card reader"
+    ],
+    "audio_interface": [
+      "audio interface"
+    ],
+    "headphones": [
+      "headphones",
+      "headphone"
+    ]
+  },
+  "type_to_family": {
+    "laptop": "LAP",
+    "monitor": "MON",
+    "bag": "BAG",
+    "audio": "HEAD",
+    "storage": "ACC"
+  },
+  "fallback_family_order": [
+    "COOL",
+    "BAG",
+    "ACC",
+    "PERIPH",
+    "HEAD"
+  ],
+
   "cv_returns_pack": "electronics"
 }
