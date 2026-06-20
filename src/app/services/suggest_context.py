@@ -64,6 +64,9 @@ class SuggestContext:
     # ── Timing ───────────────────────────────────────────────────────────────
     timing_breakdown: Dict[str, Any] = field(default_factory=lambda: {"ollama_summary_ms": None})
 
+    # ── Fraud / risk ─────────────────────────────────────────────────────────
+    fraud_summary: Dict[str, Any] = field(default_factory=dict)
+
 
 def parse_image_inputs(
     *,

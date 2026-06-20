@@ -4093,7 +4093,13 @@ def suggest(
         _CURRENT_QUERY_CTX.set(query or "")
     except Exception:
         pass
-    timing_breakdown: Dict[str, Any] = {"ollama_summary_ms": None}
+    # SuggestContext adoption (Pass 1): the shared state bag. timing_breakdown lives on the ctx
+    # and the local name is an ALIAS to the same dict (mutated in-place everywhere), so behaviour
+    # is byte-identical. fraud_summary (reassigned in its block below) is synced onto the ctx after
+    # it is built. Later passes migrate image_context/kv_out/structured_state_out/nlp/constraints.
+    from src.app.services.suggest_context import SuggestContext as _SuggestContext
+    _ctx = _SuggestContext()
+    timing_breakdown: Dict[str, Any] = _ctx.timing_breakdown
     span = trace.get_current_span()
     try:
         uid_hash = hash_uid(uid)  # centralized salted pseudonym (was local sha256[:12])
@@ -5235,6 +5241,8 @@ def suggest(
     except (TypeError, ValueError, RuntimeError, ImportError) as exc:
         _trace_system_error(trace_id=trace_id, stage="fraud_summary.build", exc=exc)
         fraud_summary = {}
+    # SuggestContext adoption (Pass 1): mirror the finalized fraud_summary onto the ctx.
+    _ctx.fraud_summary = fraud_summary
 
     budget = TokenBudget(redis)
     tier = infer_tier(uid)
