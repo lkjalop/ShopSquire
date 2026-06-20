@@ -3,7 +3,7 @@
 **Status**: Living document — updated as passes land.  
 **Last updated**: 2026-06-20  
 **Branch**: `wip/docker-real-env-20260213`  
-**Monolith size**: 12,147 lines total (~11,686 non-blank) — down from ~13,500 at sprint start. Phase 2A COMPLETE (5/5); NQE DUP-5 input-builder drift fixed (a6fab44); SuggestContext adoption Pass 1 landed (5999b74: timing_breakdown + fraud_summary).
+**Monolith size**: 12,175 lines total (~11,713 non-blank). Trajectory: 2,759 (2026-02-13 initial) → **14,748 PEAK (2026-06-18, fd7b523a)** → 12,175 today = ~2,573 lines (~17%) removed via strangler extraction + agnostic excisions. The BULK reduction (→<7k, →<4k) is still pending in phase extraction (#5), now unblocked by SuggestContext. Phase 2A COMPLETE (5/5); NQE DUP-5 fixed (a6fab44); SuggestContext adoption COMPLETE — Passes 1-5 (5999b74/bc21abe/e59c25c/2e25321): all 7 hidden dicts on the ctx.
 
 ---
 
