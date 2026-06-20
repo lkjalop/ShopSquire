@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from typing import Any, Dict, List
 
 
@@ -95,13 +96,95 @@ def _result_price_dollars(row: Dict[str, Any] | None) -> float | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ADAPTER — Electronics-specific spec extraction.
-# Parses laptop/electronics product fields. The regex patterns, field names,
-# and token lists ("rtx", "rog", "tuf", "legion") are all electronics-specific.
-# Phase 2: replace with StoreProfile["spec_extraction_rules"].
+# CORE — Generic spec extraction driven by StoreProfile["spec_extraction_rules"].
+# A vertical defines numeric fields (spec_key + ordered regex patterns) and boolean
+# flags (token presence). Verticals WITHOUT the slot fall back to the electronics
+# inline parser below (byte-identical, zero risk) — that inline parser is the
+# electronics ADAPTER until/unless it too migrates to rules behind the parity grid.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@lru_cache(maxsize=8)
+def _spec_extraction_rules_for(pid: str):
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("spec_extraction_rules", profile_id=pid, default=None)
+    if not isinstance(raw, dict):
+        return None
+    numeric = []
+    for r in raw.get("numeric") or []:
+        out = r.get("out")
+        if not out:
+            continue
+        pats = [
+            (re.compile(p["regex"], re.IGNORECASE), int(p.get("group", 1)), float(p.get("scale", 1.0)))
+            for p in (r.get("patterns") or [])
+            if isinstance(p, dict) and p.get("regex")
+        ]
+        numeric.append((out, r.get("spec_key"), pats))
+    flags = [
+        (f.get("out"), tuple(str(t).lower() for t in (f.get("any") or [])))
+        for f in (raw.get("flags") or [])
+        if isinstance(f, dict) and f.get("out")
+    ]
+    return {"numeric": numeric, "flags": flags}
+
+
+def reset_cache() -> None:
+    """Clear the per-profile spec-extraction-rules cache (test isolation / reload)."""
+    _spec_extraction_rules_for.cache_clear()
+
+
+def _candidate_text_blob(candidate: Dict[str, Any], specs: Dict[str, Any]) -> str:
+    return " ".join(
+        [
+            str(candidate.get("name") or ""),
+            " ".join(str(x) for x in (candidate.get("features") or []) if x is not None),
+            json.dumps(specs, ensure_ascii=False, default=str),
+        ]
+    ).lower()
+
+
+def _specs_from_rules(candidate: Dict[str, Any], rules: dict) -> Dict[str, Any]:
+    specs = candidate.get("specs") if isinstance(candidate.get("specs"), dict) else {}
+    text = _candidate_text_blob(candidate, specs)
+
+    def _as_float(value: Any) -> float | None:
+        try:
+            if value is None or value == "":
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    out: Dict[str, Any] = {}
+    for out_key, spec_key, pats in rules["numeric"]:
+        val = _as_float(specs.get(spec_key)) if spec_key else None
+        if val is None:
+            for rx, grp, scale in pats:
+                m = rx.search(text)
+                if m:
+                    try:
+                        val = float(m.group(grp)) * scale
+                    except Exception:
+                        val = None
+                    break
+        out[out_key] = val
+    for out_key, toks in rules["flags"]:
+        out[out_key] = any(t in text for t in toks)
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADAPTER — Electronics-specific spec extraction (inline fallback).
+# Used only when the active profile defines no spec_extraction_rules. Parses
+# laptop/electronics fields; the regexes/token lists are electronics flavour.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _extract_candidate_numeric_specs(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    from src.app.platform.store_profile import active_profile_id
+    _rules = _spec_extraction_rules_for(active_profile_id())
+    if _rules is not None:
+        return _specs_from_rules(candidate, _rules)
+
     specs = candidate.get("specs") if isinstance(candidate.get("specs"), dict) else {}
     text = " ".join(
         [

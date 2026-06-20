@@ -208,5 +208,77 @@
     ]
   },
 
+  "_spec_extraction_rules_comment": "ADAPTER (Phase 2A): vertical spec metrics for ranking. numeric=spec_key+regex patterns; flags=token presence. Consumed by recommend_utils._extract_candidate_numeric_specs + ranking_rules.",
+  "spec_extraction_rules": {
+    "numeric": [],
+    "flags": [
+      {
+        "out": "warm",
+        "any": [
+          "wool",
+          "merino",
+          "fleece",
+          "down",
+          "insulated",
+          "thermal",
+          "sherpa",
+          "puffer",
+          "quilted"
+        ]
+      },
+      {
+        "out": "breathable",
+        "any": [
+          "linen",
+          "cotton",
+          "mesh",
+          "breathable",
+          "moisture",
+          "wicking"
+        ]
+      },
+      {
+        "out": "waterproof",
+        "any": [
+          "waterproof",
+          "gore-tex",
+          "gore tex",
+          "rain",
+          "water-resistant",
+          "water resistant"
+        ]
+      },
+      {
+        "out": "formal",
+        "any": [
+          "suit",
+          "blazer",
+          "formal",
+          "dress shirt",
+          "tailored",
+          "tuxedo"
+        ]
+      },
+      {
+        "out": "athletic",
+        "any": [
+          "athletic",
+          "performance",
+          "sport",
+          "gym",
+          "compression",
+          "activewear"
+        ]
+      },
+      {
+        "out": "lightweight",
+        "any": [
+          "lightweight",
+          "packable"
+        ]
+      }
+    ]
+  },
+
   "cv_returns_pack": "electronics"
 }

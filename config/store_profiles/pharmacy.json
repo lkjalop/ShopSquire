@@ -236,5 +236,58 @@
     ]
   },
 
+  "_spec_extraction_rules_comment": "ADAPTER (Phase 2A): vertical spec metrics for ranking. numeric=spec_key from structured catalog specs; flags=token presence in name/specs. Consumed by recommend_utils._extract_candidate_numeric_specs + ranking_rules.",
+  "spec_extraction_rules": {
+    "numeric": [
+      {
+        "out": "strength_mg",
+        "spec_key": "strength_mg",
+        "patterns": []
+      },
+      {
+        "out": "pack_size",
+        "spec_key": "pack_size",
+        "patterns": []
+      }
+    ],
+    "flags": [
+      {
+        "out": "non_drowsy",
+        "any": [
+          "non-drowsy",
+          "non drowsy",
+          "daytime"
+        ]
+      },
+      {
+        "out": "fast_acting",
+        "any": [
+          "fast acting",
+          "fast-acting",
+          "rapid",
+          "express"
+        ]
+      },
+      {
+        "out": "childrens",
+        "any": [
+          "children",
+          "kids",
+          "infant",
+          "paediatric",
+          "pediatric",
+          "junior"
+        ]
+      },
+      {
+        "out": "sugar_free",
+        "any": [
+          "sugar free",
+          "sugar-free"
+        ]
+      }
+    ]
+  },
+
   "cv_returns_pack": "electronics"
 }
