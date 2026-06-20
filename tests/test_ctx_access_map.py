@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 
-from scripts.ctx_access_map import DEFAULT_TRACKED, analyze_range, reads_after
+from scripts.ctx_access_map import DEFAULT_TRACKED, analyze_range, io_contract, reads_after
 
 SRC = (
     "def suggest():\n"                 # 1
@@ -45,3 +45,22 @@ def test_clean_boundary_when_no_downstream_read():
     # fraud_summary is written in-range but never read after -> safe to move.
     after = reads_after(_tree(), 7, 8, {"fraud_summary"})
     assert "fraud_summary" not in after
+
+
+_IO_SRC = (
+    "def suggest():\n"               # 1
+    "    a = 1\n"                    # 2  set before range
+    "    b = a + 1\n"                # 3  RANGE start: reads a (input), sets b
+    "    c = b + 1\n"                # 4  sets c (used after) -> output
+    "    d = 9\n"                    # 5  RANGE end: sets d (NOT used after) -> not output
+    "    e = c + 1\n"                # 6  after: reads c
+)
+
+
+def test_io_contract_inputs_and_outputs():
+    import ast as _ast
+    tree = _ast.parse(_IO_SRC)
+    fn = tree.body[0]
+    inputs, outputs = io_contract(tree, fn, 3, 5)
+    assert inputs == ["a"]          # read in-range, assigned before
+    assert outputs == ["c"]         # assigned in-range, read after; d is dropped (unused after)

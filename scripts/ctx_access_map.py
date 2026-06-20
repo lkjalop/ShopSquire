@@ -91,6 +91,49 @@ def reads_after(tree: ast.AST, after: int, end_of_fn: int, names: Set[str]) -> D
     return first
 
 
+def _assigned_names(node: ast.AST) -> Set[str]:
+    out: Set[str] = set()
+    for t in (node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []):
+        for sub in ast.walk(t):
+            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+                out.add(sub.id)
+    return out
+
+
+def io_contract(tree: ast.AST, fn: ast.AST, lo: int, hi: int):
+    """True I/O of a candidate stage for ANY local (not just the tracked dicts).
+
+    inputs  = names read in-range that were assigned before the range (the stage needs them).
+    outputs = names assigned in-range that are read after the range (downstream needs them).
+    A clean terminal stage has few/zero outputs.
+    """
+    fn_end = getattr(fn, "end_lineno", 1 << 30)
+    assigned_before: Set[str] = set()
+    assigned_in: Set[str] = set()
+    read_in: Set[str] = set()
+    read_after: Set[str] = set()
+    all_assigned: Set[str] = set()
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            names = _assigned_names(node)
+            all_assigned |= names
+            ln = getattr(node, "lineno", -1)
+            if ln < lo:
+                assigned_before |= names
+            elif lo <= ln <= hi:
+                assigned_in |= names
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            ln = getattr(node, "lineno", -1)
+            if lo <= ln <= hi:
+                read_in.add(node.id)
+            elif hi < ln <= fn_end:
+                read_after.add(node.id)
+    # restrict to data-flow names (assigned somewhere in the fn) to cut import/builtin noise
+    inputs = sorted((read_in & assigned_before) & all_assigned)
+    outputs = sorted((assigned_in & read_after) & all_assigned)
+    return inputs, outputs
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("file")
@@ -114,11 +157,19 @@ def main() -> int:
     written = acc.mutated | acc.rebound
     after = reads_after(tree, args.end, fn_end, written)
     if after:
-        print("  ⚠ written-here & read-after (downstream depends on this range running first):")
+        print("  ⚠ tracked fields written-here & read-after:")
         for nm, ln in sorted(after.items(), key=lambda kv: kv[1]):
             print(f"      {nm}: first read again at L{ln}")
     else:
-        print("  ✓ no downstream reads of fields written here — boundary is clean to extract")
+        print("  ✓ no downstream reads of tracked fields written here")
+
+    # True I/O contract over ALL locals (the real extraction surface)
+    if fn is not None:
+        inputs, outputs = io_contract(tree, fn, args.start, args.end)
+        print(f"  INPUTS  (read here, set before) : {inputs}")
+        print(f"  OUTPUTS (set here, read after)  : {outputs}")
+        print(f"  → stage signature: run_stage(ctx, {', '.join(inputs)[:80]}...) -> ({', '.join(outputs)[:80]}...)")
+        print(f"  → cleanliness: {len(outputs)} crossing outputs ({'CLEAN' if len(outputs)<=3 else 'COUPLED'})")
     return 0
 
 
