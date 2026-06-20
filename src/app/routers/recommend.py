@@ -4521,6 +4521,12 @@ def suggest(
             image_context = {}
             image_cv_signals_parsed = {}
 
+    # SuggestContext adoption (Pass 2): image_context is now finalized (parsed + feature-stripped;
+    # last rebind above). Bind it onto the ctx by reference — the ~11 downstream in-place mutations
+    # then flow into the ctx, making it the live carrier for the rest of suggest(). The fast-path
+    # below returns early using its own _fast_path_image_context and does not read the ctx.
+    _ctx.image_context = image_context
+
     if fast_path_enabled:
         return _with_trace(_fast_path_catalog_recommendation(
             db=db,

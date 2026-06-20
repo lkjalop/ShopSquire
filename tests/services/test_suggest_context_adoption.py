@@ -38,3 +38,15 @@ def test_fraud_summary_sync_semantics():
     fraud_summary = {"score": 0.9, "level": "high"}  # a fresh local (rebind)
     ctx.fraud_summary = fraud_summary
     assert ctx.fraud_summary["level"] == "high"
+
+
+def test_image_context_live_carrier_semantics():
+    # Pass 2: after suggest() binds ctx.image_context = image_context (post-strip), downstream
+    # in-place mutations on the local flow into the ctx (same object).
+    ctx = SuggestContext()
+    image_context = {"labels": ["laptop"], "ocr": "x"}  # finalized local (rebind)
+    ctx.image_context = image_context  # bind by reference
+    image_context["product_identity"] = {"brand": "lenovo"}  # downstream in-place mutation
+    image_context.pop("ocr", None)
+    assert ctx.image_context["product_identity"] == {"brand": "lenovo"}
+    assert "ocr" not in ctx.image_context
