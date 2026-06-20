@@ -231,5 +231,302 @@
     "tablet":  ["bag","audio","storage","peripheral"]
   },
 
+  "_entity_comment": "Entity-NER slots (category/brand/use-case/spec patterns + image-label map) excised VERBATIM from services/category_router.py so that module is vertical-blind. Non-electronics verticals derive these from their own manufacturers/use_case_patterns/product_type_rules via the accessor fallbacks.",
+  "entity_category_patterns": [
+    [
+      "fresh_produce",
+      [
+        "\\bfruit\\b",
+        "\\bapple\\b",
+        "\\bbanana\\b",
+        "\\borange\\b",
+        "\\bpear\\b",
+        "\\bmango\\b",
+        "\\bgrape\\b",
+        "\\bmelon\\b",
+        "\\bberry\\b",
+        "\\bstrawberry\\b",
+        "\\bblueberry\\b",
+        "\\braspberry\\b",
+        "\\bavocado\\b",
+        "\\bvegetable\\b",
+        "\\blettuce\\b",
+        "\\bspinach\\b",
+        "\\bbroccoli\\b",
+        "\\bcarrot\\b",
+        "\\bcabbage\\b",
+        "\\bcauliflower\\b",
+        "\\btomato\\b",
+        "\\bcucumber\\b",
+        "\\bonion\\b",
+        "\\bpotato\\b",
+        "\\bpumpkin\\b",
+        "\\bproduce\\b",
+        "\\bgrocery\\b",
+        "\\bfresh\\s?produce\\b"
+      ]
+    ],
+    [
+      "laptop",
+      [
+        "\\blaptops?\\b",
+        "\\bnotebooks?\\b",
+        "\\bultrabook\\b",
+        "\\bmacbook\\b",
+        "\\bchromebook\\b",
+        "\\bthinkpad\\b",
+        "\\bideapad\\b",
+        "\\blegion\\b",
+        "\\bmsi\\b",
+        "\\brazer\\b",
+        "\\balienware\\b",
+        "\\bomen\\b",
+        "\\bvivobook\\b",
+        "\\bzenbook\\b",
+        "\\brog\\b",
+        "\\btuf\\b",
+        "\\bspectre\\b",
+        "\\benvy\\b",
+        "\\bvictus\\b",
+        "\\bgaming\\s+laptop\\b",
+        "\\bgaming\\s+notebook\\b"
+      ]
+    ],
+    [
+      "desktop",
+      [
+        "\\bdesktop\\b",
+        "\\bgaming\\s?pc\\b",
+        "\\btower\\b",
+        "\\bmini\\s?pc\\b"
+      ]
+    ],
+    [
+      "phone",
+      [
+        "\\bphone\\b",
+        "\\bsmartphone\\b",
+        "\\biphone\\b",
+        "\\bgalaxy\\b",
+        "\\bpixel\\b",
+        "\\bmobile\\b"
+      ]
+    ],
+    [
+      "tablet",
+      [
+        "\\btablet\\b",
+        "\\bipad\\b",
+        "\\bgalaxy\\s?tab\\b"
+      ]
+    ],
+    [
+      "monitor",
+      [
+        "\\bmonitor\\b",
+        "\\bdisplay\\b",
+        "\\bscreen\\b"
+      ]
+    ],
+    [
+      "kitchen",
+      [
+        "\\bkitchen\\b",
+        "\\bmixer\\b",
+        "\\bblender\\b",
+        "\\btoaster\\b",
+        "\\bmicrowave\\b",
+        "\\bfridge\\b",
+        "\\brefrigerator\\b",
+        "\\bdishwasher\\b",
+        "\\boven\\b",
+        "\\bcoffee\\s?maker\\b",
+        "\\bair\\s?fryer\\b"
+      ]
+    ],
+    [
+      "furniture",
+      [
+        "\\bsofa\\b",
+        "\\bcouch\\b",
+        "\\bbed\\b",
+        "\\bmattress\\b",
+        "\\bdesk\\b",
+        "\\bchair\\b",
+        "\\bbookshelf\\b",
+        "\\bwardrobe\\b",
+        "\\btable\\b"
+      ]
+    ],
+    [
+      "clothing",
+      [
+        "\\bshirt\\b",
+        "\\bt-?shirt\\b",
+        "\\bjacket\\b",
+        "\\bdress\\b",
+        "\\bshoes?\\b",
+        "\\bsneaker\\b",
+        "\\bjeans\\b",
+        "\\bpants\\b",
+        "\\bskirt\\b",
+        "\\bcoat\\b",
+        "\\bsweater\\b",
+        "\\bhoodie\\b",
+        "\\bboots?\\b"
+      ]
+    ],
+    [
+      "tv",
+      [
+        "\\btelevision\\b",
+        "\\btv\\b",
+        "\\boled\\b",
+        "\\bqled\\b",
+        "\\bsoundbar\\b"
+      ]
+    ],
+    [
+      "accessory",
+      [
+        "\\bkeyboard\\b",
+        "\\bmouse\\b",
+        "\\bcharger\\b",
+        "\\badapter\\b",
+        "\\bdock\\b",
+        "\\bheadset\\b",
+        "\\bearbuds?\\b",
+        "\\bheadphone\\b",
+        "\\bwebcam\\b",
+        "\\bspeaker\\b"
+      ]
+    ]
+  ],
+  "entity_image_label_map": {
+    "fruit": "fresh_produce",
+    "apple": "fresh_produce",
+    "banana": "fresh_produce",
+    "orange": "fresh_produce",
+    "pear": "fresh_produce",
+    "mango": "fresh_produce",
+    "grape": "fresh_produce",
+    "strawberry": "fresh_produce",
+    "blueberry": "fresh_produce",
+    "raspberry": "fresh_produce",
+    "avocado": "fresh_produce",
+    "vegetable": "fresh_produce",
+    "lettuce": "fresh_produce",
+    "spinach": "fresh_produce",
+    "broccoli": "fresh_produce",
+    "carrot": "fresh_produce",
+    "cabbage": "fresh_produce",
+    "cauliflower": "fresh_produce",
+    "tomato": "fresh_produce",
+    "cucumber": "fresh_produce",
+    "onion": "fresh_produce",
+    "potato": "fresh_produce",
+    "produce": "fresh_produce",
+    "grocery": "fresh_produce",
+    "laptop": "laptop",
+    "notebook": "laptop",
+    "keyboard": "accessory",
+    "msi": "laptop",
+    "razer": "laptop",
+    "alienware": "laptop",
+    "rog": "laptop",
+    "tuf gaming": "laptop",
+    "vivobook": "laptop",
+    "spectre": "laptop",
+    "envy": "laptop",
+    "victus": "laptop",
+    "gaming laptop": "laptop",
+    "gaming notebook": "laptop",
+    "phone": "phone",
+    "cell phone": "phone",
+    "smartphone": "phone",
+    "television": "tv",
+    "tv": "tv",
+    "monitor": "monitor",
+    "sofa": "furniture",
+    "couch": "furniture",
+    "bed": "furniture",
+    "shirt": "clothing",
+    "dress": "clothing",
+    "shoe": "clothing",
+    "refrigerator": "kitchen",
+    "oven": "kitchen",
+    "microwave": "kitchen"
+  },
+  "entity_brand_patterns": {
+    "apple": "\\b(apple|macbook|iphone|ipad|airpods?|imac)\\b",
+    "samsung": "\\b(samsung|galaxy)\\b",
+    "dell": "\\b(dell|xps|inspiron|latitude|alienware)\\b",
+    "hp": "\\b(hp|pavilion|envy|spectre|omen|elitebook)\\b",
+    "lenovo": "\\b(lenovo|thinkpad|ideapad|legion|yoga)\\b",
+    "asus": "\\b(asus|rog|zenbook|vivobook|tuf)\\b",
+    "acer": "\\b(acer|aspire|predator|nitro|swift)\\b",
+    "microsoft": "\\b(microsoft|surface)\\b",
+    "google": "\\b(google|pixel|chromebook)\\b",
+    "sony": "\\b(sony|playstation|bravia)\\b",
+    "lg": "\\blg\\b",
+    "nvidia": "\\b(nvidia|geforce|rtx|gtx)\\b",
+    "amd": "\\b(amd|ryzen|radeon)\\b",
+    "intel": "\\b(intel|core\\s?i[3579])\\b"
+  },
+  "entity_use_case_patterns": {
+    "gaming": "\\b(gaming|gamer|game|esports?|fps)\\b",
+    "video_editing": "\\b(video\\s?edit|premiere|davinci|final\\s?cut|render)\\b",
+    "programming": "\\b(coding|programming|developer|IDE|compil)\\b",
+    "business": "\\b(business|office|enterprise|corporate|professional)\\b",
+    "student": "\\b(student|school|university|college|homework)\\b",
+    "creative": "\\b(creative|design|photo|illustrat|photoshop)\\b",
+    "streaming": "\\b(stream|twitch|youtube|content\\s?creat)\\b",
+    "travel": "\\b(travel|portable|lightweight|on\\s?the\\s?go|commut)\\b",
+    "home_office": "\\b(home\\s?office|work\\s?from\\s?home|remote\\s?work|wfh)\\b"
+  },
+  "entity_spec_patterns": [
+    [
+      "ram",
+      "gb",
+      "\\b(\\d+)\\s?(?:gb?\\s?)?ram\\b"
+    ],
+    [
+      "storage",
+      "gb",
+      "\\b(\\d+)\\s?(?:gb|tb)\\s?(?:ssd|nvme|storage|hdd|hard\\s?drive)\\b"
+    ],
+    [
+      "screen_size",
+      "inches",
+      "\\b(\\d{2}(?:\\.\\d)?)[- ]?(?:in(?:ch)?|\\\")\\b"
+    ],
+    [
+      "weight",
+      "lbs",
+      "\\b(\\d+(?:\\.\\d+)?)\\s?(?:lbs?|pounds?|kg)\\b"
+    ],
+    [
+      "battery",
+      "hours",
+      "\\b(\\d+)\\s?(?:hr|hour|battery)\\b"
+    ]
+  ],
+  "entity_category_preference": [
+    "laptop",
+    "phone",
+    "tablet",
+    "monitor",
+    "accessory",
+    "fresh_produce"
+  ],
+  "entity_template_banks": [
+    "clothing",
+    "kitchen",
+    "furniture",
+    "tv",
+    "phone",
+    "tablet"
+  ],
+
   "cv_returns_pack": "electronics"
 }

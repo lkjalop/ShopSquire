@@ -41,6 +41,9 @@ _CORE_MODULES = [
     "src/app/platform/tenant_registry.py",
     "src/app/services/recommend_narration_stage.py",
     "src/app/services/suggest_context.py",
+    # graduated from _PENDING_EXCISION 2026-06-20: entity NER patterns excised verbatim to
+    # electronics.json `entity_*` slots; non-electronics verticals derive from their own data.
+    "src/app/services/category_router.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
@@ -84,7 +87,7 @@ def test_lint_actually_detects_flavour():
 # RATCHET DOWN ONLY — distinct flavour-token count may shrink but never grow. When a baseline
 # reaches 0, move the module into _CORE_MODULES.
 _PENDING_EXCISION = {
-    "src/app/services/category_router.py": 16,
+    # category_router GRADUATED to _CORE_MODULES 2026-06-20 (entity_* slots → electronics.json).
     "src/app/services/product_taxonomy.py": 2,
 }
 
