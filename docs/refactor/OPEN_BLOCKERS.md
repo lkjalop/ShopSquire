@@ -111,6 +111,35 @@ These exist because earlier strangler passes added the helper but didn't replace
 
 **Quick win**: replace each inline block with a call to the existing module. **Estimated savings: ~500 lines**, zero new modules created.
 
+### Verified status — 2026-06-20 (the quick win is mostly already done)
+
+A line-by-line verification (line numbers in the table above are STALE — content shifted
+~200 lines) found the Pass 9a–10 stream already resolved most of these:
+
+| # | Verified state | Evidence |
+|---|---|---|
+| DUP-1 | **Data deduped** — patterns now profile-backed `_brand_label_patterns()` (recommend.py L6214). Remaining inline loop (L6226-L6260: Apple hard-lock, trace logging) has **no equivalent module function** to call; deduping it means *creating* one (contradicts "no new files"). | L6214 `_BRAND_LABEL_PATTERNS = _brand_label_patterns()  # excised → StoreProfile` |
+| DUP-2 | **✅ DONE** — `_detect_buyer_persona_with_confidence` (L2320) is a one-line thin wrapper to `recommend_persona`. No inline regex remains. | L2320-L2321 |
+| DUP-3 | **✅ DONE** — budget extraction is the module call `_extract_explicit_budget_override` (L5848); module imported L3788. | L5848, L3788-L3793 |
+| DUP-4 | **NOT a duplicate** — L5810-L5883 is bespoke session-slot glue (merge prior-turn `nqe_answered_fields` + confirmed_slots into constraints). `RecommendNQEHooks`/`run_recommend_nqe_stage` do not do this. Nothing to call. | L5810-L5883 vs recommend_nqe_stage.py L46-L85 |
+| DUP-5 | **Real, but NOT a quick win** — the open-ended early-return block (L7464-L7600+) is a *second* NQE path that early-returns with no products. Consolidating it into `run_recommend_nqe_stage` (L10231) is a **medium-risk behavioural merge** needing a `RecommendStageState` build + early-return preservation — i.e. F-series work, gated on the golden contract test (now exists). | L7464 vs L10231 |
+
+**Revised estimate: the ~500-line quick win does not exist** — only DUP-5 remains as real work and it is medium-risk, not a drop-in. Treat DUP-5 as part of the NQE-pipeline-dedup workstream, protected by `tests/integration/test_recommend_contract_stability.py`.
+
+### Agnostic-island parity gap (blocks a "low-risk" profile swap)
+
+`category_router.py` (decision path: recommend.py L644/L1503/L9528) and `product_taxonomy.py`
+(4 services) hardcode electronics flavour but are **cross-vertical in intent**. A blind
+data→profile swap would REGRESS electronics because the profile taxonomies lack parity:
+- `_USE_CASE_PATTERNS` (9: gaming/video_editing/programming/business/student/creative/streaming/travel/home_office) vs profile `use_case_patterns` (8, but renames business→office, student→study; **6 missing**).
+- `_BRAND_PATTERNS` (14, incl. nvidia/amd/intel components) vs profile `manufacturers` (12 LAPTOP makers; **6 missing**, different purpose).
+
+Correct sequence (a focused pass, not tail-of-turn): reconcile taxonomies → expand the profile
+slots with parity → excise the module to per-request accessors → no-bleed test → full regression.
+Until then these are guarded by the **pending-excision ratchet** in
+`tests/test_no_flavour_in_core.py` (`_PENDING_EXCISION`: category_router=16, product_taxonomy=2,
+distinct flavour tokens, shrink-only).
+
 ---
 
 ## 5. "Dual-write" pattern — fold into `emit_event(...)`
