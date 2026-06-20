@@ -4173,6 +4173,7 @@ def suggest(
     # monolith retrieval below is authoritative. Promote to fusion only after shadow
     # parity is validated (avoids the prior 30s-blocking-then-discarded anti-pattern).
     _pipeline_v2_enabled = str(os.getenv("RECOMMEND_PIPELINE_V2", "0")).strip().lower() in ("1", "true", "yes")
+    _v2_holder: Dict[str, Any] = {}  # shadow result captured for Tier 2 parity vs primary results
     if _pipeline_v2_enabled:
         try:
             import threading as _thr_v2
@@ -4193,6 +4194,7 @@ def suggest(
                 except Exception:
                     err = True
                 ms = int((_t.perf_counter() - t0) * 1000)
+                _v2_holder.update({"top_skus": top, "count": count, "ms": ms, "err": err, "done": True})
                 try:
                     from src.app.observability.metrics import record_pipeline_v2_shadow
                     record_pipeline_v2_shadow(ms=ms, count=count, error=err)
@@ -10059,6 +10061,28 @@ def suggest(
     _ctx.retrieved_context = locals().get("retrieved_context", {})
     _ctx.proposal = locals().get("proposal", {})
     _ctx.ner_entities = locals().get("ner_entities", {})
+    # Tier 2 parity (measurement-only; RECOMMEND_PIPELINE_V2 off by default): if the hybrid shadow
+    # finished, log overlap@k / budget-adherence / latency vs the served (primary) results. This is
+    # the gate the roadmap requires BEFORE promoting hybrid retrieval to primary.
+    if _pipeline_v2_enabled and _v2_holder.get("done"):
+        try:
+            from src.app.services.recommend_retrieval_metrics import compute_parity
+            _parity = compute_parity(
+                shadow_skus=_v2_holder.get("top_skus") or [],
+                primary_items=results,
+                shadow_count=int(_v2_holder.get("count") or 0),
+                shadow_latency_ms=int(_v2_holder.get("ms") or 0),
+                budget_min=constraints.get("budget_min"),
+                budget_max=constraints.get("budget_max"),
+            )
+            timing_breakdown["v2_parity_overlap_at_k"] = _parity.get("overlap_at_k")
+            log_trace_event(
+                trace_id=trace_id, event_type="recommend_pipeline_v2_parity",
+                source_type="agent", source_id="Recommend_Pipeline_V2",
+                target_type="system", target_id=None, payload=_parity,
+            )
+        except Exception as _pe:
+            _trace_system_error(trace_id=trace_id, stage="v2_parity", exc=_pe)
     # Persist search event for BI/funnel tracking
     try:
         log_search_event(
