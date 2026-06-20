@@ -5478,6 +5478,9 @@ def suggest(
     )
     nlp_ms = int((time.perf_counter() - nlp_start) * 1000)
     timing_breakdown["nlp_ms"] = nlp_ms
+    # SuggestContext adoption (Pass 4): nlp is assigned once above, then mutated in-place.
+    # Bind it onto the ctx by reference so downstream mutations flow into the ctx.
+    _ctx.nlp = nlp if isinstance(nlp, dict) else {}
     followup_explain = _is_followup_explain_query(query)
     complexity_context = {
         "conversation_turn": int(kv.get("conversation_turn") or 0),
@@ -11189,6 +11192,12 @@ def suggest(
             shortlist_skus=shortlist_skus,
             turn_type=turn_type,
         )
+        # SuggestContext adoption (Pass 3): bind the finalized memory write-back dicts onto the
+        # ctx by reference — kv_out's last rebind is the _update_pinned_context call above;
+        # structured_state_out was assigned once at L11139. Downstream in-place mutations on both
+        # flow into the ctx, making it the live carrier through end-of-turn persistence.
+        _ctx.kv_out = kv_out
+        _ctx.structured_state_out = structured_state_out
         confirmed_slots_out = (
             kv_out.get("confirmed_slots")
             if isinstance(kv_out.get("confirmed_slots"), dict)

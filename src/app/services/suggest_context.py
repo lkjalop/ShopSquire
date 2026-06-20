@@ -67,6 +67,13 @@ class SuggestContext:
     # ── Fraud / risk ─────────────────────────────────────────────────────────
     fraud_summary: Dict[str, Any] = field(default_factory=dict)
 
+    # ── Memory write-back (end-of-turn persistence) ──────────────────────────
+    kv_out: Dict[str, Any] = field(default_factory=dict)
+    structured_state_out: Dict[str, Any] = field(default_factory=dict)
+
+    # ── NLP analysis ─────────────────────────────────────────────────────────
+    nlp: Dict[str, Any] = field(default_factory=dict)
+
 
 def parse_image_inputs(
     *,
