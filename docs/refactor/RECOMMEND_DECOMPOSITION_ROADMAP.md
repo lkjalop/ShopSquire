@@ -83,19 +83,17 @@ def run_nqe_filter_chain(
 | **P0** | `persona_patterns` ✅ **DONE (947c2d2)** | `recommend_persona` | ~50 | Easy | **YES** |
 | **P0** | `brand_sql_patterns` ✅ **DONE (903fd27)** | `recommend_candidate_classify.brand_sql_predicate` | ~30 | Easy | **YES** |
 | **P1** | `persona_prompt_templates` ✅ **DONE (917d1ed)** | `recommend_persona.build_persona_prompt_context` | ~50 | Medium | **YES** |
-| **P1** | `ranking_rules` ⬜ | `recommend_ranking.use_case_rank_adjustment` ([L40+](../../src/app/services/recommend_ranking.py#L40)) | ~150 | **HARD** (re-estimated) | **YES** |
-| **P1** | `spec_extraction_rules` ⬜ | `recommend_utils._extract_candidate_numeric_specs` ([L104+](../../src/app/services/recommend_utils.py#L104)) | ~90 | **HARD** (re-estimated) | Yes |
+| **P1** | `ranking_rules` ✅ **DONE (7160bea)** | `recommend_ranking.use_case_rank_adjustment` | ~150 | Hard | **YES** |
+| **P1** | `spec_extraction_rules` ✅ **DONE (f5d31c1)** | `recommend_utils._extract_candidate_numeric_specs` | ~90 | Hard | Yes |
 
-> **2026-06-20 finding — the last two P1 slots are a COUPLED rule-engine pass, not verbatim moves.**
-> `use_case_rank_adjustment` is ~150 lines of compound numeric conditions (`has_gpu and not
-> creator_hint`, elif chains, ±deltas) and `_extract_candidate_numeric_specs` returns an
-> electronics-SHAPED 11-key dict (ram_gb/gpu_vram_gb/gaming_style/nvidia/creator_hint…) that
-> ranking consumes. Doing them needs a designed generic framework: (1) a profile-defined spec
-> schema {field → spec_key + regex + flag-token-lists}, then (2) a declarative rule table
-> {use_case(s), spec_key, op, threshold, delta, reason} the CORE evaluates. They must ship
-> together (ranking reads spec output) and be guarded by a candidate×use_case parity grid vs HEAD,
-> since this is the core ranking-QUALITY path. Treat as one dedicated pass — NOT a tail-of-turn move.
-> The first three P1/P0 slots (persona/brand) WERE clean dispatch-on-key moves and are done.
+> **2026-06-20 — Phase 2A COMPLETE (5/5). The coupled ranking/spec pass shipped (f5d31c1 + 7160bea).**
+> Approach: a generic profile-driven framework, with electronics kept INLINE (byte-identical, zero
+> risk) as the fallback and non-electronics routed through the rules — both files' migration notes
+> endorsed this. `spec_extraction_rules` (numeric=spec_key+regex, flags=token presence) feeds
+> `ranking_rules` (rule fires on use_case/match_query; each met {metric,op,value} adds delta+reason).
+> Verified electronics byte-identical over candidate×use_case grids; fashion/pharmacy rank in their
+> own vocabulary (breathable/formal/non_drowsy…); electronics use-case under a non-electronics tenant
+> → neutral (no bleed). **The second vertical is now recommendation-QUALITY portable.**
 | **P2** | `techy_query_tokens` | `recommend_nqe_helpers._TECHY_QUERY_TOKENS` ([L35-56](../../src/app/services/recommend_nqe_helpers.py#L35)) | ~20 | Trivial | No |
 | **P2** | `gpu_type_tokens` | `recommend_utils` ([L143-157](../../src/app/services/recommend_utils.py#L143)) | ~15 | Easy | No |
 | **P2** | `price_bracket_thresholds` | `recommend_budget_parsing.BUDGET_BRACKETS` ([L30-35](../../src/app/services/recommend_budget_parsing.py#L30)) | 4 entries | Trivial | Maybe — `price_bands_usd` slot may already cover |
