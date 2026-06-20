@@ -967,5 +967,207 @@
     }
   ],
 
+  "_identity_comment": "ADAPTER (product identity / image+text): brand/product-type/form-factor/cpu keyword maps + spec regexes for identify_product_from_text. Excised VERBATIM from product_identity_agent. Verticals without these slots do not parse images through laptop identity fields (no bleed).",
+  "identity_brand_patterns": {
+    "Apple": [
+      "apple",
+      "macbook",
+      "imac",
+      "mac mini",
+      "mac pro",
+      "mac studio"
+    ],
+    "Dell": [
+      "dell",
+      "xps",
+      "inspiron",
+      "latitude",
+      "precision",
+      "alienware",
+      "vostro"
+    ],
+    "HP": [
+      "hp",
+      "hewlett",
+      "spectre",
+      "envy",
+      "pavilion",
+      "elitebook",
+      "probook",
+      "omen",
+      "zbook"
+    ],
+    "Lenovo": [
+      "lenovo",
+      "thinkpad",
+      "ideapad",
+      "legion",
+      "yoga",
+      "thinkcentre",
+      "thinkbook"
+    ],
+    "ASUS": [
+      "asus",
+      "zenbook",
+      "vivobook",
+      "rog",
+      "tuf",
+      "proart",
+      "expertbook"
+    ],
+    "Acer": [
+      "acer",
+      "aspire",
+      "nitro",
+      "predator",
+      "swift",
+      "spin",
+      "travelmate"
+    ],
+    "Microsoft": [
+      "surface",
+      "microsoft surface"
+    ],
+    "Samsung": [
+      "samsung",
+      "galaxy book",
+      "galaxy tab"
+    ],
+    "MSI": [
+      "msi",
+      "stealth",
+      "raider",
+      "creator"
+    ],
+    "Razer": [
+      "razer",
+      "blade"
+    ],
+    "LG": [
+      "lg gram"
+    ],
+    "Huawei": [
+      "huawei",
+      "matebook"
+    ],
+    "Google": [
+      "google pixel",
+      "pixelbook",
+      "chromebook pixel"
+    ],
+    "Framework": [
+      "framework"
+    ]
+  },
+  "identity_product_type_kw": {
+    "laptop": [
+      "laptop",
+      "notebook",
+      "ultrabook",
+      "chromebook",
+      "macbook"
+    ],
+    "desktop": [
+      "desktop",
+      "tower",
+      "pc",
+      "imac",
+      "mac mini",
+      "mac pro",
+      "mac studio",
+      "nuc"
+    ],
+    "tablet": [
+      "tablet",
+      "ipad",
+      "surface go",
+      "galaxy tab"
+    ],
+    "monitor": [
+      "monitor",
+      "display",
+      "screen"
+    ],
+    "phone": [
+      "phone",
+      "iphone",
+      "smartphone",
+      "galaxy s",
+      "pixel"
+    ]
+  },
+  "identity_form_factor_kw": {
+    "gaming": [
+      "gaming",
+      "rog",
+      "tuf",
+      "legion",
+      "omen",
+      "predator",
+      "nitro",
+      "alienware",
+      "raider"
+    ],
+    "ultrabook": [
+      "ultrabook",
+      "swift",
+      "zenbook",
+      "spectre",
+      "xps",
+      "gram",
+      "macbook air"
+    ],
+    "workstation": [
+      "workstation",
+      "precision",
+      "zbook",
+      "proart",
+      "thinkpad p",
+      "mac pro"
+    ],
+    "2-in-1": [
+      "2-in-1",
+      "2 in 1",
+      "convertible",
+      "yoga",
+      "spin",
+      "surface pro"
+    ]
+  },
+  "identity_cpu_tier_kw": {
+    "i3": "budget",
+    "celeron": "budget",
+    "pentium": "budget",
+    "athlon": "budget",
+    "ryzen 3": "budget",
+    "m1": "midrange",
+    "i5": "midrange",
+    "ryzen 5": "midrange",
+    "m2": "midrange",
+    "m3": "midrange",
+    "i7": "performance",
+    "ryzen 7": "performance",
+    "m2 pro": "performance",
+    "m3 pro": "performance",
+    "m4 pro": "performance",
+    "i9": "workstation",
+    "ryzen 9": "workstation",
+    "xeon": "workstation",
+    "threadripper": "workstation",
+    "m2 max": "workstation",
+    "m2 ultra": "workstation",
+    "m3 max": "workstation",
+    "m3 ultra": "workstation",
+    "m4 max": "workstation"
+  },
+  "identity_spec_regexes": {
+    "ram": "(\\d{1,3})\\s*gb\\s*(?:ram|ddr|memory|lpddr)",
+    "display": "(\\d{2}(?:\\.\\d)?)\\s*[\\-\\\"]?\\s*(?:inch|in\\b|\\\")",
+    "gpu": "(rtx\\s*\\d{4}\\w*|gtx\\s*\\d{4}\\w*|rx\\s*\\d{4}\\w*|radeon\\s+\\w+|arc\\s*a\\d{3}\\w*|quadro\\s+\\w+|firepro\\s+\\w+|m\\d\\s+gpu)"
+  },
+
+  "_product_identity_prompt_comment": "ADAPTER: vision-LLM prompt/schema for identify_product_from_image. Electronics laptop schema; a vertical without this slot gets a generic identify prompt (no laptop-schema bleed).",
+  "product_identity_prompt": "You are a product identification specialist for an ecommerce platform.\nAnalyze this product image and extract structured specifications.\nReturn ONLY valid JSON (no markdown, no prose).\nSchema:\n{\n  \"identified\": true|false,\n  \"product_type\": \"laptop|desktop|tablet|phone|monitor|accessory|other\",\n  \"brand\": \"string or null\",\n  \"model\": \"string or null\",\n  \"cpu_tier\": \"budget|midrange|performance|workstation|unknown\",\n  \"cpu_hint\": \"e.g. i5-13th, Ryzen 7, M2 Pro, or null\",\n  \"ram_gb_hint\": 8|16|32|null,\n  \"gpu_hint\": \"e.g. RTX 4060, integrated, or null\",\n  \"display_inches_hint\": 14|15.6|16|null,\n  \"form_factor\": \"ultrabook|standard|gaming|workstation|2-in-1|unknown\",\n  \"price_tier\": \"budget|midrange|premium|flagship|unknown\",\n  \"confidence\": 0.0 to 1.0,\n  \"notes\": \"short free-text\"\n}\nRules:\n- Identify from visible branding, form factor, bezels, keyboard layout, chassis design.\n- If you see visible text (model label, spec sticker), use it.\n- If uncertain about a field, use null or unknown.\n- confidence reflects overall identification certainty.\n",
+
   "cv_returns_pack": "electronics"
 }
