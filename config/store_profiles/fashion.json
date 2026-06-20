@@ -280,5 +280,111 @@
     ]
   },
 
+  "_ranking_rules_comment": "ADAPTER (Phase 2A): use-case ranking rules. A rule fires when use_case matches; each met condition (metric op value) adds delta+reason. Metrics from spec_extraction_rules. Consumed by recommend_ranking.use_case_rank_adjustment.",
+  "ranking_rules": [
+    {
+      "use_cases": [
+        "summer",
+        "casual"
+      ],
+      "conditions": [
+        {
+          "metric": "breathable",
+          "op": "truthy",
+          "delta": 1.0,
+          "reason": "breathable fabric for warm weather"
+        },
+        {
+          "metric": "warm",
+          "op": "truthy",
+          "delta": -1.0,
+          "reason": "too warm for this use"
+        },
+        {
+          "metric": "lightweight",
+          "op": "truthy",
+          "delta": 0.5,
+          "reason": "lightweight and easy to wear"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "formal"
+      ],
+      "conditions": [
+        {
+          "metric": "formal",
+          "op": "truthy",
+          "delta": 1.5,
+          "reason": "formal styling for the occasion"
+        },
+        {
+          "metric": "athletic",
+          "op": "truthy",
+          "delta": -1.2,
+          "reason": "too casual for a formal setting"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "athletic"
+      ],
+      "conditions": [
+        {
+          "metric": "athletic",
+          "op": "truthy",
+          "delta": 1.5,
+          "reason": "performance fabric for training"
+        },
+        {
+          "metric": "breathable",
+          "op": "truthy",
+          "delta": 0.6,
+          "reason": "breathable for workouts"
+        },
+        {
+          "metric": "formal",
+          "op": "truthy",
+          "delta": -1.2,
+          "reason": "formalwear is impractical for sport"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "outdoor"
+      ],
+      "conditions": [
+        {
+          "metric": "waterproof",
+          "op": "truthy",
+          "delta": 1.3,
+          "reason": "weatherproof for the outdoors"
+        },
+        {
+          "metric": "warm",
+          "op": "truthy",
+          "delta": 0.8,
+          "reason": "warm layer for cold conditions"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "workwear"
+      ],
+      "conditions": [
+        {
+          "metric": "waterproof",
+          "op": "truthy",
+          "delta": 0.6,
+          "reason": "weather-ready for the worksite"
+        }
+      ]
+    }
+  ],
+
   "cv_returns_pack": "electronics"
 }

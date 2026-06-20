@@ -24,16 +24,98 @@ MIGRATION PATH (Phase 2):
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Dict, List, Tuple
 
 from src.app.services.recommend_utils import _extract_candidate_numeric_specs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ADAPTER — Electronics-specific use-case rank scoring.
-# Every metric (ram, gpu_vram, refresh_hz, gaming_style, portable, nvidia) and
-# every heuristic threshold is laptop/electronics-specific.
-# Phase 2: replace with profile-driven rule table from StoreProfile["ranking_rules"].
+# CORE — Generic ranking-rule evaluator driven by StoreProfile["ranking_rules"].
+# A rule = {use_cases:[...], match_query:[...], conditions:[{metric, op, value, delta, reason}]}.
+# A rule fires when the use_case matches (or a match_query token is in the query); each satisfied
+# condition adds its delta and a reason. Verticals WITHOUT the slot fall back to the electronics
+# inline scorer below (byte-identical). Metrics come from spec_extraction_rules (also profile).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@lru_cache(maxsize=8)
+def _ranking_rules_for(pid: str):
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("ranking_rules", profile_id=pid, default=None)
+    return raw if isinstance(raw, list) and raw else None
+
+
+def _active_pid() -> str:
+    from src.app.platform.store_profile import active_profile_id
+    return active_profile_id()
+
+
+def reset_cache() -> None:
+    """Clear the per-profile ranking-rules cache (test isolation / reload)."""
+    _ranking_rules_for.cache_clear()
+
+
+def _condition_met(metric_value: Any, op: str, value: Any) -> bool:
+    op = str(op or "truthy").lower()
+    if op == "truthy":
+        return bool(metric_value)
+    if op == "falsy":
+        return not bool(metric_value)
+    try:
+        x = float(metric_value) if metric_value is not None else None
+    except Exception:
+        x = None
+    if x is None:
+        return False
+    try:
+        if op == ">=":
+            return x >= float(value)
+        if op == "<=":
+            return x <= float(value)
+        if op == ">":
+            return x > float(value)
+        if op == "<":
+            return x < float(value)
+        if op == "==":
+            return x == float(value)
+        if op == "between" and isinstance(value, (list, tuple)) and len(value) == 2:
+            return float(value[0]) <= x <= float(value[1])
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
+def _evaluate_ranking_rules(
+    metrics: Dict[str, Any], use_case: str, query: str, rules: list
+) -> Tuple[float, List[str], List[str]]:
+    uc = str(use_case or "").strip().lower()
+    q = str(query or "").lower()
+    score = 0.0
+    plus: List[str] = []
+    minus: List[str] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        ucs = [str(x).lower() for x in (rule.get("use_cases") or [])]
+        mq = [str(x).lower() for x in (rule.get("match_query") or [])]
+        if not (uc in ucs or any(t in q for t in mq)):
+            continue
+        for cond in rule.get("conditions") or []:
+            if not isinstance(cond, dict):
+                continue
+            if _condition_met(metrics.get(cond.get("metric")), cond.get("op"), cond.get("value")):
+                delta = float(cond.get("delta") or 0.0)
+                score += delta
+                reason = cond.get("reason")
+                if reason:
+                    (plus if delta >= 0 else minus).append(str(reason))
+    return round(score, 4), plus[:3], minus[:3]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ADAPTER — Electronics-specific use-case rank scoring (inline fallback).
+# Used only when the active profile defines no ranking_rules. Every metric and
+# threshold here is laptop/electronics flavour.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def use_case_rank_adjustment(
@@ -46,6 +128,11 @@ def use_case_rank_adjustment(
     q_low = str(query or "").lower()
     if not use_case:
         return 0.0, [], []
+
+    # Profile-driven path (vertical-agnostic): use the rule table if the active profile defines one.
+    _rules = _ranking_rules_for(_active_pid())
+    if _rules is not None:
+        return _evaluate_ranking_rules(_extract_candidate_numeric_specs(candidate), use_case, q_low, _rules)
 
     metrics = _extract_candidate_numeric_specs(candidate)
     plus: List[str] = []

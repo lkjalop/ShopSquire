@@ -289,5 +289,68 @@
     ]
   },
 
+  "_ranking_rules_comment": "ADAPTER (Phase 2A): use-case ranking rules. A rule fires when use_case matches; each met condition (metric op value) adds delta+reason. Metrics from spec_extraction_rules. Consumed by recommend_ranking.use_case_rank_adjustment.",
+  "ranking_rules": [
+    {
+      "use_cases": [
+        "cold_flu",
+        "allergy"
+      ],
+      "conditions": [
+        {
+          "metric": "non_drowsy",
+          "op": "truthy",
+          "delta": 1.0,
+          "reason": "non-drowsy for daytime relief"
+        },
+        {
+          "metric": "fast_acting",
+          "op": "truthy",
+          "delta": 0.6,
+          "reason": "fast-acting relief"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "pain_relief"
+      ],
+      "conditions": [
+        {
+          "metric": "fast_acting",
+          "op": "truthy",
+          "delta": 0.8,
+          "reason": "fast-acting pain relief"
+        },
+        {
+          "metric": "strength_mg",
+          "op": ">=",
+          "value": 400,
+          "delta": 0.5,
+          "reason": "higher strength for stronger pain"
+        }
+      ]
+    },
+    {
+      "use_cases": [
+        "baby_care"
+      ],
+      "conditions": [
+        {
+          "metric": "childrens",
+          "op": "truthy",
+          "delta": 1.5,
+          "reason": "formulated for children"
+        },
+        {
+          "metric": "sugar_free",
+          "op": "truthy",
+          "delta": 0.4,
+          "reason": "sugar-free is gentler for kids"
+        }
+      ]
+    }
+  ],
+
   "cv_returns_pack": "electronics"
 }
