@@ -3,7 +3,7 @@
 **Status**: Living document — updated as passes land.  
 **Last updated**: 2026-06-20  
 **Branch**: `wip/docker-real-env-20260213`  
-**Monolith size**: 12,160 lines (down from ~13,500 at sprint start)
+**Monolith size**: 12,147 lines total (~11,686 non-blank) — down from ~13,500 at sprint start. Phase 2A COMPLETE (5/5); NQE DUP-5 input-builder drift fixed (a6fab44); SuggestContext adoption Pass 1 landed (5999b74: timing_breakdown + fraud_summary).
 
 ---
 
