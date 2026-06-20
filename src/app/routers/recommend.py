@@ -10595,12 +10595,33 @@ def suggest(
         except Exception:
             pass
         from src.app.observability.stage_timer import StageTimer as _StageTimer
-        with _StageTimer(timing_breakdown, "summary_ms"):  # time the dominant LLM cost
-            assistant_message, llm_summary_job_id = _summarize_results(
-                query, results, constraints, _summ_model, trace_id,
-                context_preamble=_combined_preamble,
-                narration_inputs=narration_inputs,
-            )
+        # Tier 1 — narration mode (RECOMMEND_NARRATION_MODE): blocking (default; LLM prose) | skip
+        # (deterministic grounded answer only, NO blocking LLM call) | async (skip + narration_pending
+        # so a client can request richer prose out-of-band). Baseline (docs/refactor/benchmarks):
+        # LLM narration was 85-91% of route latency. In skip/async, assistant_message stays None here
+        # and the deterministic fallback below (_deterministic_assistant_message + brand_budget_answer)
+        # fills it — taking a text recommendation from ~5s to <150ms.
+        _narr_mode = str(
+            os.getenv("RECOMMEND_NARRATION_MODE", "")  # env override wins (deployment toggle)
+            or (flags.get("RECOMMEND_NARRATION_MODE") if isinstance(flags, dict) else None)
+            or "blocking"
+        ).strip().lower()
+        if _narr_mode not in ("blocking", "skip", "async"):
+            _narr_mode = "blocking"
+        timing_breakdown["narration_mode"] = _narr_mode
+        if _narr_mode == "blocking":
+            with _StageTimer(timing_breakdown, "summary_ms"):  # time the dominant LLM cost
+                assistant_message, llm_summary_job_id = _summarize_results(
+                    query, results, constraints, _summ_model, trace_id,
+                    context_preamble=_combined_preamble,
+                    narration_inputs=narration_inputs,
+                )
+        else:
+            # No blocking LLM call. The deterministic grounded message is produced by the
+            # `if not assistant_message:` fallback below.
+            assistant_message, llm_summary_job_id = None, None
+            timing_breakdown["summary_ms"] = 0
+            timing_breakdown["narration_pending"] = (_narr_mode == "async")
         # 0.4 Grounded narration guard (flag: COMMERCE_NARRATION_GUARD). The LLM is
         # a narrator over evidence, not a source of truth — if it invents a
         # product/price/spec or parrots a quarantined payload, reject and fall back
