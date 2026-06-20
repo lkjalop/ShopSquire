@@ -112,3 +112,6 @@ latency-*.png
 
 # Resume / personal files accidentally placed in repo root
 resume_*.md
+
+# pytest run-output artifact (was accidentally tracked)
+pytest_run_out.txt
