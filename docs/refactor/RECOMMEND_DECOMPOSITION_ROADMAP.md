@@ -80,11 +80,22 @@ def run_nqe_filter_chain(
 
 | Priority | Slot name | Source location | LoC | Ease | Blocker for non-electronics? |
 |---|---|---|---|---|---|
-| **P0** | `persona_patterns` | `recommend_persona.PERSONA_PATTERNS` ([L36-84](../../src/app/services/recommend_persona.py#L36)) | ~50 | Easy | **YES** |
-| **P0** | `brand_sql_patterns` | `recommend_candidate_classify.brand_sql_predicate` ([L103-134](../../src/app/services/recommend_candidate_classify.py#L103)) | ~30 | Easy | **YES** |
-| **P1** | `persona_prompt_templates` | `recommend_persona.build_persona_prompt_context` ([L135-188](../../src/app/services/recommend_persona.py#L135)) | ~50 | Medium | **YES** |
-| **P1** | `ranking_rules` | `recommend_ranking.use_case_rank_adjustment` ([L40-125](../../src/app/services/recommend_ranking.py#L40)) | ~85 | Medium | **YES** |
-| **P1** | `spec_extraction_rules` | `recommend_utils._extract_candidate_numeric_specs` ([L112-132](../../src/app/services/recommend_utils.py#L112)) | ~20 | Easy | Yes (specs differ wildly per vertical) |
+| **P0** | `persona_patterns` ✅ **DONE (947c2d2)** | `recommend_persona` | ~50 | Easy | **YES** |
+| **P0** | `brand_sql_patterns` ✅ **DONE (903fd27)** | `recommend_candidate_classify.brand_sql_predicate` | ~30 | Easy | **YES** |
+| **P1** | `persona_prompt_templates` ✅ **DONE (917d1ed)** | `recommend_persona.build_persona_prompt_context` | ~50 | Medium | **YES** |
+| **P1** | `ranking_rules` ⬜ | `recommend_ranking.use_case_rank_adjustment` ([L40+](../../src/app/services/recommend_ranking.py#L40)) | ~150 | **HARD** (re-estimated) | **YES** |
+| **P1** | `spec_extraction_rules` ⬜ | `recommend_utils._extract_candidate_numeric_specs` ([L104+](../../src/app/services/recommend_utils.py#L104)) | ~90 | **HARD** (re-estimated) | Yes |
+
+> **2026-06-20 finding — the last two P1 slots are a COUPLED rule-engine pass, not verbatim moves.**
+> `use_case_rank_adjustment` is ~150 lines of compound numeric conditions (`has_gpu and not
+> creator_hint`, elif chains, ±deltas) and `_extract_candidate_numeric_specs` returns an
+> electronics-SHAPED 11-key dict (ram_gb/gpu_vram_gb/gaming_style/nvidia/creator_hint…) that
+> ranking consumes. Doing them needs a designed generic framework: (1) a profile-defined spec
+> schema {field → spec_key + regex + flag-token-lists}, then (2) a declarative rule table
+> {use_case(s), spec_key, op, threshold, delta, reason} the CORE evaluates. They must ship
+> together (ranking reads spec output) and be guarded by a candidate×use_case parity grid vs HEAD,
+> since this is the core ranking-QUALITY path. Treat as one dedicated pass — NOT a tail-of-turn move.
+> The first three P1/P0 slots (persona/brand) WERE clean dispatch-on-key moves and are done.
 | **P2** | `techy_query_tokens` | `recommend_nqe_helpers._TECHY_QUERY_TOKENS` ([L35-56](../../src/app/services/recommend_nqe_helpers.py#L35)) | ~20 | Trivial | No |
 | **P2** | `gpu_type_tokens` | `recommend_utils` ([L143-157](../../src/app/services/recommend_utils.py#L143)) | ~15 | Easy | No |
 | **P2** | `price_bracket_thresholds` | `recommend_budget_parsing.BUDGET_BRACKETS` ([L30-35](../../src/app/services/recommend_budget_parsing.py#L30)) | 4 entries | Trivial | Maybe — `price_bands_usd` slot may already cover |
@@ -195,6 +206,26 @@ Do **Path A first**, then re-evaluate. If you only need 1–2 more verticals, **
 **Total**: monolith 13,039 → 12,160 lines this session (879 extracted), 14 services modules now own previously-monolithic logic, **574 services tests pass** with no regressions.
 
 **Pre-existing failure** (unchanged): `test_digital_marketing_enhancements.py::TestDeterministicAssistantMessagePersona::test_no_results_returns_none`
+
+### Agnostic-hardening session (2026-06-20)
+
+Focus: make CORE vertical-blind (not line reduction). Each excision verified electronics
+**byte-identical vs HEAD** + a fashion/pharmacy **no-bleed** test + full mandated regression.
+
+| Commit | Work |
+|---|---|
+| 4d6e504 | golden contract-stability net (`tests/integration/test_recommend_contract_stability.py`) |
+| 5df9c8e | pending-excision ratchet + verified DUP-1..5 (only DUP-5 is real) |
+| 6689f8a | `category_router` entity-NER → `electronics.json entity_*` slots → **core** |
+| 76900dd | `product_taxonomy` accessory families → `electronics.json` slots → **core** (ratchet now EMPTY) |
+| ec26324 | untrack `pytest_run_out.txt` + gitignore |
+| 204ccfe | enable `AUTO_LLM_RERANK_HIGH_COMPLEXITY` (provider-gated, inert in tests) |
+| 947c2d2 | Phase 2A P0 `persona_patterns` → profile (fashion/pharmacy personas work) |
+| 903fd27 | Phase 2A P0 `brand_sql_patterns` → profile (manufacturer-derived for non-electronics) |
+| 917d1ed | Phase 2A P1 `persona_prompt_templates` → profile (inline electronics fallback removed) |
+
+**Phase 2A: 3/5 slots done.** Remaining `ranking_rules` + `spec_extraction_rules` = one coupled
+rule-engine pass (see §2 note). `_PENDING_EXCISION` ratchet is empty; `_CORE_MODULES` now guards 16.
 
 ---
 
