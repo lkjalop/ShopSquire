@@ -74,6 +74,9 @@ class SuggestContext:
     # ── NLP analysis ─────────────────────────────────────────────────────────
     nlp: Dict[str, Any] = field(default_factory=dict)
 
+    # ── Constraints (the primary mutation surface) ───────────────────────────
+    constraints: Dict[str, Any] = field(default_factory=dict)
+
 
 def parse_image_inputs(
     *,

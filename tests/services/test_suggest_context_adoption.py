@@ -62,6 +62,22 @@ def test_kv_out_structured_state_nlp_live_carrier():
     assert ctx.nlp["intent_confidence"] == 0.9
 
 
+def test_pass5_constraints_field_and_rebind_semantics():
+    # Pass 5: constraints is bound after init, then RE-bound after apply_narration returns a new dict.
+    ctx = SuggestContext()
+    assert ctx.constraints == {}
+    constraints = {"budget_max": 1800, "brands": []}
+    ctx.constraints = constraints  # bind after init
+    constraints["buyer_persona"] = "gamer"  # in-place mutation flows in
+    assert ctx.constraints["buyer_persona"] == "gamer"
+    # narration returns a NEW dict (copy + overlay); re-bind keeps ctx pointing at the live object
+    constraints = dict(constraints)
+    constraints["use_case"] = "gaming"
+    ctx.constraints = constraints  # re-bind
+    constraints["specs"] = ["rtx"]
+    assert ctx.constraints["use_case"] == "gaming" and ctx.constraints["specs"] == ["rtx"]
+
+
 def test_image_context_live_carrier_semantics():
     # Pass 2: after suggest() binds ctx.image_context = image_context (post-strip), downstream
     # in-place mutations on the local flow into the ctx (same object).

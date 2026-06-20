@@ -5721,6 +5721,10 @@ def suggest(
         "_request_budget_max": budget_max,
         "_request_budget_min": budget_min,
     }
+    # SuggestContext adoption (Pass 5 — constraints, the largest mutation surface, ~130 subscript
+    # writes). Bind the init dict onto the ctx by reference so those mutations flow into the ctx;
+    # re-bound after apply_narration_inputs_to_constraints (which returns a NEW dict) below.
+    _ctx.constraints = constraints
     if (
         str(image_context.get("intent") or "").strip().lower() == "cv_triage"
         or float(image_cv_signals_parsed.get("damage_score") or 0.0) > 0.4
@@ -10424,6 +10428,7 @@ def suggest(
         query_understanding=build_query_understanding(query_effective or query or "", constraints),
     )
     constraints = apply_narration_inputs_to_constraints(constraints, narration_inputs)
+    _ctx.constraints = constraints  # re-bind: apply_narration returns a NEW dict (Pass 5)
     # Off-category relevance guard: a computer query must not be led by a peripheral
     # (e.g. a router for "gaming laptop"). Demote, never remove — propagates to both
     # the product cards and the LLM summary below.
