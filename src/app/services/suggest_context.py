@@ -77,6 +77,18 @@ class SuggestContext:
     # ── Constraints (the primary mutation surface) ───────────────────────────
     constraints: Dict[str, Any] = field(default_factory=dict)
 
+    # ── Retrieval / ranking / response data (request-scoped) — Pass 6 ────────
+    candidates: List[Dict[str, Any]] = field(default_factory=list)
+    scored: List[Dict[str, Any]] = field(default_factory=list)
+    results: List[Dict[str, Any]] = field(default_factory=list)
+    retrieved_context: Dict[str, Any] = field(default_factory=dict)
+    proposal: Dict[str, Any] = field(default_factory=dict)
+    ner_entities: Dict[str, Any] = field(default_factory=dict)
+    payload: Dict[str, Any] = field(default_factory=dict)
+
+    # ── Dependencies (clients / ids; set once, not per-stage) — Pass 6 ───────
+    deps: Dict[str, Any] = field(default_factory=dict)
+
 
 def parse_image_inputs(
     *,

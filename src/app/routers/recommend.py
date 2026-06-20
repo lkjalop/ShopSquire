@@ -5367,6 +5367,9 @@ def suggest(
 
     service = RecommendationService(session=db)
     mem = Memory(redis)
+    # SuggestContext adoption (Pass 6): one-time deps bind (clients/ids; never reassigned) so
+    # extracted stages take ctx instead of threading mem/service/db/tenant_id as params.
+    _ctx.deps = {"mem": mem, "service": service, "db": db, "tenant_id": tenant_id}
     ctx = mem.get_context(uid)
     kv = ctx.get("kv") or {}
     structured_state = mem.get_structured_state(uid) or {}
@@ -10040,6 +10043,15 @@ def suggest(
             catalog_profile=catalog_profile,
         )
         timing_breakdown["image_fill_ms"] = int((time.perf_counter() - _fill_t0) * 1000)
+    # SuggestContext adoption (Pass 6): bind the finalized retrieval/ranking data locals onto the
+    # ctx by reference (these have no further rebind below). `results` is deliberately NOT bound
+    # here — it is reassigned 8x through the tail; it gets the front-bind+rebind treatment when the
+    # narration tail is extracted. Zero behaviour change (nothing reads these ctx fields yet).
+    _ctx.candidates = locals().get("candidates", [])
+    _ctx.scored = locals().get("scored", [])
+    _ctx.retrieved_context = locals().get("retrieved_context", {})
+    _ctx.proposal = locals().get("proposal", {})
+    _ctx.ner_entities = locals().get("ner_entities", {})
     # Persist search event for BI/funnel tracking
     try:
         log_search_event(

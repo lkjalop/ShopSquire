@@ -62,6 +62,29 @@ def test_kv_out_structured_state_nlp_live_carrier():
     assert ctx.nlp["intent_confidence"] == 0.9
 
 
+def test_pass6_data_locals_and_deps_fields():
+    ctx = SuggestContext()
+    assert ctx.candidates == [] and ctx.scored == [] and ctx.results == []
+    assert ctx.retrieved_context == {} and ctx.proposal == {} and ctx.ner_entities == {}
+    assert ctx.payload == {} and ctx.deps == {}
+
+
+def test_pass6_deps_and_data_live_carrier():
+    ctx = SuggestContext()
+    # deps: one-time bind of clients/ids
+    ctx.deps = {"mem": object(), "service": object(), "db": object(), "tenant_id": "t1"}
+    assert ctx.deps["tenant_id"] == "t1"
+    # data locals bound by reference -> in-place mutation flows in
+    scored = [{"sku": "A"}]
+    ctx.scored = scored
+    scored.append({"sku": "B"})
+    assert len(ctx.scored) == 2
+    rc = {"ner_entities": {}}
+    ctx.retrieved_context = rc
+    rc["memory_confidence"] = 0.8
+    assert ctx.retrieved_context["memory_confidence"] == 0.8
+
+
 def test_pass5_constraints_field_and_rebind_semantics():
     # Pass 5: constraints is bound after init, then RE-bound after apply_narration returns a new dict.
     ctx = SuggestContext()
