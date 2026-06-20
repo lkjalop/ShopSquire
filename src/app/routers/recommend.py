@@ -2525,6 +2525,7 @@ def _infer_account_warranty_status(uid: str | None) -> dict[str, Any]:
 from src.app.services.recommend_nqe_helpers import (  # noqa: E402
     question_slot_from_id as _question_slot_from_id,
     normalize_recent_nqe_asked as _normalize_recent_nqe_asked,
+    build_nqe_asked_and_answered as _build_nqe_asked_and_answered,
     contradicted_slots as _contradicted_slots,
     question_fatigue_filter as _question_fatigue_filter_impl,
     apply_persona_confidence_fallback as _apply_persona_confidence_fallback_impl,
@@ -7515,32 +7516,18 @@ def suggest(
                 identity_constraints=_identity_constraints,
                 identity_result=_id_result,
             )
-            _nqe_asked = list((structured_state.get("nqe_asked_ids") or kv.get("nqe_asked_ids") or []))
-            for _e in (recent_asked_entries or []):
-                _turn = int((_e or {}).get("turn") or 0)
-                _slot = str((_e or {}).get("slot") or "").strip().lower()
-                _qid = str((_e or {}).get("id") or "").strip().lower()
-                if (
-                    _qid
-                    and _turn > 0
-                    and (current_turn - _turn) <= fatigue_turns
-                    and _slot not in contradicted_slots
-                    and _qid not in _nqe_asked
-                ):
-                    _nqe_asked.append(_qid)
-            _nqe_answered = dict((structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {}))
-            # ── Fix 1: bridge text-extracted constraints into NQE answered_fields ──
-            for _ck, _cv in (
-                ("budget_min", constraints.get("budget_min")),
-                ("budget_max", constraints.get("budget_max")),
-                ("use_case", constraints.get("use_case")),
-                ("brand_preference", (constraints.get("brands") or [None])[0]),
-                ("gpu_preference", constraints.get("gpu_preference")),
-            ):
-                if _ck == "use_case" and _use_case_needs_nqe_refinement(_cv):
-                    continue
-                if _cv and not _nqe_answered.get(_ck):
-                    _nqe_answered[_ck] = _cv
+            # Shared with the post-retrieval NQE stage (run_recommend_nqe_stage) — one source
+            # of truth for the fatigue-filtered asked-ids + the answered-fields bridge.
+            _nqe_asked, _nqe_answered = _build_nqe_asked_and_answered(
+                structured_state=structured_state,
+                kv=kv,
+                constraints=constraints,
+                recent_asked_entries=recent_asked_entries,
+                current_turn=current_turn,
+                fatigue_turns=fatigue_turns,
+                contradicted_slots=contradicted_slots,
+                use_case_needs_nqe_refinement=_use_case_needs_nqe_refinement,
+            )
             # Compute OOS fraction using a direct batch stock lookup at NQE-build time.
             # The bulk stock annotation pass happens later (line ~12600), so we cannot
             # rely on stock_status being set on results yet.  A separate batch query

@@ -31,6 +31,7 @@ from src.app.flows.nqe import (
 from src.app.rag.retrieve import Retriever
 from src.app.services.decision_log import log_trace_event
 from src.app.services.query_understanding import QueryUnderstanding, build_query_understanding
+from src.app.services.recommend_nqe_helpers import build_nqe_asked_and_answered
 
 
 DOMAIN_REFINEMENT_QUESTION_IDS = {
@@ -255,39 +256,16 @@ def run_recommend_nqe_stage(
                 identity_constraints=identity_constraints,
                 identity_result=identity_result,
             )
-            asked_ids = list(
-                state.structured_state.get("nqe_asked_ids")
-                or state.kv.get("nqe_asked_ids")
-                or []
+            asked_ids, answered = build_nqe_asked_and_answered(
+                structured_state=state.structured_state,
+                kv=state.kv,
+                constraints=state.constraints,
+                recent_asked_entries=recent_asked_entries,
+                current_turn=current_turn,
+                fatigue_turns=fatigue_turns,
+                contradicted_slots=contradicted_slots,
+                use_case_needs_nqe_refinement=hooks.use_case_needs_nqe_refinement,
             )
-            for entry in recent_asked_entries or []:
-                turn = int((entry or {}).get("turn") or 0)
-                slot = str((entry or {}).get("slot") or "").strip().lower()
-                qid = str((entry or {}).get("id") or "").strip().lower()
-                if (
-                    qid
-                    and turn > 0
-                    and (current_turn - turn) <= fatigue_turns
-                    and slot not in contradicted_slots
-                    and qid not in asked_ids
-                ):
-                    asked_ids.append(qid)
-            answered = dict(
-                state.structured_state.get("nqe_answered_fields")
-                or state.kv.get("nqe_answered_fields")
-                or {}
-            )
-            for key, value in (
-                ("budget_min", state.constraints.get("budget_min")),
-                ("budget_max", state.constraints.get("budget_max")),
-                ("use_case", state.constraints.get("use_case")),
-                ("brand_preference", (state.constraints.get("brands") or [None])[0]),
-                ("gpu_preference", state.constraints.get("gpu_preference")),
-            ):
-                if key == "use_case" and hooks.use_case_needs_nqe_refinement(value):
-                    continue
-                if value and not answered.get(key):
-                    answered[key] = value
             if query_understanding is not None:
                 if query_understanding.budget_min is not None and not answered.get("budget_min"):
                     answered["budget_min"] = query_understanding.budget_min

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 from src.app.services.recommend_budget_parsing import classify_budget_bracket
 
@@ -167,6 +167,61 @@ def contradicted_slots(
         if any(x in q for x in ("gpu", "ram", "ssd", "storage", "cpu", "cores")):
             contradicted.add("specs")
     return contradicted
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CORE — NQE input state (vertical-agnostic). Single source of truth for the
+# fatigue-filtered asked-id list + the answered-fields bridge, shared by BOTH NQE
+# paths in recommend.py (the open-ended early-return path and the post-retrieval
+# run_recommend_nqe_stage) so they cannot drift.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def build_nqe_asked_and_answered(
+    *,
+    structured_state: Dict[str, Any],
+    kv: Dict[str, Any],
+    constraints: Dict[str, Any],
+    recent_asked_entries: List[Dict[str, Any]] | None,
+    current_turn: int,
+    fatigue_turns: int,
+    contradicted_slots: set[str],
+    use_case_needs_nqe_refinement: Callable[[Any], bool],
+) -> Tuple[List[str], Dict[str, Any]]:
+    """Return (previously_asked_ids, answered_fields) for an NQEInput.
+
+    asked_ids = persisted nqe_asked_ids + recent-asked entries that are still within the
+    fatigue window and not on a contradicted slot. answered_fields = persisted
+    nqe_answered_fields bridged with text-extracted constraints (budget/use_case/brand/gpu).
+    """
+    ss = structured_state if isinstance(structured_state, dict) else {}
+    kvd = kv if isinstance(kv, dict) else {}
+    asked: List[str] = list(ss.get("nqe_asked_ids") or kvd.get("nqe_asked_ids") or [])
+    for entry in recent_asked_entries or []:
+        turn = int((entry or {}).get("turn") or 0)
+        slot = str((entry or {}).get("slot") or "").strip().lower()
+        qid = str((entry or {}).get("id") or "").strip().lower()
+        if (
+            qid
+            and turn > 0
+            and (current_turn - turn) <= fatigue_turns
+            and slot not in contradicted_slots
+            and qid not in asked
+        ):
+            asked.append(qid)
+    answered: Dict[str, Any] = dict(ss.get("nqe_answered_fields") or kvd.get("nqe_answered_fields") or {})
+    for key, value in (
+        ("budget_min", constraints.get("budget_min")),
+        ("budget_max", constraints.get("budget_max")),
+        ("use_case", constraints.get("use_case")),
+        ("brand_preference", (constraints.get("brands") or [None])[0]),
+        ("gpu_preference", constraints.get("gpu_preference")),
+    ):
+        if key == "use_case" and use_case_needs_nqe_refinement(value):
+            continue
+        if value and not answered.get(key):
+            answered[key] = value
+    return asked, answered
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
