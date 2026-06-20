@@ -14,6 +14,7 @@ ALL ADAPTER (product-type-specific / electronics):
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from typing import Any, Dict
 
 # GPU term constants (imported from recommend.py scope; re-declared here for
@@ -109,37 +110,48 @@ def candidate_looks_like_device(candidate: Dict[str, Any] | None) -> bool:
     return any(t in text_blob for t in positive_terms)
 
 
+@lru_cache(maxsize=8)
+def _brand_sql_patterns_for(pid: str) -> Dict[str, str]:
+    """brand-key -> SQL WHERE fragment, resolved from the active StoreProfile.
+
+    TRUSTED CONFIG ONLY: these fragments are interpolated into SQL. No user input ever
+    reaches them — the caller normalises `brand` to a key and looks up a fixed string.
+    Electronics carries the verbatim predicates in its `brand_sql_patterns` slot; other
+    verticals fall back to a name-LIKE predicate derived from their `manufacturers` slot.
+    """
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("brand_sql_patterns", profile_id=pid, default=None)
+    if isinstance(raw, dict) and raw:
+        return {str(k).strip().lower(): str(v) for k, v in raw.items()}
+    # Fallback: derive a name-LIKE predicate per brand from manufacturers (name+aliases+lines).
+    mans = profile_slot("manufacturers", profile_id=pid, default=None) or {}
+    out: Dict[str, str] = {}
+    for name, spec in mans.items():
+        tokens = [name] + list((spec or {}).get("aliases") or []) + list((spec or {}).get("lines") or [])
+        seen: set[str] = set()
+        likes: list[str] = []
+        for t in tokens:
+            tl = str(t).strip().lower()
+            if tl and tl not in seen:
+                seen.add(tl)
+                likes.append("LOWER(p.name) LIKE '%" + tl.replace("'", "''") + "%'")
+        if likes:
+            out[str(name).strip().lower()] = "(" + " OR ".join(likes) + ")"
+    return out
+
+
+def reset_cache() -> None:
+    """Clear the per-profile brand-SQL cache (test isolation / profile reload)."""
+    try:
+        _brand_sql_patterns_for.cache_clear()
+    except Exception:
+        pass
+
+
 def brand_sql_predicate(brand: str | None) -> str:
     key = str(brand or "").strip().lower()
-    if key == "apple":
-        return "(LOWER(p.name) LIKE '%apple%' OR LOWER(p.name) LIKE '%macbook%' OR LOWER(p.name) LIKE '%imac%' OR LOWER(p.sku) LIKE 'mb%')"
-    if key == "asus":
-        return "(LOWER(p.name) LIKE '%asus%' OR LOWER(p.name) LIKE '%vivobook%' OR LOWER(p.name) LIKE '%zenbook%' OR LOWER(p.name) LIKE '%rog%' OR LOWER(p.name) LIKE '%tuf%')"
-    if key == "lenovo":
-        return "(LOWER(p.name) LIKE '%lenovo%' OR LOWER(p.name) LIKE '%ideapad%' OR LOWER(p.name) LIKE '%thinkpad%' OR LOWER(p.name) LIKE '%yoga%' OR LOWER(p.name) LIKE '%legion%')"
-    if key == "hp":
-        return "(LOWER(p.name) LIKE '%hp %' OR LOWER(p.name) LIKE 'hp %' OR LOWER(p.name) LIKE '%envy%' OR LOWER(p.name) LIKE '%victus%' OR LOWER(p.name) LIKE '%omen%' OR LOWER(p.name) LIKE '%omnibook%' OR LOWER(p.name) LIKE '%elitebook%' OR LOWER(p.name) LIKE '%probook%')"
-    if key == "dell":
-        return "(LOWER(p.name) LIKE '%dell%' OR LOWER(p.name) LIKE '%inspiron%' OR LOWER(p.name) LIKE '%xps%' OR LOWER(p.name) LIKE '%latitude%' OR LOWER(p.name) LIKE '%vostro%')"
-    if key == "msi":
-        return "(LOWER(p.name) LIKE '%msi%' OR LOWER(p.name) LIKE '%stealth%' OR LOWER(p.name) LIKE '%raider%' OR LOWER(p.name) LIKE '%titan%')"
-    if key == "alienware":
-        return "(LOWER(p.name) LIKE '%alienware%')"
-    if key == "microsoft":
-        return "(LOWER(p.name) LIKE '%microsoft%' OR LOWER(p.name) LIKE '%surface%')"
-    if key == "acer":
-        return "(LOWER(p.name) LIKE '%acer%' OR LOWER(p.name) LIKE '%swift%' OR LOWER(p.name) LIKE '%aspire%' OR LOWER(p.name) LIKE '%predator%' OR LOWER(p.name) LIKE '%nitro%')"
-    if key == "samsung":
-        return "(LOWER(p.name) LIKE '%samsung%' OR LOWER(p.name) LIKE '%galaxy book%')"
-    if key == "razer":
-        return "(LOWER(p.name) LIKE '%razer%' OR LOWER(p.name) LIKE '%blade%')"
-    if key == "gigabyte":
-        return "(LOWER(p.name) LIKE '%gigabyte%' OR LOWER(p.name) LIKE '%aorus%')"
-    if key == "toshiba":
-        return "(LOWER(p.name) LIKE '%toshiba%' OR LOWER(p.name) LIKE '%dynabook%')"
-    if key == "windows":
-        return "(LOWER(p.name) NOT LIKE '%apple%' AND LOWER(p.name) NOT LIKE '%macbook%' AND LOWER(p.name) NOT LIKE '%imac%' AND LOWER(p.sku) NOT LIKE 'mb%')"
-    return ""
+    from src.app.platform.store_profile import active_profile_id
+    return _brand_sql_patterns_for(active_profile_id()).get(key, "")
 
 
 def candidate_has_discrete_gpu(candidate: Dict[str, Any] | None) -> bool:

@@ -826,5 +826,23 @@
     ]
   },
 
+  "_brand_sql_patterns_comment": "ADAPTER (Phase 2A P0): brand -> SQL WHERE-fragment for catalog filtering. TRUSTED CONFIG ONLY (interpolated into SQL; no user input reaches these strings). Excised verbatim from recommend_candidate_classify.brand_sql_predicate. Non-electronics verticals derive predicates from their manufacturers slot.",
+  "brand_sql_patterns": {
+    "apple": "(LOWER(p.name) LIKE '%apple%' OR LOWER(p.name) LIKE '%macbook%' OR LOWER(p.name) LIKE '%imac%' OR LOWER(p.sku) LIKE 'mb%')",
+    "asus": "(LOWER(p.name) LIKE '%asus%' OR LOWER(p.name) LIKE '%vivobook%' OR LOWER(p.name) LIKE '%zenbook%' OR LOWER(p.name) LIKE '%rog%' OR LOWER(p.name) LIKE '%tuf%')",
+    "lenovo": "(LOWER(p.name) LIKE '%lenovo%' OR LOWER(p.name) LIKE '%ideapad%' OR LOWER(p.name) LIKE '%thinkpad%' OR LOWER(p.name) LIKE '%yoga%' OR LOWER(p.name) LIKE '%legion%')",
+    "hp": "(LOWER(p.name) LIKE '%hp %' OR LOWER(p.name) LIKE 'hp %' OR LOWER(p.name) LIKE '%envy%' OR LOWER(p.name) LIKE '%victus%' OR LOWER(p.name) LIKE '%omen%' OR LOWER(p.name) LIKE '%omnibook%' OR LOWER(p.name) LIKE '%elitebook%' OR LOWER(p.name) LIKE '%probook%')",
+    "dell": "(LOWER(p.name) LIKE '%dell%' OR LOWER(p.name) LIKE '%inspiron%' OR LOWER(p.name) LIKE '%xps%' OR LOWER(p.name) LIKE '%latitude%' OR LOWER(p.name) LIKE '%vostro%')",
+    "msi": "(LOWER(p.name) LIKE '%msi%' OR LOWER(p.name) LIKE '%stealth%' OR LOWER(p.name) LIKE '%raider%' OR LOWER(p.name) LIKE '%titan%')",
+    "alienware": "(LOWER(p.name) LIKE '%alienware%')",
+    "microsoft": "(LOWER(p.name) LIKE '%microsoft%' OR LOWER(p.name) LIKE '%surface%')",
+    "acer": "(LOWER(p.name) LIKE '%acer%' OR LOWER(p.name) LIKE '%swift%' OR LOWER(p.name) LIKE '%aspire%' OR LOWER(p.name) LIKE '%predator%' OR LOWER(p.name) LIKE '%nitro%')",
+    "samsung": "(LOWER(p.name) LIKE '%samsung%' OR LOWER(p.name) LIKE '%galaxy book%')",
+    "razer": "(LOWER(p.name) LIKE '%razer%' OR LOWER(p.name) LIKE '%blade%')",
+    "gigabyte": "(LOWER(p.name) LIKE '%gigabyte%' OR LOWER(p.name) LIKE '%aorus%')",
+    "toshiba": "(LOWER(p.name) LIKE '%toshiba%' OR LOWER(p.name) LIKE '%dynabook%')",
+    "windows": "(LOWER(p.name) NOT LIKE '%apple%' AND LOWER(p.name) NOT LIKE '%macbook%' AND LOWER(p.name) NOT LIKE '%imac%' AND LOWER(p.sku) NOT LIKE 'mb%')"
+  },
+
   "cv_returns_pack": "electronics"
 }
