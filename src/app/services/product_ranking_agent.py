@@ -319,9 +319,15 @@ def listwise_rerank(
             for i, rp in enumerate(final):
                 rp.rank = i + 1
 
-    # ── Contrastive WHY generation ──
-    if len(final) >= 1:
-        # Compute average scores of rejected candidates
+    # ── Contrastive WHY + delta explanations (deterministic, spec-specific) ──
+    # The #1 pick is the anchor; runners-up are explained by their ACTUAL spec deltas vs #1
+    # ("why this one, not the top pick") rather than a generic phrase. No LLM call — the deltas
+    # are already computed, so this is zero-latency and deterministic.
+    if final:
+        anchor = final[0]
+        for rp in final[1:]:
+            rp.delta_vs_anchor = compute_product_delta(anchor.raw, rp.raw)
+
         rejected = [r for r in scored if r not in final]
         if rejected:
             avg_rejected = {
@@ -332,27 +338,44 @@ def listwise_rerank(
             avg_rejected = {"spec_match": 0.5, "budget_fit": 0.5, "brand_pref": 0.5}
 
         for rp in final:
-            reasons = []
-            cs = rp.component_scores
-            if cs.get("spec_match", 0) > avg_rejected.get("spec_match", 0) + 0.1:
-                reasons.append("better spec match for your needs")
-            if cs.get("budget_fit", 0) > avg_rejected.get("budget_fit", 0) + 0.1:
-                reasons.append("fits your budget well")
-            if cs.get("brand_pref", 0) > avg_rejected.get("brand_pref", 0) + 0.1:
-                reasons.append("matches your brand preference")
-            if not reasons:
-                reasons.append("strong overall score across all criteria")
             brand = (rp.raw.get("brand") or "").strip()
             name = (rp.raw.get("name") or rp.raw.get("title") or rp.product_id).strip()
-            rp.contrastive_why = f"{brand} {name}: selected because it has {', '.join(reasons)}.".strip()
-
-    # ── Product delta explanations (vs anchor or vs #1) ──
-    if len(final) >= 2:
-        anchor = final[0]  # #1 ranked product is the anchor
-        for rp in final[1:]:
-            rp.delta_vs_anchor = compute_product_delta(anchor.raw, rp.raw)
+            label = f"{brand} {name}".strip()
+            if rp.rank == 1:
+                cs = rp.component_scores
+                adv: List[str] = []
+                if cs.get("spec_match", 0) > avg_rejected.get("spec_match", 0) + 0.1:
+                    adv.append("the strongest spec match for your needs")
+                if cs.get("budget_fit", 0) > avg_rejected.get("budget_fit", 0) + 0.1:
+                    adv.append("the best value within your budget")
+                if cs.get("brand_pref", 0) > avg_rejected.get("brand_pref", 0) + 0.1:
+                    adv.append("your preferred brand")
+                reason = "; ".join(adv[:2]) if adv else "the strongest overall score across your criteria"
+                rp.contrastive_why = f"{label}: top pick — {reason}."
+            else:
+                salient = _salient_deltas(rp.delta_vs_anchor, k=2)
+                if salient:
+                    rp.contrastive_why = f"{label}: vs the top pick — {'; '.join(salient)}."
+                else:
+                    rp.contrastive_why = f"{label}: closely matches the top pick on the specs that matter."
 
     return final
+
+
+# Decision-relevant delta dimensions, most→least salient for a one-line "why not #1" explanation.
+_DELTA_SALIENCE = ("price", "gpu", "cpu", "ram", "refresh_rate", "storage", "display")
+
+
+def _salient_deltas(deltas: Dict[str, str], k: int = 2) -> List[str]:
+    """Pick the k most decision-relevant deltas, skipping 'Same'/'Similar' (no signal)."""
+    out: List[str] = []
+    for key in _DELTA_SALIENCE:
+        d = (deltas or {}).get(key)
+        if d and not d.lower().startswith(("same", "similar")):
+            out.append(d)
+        if len(out) >= k:
+            break
+    return out
 
 
 def compute_product_delta(
