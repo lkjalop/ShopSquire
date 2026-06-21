@@ -73,3 +73,37 @@ def test_default_demoter_used_when_not_injected():
         payload=payload, finalize_fn=lambda **k: _fin_result(k["results"]),
     )
     assert ran is True and isinstance(out, list)
+
+
+# ── build_result_rows (Phase 3.3) ──
+def _norm(v):
+    return round(v * 10, 2)  # deterministic stand-in for the route's _normalize_score
+
+
+def test_build_result_rows_maps_scored_to_rows():
+    from src.app.services.recommend_response_finalizer import build_result_rows
+    scored = [
+        {"score": 1.0, "confidence": 0.9, "candidate": {"sku": "A", "name": "Alpha"},
+         "factors": {"positive": ["fast", "cheap", "light", "x4"], "negative": ["heavy"]}},
+        {"score": 0.5, "candidate": {"sku": "B", "name": "Beta"}, "factors": {}},
+    ]
+    rows = build_result_rows(
+        scored, baseline_pos={"A": 2}, why_by_sku={"A": "top pick — best specs"},
+        delta_by_sku={"A": {"price": "cheaper"}}, normalize_score=_norm,
+    )
+    a, b = rows[0], rows[1]
+    assert a["sku"] == "A" and a["name"] == "Alpha"          # candidate spread
+    assert a["why"] == ["fast", "cheap", "light"]            # positive[:3]
+    assert a["why_not"] == ["heavy"]                          # negative[:3]
+    assert a["contrastive_why"] == "top pick — best specs"
+    assert a["delta_vs_anchor"] == {"price": "cheaper"}
+    assert a["score"] == 1.0 and a["score_norm"] == 10.0      # normalize_score injected
+    assert a["rank_delta"] == 0.0 and a["rerank_delta"] == 2 - 0  # baseline 2 -> idx 0
+    assert b["baseline_rank"] is None and b["rerank_delta"] is None and b["why"] == []
+
+
+def test_build_result_rows_empty_and_malformed_safe():
+    from src.app.services.recommend_response_finalizer import build_result_rows
+    assert build_result_rows([], normalize_score=_norm) == []
+    rows = build_result_rows([{"score": 1.0, "candidate": {"sku": "A"}}, "garbage"], normalize_score=_norm)
+    assert len(rows) == 1 and rows[0]["sku"] == "A"  # non-dict item skipped

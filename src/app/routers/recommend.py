@@ -9952,7 +9952,6 @@ def suggest(
             "score": item.get("score"),
         })
 
-    results = []
     image_lane_fill: Dict[str, Any] = {"applied": False, "added": 0, "reason": "not_image_flow"}
     top_score = scored[0]["score"] if scored else 0.0
     min_score = scored[-1]["score"] if scored else 0.0
@@ -9960,31 +9959,13 @@ def suggest(
         if top_score == min_score:
             return 100.0
         return round((val - min_score) / max((top_score - min_score), 1e-6) * 100, 2)
-    for idx, item in enumerate(scored):
-        c = item.get("candidate") or {}
-        score_val = float(item.get("score") or 0.0)
-        rank_delta = round(top_score - score_val, 2)
-        why_not_inline = item.get("factors", {}).get("negative", [])[:3]
-        sku = c.get("sku")
-        baseline_rank = baseline_pos.get(sku) if sku in baseline_pos else None
-        rerank_delta = None
-        if baseline_rank is not None:
-            rerank_delta = baseline_rank - idx
-        _pos_factors = list(((item.get("factors") or {}).get("positive") or []))[:3]
-        results.append({
-            **c,
-            "confidence": item.get("confidence"),
-            "factors": item.get("factors"),
-            "why": _pos_factors,
-            "score": score_val,
-            "score_norm": _normalize_score(score_val),
-            "rank_delta": rank_delta,
-            "why_not": why_not_inline,
-            "contrastive_why": _why_by_sku.get(str(sku or ""), ""),
-            "delta_vs_anchor": _delta_by_sku.get(str(sku or ""), {}),
-            "baseline_rank": baseline_rank,
-            "rerank_delta": rerank_delta,
-        })
+    # Result-row assembly extracted to recommend_response_finalizer.build_result_rows
+    # (normalize_score is injected — it's reused below for the image-lane fill).
+    from src.app.services.recommend_response_finalizer import build_result_rows as _build_result_rows
+    results = _build_result_rows(
+        scored, baseline_pos=baseline_pos, why_by_sku=_why_by_sku,
+        delta_by_sku=_delta_by_sku, normalize_score=_normalize_score,
+    )
     # WS2.4 / WS3.1 / WS3.2 — enforce query-plan hard constraints + accessory guard
     # on the full ranked list before the display slice. Conservative + self-reverting.
     try:

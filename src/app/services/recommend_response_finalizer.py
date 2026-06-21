@@ -469,3 +469,47 @@ def run_finalizer(
             except Exception:
                 pass
     return results, finalizer_ran
+
+
+def build_result_rows(
+    scored: List[Dict[str, Any]],
+    *,
+    baseline_pos: Optional[Dict[str, int]] = None,
+    why_by_sku: Optional[Dict[str, str]] = None,
+    delta_by_sku: Optional[Dict[str, Any]] = None,
+    normalize_score: Callable[[float], float],
+) -> List[Dict[str, Any]]:
+    """Assemble the per-product response rows from scored candidates + rerank metadata. Pure:
+    maps each {score, candidate, factors} into the response row — specs (spread) + why
+    (factors.positive) + why_not (factors.negative) + contrastive_why + delta_vs_anchor + rank /
+    rerank deltas + normalized score. normalize_score is injected (it depends on the score range, which
+    the route also reuses for the image-lane fill). Vertical-blind; never raises on a malformed item."""
+    baseline_pos = baseline_pos or {}
+    why_by_sku = why_by_sku or {}
+    delta_by_sku = delta_by_sku or {}
+    top_score = float(scored[0].get("score") or 0.0) if scored else 0.0
+    rows: List[Dict[str, Any]] = []
+    for idx, item in enumerate(scored or []):
+        if not isinstance(item, dict):
+            continue
+        c = item.get("candidate") or {}
+        score_val = float(item.get("score") or 0.0)
+        sku = c.get("sku")
+        baseline_rank = baseline_pos.get(sku) if sku in baseline_pos else None
+        rerank_delta = (baseline_rank - idx) if baseline_rank is not None else None
+        factors = item.get("factors") or {}
+        rows.append({
+            **c,
+            "confidence": item.get("confidence"),
+            "factors": item.get("factors"),
+            "why": list((factors.get("positive") or []))[:3],
+            "score": score_val,
+            "score_norm": normalize_score(score_val),
+            "rank_delta": round(top_score - score_val, 2),
+            "why_not": list((factors.get("negative") or []))[:3],
+            "contrastive_why": why_by_sku.get(str(sku or ""), ""),
+            "delta_vs_anchor": delta_by_sku.get(str(sku or ""), {}),
+            "baseline_rank": baseline_rank,
+            "rerank_delta": rerank_delta,
+        })
+    return rows
