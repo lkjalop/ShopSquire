@@ -10233,8 +10233,13 @@ def suggest(
     if _ext_enabled:
         try:
             from src.app.services.external_product_research_service import research as _ext_research
-            from src.app.ports.external_product_research import NullFetcher as _ext_fetcher
             from src.app.platform.store_profile import profile_slot as _ext_profile_slot, active_profile_id as _ext_active_pid
+            # Real SSRF-safe httpx adapter ONLY when an operator-configured search endpoint exists;
+            # otherwise the NullFetcher keeps external research inert (empty) even when enabled.
+            if os.getenv("EXTERNAL_RESEARCH_SEARCH_URL"):
+                from src.app.adapters.external_research_httpx import HttpxResearchFetcher as _ext_fetcher
+            else:
+                from src.app.ports.external_product_research import NullFetcher as _ext_fetcher
             # AGNOSTIC: allowlist comes from the ACTIVE profile (electronics->tech, pharmacy->health,
             # fashion->fashion), falling back to the global config. Cache is namespaced by tenant+profile
             # so verticals never share web results.
