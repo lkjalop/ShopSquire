@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
+import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
@@ -406,6 +407,8 @@ export default function App() {
   const [rightPanelPrevMode, setRightPanelPrevMode] = useState<RightPanelMode | null>(null);
   const [rightPanelContract, setRightPanelContract] = useState<RightPanelContract | null>(null);
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
+  // Safe-internet-search results (separate labeled source; never owned catalog items).
+  const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
@@ -1358,6 +1361,7 @@ export default function App() {
           }
         }
         const prods = (data.products || []) as Product[];
+        setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
         const respAssistant = data.assistant_message || '';
         const nextQuestions = Array.isArray(data.next_questions) ? data.next_questions : [];
         const normalizedNextQuestions = normalizeNextQuestions(nextQuestions);
@@ -1612,6 +1616,7 @@ export default function App() {
           </div>
         </div>
         <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
+        <ExternalResearchPanel items={externalResearch} />
       </main>
 
       {/* Floating Chat Button */}
