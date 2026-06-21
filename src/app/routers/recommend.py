@@ -10220,6 +10220,31 @@ def suggest(
             "playbook_hint": {"id": "PB-INV-004"},
         } if insufficient_stock_skus else None),
     }, trace_id)
+    # Safe internet search (EXTERNAL_RESEARCH_ENABLED, off by default): a SEPARATE labeled source.
+    # NullFetcher = no network until a real allowlisted httpx adapter is wired -> stays 'empty' even
+    # if enabled. NEVER merged into owned `results`/cart (external items have sku=None -> structurally
+    # un-cartable). PII is scrubbed before egress; only allowlisted domains pass; web text is data.
+    _ext_raw = os.getenv("EXTERNAL_RESEARCH_ENABLED")
+    _ext_enabled = (
+        str(_ext_raw).strip().lower() in ("1", "true", "yes")
+        if _ext_raw is not None
+        else bool(flags.get("EXTERNAL_RESEARCH_ENABLED", False))
+    )
+    if _ext_enabled:
+        try:
+            from src.app.services.external_product_research_service import research as _ext_research
+            from src.app.ports.external_product_research import NullFetcher as _ext_fetcher
+            _extres = _ext_research(
+                query, fetcher=_ext_fetcher(),
+                allowlist=flags.get("EXTERNAL_RESEARCH_ALLOWLIST") or [],
+                catalog_skus=[str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)],
+                catalog_names={str(r.get("sku")): str(r.get("name") or "") for r in (results or []) if isinstance(r, dict) and r.get("sku")},
+                enabled=True, scrub=scrub_pii, redis=redis,
+            )
+            payload["external_research"] = _extres.get("items") or []
+            payload["external_research_status"] = _extres.get("source_status")
+        except Exception as _ee:
+            _trace_system_error(trace_id=trace_id, stage="external_research", exc=_ee)
     # Ensure evidence contract keys are present at payload construction
     if "evidence_items" not in payload:
         top = []
