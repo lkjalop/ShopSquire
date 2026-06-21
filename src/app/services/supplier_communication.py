@@ -128,16 +128,46 @@ def dispatch_supplier_message(
     tenant_id: Optional[str] = None,
     actor: Optional[str] = None,
     from_email: Optional[str] = None,
+    boundary_check_fn: Optional[Callable[..., Any]] = None,
+    trace_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Decide-then-(maybe)-send. ALWAYS returns the draft. Never raises; never sends unless
-    allow_send AND the gate ALLOWs supplier_contact AND the recipient domain is trusted AND a real
-    mailer is bound. Returns {draft, sent, status, [verdict], [send_result], reason}."""
+    allow_send AND the MAESTRO boundary passes AND the gate ALLOWs supplier_contact AND the recipient
+    domain is trusted AND a real mailer is bound. Returns {draft, sent, status, [verdict], [maestro],
+    [send_result], reason}."""
     out: Dict[str, Any] = {"draft": draft.to_dict(), "sent": False, "status": "draft_only"}
 
     # Bounded-autonomy default: a draft is just a draft until a human/flow asks to send.
     if not allow_send:
         out["reason"] = "allow_send not requested — draft retained for human review"
         return out
+
+    # 0) MAESTRO boundary (defense in depth, before the policy gate): the supplier-comms agent may
+    # only invoke the dispatch tool within the suppliers scope. In 'block' mode a high/critical
+    # violation raises MaestroViolationError (caught -> held); in 'audit' (default) it just records.
+    if boundary_check_fn is None:
+        try:
+            from src.app.security.maestro_boundaries import record_agent_action as boundary_check_fn  # type: ignore[assignment]
+            from src.app.services.decision_log import log_trace_event as _ss_log
+        except Exception:
+            boundary_check_fn, _ss_log = None, None
+    else:
+        _ss_log = None
+    if boundary_check_fn is not None:
+        _violations = None
+        try:
+            _violations = boundary_check_fn(
+                agent_name="Supplier_Communication_Agent", tool_name="dispatch_supplier_message",
+                data_scope="suppliers", value_usd=float(value_cents or 0) / 100.0,
+                trace_id=trace_id, log_fn=_ss_log,
+            )
+        except Exception as _mexc:  # MaestroViolationError in 'block' mode -> hold the send
+            out["status"] = "held_for_review"
+            out["reason"] = f"maestro boundary violation: {str(_mexc)[:160]}"
+            out["maestro"] = {"blocked": True}
+            return out
+        if _violations:
+            out["maestro"] = {"violations": [getattr(v, "violation_type", "unknown") for v in _violations]}
 
     # 1) Gate. Default to the canonical execution gate; supplier_contact → HUMAN_REVIEW (SUP-04).
     if decide_fn is None:

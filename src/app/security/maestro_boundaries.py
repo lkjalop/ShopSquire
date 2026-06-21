@@ -265,6 +265,18 @@ AGENT_BOUNDARIES: Dict[str, AgentBoundary] = {
         allowed_peers=frozenset(["Orchestrator"]),
         risk_tier="high",
     ),
+    "Supplier_Communication_Agent": AgentBoundary(
+        agent_name="Supplier_Communication_Agent",
+        # Draft freely; the SEND is the consequential tool — gated by execution_gate AND this boundary.
+        allowed_tools=frozenset(["draft_supplier_message", "dispatch_supplier_message"]),
+        allowed_data_scopes=frozenset(["suppliers", "orders", "inventory"]),
+        max_autonomous_value_usd=0.0,  # cannot auto-approve any spend; outbound send is human-gated
+        can_write_db=False,
+        can_call_external_api=True,    # emails a supplier via the injected mailer (allowlisted recipient)
+        can_invoke_llm=True,           # drafts the message
+        allowed_peers=frozenset(["Orchestrator", "Inventory_Agent"]),
+        risk_tier="high",
+    ),
 }
 
 
@@ -393,6 +405,46 @@ def validate_agent_action(
         if blocking:
             raise MaestroViolationError(blocking)
 
+    return violations
+
+
+def record_agent_action(
+    *,
+    agent_name: str,
+    tool_name: Optional[str] = None,
+    data_scope: Optional[str] = None,
+    target_agent: Optional[str] = None,
+    value_usd: float = 0.0,
+    trace_id: Optional[str] = None,
+    log_fn: Optional[Any] = None,
+) -> List[BoundaryViolation]:
+    """validate_agent_action + AUDIT — record any boundary violations to the decision trace so MAESTRO
+    enforcement on the recommend / supplier / fraud paths is OBSERVABLE, not silent.
+
+    In 'block' enforcement mode the underlying validate raises MaestroViolationError on a high/critical
+    violation (the caller converts it to a 403 / held action); in 'audit'/'warn' (default) it returns
+    the violation list and behaviour is unchanged. The log sink is injected so this stays dependency-
+    light. Returns the violations (empty = within boundary). Never raises beyond MaestroViolationError."""
+    violations = validate_agent_action(
+        agent_name=agent_name, tool_name=tool_name, data_scope=data_scope,
+        target_agent=target_agent, value_usd=value_usd,
+    )
+    if violations and log_fn is not None:
+        try:
+            log_fn(
+                trace_id=trace_id, event_type="maestro_boundary", source_type="agent",
+                source_id=str(agent_name), target_type="system", target_id=None,
+                payload={
+                    "maestro_checked": True,
+                    "enforcement_mode": _ENFORCEMENT_MODE,
+                    "violations": [
+                        {"type": v.violation_type, "severity": v.severity, "detail": v.detail[:200]}
+                        for v in violations
+                    ],
+                },
+            )
+        except Exception:
+            pass
     return violations
 
 

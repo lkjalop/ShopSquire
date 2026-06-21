@@ -290,6 +290,16 @@ class FraudScorer:
         case_id: Optional[str] = None,
     ) -> Tuple[float, str, Dict[str, bool]]:
         signals = dict(base_signals or {})
+        # MAESTRO boundary (audit): record that the fraud agent scored within its tool/data scope.
+        # Clean by definition (score_fraud/orders are in-boundary); in 'block' mode an out-of-scope
+        # call would raise. Never affects the score.
+        try:
+            from src.app.security.maestro_boundaries import record_agent_action as _maestro
+            from src.app.services.decision_log import log_trace_event as _fs_log
+            _maestro(agent_name="Fraud_Scoring_Agent", tool_name="score_fraud",
+                     data_scope="orders", trace_id=(case_id or None), log_fn=_fs_log)
+        except Exception:
+            pass
         if session_data:
             signals.update(BehavioralFraudDetector().analyze_session(session_data))
         # Serial mismatch

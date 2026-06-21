@@ -39,7 +39,7 @@ from src.app.services.ethical_ai import EthicalAIGuard
 from src.app.services.decision_log import log_trace_event, log_decision
 from src.app.services.catalog_profile import assess_catalog_relevance, get_cached_catalog_profile_with_meta
 from src.app.security.commerce_request_guard import inspect_commerce_request
-from src.app.security.maestro_boundaries import validate_agent_action as _maestro_validate
+from src.app.security.maestro_boundaries import validate_agent_action as _maestro_validate, record_agent_action as _maestro_record
 from src.app.services.agent_bus import AgentBus
 from src.app.services.agent_handoff import request_handoff_best_effort
 from src.app.deps import hash_uid
@@ -9406,6 +9406,10 @@ def suggest(
         _delta_by_sku: Dict[str, Dict[str, str]] = {}
         try:
             from src.app.services.product_ranking_agent import listwise_rerank
+            # MAESTRO boundary (audit): the ranking agent only ranks within the products scope.
+            for _mv in _maestro_record(agent_name="Product_Ranking_Agent", tool_name="rank_products",
+                                       data_scope="products", trace_id=trace_id, log_fn=log_trace_event):
+                _trace_system_error(trace_id=trace_id, stage="maestro_ranking", exc=Exception(_mv.detail))
 
             _p_brands_rank, _n_brands_rank = _extract_profile_brand_prefs(_user_profile_dict)
             _brand_pos_rank = list(constraints.get("brands") or _p_brands_rank)
