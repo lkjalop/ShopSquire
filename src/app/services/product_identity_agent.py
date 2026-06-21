@@ -252,6 +252,13 @@ def specs_to_constraints(identity: Dict[str, Any]) -> Dict[str, Any]:
     if brand and brand.lower() not in ("unknown", "null", "none", ""):
         constraints["identity_brand"] = brand
 
+    # Model / product line — the MOST specific anchor (e.g. "ThinkPad X1", "Pro 7"). Previously
+    # dropped, which is why an uploaded photo of a specific model returned generic results. Carried
+    # so retrieval/ranking can anchor on the exact product line, not just the brand.
+    model = identity.get("model")
+    if model and str(model).strip().lower() not in ("unknown", "null", "none", ""):
+        constraints["identity_model"] = str(model).strip()
+
     # Price tier → budget hints
     tier_map = {
         "budget": (300, 800),

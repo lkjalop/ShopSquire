@@ -6910,6 +6910,10 @@ def suggest(
                     constraints.setdefault("form_factor", _identity_constraints["identity_form_factor"])
                 if _identity_constraints.get("identity_product_type"):
                     constraints.setdefault("product_type", _identity_constraints["identity_product_type"])
+                # Carry the specific model so ranking can ANCHOR results to the uploaded product
+                # line (multimodal anchoring), not just the brand.
+                if _identity_constraints.get("identity_model"):
+                    constraints.setdefault("identity_model", _identity_constraints["identity_model"])
                 log_trace_event(
                     trace_id=trace_id,
                     event_type="product_identity_text_enrichment",
@@ -9445,6 +9449,17 @@ def suggest(
                 scored.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
         except Exception:
             pass
+        # ── Multimodal anchoring ───────────────────────────────────────────────
+        # When an uploaded image identified a specific model, float catalog items matching that
+        # product line to the top so the upload anchors the results (instead of generic matches).
+        try:
+            _id_model_anchor = constraints.get("identity_model")
+            if _id_model_anchor:
+                from src.app.services.product_ranking_agent import identity_anchor_boost
+                scored = identity_anchor_boost(scored, identity_model=_id_model_anchor)
+                timing_breakdown["identity_anchored"] = True
+        except Exception as _iaexc:
+            _trace_system_error(trace_id=trace_id, stage="identity_anchor", exc=_iaexc)
         ranked = [
             dict((item or {}).get("candidate") or {})
             for item in (scored or [])

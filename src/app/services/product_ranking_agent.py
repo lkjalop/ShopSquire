@@ -8,8 +8,44 @@ Upgrades the recommendation pipeline's reranking pass with:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
+
+
+def identity_anchor_boost(
+    scored: List[Dict[str, Any]],
+    *,
+    identity_model: Optional[str] = None,
+    boost: float = 0.6,
+) -> List[Dict[str, Any]]:
+    """Multimodal anchoring — float candidates that MATCH an image-identified product line to the top.
+
+    `scored` is the in-pipeline list of {"score": float, "candidate": {...}} items. When an uploaded
+    image identified a specific model (e.g. "ThinkPad X1"), candidates whose name/model/title contain
+    those tokens get a score bump proportional to how many tokens match, then the list is re-sorted in
+    place. No-op when there is no identity_model. Pure (no I/O); vertical-blind."""
+    model = str(identity_model or "").strip().lower()
+    if not model or not scored:
+        return scored
+    tokens = [t for t in re.split(r"[^a-z0-9]+", model) if len(t) >= 2]
+    if not tokens:
+        return scored
+    changed = False
+    for item in scored:
+        if not isinstance(item, dict):
+            continue
+        cand = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+        hay = f"{cand.get('name', '')} {cand.get('model', '')} {cand.get('title', '')}".lower()
+        hits = sum(1 for t in tokens if t in hay)
+        if hits:
+            frac = hits / len(tokens)
+            item["score"] = float(item.get("score") or 0.0) + boost * frac
+            cand["_identity_anchor"] = round(frac, 3)
+            changed = True
+    if changed:
+        scored.sort(key=lambda x: float((x or {}).get("score") or 0.0), reverse=True)
+    return scored
 
 
 @dataclass
