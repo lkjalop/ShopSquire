@@ -976,37 +976,14 @@ def _fast_path_catalog_recommendation(
     candidates.sort(key=lambda x: (-float(x.get("score") or 0.0), int(x.get("price_cents") or 0), str(x.get("name") or "")))
     query_elapsed_ms = int((time.perf_counter() - query_t0) * 1000)
     if not candidates or query_elapsed_ms > 2500:
+        # AGNOSTIC: demo/fallback products come from the ACTIVE profile (electronics carries the
+        # laptop demo set; a non-electronics tenant gets [] — no laptop products as a fallback).
+        # Copied so the lru-cached profile dict is never mutated by the scoring loop below.
+        from src.app.platform.store_profile import profile_slot as _fb_profile_slot
         fallback_rows = [
-            {
-                "id": "LOCAL-MSI-THIN-A15",
-                "sku": "LOCAL-MSI-THIN-A15",
-                "name": 'MSI Thin A15 15"',
-                "price_cents": 179900,
-                "currency": "USD",
-                "image_url": None,
-                "stock": 5,
-                "specs": {"cpu": "Ryzen 5", "gpu": "GeForce RTX 3050", "ram_gb": 8, "display_hz": 144},
-            },
-            {
-                "id": "LOCAL-MSI-KATANA-15",
-                "sku": "LOCAL-MSI-KATANA-15",
-                "name": "MSI Katana 15 B13VGK",
-                "price_cents": 149900,
-                "currency": "USD",
-                "image_url": None,
-                "stock": 3,
-                "specs": {"gpu": "RTX 4070", "ram_gb": 16, "display_hz": 144},
-            },
-            {
-                "id": "LOCAL-LENOVO-LOQ-15",
-                "sku": "LOCAL-LENOVO-LOQ-15",
-                "name": "Lenovo LOQ 15",
-                "price_cents": 139900,
-                "currency": "USD",
-                "image_url": None,
-                "stock": 4,
-                "specs": {"cpu": "Ryzen 5", "gpu": "RTX 4050", "ram_gb": 16},
-            },
+            {**r, "specs": dict(r.get("specs") or {})}
+            for r in (_fb_profile_slot("demo_fallback_catalog", default=[]) or [])
+            if isinstance(r, dict)
         ]
         candidates = []
         for item in fallback_rows:

@@ -1176,5 +1176,52 @@
     "rtings.com"
   ],
 
+  "_demo_fallback_catalog_comment": "ADAPTER: fast-path demo/fallback products used only when live retrieval is empty/slow. Excised from recommend._fast_path_catalog_recommendation so a non-electronics tenant does not get laptop products as a fallback (resolved per active profile).",
+  "demo_fallback_catalog": [
+    {
+      "id": "LOCAL-MSI-THIN-A15",
+      "sku": "LOCAL-MSI-THIN-A15",
+      "name": "MSI Thin A15 15\"",
+      "price_cents": 179900,
+      "currency": "USD",
+      "image_url": null,
+      "stock": 5,
+      "specs": {
+        "cpu": "Ryzen 5",
+        "gpu": "GeForce RTX 3050",
+        "ram_gb": 8,
+        "display_hz": 144
+      }
+    },
+    {
+      "id": "LOCAL-MSI-KATANA-15",
+      "sku": "LOCAL-MSI-KATANA-15",
+      "name": "MSI Katana 15 B13VGK",
+      "price_cents": 149900,
+      "currency": "USD",
+      "image_url": null,
+      "stock": 3,
+      "specs": {
+        "gpu": "RTX 4070",
+        "ram_gb": 16,
+        "display_hz": 144
+      }
+    },
+    {
+      "id": "LOCAL-LENOVO-LOQ-15",
+      "sku": "LOCAL-LENOVO-LOQ-15",
+      "name": "Lenovo LOQ 15",
+      "price_cents": 139900,
+      "currency": "USD",
+      "image_url": null,
+      "stock": 4,
+      "specs": {
+        "cpu": "Ryzen 5",
+        "gpu": "RTX 4050",
+        "ram_gb": 16
+      }
+    }
+  ],
+
   "cv_returns_pack": "electronics"
 }
