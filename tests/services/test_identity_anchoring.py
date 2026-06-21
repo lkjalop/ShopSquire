@@ -65,3 +65,39 @@ def test_no_match_leaves_scores_untouched():
     out = identity_anchor_boost(_scored(), identity_model="Macbook Air")
     assert all("_identity_anchor" not in i["candidate"] for i in out)
     assert out[0]["candidate"]["sku"] == "A"  # unchanged order (no re-sort triggered)
+
+
+# ── apply_stock_penalty (Phase 3.2) ──
+def _scored_stock():
+    return [
+        {"score": 1.0, "candidate": {"sku": "IN"}},
+        {"score": 0.9, "candidate": {"sku": "OOS"}},
+        {"score": 0.8, "candidate": {"sku": "UNK"}},
+    ]
+
+
+def test_stock_penalty_demotes_oos_and_unknown_and_resorts():
+    from src.app.services.product_ranking_agent import apply_stock_penalty
+    stock = {"IN": 10, "OOS": 0}  # UNK absent -> unknown
+    out = apply_stock_penalty(_scored_stock(), batch_stock_fn=lambda skus: stock)
+    by = {i["candidate"]["sku"]: i for i in out}
+    assert by["OOS"]["candidate"]["_stock_penalty"] == "out_of_stock"
+    assert by["UNK"]["candidate"]["_stock_penalty"] == "unknown"
+    assert "_stock_penalty" not in by["IN"]["candidate"]
+    assert out[0]["candidate"]["sku"] == "IN"  # in-stock stays on top
+    assert by["OOS"]["score"] == 0.9 - 0.5 and by["UNK"]["score"] == 0.8 - 0.1
+
+
+def test_stock_penalty_noop_on_empty_or_no_skus():
+    from src.app.services.product_ranking_agent import apply_stock_penalty
+    assert apply_stock_penalty([], batch_stock_fn=lambda s: {}) == []
+    nosku = [{"score": 1.0, "candidate": {}}]
+    assert apply_stock_penalty(nosku, batch_stock_fn=lambda s: {}) == nosku
+
+
+def test_stock_penalty_never_raises_on_lookup_failure():
+    from src.app.services.product_ranking_agent import apply_stock_penalty
+    def _boom(skus):
+        raise RuntimeError("inventory down")
+    out = apply_stock_penalty(_scored_stock(), batch_stock_fn=_boom)
+    assert [i["candidate"]["sku"] for i in out] == ["IN", "OOS", "UNK"]  # untouched

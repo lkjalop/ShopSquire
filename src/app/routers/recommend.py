@@ -9376,31 +9376,12 @@ def suggest(
             use_case_key=(_use_case_match or constraints.get("use_case")),
             query=query_effective,
         )
-        # ── Pre-ranking stock penalty ─────────────────────────────────────────
-        # Apply live inventory penalties BEFORE building results so ranking
-        # reflects stock reality. OOS items lose 0.5 pts; unknown stock loses 0.1.
+        # Pre-ranking stock penalty (extracted to product_ranking_agent.apply_stock_penalty):
+        # OOS -0.5, unknown -0.1, then re-sort, so ranking reflects live stock before results build.
         try:
             from src.app.services.inventory_query_service import batch_stock_levels as _bsl_pre
-            _pre_skus = [
-                str((item or {}).get("candidate", {}).get("sku") or "")
-                for item in scored
-                if isinstance(item, dict) and isinstance((item or {}).get("candidate"), dict)
-            ]
-            if _pre_skus:
-                _pre_stock = _bsl_pre([s for s in _pre_skus if s])
-                for _item in scored:
-                    _cand = (_item or {}).get("candidate") or {}
-                    _sku = str(_cand.get("sku") or "")
-                    if not _sku:
-                        continue
-                    _lvl = _pre_stock.get(_sku)
-                    if _lvl is None:
-                        _item["score"] = float(_item.get("score") or 0.0) - 0.1
-                        _cand["_stock_penalty"] = "unknown"
-                    elif _lvl == 0:
-                        _item["score"] = float(_item.get("score") or 0.0) - 0.5
-                        _cand["_stock_penalty"] = "out_of_stock"
-                scored.sort(key=lambda x: float(x.get("score") or 0.0), reverse=True)
+            from src.app.services.product_ranking_agent import apply_stock_penalty as _apply_stock_penalty
+            scored = _apply_stock_penalty(scored, batch_stock_fn=_bsl_pre)
         except Exception:
             pass
         # ── Multimodal anchoring ───────────────────────────────────────────────

@@ -13,6 +13,49 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 
+def apply_stock_penalty(
+    scored: List[Dict[str, Any]],
+    *,
+    batch_stock_fn: Callable[[List[str]], Dict[str, Any]],
+    oos_penalty: float = 0.5,
+    unknown_penalty: float = 0.1,
+) -> List[Dict[str, Any]]:
+    """Penalize out-of-stock / unknown-stock candidates BEFORE results assembly so ranking reflects
+    live stock reality (OOS -0.5, unknown -0.1), then re-sort by score. Mutates item['score'] and
+    candidate['_stock_penalty'] in place; batch_stock_fn(skus)->{sku: level} is injected. No-op when
+    there are no SKUs; never raises (a stock-lookup failure leaves ranking untouched). Vertical-blind."""
+    if not scored:
+        return scored
+    skus = [
+        str((i or {}).get("candidate", {}).get("sku") or "")
+        for i in scored
+        if isinstance(i, dict) and isinstance(i.get("candidate"), dict)
+    ]
+    skus = [s for s in skus if s]
+    if not skus:
+        return scored
+    try:
+        stock = batch_stock_fn(skus) or {}
+    except Exception:
+        return scored
+    for item in scored:
+        if not isinstance(item, dict):
+            continue
+        cand = item.get("candidate") or {}
+        sku = str(cand.get("sku") or "")
+        if not sku:
+            continue
+        lvl = stock.get(sku)
+        if lvl is None:
+            item["score"] = float(item.get("score") or 0.0) - unknown_penalty
+            cand["_stock_penalty"] = "unknown"
+        elif lvl == 0:
+            item["score"] = float(item.get("score") or 0.0) - oos_penalty
+            cand["_stock_penalty"] = "out_of_stock"
+    scored.sort(key=lambda x: float((x or {}).get("score") or 0.0), reverse=True)
+    return scored
+
+
 def identity_anchor_boost(
     scored: List[Dict[str, Any]],
     *,
