@@ -36,6 +36,11 @@ export type Product = {
   why_codes?: { code: string; label: string; confidence: number; weight?: number; weighted_score?: number }[];
   why_confidence?: number;
   model_source?: string;
+  // Stock honesty — surfaced from the backend finalizer (stock_status/stock_level/stock_urgency/cart_eligible).
+  stock_status?: 'in_stock' | 'low_stock' | 'very_low_stock' | 'out_of_stock' | string;
+  stock_level?: number;
+  stock_urgency?: string;
+  cart_eligible?: boolean;
 };
 type RightPanelMode = 'none' | 'grid' | 'list' | 'compare' | 'cv' | 'cart' | 'faq' | 'security' | 'visual_search' | 'image_context';
 type NqeInteraction = {
@@ -1187,6 +1192,13 @@ export default function App() {
             price: price ?? 0,
             features,
             image_url: item.image_url,
+            // Preserve backend signals this field-by-field map used to drop (stock honesty + why).
+            why: item.why,
+            score_norm: item.score_norm,
+            stock_status: item.stock_status,
+            stock_level: item.stock_level,
+            stock_urgency: item.stock_urgency,
+            cart_eligible: item.cart_eligible,
           } as Product;
         });
         setTraceId(normalizeTraceId(data.decision_trace_id || data.trace_id || proposal.trace_id || null));
