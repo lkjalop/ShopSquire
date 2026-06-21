@@ -386,5 +386,12 @@
     }
   ],
 
+  "_external_research_allowlist_comment": "ADAPTER: per-vertical web-research domain allowlist (illustrative — configure per deployment). Resolved per-request by recommend.py via profile_slot; safe internet search never reaches a domain outside this list.",
+  "external_research_allowlist": [
+    "vogue.com",
+    "gq.com",
+    "businessoffashion.com"
+  ],
+
   "cv_returns_pack": "electronics"
 }

@@ -78,6 +78,7 @@ def research(
     enabled: bool = False,
     scrub: Optional[Callable[[str], str]] = None,
     redis: Any = None,
+    cache_namespace: str = "",
     timeout_s: float = 4.0,
     max_items: int = 8,
 ) -> Dict[str, Any]:
@@ -89,8 +90,9 @@ def research(
     allow = [a for a in (allowlist or []) if str(a or "").strip()]
     t0 = time.perf_counter()
 
+    # Namespace the cache by tenant/profile so verticals never see each other's web results.
     cache_key = "extres:" + hashlib.sha256(
-        (scrubbed + "|" + ",".join(sorted(allow))).encode("utf-8")
+        (str(cache_namespace) + "|" + scrubbed + "|" + ",".join(sorted(allow))).encode("utf-8")
     ).hexdigest()[:24]
     if redis is not None:
         with contextlib.suppress(Exception):

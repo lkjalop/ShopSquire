@@ -10234,12 +10234,22 @@ def suggest(
         try:
             from src.app.services.external_product_research_service import research as _ext_research
             from src.app.ports.external_product_research import NullFetcher as _ext_fetcher
+            from src.app.platform.store_profile import profile_slot as _ext_profile_slot, active_profile_id as _ext_active_pid
+            # AGNOSTIC: allowlist comes from the ACTIVE profile (electronics->tech, pharmacy->health,
+            # fashion->fashion), falling back to the global config. Cache is namespaced by tenant+profile
+            # so verticals never share web results.
+            _ext_allow = (
+                _ext_profile_slot("external_research_allowlist", default=None)
+                or flags.get("EXTERNAL_RESEARCH_ALLOWLIST")
+                or []
+            )
             _extres = _ext_research(
                 query, fetcher=_ext_fetcher(),
-                allowlist=flags.get("EXTERNAL_RESEARCH_ALLOWLIST") or [],
+                allowlist=_ext_allow,
                 catalog_skus=[str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)],
                 catalog_names={str(r.get("sku")): str(r.get("name") or "") for r in (results or []) if isinstance(r, dict) and r.get("sku")},
                 enabled=True, scrub=scrub_pii, redis=redis,
+                cache_namespace=f"{tenant_id or ''}:{_ext_active_pid()}",
             )
             payload["external_research"] = _extres.get("items") or []
             payload["external_research_status"] = _extres.get("source_status")

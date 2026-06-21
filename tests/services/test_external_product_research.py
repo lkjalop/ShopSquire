@@ -16,6 +16,17 @@ class _Fetcher:
         return self.hits
 
 
+class _FakeRedis:
+    def __init__(self):
+        self.store = {}
+
+    def get(self, k):
+        return self.store.get(k)
+
+    def setex(self, k, ttl, v):
+        self.store[k] = v
+
+
 _ALLOW = ["shop-reviews.example"]
 
 
@@ -68,6 +79,35 @@ def test_empty_hits_status_empty_with_labeled_source():
     out = research("x", fetcher=_Fetcher([]), allowlist=_ALLOW, enabled=True)
     assert out["status"] == "empty"
     assert out["source_status"]["source"] == "external_research"
+
+
+def test_cache_namespace_isolates_verticals():
+    r = _FakeRedis()
+    a = [{"title": "X", "source_domain": "shop-reviews.example"}]
+    research("q", fetcher=_Fetcher(a), allowlist=_ALLOW, enabled=True, redis=r, cache_namespace="tA:electronics")
+    # different namespace must NOT hit A's cache -> uses its own fetch
+    out_b = research("q", fetcher=_Fetcher([{"title": "Y", "source_domain": "shop-reviews.example"}]),
+                     allowlist=_ALLOW, enabled=True, redis=r, cache_namespace="tB:pharmacy")
+    assert out_b["items"][0]["title"] == "Y"
+    # same namespace -> cache hit (A's X), not the new fetch
+    out_a2 = research("q", fetcher=_Fetcher([{"title": "Z", "source_domain": "shop-reviews.example"}]),
+                      allowlist=_ALLOW, enabled=True, redis=r, cache_namespace="tA:electronics")
+    assert out_a2["status"] == "cached" and out_a2["items"][0]["title"] == "X"
+
+
+def test_allowlist_is_per_profile_no_bleed():
+    from src.app.platform.store_profile import profile_slot, reset_active_profile_id, set_active_profile_id
+
+    def _allow(pid):
+        tok = set_active_profile_id(pid)
+        try:
+            return profile_slot("external_research_allowlist", default=None) or []
+        finally:
+            reset_active_profile_id(tok)
+
+    el, ph = _allow("electronics"), _allow("pharmacy")
+    assert "pcmag.com" in el and "pcmag.com" not in ph
+    assert "drugs.com" in ph and "drugs.com" not in el
 
 
 def test_no_item_is_sold_here_without_a_sku():

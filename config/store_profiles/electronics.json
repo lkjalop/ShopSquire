@@ -1169,5 +1169,12 @@
   "_product_identity_prompt_comment": "ADAPTER: vision-LLM prompt/schema for identify_product_from_image. Electronics laptop schema; a vertical without this slot gets a generic identify prompt (no laptop-schema bleed).",
   "product_identity_prompt": "You are a product identification specialist for an ecommerce platform.\nAnalyze this product image and extract structured specifications.\nReturn ONLY valid JSON (no markdown, no prose).\nSchema:\n{\n  \"identified\": true|false,\n  \"product_type\": \"laptop|desktop|tablet|phone|monitor|accessory|other\",\n  \"brand\": \"string or null\",\n  \"model\": \"string or null\",\n  \"cpu_tier\": \"budget|midrange|performance|workstation|unknown\",\n  \"cpu_hint\": \"e.g. i5-13th, Ryzen 7, M2 Pro, or null\",\n  \"ram_gb_hint\": 8|16|32|null,\n  \"gpu_hint\": \"e.g. RTX 4060, integrated, or null\",\n  \"display_inches_hint\": 14|15.6|16|null,\n  \"form_factor\": \"ultrabook|standard|gaming|workstation|2-in-1|unknown\",\n  \"price_tier\": \"budget|midrange|premium|flagship|unknown\",\n  \"confidence\": 0.0 to 1.0,\n  \"notes\": \"short free-text\"\n}\nRules:\n- Identify from visible branding, form factor, bezels, keyboard layout, chassis design.\n- If you see visible text (model label, spec sticker), use it.\n- If uncertain about a field, use null or unknown.\n- confidence reflects overall identification certainty.\n",
 
+  "_external_research_allowlist_comment": "ADAPTER: per-vertical web-research domain allowlist (illustrative — configure per deployment). Resolved per-request by recommend.py via profile_slot; safe internet search never reaches a domain outside this list.",
+  "external_research_allowlist": [
+    "notebookcheck.net",
+    "pcmag.com",
+    "rtings.com"
+  ],
+
   "cv_returns_pack": "electronics"
 }
