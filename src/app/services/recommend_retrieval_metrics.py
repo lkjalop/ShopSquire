@@ -55,6 +55,23 @@ def in_budget_fraction(
     return round(sum(1 for p in prices if ok(p)) / len(prices), 4)
 
 
+def in_stock_fraction(items: List[Dict[str, Any]] | None) -> Optional[float]:
+    """Fraction of items that are in stock. None if stock is unknown for all."""
+    known = [it for it in (items or []) if isinstance(it, dict) and ("stock" in it or "stock_status" in it)]
+    if not known:
+        return None
+
+    def _in(it: Dict[str, Any]) -> bool:
+        if "stock" in it:
+            try:
+                return float(it.get("stock") or 0) > 0
+            except (TypeError, ValueError):
+                return False
+        return str(it.get("stock_status") or "").lower() in ("in_stock", "available", "full")
+
+    return round(sum(1 for it in known if _in(it)) / len(known), 4)
+
+
 def compute_parity(
     *,
     shadow_skus: List[str],
@@ -74,6 +91,7 @@ def compute_parity(
         "shadow_count": int(shadow_count),
         "primary_count": len(primary_skus),
         "primary_in_budget": in_budget_fraction(primary_items, budget_min, budget_max),
+        "primary_in_stock": in_stock_fraction(primary_items),
         "shadow_latency_ms": int(shadow_latency_ms),
         "shadow_top_skus": list(shadow_skus[:k]),
         "primary_top_skus": primary_skus[:k],

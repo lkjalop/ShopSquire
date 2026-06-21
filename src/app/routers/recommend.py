@@ -4171,7 +4171,8 @@ def suggest(
                 except Exception:
                     err = True
                 ms = int((_t.perf_counter() - t0) * 1000)
-                _v2_holder.update({"top_skus": top, "count": count, "ms": ms, "err": err, "done": True})
+                _v2_holder.update({"top_skus": top, "count": count, "ms": ms, "err": err, "done": True,
+                                   "cands": [c for c in cands[:60] if isinstance(c, dict)]})
                 try:
                     from src.app.observability.metrics import record_pipeline_v2_shadow
                     record_pipeline_v2_shadow(ms=ms, count=count, error=err)
@@ -9319,6 +9320,20 @@ def suggest(
             )
         except Exception:
             pass
+        # Tier 2 retrieval mode (RECOMMEND_RETRIEVAL_MODE, default shadow). fusion/primary merge or
+        # swap in the V2 hybrid candidates HERE — BEFORE ranking/stock/budget/security below — so V2
+        # never bypasses the guards. Degrades to primary-only when V2 isn't ready (non-blocking).
+        try:
+            from src.app.services.recommend_retriever_stage import resolve_retrieval_mode as _resolve_rmode, apply_retrieval_mode as _apply_rmode
+            _retr_mode = _resolve_rmode(flags)
+            timing_breakdown["retrieval_mode"] = _retr_mode
+            if _retr_mode in ("fusion", "primary") and _v2_holder.get("done") and _v2_holder.get("cands"):
+                _fused = _apply_rmode(_retr_mode, primary=candidates, v2=_v2_holder.get("cands") or [])
+                if _fused:
+                    candidates = _fused
+                    timing_breakdown["retrieval_fused_count"] = len(candidates)
+        except Exception as _rmexc:
+            _trace_system_error(trace_id=trace_id, stage="retrieval_mode", exc=_rmexc)
         with tracer.start_as_current_span("recommend.rerank_baseline"):
             baseline_scored = service.rerank_candidates_with_factors(candidates, constraints)
             baseline_skus = [i["candidate"]["sku"] for i in baseline_scored]
