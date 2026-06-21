@@ -78,9 +78,11 @@ def _idempotent(path: str, key: str | None) -> bool:
                 row = db.execute(
                     text("SELECT 1 FROM idempotency_keys WHERE key = :k"), {"k": k}
                 ).fetchone()
-                return row is None  # True = no existing row (fail open), False = duplicate
+                return row is None  # True = no existing row, False = duplicate
             except Exception:
-                return True  # fail open on DB error
+                # Money path: if we CANNOT verify idempotency (DB error), fail CLOSED — reject as a
+                # possible duplicate (caller returns 409, no charge) rather than risk a double charge.
+                return False
 
 
 @router.get("/providers/rollout")
