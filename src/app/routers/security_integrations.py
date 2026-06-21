@@ -6,7 +6,7 @@ from typing import Any
 import os
 import httpx
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import text as sql_text
 from src.app.models.db import db_session
 from src.app.deps import get_redis
@@ -1102,3 +1102,48 @@ def security_events_ingest_edr_memory(
         except Exception:
             pass
     return out
+
+
+@router.post("/csp-report")
+async def csp_report(request: Request) -> Response:
+    """PCI DSS 11.6.1 — receive browser CSP violation reports and route them to the security event
+    stream. A blocked script on a payment page (an injected skimmer, a tampered header) trips the
+    strict checkout CSP and is reported here, so payment-page tampering is DETECTED rather than
+    silently dropped. Unauthenticated by design (browsers POST these out-of-band) and CSRF-exempt
+    (allowlisted in csrf_middleware). Always returns 204; never raises."""
+    report: Dict[str, Any] = {}
+    try:
+        raw = await request.body()
+        data = json.loads(raw or b"{}")
+        if isinstance(data, dict):
+            report = data.get("csp-report") if isinstance(data.get("csp-report"), dict) else data
+    except Exception:
+        report = {}
+
+    blocked = str((report or {}).get("blocked-uri") or "")[:300]
+    directive = str((report or {}).get("violated-directive") or (report or {}).get("effective-directive") or "")[:200]
+    document = str((report or {}).get("document-uri") or "")[:300]
+    # A script violation on the checkout page is an e-skimming signal -> escalate.
+    is_payment = "/checkout" in document and "script" in directive.lower()
+    severity = "high" if is_payment else "warn"
+
+    try:
+        from src.app.security.observer import emit_security_event
+        emit_security_event(
+            "/api/v1/security/csp-report",
+            {
+                "payload": {"event_ref": "csp_violation", "document_uri": document},
+                "analysis": {
+                    "signals": {"csp_violation": True, "payment_page_script_block": is_payment},
+                    "severity": severity,
+                    "verdict": "tamper_suspected" if is_payment else "report",
+                    "csp": {"blocked_uri": blocked, "violated_directive": directive, "document_uri": document},
+                    "owasp_agentic_top10": [],
+                    "compliance": ["pci_dss_11_6_1_payment_page_tamper_detection"],
+                },
+            },
+            request=request,
+        )
+    except Exception:
+        pass
+    return Response(status_code=204)

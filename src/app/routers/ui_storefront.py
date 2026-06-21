@@ -320,10 +320,13 @@ def storefront() -> HTMLResponse:
 
 @router.get("/checkout")
 def checkout() -> HTMLResponse:
-    import os, re as _re
+    import os, re as _re, secrets as _secrets
+    from src.app.security.headers import payment_page_csp as _payment_csp
     raw_pk = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
     # Only inject pk_test_ / pk_live_ keys — never secret keys
     stripe_pk = raw_pk if _re.match(r"^pk_(test|live)_[A-Za-z0-9]+$", raw_pk) else ""
+    # PCI 6.4.3/11.6.1 — per-response nonce + strict payment-page CSP (self + Stripe only).
+    _csp_nonce = _secrets.token_urlsafe(16)
     html = f"""<!doctype html>
 <html lang='en'>
 <head>
@@ -413,7 +416,7 @@ def checkout() -> HTMLResponse:
     <a href="/ui" class="back-link" id="back-link-form">&#x2190; Back to Shopping</a>
   </div>
 
-  <script>
+  <script nonce='{_csp_nonce}'>
     var STRIPE_PK = '{stripe_pk}';
     var stripe = null;
 
@@ -554,7 +557,9 @@ def checkout() -> HTMLResponse:
   </script>
 </body>
 </html>"""
-    return HTMLResponse(content=html)
+    # Per-route strict payment CSP (the global SecurityHeadersMiddleware only sets CSP when absent,
+    # so this stricter Stripe-scoped policy wins for the checkout page).
+    return HTMLResponse(content=html, headers={"Content-Security-Policy": _payment_csp(_csp_nonce)})
 
 
 @router.get("/forensics")
