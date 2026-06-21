@@ -107,6 +107,23 @@ def enforce_action_authority(
         else matrix_verdict
     )
 
+    # Canonical audit (PCI Req 10 / ISO 42001 / OWASP Agentic): persist the AUTHORITATIVE verdict —
+    # the decision actually enforced — to policy_evaluation_log with framework tags, reliably and in
+    # the canonical schema. The shadow engine writes to the control-plane store and can no-op on
+    # schema drift; this guarantees the enforced verdict is recorded for every consequential action
+    # routed through this seam (refund / bank_change / supplier_pay / pii_export / order_accept / …).
+    try:
+        from src.app.policy.execution_gate import record_policy_decision
+        _ctx = dict(context or {})
+        record_policy_decision(
+            action, int(value_aud_cents or 0), authoritative,
+            tenant_id=_ctx.get("tenant_id"),
+            actor=str(_ctx.get("requested_by_role") or _ctx.get("actor") or ""),
+            seam="route_enforcement",
+        )
+    except Exception:
+        pass
+
     if authoritative.decision == AuthDecision.ALLOW:
         return authoritative
 

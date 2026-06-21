@@ -42,6 +42,39 @@ def is_consequential(action: str) -> bool:
     return str(action or "").strip().lower() in CONSEQUENTIAL_ACTIONS
 
 
+# OWASP Agentic AI Top 10 (ASI) tags per consequential action, consistent with the observer's
+# vocabulary (security/observer._owasp_agentic_tags). The execution gate IS the OWASP-Agentic
+# "excessive agency / tool misuse" control, so EVERY consequential action carries ASI02; higher-risk
+# actions add their specific risk. Stamped into the policy_evaluation_log context so every gated
+# decision is queryable by framework (OWASP Agentic / PCI Req 10 / ISO 42001 decision logging).
+_ACTION_AGENTIC_TAGS = {
+    "bank_change": ["ASI09:HumanAgentTrustExploitation", "ASI03:IdentityPrivilegeAbuse"],
+    "supplier_pay": ["ASI09:HumanAgentTrustExploitation"],
+    "supplier_add": ["ASI04:AgenticSupplyChainVulnerabilities"],
+    "supplier_contact": ["ASI09:HumanAgentTrustExploitation"],
+    "purchase_order": ["ASI04:AgenticSupplyChainVulnerabilities"],
+    "pii_export": ["ASI03:IdentityPrivilegeAbuse"],
+    "account_recovery": ["ASI03:IdentityPrivilegeAbuse", "ASI09:HumanAgentTrustExploitation"],
+    "tool_egress": ["ASI07:InsecureInterAgentComms"],
+    "fraud_disposition": ["ASI10:RogueAgents"],
+}
+_DEFAULT_AGENTIC_TAG = "ASI02:ToolMisuse"
+
+
+def framework_tags(action: str) -> Dict[str, Any]:
+    """Compliance framework tags for a consequential action, for the audit context.
+
+    Lets a compliance query pull every gated decision by OWASP Agentic ASI tag, PCI Req 10, or ISO
+    42001 decision-logging — turning the policy_evaluation_log into framework-queryable evidence."""
+    a = str(action or "").strip().lower()
+    agentic = list(dict.fromkeys([_DEFAULT_AGENTIC_TAG] + _ACTION_AGENTIC_TAGS.get(a, [])))
+    return {
+        "owasp_agentic_top10": agentic,
+        "compliance": ["pci_dss_req10_audit_trail", "iso_42001_decision_logging"],
+        "control": "execution_gate",
+    }
+
+
 def _log_policy_evaluation(
     action: str, value_cents: int, verdict: PolicyVerdict,
     tenant_id: Optional[str], actor: Optional[str],
@@ -99,5 +132,28 @@ def decide(
             alert_siem=True,
             context=context or {},
         )
-    _log_policy_evaluation(action, value_cents, verdict, tenant_id, actor)
+    record_policy_decision(action, value_cents, verdict, tenant_id=tenant_id, actor=actor)
     return verdict
+
+
+def record_policy_decision(
+    action: str,
+    value_cents: int,
+    verdict: PolicyVerdict,
+    *,
+    tenant_id: Optional[str] = None,
+    actor: Optional[str] = None,
+    seam: Optional[str] = None,
+) -> None:
+    """Canonical audit writer — stamp framework tags onto the verdict context and persist it to
+    policy_evaluation_log. Shared by decide() and the route_enforcement seam so EVERY consequential
+    decision is recorded in the canonical schema, queryable by framework (Req 10 / ISO 42001 / OWASP
+    Agentic), independent of the shadow engine. Never raises."""
+    try:
+        ctx = {**(getattr(verdict, "context", None) or {}), "frameworks": framework_tags(action)}
+        if seam:
+            ctx["seam"] = seam
+        verdict.context = ctx
+    except Exception:
+        pass
+    _log_policy_evaluation(action, value_cents, verdict, tenant_id, actor)
