@@ -211,6 +211,56 @@ _KNOWLEDGE_QUERY_CTX: "_ContextVar" = _ContextVar("recommend_knowledge_ctx", def
 _CURRENT_QUERY_CTX: "_ContextVar" = _ContextVar("recommend_current_query", default="")
 
 
+def _image_security_event(
+    *,
+    sec_signals: Dict[str, Any],
+    frameworks: Dict[str, Any],
+    severity: str,
+    policy_route: str,
+    uid: str | None,
+    query: str | None,
+    trace_id: str | None,
+) -> Dict[str, Any] | None:
+    """Build the Security_Observer event payload for a FLAGGED image, or None when the image is
+    clean (policy_route == 'allow').
+
+    Closes a signal-drop: CV adversarial findings (steg / QR-injection / OCR-injection /
+    manipulation / adversarial perturbation) were written to the decision trace but never entered
+    the SECURITY-EVENT stream (SIEM/observer), so they could not be correlated or alerted on — only
+    shown as a UI badge. This puts a flagged image on the same footing as a text prompt-injection."""
+    if not policy_route or str(policy_route).lower() == "allow":
+        return None
+    verdict = (
+        "block" if policy_route == "lockdown"
+        else "escalate" if policy_route == "escalate"
+        else "sanitize"
+    )
+    sig = {k: bool(v) for k, v in (sec_signals or {}).items()}
+    fw = frameworks or {}
+    return {
+        "payload": {
+            "uid": uid,
+            "query": scrub_pii(query or ""),
+            "trace_id": trace_id,
+            "event_ref": f"image_security:{trace_id}",
+            "cv_signals": sig,  # compute_risk reads cv_signals to factor the adversarial findings
+        },
+        "analysis": {
+            "signals": {k: True for k, v in sig.items() if v},
+            "cv_signals": sig,
+            "severity": severity,
+            "route": policy_route,
+            "verdict": verdict,
+            "mitre_atlas": fw.get("mitre_atlas") or [],
+            "mitre_attack": fw.get("mitre_attack") or [],
+            "owasp_llm_top10": fw.get("owasp_llm_top10") or [],
+            "stride_categories": fw.get("stride_categories") or [],
+            "dread": fw.get("dread") or {},
+            "cvss": fw.get("cvss") or {},
+        },
+    }
+
+
 def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None) -> None:
     """If this is a comparison/knowledge turn and the message is empty or a generic
     disambiguation/no-results fallback, replace it with a real conceptual answer."""
@@ -5157,6 +5207,14 @@ def suggest(
                 "qr_redirect_probe": cv_signals.get("qr_redirect_probe") if isinstance(cv_signals.get("qr_redirect_probe"), dict) else {},
             },
         )
+        # Security_Observer: a flagged image must also enter the SECURITY-EVENT stream (not just the
+        # decision trace) so adversarial/steg/QR-injection uploads are correlated + alertable.
+        _img_evt = _image_security_event(
+            sec_signals=sec_signals, frameworks=frameworks, severity=sev,
+            policy_route=policy_route, uid=uid, query=query, trace_id=trace_id,
+        )
+        if _img_evt is not None:
+            emit_security_event("/api/v1/recommend/suggest:image", _img_evt, request=request)
     except Exception:
         pass
     severity = analysis.get("severity", "info")
