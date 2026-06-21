@@ -359,5 +359,20 @@
     "medlineplus.gov"
   ],
 
+  "supplier_message_templates": {
+    "reorder": {
+      "subject": "Reorder request — {item}",
+      "body": "Dear {supplier_name},\n\nWe wish to reorder {item}{details}. Please confirm batch availability, expiry dating, unit price, and lead time. Supply must meet current regulatory and cold-chain requirements where applicable.\n\nThis is a draft prepared for pharmacist review before sending.\n\nRegards,\n{sender_name}"
+    },
+    "price_query": {
+      "subject": "Pricing enquiry — {item}",
+      "body": "Dear {supplier_name},\n\nPlease confirm current pricing and any contract/volume terms for {item}. {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
+    },
+    "stock_check": {
+      "subject": "Stock and expiry check — {item}",
+      "body": "Dear {supplier_name},\n\nPlease confirm available stock, batch numbers, and expiry dating for {item}, and the next restock date. {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
+    }
+  },
+
   "cv_returns_pack": "electronics"
 }

@@ -41,6 +41,7 @@ _CORE_MODULES = [
     "src/app/platform/tenant_registry.py",
     "src/app/services/recommend_narration_stage.py",
     "src/app/services/suggest_context.py",
+    "src/app/services/supplier_communication.py",
     # graduated from _PENDING_EXCISION 2026-06-20: entity NER patterns excised verbatim to
     # electronics.json `entity_*` slots; non-electronics verticals derive from their own data.
     "src/app/services/category_router.py",

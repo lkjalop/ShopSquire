@@ -393,5 +393,20 @@
     "businessoffashion.com"
   ],
 
+  "supplier_message_templates": {
+    "reorder": {
+      "subject": "Restock request — {item}",
+      "body": "Hi {supplier_name},\n\nWe'd like to restock {item}{details}. Please confirm available sizes/colours, wholesale pricing, and dispatch lead time.\n\nThis is a draft for review before sending.\n\nKind regards,\n{sender_name}"
+    },
+    "price_query": {
+      "subject": "Wholesale pricing — {item}",
+      "body": "Hi {supplier_name},\n\nCould you share current wholesale pricing and any season/volume discounts for {item}? {details}\n\nDraft for review.\n\nKind regards,\n{sender_name}"
+    },
+    "stock_check": {
+      "subject": "Size availability — {item}",
+      "body": "Hi {supplier_name},\n\nPlease confirm which sizes of {item} are in stock and the next delivery window. {details}\n\nDraft for review.\n\nKind regards,\n{sender_name}"
+    }
+  },
+
   "cv_returns_pack": "electronics"
 }

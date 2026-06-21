@@ -1223,5 +1223,20 @@
     }
   ],
 
+  "supplier_message_templates": {
+    "reorder": {
+      "subject": "Reorder request — {item}",
+      "body": "Hello {supplier_name},\n\nWe would like to reorder {item}{details}. Please confirm availability, unit price, and lead time.\n\nThis is a draft prepared for review before sending.\n\nRegards,\n{sender_name}"
+    },
+    "price_query": {
+      "subject": "Pricing enquiry — {item}",
+      "body": "Hello {supplier_name},\n\nCould you confirm current trade pricing and any volume breaks for {item}? {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
+    },
+    "stock_check": {
+      "subject": "Stock availability — {item}",
+      "body": "Hello {supplier_name},\n\nPlease confirm on-hand stock and next restock date for {item}. {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
+    }
+  },
+
   "cv_returns_pack": "electronics"
 }

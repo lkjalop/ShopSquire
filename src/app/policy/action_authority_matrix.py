@@ -138,6 +138,18 @@ _RULES: List[Dict[str, Any]] = [
         "create_ticket": True,
         "ticket_priority": "critical",
     },
+    {
+        # Outbound supplier communication (reorder/price/stock emails). EXPLICIT rule so the
+        # verdict is HUMAN_REVIEW even if POLICY_MATRIX_DEFAULT_ALLOW is set — the AI drafts,
+        # a human sends. supplier_communication.dispatch enforces this (never auto-sends).
+        "id": "SUP-04",
+        "action": "supplier_contact",
+        "max_aud_cents": None,
+        "decision": AuthDecision.HUMAN_REVIEW,
+        "reason": "Outbound supplier communication is draft-only — AI cannot auto-send, human approves",
+        "create_ticket": True,
+        "ticket_priority": "high",
+    },
     # -----------------------------------------------------------------------
     # PII / data operations
     # -----------------------------------------------------------------------
