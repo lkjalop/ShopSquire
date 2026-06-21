@@ -192,3 +192,34 @@ def test_claim_guard_never_raises_on_verify_failure():
         deterministic_fn=_det, guard_enabled_fn=lambda: True, verify_fn=_boom,
     )
     assert out == "msg"  # failure swallowed, original kept
+
+
+# ── prepare_narration ──
+def test_prepare_narration_groups_outputs_and_stamps_constraints():
+    from src.app.services.recommend_narration_stage import prepare_narration, NarrationPrep
+    c = {}
+    prep = prepare_narration(
+        query="gaming laptop", query_effective="gaming laptop under 1800", constraints=c,
+        results=[{"sku": "A"}, {"sku": "B"}],
+        filter_meta_price={"min": 0}, strict_image_brand_hint="lenovo", inferred_image_brand="lenovo",
+        demote_off_category=lambda r, q: r,
+        build_brand_budget_answer=lambda q, r, cc: "BBA",
+    )
+    assert isinstance(prep, NarrationPrep)
+    assert prep.brand_budget_answer == "BBA"
+    # metadata stamped onto the constraints carried through (apply_* may rebind to a new dict).
+    assert prep.constraints.get("_strict_image_brand_hint") == "lenovo"
+    assert prep.constraints.get("_price_filter_meta") == {"min": 0}
+    assert prep.narration_inputs is not None
+    assert [r["sku"] for r in prep.results] == ["A", "B"]
+
+
+def test_prepare_narration_applies_demoter():
+    from src.app.services.recommend_narration_stage import prepare_narration
+    prep = prepare_narration(
+        query="q", query_effective="q", constraints={}, results=[{"sku": "A"}, {"sku": "ACC"}],
+        filter_meta_price=None, strict_image_brand_hint=None, inferred_image_brand=None,
+        demote_off_category=lambda r, q: [x for x in r if x["sku"] != "ACC"],  # drop the accessory
+        build_brand_budget_answer=lambda q, r, cc: "",
+    )
+    assert [r["sku"] for r in prep.results] == ["A"]

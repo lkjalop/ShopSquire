@@ -10631,22 +10631,23 @@ def suggest(
     )
 
     assistant_message = None
-    constraints["_price_filter_meta"] = filter_meta_price or {}
-    constraints["_strict_image_brand_hint"] = strict_image_brand_hint
-    constraints["_inferred_image_brand"] = inferred_image_brand
-    narration_inputs = build_narration_inputs(
-        query_effective or query,
-        constraints,
-        query_understanding=build_query_understanding(query_effective or query or "", constraints),
-    )
-    constraints = apply_narration_inputs_to_constraints(constraints, narration_inputs)
-    _ctx.constraints = constraints  # re-bind: apply_narration returns a NEW dict (Pass 5)
-    # Off-category relevance guard: a computer query must not be led by a peripheral
-    # (e.g. a router for "gaming laptop"). Demote, never remove — propagates to both
-    # the product cards and the LLM summary below.
-    results = _demote_off_category(results, query)
-    brand_budget_answer = _build_brand_budget_answer_v2(query, results, constraints)
     llm_summary_job_id = None
+    # Narration prep (extracted to recommend_narration_stage.prepare_narration): stamp price/brand
+    # metadata, build the narration envelope (rebinds constraints), demote off-category, compute the
+    # brand/budget answer — returned grouped so the route rebinds them together.
+    from src.app.services.recommend_narration_stage import prepare_narration as _prepare_narration
+    _prep = _prepare_narration(
+        query=query, query_effective=query_effective, constraints=constraints, results=results,
+        filter_meta_price=filter_meta_price, strict_image_brand_hint=strict_image_brand_hint,
+        inferred_image_brand=inferred_image_brand,
+        demote_off_category=_demote_off_category,
+        build_brand_budget_answer=_build_brand_budget_answer_v2,
+    )
+    constraints = _prep.constraints
+    _ctx.constraints = constraints  # re-bind: apply_narration returns a NEW dict (Pass 5)
+    results = _prep.results
+    narration_inputs = _prep.narration_inputs
+    brand_budget_answer = _prep.brand_budget_answer
     # WS2.2 — comparison/knowledge answers are injected at the universal return
     # wrapper (_with_trace) so they survive every early-return path. Nothing to do here.
     # Force LLM summary whenever the query has enough context to deserve a real response.

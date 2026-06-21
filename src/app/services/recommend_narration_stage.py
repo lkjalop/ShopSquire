@@ -13,6 +13,53 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from src.app.services.query_understanding import QueryUnderstanding, build_query_understanding
 
 
+@dataclass
+class NarrationPrep:
+    """Grouped output of the narration prep stage — replaces the 6 loose locals the inline block
+    leaked into the route (constraints, results, narration_inputs, brand_budget_answer)."""
+    constraints: Dict[str, Any]
+    results: Any
+    narration_inputs: Any
+    brand_budget_answer: Any
+
+
+def prepare_narration(
+    *,
+    query: Any,
+    query_effective: Any,
+    constraints: Dict[str, Any],
+    results: Any,
+    filter_meta_price: Any,
+    strict_image_brand_hint: Any,
+    inferred_image_brand: Any,
+    demote_off_category: Callable[[Any, Any], Any],
+    build_brand_budget_answer: Callable[..., Any],
+) -> NarrationPrep:
+    """Pre-narration setup: stamp price/brand metadata onto constraints, build the narration
+    envelope (build_narration_inputs + apply_narration_inputs_to_constraints — note this REBINDS
+    constraints to a new dict), demote off-category results, and compute the brand/budget answer.
+    Returns a NarrationPrep so the route rebinds these together instead of juggling 6 loose locals.
+    The two route-local helpers are injected; never raises beyond the helpers' own contracts."""
+    constraints["_price_filter_meta"] = filter_meta_price or {}
+    constraints["_strict_image_brand_hint"] = strict_image_brand_hint
+    constraints["_inferred_image_brand"] = inferred_image_brand
+    narration_inputs = build_narration_inputs(
+        query_effective or query,
+        constraints,
+        query_understanding=build_query_understanding(query_effective or query or "", constraints),
+    )
+    constraints = apply_narration_inputs_to_constraints(constraints, narration_inputs)
+    # Off-category relevance guard: a primary-product query must not be led by a peripheral.
+    results = demote_off_category(results, query)
+    brand_budget_answer = build_brand_budget_answer(query, results, constraints)
+    return NarrationPrep(
+        constraints=constraints,
+        results=results,
+        narration_inputs=narration_inputs,
+        brand_budget_answer=brand_budget_answer,
+    )
+
+
 def run_narration(
     timing_breakdown: Dict[str, Any],
     *,
