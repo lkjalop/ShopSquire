@@ -239,6 +239,86 @@ def _control_evidence_rows(days: int) -> List[Dict[str, str]]:
     return rows
 
 
+def build_decision_evidence(days: int = 30, limit: int = 25) -> Dict[str, Any]:
+    """ISO 42001 / EU AI Act / PCI Req 10 / OWASP Agentic evidence pack — aggregate the
+    framework-tagged consequential-decision audit (policy_evaluation_log, written by B4) into a
+    procurement-ready report: how many consequential actions were decided, the allow/escalate/block
+    split, the breakdown by OWASP-Agentic ASI tag and by action, and recent examples. This turns
+    "we have controls" into "here is the auditable evidence." Pure read; never raises."""
+    # Match SQLite CURRENT_TIMESTAMP format ("YYYY-MM-DD HH:MM:SS") used by the canonical audit
+    # writer — an isoformat 'T' bound would lexically exclude same-day space-formatted rows.
+    since = (datetime.utcnow() - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
+    rows: List[Any] = []
+    with db_session() as db:
+        try:
+            rows = list(db.execute(
+                text(
+                    "SELECT action, decision, reason, context, created_at FROM policy_evaluation_log "
+                    "WHERE created_at >= :since ORDER BY created_at DESC"
+                ),
+                {"since": since},
+            ).mappings().all())
+        except Exception:
+            rows = []
+
+    by_decision: Dict[str, int] = {}
+    by_action: Dict[str, int] = {}
+    by_agentic_tag: Dict[str, int] = {}
+    frameworks_seen: set[str] = set()
+    recent: List[Dict[str, Any]] = []
+    for r in rows:
+        action = str(r.get("action") or "unknown")
+        decision = str(r.get("decision") or "unknown")
+        by_decision[decision] = by_decision.get(decision, 0) + 1
+        by_action[action] = by_action.get(action, 0) + 1
+        ctx: Dict[str, Any] = {}
+        try:
+            ctx = json.loads(r.get("context") or "{}")
+        except Exception:
+            ctx = {}
+        fw = (ctx.get("frameworks") or {}) if isinstance(ctx, dict) else {}
+        for tag in (fw.get("owasp_agentic_top10") or []):
+            by_agentic_tag[str(tag)] = by_agentic_tag.get(str(tag), 0) + 1
+        for c in (fw.get("compliance") or []):
+            frameworks_seen.add(str(c))
+        if len(recent) < int(limit):
+            recent.append({
+                "action": action, "decision": decision,
+                "reason": str(r.get("reason") or "")[:160],
+                "owasp_agentic": fw.get("owasp_agentic_top10") or [],
+                "created_at": str(r.get("created_at") or ""),
+            })
+
+    total = len(rows)
+    # Coverage: a tagged row proves the framework-queryable audit is working.
+    tagged = sum(by_agentic_tag.values())
+    return {
+        "window_days": int(days),
+        "total_consequential_decisions": total,
+        "audit_coverage": {
+            "framework_tagged_rows": tagged,
+            "queryable": tagged > 0 or total == 0,
+            "note": "every consequential decision is logged with OWASP-Agentic/PCI-Req10/ISO-42001 tags (execution_gate B4)",
+        },
+        "by_decision": by_decision,
+        "by_action": by_action,
+        "by_owasp_agentic_tag": by_agentic_tag,
+        "compliance_frameworks": sorted(frameworks_seen),
+        "recent": recent,
+    }
+
+
+@router.get("/decision-evidence")
+def grc_decision_evidence(
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(25, ge=1, le=200),
+    role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Framework-queryable evidence of consequential-action governance (ISO 42001 / EU AI Act /
+    PCI Req 10 / OWASP Agentic) — the auditable proof an enterprise/QSA asks for."""
+    return build_decision_evidence(days=days, limit=limit)
+
+
 @router.get("/risk-register")
 def grc_risk_register(
     days: int = Query(30, ge=1, le=365),
