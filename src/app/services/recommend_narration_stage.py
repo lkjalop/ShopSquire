@@ -8,9 +8,76 @@ It is vertical-agnostic: it carries values, provenance, and assumptions only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.app.services.query_understanding import QueryUnderstanding, build_query_understanding
+
+
+def run_narration(
+    timing_breakdown: Dict[str, Any],
+    *,
+    mode: str,
+    query: Any,
+    results: Any,
+    constraints: Any,
+    summ_model: Any,
+    trace_id: Any,
+    combined_preamble: Any,
+    narration_inputs: Any,
+    summarize_fn: Callable[..., Tuple[Any, Any]],
+    executor: Any = None,
+    redis: Any = None,
+    submit_fn: Optional[Callable[..., Any]] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Tier-1 narration latency control. Returns (assistant_message, llm_summary_job_id) and writes
+    narration_mode / summary_ms / narration_pending into ``timing_breakdown``.
+
+    LLM narration was measured at 85-91% of route latency, so the mode is the latency lever:
+      * ``blocking`` (default): call the LLM now (timed via StageTimer) -> prose.
+      * ``skip``: no LLM call -> (None, None); the route's deterministic fallback fills the message.
+      * ``async``: skip now + enqueue the prose as a background job (client polls /narration/{id}).
+    ``summarize_fn`` is injected (the route's _summarize_results) so this is unit-testable without an
+    LLM. Never raises on the async-enqueue path (job id -> None on failure)."""
+    from src.app.observability.stage_timer import StageTimer
+
+    m = str(mode or "blocking").strip().lower()
+    if m not in ("blocking", "skip", "async"):
+        m = "blocking"
+    if isinstance(timing_breakdown, dict):
+        timing_breakdown["narration_mode"] = m
+
+    assistant_message: Optional[str] = None
+    llm_summary_job_id: Optional[str] = None
+
+    if m == "blocking":
+        with StageTimer(timing_breakdown, "summary_ms"):  # time the dominant LLM cost
+            assistant_message, llm_summary_job_id = summarize_fn(
+                query, results, constraints, summ_model, trace_id,
+                context_preamble=combined_preamble,
+                narration_inputs=narration_inputs,
+            )
+        return assistant_message, llm_summary_job_id
+
+    # skip / async: no blocking LLM call — the deterministic grounded message fills in downstream.
+    if isinstance(timing_breakdown, dict):
+        timing_breakdown["summary_ms"] = 0
+        timing_breakdown["narration_pending"] = (m == "async")
+    if m == "async":
+        if submit_fn is None:
+            try:
+                from src.app.services.recommend_narration_jobs import submit_narration as submit_fn  # type: ignore
+            except Exception:
+                submit_fn = None
+        if submit_fn is not None:
+            try:
+                llm_summary_job_id = submit_fn(
+                    executor, redis, summarize_fn,
+                    query, list(results or []), dict(constraints or {}), summ_model, trace_id,
+                    context_preamble=combined_preamble, narration_inputs=narration_inputs,
+                )
+            except Exception:
+                llm_summary_job_id = None
+    return assistant_message, llm_summary_job_id
 
 
 @dataclass(frozen=True)
