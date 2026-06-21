@@ -28,7 +28,22 @@ if str(ROOT) not in sys.path:
 from src.app.models.db import engine
 from src.app.models.init_db import ensure_metadata
 
-DEFAULT_SOURCE = Path("docs/laptop-products-exp.txt")
+def _default_source() -> Path:
+    """Canonical product catalog source — SAME preference order as
+    seed_demo_data._default_product_source (new-short -> new -> exp) so both seed paths populate the
+    SAME catalog and demo results are consistent regardless of which seeder ran. Override with
+    --source or PRODUCT_SOURCE_TXT."""
+    for candidate in (
+        "docs/laptop-products-new-short.txt",
+        "docs/laptop-products-new.txt",
+        "docs/laptop-products-exp.txt",
+    ):
+        if Path(candidate).exists():
+            return Path(candidate)
+    return Path("docs/laptop-products-new-short.txt")
+
+
+DEFAULT_SOURCE = _default_source()
 
 
 def parse_blocks(text: str) -> List[str]:
