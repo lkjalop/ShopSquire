@@ -10217,42 +10217,17 @@ def suggest(
     # NullFetcher = no network until a real allowlisted httpx adapter is wired -> stays 'empty' even
     # if enabled. NEVER merged into owned `results`/cart (external items have sku=None -> structurally
     # un-cartable). PII is scrubbed before egress; only allowlisted domains pass; web text is data.
-    _ext_raw = os.getenv("EXTERNAL_RESEARCH_ENABLED")
-    _ext_enabled = (
-        str(_ext_raw).strip().lower() in ("1", "true", "yes")
-        if _ext_raw is not None
-        else bool(flags.get("EXTERNAL_RESEARCH_ENABLED", False))
-    )
-    if _ext_enabled:
-        try:
-            from src.app.services.external_product_research_service import research as _ext_research
-            from src.app.platform.store_profile import profile_slot as _ext_profile_slot, active_profile_id as _ext_active_pid
-            # Real SSRF-safe httpx adapter ONLY when an operator-configured search endpoint exists;
-            # otherwise the NullFetcher keeps external research inert (empty) even when enabled.
-            if os.getenv("EXTERNAL_RESEARCH_SEARCH_URL"):
-                from src.app.adapters.external_research_httpx import HttpxResearchFetcher as _ext_fetcher
-            else:
-                from src.app.ports.external_product_research import NullFetcher as _ext_fetcher
-            # AGNOSTIC: allowlist comes from the ACTIVE profile (electronics->tech, pharmacy->health,
-            # fashion->fashion), falling back to the global config. Cache is namespaced by tenant+profile
-            # so verticals never share web results.
-            _ext_allow = (
-                _ext_profile_slot("external_research_allowlist", default=None)
-                or flags.get("EXTERNAL_RESEARCH_ALLOWLIST")
-                or []
-            )
-            _extres = _ext_research(
-                query, fetcher=_ext_fetcher(),
-                allowlist=_ext_allow,
-                catalog_skus=[str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)],
-                catalog_names={str(r.get("sku")): str(r.get("name") or "") for r in (results or []) if isinstance(r, dict) and r.get("sku")},
-                enabled=True, scrub=scrub_pii, redis=redis,
-                cache_namespace=f"{tenant_id or ''}:{_ext_active_pid()}",
-            )
+    # Safe internet search extracted to external_product_research_service.run_external_research_stage
+    # (enable check + fetcher selection + per-profile allowlist + SKU-gate). Route keeps the trace.
+    try:
+        from src.app.services.external_product_research_service import run_external_research_stage as _run_ext
+        _extres = _run_ext(query=query, results=results, flags=flags, scrub=scrub_pii,
+                           redis=redis, tenant_id=tenant_id)
+        if _extres is not None:
             payload["external_research"] = _extres.get("items") or []
             payload["external_research_status"] = _extres.get("source_status")
-        except Exception as _ee:
-            _trace_system_error(trace_id=trace_id, stage="external_research", exc=_ee)
+    except Exception as _ee:
+        _trace_system_error(trace_id=trace_id, stage="external_research", exc=_ee)
     # Tier 3 safe multimodal: classify the image<->query relationship (always, observability). The
     # visual-similarity leg (IMAGE_SIMILARITY_ENABLED, off by default + needs a built FAISS index)
     # attaches a LABELED source, never owned results. OCR/QR/prompt text never reaches this — only

@@ -115,3 +115,21 @@ def test_no_item_is_sold_here_without_a_sku():
     out = research("x", fetcher=_Fetcher(hits), allowlist=_ALLOW, enabled=True, catalog_names={"LAP-9": "Totally Different"})
     assert all((i["sku"] is not None) == i["sold_here"] for i in out["items"])
     assert out["items"][0]["sold_here"] is False
+
+
+# ── run_external_research_stage (Phase 3 extraction) ──
+def test_stage_returns_none_when_disabled(monkeypatch):
+    from src.app.services.external_product_research_service import run_external_research_stage
+    monkeypatch.delenv("EXTERNAL_RESEARCH_ENABLED", raising=False)
+    assert run_external_research_stage(query="laptop", results=[], flags={"EXTERNAL_RESEARCH_ENABLED": False}) is None
+
+
+def test_stage_uses_nullfetcher_when_no_endpoint(monkeypatch):
+    # Enabled but no EXTERNAL_RESEARCH_SEARCH_URL -> NullFetcher -> empty items (inert), not None.
+    from src.app.services.external_product_research_service import run_external_research_stage
+    monkeypatch.setenv("EXTERNAL_RESEARCH_ENABLED", "1")
+    monkeypatch.delenv("EXTERNAL_RESEARCH_SEARCH_URL", raising=False)
+    out = run_external_research_stage(query="laptop", results=[{"sku": "A", "name": "Alpha"}],
+                                      flags={"EXTERNAL_RESEARCH_ALLOWLIST": ["trusted.com"]})
+    assert out is not None and out["items"] == []  # inert NullFetcher -> no items
+    assert out["source_status"]["source"] == "external_research"

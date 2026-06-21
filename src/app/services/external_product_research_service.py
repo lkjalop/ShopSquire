@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -144,3 +145,55 @@ def research(
         with contextlib.suppress(Exception):
             redis.setex(cache_key, 600, json.dumps(out))
     return out
+
+
+def run_external_research_stage(
+    *,
+    query: str,
+    results: Optional[List[Dict[str, Any]]] = None,
+    flags: Optional[Dict[str, Any]] = None,
+    scrub: Optional[Callable[[str], str]] = None,
+    redis: Any = None,
+    tenant_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Route wrapper for safe internet search. Resolves enabled (env EXTERNAL_RESEARCH_ENABLED >
+    flag), picks the fetcher (SSRF-safe httpx adapter when EXTERNAL_RESEARCH_SEARCH_URL is set, else
+    the inert NullFetcher), resolves the PER-PROFILE allowlist (cache namespaced by tenant+profile),
+    SKU-gates against the owned results, and runs research(). Returns {items, source_status} when it
+    ran, or None when disabled. Raises on internal error so the caller can trace it (matches the
+    route's _trace_system_error)."""
+    flags = flags or {}
+    raw = os.getenv("EXTERNAL_RESEARCH_ENABLED")
+    enabled = (
+        str(raw).strip().lower() in ("1", "true", "yes")
+        if raw is not None
+        else bool(flags.get("EXTERNAL_RESEARCH_ENABLED", False))
+    )
+    if not enabled:
+        return None
+
+    # Real SSRF-safe httpx adapter ONLY when an operator-configured search endpoint exists; otherwise
+    # the NullFetcher keeps external research inert (empty) even when the flag is on.
+    if os.getenv("EXTERNAL_RESEARCH_SEARCH_URL"):
+        from src.app.adapters.external_research_httpx import HttpxResearchFetcher as _fetcher
+    else:
+        from src.app.ports.external_product_research import NullFetcher as _fetcher
+    from src.app.platform.store_profile import active_profile_id as _active_pid, profile_slot as _profile_slot
+
+    # AGNOSTIC: allowlist comes from the ACTIVE profile, falling back to the global config.
+    allow = _profile_slot("external_research_allowlist", default=None) or flags.get("EXTERNAL_RESEARCH_ALLOWLIST") or []
+    res = research(
+        query,
+        fetcher=_fetcher(),
+        allowlist=allow,
+        catalog_skus=[str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)],
+        catalog_names={
+            str(r.get("sku")): str(r.get("name") or "")
+            for r in (results or []) if isinstance(r, dict) and r.get("sku")
+        },
+        enabled=True,
+        scrub=scrub,
+        redis=redis,
+        cache_namespace=f"{tenant_id or ''}:{_active_pid()}",
+    )
+    return {"items": res.get("items") or [], "source_status": res.get("source_status")}
