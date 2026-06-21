@@ -21,7 +21,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 _log = logging.getLogger(__name__)
 
@@ -428,3 +428,44 @@ def finalize_recommendation_response(
         contract_valid=len(violations) == 0,
         contract_violations=violations,
     )
+
+
+def run_finalizer(
+    *,
+    results: List[Dict[str, Any]],
+    constraints: Dict[str, Any],
+    uid: Optional[str],
+    kv: Optional[Dict[str, Any]],
+    query: Optional[str],
+    payload: Dict[str, Any],
+    demote_off_category: Optional[Callable[[Any, Any], Any]] = None,
+    finalize_fn: Optional[Callable[..., "FinalizerResult"]] = None,
+    log: Any = None,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Route wrapper for the canonical finalizer: stock annotation + contract validation +
+    off-category demotion, writing the frozen list into ``payload`` (results + products). Returns
+    (results, finalizer_ran). On any failure returns (results unchanged, False) so the late fallback
+    annotation pass still runs. Never raises. Off-category demoter defaults to the module-local one."""
+    finalizer_ran = False
+    demote = demote_off_category or _demote_off_category
+    try:
+        fn = finalize_fn or finalize_recommendation_response
+        stock_filter_opted = bool((kv or {}).get("stock_filter_preference") == "in_stock_only")
+        fin = fn(results=results, constraints=constraints, uid=uid, stock_filter_opted=stock_filter_opted)
+        results = fin.results
+        results = demote(results, query)  # drop off-category (e.g. a router for a laptop query)
+        if isinstance(payload, dict):
+            payload["results"] = results
+            payload["products"] = results
+            if getattr(fin, "oos_removed", None):
+                payload["oos_removed_count"] = len(fin.oos_removed)
+            if not getattr(fin, "contract_valid", True):
+                payload["_contract_violations"] = list(getattr(fin, "contract_violations", []))[:5]
+        finalizer_ran = True
+    except Exception as exc:
+        if log is not None:
+            try:
+                log.warning("recommend_finalizer failed, continuing with pre-finalized results: %s", exc)
+            except Exception:
+                pass
+    return results, finalizer_ran

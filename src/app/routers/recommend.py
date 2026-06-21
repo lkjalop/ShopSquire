@@ -10624,27 +10624,11 @@ def suggest(
     # all describe products in the same finalized, stock-annotated order.
     # This is the canonical stock-annotation pass; the late pass at line ~12800
     # only runs as a fallback when this block raises an exception.
-    _finalizer_ran: bool = False
-    try:
-        from src.app.services.recommend_response_finalizer import finalize_recommendation_response as _finalize
-        _stock_filter_opted = bool((kv or {}).get("stock_filter_preference") == "in_stock_only")
-        _fin = _finalize(
-            results=results,
-            constraints=constraints,
-            uid=uid,
-            stock_filter_opted=_stock_filter_opted,
-        )
-        results = _fin.results
-        results = _demote_off_category(results, query)  # drop off-category (router for laptop)
-        payload["results"] = results
-        payload["products"] = results
-        if _fin.oos_removed:
-            payload["oos_removed_count"] = len(_fin.oos_removed)
-        if not _fin.contract_valid:
-            payload["_contract_violations"] = _fin.contract_violations[:5]
-        _finalizer_ran = True
-    except Exception as _fin_exc:
-        _log.warning("recommend_finalizer failed, continuing with pre-finalized results: %s", _fin_exc)
+    from src.app.services.recommend_response_finalizer import run_finalizer as _run_finalizer
+    results, _finalizer_ran = _run_finalizer(
+        results=results, constraints=constraints, uid=uid, kv=kv, query=query, payload=payload,
+        demote_off_category=_demote_off_category, log=logger,
+    )
 
     assistant_message = None
     constraints["_price_filter_meta"] = filter_meta_price or {}
