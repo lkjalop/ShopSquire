@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.app.services.recommend_narration_stage import build_narration_preamble, run_narration
+from src.app.services.recommend_narration_stage import (
+    apply_product_claim_guard,
+    build_narration_preamble,
+    run_narration,
+)
 
 
 def _summarize_spy(calls):
@@ -135,3 +139,56 @@ def test_preamble_never_raises_on_helper_failure():
     combined, model = _preamble(build_context_preamble=_boom)
     # ctx failed but trace + session still combine; no raise.
     assert "TRACE" in (combined or "") and model
+
+
+# ── apply_product_claim_guard ──
+def _det(*a, **k):
+    return "DETERMINISTIC GROUNDED"
+
+
+def test_claim_guard_replaces_ungrounded_message_and_logs():
+    logs = []
+    out = apply_product_claim_guard(
+        "LLM says it has a 999Hz screen", query="q", results=[{"sku": "A"}], constraints={},
+        brand_budget_answer="", trace_id="t", deterministic_fn=_det,
+        guard_enabled_fn=lambda: True,
+        verify_fn=lambda *a, **k: SimpleNamespace(grounded=False, violations=["fake_spec"]),
+        log_fn=lambda **kw: logs.append(kw),
+    )
+    assert out == "DETERMINISTIC GROUNDED"
+    assert logs and logs[0]["event_type"] == "narration_guard_rejected"
+
+
+def test_claim_guard_keeps_grounded_message():
+    out = apply_product_claim_guard(
+        "grounded prose", query="q", results=[{"sku": "A"}], constraints={}, brand_budget_answer="",
+        trace_id="t", deterministic_fn=_det, guard_enabled_fn=lambda: True,
+        verify_fn=lambda *a, **k: SimpleNamespace(grounded=True, violations=[]),
+    )
+    assert out == "grounded prose"
+
+
+def test_claim_guard_noop_when_disabled_or_empty():
+    # disabled -> verify never consulted
+    out = apply_product_claim_guard(
+        "msg", query="q", results=[{"sku": "A"}], constraints={}, brand_budget_answer="", trace_id="t",
+        deterministic_fn=_det, guard_enabled_fn=lambda: False,
+        verify_fn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("verify must not run")),
+    )
+    assert out == "msg"
+    # no results -> unchanged
+    assert apply_product_claim_guard(
+        "msg", query="q", results=[], constraints={}, brand_budget_answer="", trace_id="t",
+        deterministic_fn=_det, guard_enabled_fn=lambda: True,
+        verify_fn=lambda *a, **k: SimpleNamespace(grounded=False, violations=[]),
+    ) == "msg"
+
+
+def test_claim_guard_never_raises_on_verify_failure():
+    def _boom(*a, **k):
+        raise RuntimeError("guard down")
+    out = apply_product_claim_guard(
+        "msg", query="q", results=[{"sku": "A"}], constraints={}, brand_budget_answer="", trace_id="t",
+        deterministic_fn=_det, guard_enabled_fn=lambda: True, verify_fn=_boom,
+    )
+    assert out == "msg"  # failure swallowed, original kept

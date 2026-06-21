@@ -185,6 +185,56 @@ def build_narration_preamble(
     return combined, summ_model
 
 
+def apply_product_claim_guard(
+    assistant_message: Optional[str],
+    *,
+    query: Any,
+    results: Any,
+    constraints: Any,
+    brand_budget_answer: Any,
+    trace_id: Any,
+    deterministic_fn: Callable[..., str],
+    guard_enabled_fn: Optional[Callable[[], bool]] = None,
+    verify_fn: Optional[Callable[..., Any]] = None,
+    log_fn: Optional[Callable[..., Any]] = None,
+) -> Optional[str]:
+    """Grounded narration guard (flag COMMERCE_NARRATION_GUARD). The LLM is a narrator over evidence,
+    not a source of truth: if it invents a product/price/spec or parrots a quarantined payload, reject
+    the prose and fall back to deterministic grounded copy (and trace the rejection). Returns the
+    (possibly replaced) assistant_message. Flag-off / no message / no results -> unchanged. The
+    deterministic copy generator is injected; never raises."""
+    try:
+        if guard_enabled_fn is None or verify_fn is None:
+            from src.app.services.product_claim_guard import guard_enabled as _ge, verify_product_narration as _vp
+            guard_enabled_fn = guard_enabled_fn or _ge
+            verify_fn = verify_fn or _vp
+        if guard_enabled_fn() and assistant_message and results:
+            gr = verify_fn(
+                assistant_message, results,
+                budget_min=(constraints or {}).get("budget_min"),
+                budget_max=(constraints or {}).get("budget_max"),
+            )
+            if not getattr(gr, "grounded", True):
+                assistant_message = deterministic_fn(
+                    query, results, constraints, brand_budget_answer=brand_budget_answer
+                )
+                try:
+                    if log_fn is None:
+                        from src.app.services.decision_log import log_trace_event as log_fn  # type: ignore
+                    log_fn(
+                        trace_id=trace_id, event_type="narration_guard_rejected",
+                        source_type="agent", source_id="Product_Claim_Guard",
+                        target_type="system", target_id=None,
+                        payload={"violations": list(getattr(gr, "violations", []))[:6],
+                                 "used_llm": False, "fallback_reason": "ungrounded_product_claim"},
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return assistant_message
+
+
 @dataclass(frozen=True)
 class NarrationInputs:
     query_text: str
