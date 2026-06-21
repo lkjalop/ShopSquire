@@ -80,6 +80,111 @@ def run_narration(
     return assistant_message, llm_summary_job_id
 
 
+def build_narration_preamble(
+    *,
+    kv: Any,
+    structured_state: Any,
+    constraints: Dict[str, Any],
+    prior_shortlist: Any,
+    db: Any,
+    trace_id: Any,
+    mem: Any,
+    uid: Any,
+    session_context_summary: Any,
+    image_cv_signals_parsed: Any,
+    llm_model: Any,
+    image_feature_allowlist: Any,
+    build_context_preamble: Callable[..., Any],
+    trace_to_context_summary: Callable[..., Any],
+    image_security_preamble_note: Callable[..., Any],
+) -> Tuple[Optional[str], Any]:
+    """Assemble the LLM narration preamble and resolve the summary model.
+
+    Order: conversation memory (build_context_preamble) -> decision-trace context -> recent session
+    excerpt -> SANITIZED image notes (QR status + off-topic). Untrusted image-derived text (decoded
+    QR/OCR) never enters the preamble — only a quarantine status — preserving the "an image cannot
+    issue instructions" boundary. Also threads the image-trust verdict into ``constraints`` in place
+    so the summarizer can fence blocked signals. Returns (combined_preamble, summ_model). The three
+    route-local helpers are injected so this is unit-testable; never raises."""
+    import json as _json
+    import os as _os
+
+    ctx_preamble: Optional[str] = None
+    trace_ctx: Optional[str] = None
+    try:
+        prior_prods: Optional[list] = None
+        try:
+            if prior_shortlist and db is not None:
+                from sqlalchemy import text as _sqla_text
+                skus = [str(s) for s in prior_shortlist[:4] if s]
+                if skus:
+                    bind = {f"s{i}": sk for i, sk in enumerate(skus)}
+                    placeholders = ", ".join(f":s{i}" for i in range(len(skus)))
+                    rows = db.execute(
+                        _sqla_text(f"SELECT sku, name, price_cents, specs FROM products WHERE sku IN ({placeholders}) AND active=1"),
+                        bind,
+                    ).mappings().all()
+                    prior_prods = [
+                        {"sku": r["sku"], "name": r["name"], "price_cents": r["price_cents"],
+                         "specs": _json.loads(r["specs"]) if isinstance(r["specs"], str) else (r["specs"] or {})}
+                        for r in rows
+                    ]
+        except Exception:
+            prior_prods = None
+        ctx_preamble = build_context_preamble(
+            kv=kv if isinstance(kv, dict) else {},
+            structured_state=structured_state if isinstance(structured_state, dict) else {},
+            constraints=constraints,
+            prior_shortlist_products=prior_prods,
+        ) or None
+    except Exception:
+        pass
+    try:
+        trace_ctx = trace_to_context_summary(trace_id, mem, uid) or None
+    except Exception:
+        pass
+
+    session_excerpt = (str(session_context_summary or "").strip())[:400] or None
+    parts = [p for p in (ctx_preamble, trace_ctx, session_excerpt) if p]
+    combined: Optional[str] = "\n\n".join(parts) if parts else None
+
+    # QR signal -> SANITIZED status only (never the decoded payload).
+    try:
+        qr_note = image_security_preamble_note(image_cv_signals_parsed)
+        if qr_note:
+            combined = (combined + "\n\n" + qr_note) if combined else qr_note
+    except Exception:
+        pass
+    # Off-topic image note (vertical-blind fallback text).
+    try:
+        if isinstance(image_cv_signals_parsed, dict) and image_cv_signals_parsed.get("image_relevance") == "off_topic":
+            off_note = str(
+                image_cv_signals_parsed.get("image_relevance_note")
+                or "The uploaded image does not appear to match this store's products. "
+                   "Recommendations will be based on the text query only."
+            )
+            combined = (combined + "\n\n" + off_note) if combined else off_note
+    except Exception:
+        pass
+
+    # Resolve a real model for the summary (llm_model may be a display name like
+    # "rule-based (prefer_small)" when the intent rollout is off).
+    summ_model = llm_model
+    if not summ_model or "rule-based" in str(summ_model) or " " in str(summ_model):
+        summ_model = _os.getenv("OLLAMA_SUMMARY_MODEL", _os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b"))
+
+    # Thread the image-trust verdict into constraints (in place) for the security fence.
+    try:
+        verdict = getattr(image_feature_allowlist, "verdict", "full")
+        if verdict != "full" and isinstance(constraints, dict):
+            constraints["_image_feature_allowlist_verdict"] = verdict
+            constraints["_image_feature_blocked_signals"] = getattr(image_feature_allowlist, "blocked_signals", [])
+    except Exception:
+        pass
+
+    return combined, summ_model
+
+
 @dataclass(frozen=True)
 class NarrationInputs:
     query_text: str

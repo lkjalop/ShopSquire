@@ -10691,83 +10691,20 @@ def suggest(
         except Exception:
             pass
     if assistant_message is None and llm_summary_requested and rule_eval.get("recommend_llm", True):
-        # ── Build frontier-style memory injection for LLM prompt ──────────────
-        # Mirrors Kimi K2 / Claude extended context: structured slot state prepended
-        # to each turn so the LLM never loses conversation context.
-        _ctx_preamble: str | None = None
-        _trace_ctx: str | None = None
-        try:
-            # Fetch prior shortlist products with specs for multi-hop comparison context
-            _prior_prods: list | None = None
-            try:
-                if prior_shortlist and db is not None:
-                    from sqlalchemy import text as _sqla_text
-                    _skus_for_ctx = [str(s) for s in prior_shortlist[:4] if s]
-                    if _skus_for_ctx:
-                        _bind = {f"s{i}": sk for i, sk in enumerate(_skus_for_ctx)}
-                        _placeholders = ", ".join(f":s{i}" for i in range(len(_skus_for_ctx)))
-                        _rows = db.execute(_sqla_text(f"SELECT sku, name, price_cents, specs FROM products WHERE sku IN ({_placeholders}) AND active=1"), _bind).mappings().all()
-                        _prior_prods = [{"sku": r["sku"], "name": r["name"], "price_cents": r["price_cents"], "specs": json.loads(r["specs"]) if isinstance(r["specs"], str) else (r["specs"] or {})} for r in _rows]
-            except Exception:
-                _prior_prods = None
-            _ctx_preamble = _build_context_preamble(
-                kv=kv if isinstance(kv, dict) else {},
-                structured_state=structured_state if isinstance(structured_state, dict) else {},
-                constraints=constraints,
-                prior_shortlist_products=_prior_prods,
-            ) or None
-        except Exception:
-            pass
-        try:
-            _trace_ctx = _trace_to_context_summary(trace_id, mem, uid) or None
-        except Exception:
-            pass
-        # Combine: conversation memory first, then trace context, then recent turn history.
-        # Truncate session summary to ~400 chars so it doesn't crowd the product context.
-        _session_excerpt = (str(_session_context_summary or "").strip())[:400] or None
-        _combined_preamble_parts = [p for p in (_ctx_preamble, _trace_ctx, _session_excerpt) if p]
-        _combined_preamble = "\n\n".join(_combined_preamble_parts) if _combined_preamble_parts else None
-        # ── QR signal → SANITIZED status only (never the decoded payload) ────
-        # Untrusted image-derived content (QR/OCR/links) must NOT reach the LLM as
-        # raw text — that is a prompt-injection vector and contradicts the
-        # "image cannot issue instructions" boundary. Surface only a quarantine
-        # status so the narrator can say the image is under review; the decoded
-        # payload stays in the security trace (admin-only), never in the prompt.
-        try:
-            _qr_note = _image_security_preamble_note(image_cv_signals_parsed)
-            if _qr_note:
-                _combined_preamble = (_combined_preamble + "\n\n" + _qr_note) if _combined_preamble else _qr_note
-        except Exception:
-            pass
-        # ── Off-topic image note injection ───────────────────────────────────
-        try:
-            if image_cv_signals_parsed.get("image_relevance") == "off_topic":
-                _off_note = str(image_cv_signals_parsed.get("image_relevance_note") or
-                                "The uploaded image does not appear to be an electronics product. "
-                                "Recommendations will be based on the text query only.")
-                _combined_preamble = (_combined_preamble + "\n\n" + _off_note) if _combined_preamble else _off_note
-        except Exception:
-            pass
-        # Use a real Ollama model for the summary. `llm_model` may be a display
-        # name like "rule-based (prefer_small)" when the intent rollout is off —
-        # in that case fall back to the configured medium model so the LLM
-        # actually runs.
-        _summ_model = llm_model
-        if not _summ_model or "rule-based" in str(_summ_model) or " " in str(_summ_model):
-            # Summary prose defaults to the faster qwen3:14b (≈12s vs ≈25s for 27B,
-            # equivalent quality in testing). Override with OLLAMA_SUMMARY_MODEL.
-            _summ_model = os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b"))
-        # Thread image trust verdict into constraints so _summarize_results
-        # can inject the security fence (Approach 1).
-        try:
-            _allowlist_verdict = getattr(_image_feature_allowlist, "verdict", "full")
-            if _allowlist_verdict != "full":
-                constraints["_image_feature_allowlist_verdict"] = _allowlist_verdict
-                constraints["_image_feature_blocked_signals"] = getattr(
-                    _image_feature_allowlist, "blocked_signals", []
-                )
-        except Exception:
-            pass
+        # Build the narration preamble (memory + trace + session + SANITIZED image notes) and resolve
+        # the summary model. Extracted to recommend_narration_stage.build_narration_preamble; the
+        # route-local helpers are injected. Threads the image-trust verdict into constraints in place.
+        from src.app.services.recommend_narration_stage import build_narration_preamble as _build_preamble
+        _combined_preamble, _summ_model = _build_preamble(
+            kv=kv, structured_state=structured_state, constraints=constraints,
+            prior_shortlist=prior_shortlist, db=db, trace_id=trace_id, mem=mem, uid=uid,
+            session_context_summary=_session_context_summary,
+            image_cv_signals_parsed=image_cv_signals_parsed, llm_model=llm_model,
+            image_feature_allowlist=_image_feature_allowlist,
+            build_context_preamble=_build_context_preamble,
+            trace_to_context_summary=_trace_to_context_summary,
+            image_security_preamble_note=_image_security_preamble_note,
+        )
         # Tier 1 — narration mode (RECOMMEND_NARRATION_MODE): blocking (default; LLM prose) | skip
         # (deterministic grounded answer only) | async (skip + enqueue prose out-of-band). LLM
         # narration was 85-91% of route latency; skip/async leave assistant_message None here so the

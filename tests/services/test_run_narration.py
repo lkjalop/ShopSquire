@@ -6,7 +6,9 @@ summarize_fn is injected so this is testable without an LLM.
 """
 from __future__ import annotations
 
-from src.app.services.recommend_narration_stage import run_narration
+from types import SimpleNamespace
+
+from src.app.services.recommend_narration_stage import build_narration_preamble, run_narration
 
 
 def _summarize_spy(calls):
@@ -83,3 +85,53 @@ def test_async_submit_failure_is_swallowed():
     )
     assert am is None and job is None  # enqueue failure -> no job id, no raise
     assert tb["narration_pending"] is True
+
+
+# ── build_narration_preamble ──
+def _preamble(**overrides):
+    base = dict(
+        kv={}, structured_state={}, constraints={}, prior_shortlist=[], db=None, trace_id="t",
+        mem=None, uid="u", session_context_summary="recent chat", image_cv_signals_parsed={},
+        llm_model="qwen3:14b", image_feature_allowlist=SimpleNamespace(verdict="full", blocked_signals=[]),
+        build_context_preamble=lambda **k: "CTX",
+        trace_to_context_summary=lambda *a, **k: "TRACE",
+        image_security_preamble_note=lambda sig: "",
+    )
+    base.update(overrides)
+    return build_narration_preamble(**base)
+
+
+def test_preamble_combines_memory_trace_and_session():
+    combined, model = _preamble()
+    assert combined == "CTX\n\nTRACE\n\nrecent chat"
+    assert model == "qwen3:14b"  # clean model name left as-is
+
+
+def test_preamble_resolves_display_model_name():
+    _, model = _preamble(llm_model="rule-based (prefer_small)")
+    assert model and "rule-based" not in model  # fell back to a real model
+
+
+def test_preamble_appends_qr_and_offtopic_notes_without_flavour():
+    combined, _ = _preamble(
+        image_security_preamble_note=lambda sig: "[image under review]",
+        image_cv_signals_parsed={"image_relevance": "off_topic"},
+    )
+    assert "[image under review]" in combined
+    assert "based on the text query only" in combined
+    assert "electronics" not in combined.lower()  # vertical-blind fallback
+
+
+def test_preamble_threads_image_trust_verdict_into_constraints():
+    c = {}
+    _preamble(constraints=c, image_feature_allowlist=SimpleNamespace(verdict="restricted", blocked_signals=["qr"]))
+    assert c["_image_feature_allowlist_verdict"] == "restricted"
+    assert c["_image_feature_blocked_signals"] == ["qr"]
+
+
+def test_preamble_never_raises_on_helper_failure():
+    def _boom(**k):
+        raise RuntimeError("ctx down")
+    combined, model = _preamble(build_context_preamble=_boom)
+    # ctx failed but trace + session still combine; no raise.
+    assert "TRACE" in (combined or "") and model
