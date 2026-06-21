@@ -38,3 +38,34 @@ def contains_pci_data(text: str) -> bool:
     if CVV_RE.search(text) and CVV_HINT_RE.search(text):
         return True
     return False
+
+
+# CVV immediately following an explicit hint, e.g. "CVV: 123" / "security code 4321".
+_CVV_WITH_HINT_RE = re.compile(
+    r"((?:cvv|cvc|security\s*code|card\s*verification)\b\s*[:#=]?\s*)\d{3,4}\b",
+    re.IGNORECASE,
+)
+
+
+def redact_pci(text: str) -> str:
+    """Mask card PANs (and CVV-with-hint) so they never reach logs, decision traces, or LLM input.
+
+    Mirrors contains_pci_data's gating to avoid over-redacting SKUs / model numbers:
+      * a 13-19 digit run is masked only when it passes the Luhn check, OR when the surrounding
+        text carries card/cvv/expiry context (catches fake demo PANs in a payment context);
+      * a 3-4 digit CVV is masked only when it directly follows an explicit CVV/CVC hint.
+    Req 3/4 (do not store/expose PAN). Safe on non-payment text (no context -> only Luhn PANs).
+    """
+    if not text:
+        return text
+    has_context = bool(CARD_HINT_RE.search(text) or CVV_HINT_RE.search(text) or EXPIRY_RE.search(text))
+
+    def _mask_card(m: "re.Match") -> str:
+        candidate = re.sub(r"[^0-9]", "", m.group(0))
+        if 13 <= len(candidate) <= 19 and (luhn_check(candidate) or has_context):
+            return "[REDACTED_CARD]"
+        return m.group(0)
+
+    out = CARD_RE.sub(_mask_card, text)
+    out = _CVV_WITH_HINT_RE.sub(r"\1[REDACTED_CVV]", out)
+    return out

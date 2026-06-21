@@ -11,6 +11,7 @@ from fastapi import Depends
 from urllib.parse import urlparse
 
 from src.app.config import get_settings, load_feature_flags
+from src.app.security.pci import redact_pci as _redact_pci
 
 
 class DummyRedis:
@@ -146,6 +147,9 @@ def scrub_pii(text: str) -> str:
 
     # Preserve known system IDs that can look like phone numbers.
     text = re.sub(r"\b(?:TKT|INC|CASE|ORD|ORDER|REQ|DEC|TRACE|EVT|EVENT)-\d{6,}\b", _protect, text, flags=re.I)
+    # Mask card PANs / CVV FIRST (before phone, so a 13-19 digit run is never partially handled).
+    # Reuses the PCI detector's Luhn + context gating to avoid over-redacting SKUs/model numbers.
+    text = _redact_pci(text)
     text = PII_EMAIL.sub("[REDACTED_EMAIL]", text)
 
     # Only redact a phone match when the MATCHED TOKEN itself holds 10–15 digits
