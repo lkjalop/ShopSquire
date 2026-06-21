@@ -10247,6 +10247,36 @@ def suggest(
             payload["external_research_status"] = _extres.get("source_status")
         except Exception as _ee:
             _trace_system_error(trace_id=trace_id, stage="external_research", exc=_ee)
+    # Tier 3 safe multimodal: classify the image<->query relationship (always, observability). The
+    # visual-similarity leg (IMAGE_SIMILARITY_ENABLED, off by default + needs a built FAISS index)
+    # attaches a LABELED source, never owned results. OCR/QR/prompt text never reaches this — only
+    # safe labels + the detected product type; gate-denied/suspicious -> off_topic, no influence.
+    if incoming_image_payload and isinstance(image_context, dict) and image_context.get("labels"):
+        try:
+            from src.app.services.image_query_relationship import classify as _img_classify
+            from src.app.services.category_router import detect_category as _img_detect_cat
+            from src.app.platform.store_profile import profile_slot as _img_profile_slot
+            _img_allowed = (getattr(_image_feature_allowlist, "allow_image_labels", True)
+                            and getattr(_image_feature_allowlist, "verdict", "full") != "text_only")
+            _img_rel = _img_classify(
+                image_labels=image_context.get("labels") or [],
+                query=query,
+                image_suspicious=(not _img_allowed) or bool(image_reupload_reasons),
+                detect_category=_img_detect_cat,
+                companions_map=_img_profile_slot("upsell_companions", default={}) or {},
+            )
+            payload["image_relationship"] = _img_rel
+            if bool(flags.get("IMAGE_SIMILARITY_ENABLED", False)):
+                from src.app.services.recommend_image_similarity_stage import run as _run_visual
+                _vis = _run_visual(
+                    image_bytes=_decode_session_image_blob(kv if isinstance(kv, dict) else {}, image_context.get("hash")),
+                    query_text=query, relationship=_img_rel, allow_visual=_img_allowed,
+                    budget_min=constraints.get("budget_min"), budget_max=constraints.get("budget_max"),
+                )
+                payload["visual_similarity"] = _vis.get("candidates") or []
+                payload["visual_similarity_status"] = _vis.get("source_status")
+        except Exception as _ie:
+            _trace_system_error(trace_id=trace_id, stage="image_relationship", exc=_ie)
     # Ensure evidence contract keys are present at payload construction
     if "evidence_items" not in payload:
         top = []
