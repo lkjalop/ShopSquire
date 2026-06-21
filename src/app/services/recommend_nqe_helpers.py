@@ -287,16 +287,26 @@ def apply_persona_confidence_fallback(
     min_conf = float(os.getenv("PERSONA_CONFIDENCE_MIN", "0.34") or 0.34)
     if conf >= min_conf:
         return out
+    # Vertical-blind: the disambiguation question + options come from the active StoreProfile
+    # (slot nqe_use_case_fallback_question). The neutral inline default is a safe last resort if a
+    # profile lacks the slot — it carries no electronics flavour.
+    spec: dict = {}
+    try:
+        from src.app.platform.store_profile import profile_slot
+        cand = profile_slot("nqe_use_case_fallback_question", default=None)
+        if isinstance(cand, dict) and str(cand.get("text") or "").strip():
+            spec = cand
+    except Exception:
+        spec = {}
     fallback = {
         "id": "ask_use_case",
-        "text": "To avoid guessing, what will you mostly do: general office/school work, creator/engineering tools, or gaming?",
+        "text": str(spec.get("text") or "To help narrow it down, what will you mainly use this for?"),
         "goal": "resolve_use_case",
         "question_slot": "use_case",
-        "options": [
-            {"id": "use_case_general", "label": "General office/school"},
-            {"id": "use_case_creator", "label": "Creator/engineering tools"},
-            {"id": "use_case_gaming", "label": "Gaming"},
-        ],
+        "options": list(spec.get("options") or [
+            {"id": "use_case_primary", "label": "Everyday / general use"},
+            {"id": "use_case_specialised", "label": "Specialised / professional use"},
+        ]),
     }
     existing_ids = {str((q or {}).get("id") or "").strip().lower() for q in out}
     if "ask_use_case" not in existing_ids:

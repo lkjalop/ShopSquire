@@ -393,6 +393,15 @@
     "businessoffashion.com"
   ],
 
+  "nqe_use_case_fallback_question": {
+    "text": "To help narrow it down, what's the occasion: everyday casual, work/office, or a special event?",
+    "options": [
+      {"id": "use_case_casual", "label": "Everyday casual"},
+      {"id": "use_case_work", "label": "Work/office"},
+      {"id": "use_case_event", "label": "Special event"}
+    ]
+  },
+
   "supplier_message_templates": {
     "reorder": {
       "subject": "Restock request — {item}",

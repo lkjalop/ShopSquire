@@ -359,6 +359,15 @@
     "medlineplus.gov"
   ],
 
+  "nqe_use_case_fallback_question": {
+    "text": "To point you to the right product, is this for everyday wellbeing, managing a specific symptom, or ongoing condition support?",
+    "options": [
+      {"id": "use_case_wellbeing", "label": "Everyday wellbeing"},
+      {"id": "use_case_symptom", "label": "Specific symptom relief"},
+      {"id": "use_case_condition", "label": "Ongoing condition support"}
+    ]
+  },
+
   "supplier_message_templates": {
     "reorder": {
       "subject": "Reorder request — {item}",

@@ -1223,6 +1223,15 @@
     }
   ],
 
+  "nqe_use_case_fallback_question": {
+    "text": "To avoid guessing, what will you mostly do: general office/school work, creator/engineering tools, or gaming?",
+    "options": [
+      {"id": "use_case_general", "label": "General office/school"},
+      {"id": "use_case_creator", "label": "Creator/engineering tools"},
+      {"id": "use_case_gaming", "label": "Gaming"}
+    ]
+  },
+
   "supplier_message_templates": {
     "reorder": {
       "subject": "Reorder request — {item}",
