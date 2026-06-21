@@ -63,3 +63,53 @@ def test_stage_search_error_fails_safe():
         raise RuntimeError("no index")
     out = run_visual(image_bytes=b"x", query_text="q", relationship={"relationship": ON_TOPIC}, search_fn=_boom)
     assert out["candidates"] == [] and out["source_status"]["status"] == "error"
+
+
+# ── run_image_relationship_stage (Phase 3 extraction) ──
+def test_relationship_stage_classifies_without_visual_when_disabled():
+    from types import SimpleNamespace
+    from src.app.services.recommend_image_similarity_stage import run_image_relationship_stage
+    out = run_image_relationship_stage(
+        image_context={"labels": ["laptop"], "hash": "h"}, query="laptop under 1800",
+        image_feature_allowlist=SimpleNamespace(allow_image_labels=True, verdict="full"),
+        image_reupload_reasons=[], image_similarity_enabled=False,
+        decode_image_blob=lambda kv, h: b"x",
+        classify_fn=lambda **k: {"relationship": "on_topic", "influence": "boost"},
+        detect_category_fn=_dc, companions_map=_COMP,
+    )
+    assert out["image_relationship"]["relationship"] == "on_topic"
+    assert "visual_similarity" not in out  # leg off
+
+
+def test_relationship_stage_runs_visual_when_enabled():
+    from types import SimpleNamespace
+    from src.app.services.recommend_image_similarity_stage import run_image_relationship_stage
+    decoded = {}
+    out = run_image_relationship_stage(
+        image_context={"labels": ["laptop"], "hash": "H"}, query="laptop",
+        image_feature_allowlist=SimpleNamespace(allow_image_labels=True, verdict="full"),
+        image_reupload_reasons=[], image_similarity_enabled=True,
+        decode_image_blob=lambda kv, h: decoded.setdefault("h", h) or b"img",
+        classify_fn=lambda **k: {"relationship": "on_topic", "influence": "boost"},
+        detect_category_fn=_dc, companions_map=_COMP,
+        visual_run_fn=lambda **k: {"candidates": [{"sku": "V1", "source": "visual_similarity"}],
+                                   "source_status": {"source": "visual_similarity", "status": "ok"}},
+    )
+    assert decoded["h"] == "H"  # blob decoded via injected fn using the image hash
+    assert out["visual_similarity"][0]["sku"] == "V1"
+    assert out["visual_similarity_status"]["source"] == "visual_similarity"
+
+
+def test_relationship_stage_marks_suspicious_when_gate_denied():
+    from types import SimpleNamespace
+    from src.app.services.recommend_image_similarity_stage import run_image_relationship_stage
+    seen = {}
+    run_image_relationship_stage(
+        image_context={"labels": ["laptop"]}, query="laptop",
+        image_feature_allowlist=SimpleNamespace(allow_image_labels=False, verdict="text_only"),
+        image_reupload_reasons=[], image_similarity_enabled=False,
+        decode_image_blob=lambda kv, h: b"",
+        classify_fn=lambda **k: seen.update(k) or {"relationship": "off_topic"},
+        detect_category_fn=_dc, companions_map=_COMP,
+    )
+    assert seen["image_suspicious"] is True  # allowlist denied -> classified as suspicious

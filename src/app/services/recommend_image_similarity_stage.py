@@ -54,3 +54,65 @@ def run(
         h.setdefault("source", _SOURCE)
     return {"candidates": hits, "influence": influence,
             "source_status": SourceStatus.from_hits(_SOURCE, hits, int((time.perf_counter() - t0) * 1000)).to_dict()}
+
+
+def run_image_relationship_stage(
+    *,
+    image_context: Dict[str, Any],
+    query: Any,
+    image_feature_allowlist: Any,
+    image_reupload_reasons: Any,
+    image_similarity_enabled: bool,
+    decode_image_blob: Callable[..., Any],
+    kv: Any = None,
+    budget_min: Any = None,
+    budget_max: Any = None,
+    classify_fn: Optional[Callable[..., Any]] = None,
+    detect_category_fn: Optional[Callable[..., Any]] = None,
+    companions_map: Optional[Dict[str, Any]] = None,
+    visual_run_fn: Optional[Callable[..., Any]] = None,
+) -> Dict[str, Any]:
+    """Tier-3 safe multimodal stage: classify the image<->query relationship (ALWAYS, for
+    observability) and — only when image_similarity_enabled — run the labeled visual leg.
+
+    Returns {image_relationship, [visual_similarity], [visual_similarity_status]} for the caller to
+    attach to the payload. OCR/QR/prompt text NEVER reaches this — only safe labels + the detected
+    product type; a gate-denied/suspicious image is marked suspicious (-> off_topic, no influence).
+    decode_image_blob is injected (route-local); classify/detect/visual are injected with lazy
+    defaults for testability. Raises on internal error so the caller can trace it."""
+    out: Dict[str, Any] = {}
+    if classify_fn is None:
+        from src.app.services.image_query_relationship import classify as classify_fn
+    if detect_category_fn is None:
+        from src.app.services.category_router import detect_category as detect_category_fn
+    if companions_map is None:
+        try:
+            from src.app.platform.store_profile import profile_slot
+            companions_map = profile_slot("upsell_companions", default={}) or {}
+        except Exception:
+            companions_map = {}
+
+    allowed = (
+        getattr(image_feature_allowlist, "allow_image_labels", True)
+        and getattr(image_feature_allowlist, "verdict", "full") != "text_only"
+    )
+    rel = classify_fn(
+        image_labels=image_context.get("labels") or [],
+        query=query,
+        image_suspicious=(not allowed) or bool(image_reupload_reasons),
+        detect_category=detect_category_fn,
+        companions_map=companions_map,
+    )
+    out["image_relationship"] = rel
+
+    if image_similarity_enabled:
+        if visual_run_fn is None:
+            visual_run_fn = run  # the module-local visual-similarity stage
+        vis = visual_run_fn(
+            image_bytes=decode_image_blob(kv if isinstance(kv, dict) else {}, image_context.get("hash")),
+            query_text=query, relationship=rel, allow_visual=allowed,
+            budget_min=budget_min, budget_max=budget_max,
+        )
+        out["visual_similarity"] = vis.get("candidates") or []
+        out["visual_similarity_status"] = vis.get("source_status")
+    return out
