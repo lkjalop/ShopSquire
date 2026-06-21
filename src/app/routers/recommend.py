@@ -6737,6 +6737,7 @@ def suggest(
             identify_product_from_image,
             identify_product_from_text,
             specs_to_constraints as _id_to_constraints,
+            apply_identity_to_constraints as _apply_identity_to_constraints,
         )
         _image_blob = _decode_session_image_blob(kv if isinstance(kv, dict) else {}, image_context.get("hash"))
         _vision_result = None
@@ -6876,61 +6877,14 @@ def suggest(
             if _image_flagged and _labels_weak and _brand_only and _brand_conf >= _vision_brand_only_min_conf:
                 _id_result = dict(_low_conf_brand_candidate)
                 _id_source = "vision_brand_rescue"
-        if _id_result:
-            if _id_result.get("identified"):
-                _identity_constraints = _id_to_constraints(_id_result)
-                # Merge identity constraints into the main constraints dict
-                if _identity_constraints.get("identity_brand") and not constraints.get("brand"):
-                    constraints["brand"] = _identity_constraints["identity_brand"]
-                # Also propagate brand hint from vision identity so brand-priority fallback fetches work
-                _id_brand_low = str(_identity_constraints.get("identity_brand") or "").strip().lower()
-                if _id_brand_low and _id_brand_low in _SUPPORTED_IMAGE_BRAND_HINTS:
-                    if not strict_image_brand_hint:
-                        strict_image_brand_hint = _id_brand_low
-                    if not constraints.get("_request_brand_hint"):
-                        constraints["_request_brand_hint"] = _id_brand_low
-                    if not constraints.get("brands"):
-                        constraints["brands"] = [_id_brand_low]
-                if _identity_constraints.get("identity_budget_min") and not constraints.get("budget_min"):
-                    constraints["budget_min"] = _identity_constraints["identity_budget_min"]
-                if _identity_constraints.get("identity_budget_max") and not constraints.get("budget_max"):
-                    constraints["budget_max"] = _identity_constraints["identity_budget_max"]
-                if _identity_constraints.get("identity_cpu_tier"):
-                    constraints.setdefault("cpu_tier", _identity_constraints["identity_cpu_tier"])
-                if _identity_constraints.get("identity_ram_gb_min"):
-                    constraints.setdefault("specs", [])
-                    if not any("ram" in str(s).lower() for s in constraints["specs"]):
-                        constraints["specs"].append(f"ram_gb_min:{_identity_constraints['identity_ram_gb_min']}")
-                if _identity_constraints.get("identity_gpu_class"):
-                    constraints["must_have_gpu"] = True
-                    constraints.setdefault("gpu_preference", "with_discrete")
-                if _identity_constraints.get("identity_display_inches"):
-                    constraints.setdefault("display_inches", _identity_constraints["identity_display_inches"])
-                if _identity_constraints.get("identity_form_factor"):
-                    constraints.setdefault("form_factor", _identity_constraints["identity_form_factor"])
-                if _identity_constraints.get("identity_product_type"):
-                    constraints.setdefault("product_type", _identity_constraints["identity_product_type"])
-                # Carry the specific model so ranking can ANCHOR results to the uploaded product
-                # line (multimodal anchoring), not just the brand.
-                if _identity_constraints.get("identity_model"):
-                    constraints.setdefault("identity_model", _identity_constraints["identity_model"])
-                log_trace_event(
-                    trace_id=trace_id,
-                    event_type="product_identity_text_enrichment",
-                    source_type="agent",
-                    source_id="Product_Identity_Agent",
-                    target_type="system",
-                    target_id=None,
-                    payload={
-                        "brand": _identity_constraints.get("identity_brand"),
-                        "cpu_tier": _identity_constraints.get("identity_cpu_tier"),
-                        "form_factor": _identity_constraints.get("identity_form_factor"),
-                        "product_type": _identity_constraints.get("identity_product_type"),
-                        "confidence": _id_result.get("confidence"),
-                        "source": _id_source,
-                        "constraints_added": list(_identity_constraints.keys()),
-                    },
-                )
+        # Map the image-identified product into retrieval constraints (extracted to
+        # product_identity_agent.apply_identity_to_constraints — multimodal anchoring).
+        _identity_constraints, strict_image_brand_hint = _apply_identity_to_constraints(
+            _id_result, constraints,
+            supported_brand_hints=_SUPPORTED_IMAGE_BRAND_HINTS,
+            strict_image_brand_hint=strict_image_brand_hint,
+            id_source=_id_source, trace_id=trace_id, log_fn=log_trace_event,
+        )
     except Exception:
         pass
     # Multimodal confidence gate: if image signals are weak/risky, ask for a

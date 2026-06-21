@@ -14,7 +14,7 @@ import os
 import re
 import time
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import requests
 
@@ -477,3 +477,84 @@ def identify_product_from_text(
             pass
 
     return result
+
+
+def apply_identity_to_constraints(
+    id_result: Dict[str, Any],
+    constraints: Dict[str, Any],
+    *,
+    supported_brand_hints: Any = None,
+    strict_image_brand_hint: Optional[str] = None,
+    id_source: str = "",
+    trace_id: Any = None,
+    log_fn: Optional[Any] = None,
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    """Map an image-identified product into the live retrieval constraints, IN PLACE.
+
+    Runs specs_to_constraints(id_result), then fills brand / budget / cpu_tier / ram / gpu / display /
+    form_factor / product_type and the specific model (for multimodal anchoring) without clobbering
+    values the shopper already gave (setdefault / "not present" guards). Also seeds the brand hint so
+    the brand-priority fetch fires. Returns (identity_constraints, strict_image_brand_hint). No-op when
+    id_result is unidentified; never raises (the route's behaviour is preserved)."""
+    identity_constraints: Dict[str, Any] = {}
+    try:
+        if not (id_result and id_result.get("identified")):
+            return identity_constraints, strict_image_brand_hint
+        identity_constraints = specs_to_constraints(id_result)
+        hints = supported_brand_hints or set()
+
+        if identity_constraints.get("identity_brand") and not constraints.get("brand"):
+            constraints["brand"] = identity_constraints["identity_brand"]
+        id_brand_low = str(identity_constraints.get("identity_brand") or "").strip().lower()
+        if id_brand_low and id_brand_low in hints:
+            if not strict_image_brand_hint:
+                strict_image_brand_hint = id_brand_low
+            if not constraints.get("_request_brand_hint"):
+                constraints["_request_brand_hint"] = id_brand_low
+            if not constraints.get("brands"):
+                constraints["brands"] = [id_brand_low]
+
+        if identity_constraints.get("identity_budget_min") and not constraints.get("budget_min"):
+            constraints["budget_min"] = identity_constraints["identity_budget_min"]
+        if identity_constraints.get("identity_budget_max") and not constraints.get("budget_max"):
+            constraints["budget_max"] = identity_constraints["identity_budget_max"]
+        if identity_constraints.get("identity_cpu_tier"):
+            constraints.setdefault("cpu_tier", identity_constraints["identity_cpu_tier"])
+        if identity_constraints.get("identity_ram_gb_min"):
+            constraints.setdefault("specs", [])
+            if not any("ram" in str(s).lower() for s in constraints["specs"]):
+                constraints["specs"].append(f"ram_gb_min:{identity_constraints['identity_ram_gb_min']}")
+        if identity_constraints.get("identity_gpu_class"):
+            constraints["must_have_gpu"] = True
+            constraints.setdefault("gpu_preference", "with_discrete")
+        if identity_constraints.get("identity_display_inches"):
+            constraints.setdefault("display_inches", identity_constraints["identity_display_inches"])
+        if identity_constraints.get("identity_form_factor"):
+            constraints.setdefault("form_factor", identity_constraints["identity_form_factor"])
+        if identity_constraints.get("identity_product_type"):
+            constraints.setdefault("product_type", identity_constraints["identity_product_type"])
+        # Specific model -> anchor results to the uploaded product line, not just the brand.
+        if identity_constraints.get("identity_model"):
+            constraints.setdefault("identity_model", identity_constraints["identity_model"])
+
+        if log_fn is not None:
+            try:
+                log_fn(
+                    trace_id=trace_id, event_type="product_identity_text_enrichment",
+                    source_type="agent", source_id="Product_Identity_Agent",
+                    target_type="system", target_id=None,
+                    payload={
+                        "brand": identity_constraints.get("identity_brand"),
+                        "cpu_tier": identity_constraints.get("identity_cpu_tier"),
+                        "form_factor": identity_constraints.get("identity_form_factor"),
+                        "product_type": identity_constraints.get("identity_product_type"),
+                        "confidence": id_result.get("confidence"),
+                        "source": id_source,
+                        "constraints_added": list(identity_constraints.keys()),
+                    },
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return identity_constraints, strict_image_brand_hint
