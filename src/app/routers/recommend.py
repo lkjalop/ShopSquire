@@ -6772,27 +6772,35 @@ def suggest(
             except Exception:
                 pass
         if _image_blob and not _id_result:
-            # Use the pre-launched parallel future if present (flag PARALLEL_VISION_IDENTITY);
-            # otherwise call inline. Fall back to inline if the future errored.
+            # VLM hardening (Track 3): in PARALLEL mode the pre-launched future is JOINED with a
+            # timeout — on timeout/error we DO NOT block on an inline call; we record vision_status
+            # and proceed (text-identity + catalog still answer, so commerce never stalls on the VLM).
+            # The inline call happens only in non-parallel mode.
             _id_candidate = None
+            _vision_status = "ok"
             if _id_image_future is not None:
                 try:
                     _id_candidate = _id_image_future.result(
                         timeout=float(os.getenv("CV_IDENTITY_TIMEOUT_SEC", "30") or 30)
                     )
-                except Exception:
+                except _futures.TimeoutError:
+                    _vision_status = "timeout"
                     _id_candidate = None
-            if not isinstance(_id_candidate, dict):
+                except Exception:
+                    _vision_status = "error"
+                    _id_candidate = None
+            else:
                 _id_candidate = identify_product_from_image(
                     _image_blob,
                     user_query=query or "",
                     trace_id=trace_id,
                 )
+            timing_breakdown["vision_status"] = _vision_status
             if isinstance(_id_candidate, dict):
                 _low_conf_brand_candidate = dict(_id_candidate)
-            if bool(_id_candidate.get("identified")) and float(_id_candidate.get("confidence") or 0.0) >= _vision_min_conf:
-                _id_result = _id_candidate
-                _id_source = "vision_image"
+                if bool(_id_candidate.get("identified")) and float(_id_candidate.get("confidence") or 0.0) >= _vision_min_conf:
+                    _id_result = _id_candidate
+                    _id_source = "vision_image"
         if (not _id_result) and (image_context.get("labels") or image_context.get("ocr")):
             _id_result = identify_product_from_text(
                 labels=image_context.get("labels") or [],
