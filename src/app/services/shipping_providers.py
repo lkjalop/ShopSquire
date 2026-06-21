@@ -1,5 +1,6 @@
 import logging
 import os
+import uuid
 from typing import Dict, Any
 
 _log = logging.getLogger("shopsquire.shipping")
@@ -290,3 +291,70 @@ def get_default_shipping_provider() -> BaseShippingProvider:
     # valid provider object that returns graceful {"ok": False, "stub": True}
     # rather than raising. Real labels require a configured API key.
     return EasyPostProvider()
+
+
+def shipping_readiness() -> Dict[str, Any]:
+    """Honest, network-free report of whether a REAL carrier is configured.
+
+    Shipping honesty (Track 6): callers must know whether a label would be a real shipment or a
+    stub. `ready` is True only when at least one carrier has the credentials it needs; otherwise
+    `stub` is True and labels MUST NOT be presented as real (no fabricated tracking numbers)."""
+    ap = AusPostProvider()
+    st = StarTrackProvider()
+    ep = EasyPostProvider()
+    ss = ShipStationProvider()
+    configured = {
+        "auspost": bool(ap.api_key),
+        "startrack": bool(st.api_key and st.account_number),
+        "easypost": bool(ep.api_key),
+        "shipstation": bool(ss.key and ss.secret),
+    }
+    ready = any(configured.values())
+    return {
+        "ready": ready,
+        "stub": not ready,
+        "provider": get_default_shipping_provider().name,
+        "configured": configured,
+        "reason": (
+            "live carrier configured"
+            if ready
+            else "no carrier API key configured — labels are stubs, not real shipments"
+        ),
+    }
+
+
+def plan_label_record(readiness: Dict[str, Any], create_result: Dict[str, Any], *, case_id: str) -> Dict[str, Any]:
+    """Decide — HONESTLY and purely (no I/O) — what to record/return for a label attempt.
+
+    A stub/unconfigured carrier, or a failed `create_label`, must NOT yield a fabricated tracking
+    number presented as a real shipment. In that case tracking/label are None and status='stub'.
+    Only a genuinely successful create produces a tracking number and status='generated'."""
+    result = create_result or {}
+    is_stub = bool((readiness or {}).get("stub")) or bool(result.get("stub")) or not bool(result.get("ok"))
+    if is_stub:
+        return {
+            "tracking_number": None,
+            "label_url": None,
+            "status": "stub",
+            "stub": True,
+            "ok": False,
+            "reason": (
+                result.get("error")
+                or (readiness or {}).get("reason")
+                or "no carrier configured — label is a stub, not a real shipment"
+            ),
+        }
+    tracking = f"RR{uuid.uuid4().hex[:10].upper()}"
+    label_url = (
+        (result.get("raw") or {}).get("postage_label", {}).get("label_url")
+        or result.get("label_url")
+        or f"pending://{case_id}"
+    )
+    return {
+        "tracking_number": tracking,
+        "label_url": label_url,
+        "status": "generated",
+        "stub": False,
+        "ok": True,
+        "reason": None,
+    }
