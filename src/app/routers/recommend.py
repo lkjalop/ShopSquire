@@ -854,6 +854,7 @@ def _fast_path_product_score(
     safe_hints: Dict[str, Any],
     budget_min: Optional[int],
     budget_max: Optional[int],
+    use_case_fit: Optional[Dict[str, Any]] = None,
 ) -> float:
     name = str(row.get("name") or "").lower()
     specs = row.get("specs") if isinstance(row.get("specs"), dict) else {}
@@ -866,13 +867,34 @@ def _fast_path_product_score(
     score = 0.0
     if "laptop" in haystack or "notebook" in haystack:
         score += 30.0
-    if re.search(r"\b(gaming|rtx|geforce|radeon|gpu|144hz|4050|4060|4070|3050)\b", haystack):
-        score += 35.0 if "gaming" in q or "gaming" in safe_hints.get("use_case_hints", []) else 12.0
+    # Use-case suitability comes from the vertical adapter (electronics: GPU tier +
+    # spec floors), NOT a keyword regex. A laptop that actually MEETS the resolved
+    # use-case (e.g. discrete GPU + 144Hz for gaming) is boosted; one that misses a
+    # hard requirement (Intel-Arc 60Hz for "gaming") is penalised so it can never
+    # outrank a genuine match. Generic queries (no use-case) get a mild
+    # discrete-GPU nudge only.
+    fit = use_case_fit if use_case_fit is not None else _use_case_fit(row, query)
+    if fit.get("use_case"):
+        if fit.get("meets"):
+            score += 35.0
+        else:
+            score += 4.0
+            if any(str(g).startswith("needs_discrete_gpu") for g in (fit.get("gaps") or [])):
+                score -= 14.0
+    elif fit.get("tier") in ("entry", "mid", "high"):
+        score += 8.0
     for brand in safe_hints.get("brand_hints") or []:
         if brand and brand in haystack:
             score += 22.0
-    for token in ("msi", "asus", "acer", "alienware", "lenovo", "hp", "dell"):
-        if token in q and token in haystack:
+    # Brand list is vertical flavour -> read from the active store profile, not hardcoded.
+    try:
+        from src.app.platform.store_profile import profile_slot as _ps
+        _known_brands = _ps("known_brands", default=()) or ()
+    except Exception:
+        _known_brands = ()
+    for token in _known_brands:
+        token = str(token).lower()
+        if token and token in q and token in haystack:
             score += 12.0
     if budget_min is not None and price >= float(budget_min):
         score += 8.0
@@ -1000,25 +1022,29 @@ def _fast_path_catalog_recommendation(
             "stock": int(row.get("stock") or 0),
             "specs": specs,
         }
+        _fit = _use_case_fit(item, query)
         item["score"] = _fast_path_product_score(
             row=item,
             query=query,
             safe_hints=safe_hints,
             budget_min=budget_min,
             budget_max=budget_max,
+            use_case_fit=_fit,
         )
         item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
         _price = int(item.get("price_cents") or 0) / 100.0
+        # Use-case reason codes (e.g. gaming_use_case_match, discrete_gpu) come from the
+        # adapter and are emitted ONLY when the candidate actually meets the use-case.
         item["factors"] = {
             "positive": list(filter(None, [
                 "price_fit" if (budget_max is not None and _price <= float(budget_max)) else (
                     "query_match" if any(tok in str(item.get("name") or "").lower() for tok in str(query or "").lower().split()) else "catalog_match"
                 ),
                 "safe_image_brand_hint" if safe_hints.get("brand_hints") else None,
-                "gaming_use_case_match" if ("gaming" in safe_hints.get("use_case_hints", []) or "gaming" in str(query).lower()) else None,
+                *(_fit.get("reasons") or []),
                 "in_stock" if item.get("stock", 0) > 0 else None,
             ]))[:4],
-            "negative": [],
+            "negative": list(_fit.get("gaps") or [])[:2],
         }
         item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
         candidates.append(item)
@@ -1042,22 +1068,24 @@ def _fast_path_catalog_recommendation(
             if budget_max is not None and item["price_cents"] > int((float(budget_max) + 400.0) * 100):
                 continue
             item = dict(item)
+            _fb_fit = _use_case_fit(item, query)
             item["score"] = _fast_path_product_score(
                 row=item,
                 query=query,
                 safe_hints=safe_hints,
                 budget_min=budget_min,
                 budget_max=budget_max,
+                use_case_fit=_fb_fit,
             )
             item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
             _fb_price = int(item.get("price_cents") or 0) / 100.0
             item["factors"] = {
                 "positive": list(filter(None, [
                     "price_fit" if (budget_max is not None and _fb_price <= float(budget_max)) else "query_match",
-                    "gaming_use_case_match" if ("gaming" in safe_hints.get("use_case_hints", []) or "gaming" in str(query).lower()) else None,
+                    *(_fb_fit.get("reasons") or []),
                     "in_stock" if item.get("stock", 0) > 0 else None,
                 ]))[:3],
-                "negative": ["catalog_query_timeout"] if query_elapsed_ms > 2500 else [],
+                "negative": ["catalog_query_timeout"] if query_elapsed_ms > 2500 else list(_fb_fit.get("gaps") or [])[:2],
             }
             item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
             candidates.append(item)
@@ -2664,6 +2692,8 @@ from src.app.services.recommend_candidate_classify import (  # noqa: E402
     brand_sql_predicate as _brand_sql_predicate_impl,
     candidate_has_discrete_gpu as _candidate_has_discrete_gpu_impl,
     gpu_intent_profile as _gpu_intent_profile_impl,
+    use_case_fit as _use_case_fit_impl,
+    gpu_tier as _gpu_tier_impl,
 )
 
 
@@ -2681,6 +2711,22 @@ def _candidate_has_discrete_gpu(candidate: Dict[str, Any] | None) -> bool:
 
 def _gpu_intent_profile(query: str | None, constraints: Dict[str, Any] | None = None) -> Dict[str, Any]:
     return _gpu_intent_profile_impl(query, constraints)
+
+
+def _use_case_fit(candidate: Dict[str, Any] | None, query: str | None) -> Dict[str, Any]:
+    """Core delegates use-case suitability to the active vertical adapter; never
+    hardcodes 'gaming == has gpu keyword'. Fails open to a neutral verdict."""
+    try:
+        return _use_case_fit_impl(candidate, query)
+    except Exception:
+        return {"use_case": None, "meets": True, "tier": "none", "reasons": [], "gaps": []}
+
+
+def _gpu_tier(candidate: Dict[str, Any] | None) -> str:
+    try:
+        return _gpu_tier_impl(candidate)
+    except Exception:
+        return "none"
 
 
 def _safe_int(value: Any, default: int) -> int:
