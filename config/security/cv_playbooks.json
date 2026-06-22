@@ -1,6 +1,6 @@
 {
   "schema_version": "2.0",
-  "published_at": "2026-06-11T05:29:48.014705+00:00",
+  "published_at": "2026-06-22T10:21:50.870944+00:00",
   "risk_band_order": [
     "low",
     "medium",
@@ -251,7 +251,7 @@
       "domain": "security",
       "priority": 90,
       "enabled": true,
-      "version": "1.0.87",
+      "version": "1.0.90",
       "trigger_logic": "any",
       "entry_conditions": {
         "channel": "payments"
@@ -288,7 +288,7 @@
       "requires_approval_roles": [],
       "severity": "high",
       "updated_by": "owner",
-      "updated_at": "2026-06-11T05:29:48.014705+00:00"
+      "updated_at": "2026-06-22T10:21:50.870944+00:00"
     },
     {
       "id": "PB-EMAIL-001",

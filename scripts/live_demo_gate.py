@@ -98,7 +98,8 @@ def check_no_stubs(session, base: str) -> List[Dict]:
     results = []
     print("\nGate 2 - No Stub Text in Responses")
     try:
-        response = _post(session, base, "/api/v1/recommend", {"query": "show me a gaming laptop", "uid": "gate-check-user"})
+        response = _get(session, base, "/api/v1/recommend/suggest",
+                        params={"query": "show me a gaming laptop", "uid": "gate-check-user"})
         raw = response.text
         stub_found, marker = _has_stub(raw)
         results.append(
@@ -182,14 +183,15 @@ def check_budget_question(session, base: str) -> List[Dict]:
     results = []
     print("\nGate 5 - Scenario C: Budget Question Direct Answer")
     try:
-        response = _post(
+        response = _get(
             session,
             base,
-            "/api/v1/recommend",
-            {
+            "/api/v1/recommend/suggest",
+            params={
                 "query": "Is $1800 enough for a gaming laptop?",
                 "uid": "gate-check-user",
-                "context": {"budget_max": 1800, "use_case": "gaming"},
+                "budget_max": 1800,
+                "use_case": "gaming",
             },
         )
         results.append(_gate("recommend for budget question reachable", response.status_code < 500, f"HTTP {response.status_code}"))

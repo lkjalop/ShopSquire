@@ -52,7 +52,16 @@ def _load_catalog() -> list[dict]:
 
 
 def main() -> int:
-    from src.app.services import visual_search
+    # The import itself pulls in CLIP / sentence_transformers / faiss. If those deps
+    # aren't installed it raises ModuleNotFoundError BEFORE the is_available() check —
+    # so catch it here and stay fail-soft (the docstring promise) instead of a traceback.
+    try:
+        from src.app.services import visual_search
+    except Exception as exc:  # ModuleNotFoundError: sentence_transformers / clip / faiss
+        print(f"[FAIL] visual-search deps not installed ({exc}). Install the CLIP/FAISS stack "
+              "(sentence_transformers, faiss-cpu) on the host, then re-run. Visual similarity "
+              "stays inert and IMAGE_SIMILARITY_ENABLED must remain 0 until then.")
+        return 2
 
     if not visual_search.is_available():
         print("[FAIL] CLIP/FAISS not available in this environment — install the visual-search deps "

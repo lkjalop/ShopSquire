@@ -1,8 +1,12 @@
-import os
 import pytest
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_cv_prompt_injection.db")
-os.environ.setdefault("DATABASE_URL_RO", "sqlite:///./test_cv_prompt_injection.db")
+# NOTE: This is a pure unit test of cv_tier2_pipeline.run_tier2 (OCR monkeypatched,
+# no DB access). It intentionally does NOT set DATABASE_URL at import time. A prior
+# module-level os.environ.setdefault("DATABASE_URL", "...test_cv_prompt_injection.db")
+# leaked process-wide (setdefault wins for the whole session) and diverted later
+# tests/api tests off the canonical sqlite:///test.sqlite, causing the
+# test_vision_triage cross-dir flake. Tests that need an isolated DB must scope it
+# to a fixture (see test_cv_upload_ownership.py), never at import time.
 
 
 def test_cv_prompt_injection_positive(monkeypatch):

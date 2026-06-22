@@ -4,9 +4,6 @@ import base64
 import pytest
 from sqlalchemy import text
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_cv_upload_ownership.db")
-os.environ.setdefault("DATABASE_URL_RO", "sqlite:///./test_cv_upload_ownership.db")
-
 
 def _merchant_key():
     # Match default in auth._role_keys(): MERCHANT_API_KEY default is "local-merchant-key"
