@@ -1090,6 +1090,14 @@ def _fast_path_catalog_recommendation(
             item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
             candidates.append(item)
         candidates.sort(key=lambda x: (-float(x.get("score") or 0.0), int(x.get("price_cents") or 0), str(x.get("name") or "")))
+    # Collapse the same product listed under multiple SKUs (keeps the best record),
+    # then re-sort so the surviving records are correctly ordered before truncation.
+    try:
+        from src.app.services.sku_canonicalize import canonicalize as _canonicalize_skus
+        candidates = _canonicalize_skus(candidates)
+        candidates.sort(key=lambda x: (-float(x.get("score") or 0.0), int(x.get("price_cents") or 0), str(x.get("name") or "")))
+    except Exception:
+        pass
     results = candidates[:3]
     for item in results:
         reasons = [str(x) for x in ((item.get("factors") or {}).get("positive") or [])[:3]]
