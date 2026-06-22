@@ -27,8 +27,21 @@ _SUSPICIOUS_NAME_PAT = re.compile(
 # cart can be grown). The literal 1200 here was a cents/dollars bug ($12, not $1200): every
 # real cart exceeded it, so the strict branch ALWAYS fired and the relaxed branch was dead.
 # $200 keeps laptop carts in the strict branch (unchanged) while reviving the relaxed branch
-# for genuine accessory carts. TODO(Phase 1): move to a StoreProfile policy slot per vertical.
+# for genuine accessory carts. This is the ELECTRONICS fallback; the live value is the active
+# StoreProfile `cart_crossover_cents` slot (see _cart_crossover_cents) so a low-AOV vertical
+# (e.g. pharmacy) or high-AOV vertical tunes the strict/relaxed boundary without code changes.
 _ADAPTIVE_CART_CROSSOVER_CENTS = 20000  # $200.00
+
+
+def _cart_crossover_cents(profile_id: str | None = None) -> int:
+    """Adaptive price-guard crossover (cents) for the ACTIVE vertical. Prefers the StoreProfile
+    `cart_crossover_cents` slot; falls back to the electronics default. profile_slot is defensive
+    (never raises) so no try/except is needed (keeps this off the silent-except ratchet)."""
+    from src.app.platform.store_profile import profile_slot
+    val = profile_slot("cart_crossover_cents", profile_id=profile_id, default=None)
+    if isinstance(val, (int, float)) and val > 0:
+        return int(val)
+    return _ADAPTIVE_CART_CROSSOVER_CENTS
 
 
 def _passes_price_guard(price_cents: int, cart_price_cents: int) -> bool:
@@ -40,9 +53,10 @@ def _passes_price_guard(price_cents: int, cart_price_cents: int) -> bool:
       (an accessory cart can reasonably be grown).
     - Unknown/zero cart: no guard.
     """
-    if cart_price_cents > _ADAPTIVE_CART_CROSSOVER_CENTS:
+    crossover = _cart_crossover_cents()
+    if cart_price_cents > crossover:
         return price_cents <= int(cart_price_cents * 0.7)
-    if 0 < cart_price_cents <= _ADAPTIVE_CART_CROSSOVER_CENTS:
+    if 0 < cart_price_cents <= crossover:
         return price_cents <= int(cart_price_cents * 1.9)
     return True
 
@@ -64,6 +78,9 @@ class UpsellCandidate:
 
 _SKU_FAMILY_PAT = re.compile(r"^SYN-([A-Z]+)-", re.IGNORECASE)
 
+# ELECTRONICS fallback for persona → preferred accessory slugs. Live source is the active
+# StoreProfile `persona_accessory_slugs` slot (see _persona_accessory_slugs), so a fashion or
+# pharmacy vertical supplies its own persona→accessory affinities instead of inheriting laptops.
 _PERSONA_ACCESSORY_SLUGS: dict[str, set[str]] = {
     "student": {"laptop_sleeve", "mouse", "power_bank", "usb_hub", "dock"},
     "gamer": {"gaming_mouse", "headset", "cooling_pad", "laptop_stand", "monitor"},
@@ -74,6 +91,22 @@ _PERSONA_ACCESSORY_SLUGS: dict[str, set[str]] = {
 }
 
 
+def _persona_accessory_slugs(profile_id: str | None = None) -> dict[str, set[str]]:
+    """Persona → preferred accessory slugs for the ACTIVE vertical. Prefers the StoreProfile
+    `persona_accessory_slugs` slot (values may be lists in JSON → normalized to sets); falls back
+    to the electronics table. profile_slot is defensive, so no try/except (off the ratchet)."""
+    from src.app.platform.store_profile import profile_slot
+    prof = profile_slot("persona_accessory_slugs", profile_id=profile_id, default=None)
+    if isinstance(prof, dict) and prof:
+        out: dict[str, set[str]] = {}
+        for k, v in prof.items():
+            if isinstance(v, (list, set, tuple)):
+                out[str(k).strip().lower()] = {str(s).strip().lower() for s in v if str(s).strip()}
+        if out:
+            return out
+    return _PERSONA_ACCESSORY_SLUGS
+
+
 def _sku_family(sku: str | None) -> str:
     s = str(sku or "").strip().upper()
     m = _SKU_FAMILY_PAT.match(s)
@@ -82,34 +115,80 @@ def _sku_family(sku: str | None) -> str:
     return infer_product_family(sku=s)
 
 
+# ELECTRONICS-centric fallback: intent family_code -> trigger keywords. Live source is the active
+# StoreProfile `intent_family_keywords` slot. Insertion order IS precedence: the first family whose
+# keyword appears in the (query+persona+use_case) text wins (LAP before FSH before HMW).
+_INTENT_FAMILY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "LAP": ("laptop", "macbook", "notebook", "gaming", "student", "university", "office pc", "windows"),
+    "FSH": ("shirt", "dress", "fashion", "sneaker", "hoodie", "clothes", "apparel"),
+    "HMW": ("kitchen", "home", "bedroom", "lamp", "basket", "decor", "furniture"),
+}
+
+
+def _intent_family_keywords(profile_id: str | None = None) -> dict[str, tuple[str, ...]]:
+    """family_code -> trigger keywords for the ACTIVE vertical. Prefers the StoreProfile
+    `intent_family_keywords` slot; falls back to the electronics map. profile_slot is defensive."""
+    from src.app.platform.store_profile import profile_slot
+    prof = profile_slot("intent_family_keywords", profile_id=profile_id, default=None)
+    if isinstance(prof, dict) and prof:
+        out: dict[str, tuple[str, ...]] = {}
+        for fam, kws in prof.items():
+            if isinstance(kws, (list, tuple)):
+                tok = tuple(str(k).strip().lower() for k in kws if str(k).strip())
+                if tok:
+                    out[str(fam).strip().upper()] = tok
+        if out:
+            return out
+    return _INTENT_FAMILY_KEYWORDS
+
+
 def _infer_intent_family(query: str | None, persona: str | None, use_case: str | None) -> str | None:
-    q = str(query or "").strip().lower()
-    p = str(persona or "").strip().lower()
-    u = str(use_case or "").strip().lower()
-    text = " ".join([q, p, u]).strip()
+    text = " ".join([
+        str(query or "").strip().lower(),
+        str(persona or "").strip().lower(),
+        str(use_case or "").strip().lower(),
+    ]).strip()
     if not text:
         return None
-    if any(t in text for t in ("laptop", "macbook", "notebook", "gaming", "student", "university", "office pc", "windows")):
-        return "LAP"
-    if any(t in text for t in ("shirt", "dress", "fashion", "sneaker", "hoodie", "clothes", "apparel")):
-        return "FSH"
-    if any(t in text for t in ("kitchen", "home", "bedroom", "lamp", "basket", "decor", "furniture")):
-        return "HMW"
+    for fam, kws in _intent_family_keywords().items():
+        if any(t in text for t in kws):
+            return fam
     return None
+
+
+# ELECTRONICS-centric fallback complement matrix (cart_family -> {candidate_family: weight}).
+# Live source is the active StoreProfile `family_complement_matrix` slot. Same-family gets the
+# highest weight; accessory/peripheral families complement LAP strongly (a shopper with a laptop
+# needs a mouse/headset/bag, not another laptop).
+_FAMILY_COMPLEMENT_MATRIX: dict[str, dict[str, float]] = {
+    "LAP": {"LAP": 1.0, "PERIPH": 0.95, "ACC": 0.90, "MON": 0.90, "HEAD": 0.85, "COOL": 0.80, "BAG": 0.75, "HMW": 0.35, "FSH": 0.05},
+    "FSH": {"FSH": 1.0, "HMW": 0.25, "LAP": 0.10},
+    "HMW": {"HMW": 1.0, "FSH": 0.30, "LAP": 0.20},
+    "PERIPH": {"PERIPH": 0.80, "LAP": 0.60, "ACC": 0.70, "HEAD": 0.65, "MON": 0.55, "HMW": 0.20, "FSH": 0.05},
+    "MON": {"MON": 0.80, "LAP": 0.65, "PERIPH": 0.70, "ACC": 0.60, "HMW": 0.20, "FSH": 0.05},
+}
+
+
+def _family_complement_matrix(profile_id: str | None = None) -> dict[str, dict[str, float]]:
+    """cart_family -> {candidate_family: weight} for the ACTIVE vertical. Prefers the StoreProfile
+    `family_complement_matrix` slot; falls back to the electronics matrix. profile_slot is defensive."""
+    from src.app.platform.store_profile import profile_slot
+    prof = profile_slot("family_complement_matrix", profile_id=profile_id, default=None)
+    if isinstance(prof, dict) and prof:
+        out: dict[str, dict[str, float]] = {}
+        for cart_fam, row in prof.items():
+            if isinstance(row, dict):
+                norm = {str(k).strip().upper(): float(v) for k, v in row.items() if isinstance(v, (int, float))}
+                if norm:
+                    out[str(cart_fam).strip().upper()] = norm
+        if out:
+            return out
+    return _FAMILY_COMPLEMENT_MATRIX
 
 
 def _family_complement_weight(cart_family: str, candidate_family: str) -> float:
     # Keep relevance deterministic and transparent: same-family gets highest weight.
-    # Peripheral/accessory families complement LAP strongly — a shopper who already
-    # has a laptop needs a mouse, headset or bag, not another laptop.
-    matrix: dict[str, dict[str, float]] = {
-        "LAP": {"LAP": 1.0, "PERIPH": 0.95, "ACC": 0.90, "MON": 0.90, "HEAD": 0.85, "COOL": 0.80, "BAG": 0.75, "HMW": 0.35, "FSH": 0.05},
-        "FSH": {"FSH": 1.0, "HMW": 0.25, "LAP": 0.10},
-        "HMW": {"HMW": 1.0, "FSH": 0.30, "LAP": 0.20},
-        "PERIPH": {"PERIPH": 0.80, "LAP": 0.60, "ACC": 0.70, "HEAD": 0.65, "MON": 0.55, "HMW": 0.20, "FSH": 0.05},
-        "MON": {"MON": 0.80, "LAP": 0.65, "PERIPH": 0.70, "ACC": 0.60, "HMW": 0.20, "FSH": 0.05},
-    }
-    row = matrix.get(str(cart_family or "UNK").upper(), {})
+    row = _family_complement_matrix().get(str(cart_family or "UNK").upper(), {})
     if not row:
         return 0.0
     return float(row.get(str(candidate_family or "UNK").upper(), 0.0))
@@ -120,7 +199,7 @@ def _persona_accessory_boost(persona: str | None, accessory_slug: str | None) ->
     slug = str(accessory_slug or "").strip().lower()
     if not persona_key or not slug:
         return 0.0
-    wanted = _PERSONA_ACCESSORY_SLUGS.get(persona_key) or set()
+    wanted = _persona_accessory_slugs().get(persona_key) or set()
     if slug in wanted:
         return 1.0
     return 0.0
