@@ -56,3 +56,48 @@ def test_from_caption_maps_search_hits(monkeypatch):
 def test_retrieve_and_merge_three_sources_no_crash():
     out = cr.retrieve_and_merge("gaming laptop", top_n=5)
     assert isinstance(out, list)
+
+
+def _capture_db(monkeypatch):
+    """Patch cr.db_session to capture the SQL + params from_db builds (no real DB)."""
+    captured: dict = {}
+
+    class _FakeDB:
+        def execute(self, sql, params=None):
+            captured["sql"] = str(sql)
+            captured["params"] = params or {}
+            class _R:
+                def fetchall(self_inner):
+                    return []
+            return _R()
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_session():
+        yield _FakeDB()
+
+    monkeypatch.setattr(cr, "db_session", _fake_session)
+    return captured
+
+
+def test_from_db_tokenises_multiword_query(monkeypatch):
+    # The bug: a realistic multi-word query was matched as LIKE %whole phrase% and hit no
+    # product → the scatter-gather DB leg returned 0. Now each significant token is its own
+    # OR'd LIKE term, so recall is restored.
+    captured = _capture_db(monkeypatch)
+    cr.from_db("show me a gaming laptop $1500-2100")
+    params = captured["params"]
+    assert "qt" not in params  # no single whole-phrase term
+    vals = {v for k, v in params.items() if k.startswith("qt_")}
+    assert "%gaming%" in vals and "%laptop%" in vals
+    assert "%show%" not in vals and "%me%" not in vals     # filler/short dropped
+    assert not any("gaming laptop" in v for v in vals)     # never the raw phrase as one term
+
+
+def test_from_db_all_filler_query_does_not_force_zero(monkeypatch):
+    # A query that is only filler/short tokens adds NO keyword condition → returns the active
+    # catalog as a candidate pool rather than being forced to 0 results.
+    captured = _capture_db(monkeypatch)
+    cr.from_db("show me the")
+    assert not any(str(k).startswith("qt") for k in captured["params"])

@@ -122,16 +122,36 @@ def from_db(
             conditions.append("(LOWER(p.category) LIKE :cat OR LOWER(p.name) LIKE :cat)")
             params["cat"] = f"%{str(category).lower()[:40]}%"
 
-        # Keyword relevance: simple LIKE matching (pgvector handles semantic)
+        # Keyword relevance: TOKENISED LIKE matching (pgvector handles semantic).
+        # Match ANY significant token, NOT the whole raw string. A multi-word query
+        # ("gaming laptop $1500-2100") matched as `LIKE %whole phrase%` hits no product
+        # name → 0 results, which is why the scatter-gather DB leg returned empty for
+        # realistic queries (V2 parity = 0). Tokenising restores recall.
+        # CAST(... AS TEXT) is portable (Postgres + SQLite); `p.specs::text` was
+        # Postgres-only and made from_db raise → empty results on SQLite.
         if query:
-            q_safe = str(query or "")[:100]
-            # CAST(... AS TEXT) is portable (Postgres + SQLite); `p.specs::text`
-            # was Postgres-only and made from_db raise → empty results on SQLite.
-            conditions.append(
-                "(LOWER(p.name) LIKE :qt OR LOWER(COALESCE(p.brand,'')) LIKE :qt "
-                "OR LOWER(COALESCE(CAST(p.specs AS TEXT), '')) LIKE :qt)"
-            )
-            params["qt"] = f"%{q_safe.lower()}%"
+            import re as _re_tok
+            q_low = str(query or "")[:120].lower()
+            # conversational filler that should never drive catalog matching
+            _STOP = {
+                "show", "me", "the", "for", "with", "and", "you", "can", "get", "got",
+                "please", "looking", "that", "this", "into", "what", "which", "about",
+                "around", "are", "any", "some", "have", "want", "need", "give",
+            }
+            toks = [
+                t for t in _re_tok.split(r"[^a-z0-9]+", q_low)
+                if len(t) >= 3 and not t.isdigit() and t not in _STOP
+            ][:6]
+            if toks:
+                ors = []
+                for i, t in enumerate(toks):
+                    params[f"qt_{i}"] = f"%{t}%"
+                    ors.append(
+                        f"(LOWER(p.name) LIKE :qt_{i} "
+                        f"OR LOWER(COALESCE(p.brand,'')) LIKE :qt_{i} "
+                        f"OR LOWER(COALESCE(CAST(p.specs AS TEXT), '')) LIKE :qt_{i})"
+                    )
+                conditions.append("(" + " OR ".join(ors) + ")")
 
         where_clause = " AND ".join(conditions)
         sql = (

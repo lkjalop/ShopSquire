@@ -4212,16 +4212,20 @@ def suggest(
                 err = False
                 count = 0
                 top: list = []
+                cands: list = []           # pre-init: referenced below even on the error path
+                leg_errors: dict = {}
                 try:
                     from src.app.services.recommend_pipeline import run_recommend_pipeline as _run_pipeline
                     res = _a.run(_run_pipeline({}, uid=_uid, query=_q, budget_min=_bmin, budget_max=_bmax, top_n=20))
                     cands = list((res or {}).get("candidates") or [])
+                    leg_errors = dict((res or {}).get("leg_errors") or {})
                     count = len(cands)
                     top = [c.get("sku") for c in cands[:5] if isinstance(c, dict)]
                 except Exception:
                     err = True
                 ms = int((_t.perf_counter() - t0) * 1000)
                 _v2_holder.update({"top_skus": top, "count": count, "ms": ms, "err": err, "done": True,
+                                   "leg_errors": leg_errors,
                                    "cands": [c for c in cands[:60] if isinstance(c, dict)]})
                 try:
                     from src.app.observability.metrics import record_pipeline_v2_shadow
@@ -4237,7 +4241,7 @@ def suggest(
                             target_type="system", target_id=None,
                             payload={"shadow": True, "customer_affecting": False,
                                      "candidate_count": count, "latency_ms": ms,
-                                     "top_skus": top, "error": err},
+                                     "top_skus": top, "error": err, "leg_errors": leg_errors},
                         )
                 except Exception:
                     pass

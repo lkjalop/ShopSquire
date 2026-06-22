@@ -52,3 +52,27 @@ async def test_hung_leg_falls_back_not_blocks():
 def test_timeout_budgets_are_configurable():
     # Budgets read from env (silent-hang guard is tunable per deployment).
     assert rp._LEG_TIMEOUT_S > 0 and rp._CV_TIMEOUT_S > 0 and rp._DEEP_TIMEOUT_S > 0
+
+
+@pytest.mark.asyncio
+async def test_bounded_records_timeout_reason():
+    # A timed-out leg is recorded in the errors map (surfaced in trace), not silent.
+    errs: dict = {}
+    async def _hang():
+        await asyncio.sleep(10)
+    with pytest.raises(asyncio.TimeoutError):
+        await rp._bounded(_hang(), 0.05, "vector", errs)
+    assert errs.get("vector", "").startswith("timeout")
+
+
+@pytest.mark.asyncio
+async def test_bounded_records_leg_failure_reason():
+    # A non-timeout leg failure (e.g. missing index) is recorded with its type, then re-raised
+    # so gather(return_exceptions=True) still falls back to the leg default.
+    errs: dict = {}
+    async def _boom():
+        raise ValueError("vector index not built")
+    with pytest.raises(ValueError):
+        await rp._bounded(_boom(), 1.0, "caption", errs)
+    assert "ValueError" in errs.get("caption", "")
+    assert "index not built" in errs.get("caption", "")

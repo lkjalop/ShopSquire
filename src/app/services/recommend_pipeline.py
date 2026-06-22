@@ -29,11 +29,15 @@ architecture docs:
     - LLM summarization
     - Response assembly
 
-IMPORTANT: This module is currently a SCAFFOLD. It is not called by the main
-recommend route yet. Integration happens in Sprint R5 (recommend.py refactor).
-The existing recommend.py flow continues to work unchanged until R5 is complete.
+STATUS: WIRED IN SHADOW (not a dead scaffold). The route runs the V2 hybrid
+candidates produced here and fuses/swaps them via
+services/recommend_retriever_stage.run_retrieval_mode_stage() BEFORE ranking, so
+V2 never bypasses the downstream rank/stock/budget/security guards. Default mode
+is RECOMMEND_RETRIEVAL_MODE=shadow (measurement-only, NOT customer-affecting);
+fusion/primary are gated on live parity proof (see recommend_retrieval_metrics).
+The legacy monolith remains the authoritative path until parity promotes a mode.
 
-Usage (Sprint R5):
+Usage:
     result = await run_recommend_pipeline(payload, context)
 """
 
@@ -55,14 +59,22 @@ _CV_TIMEOUT_S = float(os.getenv("RECOMMEND_CV_TIMEOUT_S", "12.0"))
 _DEEP_TIMEOUT_S = float(os.getenv("RECOMMEND_DEEP_TIMEOUT_S", "10.0"))
 
 
-async def _bounded(coro, budget_s: float, label: str):
-    """Run `coro` under a hard timeout. On timeout, log + re-raise asyncio.TimeoutError
-    so the caller's gather(return_exceptions=True) captures it and falls back to default.
-    This is the single guard that turns an unbounded gather into a bounded one."""
+async def _bounded(coro, budget_s: float, label: str, errors: Optional[Dict[str, str]] = None):
+    """Run `coro` under a hard timeout. On timeout OR any leg failure, record the reason
+    into `errors[label]` (so it surfaces in the trace, never only in logs) and re-raise so
+    the caller's gather(return_exceptions=True) captures it and falls back to default.
+    This is the single guard that turns an unbounded gather into a bounded, observable one."""
     try:
         return await asyncio.wait_for(coro, timeout=budget_s)
     except asyncio.TimeoutError:
         logger.warning("scatter leg timed out: %s (budget=%.1fs)", label, budget_s)
+        if errors is not None:
+            errors[label] = f"timeout>{budget_s}s"
+        raise
+    except Exception as exc:
+        logger.warning("scatter leg failed: %s — %s", label, exc)
+        if errors is not None:
+            errors[label] = f"{type(exc).__name__}: {str(exc)[:120]}"
         raise
 
 
@@ -75,14 +87,12 @@ async def _scatter_db(
     brands: Optional[List[str]],
     category: Optional[str],
 ) -> List[Dict[str, Any]]:
-    """Async wrapper for DB keyword/filter retrieval."""
-    try:
-        return await asyncio.to_thread(
-            _sync_db_search, query, budget_min, budget_max, brands, category
-        )
-    except Exception as exc:
-        logger.debug("scatter_db failed: %s", exc)
-        return []
+    """Async wrapper for DB keyword/filter retrieval. Exceptions propagate to _bounded,
+    which records them in the leg-errors map and re-raises (gather falls back to []) — so a
+    leg failure is observable in the trace instead of silently swallowed."""
+    return await asyncio.to_thread(
+        _sync_db_search, query, budget_min, budget_max, brands, category
+    )
 
 
 def _sync_db_search(query, budget_min, budget_max, brands, category) -> List[Dict[str, Any]]:
@@ -91,12 +101,9 @@ def _sync_db_search(query, budget_min, budget_max, brands, category) -> List[Dic
 
 
 async def _scatter_vector(query: str, top_k: int = 20) -> List[Dict[str, Any]]:
-    """Async wrapper for vector/semantic search."""
-    try:
-        return await asyncio.to_thread(_sync_vector_search, query, top_k)
-    except Exception as exc:
-        logger.debug("scatter_vector failed: %s", exc)
-        return []
+    """Async wrapper for vector/semantic search. Exceptions propagate to _bounded (recorded
+    + re-raised); gather falls back to [] — failure is observable, not silent."""
+    return await asyncio.to_thread(_sync_vector_search, query, top_k)
 
 
 def _sync_vector_search(query: str, top_k: int) -> List[Dict[str, Any]]:
@@ -105,12 +112,9 @@ def _sync_vector_search(query: str, top_k: int) -> List[Dict[str, Any]]:
 
 
 async def _scatter_caption(query: str, top_k: int = 20) -> List[Dict[str, Any]]:
-    """Async wrapper for multimodal caption-RAG (pgvector product_embeddings)."""
-    try:
-        return await asyncio.to_thread(_sync_caption_search, query, top_k)
-    except Exception as exc:
-        logger.debug("scatter_caption failed: %s", exc)
-        return []
+    """Async wrapper for multimodal caption-RAG (pgvector product_embeddings). Exceptions
+    propagate to _bounded (recorded + re-raised); gather falls back to [] — observable, not silent."""
+    return await asyncio.to_thread(_sync_caption_search, query, top_k)
 
 
 def _sync_caption_search(query: str, top_k: int) -> List[Dict[str, Any]]:
@@ -149,18 +153,15 @@ async def _scatter_inventory(skus: List[str]) -> Dict[str, int]:
 
 
 async def _scatter_cv(image_bytes: bytes, query: str, trace_id: Optional[str]) -> Dict[str, Any]:
-    """CV analysis — only called when image is present."""
-    try:
-        from src.app.services.cv_tiered import TieredCVProvider
-        from src.app.services.orchestrator import _run_async_safe
-        cvp = TieredCVProvider()
-        return await asyncio.to_thread(
-            _run_async_safe,
-            cvp.process(image_bytes, meta={"trace_id": trace_id, "query": query}),
-        )
-    except Exception as exc:
-        logger.debug("scatter_cv failed: %s", exc)
-        return {}
+    """CV analysis — only called when image is present. Exceptions propagate to _bounded
+    (recorded + re-raised); gather falls back to {} — observable, not silent."""
+    from src.app.services.cv_tiered import TieredCVProvider
+    from src.app.services.orchestrator import _run_async_safe
+    cvp = TieredCVProvider()
+    return await asyncio.to_thread(
+        _run_async_safe,
+        cvp.process(image_bytes, meta={"trace_id": trace_id, "query": query}),
+    )
 
 
 # ── Stage 2 gather ────────────────────────────────────────────────────────────
@@ -252,22 +253,26 @@ async def run_recommend_pipeline(
     """
     t0 = time.perf_counter()
     timings: Dict[str, float] = {}
+    # Per-leg failure map (label -> reason). Populated by _bounded on timeout/error and
+    # surfaced in the return + trace so a degraded leg is visible during parity review,
+    # not just buried in logs.
+    leg_errors: Dict[str, str] = {}
 
     # ── Stage 1: Parallel scatter ─────────────────────────────────────────────
     # Three retrieval sources (db-keyword + CLIP-visual + caption-RAG) + fraud,
     # plus CV when an image is present. Index-safe unpacking so adding/removing a
     # leg can't silently misalign results.
     scatter_tasks = [
-        _bounded(_scatter_db(query, budget_min, budget_max, brands, category), _LEG_TIMEOUT_S, "db"),       # 0
-        _bounded(_scatter_vector(query, top_k=top_n * 2), _LEG_TIMEOUT_S, "vector"),                        # 1
-        _bounded(_scatter_fraud(uid, payload), _LEG_TIMEOUT_S, "fraud"),                                    # 2
-        _bounded(_scatter_caption(query, top_k=top_n * 2), _LEG_TIMEOUT_S, "caption"),                      # 3
+        _bounded(_scatter_db(query, budget_min, budget_max, brands, category), _LEG_TIMEOUT_S, "db", leg_errors),       # 0
+        _bounded(_scatter_vector(query, top_k=top_n * 2), _LEG_TIMEOUT_S, "vector", leg_errors),                        # 1
+        _bounded(_scatter_fraud(uid, payload), _LEG_TIMEOUT_S, "fraud", leg_errors),                                    # 2
+        _bounded(_scatter_caption(query, top_k=top_n * 2), _LEG_TIMEOUT_S, "caption", leg_errors),                      # 3
     ]
     _leg_labels = ["db", "vector", "fraud", "caption"]
     cv_idx = None
     if image_bytes:
         cv_idx = len(scatter_tasks)
-        scatter_tasks.append(_bounded(_scatter_cv(image_bytes, query, trace_id), _CV_TIMEOUT_S, "cv"))
+        scatter_tasks.append(_bounded(_scatter_cv(image_bytes, query, trace_id), _CV_TIMEOUT_S, "cv", leg_errors))
         _leg_labels.append("cv")
 
     scatter_results = await asyncio.gather(*scatter_tasks, return_exceptions=True)
@@ -276,7 +281,9 @@ async def run_recommend_pipeline(
     _timed_out = [lbl for lbl, r in zip(_leg_labels, scatter_results) if isinstance(r, asyncio.TimeoutError)]
     if _timed_out:
         timings["scatter_timeouts"] = _timed_out
-        logger.warning("scatter legs timed out: %s", _timed_out)
+    if leg_errors:
+        timings["scatter_errors"] = dict(leg_errors)
+        logger.warning("scatter leg failures: %s", leg_errors)
 
     def _res(i, default):
         if i is None or i >= len(scatter_results):
@@ -312,8 +319,8 @@ async def run_recommend_pipeline(
     deepened = False
     if complexity_score >= 7 and candidates:
         deep_results = await asyncio.gather(
-            _bounded(_deep_usecase(candidates, payload), _DEEP_TIMEOUT_S, "deep_usecase"),
-            _bounded(_deep_budget(candidates, budget_max), _DEEP_TIMEOUT_S, "deep_budget"),
+            _bounded(_deep_usecase(candidates, payload), _DEEP_TIMEOUT_S, "deep_usecase", leg_errors),
+            _bounded(_deep_budget(candidates, budget_max), _DEEP_TIMEOUT_S, "deep_budget", leg_errors),
             return_exceptions=True,
         )
         uc_ranked = deep_results[0] if not isinstance(deep_results[0], Exception) else None
@@ -334,5 +341,6 @@ async def run_recommend_pipeline(
         "oos_fraction": round(oos_fraction, 3),
         "stock_map": stock_map,
         "latency_ms": timings,
+        "leg_errors": dict(leg_errors),
         "deepened": deepened,
     }
