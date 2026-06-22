@@ -46,7 +46,8 @@ def test_readiness_reports_ready_when_carrier_configured(monkeypatch):
 def test_plan_stub_when_readiness_stub():
     p = plan_label_record({"stub": True, "reason": "no carrier"}, {"ok": False, "stub": True}, case_id="c1")
     assert p["stub"] is True and p["ok"] is False
-    assert p["tracking_number"] is None and p["label_url"] is None and p["status"] == "stub"
+    # Clearly-marked STUB reference (NOT a real-looking RR carrier code) + no real label PDF.
+    assert p["tracking_number"].startswith("STUB-") and p["label_url"] is None and p["status"] == "stub"
 
 
 def test_plan_generated_when_ready_and_ok():
@@ -58,7 +59,7 @@ def test_plan_generated_when_ready_and_ok():
 def test_plan_stub_when_ready_but_create_failed():
     # A configured carrier that returns ok=False must NOT fabricate a tracking number.
     p = plan_label_record({"stub": False}, {"ok": False, "error": "carrier 500"}, case_id="c1")
-    assert p["stub"] is True and p["status"] == "stub" and p["tracking_number"] is None
+    assert p["stub"] is True and p["status"] == "stub" and p["tracking_number"].startswith("STUB-")
     assert p["reason"] == "carrier 500"
 
 
@@ -67,7 +68,7 @@ def test_create_return_label_is_honest_stub(monkeypatch):
     _clear_carriers(monkeypatch)
     out = asyncio.run(shipping_stub.ShippingService().create_return_label("case-y"))
     assert out["stub"] is True and out["ok"] is False
-    assert out["tracking_number"] is None and out["status"] == "stub"
+    assert out["tracking_number"].startswith("STUB-") and out["status"] == "stub"
     assert "carrier" in out and out["reason"]
 
 

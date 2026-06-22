@@ -5,6 +5,10 @@
     "recommend": {
       "enabled": true,
       "rollout_percent": 100
+    },
+    "pricing": {
+      "enabled": true,
+      "rollout_percent": 100
     }
   },
   "KILL_SWITCH": false,

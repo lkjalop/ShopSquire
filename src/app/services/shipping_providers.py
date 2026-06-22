@@ -326,15 +326,17 @@ def shipping_readiness() -> Dict[str, Any]:
 def plan_label_record(readiness: Dict[str, Any], create_result: Dict[str, Any], *, case_id: str) -> Dict[str, Any]:
     """Decide — HONESTLY and purely (no I/O) — what to record/return for a label attempt.
 
-    A stub/unconfigured carrier, or a failed `create_label`, must NOT yield a fabricated tracking
-    number presented as a real shipment. In that case tracking/label are None and status='stub'.
-    Only a genuinely successful create produces a tracking number and status='generated'."""
+    A stub/unconfigured carrier (or a failed `create_label`) must NOT yield a fabricated REAL-LOOKING
+    carrier tracking number ('RR…') that implies a shipment exists. It DOES still need a reference so
+    the returns flow can proceed, so it gets a CLEARLY-MARKED 'STUB-…' reference with stub=True /
+    status='stub' (unambiguously not a real carrier shipment). Only a genuinely successful create
+    produces a real 'RR…' tracking number and status='generated'."""
     result = create_result or {}
     is_stub = bool((readiness or {}).get("stub")) or bool(result.get("stub")) or not bool(result.get("ok"))
     if is_stub:
         return {
-            "tracking_number": None,
-            "label_url": None,
+            "tracking_number": f"STUB-{uuid.uuid4().hex[:10].upper()}",  # clearly NOT a real carrier code
+            "label_url": None,  # no real label PDF exists for a stub
             "status": "stub",
             "stub": True,
             "ok": False,
