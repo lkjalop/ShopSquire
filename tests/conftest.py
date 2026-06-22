@@ -469,6 +469,21 @@ def yolo_damage_classifier():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
+def _clear_vision_cache_between_tests():
+    """Isolation: the image-hash vision_cache (shared by product_identity, cv_tier2.run_tier2 and the
+    vision-triage path) is process-local and persists across tests. Tests that reuse the same image
+    bytes would otherwise be served a PRIOR test's cached verdict — cross-test contamination that made
+    cv/vision-triage tests flap in full-suite runs. Clear it before each test. Safe: process-local,
+    correctness never depends on the cache (a miss just recomputes)."""
+    try:
+        from src.app.services import vision_cache
+        vision_cache.clear()
+    except Exception:
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _rss_guard():
     """Warn to stderr when a test grows process RSS by > 300 MB."""
     try:
