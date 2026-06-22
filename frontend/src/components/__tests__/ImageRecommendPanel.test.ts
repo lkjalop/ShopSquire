@@ -3,9 +3,32 @@
  * Unit tests for computeTrustLevel — covers steg + all trust branches.
  */
 import { describe, it, expect } from 'vitest';
-import { computeTrustLevel, shouldUseFastPath } from '../ImageRecommendPanel';
+import { computeTrustLevel, shouldUseFastPath, isProofRelevant } from '../ImageRecommendPanel';
 
 const clean = () => ({});
+
+describe('isProofRelevant (proof-of-purchase CTA gating)', () => {
+  const g = (over: any = {}) => ({ trustLevel: 'green', securityNote: '', products: [], source: '', icon: '', friendlyBrand: '', summary: '', ...over } as any);
+
+  it('hides proof CTAs during normal shopping / visual search', () => {
+    expect(isProofRelevant(g(), 'gaming laptop under $1800')).toBe(false);
+    expect(isProofRelevant(g({ context: { intent_routing: { intent: 'visual_search' } } }), 'show me laptops')).toBe(false);
+  });
+
+  it('shows proof CTAs for repair/damage intent', () => {
+    expect(isProofRelevant(g({ isRepairIntent: true }), 'my screen is cracked')).toBe(true);
+  });
+
+  it('shows proof CTAs when the query is warranty/return/refund/ownership', () => {
+    expect(isProofRelevant(g(), 'I need a warranty claim for my laptop')).toBe(true);
+    expect(isProofRelevant(g(), 'how do I return this for a refund?')).toBe(true);
+    expect(isProofRelevant(g(), 'proof of purchase for my order')).toBe(true);
+  });
+
+  it('shows proof CTAs when the triage intent is proof-relevant', () => {
+    expect(isProofRelevant(g({ context: { intent_routing: { intent: 'returns' } } }), '')).toBe(true);
+  });
+});
 
 describe('computeTrustLevel', () => {
   // ── green ────────────────────────────────────────────────────────────────

@@ -64,6 +64,18 @@ interface ImageGroup {
   repairContext?: { brand: string; damage_score: number } | null;
 }
 
+/** Proof-of-purchase uploads (receipt / order / serial) belong ONLY in
+ * ownership-proof flows — warranty, repair, return, refund, fraud review — not
+ * during normal shopping / visual search, where they are irrelevant and add
+ * friction. Gate the CTAs on a proof-relevant intent or query. */
+const PROOF_INTENT_RE = /\b(warrant|repair|return|refund|exchange|rma|proof of purchase|receipt|serial|owner|ownership|stolen|fraud|claim|guarantee)\b/i;
+export function isProofRelevant(group: ImageGroup, userQuery: string): boolean {
+  if (group.isRepairIntent) return true;
+  const intent = String(group.context?.intent_routing?.intent || '').toLowerCase();
+  if (/(repair|warrant|return|refund|fraud|proof|ownership|claim)/.test(intent)) return true;
+  return PROOF_INTENT_RE.test(String(userQuery || ''));
+}
+
 type RecommendTracePayload = {
   trace_id?: string | null;
   decision_trace_id?: string | null;
@@ -1240,17 +1252,20 @@ export default function ImageRecommendPanel({ imageContexts, userQuery, traceId,
             {group.securityNote && (
               <div className={group.trustLevel === 'green' ? styles.securityNoteBenign : styles.securityNote}>
                 {group.securityNote}
-                <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my receipt now')}>
-                    Upload receipt
-                  </button>
-                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my order confirmation screenshot now')}>
-                    Upload order confirmation
-                  </button>
-                  <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading a photo of the serial number label now')}>
-                    Upload serial label
-                  </button>
-                </div>
+                {/* Proof-of-purchase CTAs only in ownership-proof flows, never during normal shopping. */}
+                {isProofRelevant(group, userQuery) && (
+                  <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my receipt now')}>
+                      Upload receipt
+                    </button>
+                    <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading my order confirmation screenshot now')}>
+                      Upload order confirmation
+                    </button>
+                    <button className={styles.clarifyBtn} onClick={() => onClarify?.('I am uploading a photo of the serial number label now')}>
+                      Upload serial label
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
