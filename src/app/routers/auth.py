@@ -336,14 +336,17 @@ def _verify_password(password: str, stored_hash: str, salt: str) -> tuple[bool, 
             return True, new_hash
         except (_ArgonMismatch, _ArgonInvalid, Exception):  # type: ignore[misc]
             return False, None
-    # Legacy PBKDF2-HMAC-SHA256 path — always 100 000 iterations (historical value)
+    # PBKDF2-HMAC-SHA256 path. The hex string doesn't embed the iteration count, so try the CURRENT
+    # default (600k, matching _hash_password) first, then the legacy 100k value. Without the 600k
+    # attempt, any password hashed via _hash_password when argon2 is unavailable could NEVER verify.
     try:
-        expected = hashlib.pbkdf2_hmac(
-            "sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000
-        ).hex()
-        if hmac.compare_digest(expected, stored_hash):
-            upgraded = _ARGON2_PH.hash(password) if (_ARGON2_AVAILABLE and _ARGON2_PH is not None) else None
-            return True, upgraded
+        for _iters in (600_000, 100_000):
+            expected = hashlib.pbkdf2_hmac(
+                "sha256", password.encode("utf-8"), salt.encode("utf-8"), _iters
+            ).hex()
+            if hmac.compare_digest(expected, stored_hash):
+                upgraded = _ARGON2_PH.hash(password) if (_ARGON2_AVAILABLE and _ARGON2_PH is not None) else None
+                return True, upgraded
     except Exception:
         pass
     return False, None

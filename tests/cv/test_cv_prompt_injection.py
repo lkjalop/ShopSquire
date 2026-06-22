@@ -31,6 +31,8 @@ def test_cv_prompt_injection_negative(monkeypatch):
 
     monkeypatch.setattr(t2, "extract_text", _fake_extract_clean)
 
-    res = t2.run_tier2(b"fake", meta={"case_id": "case-clean"})
+    # Distinct image bytes from the positive test — run_tier2 is image-hash cached, so reusing the
+    # same bytes would return the positive test's cached (flagged) verdict and never run this OCR.
+    res = t2.run_tier2(b"fake-clean-negative", meta={"case_id": "case-clean"})
     tags = res.get("evidence_tags") or []
     assert "prompt_injection_text_suspected" not in tags

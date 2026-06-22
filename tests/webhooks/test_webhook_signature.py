@@ -3,12 +3,35 @@ import time
 import json
 import hashlib
 import hmac
+import uuid
 import pytest
 
 from fastapi.testclient import TestClient
 
 from src.app.main import create_app
 from src.app.deps import get_redis
+
+
+@pytest.fixture(autouse=True)
+def _clear_webhook_replay_state():
+    """Hermetic isolation: webhook replay dedup persists in redis (webhook_replay:*) AND an in-process
+    cache, and these tests share payloads — so without clearing, a later test/run sees a prior key and
+    gets 409 on its FIRST request. Clear both before each test."""
+    try:
+        from src.app.security.webhook_security import _LOCAL_REPLAY_CACHE
+        _LOCAL_REPLAY_CACHE.clear()
+    except Exception:
+        pass
+    try:
+        r = get_redis()
+        for k in list(r.scan_iter("webhook_replay:*")):
+            try:
+                r.delete(k)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    yield
 
 
 def _httpx_post_patched() -> bool:
@@ -86,7 +109,10 @@ def test_webhook_signature_replay_detected_with_redis():
     app = create_app()
     client = TestClient(app)
 
-    body = {"hello": "world"}
+    # Unique nonce so the replay/idempotency key differs every run (the dedup state persists in the
+    # shared dev DB; a fixed payload would 409 on the FIRST request of a later run). Same body for
+    # both POSTs within this test -> first 200, replay 409.
+    body = {"hello": "world", "nonce": uuid.uuid4().hex}
     payload = json.dumps(body).encode("utf-8")
     ts = int(time.time())
     sig = _make_sig("s3cr3t", payload, ts)
