@@ -86,6 +86,28 @@ def _get_escalation_level(client_key: str) -> str:
     return "green"
 
 
+_ESCALATION_ORDER = {"green": 0, "yellow": 1, "orange": 2, "red": 3}
+# Statistically-detected hidden-payload / manipulation signals. "Present but
+# undecodable" steganography is MORE suspicious, not less — these must never route
+# to the standard queue at green regardless of the per-client progressive counter.
+_THREAT_FLOOR_TAGS = (
+    "steganography_suspected",
+    "manipulation_detected",
+    "adversarial_perturbation_suspected",
+)
+
+
+def _apply_threat_class_floor(level: str, evidence_tags) -> str:
+    """Floor the escalation at yellow/review when a threat-class signal is present."""
+    try:
+        if any(t in (evidence_tags or []) for t in _THREAT_FLOOR_TAGS):
+            if _ESCALATION_ORDER.get(level, 0) < _ESCALATION_ORDER["yellow"]:
+                return "yellow"
+    except Exception:
+        pass
+    return level
+
+
 def _is_diagnostic_qr_payload(payload: str, *, context_text: str = "") -> bool:
     raw = str(payload or "").strip().lower()
     ctx = str(context_text or "").strip().lower()
@@ -892,6 +914,8 @@ async def analyze(
             or bool("qr_url_present" in tier2_evidence_tags)
             or bool("qr_url_suspicious" in tier2_evidence_tags)
             or bool("manipulation_detected" in tier2_evidence_tags)
+            or bool("steganography_suspected" in tier2_evidence_tags)
+            or bool("adversarial_perturbation_suspected" in tier2_evidence_tags)
             or bool("prompt_injection_text_suspected" in tier2_evidence_tags)
             or (isinstance(image_consistency, dict) and image_consistency.get("status") in ("mismatch", "suspicious"))
         )
@@ -907,6 +931,8 @@ async def analyze(
             _has_suspicious_signal = bool(
                 qr_prompt_injection or qr_external_url_detected
                 or "manipulation_detected" in tier2_evidence_tags
+                or "steganography_suspected" in tier2_evidence_tags
+                or "adversarial_perturbation_suspected" in tier2_evidence_tags
                 or "prompt_injection_text_suspected" in tier2_evidence_tags
                 or (isinstance(image_consistency, dict) and image_consistency.get("status") in ("mismatch", "suspicious"))
             )
@@ -914,6 +940,10 @@ async def analyze(
                 _escalation_level = _record_suspicious_upload(_client_key)
             else:
                 _escalation_level = _get_escalation_level(_client_key)
+            # Threat-class FLOOR: floor at yellow/review so a C2-beacon or
+            # payment-fraud steg carrier can never route to the standard queue at
+            # green, regardless of the per-client progressive counter.
+            _escalation_level = _apply_threat_class_floor(_escalation_level, tier2_evidence_tags)
             # If red, emit escalation trace event
             if _escalation_level == "red":
                 try:
