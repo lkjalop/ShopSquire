@@ -305,8 +305,11 @@ def checkout_initiate(
 async def stripe_webhook(request: Request) -> Dict:
     """Stripe sends payment_intent.succeeded / payment_intent.payment_failed here.
 
-    Signature verification uses STRIPE_WEBHOOK_SECRET.  Without it the endpoint
-    still processes events but logs a warning — acceptable in dev, not in prod.
+    Signature verification uses STRIPE_WEBHOOK_SECRET. In non-dev environments the
+    secret is MANDATORY: an unsigned/unverifiable webhook is rejected (fail closed),
+    so a forged event can never transition an order to paid/refunded. In local/dev/test
+    only, an unset secret falls back to processing the raw JSON (with a warning) so the
+    flow can be exercised without Stripe configured.
     """
     payload_bytes = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
@@ -320,7 +323,16 @@ async def stripe_webhook(request: Request) -> Dict:
             _log.warning("stripe_webhook: invalid signature — %s", exc)
             raise HTTPException(status_code=400, detail=f"Invalid Stripe webhook signature: {exc}")
     else:
-        _log.warning("stripe_webhook: STRIPE_WEBHOOK_SECRET not set — skipping signature verification")
+        # Fail closed outside dev: never mutate order state from an unverified payload.
+        if _is_non_dev_env(getattr(get_settings(), "app_env", None)):
+            _log.error(
+                "stripe_webhook: STRIPE_WEBHOOK_SECRET not set in non-dev env — rejecting unverified webhook (fail closed)"
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Webhook signature verification not configured (STRIPE_WEBHOOK_SECRET required).",
+            )
+        _log.warning("stripe_webhook: STRIPE_WEBHOOK_SECRET not set — skipping signature verification (dev only)")
         try:
             event = json.loads(payload_bytes)
         except Exception as exc:
