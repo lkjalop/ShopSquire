@@ -31,8 +31,22 @@ def test_safe_recommend_trace_contains_maestro_guardrail_events(monkeypatch):
     trace_id = str(body.get("decision_trace_id") or body.get("trace_id") or "").strip()
     assert trace_id, body
 
+    def _maestro_events(evs):
+        out = []
+        for ev in evs or []:
+            if not isinstance(ev, dict):
+                continue
+            payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
+            if ev.get("event_type") == "agent_guardrail" or payload.get("maestro_checked") is True:
+                out.append(ev)
+        return out
+
+    # Poll until the MAESTRO events specifically appear (not just any event). Decision-trace events
+    # are written async; under full-suite load the maestro events can land a beat after the first
+    # batch, so breaking on "any event" caused a flake. Wait for the events we actually assert on.
     events = []
-    deadline = time.time() + 8.0
+    maestro = []
+    deadline = time.time() + 20.0
     while time.time() < deadline:
         q = client.get(
             f"/api/v1/decisions/{trace_id}/query",
@@ -41,19 +55,12 @@ def test_safe_recommend_trace_contains_maestro_guardrail_events(monkeypatch):
         )
         assert q.status_code == 200, q.text
         events = q.json().get("events") or []
-        if events:
+        maestro = _maestro_events(events)
+        if maestro:
             break
         time.sleep(0.2)
 
     assert events, "expected decision trace events"
-    maestro = []
-    for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
-        if ev.get("event_type") == "agent_guardrail" or payload.get("maestro_checked") is True:
-            maestro.append(ev)
-
     assert maestro, f"expected maestro guardrail events in trace {trace_id}"
     for ev in maestro[:3]:
         payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
