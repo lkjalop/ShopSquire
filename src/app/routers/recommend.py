@@ -9396,50 +9396,31 @@ def suggest(
             if isinstance((item or {}).get("candidate"), dict)
         ]
 
-        # Add human-facing contrastive WHY + delta explanations.
+        # Human-facing contrastive WHY + delta explanations. The listwise build is extracted to
+        # product_ranking_agent.build_contrastive_explanations; the MAESTRO boundary check + brand-pref
+        # resolution stay route-side (route-local trace + profile).
         _why_by_sku: Dict[str, str] = {}
         _delta_by_sku: Dict[str, Dict[str, str]] = {}
         try:
-            from src.app.services.product_ranking_agent import listwise_rerank
             # MAESTRO boundary (audit): the ranking agent only ranks within the products scope.
             for _mv in _maestro_record(agent_name="Product_Ranking_Agent", tool_name="rank_products",
                                        data_scope="products", trace_id=trace_id, log_fn=log_trace_event):
                 _trace_system_error(trace_id=trace_id, stage="maestro_ranking", exc=Exception(_mv.detail))
-
             _p_brands_rank, _n_brands_rank = _extract_profile_brand_prefs(_user_profile_dict)
-            _brand_pos_rank = list(constraints.get("brands") or _p_brands_rank)
-            _brand_neg_rank = list(constraints.get("brand_excludes") or _n_brands_rank)
             _required_specs_rank: Dict[str, Any] = {}
             for _spec in list(constraints.get("specs") or []):
                 if isinstance(_spec, dict):
                     _required_specs_rank.update(_spec)
-
-            _rank_inputs: list[Dict[str, Any]] = []
-            for _it in (scored or []):
-                _cand = dict((_it or {}).get("candidate") or {})
-                _cand["product_id"] = _cand.get("sku") or _cand.get("product_id") or _cand.get("id")
-                if _cand.get("price") is None and _cand.get("price_cents") is not None:
-                    try:
-                        _cand["price"] = float(_cand.get("price_cents")) / 100.0
-                    except Exception:
-                        pass
-                _rank_inputs.append(_cand)
-
-            _ranked_explain = listwise_rerank(
-                _rank_inputs,
+            from src.app.services.product_ranking_agent import build_contrastive_explanations as _build_why
+            _why_by_sku, _delta_by_sku = _build_why(
+                scored,
                 required_specs=_required_specs_rank,
                 budget_min=constraints.get("budget_min"),
                 budget_max=constraints.get("budget_max"),
-                brands_positive=_brand_pos_rank,
-                brands_negative=_brand_neg_rank,
-                top_n=min(12, len(_rank_inputs) or 12),
+                brands_positive=list(constraints.get("brands") or _p_brands_rank),
+                brands_negative=list(constraints.get("brand_excludes") or _n_brands_rank),
+                top_n=12,
             )
-            for _rp in (_ranked_explain or []):
-                _sku = str((_rp.raw or {}).get("sku") or _rp.product_id or "")
-                if not _sku:
-                    continue
-                _why_by_sku[_sku] = str(_rp.contrastive_why or "")
-                _delta_by_sku[_sku] = dict(_rp.delta_vs_anchor or {})
         except Exception:
             _why_by_sku = {}
             _delta_by_sku = {}

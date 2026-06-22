@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 def apply_stock_penalty(
@@ -584,3 +584,51 @@ def _parse_price(val: Any) -> Optional[float]:
         return float(str(val).replace(",", "").replace("$", "").replace("£", "").replace("€", ""))
     except (ValueError, TypeError):
         return None
+
+
+def build_contrastive_explanations(
+    scored: List[Dict[str, Any]],
+    *,
+    required_specs: Optional[Dict[str, Any]] = None,
+    budget_min: Any = None,
+    budget_max: Any = None,
+    brands_positive: Optional[List[str]] = None,
+    brands_negative: Optional[List[str]] = None,
+    top_n: int = 12,
+) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
+    """Build {sku: contrastive_why} + {sku: delta_vs_anchor} for the top-N via listwise_rerank.
+
+    Normalizes each scored candidate into a rank input (product_id + dollar price), runs the listwise
+    reranker for its human-facing explanations, and maps them by SKU. Returns ({}, {}) on any failure
+    so the route degrades to no-explanations rather than erroring. Pure (no I/O)."""
+    why_by_sku: Dict[str, str] = {}
+    delta_by_sku: Dict[str, Dict[str, str]] = {}
+    try:
+        rank_inputs: List[Dict[str, Any]] = []
+        for it in (scored or []):
+            cand = dict((it or {}).get("candidate") or {})
+            cand["product_id"] = cand.get("sku") or cand.get("product_id") or cand.get("id")
+            if cand.get("price") is None and cand.get("price_cents") is not None:
+                try:
+                    cand["price"] = float(cand.get("price_cents")) / 100.0
+                except Exception:
+                    pass
+            rank_inputs.append(cand)
+        ranked = listwise_rerank(
+            rank_inputs,
+            required_specs=required_specs or {},
+            budget_min=budget_min,
+            budget_max=budget_max,
+            brands_positive=brands_positive or [],
+            brands_negative=brands_negative or [],
+            top_n=min(int(top_n), len(rank_inputs) or int(top_n)),
+        )
+        for rp in (ranked or []):
+            sku = str((rp.raw or {}).get("sku") or rp.product_id or "")
+            if not sku:
+                continue
+            why_by_sku[sku] = str(rp.contrastive_why or "")
+            delta_by_sku[sku] = dict(rp.delta_vs_anchor or {})
+    except Exception:
+        return {}, {}
+    return why_by_sku, delta_by_sku

@@ -70,3 +70,22 @@ def test_salient_deltas_skips_same_similar_and_respects_priority_and_cap():
 
 def test_salient_deltas_empty_when_all_same():
     assert _salient_deltas({"ram": "Same 16GB RAM", "price": "Similar price ($1,800)"}) == []
+
+
+# ── build_contrastive_explanations (Phase 3 extraction) ──
+def test_build_contrastive_explanations_maps_by_sku():
+    from src.app.services.product_ranking_agent import build_contrastive_explanations
+    scored = [{"score": 1.0, "candidate": c} for c in _cands()]
+    why, delta = build_contrastive_explanations(
+        scored, required_specs={"ram_gb": 32, "gpu_vram_gb": 8}, budget_max=2300, top_n=3)
+    assert set(why.keys()) == {"A", "B", "C"}        # one explanation per SKU
+    assert all(isinstance(v, str) and v for v in why.values())
+    # exactly one "top pick", others contrast vs it (delegates to the contrastive-why logic)
+    tops = [k for k, v in why.items() if v.split(":", 1)[-1].strip().startswith("top pick")]
+    assert len(tops) == 1
+    assert isinstance(delta, dict)
+
+
+def test_build_contrastive_explanations_empty_and_safe():
+    from src.app.services.product_ranking_agent import build_contrastive_explanations
+    assert build_contrastive_explanations([], top_n=3) == ({}, {})
