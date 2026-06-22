@@ -9344,18 +9344,13 @@ def suggest(
             )
         except Exception:
             pass
-        # Tier 2 retrieval mode (RECOMMEND_RETRIEVAL_MODE, default shadow). fusion/primary merge or
-        # swap in the V2 hybrid candidates HERE — BEFORE ranking/stock/budget/security below — so V2
-        # never bypasses the guards. Degrades to primary-only when V2 isn't ready (non-blocking).
+        # Tier 2 retrieval mode (RECOMMEND_RETRIEVAL_MODE) extracted to
+        # recommend_retriever_stage.run_retrieval_mode_stage: fuse/swap V2 candidates BEFORE ranking
+        # so they never bypass the downstream guards. Route keeps the trace wrapper.
         try:
-            from src.app.services.recommend_retriever_stage import resolve_retrieval_mode as _resolve_rmode, apply_retrieval_mode as _apply_rmode
-            _retr_mode = _resolve_rmode(flags)
-            timing_breakdown["retrieval_mode"] = _retr_mode
-            if _retr_mode in ("fusion", "primary") and _v2_holder.get("done") and _v2_holder.get("cands"):
-                _fused = _apply_rmode(_retr_mode, primary=candidates, v2=_v2_holder.get("cands") or [])
-                if _fused:
-                    candidates = _fused
-                    timing_breakdown["retrieval_fused_count"] = len(candidates)
+            from src.app.services.recommend_retriever_stage import run_retrieval_mode_stage as _run_retr
+            candidates = _run_retr(flags=flags, candidates=candidates, v2_holder=_v2_holder,
+                                   timing_breakdown=timing_breakdown)
         except Exception as _rmexc:
             _trace_system_error(trace_id=trace_id, stage="retrieval_mode", exc=_rmexc)
         with tracer.start_as_current_span("recommend.rerank_baseline"):

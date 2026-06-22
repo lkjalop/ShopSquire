@@ -48,3 +48,28 @@ def apply_retrieval_mode(
         v = [c for c in (v2 or []) if isinstance(c, dict) and c.get("sku")]
         return list(v) if v else list(primary or [])  # monolith fallback on empty/unavailable V2
     return list(primary or [])  # shadow
+
+
+def run_retrieval_mode_stage(
+    *,
+    flags: Dict[str, Any] | None,
+    candidates: List[Dict[str, Any]],
+    v2_holder: Dict[str, Any] | None = None,
+    timing_breakdown: Dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
+    """Route wrapper: resolve RECOMMEND_RETRIEVAL_MODE and fuse/swap the V2 hybrid candidates when
+    ready (fusion/primary) — BEFORE ranking, so V2 never bypasses the downstream ranking/stock/budget/
+    security guards. Returns the (possibly fused) candidate list and records retrieval_mode +
+    retrieval_fused_count in timing_breakdown. Degrades to the primary candidates when V2 isn't ready
+    (non-blocking). Raises on internal error so the caller can trace it (matches _trace_system_error)."""
+    mode = resolve_retrieval_mode(flags)
+    if isinstance(timing_breakdown, dict):
+        timing_breakdown["retrieval_mode"] = mode
+    v2h = v2_holder or {}
+    if mode in ("fusion", "primary") and v2h.get("done") and v2h.get("cands"):
+        fused = apply_retrieval_mode(mode, primary=candidates, v2=v2h.get("cands") or [])
+        if fused:
+            candidates = fused
+            if isinstance(timing_breakdown, dict):
+                timing_breakdown["retrieval_fused_count"] = len(candidates)
+    return candidates

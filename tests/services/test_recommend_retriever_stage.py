@@ -45,3 +45,32 @@ def test_apply_mode_shadow_primary_fusion():
     # primary mode falls back to monolith when v2 empty
     assert [c["sku"] for c in apply_retrieval_mode("primary", primary=primary, v2=[])] == ["A", "B"]
     assert set(c["sku"] for c in apply_retrieval_mode("fusion", primary=primary, v2=v2)) == {"A", "B", "C"}
+
+
+# ── run_retrieval_mode_stage (Phase 3 extraction) ──
+def test_run_stage_shadow_returns_primary_unchanged():
+    from src.app.services.recommend_retriever_stage import run_retrieval_mode_stage
+    tb = {}
+    primary = [{"sku": "A"}, {"sku": "B"}]
+    out = run_retrieval_mode_stage(flags={"RECOMMEND_RETRIEVAL_MODE": "shadow"}, candidates=primary,
+                                   v2_holder={"done": True, "cands": [{"sku": "Z"}]}, timing_breakdown=tb)
+    assert out == primary and tb["retrieval_mode"] == "shadow"  # shadow never swaps
+
+
+def test_run_stage_fusion_merges_when_v2_ready():
+    from src.app.services.recommend_retriever_stage import run_retrieval_mode_stage
+    tb = {}
+    out = run_retrieval_mode_stage(
+        flags={"RECOMMEND_RETRIEVAL_MODE": "fusion"},
+        candidates=[{"sku": "A"}, {"sku": "B"}],
+        v2_holder={"done": True, "cands": [{"sku": "B"}, {"sku": "C"}]}, timing_breakdown=tb)
+    skus = {c["sku"] for c in out}
+    assert "C" in skus and tb["retrieval_mode"] == "fusion" and tb["retrieval_fused_count"] == len(out)
+
+
+def test_run_stage_degrades_when_v2_not_ready():
+    from src.app.services.recommend_retriever_stage import run_retrieval_mode_stage
+    primary = [{"sku": "A"}]
+    out = run_retrieval_mode_stage(flags={"RECOMMEND_RETRIEVAL_MODE": "fusion"}, candidates=primary,
+                                   v2_holder={"done": False, "cands": []}, timing_breakdown={})
+    assert out == primary  # V2 not ready -> primary unchanged (non-blocking)
