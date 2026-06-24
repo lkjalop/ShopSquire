@@ -10630,64 +10630,31 @@ def suggest(
             severity="high", source="recommend_escalation",
             extra_context={"escalation_assessment": _esc_decision.to_dict()},
         )
-    try:
-        _bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
-        _bf_status = str(_bf.get("status") or "").strip().lower()
-        _bf_advice = str(_bf.get("advice") or "").strip()
-        if _bf_status in {"low", "high"} and _bf_advice:
-            assistant_message = f"{assistant_message} {_bf_advice}" if assistant_message else _bf_advice
-        if _bf_status == "low":
-            _alts = payload.get("alternatives") if isinstance(payload.get("alternatives"), list) else []
-            _floor = int(float(_bf.get("floor") or 0)) if _bf.get("floor") is not None else 0
-            if _floor > 0:
-                _alts.append(f"Raise budget to around ${_floor:,} for this use-case")
-            _alts.append("Keep budget and prioritize refurbished / previous generation")
-            _alts.append("Relax one or two strict specs to widen options")
-            payload["alternatives"] = list(dict.fromkeys([str(x) for x in _alts if str(x).strip()]))[:4]
-    except Exception:
-        pass
-    if image_brand_mismatch_note and not brand_budget_answer:
-        assistant_message = f"{assistant_message} {image_brand_mismatch_note}" if assistant_message else image_brand_mismatch_note
-    if gpu_inference_note:
-        assistant_message = f"{assistant_message} {gpu_inference_note}" if assistant_message else gpu_inference_note
-    # Step 4 — surface the fulfilment verdict (Step 3b) as a plain availability line on the answer.
-    if _availability_line:
-        assistant_message = f"{assistant_message} {_availability_line}".strip() if assistant_message else _availability_line
-    # Constraint honesty: lead with the "no exact match — closest shown, want to relax X?" note so the
-    # buyer is never told constraint-violating products are a clean match (GPT-5.5 #2).
-    _cstatus = constraints.get("constraint_status") if isinstance(constraints.get("constraint_status"), dict) else {}
-    if _cstatus.get("exact_match") is False and _cstatus.get("relaxation_note"):
-        _rn = str(_cstatus["relaxation_note"])
-        assistant_message = f"{_rn} {assistant_message}".strip() if assistant_message else _rn
+    # ── Message decoration (extracted to recommend_message_decorator) ──
+    from src.app.services.recommend_message_decorator import (
+        apply_budget_advice as _apply_budget_advice,
+        apply_contextual_notes as _apply_contextual_notes,
+        apply_constraint_honesty_prefix as _apply_constraint_honesty_prefix,
+        build_comparative_synthesis as _build_comparative_synthesis,
+        apply_price_range_note as _apply_price_range_note,
+    )
+    assistant_message, payload = _apply_budget_advice(assistant_message, constraints, payload)
+    assistant_message = _apply_contextual_notes(
+        assistant_message,
+        image_brand_mismatch_note=image_brand_mismatch_note,
+        brand_budget_answer=brand_budget_answer,
+        gpu_inference_note=gpu_inference_note,
+        availability_line=_availability_line,
+    )
+    assistant_message = _apply_constraint_honesty_prefix(assistant_message, constraints)
     # Inventory presence note when requested brands are missing (via helper for testability)
     note, unmatched = _emit_inventory_brand_notice(results=results, constraints=constraints, decision_id=decision_id, trace_id=trace_id)
     if note:
         assistant_message = (assistant_message or "") + note
-    # Comparative synthesis for "which is better" queries
-    try:
-        needs_synthesis = any(
-            phrase in (query or "").lower() for phrase in [
-                "which is better", "which one should", "what do you recommend",
-                "pros and cons", "which would you", "best choice",
-            ]
-        )
-        if needs_synthesis and results:
-            top = results[:3]
-            lines = []
-            for i, r in enumerate(top):
-                pros = (r.get("factors") or {}).get("positive", [])
-                price = int(r.get("price_cents") or 0) // 100 if r.get("price_cents") is not None else r.get("price")
-                pros_h = _humanize_positive_factor_tokens(pros)
-                why = (" - " + "; ".join(pros_h)) if pros_h else ""
-                lines.append(f"{i+1}. {r.get('name')} (${price}){why}")
-            assistant_message = (
-                "Based on your criteria and our current inventory:\n\n" +
-                "\n".join(lines) +
-                "\n\nThese rankings consider price match, spec relevance, and stock availability. "
-                "Ask for more detail on any item if you'd like."
-            )
-    except Exception:
-        pass
+    # Comparative synthesis for "which is better" queries (extracted)
+    _synth = _build_comparative_synthesis(query, results or [], _humanize_positive_factor_tokens)
+    if _synth:
+        assistant_message = _synth
     # ── Use-Case Advisor: assess suitability of top results and annotate ──
     try:
         if _use_case_match and _use_case_specs and results:
@@ -10745,17 +10712,8 @@ def suggest(
             )
     except Exception:
         pass
-    # ── Price range advisory note in assistant message ──
-    try:
-        _pr_range = payload.get("price_range")
-        if _pr_range and _pr_range.get("count", 0) >= 2:
-            _pr_min = _pr_range["min"]
-            _pr_max = _pr_range["max"]
-            _pr_median = _pr_range["median"]
-            _pr_note = f"\n\n💰 Price range: ${_pr_min:,.0f} – ${_pr_max:,.0f} (median ${_pr_median:,.0f}) across {_pr_range['count']} results."
-            assistant_message = (assistant_message or "") + _pr_note
-    except Exception:
-        pass
+    # ── Price range advisory note in assistant message (extracted) ──
+    assistant_message = _apply_price_range_note(assistant_message, payload)
     # Attach product identity constraints to response (when image-based)
     if _identity_constraints:
         payload["product_identity"] = {
