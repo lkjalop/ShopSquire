@@ -81,6 +81,23 @@
 
   "_nqe_question_packs_comment": "Domain-specific NQE clarifying questions (excised from nqe.py hardcoded packs). Each entry is keyed by question id and contains: text, goal, evidence_needed, source, options. NQE reads these from the active profile; non-electronics verticals supply their own domain questions.",
   "nqe_question_packs": {
+    "ask_b2b_procurement": {
+      "trigger_query_keywords": ["for our team", "for the team", "for staff", "for employees", "for the company", "for the business", "fleet", "bulk order", "in bulk", "procurement", "roll out", "rollout", "work laptops for", "laptops for our", "for the office team", "for our staff", "for our employees", "deploy"],
+      "skip_if_query_contains": ["just me", "for myself", "personal use", "my own", "for my"],
+      "answered_field": "b2b_requirements",
+      "text": "For a business rollout, a few specifics help me match the right machines and the right support tier:",
+      "goal": "refine_b2b_procurement",
+      "evidence_needed": ["b2b_requirements"],
+      "source": "b2b_procurement",
+      "options": [
+        {"label": "Primary workload (office / development / design / field)", "value": "workload"},
+        {"label": "OS or managed image standard (Windows, macOS, locked image)", "value": "os_standard"},
+        {"label": "Warranty / SLA (next-business-day, on-site, extended)", "value": "warranty_sla"},
+        {"label": "Fleet manageability (MDM/Intune, TPM, vPro)", "value": "manageability"},
+        {"label": "Docking / ports / peripheral standard", "value": "docking"},
+        {"label": "Keyboard region & deployment locations", "value": "deployment"}
+      ]
+    },
     "ask_high_school_activity": {
       "trigger_use_cases": ["high_school", "student", "high_schooler"],
       "skip_if_query_contains": ["gaming", "game", "video edit", "editing", "music", "coding", "code", "design", "art", "graphics"],
