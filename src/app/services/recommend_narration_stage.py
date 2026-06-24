@@ -97,12 +97,34 @@ def run_narration(
     llm_summary_job_id: Optional[str] = None
 
     if m == "blocking":
+        # Latency bound (GPT-5.5: blocking Ollama narration measured at 21-32s). Cap the LLM wait at
+        # RECOMMEND_NARRATION_TIMEOUT_SEC (default 8s); on timeout fall back to the deterministic
+        # grounded message (now guard-truthful) instead of blocking the whole response. This bounds
+        # p95 WITHOUT flipping the narration mode (LLM prose still returned when it's fast enough).
+        import os as _os
+        try:
+            _budget = float(_os.getenv("RECOMMEND_NARRATION_TIMEOUT_SEC", "8") or 8)
+        except (TypeError, ValueError):
+            _budget = 8.0
         with StageTimer(timing_breakdown, "summary_ms"):  # time the dominant LLM cost
-            assistant_message, llm_summary_job_id = summarize_fn(
-                query, results, constraints, summ_model, trace_id,
-                context_preamble=combined_preamble,
-                narration_inputs=narration_inputs,
-            )
+            if _budget > 0 and executor is not None:
+                import concurrent.futures as _cf
+                _fut = executor.submit(
+                    summarize_fn, query, results, constraints, summ_model, trace_id,
+                    context_preamble=combined_preamble, narration_inputs=narration_inputs,
+                )
+                try:
+                    assistant_message, llm_summary_job_id = _fut.result(timeout=_budget)
+                except _cf.TimeoutError:
+                    if isinstance(timing_breakdown, dict):
+                        timing_breakdown["narration_timed_out"] = True
+                    assistant_message, llm_summary_job_id = None, None  # deterministic fallback fills it
+            else:
+                assistant_message, llm_summary_job_id = summarize_fn(
+                    query, results, constraints, summ_model, trace_id,
+                    context_preamble=combined_preamble,
+                    narration_inputs=narration_inputs,
+                )
         return assistant_message, llm_summary_job_id
 
     # skip / async: no blocking LLM call — the deterministic grounded message fills in downstream.
