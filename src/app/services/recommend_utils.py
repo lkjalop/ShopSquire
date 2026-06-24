@@ -227,6 +227,21 @@ def _extract_candidate_numeric_specs(candidate: Dict[str, Any]) -> Dict[str, Any
         m = re.search(r"\b(4|6|8|12|16)\s*gb\s*(?:vram|gpu)\b", text)
         gpu_vram = float(m.group(1)) if m else None
 
+    # Weight in kg — a generic physical property (the CORE filter reads "weight_kg"); prefer the
+    # structured field, fall back to "N kg" / "N lbs" in text (lbs→kg). Lives in the electronics
+    # adapter extractor, but the key it emits is vertical-blind.
+    weight_kg = _as_float(specs.get("weight_kg"))
+    if weight_kg is None:
+        weight_kg = _as_float(specs.get("weight"))
+    if weight_kg is None:
+        m = re.search(r"\b(\d+(?:\.\d+)?)\s*kg\b", text)
+        if m:
+            weight_kg = float(m.group(1))
+        else:
+            m_lb = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)\b", text)
+            if m_lb:
+                weight_kg = round(float(m_lb.group(1)) * 0.45359, 2)
+
     gpu_text = str(specs.get("gpu") or "").lower()
     integrated_gpu = any(
         tok in f"{gpu_text} {text}"
@@ -265,6 +280,7 @@ def _extract_candidate_numeric_specs(candidate: Dict[str, Any]) -> Dict[str, Any
         "display_inches": display,
         "refresh_hz": refresh,
         "gpu_vram_gb": gpu_vram,
+        "weight_kg": weight_kg,
         "has_dedicated_gpu": discrete_gpu,
         "gaming_style": gaming_style,
         "portable": portable,
