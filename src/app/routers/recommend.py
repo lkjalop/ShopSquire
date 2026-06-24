@@ -357,6 +357,7 @@ from src.app.services.recommend_nqe_stage import (  # noqa: E402
     run_recommend_nqe_stage,
 )
 from src.app.services.query_understanding import build_query_understanding  # noqa: E402
+from src.app.services.safe_stage import record_partial_failure as _record_partial_failure  # noqa: E402
 from src.app.services.recommend_narration_stage import (  # noqa: E402
     NarrationInputs,
     apply_narration_inputs_to_constraints,
@@ -5256,8 +5257,8 @@ def suggest(
         )
         if _img_evt is not None:
             emit_security_event("/api/v1/recommend/suggest:image", _img_evt, request=request)
-    except Exception:
-        pass
+    except Exception as _e:
+        _record_partial_failure("security_event_emit_image", _e, trace_id=trace_id)
     severity = analysis.get("severity", "info")
     fraud_summary: Dict[str, Any] = {}
     try:
@@ -5532,8 +5533,8 @@ def suggest(
             }
             kv = kv_for_image
             mem.set_kv(uid, kv_for_image)
-    except Exception:
-        pass
+    except Exception as _e:
+        _record_partial_failure("memory_writeback_image", _e, trace_id=trace_id)
 
     def _decayed_pref(pref_key: str, default=None):
         meta = (kv.get("prefs_meta") or {}).get(pref_key)
@@ -5769,8 +5770,8 @@ def suggest(
         kv_boot["last_query"] = query
         mem.set_kv(uid, kv_boot)
         kv = kv_boot
-    except Exception:
-        pass
+    except Exception as _e:
+        _record_partial_failure("memory_writeback_boot", _e, trace_id=trace_id)
 
     # Episodic memory wiring: provide session summary + profile for NQE/ranking.
     _session_context_summary = ""

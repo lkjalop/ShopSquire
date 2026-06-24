@@ -24,8 +24,10 @@ import pytest
 # change; convert the swallow to safe_stage / a trace-visible except instead.
 _BASELINE = {
     # the monster — the bulk of the legacy debt; shrinks as suggest() stages are extracted
-    # and critical-path swallows are converted to safe_stage / trace-visible excepts.
-    "src/app/routers/recommend.py": 226,
+    # and critical-path swallows are converted to safe_stage / record_partial_failure. 2026-06-24:
+    # tightened 226→190 (true current count) after converting the security-emit + 2 memory-writeback
+    # swallows to observable record_partial_failure (error-budget Tier 1).
+    "src/app/routers/recommend.py": 190,
     # safe_stage's two inner guards (payload-merge + the trace sink) ARE the recorder — the one
     # place silence is legitimate.
     "src/app/services/safe_stage.py": 2,

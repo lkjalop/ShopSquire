@@ -19,6 +19,41 @@ _log = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+def record_partial_failure(
+    stage: str,
+    exc: BaseException,
+    *,
+    trace_id: str | None = None,
+    severity: str = "warn",
+    extra: Optional[dict[str, Any]] = None,
+) -> None:
+    """Make a swallowed stage error VISIBLE: emit a ``stage_partial_failure`` trace event + a warning
+    log. Use this as the body of an ``except Exception as e:`` to convert a silent ``except: pass``
+    into an auditable degradation WITHOUT crashing the request. Never raises (the recorder is the one
+    place silence is legitimate — it must not break the request it is observing)."""
+    payload: dict[str, Any] = {
+        "stage": stage,
+        "error": f"{type(exc).__name__}: {exc}",
+        "severity": severity,
+        "degraded": True,
+    }
+    if extra:
+        try:
+            payload.update(extra)
+        except Exception:
+            pass
+    try:
+        from src.app.services.decision_log import log_trace_event
+        log_trace_event(
+            trace_id, "stage_partial_failure", "system", stage, "system", None, payload,
+        )
+    except Exception:
+        # The observability sink itself must never break the request — the single
+        # acceptable silent boundary in the codebase (it IS the recorder).
+        pass
+    _log.warning("stage_partial_failure stage=%s error=%s", stage, exc, exc_info=False)
+
+
 def safe_stage(
     stage: str,
     fn: Callable[[], T],
@@ -36,25 +71,5 @@ def safe_stage(
     try:
         return fn()
     except Exception as exc:  # deliberate boundary: failure is RECORDED below, never swallowed
-        payload: dict[str, Any] = {
-            "stage": stage,
-            "error": f"{type(exc).__name__}: {exc}",
-            "severity": severity,
-            "degraded": True,
-        }
-        if extra:
-            try:
-                payload.update(extra)
-            except Exception:
-                pass
-        try:
-            from src.app.services.decision_log import log_trace_event
-            log_trace_event(
-                trace_id, "stage_partial_failure", "system", stage, "system", None, payload,
-            )
-        except Exception:
-            # The observability sink itself must never break the request — the single
-            # acceptable silent boundary in the codebase (it IS the recorder).
-            pass
-        _log.warning("stage_partial_failure stage=%s error=%s", stage, exc, exc_info=False)
+        record_partial_failure(stage, exc, trace_id=trace_id, severity=severity, extra=extra)
         return default
