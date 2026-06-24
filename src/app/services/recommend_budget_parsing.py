@@ -146,6 +146,11 @@ def build_price_buckets(
     except Exception:
         bmax = None
 
+    # No budget supplied → "within budget" is meaningless; leave all buckets empty so the UI never
+    # claims products are "within budget" when the shopper never gave one (GPT-5.5 #3).
+    if bmin is None and bmax is None:
+        return out
+
     priced: List[tuple[Dict[str, Any], float]] = []
     for r in rows:
         p = _result_price_dollars(r)
