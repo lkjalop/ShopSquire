@@ -11225,159 +11225,49 @@ def suggest(
                 df.write(_json.dumps(line) + "\n")
     except Exception:
         pass
-    policy = get_policy("recommend")
-    payload["policy_version"] = policy.get("version", payload["policy_version"])
-    payload_policy, deltas = apply_post_policy("recommend", payload)
-    # Ensure final payload includes trace/evidence contract keys for UI/tests
-    try:
-        payload_policy = _ensure_trace_response(payload_policy or {}, trace_id, flags)
-    except Exception:
-        pass
-    try:
-        if isinstance(payload_policy.get("next_questions"), list):
-            payload_policy["next_questions"] = _dedupe_next_questions_for_render(payload_policy.get("next_questions"))
-    except Exception:
-        pass
-    try:
-        agent_chain.append({
-            "agent": "Policy_Agent",
-            "policy_version": payload_policy.get("policy_version"),
-            "deltas": len(deltas or []),
-            "duration_ms": None,
-        })
-        retrieved_context["policy_gates"] = deltas or []
-        try:
-            log_trace_event(
-                trace_id=decision_id or trace_id,
-                event_type="policy_gate",
-                source_type="agent",
-                source_id="Policy_Agent",
-                target_type="system",
-                target_id=None,
-                payload={"policy_version": payload_policy.get("policy_version"), "deltas": deltas},
-            )
-        except Exception:
-            pass
-    except Exception:
-        pass
-    redacted, changes, pci = redact_payload(payload_policy)
-    # Final safety: ensure contract keys present after redaction as well
-    try:
-        redacted = _ensure_trace_response(redacted or {}, decision_id or trace_id, flags)
-    except Exception:
-        pass
-    try:
-        if isinstance(redacted.get("next_questions"), list):
-            redacted["next_questions"] = _dedupe_next_questions_for_render(redacted.get("next_questions"))
-    except Exception:
-        pass
-    try:
-        wm = build_model_watermark(
-            trace_id=decision_id or trace_id,
-            model=str(redacted.get("llm_model") or redacted.get("model_tier") or ""),
-            payload_hint=str(redacted.get("assistant_message") or "")[:120],
-        )
-        redacted["model_watermark"] = wm
-        redacted["model_output_fingerprint"] = build_output_fingerprint(redacted)
-        if str(os.getenv("MODEL_THEFT_WATERMARK_APPEND_TEXT", "0")).lower() in ("1", "true", "yes"):
-            if isinstance(redacted.get("assistant_message"), str) and redacted.get("assistant_message"):
-                redacted["assistant_message"] = f"{redacted['assistant_message']} [{wm}]"
-    except Exception:
-        pass
-    # LLM10: perturb externally visible confidence values to reduce boundary extraction.
-    redacted = _apply_model_theft_output_protection(redacted, trace_id=decision_id or trace_id)
-    try:
-        if bool(probe_result.get("detected")):
-            redacted["security"] = redacted.get("security") or {}
-            redacted["security"]["systematic_probing"] = {
-                "detected": True,
-                "reason": probe_result.get("reason"),
-                "score": probe_result.get("score"),
-            }
-            redacted["status"] = redacted.get("status") or "review_required"
-    except Exception:
-        pass
-    try:
-        tenant_for_billing = (
-            request.headers.get("X-Tenant-Id")
-            or request.headers.get("x-tenant-id")
-            or "default"
-        )
-        record_meter_event(
-            tenant_id=str(tenant_for_billing),
-            metric="recommend_requests",
-            quantity=1.0,
-            source="api",
-            metadata={"trace_id": decision_id or trace_id, "uid_hash": uid_hash},
-        )
-    except Exception:
-        pass
-    # Emit additional output analysis including critique deltas
-    with tracer.start_as_current_span("recommend.security_analyze_output_final"):
-        if skip_recommend_observer:
-            final_out = {"severity": "info", "details": {"signals": {}, "reason": "observer_skipped"}}
-        else:
-            # IMPORTANT: only scan user-facing output. Scanning the internal `proposal` blob can
-            # self-trigger (e.g., OWASP/MITRE tag strings contain "prompt injection", "supply chain", etc.)
-            # and cause false blocks on otherwise safe queries.
-            final_out = analyze_payload(
-                {
-                    "uid": uid,
-                    "assistant_message": redacted.get("assistant_message"),
-                    "next_questions": redacted.get("next_questions") or [],
-                    "results": [
-                        {"sku": r.get("sku"), "name": r.get("name"), "price": r.get("price")}
-                        for r in (redacted.get("results") or [])
-                        if isinstance(r, dict)
-                    ][:8],
-                }
-            )
-    try:
-        if not skip_recommend_observer:
-            emit_security_event(
-                "/api/v1/recommend/suggest:output",
-                {"proposal": redacted.get("proposal"), "analysis": {**final_out.get("details", {}), "critique_deltas": deltas}},
-                request=request,
-            )
-    except Exception:
-        pass
-    # Final escalation: auto-create incident for main happy-path reviews
-    try:
-        _auto_create_incident_for_review(
-            payload=redacted,
+    # ── Post-processing pipeline (extracted to recommend_post_pipeline.run_post_pipeline) ──
+    from src.app.services.recommend_post_pipeline import (
+        run_post_pipeline as _run_post_pipeline,
+        PostPipelineInput as _PostPipelineInput,
+        PostPipelineHooks as _PostPipelineHooks,
+    )
+    return _run_post_pipeline(
+        _PostPipelineInput(
+            payload=payload,
             trace_id=trace_id,
+            decision_id=decision_id,
+            flags=flags if isinstance(flags, dict) else {},
             uid=uid,
+            uid_hash=uid_hash,
             query=query,
             severity=severity,
-            source="recommend_main",
-        )
-    except Exception:
-        pass
-
-    # ── Checkout handoff (extracted leaf stage → services/checkout_handoff.py) ──
-    # Advisory-only: emits a structured checkout_action routing the buyer to the
-    # deterministic payment flow. The AI never settles money. See module docstring.
-    redacted = apply_checkout_handoff(redacted, RecommendContext(query=query, uid=uid))
-
-    # Final-word transforms on the actual returned payload (the _with_trace choke point
-    # runs BEFORE the LLM summary is generated on the main path): replace [N] citation
-    # labels with product names, and guarantee a non-empty answer.
-    # LLM-orchestration (compound multi-part answer) stays in the route — it needs a
-    # model call + request context. Then the SINGLE pure-transform pipeline owns all
-    # answer shaping (price-fill, off-type, poisoning guard, [N] deref, security, formatter).
-    redacted = _compose_compound_if_needed(redacted, redacted.get("trace_id"))
-    redacted = finalize_response_payload(redacted)
-    # Record latency for p50/p95 percentile tracking.
-    try:
-        from src.app.observability.latency_tracker import get_recommend_tracker
-        _lt = get_recommend_tracker()
-        _route_ms = (redacted.get("timing_breakdown") or {}).get("route_total_ms")
-        _cache_hit = bool((redacted.get("timing_breakdown") or {}).get("catalog_profile_cache_hit"))
-        if _route_ms is not None:
-            _lt.record(float(_route_ms), cache_hit=_cache_hit)
-    except Exception:
-        pass
-    return redacted
+            agent_chain=agent_chain,
+            retrieved_context=retrieved_context if isinstance(retrieved_context, dict) else {},
+            skip_recommend_observer=skip_recommend_observer,
+            probe_result=probe_result if isinstance(probe_result, dict) else {},
+        ),
+        _PostPipelineHooks(
+            get_policy=get_policy,
+            apply_post_policy=apply_post_policy,
+            redact_payload=redact_payload,
+            ensure_trace_response=_ensure_trace_response,
+            dedupe_next_questions_for_render=_dedupe_next_questions_for_render,
+            build_model_watermark=build_model_watermark,
+            build_output_fingerprint=build_output_fingerprint,
+            apply_model_theft_output_protection=_apply_model_theft_output_protection,
+            record_meter_event=record_meter_event,
+            analyze_payload=analyze_payload,
+            emit_security_event=emit_security_event,
+            auto_create_incident_for_review=_auto_create_incident_for_review,
+            apply_checkout_handoff=apply_checkout_handoff,
+            recommend_context_cls=RecommendContext,
+            compose_compound_if_needed=_compose_compound_if_needed,
+            finalize_response_payload=finalize_response_payload,
+            log_trace_event=log_trace_event,
+            request=request,
+            tracer=tracer,
+        ),
+    )
 
 
 @router.get("/checkout_upsell")
