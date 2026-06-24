@@ -1903,10 +1903,13 @@ def _filter_nqe_questions_by_missing_fields(
         )
     if "brand_preference" in mf:
         allow.update({"ask_brand_pref", "ask_brand"})
+    if "b2b_requirements" in mf:
+        allow.add("ask_b2b_procurement")
     # Always allow persona-refinement questions (university subject, gaming depth,
     # corporate work type, touch screen) — they refine a *detected* use-case,
     # not a missing one.
     _REFINEMENT_IDS = {
+        "ask_b2b_procurement",
         "ask_university_subject", "ask_gaming_depth",
         "ask_high_school_activity", "ask_corporate_work_type",
         "ask_touch_screen_type", "ask_software_confirm", "ask_image_model",
@@ -3972,6 +3975,8 @@ def _query_is_standalone_search(query: str | None) -> bool:
 from src.app.services.recommend_ranking import (  # noqa: E402
     use_case_rank_adjustment as _use_case_rank_adjustment_impl,
     apply_use_case_rank_adjustments as _apply_use_case_rank_adjustments_impl,
+    apply_hard_constraint_rank_adjustments as _apply_hard_constraint_rank_adjustments_impl,
+    summarize_use_case_fit as _summarize_use_case_fit,
 )
 
 
@@ -3991,6 +3996,17 @@ def _apply_use_case_rank_adjustments(
     query: str,
 ) -> List[Dict[str, Any]]:
     return _apply_use_case_rank_adjustments_impl(scored, use_case_key=use_case_key, query=query)
+
+
+def _apply_hard_constraint_rank_adjustments(
+    scored: List[Dict[str, Any]],
+    *,
+    hard_constraints: Dict[str, Any] | None,
+) -> List[Dict[str, Any]]:
+    return _apply_hard_constraint_rank_adjustments_impl(
+        scored,
+        hard_constraints=hard_constraints,
+    )
 
 
 def _humanize_positive_factor_tokens(items: list[Any]) -> list[str]:
@@ -9285,10 +9301,16 @@ def suggest(
                 ranked = service.maybe_llm_rerank(uid, candidates, constraints, use_llm=use_llm)
             with tracer.start_as_current_span("recommend.rerank_post"):
                 scored = service.rerank_candidates_with_factors(ranked, constraints)
+        from src.app.services.query_decomposer import decompose as _decompose_for_ranking
+        _ranking_plan = _decompose_for_ranking(query)
         scored = _apply_use_case_rank_adjustments(
             scored,
             use_case_key=(_use_case_match or constraints.get("use_case")),
             query=query_effective,
+        )
+        scored = _apply_hard_constraint_rank_adjustments(
+            scored,
+            hard_constraints=getattr(_ranking_plan, "hard_constraints", {}) or {},
         )
         # Pre-ranking stock penalty (extracted to product_ranking_agent.apply_stock_penalty):
         # OOS -0.5, unknown -0.1, then re-sort, so ranking reflects live stock before results build.
@@ -9868,8 +9890,7 @@ def suggest(
     # WS2.4 / WS3.1 / WS3.2 — enforce query-plan hard constraints + accessory guard
     # on the full ranked list before the display slice. Conservative + self-reverting.
     try:
-        from src.app.services.query_decomposer import decompose as _decompose_q
-        _qplan = _decompose_q(query)
+        _qplan = _ranking_plan
         if _qplan.quantity and int(_qplan.quantity) > 1:
             # Bulk/B2B order quantity ("10 laptops") → single source of truth on constraints so
             # availability/fulfilment (Step 3) can reason about N units. Distinct from the display
@@ -9924,6 +9945,9 @@ def suggest(
         results = _deduped
     except Exception:
         pass
+    _use_case_fit_status = _summarize_use_case_fit(results)
+    if _use_case_fit_status:
+        constraints["use_case_fit_status"] = _use_case_fit_status
     # Contract consistency guard: if the display limiter produced zero visible
     # items while scored candidates exist, keep top actionable cards.
     if not results and scored:
@@ -10567,7 +10591,15 @@ def suggest(
             )
         except Exception:
             pass
-    if not assistant_message:
+    if (constraints.get("use_case_fit_status") or {}).get("exact_fit") is False:
+        assistant_message = _deterministic_assistant_message(
+            query,
+            results,
+            constraints,
+            brand_budget_answer=brand_budget_answer,
+        )
+        _claim_guard_result = "forced_deterministic_use_case_conflict"
+    elif not assistant_message:
         assistant_message = _deterministic_assistant_message(query, results, constraints, brand_budget_answer=brand_budget_answer)
     elif brand_budget_answer:
         _assistant_low = str(assistant_message or "").strip().lower()
@@ -10600,15 +10632,24 @@ def suggest(
         _esc_value = int(_esc_p0) * _esc_qty if isinstance(_esc_p0, int) else 0
     _esc_horizon = constraints.get("availability_horizon_days")
     _esc_rush = bool(isinstance(_esc_horizon, int) and 0 < _esc_horizon <= 7)
+    # Intent-aware B2B: quantity is a SIGNAL, not a gate. assess_b2b_intent combines it with the
+    # query's business language → consumer / b2b / ambiguous_bulk / anomalous. Anomalous (absurd
+    # count: error, prompt attack, or a deal too large to auto-quote) escalates HARD to a human;
+    # ambiguous-bulk gets B2B treatment so it's clarified/reviewed. Surfaced for pricing
+    # (discount_eligible) + the escalation room. assess_b2b_intent never raises → no try/except.
+    from src.app.services.b2b_intent import assess_b2b_intent as _assess_b2b
+    _b2b = _assess_b2b(query, quantity=_esc_qty)
+    payload["b2b_assessment"] = _b2b.to_dict()
+    _esc_anom = (_b2b.verdict == "anomalous")
     _esc_decision = _assess_esc(
         decomposition_confidence=getattr(_dq_esc(query), "decomposition_confidence", 1.0),
-        irreversible_action=False,  # suggest() is a recommendation, not an irreversible action
+        irreversible_action=_esc_anom,  # an absurd-quantity request is consequential, not a browse
         order_quantity=_esc_qty,
         order_value_cents=_esc_value,
-        fraud_score=_esc_risk,
+        fraud_score=max(_esc_risk, 0.75 if _esc_anom else 0.0),  # anomalous → hard human escalation
         constraint_conflict=(_esc_cstat.get("exact_match") is False),
         claim_guard_rejected=(_claim_guard_result == "fell_back_to_deterministic"),
-        b2b=(_esc_qty > 1),
+        b2b=_b2b.wants_procurement_questions,  # b2b OR ambiguous-bulk → B2B review treatment
         rush_delivery=_esc_rush,  # account/email/billing red flags are checkout-time (not at suggest)
     )
     payload["escalation_assessment"] = _esc_decision.to_dict()

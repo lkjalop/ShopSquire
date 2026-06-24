@@ -82,6 +82,7 @@
   "_nqe_question_packs_comment": "Domain-specific NQE clarifying questions (excised from nqe.py hardcoded packs). Each entry is keyed by question id and contains: text, goal, evidence_needed, source, options. NQE reads these from the active profile; non-electronics verticals supply their own domain questions.",
   "nqe_question_packs": {
     "ask_b2b_procurement": {
+      "trigger_quantity_min": 5,
       "trigger_query_keywords": ["for our team", "for the team", "for staff", "for employees", "for the company", "for the business", "fleet", "bulk order", "in bulk", "procurement", "roll out", "rollout", "work laptops for", "laptops for our", "for the office team", "for our staff", "for our employees", "deploy"],
       "skip_if_query_contains": ["just me", "for myself", "personal use", "my own", "for my"],
       "answered_field": "b2b_requirements",
@@ -189,6 +190,30 @@
     {"pattern": "\\bunder\\s*([0-9](?:\\.[0-9])?)\\s*kg\\b", "key": "weight_kg_max", "cast": "float", "group": 1},
     {"pattern": "\\b(8|16|24|32|64)\\s*gb\\b", "key": "ram_gb_min", "cast": "int", "group": 1},
     {"pattern": "\\b([1248])\\s*tb\\b", "key": "storage_gb_min", "cast": "int", "group": 1, "multiplier": 1024}
+  ],
+  "_hard_constraint_metric_map_comment": "Adapter mapping from normalized query constraints to extracted product metrics. The core ranking engine only evaluates these declarative operators.",
+  "hard_constraint_metric_map": {
+    "refresh_hz_min": {"metric": "refresh_hz", "op": ">=", "label": "refresh rate"},
+    "ram_gb_min": {"metric": "ram_gb", "op": ">=", "label": "RAM"},
+    "storage_gb_min": {"metric": "storage_gb", "op": ">=", "label": "storage"},
+    "weight_kg_max": {"metric": "weight_kg", "op": "<=", "label": "weight/portability"},
+    "must_have_dedicated_gpu": {"metric": "has_dedicated_gpu", "op": "truthy", "label": "dedicated GPU"}
+  },
+  "_ranking_conflict_rules_comment": "Adapter-only workload/chassis conflicts. Strong deltas prevent generic stock and price bonuses from presenting a known mismatch as a best fit.",
+  "ranking_conflict_rules": [
+    {
+      "use_cases": ["business_professional", "office_general", "office_finance", "office_executive"],
+      "conditions": [
+        {"metric": "gaming_style", "op": "truthy", "delta": -12.0, "reason": "gaming chassis conflicts with the requested business use", "conflict": "gaming_chassis_for_office"}
+      ]
+    },
+    {
+      "use_cases": ["high_school", "university_general", "note_taking_student", "medical_student", "law_student"],
+      "skip_query_any": ["gaming", "game", "gamer", "esports", "valorant", "fortnite", "aaa"],
+      "conditions": [
+        {"metric": "gaming_style", "op": "truthy", "delta": -4.0, "reason": "gaming-first chassis is a weaker fit for everyday study", "conflict": "gaming_chassis_for_study"}
+      ]
+    }
   ],
   "_use_case_spec_implications_comment": "Implied spec floors when a use-case is present AND a phrase matches (e.g. competitive/esports gaming implies a high refresh floor). mode=setdefault never overrides an explicit value.",
   "use_case_spec_implications": [

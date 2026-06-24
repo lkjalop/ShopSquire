@@ -20,6 +20,7 @@ def _pack():
 def test_b2b_pack_present_with_procurement_options():
     p = _pack()
     assert p, "ask_b2b_procurement must exist in the electronics profile"
+    assert p.get("trigger_quantity_min") == 5
     values = {o["value"] for o in p.get("options", [])}
     # the procurement dimensions GPT-5.5 asked for
     assert {"workload", "os_standard", "warranty_sla", "manageability", "docking", "deployment"} <= values

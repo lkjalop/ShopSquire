@@ -45,6 +45,20 @@ def _question_ids(questions) -> set:
 # ── Electronics: existing questions fire ──
 
 class TestElectronicsNQEPacks:
+    def test_quantity_alone_fires_b2b_procurement(self):
+        with _vertical("electronics"):
+            engine = _make_engine()
+            inp = NQEInput(
+                intent="recommend",
+                product_category="laptop",
+                query="I am thinking to buy 10 laptops",
+                detected_use_case="business_professional",
+                missing_fields=[],
+                order_quantity=10,
+            )
+            qs = engine.propose(inp)
+            assert "ask_b2b_procurement" in _question_ids(qs)
+
     def test_high_school_fires(self):
         with _vertical("electronics"):
             engine = _make_engine()

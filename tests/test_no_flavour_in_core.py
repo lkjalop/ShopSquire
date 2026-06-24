@@ -40,6 +40,8 @@ _CORE_MODULES = [
     "src/app/services/negation_filter.py",
     # escalation policy: risk/complexity → human-in-the-loop decision, vertical-blind signal math.
     "src/app/services/escalation_policy.py",
+    # B2B intent: quantity + business-language → consumer/b2b/ambiguous/anomalous, vertical-blind.
+    "src/app/services/b2b_intent.py",
     # LLM intent-planner fallback: prompt seeded from the profile vocab, no hardcoded verticals.
     "src/app/services/llm_planner.py",
     "src/app/services/recommend_pipeline.py",

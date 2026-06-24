@@ -1,4 +1,5 @@
 from src.app.services.recommendations import RecommendationService
+from src.app.services import recommend_intent_router
 from src.app.routers import recommend as recommend_router
 from tests.test_recommend import client, _write_flags
 
@@ -47,9 +48,9 @@ def test_recommend_passes_has_image_to_complexity_context(monkeypatch):
             captured_contexts.append(dict(context or {}))
             return {"length_trigger": False, "matched_keywords": [], "conjunction_count": 0, "score": 0}
 
-        monkeypatch.setattr(recommend_router, "select_ollama_model", _capture_model)
-        monkeypatch.setattr(recommend_router, "is_complex_query", _capture_complex)
-        monkeypatch.setattr(recommend_router, "complexity_explain", _capture_explain)
+        monkeypatch.setattr(recommend_intent_router, "select_ollama_model", _capture_model)
+        monkeypatch.setattr(recommend_intent_router, "is_complex_query", _capture_complex)
+        monkeypatch.setattr(recommend_intent_router, "complexity_explain", _capture_explain)
 
         r = client.get(
             "/api/v1/recommend/suggest",

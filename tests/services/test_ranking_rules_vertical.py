@@ -38,6 +38,68 @@ def test_electronics_inline_ranking_still_works():
         assert score > 0 and any("GPU" in p or "gaming" in p.lower() or "refresh" in p.lower() for p in plus)
 
 
+def test_office_gaming_chassis_conflict_is_strong_and_explicit():
+    with _vertical("electronics"):
+        scored = rr.apply_use_case_rank_adjustments(
+            [{
+                "candidate": {
+                    "name": "MSI Katana Gaming Laptop RTX 4060",
+                    "specs": {"ram_gb": 16, "gpu": "RTX 4060", "refresh_hz": 144},
+                },
+                "score": 15.0,
+                "factors": {"positive": ["in budget"], "negative": []},
+            }],
+            use_case_key="business_professional",
+            query="10 laptops for office staff",
+        )
+        assert scored[0]["score"] < 3.0
+        assert "gaming_chassis_for_office" in scored[0]["factors"]["use_case_conflicts"]
+
+
+def test_mixed_university_gaming_does_not_penalize_discrete_gpu():
+    with _vertical("electronics"):
+        score, plus, minus = _adj(
+            {
+                "name": "Portable Gaming Laptop RTX 4060",
+                "specs": {"ram_gb": 16, "gpu": "RTX 4060", "refresh_hz": 144},
+            },
+            "university_general",
+            "portable for university but good enough for gaming",
+        )
+        assert score > 0
+        assert any("gaming" in p.lower() for p in plus)
+        assert not any("gaming-first" in m.lower() for m in minus)
+
+
+def test_hard_constraint_violation_is_demoted_before_result_build():
+    with _vertical("electronics"):
+        rows = rr.apply_hard_constraint_rank_adjustments(
+            [
+                {
+                    "candidate": {"name": "Heavy Laptop", "specs": {"weight_kg": 2.8}},
+                    "score": 20.0,
+                    "factors": {},
+                },
+                {
+                    "candidate": {"name": "Light Laptop", "specs": {"weight_kg": 1.5}},
+                    "score": 10.0,
+                    "factors": {},
+                },
+            ],
+            hard_constraints={"weight_kg_max": 2.0},
+        )
+        assert rows[0]["candidate"]["name"] == "Light Laptop"
+        assert rows[1]["factors"]["hard_constraint_violations"] == ["weight/portability"]
+
+
+def test_all_conflicted_rows_report_no_clean_fit():
+    status = rr.summarize_use_case_fit([
+        {"factors": {"use_case_conflicts": ["gaming_chassis_for_office"]}},
+        {"factors": {"use_case_conflicts": ["gaming_chassis_for_office"]}},
+    ])
+    assert status["exact_fit"] is False
+
+
 def test_fashion_ranks_in_its_vocabulary():
     with _vertical("fashion"):
         s_breath, plus, _ = _adj({"name": "Linen Breathable Shirt", "specs": {}}, "summer")

@@ -1625,10 +1625,11 @@ def test_zero_result_followup_does_not_overwrite_prior_shortlist():
         turn1_skus = [x for x in turn1_skus if x]
         assert len(turn1_skus) >= 1
 
-        # This turn intentionally produces zero matches - budget $1 has no products in any catalog.
+        # This turn intentionally produces zero matches. Three-digit values are
+        # valid shopping budgets; one-digit values are ignored as likely spec units.
         r2 = client.get(
             "/api/v1/recommend/suggest",
-            params={"uid": uid, "query": "show gaming laptops under $1"},
+            params={"uid": uid, "query": "show gaming laptops under $100"},
         )
         assert r2.status_code == 200
         b2 = r2.json()
@@ -1789,53 +1790,10 @@ def test_followup_explain_detector_extended_phrases():
         assert recommend_router._is_followup_explain_query(q) is True
 
 
-def test_recommend_passes_has_image_to_complexity_context(monkeypatch):
-    orig_retrieve = RecommendationService.retrieve_candidates
-    captured_contexts = []
-    try:
-        RecommendationService.retrieve_candidates = lambda self, query, limit=10: [
-            {"id": "p1", "sku": "CTX-1", "name": "Laptop A", "price_cents": 109900, "currency": "USD", "stock": 4, "specs": {"ram_gb": 16}},
-            {"id": "p2", "sku": "CTX-2", "name": "Laptop B", "price_cents": 129900, "currency": "USD", "stock": 3, "specs": {"ram_gb": 16}},
-        ]
-        _write_flags({
-            "USE_AGENT_CAPABILITIES": True,
-            "AGENT_ROLLOUT_PERCENT": 100,
-            "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
-            "KILL_SWITCH": False,
-            "DECISION_LOG_WRITES_ENABLED": False,
-            "DEGRADATION": {"enabled": True},
-            "TEST_FORCE_BAD_SKU": False,
-        })
-
-        def _capture_model(query, *, context=None):
-            captured_contexts.append(dict(context or {}))
-            return "llama3:8b"
-
-        def _capture_complex(query, *, context=None):
-            captured_contexts.append(dict(context or {}))
-            return False
-
-        def _capture_explain(query, *, context=None):
-            captured_contexts.append(dict(context or {}))
-            return {"length_trigger": False, "matched_keywords": [], "conjunction_count": 0, "score": 0}
-
-        monkeypatch.setattr(recommend_router, "select_ollama_model", _capture_model)
-        monkeypatch.setattr(recommend_router, "is_complex_query", _capture_complex)
-        monkeypatch.setattr(recommend_router, "complexity_explain", _capture_explain)
-
-        r = client.get(
-            "/api/v1/recommend/suggest",
-            params={
-                "uid": "u-context-img-1",
-                "query": "compare alternatives like this",
-                "image_labels": "laptop,lenovo",
-            },
-        )
-        assert r.status_code == 200
-        assert captured_contexts, "Expected complexity context capture from model-routing helpers"
-        assert any(bool(c.get("has_image")) for c in captured_contexts)
-    finally:
-        RecommendationService.retrieve_candidates = orig_retrieve
+# NOTE: test_recommend_passes_has_image_to_complexity_context moved to
+# tests/unit/test_recommend_followup_complexity_context.py after the Ollama intent-routing was
+# extracted to recommend_intent_router (the canonical version patches the new location). The stale
+# copy here patched the moved symbols and is removed to avoid a false failure.
 
 
 def test_recommend_uses_vision_product_identity_from_cached_image_blob(monkeypatch):
@@ -2333,7 +2291,7 @@ def test_structured_state_preserves_shortlist_after_zero_result_turn():
         turn1_skus = [x for x in turn1_skus if x]
         assert turn1_skus
 
-        r2 = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": "show gaming laptops under $1"})
+        r2 = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": "show gaming laptops under $100"})
         assert r2.status_code == 200
         b2 = r2.json()
         assert (b2.get("results") or []) == []

@@ -45,6 +45,20 @@ def _ranking_rules_for(pid: str):
     return raw if isinstance(raw, list) and raw else None
 
 
+@lru_cache(maxsize=8)
+def _ranking_conflict_rules_for(pid: str) -> list:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("ranking_conflict_rules", profile_id=pid, default=[])
+    return raw if isinstance(raw, list) else []
+
+
+@lru_cache(maxsize=8)
+def _hard_constraint_metric_map_for(pid: str) -> dict:
+    from src.app.platform.store_profile import profile_slot
+    raw = profile_slot("hard_constraint_metric_map", profile_id=pid, default={})
+    return raw if isinstance(raw, dict) else {}
+
+
 def _active_pid() -> str:
     from src.app.platform.store_profile import active_profile_id
     return active_profile_id()
@@ -53,6 +67,8 @@ def _active_pid() -> str:
 def reset_cache() -> None:
     """Clear the per-profile ranking-rules cache (test isolation / reload)."""
     _ranking_rules_for.cache_clear()
+    _ranking_conflict_rules_for.cache_clear()
+    _hard_constraint_metric_map_for.cache_clear()
 
 
 def _condition_met(metric_value: Any, op: str, value: Any) -> bool:
@@ -112,6 +128,65 @@ def _evaluate_ranking_rules(
     return round(score, 4), plus[:3], minus[:3]
 
 
+def _evaluate_conflict_rules(
+    metrics: Dict[str, Any], use_case: str, query: str, rules: list
+) -> Tuple[float, List[str], List[str], List[str]]:
+    uc = str(use_case or "").strip().lower()
+    q = str(query or "").lower()
+    score = 0.0
+    plus: List[str] = []
+    minus: List[str] = []
+    conflicts: List[str] = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        ucs = [str(x).lower() for x in (rule.get("use_cases") or [])]
+        if ucs and uc not in ucs:
+            continue
+        if any(str(token).lower() in q for token in (rule.get("skip_query_any") or [])):
+            continue
+        for cond in rule.get("conditions") or []:
+            if not isinstance(cond, dict):
+                continue
+            if not _condition_met(metrics.get(cond.get("metric")), cond.get("op"), cond.get("value")):
+                continue
+            delta = float(cond.get("delta") or 0.0)
+            score += delta
+            reason = str(cond.get("reason") or "").strip()
+            if reason:
+                (plus if delta >= 0 else minus).append(reason)
+            conflict = str(cond.get("conflict") or "").strip()
+            if conflict and conflict not in conflicts:
+                conflicts.append(conflict)
+    return round(score, 4), plus[:3], minus[:3], conflicts
+
+
+def _use_case_rank_details(
+    candidate: Dict[str, Any],
+    *,
+    use_case_key: str | None,
+    query: str,
+) -> Tuple[float, List[str], List[str], List[str]]:
+    base_score, plus, minus = use_case_rank_adjustment(
+        candidate,
+        use_case_key=use_case_key,
+        query=query,
+    )
+    metrics = _extract_candidate_numeric_specs(candidate)
+    conflict_score, conflict_plus, conflict_minus, conflicts = _evaluate_conflict_rules(
+        metrics,
+        str(use_case_key or ""),
+        query,
+        _ranking_conflict_rules_for(_active_pid()),
+    )
+    return (
+        round(base_score + conflict_score, 4),
+        (plus + conflict_plus)[:3],
+        (minus + conflict_minus)[:6],
+        conflicts,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ADAPTER — Electronics-specific use-case rank scoring (inline fallback).
 # Used only when the active profile defines no ranking_rules. Every metric and
@@ -154,6 +229,10 @@ def use_case_rank_adjustment(
     student_keys = {"high_school", "university_general", "note_taking_student", "medical_student", "law_student"}
     work_keys = {"business_professional", "office_general", "office_finance", "office_executive"}
     engineering_keys = {"engineering_student", "computer_science_student"}
+    gaming_requested = any(
+        token in q_low
+        for token in ("gaming", "game", "gamer", "esports", "valorant", "fortnite", "aaa")
+    )
 
     if use_case in student_keys:
         if portable:
@@ -167,12 +246,18 @@ def use_case_rank_adjustment(
         if storage >= 512:
             score += 0.4
             plus.append("usable storage headroom")
-        if has_gpu:
+        if has_gpu and not gaming_requested:
             score -= 0.8
             minus.append("more GPU-heavy than most school needs")
-        if gaming_style:
+        if gaming_style and not gaming_requested:
             score -= 1.3
             minus.append("gaming-first design is less ideal for school")
+        if gaming_requested and has_gpu:
+            score += 1.4
+            plus.append("dedicated GPU balances study and gaming")
+        if gaming_requested and refresh >= 120:
+            score += 0.5
+            plus.append("high-refresh display supports gaming")
         if display and display >= 15.6:
             score -= 0.35
     elif use_case in work_keys:
@@ -278,7 +363,11 @@ def apply_use_case_rank_adjustments(
         if not isinstance(item, dict):
             continue
         candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
-        bonus, plus, minus = use_case_rank_adjustment(candidate, use_case_key=use_case_key, query=query)
+        bonus, plus, minus, conflicts = _use_case_rank_details(
+            candidate,
+            use_case_key=use_case_key,
+            query=query,
+        )
         new_item = dict(item)
         base_factors = dict(new_item.get("factors") or {})
         pos = [str(x) for x in (base_factors.get("positive") or [])]
@@ -292,8 +381,83 @@ def apply_use_case_rank_adjustments(
         base_factors["positive"] = pos[:6]
         base_factors["negative"] = neg[:6]
         base_factors["use_case_bonus"] = bonus
+        if conflicts:
+            base_factors["use_case_conflicts"] = conflicts
         new_item["factors"] = base_factors
         new_item["score"] = float(new_item.get("score") or 0.0) + float(bonus)
         adjusted.append(new_item)
     adjusted.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
     return adjusted
+
+
+def apply_hard_constraint_rank_adjustments(
+    scored: List[Dict[str, Any]],
+    *,
+    hard_constraints: Dict[str, Any] | None,
+) -> List[Dict[str, Any]]:
+    """Demote known hard-constraint violations before result construction.
+
+    Constraint-to-metric semantics are profile data. Unknown metrics remain
+    neutral so incomplete catalogs are not treated as confirmed violations.
+    """
+    if not scored or not isinstance(hard_constraints, dict) or not hard_constraints:
+        return scored
+    metric_map = _hard_constraint_metric_map_for(_active_pid())
+    if not metric_map:
+        return scored
+    adjusted: List[Dict[str, Any]] = []
+    for item in scored:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get("candidate") if isinstance(item.get("candidate"), dict) else {}
+        metrics = _extract_candidate_numeric_specs(candidate)
+        violations: List[str] = []
+        for constraint_key, required in hard_constraints.items():
+            rule = metric_map.get(constraint_key)
+            if not isinstance(rule, dict):
+                continue
+            metric_key = str(rule.get("metric") or "").strip()
+            actual = metrics.get(metric_key)
+            if actual is None:
+                continue
+            if not _condition_met(actual, str(rule.get("op") or "truthy"), required):
+                violations.append(str(rule.get("label") or constraint_key))
+        new_item = dict(item)
+        factors = dict(new_item.get("factors") or {})
+        if violations:
+            negative = [str(x) for x in (factors.get("negative") or [])]
+            for label in violations:
+                reason = f"hard constraint miss: {label}"
+                if reason not in negative:
+                    negative.append(reason)
+            factors["negative"] = negative[:8]
+            factors["hard_constraint_violations"] = violations
+            new_item["score"] = float(new_item.get("score") or 0.0) - (20.0 * len(violations))
+        new_item["factors"] = factors
+        adjusted.append(new_item)
+    adjusted.sort(key=lambda row: float(row.get("score") or 0.0), reverse=True)
+    return adjusted
+
+
+def summarize_use_case_fit(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize whether the returned set contains at least one clean fit."""
+    valid = [row for row in (rows or []) if isinstance(row, dict)]
+    if not valid:
+        return {}
+    conflict_sets: List[List[str]] = []
+    for row in valid:
+        factors = row.get("factors") if isinstance(row.get("factors"), dict) else {}
+        conflicts = [str(x) for x in (factors.get("use_case_conflicts") or []) if str(x)]
+        conflict_sets.append(conflicts)
+    all_conflicted = bool(conflict_sets) and all(conflict_sets)
+    conflicts = list(dict.fromkeys(x for group in conflict_sets for x in group))
+    if all_conflicted:
+        return {
+            "exact_fit": False,
+            "conflicts": conflicts,
+            "message": (
+                "No clean use-case fit is available in this result set; "
+                "these are the closest options and their trade-offs are shown."
+            ),
+        }
+    return {"exact_fit": True, "conflicts": conflicts}

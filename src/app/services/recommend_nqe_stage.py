@@ -35,6 +35,7 @@ from src.app.services.recommend_nqe_helpers import build_nqe_asked_and_answered
 
 
 DOMAIN_REFINEMENT_QUESTION_IDS = {
+    "ask_b2b_procurement",
     "ask_high_school_activity",
     "ask_university_subject",
     "ask_corporate_work_type",
@@ -98,6 +99,7 @@ def prioritize_domain_refinement_questions(questions: list[dict] | None) -> list
     if not items:
         return []
     guard: list[dict] = []
+    procurement: list[dict] = []
     domain: list[dict] = []
     generic_use_case: list[dict] = []
     other: list[dict] = []
@@ -108,19 +110,24 @@ def prioritize_domain_refinement_questions(questions: list[dict] | None) -> list
         "ask_image_model",
         "reupload_clean_image",
     }
+    # B2B procurement questions outrank consumer use-case questions: when a business/bulk buyer is
+    # detected, "what's the deployment / warranty tier" matters more than "what will you use it for".
+    procurement_ids = {"ask_b2b_procurement"}
     for q in items:
         qid = str(q.get("id") or "").strip().lower()
         if qid in guard_ids:
             guard.append(q)
+        elif qid in procurement_ids:
+            procurement.append(q)
         elif qid in DOMAIN_REFINEMENT_QUESTION_IDS:
             domain.append(q)
         elif qid == "ask_use_case":
             generic_use_case.append(q)
         else:
             other.append(q)
-    if not domain:
+    if not domain and not procurement:
         return items
-    return guard + domain + other + generic_use_case
+    return guard + procurement + domain + other + generic_use_case
 
 
 def _header(request: Any, name: str) -> str | None:
@@ -249,7 +256,16 @@ def run_recommend_nqe_stage(
             missing_fields,
             query_understanding,
         )
-        if missing_fields and not skip_nqe_clarify:
+        # B2B procurement is INTENT-driven, not a raw-quantity gate: a personal multi-buy stays
+        # consumer; an absurd count is anomalous (handled by escalation). assess_b2b_intent combines
+        # the quantity with the query's business language.
+        order_quantity = state.constraints.get("order_quantity")
+        from src.app.services.b2b_intent import assess_b2b_intent
+        _b2b_assessment = assess_b2b_intent(state.query, quantity=order_quantity)
+        bulk_procurement = _b2b_assessment.wants_procurement_questions
+        if bulk_procurement and "b2b_requirements" not in missing_fields:
+            missing_fields.append("b2b_requirements")
+        if (missing_fields or bulk_procurement) and not skip_nqe_clarify:
             category = hooks.resolve_nqe_product_category(
                 query=state.query,
                 constraints=state.constraints,
@@ -299,6 +315,7 @@ def run_recommend_nqe_stage(
                 chat_history_summary=session_context_summary,
                 user_profile=user_profile_dict or {},
                 turn_intent=state.turn_intent,
+                order_quantity=order_quantity if isinstance(order_quantity, int) else None,
                 identity_residual_question=state.constraints.get("_identity_residual_question"),
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())

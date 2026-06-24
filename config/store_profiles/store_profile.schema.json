@@ -61,6 +61,8 @@
     "primary_types": {"type": "array"},
     "narration_spec_dimensions": {"type": "array", "description": "Ordered spec dimensions surfaced in product narration/tradeoff lines: [{label, variants:[{key, unit?}]}]. Vertical-blind: core's narration_tradeoff reads this instead of hardcoding GPU/RAM/refresh."},
     "spec_extraction_rules": {"type": "object", "description": "OPTIONAL (inline-adapter slot): numeric/flag spec parsing rules. fashion/pharmacy carry it; electronics uses the inline adapter in recommend_utils pending byte-equivalent extraction."},
-    "ranking_rules": {"type": "array", "description": "OPTIONAL (inline-adapter slot): use-case rank rules. fashion/pharmacy carry it; electronics uses the inline adapter in recommend_ranking pending byte-equivalent extraction."}
+    "ranking_rules": {"type": "array", "description": "OPTIONAL (inline-adapter slot): use-case rank rules. fashion/pharmacy carry it; electronics uses the inline adapter in recommend_ranking pending byte-equivalent extraction."},
+    "ranking_conflict_rules": {"type": "array", "description": "OPTIONAL adapter rules for known use-case/product conflicts that require strong rank demotion and honest narration."},
+    "hard_constraint_metric_map": {"type": "object", "description": "OPTIONAL adapter mapping from normalized hard constraints to extracted product metrics and comparison operators."}
   }
 }

@@ -612,6 +612,12 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
         return f"I couldn't find an in-stock{_brand_txt} match{_band}. {_path}"
     budget_min = constraints.get("budget_min")
     budget_max = constraints.get("budget_max")
+    use_case_fit_status = (
+        constraints.get("use_case_fit_status")
+        if isinstance(constraints.get("use_case_fit_status"), dict)
+        else {}
+    )
+    clean_use_case_fit = use_case_fit_status.get("exact_fit") is not False
 
     # ── Persona-aware humanization ────────────────────────────────────────────
     shopper_intent = constraints.get("shopper_intent") if isinstance(constraints.get("shopper_intent"), dict) else {}
@@ -660,7 +666,9 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
     n = len(results)
     match_plural = "es" if n != 1 else ""   # "matches"
     option_plural = "s" if n != 1 else ""   # "options"
-    if budget_min is not None and budget_max is not None:
+    if not clean_use_case_fit:
+        core = f"found {n} closest option{option_plural}, but none is a clean use-case fit"
+    elif budget_min is not None and budget_max is not None:
         core = f"found {n} match{match_plural} between ${int(budget_min):,} and ${int(budget_max):,}"
     elif budget_max is not None:
         core = f"found {n} option{option_plural} under ${int(budget_max):,}"
@@ -713,10 +721,15 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
             picks = top_lines[0]
         else:
             picks = ", ".join(top_lines[:-1]) + f" and {top_lines[-1]}"
-        fit_line = f"Best fits for {persona_label}: {picks}." if persona_label else f"Best fits here: {picks}."
+        if clean_use_case_fit:
+            fit_line = f"Best fits for {persona_label}: {picks}." if persona_label else f"Best fits here: {picks}."
+        else:
+            fit_line = f"Closest options with trade-offs: {picks}."
     budget_reasoning = _build_budget_reasoning_note(query, results, constraints)
 
     parts: list[str] = []
+    if not clean_use_case_fit and use_case_fit_status.get("message"):
+        parts.append(str(use_case_fit_status["message"]))
     if brand_budget_answer:
         parts.append(brand_budget_answer)
         if budget_reasoning:

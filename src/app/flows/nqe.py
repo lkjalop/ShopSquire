@@ -85,6 +85,7 @@ class NQEInput(BaseModel):
     detected_games: List[str] = []  # game titles mentioned in query
     detected_software: List[str] = []  # software names mentioned
     turn_intent: Optional[str] = None  # SEARCH | FILTER | EXPLAIN | COMPARE
+    order_quantity: Optional[int] = None
     # Stock context (set by recommend.py after candidate retrieval)
     oos_fraction: float = 0.0  # fraction of candidates that are out of stock (0.0–1.0)
     stock_filter_opted_in: bool = False  # True when user already chose "in-stock only"
@@ -596,9 +597,19 @@ class NextQuestionEngine:
             # Check trigger_use_cases
             _trigger_ucs = _pack.get("trigger_use_cases") or []
             _trigger_kws = _pack.get("trigger_query_keywords") or []
+            _trigger_qty_min = _pack.get("trigger_quantity_min")
             _skip_kws = _pack.get("skip_if_query_contains") or []
             _should_fire = False
-            if _trigger_ucs and inp.detected_use_case in _trigger_ucs:
+            if isinstance(_trigger_qty_min, int):
+                # Quantity is a SIGNAL, not a gate: fire procurement questions only when the buyer's
+                # INTENT is business/bulk (or ambiguous-bulk needing clarification) — not on a raw
+                # count alone. A personal multi-buy stays consumer; an absurd count is anomalous and
+                # handled by escalation, not a procurement question.
+                from src.app.services.b2b_intent import assess_b2b_intent
+                _b2b = assess_b2b_intent(query_text, quantity=inp.order_quantity, bulk_min=_trigger_qty_min)
+                if _b2b.wants_procurement_questions:
+                    _should_fire = True
+            elif _trigger_ucs and inp.detected_use_case in _trigger_ucs:
                 _should_fire = True
                 # Apply skip_if_query_contains
                 if _skip_kws and any(w in (query_text or "").lower() for w in _skip_kws):
@@ -611,6 +622,8 @@ class NextQuestionEngine:
                 # For corporate: skip if subtype already resolved
                 if _pack_id == "ask_corporate_work_type" and corporate_sub:
                     _should_fire = False
+            if _should_fire and _skip_kws and any(w in (query_text or "").lower() for w in _skip_kws):
+                _should_fire = False
 
             if _should_fire:
                 questions.append(
