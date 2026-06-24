@@ -11761,6 +11761,16 @@ def suggest(
     # answer shaping (price-fill, off-type, poisoning guard, [N] deref, security, formatter).
     redacted = _compose_compound_if_needed(redacted, redacted.get("trace_id"))
     redacted = finalize_response_payload(redacted)
+    # Record latency for p50/p95 percentile tracking.
+    try:
+        from src.app.observability.latency_tracker import get_recommend_tracker
+        _lt = get_recommend_tracker()
+        _route_ms = (redacted.get("timing_breakdown") or {}).get("route_total_ms")
+        _cache_hit = bool((redacted.get("timing_breakdown") or {}).get("catalog_profile_cache_hit"))
+        if _route_ms is not None:
+            _lt.record(float(_route_ms), cache_hit=_cache_hit)
+    except Exception:
+        pass
     return redacted
 
 

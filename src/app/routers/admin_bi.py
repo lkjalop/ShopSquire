@@ -1665,3 +1665,14 @@ async def security_events_stream(
             await asyncio.sleep(3)
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+@router.get("/recommend-latency")
+def recommend_latency_api(
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    """Return p50/p95/p99 latency percentiles for the recommend pipeline (warm vs cold)."""
+    _ = role
+    from src.app.observability.latency_tracker import get_recommend_tracker
+    return get_recommend_tracker().summary()
+
