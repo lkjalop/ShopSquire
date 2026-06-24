@@ -6,7 +6,7 @@ constraint-conflict-on-value force a human; the function never raises and fails 
 from __future__ import annotations
 
 from src.app.services.escalation_policy import (
-    BAND_AUTO, BAND_HUMAN, BAND_REVIEW, assess_escalation,
+    BAND_AUTO, BAND_HUMAN, BAND_REVIEW, assess_escalation, b2b_legitimacy_risk,
 )
 
 
@@ -64,3 +64,29 @@ def test_to_dict_roundtrips():
     payload = d.to_dict()
     assert payload["escalate"] is True and payload["band"] == BAND_HUMAN
     assert isinstance(payload["reasons"], list) and isinstance(payload["factors"], dict)
+    assert "talk_to_client" in payload
+
+
+# ── B2B legitimacy ("real business purchase or fraud?") ──────────────────────
+def test_b2b_legitimacy_co_occurrence_not_single_flag():
+    # A single soft flag (bulk orders are often rushed) is NOT fraud.
+    assert b2b_legitimacy_risk(rush_delivery=True) == 0.0
+    # The BEC pattern: new account + free email + billing/shipping mismatch.
+    assert b2b_legitimacy_risk(new_account=True, free_email_domain=True) >= 0.33
+    assert b2b_legitimacy_risk(new_account=True, free_email_domain=True,
+                               billing_shipping_mismatch=True, rush_delivery=True) == 1.0
+
+
+def test_b2b_fraud_pattern_escalates_to_human_with_talk_to_client():
+    d = assess_escalation(b2b=True, order_quantity=25, new_account=True,
+                          free_email_domain=True, billing_shipping_mismatch=True)
+    assert d.band == BAND_HUMAN and d.escalate is True
+    assert d.talk_to_client is True
+    assert any("fraud" in r.lower() or "b2b" in r.lower() for r in d.reasons)
+
+
+def test_clean_b2b_bulk_order_does_not_over_escalate():
+    # Legitimate bulk B2B with only rush (1 soft flag) and no fraud → not human_required.
+    d = assess_escalation(b2b=True, order_quantity=10, rush_delivery=True, fraud_score=0.0,
+                          decomposition_confidence=0.9)
+    assert d.band != BAND_HUMAN

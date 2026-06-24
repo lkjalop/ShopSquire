@@ -10825,6 +10825,8 @@ def suggest(
     if isinstance(results, list) and results and isinstance(results[0], dict):
         _esc_p0 = results[0].get("price_cents")
         _esc_value = int(_esc_p0) * _esc_qty if isinstance(_esc_p0, int) else 0
+    _esc_horizon = constraints.get("availability_horizon_days")
+    _esc_rush = bool(isinstance(_esc_horizon, int) and 0 < _esc_horizon <= 7)
     _esc_decision = _assess_esc(
         decomposition_confidence=getattr(_dq_esc(query), "decomposition_confidence", 1.0),
         irreversible_action=False,  # suggest() is a recommendation, not an irreversible action
@@ -10834,8 +10836,28 @@ def suggest(
         constraint_conflict=(_esc_cstat.get("exact_match") is False),
         claim_guard_rejected=(_claim_guard_result == "fell_back_to_deterministic"),
         b2b=(_esc_qty > 1),
+        rush_delivery=_esc_rush,  # account/email/billing red flags are checkout-time (not at suggest)
     )
     payload["escalation_assessment"] = _esc_decision.to_dict()
+    # B2B escalation -> human room: when the bounded decision requires a human, surface a review
+    # envelope and reuse the existing (flag-gated) incident creator so the escalation room/admin can
+    # act, with a direct-contact affordance for B2B deals. All non-raising calls -> no new try/except.
+    if _esc_decision.band == "human_required":
+        payload["needs_human_review"] = True
+        _esc_env = payload.get("escalation") if isinstance(payload.get("escalation"), dict) else {}
+        if not _esc_env.get("route"):
+            payload["escalation"] = {
+                "route": "human_review",
+                "reason": (_esc_decision.reasons[0] if _esc_decision.reasons else "ai_flagged_human_review"),
+                "reasons": list(_esc_decision.reasons),
+                "talk_to_client": _esc_decision.talk_to_client,
+                "band": _esc_decision.band,
+            }
+        _auto_create_incident_for_review(
+            payload=payload, trace_id=trace_id, uid=uid, query=query,
+            severity="high", source="recommend_escalation",
+            extra_context={"escalation_assessment": _esc_decision.to_dict()},
+        )
     try:
         _bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
         _bf_status = str(_bf.get("status") or "").strip().lower()

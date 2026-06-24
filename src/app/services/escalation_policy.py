@@ -46,6 +46,24 @@ def _f(env: str, default: float) -> float:
         return default
 
 
+def b2b_legitimacy_risk(
+    *,
+    new_account: bool = False,
+    free_email_domain: bool = False,
+    billing_shipping_mismatch: bool = False,
+    rush_delivery: bool = False,
+) -> float:
+    """The classic BEC / procurement-fraud pattern for a B2B order: a real business purchase vs
+    something else. CO-OCCURRENCE matters — a single soft flag is normal (bulk orders are often rushed),
+    but a new account + free-email domain + billing/shipping mismatch together is the fraud signature.
+    Returns 0..1; 0-1 flags → 0 (don't penalise legitimate procurement), 2→0.33, 3→0.67, 4→1.0."""
+    flags = [bool(new_account), bool(free_email_domain), bool(billing_shipping_mismatch), bool(rush_delivery)]
+    n = sum(1 for f in flags if f)
+    if n <= 1:
+        return 0.0
+    return round(min(1.0, (n - 1) / 3.0), 4)
+
+
 @dataclass
 class EscalationDecision:
     escalate: bool
@@ -53,11 +71,13 @@ class EscalationDecision:
     score: float
     reasons: List[str] = field(default_factory=list)
     factors: Dict[str, float] = field(default_factory=dict)
+    talk_to_client: bool = False  # offer the admin a direct-contact action (B2B deals)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "escalate": self.escalate, "band": self.band, "score": self.score,
             "reasons": list(self.reasons), "factors": dict(self.factors),
+            "talk_to_client": self.talk_to_client,
         }
 
 
@@ -71,6 +91,10 @@ def assess_escalation(
     constraint_conflict: bool = False,
     claim_guard_rejected: bool = False,
     b2b: bool = False,
+    new_account: bool = False,
+    free_email_domain: bool = False,
+    billing_shipping_mismatch: bool = False,
+    rush_delivery: bool = False,
     thresholds: Optional[Dict[str, float]] = None,
 ) -> EscalationDecision:
     """Combine the risk signals into a bounded escalation decision. Never raises."""
@@ -84,6 +108,13 @@ def assess_escalation(
 
         conf = max(0.0, min(1.0, float(decomposition_confidence if decomposition_confidence is not None else 1.0)))
         fraud = max(0.0, min(1.0, float(fraud_score or 0.0)))
+        # B2B legitimacy ("real business purchase or fraud?") acts like fraud for a B2B order.
+        b2b_risk = b2b_legitimacy_risk(
+            new_account=new_account, free_email_domain=free_email_domain,
+            billing_shipping_mismatch=billing_shipping_mismatch, rush_delivery=rush_delivery,
+        ) if b2b else 0.0
+        if b2b_risk > fraud:
+            fraud = b2b_risk
         qty = int(order_quantity or 1)
         value = int(order_value_cents or 0)
         is_bulk = qty >= bulk_qty or value >= bulk_value
@@ -118,6 +149,8 @@ def assess_escalation(
         if 0 < fraud < fraud_hard:
             review_reasons.append("fraud signals present")
 
+        if b2b and b2b_risk >= 0.33 and not any("fraud" in r or "B2B" in r for r in (hard_reasons + review_reasons)):
+            review_reasons.append("B2B legitimacy red flags — possible procurement/BEC fraud")
         if hard_reasons or score >= human_at:
             band = BAND_HUMAN
         elif review_reasons or score >= review_at:
@@ -127,8 +160,11 @@ def assess_escalation(
         reasons = hard_reasons + review_reasons
         if band != BAND_AUTO and not reasons:
             reasons.append("aggregate risk score above review threshold")
+        # Offer the admin a direct-contact action on an escalated B2B deal (assess legitimacy / close).
+        talk = bool(b2b and band != BAND_AUTO)
         return EscalationDecision(
-            escalate=(band != BAND_AUTO), band=band, score=score, reasons=reasons[:8], factors=factors,
+            escalate=(band != BAND_AUTO), band=band, score=score, reasons=reasons[:8],
+            factors=factors, talk_to_client=talk,
         )
     except Exception:
         # Fail SAFE: on any unexpected input, ask for a human rather than silently auto-proceeding.
