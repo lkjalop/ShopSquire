@@ -452,8 +452,12 @@ class RecommendationService:
                     budget_min, budget_max = (a_i, b_i) if a_i <= b_i else (b_i, a_i)
                     break
         if budget_min is None and budget_max is None:
-            # look for single-value budget mentions: "under $500", "below 1000", or standalone $1000
-            m = re.search(r"(?:under|below|less than)\s*\$?([\d\.,kKmM]+)", t)
+            # look for single-value budget mentions: "under $500", "below 1000", or standalone $1000.
+            # A trailing spec/measurement unit means the number is a SPEC, not a budget — "under 2 kg"
+            # / "under 2kg" / "under 16 gb" must NOT become $2 / $2000 / $16 (live Tier-0 finding).
+            _unit_guard = (r"(?!\s*(?:kg|kgs|lb|lbs|g|gb|tb|mb|kb|hz|ghz|mhz|khz|fps|inch|inches|in|"
+                           r"cm|mm|w|watts|wh|mah|mp|cores?|nits|ppi|dpi)\b)")
+            m = re.search(r"(?:under|below|less than)\s*\$?([\d\.,]+[kKmM]?)" + _unit_guard, t)
             if m:
                 val = self._parse_number_with_suffix(m.group(1))
                 if val is not None:
@@ -477,7 +481,11 @@ class RecommendationService:
                         val = self._parse_number_with_suffix(m2.group(1))
                         if val is not None:
                             budget = int(val)
-        return budget_min, budget_max, budget
+        # Sane-budget floor: drop nonsensical sub-$50 values (e.g. a "$2" misread from "2 kg") and
+        # absurd highs — matches the decomposer's band so all budget sources agree.
+        def _sane(v):
+            return v if (isinstance(v, (int, float)) and 50 <= v <= 1_000_000) else None
+        return _sane(budget_min), _sane(budget_max), _sane(budget)
 
     def _extract_budget_delta(self, text: str) -> Optional[int]:
         """Extract relative budget updates like:
