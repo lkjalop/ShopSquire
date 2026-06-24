@@ -250,11 +250,14 @@ def apply_product_claim_guard(
     the prose and fall back to deterministic grounded copy (and trace the rejection). Returns the
     (possibly replaced) assistant_message. Flag-off / no message / no results -> unchanged. The
     deterministic copy generator is injected; never raises."""
+    _status = "disabled"
     try:
         if guard_enabled_fn is None or verify_fn is None:
             from src.app.services.product_claim_guard import guard_enabled as _ge, verify_product_narration as _vp
             guard_enabled_fn = guard_enabled_fn or _ge
             verify_fn = verify_fn or _vp
+        if guard_enabled_fn():
+            _status = "passed" if (assistant_message and results) else "skipped"
         if guard_enabled_fn() and assistant_message and results:
             gr = verify_fn(
                 assistant_message, results,
@@ -262,6 +265,7 @@ def apply_product_claim_guard(
                 budget_max=(constraints or {}).get("budget_max"),
             )
             if not getattr(gr, "grounded", True):
+                _status = "fell_back_to_deterministic"
                 assistant_message = deterministic_fn(
                     query, results, constraints, brand_budget_answer=brand_budget_answer
                 )
@@ -279,6 +283,9 @@ def apply_product_claim_guard(
                     pass
     except Exception:
         pass
+    # Honest reporting: record the true guard state so telemetry never shows a false "passed".
+    if isinstance(constraints, dict):
+        constraints["_claim_guard_status"] = _status
     return assistant_message
 
 

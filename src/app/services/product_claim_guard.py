@@ -216,4 +216,7 @@ def verify_product_narration(
 
 def guard_enabled() -> bool:
     import os
-    return str(os.getenv("COMMERCE_NARRATION_GUARD", "0")).strip().lower() in ("1", "true", "yes")
+    # Default ON (GPT-5.5 #1): rejecting an ungrounded LLM claim only makes output MORE conservative
+    # (it falls back to deterministic grounded copy) — a truthfulness/safety improvement, not a risky
+    # behavioural change. Set COMMERCE_NARRATION_GUARD=0 to disable.
+    return str(os.getenv("COMMERCE_NARRATION_GUARD", "1")).strip().lower() in ("1", "true", "yes")

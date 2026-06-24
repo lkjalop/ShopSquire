@@ -3442,12 +3442,32 @@ def _build_knowledge_answer(
     return None
 
 
+_CONSTRAINT_FRIENDLY = {
+    "refresh": "refresh-rate", "ram": "RAM", "needs_dgpu": "dedicated-GPU",
+    "weight": "weight/portability", "accessory": "product-type",
+}
+
+
+def _constraint_relaxation_note(violated: list[str]) -> str:
+    """Honest, buyer-friendly 'no exact match' sentence naming the unmet constraints + the relaxation
+    offer. Agnostic phrasing (the constraint labels are generic spec dimensions)."""
+    labels = [_CONSTRAINT_FRIENDLY.get(v, v) for v in violated if v in _CONSTRAINT_FRIENDLY]
+    if labels:
+        unmet = ", ".join(labels)
+        return (f"No exact match for your {unmet} requirement — these are the closest options. "
+                f"I can relax the {unmet}, adjust the budget, or widen the search if you'd like.")
+    return ("No exact match for every requirement — these are the closest options. I can relax a "
+            "constraint, adjust the budget, or widen the search if you'd like.")
+
+
 def _apply_query_plan_filters(results: list, plan: Any) -> tuple[list, dict]:
     """WS3.1/WS3.2 — drop accessories and hard-constraint violators.
 
-    Conservative by design: only drops on CONFIDENT violations (spec known and
-    breaks the floor; name clearly an accessory). If filtering would empty the
-    list, it reverts — never blank the screen.
+    Conservative by design: only drops on CONFIDENT violations (spec known and breaks the floor;
+    name clearly an accessory). If filtering would empty the list it returns the closest set, but
+    HONESTLY: dropped["exact_match"]=False + dropped["violated_constraints"] so the response says
+    "no exact match, here's the closest, want to relax X?" — never silently presents violators as a
+    clean match.
     """
     if not results or plan is None:
         return results, {}
@@ -3468,6 +3488,7 @@ def _apply_query_plan_filters(results: list, plan: Any) -> tuple[list, dict]:
         )
         rmin = hc.get("refresh_hz_min")
         rammin = hc.get("ram_gb_min")
+        wmax = hc.get("weight_kg_max")
         need_dgpu = bool(hc.get("must_have_dedicated_gpu"))
         out: list = []
         for r in results:
@@ -3489,10 +3510,22 @@ def _apply_query_plan_filters(results: list, plan: Any) -> tuple[list, dict]:
             if rammin and specs.get("ram_gb") is not None and float(specs["ram_gb"]) < float(rammin):
                 dropped["ram"] = dropped.get("ram", 0) + 1
                 continue
+            # Weight cap (portability) — only when the candidate's weight is known (defensive: no
+            # weight data → no drop, never invents a violation).
+            if wmax and specs.get("weight_kg") is not None and float(specs["weight_kg"]) > float(wmax):
+                dropped["weight"] = dropped.get("weight", 0) + 1
+                continue
             out.append(r)
-        if not out:  # never blank the screen
+        if not out:
+            # Filtering would empty the screen → return the closest set, but HONESTLY: flag that no
+            # exact match exists and name the constraints that eliminated everything, so the response
+            # offers relaxation instead of silently presenting violators as a clean match.
+            violated = [k for k in ("refresh", "ram", "needs_dgpu", "weight", "accessory") if dropped.get(k)]
             dropped["reverted"] = True
+            dropped["exact_match"] = False
+            dropped["violated_constraints"] = violated
             return results, dropped
+        dropped["exact_match"] = True
         return out, dropped
     except Exception:
         return results, {}
@@ -10075,6 +10108,17 @@ def suggest(
         if _qplan.availability_horizon_days:
             constraints["availability_horizon_days"] = int(_qplan.availability_horizon_days)
         results, _plan_drops = _apply_query_plan_filters(results, _qplan)
+        # Constraint honesty: surface exact-match status + a relaxation offer when hard constraints
+        # could not all be met (instead of silently presenting constraint-violating products).
+        if _plan_drops.get("reverted") and _plan_drops.get("exact_match") is False:
+            _violated = list(_plan_drops.get("violated_constraints") or [])
+            constraints["constraint_status"] = {
+                "exact_match": False,
+                "violated_constraints": _violated,
+                "relaxation_note": _constraint_relaxation_note(_violated),
+            }
+        elif _plan_drops.get("exact_match") is True:
+            constraints["constraint_status"] = {"exact_match": True}
         if _plan_drops and trace_id:
             try:
                 log_trace_event(
@@ -10726,8 +10770,11 @@ def suggest(
         )
         _narration_mode_tel = _narr_mode
         _narration_model_tel = _summ_model
+        # Honest reporting (GPT-5.5 #1): the guard records its TRUE state (disabled/skipped/passed/
+        # fell_back_to_deterministic). Never report a false "passed" when the guard was off.
         _claim_guard_result = (
-            "fell_back_to_deterministic" if (assistant_message or "") != (_pre_guard_msg or "") else "passed"
+            (constraints.get("_claim_guard_status") if isinstance(constraints, dict) else None)
+            or ("fell_back_to_deterministic" if (assistant_message or "") != (_pre_guard_msg or "") else "disabled")
         )
     if explanation_request:
         payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
@@ -10784,6 +10831,12 @@ def suggest(
     # Step 4 — surface the fulfilment verdict (Step 3b) as a plain availability line on the answer.
     if _availability_line:
         assistant_message = f"{assistant_message} {_availability_line}".strip() if assistant_message else _availability_line
+    # Constraint honesty: lead with the "no exact match — closest shown, want to relax X?" note so the
+    # buyer is never told constraint-violating products are a clean match (GPT-5.5 #2).
+    _cstatus = constraints.get("constraint_status") if isinstance(constraints.get("constraint_status"), dict) else {}
+    if _cstatus.get("exact_match") is False and _cstatus.get("relaxation_note"):
+        _rn = str(_cstatus["relaxation_note"])
+        assistant_message = f"{_rn} {assistant_message}".strip() if assistant_message else _rn
     # Inventory presence note when requested brands are missing (via helper for testability)
     note, unmatched = _emit_inventory_brand_notice(results=results, constraints=constraints, decision_id=decision_id, trace_id=trace_id)
     if note:
