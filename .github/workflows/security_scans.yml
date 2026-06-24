@@ -8,6 +8,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ── PCI DSS Req. 3: no cardholder data in the repo ──────────────────────────
+  # Fails the build if a real (Luhn-valid, major-network) PAN is committed to source, config, or a
+  # checked-in log. Documented network TEST PANs are allowlisted. This is the gate that backs the
+  # "tokenized, no CHD stored" claim. Unit-tested by tests/security/test_no_pan_scan.py.
+  pci-no-pan-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Scan repository for cardholder data (PAN)
+        run: python scripts/scan_no_pan.py .
+
+
   trivy-filesystem:
     runs-on: ubuntu-latest
     steps:
