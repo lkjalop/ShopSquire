@@ -86,6 +86,14 @@ class SuggestContext:
     ner_entities: Dict[str, Any] = field(default_factory=dict)
     payload: Dict[str, Any] = field(default_factory=dict)
 
+    # ── Phase 2 extraction slots (typed containers for F1/F2/F3 modules) ─────
+    ollama_meta: Dict[str, Any] = field(default_factory=dict)
+    followup_contract: Dict[str, Any] = field(default_factory=dict)
+    escalation: Optional[Dict[str, Any]] = None
+    availability_verdict: Optional[Dict[str, Any]] = None
+    narration_input: Dict[str, Any] = field(default_factory=dict)
+    response_envelope: Dict[str, Any] = field(default_factory=dict)
+
     # ── Dependencies (clients / ids; set once, not per-stage) — Pass 6 ───────
     deps: Dict[str, Any] = field(default_factory=dict)
 
