@@ -10660,8 +10660,9 @@ def suggest(
     )
 
     # Availability/fulfilment verdict (Step 3b): when a bulk order_quantity was asked, assess
-    # "can we fulfil N of the primary pick by day D?" from stock + supplier lead-time. Fast path
-    # (draft_reorder=False); the human-gated reorder draft is created on explicit confirm, not here.
+    # "can we fulfil N of the primary pick by day D?" from stock + supplier lead-time.
+    # For B2B bulk orders with a shortfall, also produce a draft PO (human-gated: status
+    # 'awaiting_human_approval') so the admin can review and approve without extra clicks.
     # assess_availability never raises, so no try/except is needed (keeps the silent-except ratchet).
     _availability_line = ""
     _order_qty = constraints.get("order_quantity")
@@ -10669,8 +10670,10 @@ def suggest(
         from src.app.services.availability_agent import assess_availability, availability_summary_line
         _avail_skus = [str(r.get("sku")) for r in (results or [])[:5] if isinstance(r, dict) and r.get("sku")]
         if _avail_skus:
+            _is_b2b_bulk = int(_order_qty) >= 5
             payload["availability"] = assess_availability(
-                _avail_skus, int(_order_qty), constraints.get("availability_horizon_days"), draft_reorder=False
+                _avail_skus, int(_order_qty), constraints.get("availability_horizon_days"),
+                draft_reorder=_is_b2b_bulk,
             )
             _availability_line = availability_summary_line(payload["availability"])
 
