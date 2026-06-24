@@ -2085,6 +2085,17 @@ def _build_multi_intent_execution_plan(intent_chain: list[dict] | None) -> Dict[
     }
 
 
+# Strangler: memory write-back helpers extracted to services/recommend_memory_writeback.py.
+from src.app.services.recommend_memory_writeback import (  # noqa: E402
+    build_envelope_snapshot as _build_envelope_snapshot_impl,
+    update_pinned_context as _update_pinned_context_impl,
+    build_rolling_summary as _build_rolling_summary_impl,
+    persist_turn_state as _persist_turn_state,
+    TurnPersistenceInput as _TurnPersistenceInput,
+    TurnPersistenceHooks as _TurnPersistenceHooks,
+)
+
+
 def _build_envelope_snapshot(
     *,
     constraints: Dict[str, Any],
@@ -2093,16 +2104,11 @@ def _build_envelope_snapshot(
     shortlist_locked: bool,
     shortlist_size: int,
 ) -> Dict[str, Any]:
-    return {
-        "budget_min": constraints.get("budget_min"),
-        "budget_max": constraints.get("budget_max"),
-        "brands": list(constraints.get("brands") or []),
-        "specs": list(constraints.get("specs") or []),
-        "candidates_count": int(candidates_count),
-        "results_count": int(results_count),
-        "shortlist_locked": bool(shortlist_locked),
-        "shortlist_size": int(shortlist_size),
-    }
+    return _build_envelope_snapshot_impl(
+        constraints=constraints, candidates_count=candidates_count,
+        results_count=results_count, shortlist_locked=shortlist_locked,
+        shortlist_size=shortlist_size,
+    )
 
 
 def _classify_turn_type(
@@ -2148,27 +2154,10 @@ def _update_pinned_context(
     turn_type: str,
     ts: int | None = None,
 ) -> Dict[str, Any]:
-    now_ts = int(ts or time.time())
-    pinned = kv.get("pinned_context") if isinstance(kv.get("pinned_context"), dict) else {}
-
-    def _pin(key: str, value: Any) -> None:
-        if value is None:
-            return
-        if isinstance(value, list) and not value:
-            return
-        pinned[key] = {"value": value, "ts": now_ts, "source_turn_type": turn_type}
-
-    _pin("budget", {"min": constraints.get("budget_min"), "max": constraints.get("budget_max")})
-    _pin("use_case", constraints.get("use_case"))
-    _pin("gpu_preference", constraints.get("gpu_preference"))
-    _pin("brand_preference", list(constraints.get("brands") or []))
-    if shortlist_skus:
-        _pin("selected_skus", shortlist_skus[:12])
-    excludes = list(constraints.get("brand_excludes") or [])
-    if excludes:
-        _pin("excluded_skus", excludes[:12])
-    kv["pinned_context"] = pinned
-    return kv
+    return _update_pinned_context_impl(
+        kv=kv, constraints=constraints, shortlist_skus=shortlist_skus,
+        turn_type=turn_type, ts=ts,
+    )
 
 
 def _build_rolling_summary(
@@ -2180,39 +2169,10 @@ def _build_rolling_summary(
     turn_type: str,
     referents: Dict[str, Any] | None,
 ) -> Dict[str, Any]:
-    pinned = kv.get("pinned_context") if isinstance(kv.get("pinned_context"), dict) else {}
-    current_shortlist = [str((r or {}).get("sku") or "") for r in (results or []) if isinstance(r, dict)]
-    current_shortlist = [x for x in current_shortlist if x][:12]
-    unresolved = []
-    for q in (next_questions or []):
-        if isinstance(q, dict) and q.get("text"):
-            unresolved.append(str(q.get("text")))
-    unresolved = unresolved[:4]
-    goals = []
-    if constraints.get("use_case"):
-        goals.append(str(constraints.get("use_case")))
-    if constraints.get("budget_max") is not None or constraints.get("budget_min") is not None:
-        goals.append("budget_focused")
-    summary = {
-        "ts": int(time.time()),
-        "turn_type": turn_type,
-        "goals": goals[:3],
-        "hard_constraints": {
-            "budget_min": constraints.get("budget_min"),
-            "budget_max": constraints.get("budget_max"),
-            "brands": list(constraints.get("brands") or [])[:8],
-            "gpu_preference": constraints.get("gpu_preference"),
-        },
-        "soft_preferences": {
-            "specs": list(constraints.get("specs") or [])[:10],
-            "use_case_tags": list(constraints.get("use_case_tags") or [])[:8],
-        },
-        "current_shortlist": current_shortlist,
-        "pinned_context": pinned,
-        "referents": referents or {"has_reference": False, "source": "none", "skus": []},
-        "unresolved_questions": unresolved,
-    }
-    return summary
+    return _build_rolling_summary_impl(
+        kv=kv, constraints=constraints, results=results,
+        next_questions=next_questions, turn_type=turn_type, referents=referents,
+    )
 
 
 def _compute_envelope_diff(previous: Dict[str, Any] | None, current: Dict[str, Any]) -> Dict[str, Any]:
@@ -11410,204 +11370,38 @@ def suggest(
     except Exception:
         pass  # Stock annotation failure is non-fatal
 
-    try:
-        shortlist_skus = [str((r or {}).get("sku") or "") for r in (results or []) if isinstance(r, dict)]
-        shortlist_skus = [s for s in shortlist_skus if s][:12]
-        kv_out = mem.get_kv(uid) or {}
-        if not kv_out and isinstance(kv, dict):
-            kv_out = dict(kv)
-        structured_state_out = mem.get_structured_state(uid) or {}
-        product_memory_bank_out = dict(product_memory_bank or {})
-        # Only overwrite the shortlist when this turn produced results.
-        # Zero-result turns (e.g. brand filter with no matches) must NOT erase
-        # the prior shortlist — the user's follow-up "top 3 from those" still
-        # needs the original candidates.
-        if shortlist_skus:
-            kv_out["last_shortlist_skus"] = shortlist_skus
-            kv_out["last_valid_shortlist_skus"] = shortlist_skus
-            structured_state_out["last_shortlist_skus"] = shortlist_skus
-            structured_state_out["last_valid_shortlist_skus"] = shortlist_skus
-        # else: leave kv_out["last_shortlist_skus"] intact from the prior turn
-        kv_out["last_constraints_snapshot"] = {
-            "budget_min": constraints.get("budget_min"),
-            "budget_max": constraints.get("budget_max"),
-            "brands": list(constraints.get("brands") or []),
-            "specs": list(constraints.get("specs") or []),
-        }
-        structured_state_out["last_constraints_snapshot"] = dict(kv_out["last_constraints_snapshot"])
-        if turn_type in {"result_turn", "constraint_update_turn"}:
-            kv_out["last_valid_constraints_snapshot"] = dict(kv_out["last_constraints_snapshot"])
-            structured_state_out["last_valid_constraints_snapshot"] = dict(kv_out["last_constraints_snapshot"])
-        kv_out["last_result_envelope"] = _build_envelope_snapshot(
+    # ── Memory write-back (extracted to recommend_memory_writeback.persist_turn_state) ──
+    _persist_turn_state(
+        _TurnPersistenceInput(
+            uid=uid,
+            query=query,
             constraints=constraints,
-            candidates_count=len(candidates or []),
-            results_count=len(results or []),
-            shortlist_locked=shortlist_lock_active,
-            shortlist_size=len(shortlist_skus),
-        )
-        structured_state_out["last_result_envelope"] = dict(kv_out["last_result_envelope"])
-        kv_out["last_turn_type"] = turn_type
-        kv_out["last_turn_intent"] = turn_intent
-        kv_out["last_referents"] = referents
-        kv_out["last_followup_contract"] = followup_contract
-        kv_out["last_intent_execution_plan"] = intent_execution_plan
-        structured_state_out["last_turn_type"] = turn_type
-        structured_state_out["last_turn_intent"] = turn_intent
-        structured_state_out["last_referents"] = referents
-        structured_state_out["last_followup_contract"] = followup_contract
-        structured_state_out["last_intent_execution_plan"] = intent_execution_plan
-        structured_state_out["nqe_asked_ids"] = list(kv_out.get("nqe_asked_ids") or structured_state_out.get("nqe_asked_ids") or [])
-        structured_state_out["nqe_answered_fields"] = dict(kv_out.get("nqe_answered_fields") or structured_state_out.get("nqe_answered_fields") or {})
-        structured_state_out["nqe_recent_asked"] = _normalize_recent_nqe_asked(
-            kv_out.get("nqe_recent_asked")
-            if isinstance(kv_out.get("nqe_recent_asked"), list)
-            else structured_state_out.get("nqe_recent_asked")
-        )
-        kv_out = _update_pinned_context(
-            kv=kv_out,
-            constraints=constraints,
-            shortlist_skus=shortlist_skus,
+            results=results or [],
+            payload=payload,
+            kv=kv if isinstance(kv, dict) else {},
+            structured_state=structured_state if isinstance(structured_state, dict) else {},
+            product_memory_bank=product_memory_bank or {},
+            image_context=image_context if isinstance(image_context, dict) else {},
+            trace_id=trace_id,
             turn_type=turn_type,
-        )
-        # SuggestContext adoption (Pass 3): bind the finalized memory write-back dicts onto the
-        # ctx by reference — kv_out's last rebind is the _update_pinned_context call above;
-        # structured_state_out was assigned once at L11139. Downstream in-place mutations on both
-        # flow into the ctx, making it the live carrier through end-of-turn persistence.
-        _ctx.kv_out = kv_out
-        _ctx.structured_state_out = structured_state_out
-        confirmed_slots_out = (
-            kv_out.get("confirmed_slots")
-            if isinstance(kv_out.get("confirmed_slots"), dict)
-            else structured_state_out.get("confirmed_slots")
-        )
-        confirmed_slots_out = dict(confirmed_slots_out or {})
-        for _key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition"):
-            _val = constraints.get(_key)
-            if _val is not None:
-                confirmed_slots_out[_key] = _val
-        if constraints.get("brands"):
-            confirmed_slots_out["brands"] = list(constraints.get("brands") or [])[:8]
-        if constraints.get("specs"):
-            confirmed_slots_out["specs"] = list(constraints.get("specs") or [])[:12]
-        if constraints.get("brand_excludes"):
-            confirmed_slots_out["brand_excludes"] = list(constraints.get("brand_excludes") or [])[:12]
-        if constraints.get("use_case_tags"):
-            confirmed_slots_out["use_case_tags"] = list(constraints.get("use_case_tags") or [])[:12]
-        kv_out["confirmed_slots"] = confirmed_slots_out
-        structured_state_out["confirmed_slots"] = dict(confirmed_slots_out)
-        if image_context.get("labels") or image_context.get("ocr") or image_context.get("hash") or image_context.get("intent"):
-            kv_out["image_context"] = {
-                "hash": image_context.get("hash"),
-                "intent": image_context.get("intent"),
-                "labels": list(image_context.get("labels") or [])[:12],
-                "ocr": str(image_context.get("ocr") or "")[:500],
-                "ts": int(time.time()),
-            }
-            structured_state_out["image_context"] = dict(kv_out["image_context"])
-        kv_out["conversation_turn"] = int(kv_out.get("conversation_turn") or 0) + 1
-        structured_state_out["conversation_turn"] = int(kv_out["conversation_turn"])
-        if isinstance(payload.get("next_questions"), list) and payload.get("next_questions"):
-            asked = kv_out.get("nqe_asked") if isinstance(kv_out.get("nqe_asked"), list) else []
-            asked_recent = _normalize_recent_nqe_asked(
-                kv_out.get("nqe_recent_asked")
-                if isinstance(kv_out.get("nqe_recent_asked"), list)
-                else structured_state_out.get("nqe_recent_asked")
-            )
-            for q in payload.get("next_questions") or []:
-                if isinstance(q, dict) and q.get("id"):
-                    qid = str(q.get("id"))
-                    if qid not in asked:
-                        asked.append(qid)
-                    asked_recent.append(
-                        {
-                            "id": str(qid).strip().lower(),
-                            "slot": _question_slot_from_id(qid),
-                            "turn": int(kv_out.get("conversation_turn") or 0) + 1,
-                        }
-                    )
-            kv_out["nqe_asked"] = asked[-25:]
-            structured_state_out["nqe_asked"] = list(kv_out["nqe_asked"])
-            kv_out["nqe_recent_asked"] = asked_recent[-60:]
-            structured_state_out["nqe_recent_asked"] = list(kv_out["nqe_recent_asked"])
-
-        # Product memory bank keeps a compact recommendation history for
-        # cross-turn recall without parsing full chat logs.
-        hist = list(product_memory_bank_out.get("recent_recommendations") or [])
-        hist.append({
-            "ts": int(time.time()),
-            "query": scrub_pii(query or "")[:300],
-            "shortlist_skus": shortlist_skus,
-            "budget_min": constraints.get("budget_min"),
-            "budget_max": constraints.get("budget_max"),
-            "turn_type": turn_type,
-            "trace_id": trace_id,
-        })
-        product_memory_bank_out["recent_recommendations"] = hist[-20:]
-        product_memory_bank_out["last_trace_id"] = trace_id
-        product_memory_bank_out["last_query"] = scrub_pii(query or "")[:300]
-        if shortlist_skus:
-            product_memory_bank_out["last_shortlist_skus"] = shortlist_skus
-
-        active_ttl = int(os.getenv("CHAT_ACTIVE_TTL_SECONDS", "86400"))
-        mem.set_kv(uid, kv_out, ttl_seconds=active_ttl)
-        mem.set_structured_state(uid, structured_state_out, ttl_seconds=active_ttl)
-        mem.set_product_memory_bank(uid, product_memory_bank_out, ttl_seconds=active_ttl)
-        mem.touch_session(uid, ttl_seconds=active_ttl)
-        summary_interval = int(os.getenv("MEMORY_SUMMARY_INTERVAL", "10"))
-        should_checkpoint = bool(
-            (int(kv_out.get("conversation_turn") or 0) % max(1, summary_interval) == 0)
-            or turn_type in {"zero_result_turn", "explain_turn"}
-            or not isinstance((ctx or {}).get("summary"), dict)
-        )
-        if should_checkpoint:
-            rolling_summary = _build_rolling_summary(
-                kv=kv_out,
-                constraints=constraints,
-                results=results or [],
-                next_questions=payload.get("next_questions") if isinstance(payload.get("next_questions"), list) else [],
-                turn_type=turn_type,
-                referents=referents,
-            )
-            mem.set_summary(uid, rolling_summary, ttl_seconds=active_ttl)
-            payload["session_summary"] = rolling_summary
-            # Persist a typed Episode so get_session_context_summary() returns
-            # real turn history on every subsequent turn (not always "").
-            try:
-                from src.app.services.episodic_memory import EpisodicMemory as _EpisodicMemory
-                _ep_mem_ckpt = _EpisodicMemory(mem)
-                _ep_skus = [str(r.get("sku") or "") for r in (results or []) if isinstance(r, dict)][:6]
-                _ep_slots = {
-                    k: constraints[k] for k in ("budget_max", "budget_min", "use_case", "brands", "gpu_preference")
-                    if k in constraints and constraints[k] is not None
-                }
-                _ep_response_text = str(assistant_message or "")[:120] or turn_type
-                _ep_mem_ckpt.save_episode(
-                    uid,
-                    turn_index=int(kv_out.get("conversation_turn") or 0),
-                    query=str(query or "")[:200],
-                    response_summary=_ep_response_text,
-                    slots_captured=_ep_slots,
-                    products_shown=_ep_skus,
-                    model_used=str(llm_model or ""),
-                )
-            except Exception:
-                pass
-            log_trace_event(
-                trace_id=trace_id,
-                event_type="session_summary_checkpoint",
-                source_type="agent",
-                source_id="Conversation_Memory_Agent",
-                target_type="system",
-                target_id=None,
-                payload={
-                    "turn": int(kv_out.get("conversation_turn") or 0),
-                    "turn_type": turn_type,
-                    "summary": rolling_summary,
-                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["session_summary", "pinned_context"]),
-                },
-            )
-    except Exception:
-        pass
+            turn_intent=turn_intent,
+            referents=referents,
+            followup_contract=followup_contract,
+            intent_execution_plan=intent_execution_plan,
+            candidates=candidates or [],
+            shortlist_lock_active=shortlist_lock_active,
+            llm_model=str(llm_model or ""),
+            assistant_message=assistant_message,
+            flags=flags if isinstance(flags, dict) else {},
+            ctx_summary=ctx.get("summary") if isinstance(ctx, dict) else None,
+        ),
+        _TurnPersistenceHooks(
+            mem=mem,
+            suggest_ctx=_ctx,
+            log_trace_event=log_trace_event,
+            trace_meta_payload=_trace_meta_payload,
+        ),
+    )
     # Test-only debug: emit a simple log of SKUs when query mentions budget
     try:
         if any(tok in (query or "").lower() for tok in ("under $", "below $", "budget")):
