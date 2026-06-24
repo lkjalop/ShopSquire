@@ -1770,9 +1770,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                                   Price sensitivity: {intent.price_sensitivity}
                                 </span>
                               )}
-                              {(Number.isFinite(Number(intent.budget_min)) || Number.isFinite(Number(intent.budget_max))) && (
+                              {(Number(intent.budget_min) > 0 || Number(intent.budget_max) > 0) && (
                                 <span className={styles.intentBadge} style={{ background: '#1d4ed8' }}>
-                                  Budget band: {Number.isFinite(Number(intent.budget_min)) ? `$${Number(intent.budget_min).toLocaleString()}` : '$0'}-{Number.isFinite(Number(intent.budget_max)) ? `$${Number(intent.budget_max).toLocaleString()}` : '?'}
+                                  Budget band: {Number(intent.budget_min) > 0 ? `$${Number(intent.budget_min).toLocaleString()}` : '—'}-{Number(intent.budget_max) > 0 ? `$${Number(intent.budget_max).toLocaleString()}` : '—'}
                                 </span>
                               )}
                             </div>
