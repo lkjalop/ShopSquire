@@ -124,3 +124,27 @@ def test_never_blank(i, query):
         or body.get("needs_disambiguation")
     )
     assert useful, body
+
+
+# ── Intent-aware B2B through the route (roadmap step 1, intent not a raw-quantity gate) ───────────
+def _nq_ids(body):
+    return [str((q or {}).get("id") or "") for q in (body.get("next_questions") or [])]
+
+
+def test_business_bulk_surfaces_procurement_question_first():
+    body = _suggest("mtx-b2b1", "10 laptops for the company under $1,500")
+    assert "ask_b2b_procurement" in _nq_ids(body)
+    ba = body.get("b2b_assessment") or {}
+    assert ba.get("verdict") == "b2b" and ba.get("discount_eligible") is True
+
+
+def test_ambiguous_bulk_surfaces_procurement_question_to_clarify():
+    body = _suggest("mtx-b2b2", "I want 10 laptops under $1,500")
+    assert "ask_b2b_procurement" in _nq_ids(body)
+    assert (body.get("b2b_assessment") or {}).get("verdict") == "ambiguous_bulk"
+
+
+def test_personal_multibuy_is_not_routed_b2b():
+    body = _suggest("mtx-b2b3", "3 laptops for my family under $1,500")
+    assert "ask_b2b_procurement" not in _nq_ids(body)
+    assert (body.get("b2b_assessment") or {}).get("verdict") == "consumer"
