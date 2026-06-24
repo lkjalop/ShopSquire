@@ -257,8 +257,26 @@ def create_app() -> FastAPI:
                         _sql_text("SELECT COUNT(*) FROM products WHERE COALESCE(active, 1) = 1")
                     ).scalar() or 0
                     if int(active_products) <= 0:
+                        # Cold/empty catalog bootstrap.
                         seed_products(db)
-                        db.commit()
+                    try:
+                        from src.app.platform.store_profile import active_profile_id
+                        profile_id = str(active_profile_id() or "").strip().lower()
+                        raw_gaming_seed = os.getenv("AUTO_SEED_GAMING_CATALOG_ON_START")
+                        app_env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+                        local_default = app_env in ("local", "dev", "development", "test", "testing")
+                        gaming_seed_enabled = (
+                            str(raw_gaming_seed).strip().lower() in ("1", "true", "yes", "on")
+                            if raw_gaming_seed is not None else local_default
+                        )
+                        if profile_id == "electronics" and gaming_seed_enabled:
+                            # Idempotent and self-healing: adds missing GAM-* rows and aligned inventory
+                            # for stale local demo DBs without putting vertical logic in core scoring.
+                            from scripts.seed_gaming_laptops import ensure_gaming_catalog
+                            ensure_gaming_catalog(db)
+                    except Exception:
+                        pass
+                    db.commit()
         except Exception:
             pass
         # Load plugin registry
@@ -1169,32 +1187,59 @@ def create_app() -> FastAPI:
             sess = None
 
         try:
-            try:
-                emit_security_event(path, payload, request=request)
-            except Exception:
-                pass
-            # Anomaly detection hook (model-poison / DDOS signals) - non-blocking.
-            # Runs unconditionally on every request, not only when emit_security_event fails.
-            try:
-                from src.app.security.anomaly_detector import detect_anomaly
-                from src.app.observability.metrics import record_security_event
-                an = detect_anomaly(payload)
-                if isinstance(an, dict) and an.get("anomaly"):
-                    try:
-                        if an.get("severity") in ("high", "critical"):
-                            from src.app.services.ticketing import TicketingAgent
-                            t = TicketingAgent()
-                            title = f"Anomaly detected: {an.get('reason')}"
-                            desc = str({"path": path, "reason": an.get("reason"), "payload_summary": payload.get("body") if isinstance(payload, dict) else None})
-                            t.create_ticket(title=title, description=desc, severity=(an.get("severity") or "high"))
-                    except Exception:
-                        pass
-                    try:
-                        record_security_event("anomaly_detected", an.get("severity") or "medium", an.get("reason") or "anomaly")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # NEW-3: bound the observer so a cold-start blocking detector / GeoIP / DB call can't hang
+            # the request hot path. The bounded path runs emit + anomaly in a worker thread under a hard
+            # timeout. CONCURRENCY-GATED DEFAULT-OFF (OBSERVER_THREADED): the threaded path uses a
+            # SEPARATE db_session, which is correct on Postgres (per-thread connections) but unsafe on a
+            # shared single-connection pool (SQLite/tests → "cannot start a transaction within a
+            # transaction", and on timeout the un-cancellable thread keeps writing on that connection).
+            # With the flag off (default) the observer runs INLINE on the request-scoped session — the
+            # proven, race-free path. Enable OBSERVER_THREADED in prod (Postgres) for the hard time-bound.
+            import asyncio as _aio
+            import logging as _logging
+
+            def _run_observer_sync(_obs_request):
+                try:
+                    emit_security_event(path, payload, request=_obs_request)
+                except Exception:
+                    pass
+                # Anomaly detection hook (model-poison / DDOS signals).
+                try:
+                    from src.app.security.anomaly_detector import detect_anomaly
+                    from src.app.observability.metrics import record_security_event
+                    an = detect_anomaly(payload)
+                    if isinstance(an, dict) and an.get("anomaly"):
+                        try:
+                            if an.get("severity") in ("high", "critical"):
+                                from src.app.services.ticketing import TicketingAgent
+                                t = TicketingAgent()
+                                title = f"Anomaly detected: {an.get('reason')}"
+                                desc = str({"path": path, "reason": an.get("reason"), "payload_summary": payload.get("body") if isinstance(payload, dict) else None})
+                                t.create_ticket(title=title, description=desc, severity=(an.get("severity") or "high"))
+                        except Exception:
+                            pass
+                        try:
+                            record_security_event("anomaly_detected", an.get("severity") or "medium", an.get("reason") or "anomaly")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            _obs_threaded = str(os.getenv("OBSERVER_THREADED", "0")).strip().lower() in ("1", "true", "yes", "on")
+            if _obs_threaded:
+                # Bounded best-effort: own db_session (thread-safe on Postgres), hard timeout.
+                _obs_budget = float(os.getenv("OBSERVER_TIMEOUT_SEC", "2.0") or 2.0)
+                try:
+                    await _aio.wait_for(_aio.to_thread(lambda: _run_observer_sync(None)), timeout=_obs_budget)
+                except _aio.TimeoutError:
+                    _logging.getLogger("shopsquire.observer").warning(
+                        "security observer timed out (%.1fs) on %s — skipped; request continues", _obs_budget, path
+                    )
+                except Exception:
+                    pass
+            else:
+                # Default: inline on the request-scoped session — no cross-connection race.
+                _run_observer_sync(request)
             response = await call_next(request)
             return response
         finally:
