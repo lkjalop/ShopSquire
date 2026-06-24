@@ -1621,6 +1621,11 @@ def create_app() -> FastAPI:
 
     app.include_router(admin.router)
     try:
+        from src.app.routers.admin_mfa_routes import router as admin_mfa_router
+        app.include_router(admin_mfa_router)
+    except Exception:
+        pass
+    try:
         from src.app.routers.admin_api_keys import router as admin_api_keys_router
         app.include_router(admin_api_keys_router)
     except Exception:
