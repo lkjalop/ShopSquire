@@ -10954,63 +10954,26 @@ def suggest(
                     "I couldn't find in-stock products in that exact window yet. "
                     "Use widen/search-nearest to see the closest viable options."
                 )
-        # ── Confidence gate prefix (Fix 6) ─────────────────────────────────────
-        # Mirror orchestrator autonomy_tier logic: prepend a hold/caution notice
-        # to the visible assistant_message so the UI badge and text stay in sync.
-        try:
-            _intent_conf_gate = float(nlp.get("intent_confidence") or 0.0) if isinstance(nlp, dict) else 0.0
-            _fraud_score_gate = float((fraud_summary or {}).get("score") or 0.0)
-            _policy_approval_gate = gate_requires_review and getattr(gate, "approval_required", False)
-            if _fraud_score_gate >= 80:
-                payload["autonomy_tier"] = "denied"
-                payload["autonomy_badge"] = "DENIED — FRAUD SIGNAL"
-            elif _policy_approval_gate:
-                payload["autonomy_tier"] = "escalated"
-                payload["autonomy_badge"] = "ESCALATED"
-            elif _intent_conf_gate < 0.60:
-                _gate_prefix = "I need to verify this before confirming — "
-                if assistant_message and not assistant_message.startswith(_gate_prefix):
-                    assistant_message = _gate_prefix + assistant_message
-                payload["autonomy_tier"] = "hold"
-                payload["autonomy_badge"] = "HOLD — LOW CONFIDENCE"
-                payload["confidence_gate_active"] = True
-            elif _intent_conf_gate < 0.85:
-                payload["autonomy_tier"] = "caution"
-                payload["autonomy_badge"] = "CAUTION"
-            else:
-                payload["autonomy_tier"] = "auto"
-                payload["autonomy_badge"] = "AUTO-RESOLVED"
-            payload["intent_confidence"] = round(_intent_conf_gate, 3)
-        except Exception:
-            pass
-        # ── Security event prefix in assistant_message ───────────────────────
-        # When the uploaded image was flagged (steg, QR injection, adversarial),
-        # prepend a visible [SECURITY] notice so the user sees it in the chat UI.
-        try:
-            _steg_flag = bool(image_cv_signals_parsed.get("steg_suspicious"))
-            _qr_inj_flag = bool(image_cv_signals_parsed.get("qr_prompt_injection"))
-            _adv_flag = float(image_cv_signals_parsed.get("adversarial_score") or 0.0) >= 0.35
-            _manip_flag = bool(image_cv_signals_parsed.get("manipulation_detected"))
-            if incoming_image_payload and (_steg_flag or _qr_inj_flag or _adv_flag or _manip_flag):
-                _sec_reasons = []
-                if _steg_flag:
-                    _sec_reasons.append("hidden payload detected (steganography)")
-                if _qr_inj_flag:
-                    _sec_reasons.append("QR prompt injection")
-                if _adv_flag:
-                    _sec_reasons.append("adversarial perturbation")
-                if _manip_flag:
-                    _sec_reasons.append("image manipulation")
-                _sec_prefix = (
-                    f"⚠️ [SECURITY] Image flagged: {', '.join(_sec_reasons)}. "
-                    "Using text-only mode. "
-                )
-                if assistant_message:
-                    assistant_message = _sec_prefix + assistant_message
-                else:
-                    assistant_message = _sec_prefix + "Recommendations below are based on your text query only."
-        except Exception:
-            pass
+        # ── Confidence gate prefix (extracted to recommend_message_decorator) ──
+        from src.app.services.recommend_message_decorator import (
+            apply_confidence_gate as _apply_confidence_gate,
+            apply_security_event_prefix as _apply_security_event_prefix,
+        )
+        _intent_conf_gate = float(nlp.get("intent_confidence") or 0.0) if isinstance(nlp, dict) else 0.0
+        _fraud_score_gate = float((fraud_summary or {}).get("score") or 0.0)
+        _policy_approval_gate = gate_requires_review and getattr(gate, "approval_required", False)
+        assistant_message, payload = _apply_confidence_gate(
+            assistant_message, payload,
+            intent_confidence=_intent_conf_gate,
+            fraud_score=_fraud_score_gate,
+            policy_approval_required=bool(_policy_approval_gate),
+        )
+        # ── Security event prefix (extracted) ──
+        assistant_message = _apply_security_event_prefix(
+            assistant_message,
+            image_cv_signals_parsed=image_cv_signals_parsed,
+            has_incoming_image=bool(incoming_image_payload),
+        )
         payload["assistant_message"] = assistant_message
         payload["catalog_profile"] = catalog_profile
         payload["catalog_relevance"] = catalog_relevance

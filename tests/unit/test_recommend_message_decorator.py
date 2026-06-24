@@ -9,6 +9,8 @@ from src.app.services.recommend_message_decorator import (
     apply_constraint_honesty_prefix,
     build_comparative_synthesis,
     apply_price_range_note,
+    apply_confidence_gate,
+    apply_security_event_prefix,
 )
 
 
@@ -137,3 +139,61 @@ class TestApplyPriceRangeNote:
         payload = {"price_range": {"min": 500, "max": 500, "median": 500, "count": 1}}
         msg = apply_price_range_note("Hello", payload)
         assert msg == "Hello"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# apply_confidence_gate
+# ──────────────────────────────────────────────────────────────────────
+class TestApplyConfidenceGate:
+    def test_fraud_denied(self):
+        msg, p = apply_confidence_gate("Hello", {}, intent_confidence=0.9, fraud_score=85.0, policy_approval_required=False)
+        assert p["autonomy_tier"] == "denied"
+        assert msg == "Hello"  # no prefix
+
+    def test_escalated(self):
+        msg, p = apply_confidence_gate("Hello", {}, intent_confidence=0.9, fraud_score=10.0, policy_approval_required=True)
+        assert p["autonomy_tier"] == "escalated"
+
+    def test_hold_low_confidence(self):
+        msg, p = apply_confidence_gate("Hello", {}, intent_confidence=0.4, fraud_score=0.0, policy_approval_required=False)
+        assert p["autonomy_tier"] == "hold"
+        assert msg.startswith("I need to verify")
+        assert p["confidence_gate_active"] is True
+
+    def test_caution(self):
+        msg, p = apply_confidence_gate("Hello", {}, intent_confidence=0.7, fraud_score=0.0, policy_approval_required=False)
+        assert p["autonomy_tier"] == "caution"
+        assert msg == "Hello"
+
+    def test_auto_resolved(self):
+        msg, p = apply_confidence_gate("Hello", {}, intent_confidence=0.95, fraud_score=0.0, policy_approval_required=False)
+        assert p["autonomy_tier"] == "auto"
+        assert p["intent_confidence"] == 0.95
+
+
+# ──────────────────────────────────────────────────────────────────────
+# apply_security_event_prefix
+# ──────────────────────────────────────────────────────────────────────
+class TestApplySecurityEventPrefix:
+    def test_steg_flag(self):
+        signals = {"steg_suspicious": True}
+        msg = apply_security_event_prefix("Hello", image_cv_signals_parsed=signals, has_incoming_image=True)
+        assert "[SECURITY]" in msg
+        assert "steganography" in msg
+
+    def test_no_image_no_prefix(self):
+        signals = {"steg_suspicious": True}
+        msg = apply_security_event_prefix("Hello", image_cv_signals_parsed=signals, has_incoming_image=False)
+        assert msg == "Hello"
+
+    def test_multiple_flags(self):
+        signals = {"steg_suspicious": True, "qr_prompt_injection": True, "adversarial_score": 0.5}
+        msg = apply_security_event_prefix("Test", image_cv_signals_parsed=signals, has_incoming_image=True)
+        assert "steganography" in msg
+        assert "QR prompt injection" in msg
+        assert "adversarial" in msg
+
+    def test_none_message_gets_fallback(self):
+        signals = {"manipulation_detected": True}
+        msg = apply_security_event_prefix(None, image_cv_signals_parsed=signals, has_incoming_image=True)
+        assert "text query only" in msg

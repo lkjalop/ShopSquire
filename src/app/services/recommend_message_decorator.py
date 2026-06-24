@@ -14,6 +14,82 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
+def apply_confidence_gate(
+    assistant_message: Optional[str],
+    payload: Dict[str, Any],
+    *,
+    intent_confidence: float,
+    fraud_score: float,
+    policy_approval_required: bool,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Apply autonomy-tier logic and optionally prepend a hold prefix.
+
+    Returns (updated_message, updated_payload).
+    """
+    try:
+        if fraud_score >= 80:
+            payload["autonomy_tier"] = "denied"
+            payload["autonomy_badge"] = "DENIED \u2014 FRAUD SIGNAL"
+        elif policy_approval_required:
+            payload["autonomy_tier"] = "escalated"
+            payload["autonomy_badge"] = "ESCALATED"
+        elif intent_confidence < 0.60:
+            _gate_prefix = "I need to verify this before confirming \u2014 "
+            if assistant_message and not assistant_message.startswith(_gate_prefix):
+                assistant_message = _gate_prefix + assistant_message
+            payload["autonomy_tier"] = "hold"
+            payload["autonomy_badge"] = "HOLD \u2014 LOW CONFIDENCE"
+            payload["confidence_gate_active"] = True
+        elif intent_confidence < 0.85:
+            payload["autonomy_tier"] = "caution"
+            payload["autonomy_badge"] = "CAUTION"
+        else:
+            payload["autonomy_tier"] = "auto"
+            payload["autonomy_badge"] = "AUTO-RESOLVED"
+        payload["intent_confidence"] = round(intent_confidence, 3)
+    except Exception:
+        pass
+    return assistant_message, payload
+
+
+def apply_security_event_prefix(
+    assistant_message: Optional[str],
+    *,
+    image_cv_signals_parsed: Dict[str, Any],
+    has_incoming_image: bool,
+) -> Optional[str]:
+    """Prepend a [SECURITY] notice when image was flagged.
+
+    Returns the updated message.
+    """
+    try:
+        steg_flag = bool(image_cv_signals_parsed.get("steg_suspicious"))
+        qr_inj_flag = bool(image_cv_signals_parsed.get("qr_prompt_injection"))
+        adv_flag = float(image_cv_signals_parsed.get("adversarial_score") or 0.0) >= 0.35
+        manip_flag = bool(image_cv_signals_parsed.get("manipulation_detected"))
+        if has_incoming_image and (steg_flag or qr_inj_flag or adv_flag or manip_flag):
+            reasons: List[str] = []
+            if steg_flag:
+                reasons.append("hidden payload detected (steganography)")
+            if qr_inj_flag:
+                reasons.append("QR prompt injection")
+            if adv_flag:
+                reasons.append("adversarial perturbation")
+            if manip_flag:
+                reasons.append("image manipulation")
+            sec_prefix = (
+                f"\u26a0\ufe0f [SECURITY] Image flagged: {', '.join(reasons)}. "
+                "Using text-only mode. "
+            )
+            if assistant_message:
+                assistant_message = sec_prefix + assistant_message
+            else:
+                assistant_message = sec_prefix + "Recommendations below are based on your text query only."
+    except Exception:
+        pass
+    return assistant_message
+
+
 def apply_budget_advice(
     assistant_message: Optional[str],
     constraints: Dict[str, Any],
