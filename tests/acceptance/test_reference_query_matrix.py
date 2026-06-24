@@ -11,14 +11,32 @@ regression net so a future edit can't silently reintroduce "$2 from 2kg", a miss
 """
 from __future__ import annotations
 
+import json
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from tests.utils import default_headers
+from tests.test_recommend import _write_flags
 from src.app.main import create_app
 from src.app.models.db import db_session
 from src.app.services.recommendations import RecommendationService
+
+_FLAGS_PATH = os.path.join("config", "feature_flags.json")
+# Deterministic product-path flags so the matrix is robust to whatever flag state other test modules
+# leave in the global feature_flags.json (otherwise order-dependent: a prior test setting
+# AGENT_ROLLOUT_PERCENT=0 routes around the agent path → no order_quantity / price_buckets).
+_PRODUCT_PATH_FLAGS = {
+    "USE_AGENT_CAPABILITIES": True,
+    "AGENT_ROLLOUT_PERCENT": 100,
+    "CAPABILITIES": {"recommend": {"enabled": True, "rollout_percent": 100}},
+    "KILL_SWITCH": False,
+    "DECISION_LOG_WRITES_ENABLED": False,
+    "DEGRADATION": {"enabled": True},
+    "TEST_FORCE_BAD_SKU": False,
+}
 
 client = TestClient(create_app(), headers=default_headers())
 
@@ -35,6 +53,9 @@ _CATALOG = [
 def _seed():
     orig = RecommendationService.retrieve_candidates
     RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
+    # Pin product-path flags (save + restore) so the matrix is order-independent.
+    _orig_flags = open(_FLAGS_PATH, encoding="utf-8").read() if os.path.isfile(_FLAGS_PATH) else None
+    _write_flags(_PRODUCT_PATH_FLAGS)
     with db_session() as db:
         for sku, name, cents, wkg in _CATALOG:
             db.execute(text(
@@ -47,6 +68,9 @@ def _seed():
         db.commit()
     yield
     RecommendationService.retrieve_candidates = orig
+    if _orig_flags is not None:
+        with open(_FLAGS_PATH, "w", encoding="utf-8") as f:
+            f.write(_orig_flags)
     with db_session() as db:
         for sku, *_ in _CATALOG:
             db.execute(text("DELETE FROM inventory WHERE product_id=:p"), {"p": sku})

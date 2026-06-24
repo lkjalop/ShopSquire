@@ -15,7 +15,9 @@ def test_business_language_is_b2b_even_at_low_qty():
     a = assess_b2b_intent("2 laptops for the office", quantity=2)
     assert a.verdict == VERDICT_B2B and a.is_b2b
     assert a.discount_eligible is False  # business but not bulk
-    assert a.wants_procurement_questions is True
+    # A few business laptops is B2B, but NOT a fleet-procurement scenario — the corporate use-case
+    # refinement handles it; the fleet pack is reserved for bulk orders.
+    assert a.wants_procurement_questions is False
 
 
 def test_business_bulk_is_discount_eligible():

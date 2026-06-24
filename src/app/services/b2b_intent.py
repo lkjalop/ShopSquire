@@ -68,9 +68,11 @@ class B2BAssessment:
 
     @property
     def wants_procurement_questions(self) -> bool:
-        # Fire the B2B procurement question pack for a real B2B order OR to disambiguate a bulk order
-        # whose business intent is unclear (the question itself resolves it).
-        return self.verdict in (VERDICT_B2B, VERDICT_AMBIGUOUS_BULK)
+        # The FLEET procurement pack (workload/OS/warranty-SLA/manageability/docking) is for BULK
+        # orders: a confirmed business bulk buy, or a bulk buy whose business intent needs
+        # clarifying. A single/few business laptops ("corporate laptop for office work") are NOT a
+        # fleet procurement — they use the normal corporate use-case refinement instead.
+        return self.is_bulk and self.verdict in (VERDICT_B2B, VERDICT_AMBIGUOUS_BULK)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
