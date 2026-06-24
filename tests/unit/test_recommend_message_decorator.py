@@ -11,6 +11,7 @@ from src.app.services.recommend_message_decorator import (
     apply_price_range_note,
     apply_confidence_gate,
     apply_security_event_prefix,
+    annotate_use_case_suitability,
 )
 
 
@@ -197,3 +198,65 @@ class TestApplySecurityEventPrefix:
         signals = {"manipulation_detected": True}
         msg = apply_security_event_prefix(None, image_cv_signals_parsed=signals, has_incoming_image=True)
         assert "text query only" in msg
+
+
+# ──────────────────────────────────────────────────────────────────────
+# annotate_use_case_suitability
+# ──────────────────────────────────────────────────────────────────────
+class TestAnnotateUseCaseSuitability:
+    @staticmethod
+    def _mock_assess(use_case_key, prod_specs):
+        return {
+            "suitable": prod_specs.get("ram_gb", 0) and prod_specs["ram_gb"] >= 16,
+            "verdict": "suitable" if (prod_specs.get("ram_gb") or 0) >= 16 else "underpowered",
+            "gaps": [] if (prod_specs.get("ram_gb") or 0) >= 16 else ["ram"],
+            "strengths": ["storage"] if (prod_specs.get("storage_gb") or 0) >= 512 else [],
+            "excess": [],
+            "overkill_score": 0.0,
+        }
+
+    def test_annotates_results_and_payload(self):
+        results = [
+            {"sku": "A1", "name": "Laptop A", "specs": {"ram_gb": 32, "storage_gb": 1024}},
+            {"sku": "B2", "name": "Laptop B", "specs": {"ram_gb": 8, "storage_gb": 256}},
+        ]
+        payload = {}
+        results, payload = annotate_use_case_suitability(
+            results, payload,
+            use_case_match="software_development",
+            use_case_specs={"label": "Software Dev", "apps": ["VS Code"], "priority_factors": ["ram"]},
+            assess_fn=self._mock_assess,
+        )
+        assert results[0]["use_case_suitability"]["suitable"] is True
+        assert results[1]["use_case_suitability"]["suitable"] is False
+        assert payload["use_case_analysis"]["suitable_count"] == 1
+        assert payload["use_case_analysis"]["label"] == "Software Dev"
+
+    def test_noop_when_no_use_case(self):
+        results = [{"sku": "X"}]
+        payload = {}
+        results, payload = annotate_use_case_suitability(
+            results, payload,
+            use_case_match=None,
+            use_case_specs=None,
+            assess_fn=self._mock_assess,
+        )
+        assert "use_case_suitability" not in results[0]
+        assert "use_case_analysis" not in payload
+
+    def test_calls_trace_fn(self):
+        traced = []
+        def fake_trace(**kwargs):
+            traced.append(kwargs)
+
+        results = [{"sku": "Z", "name": "Z", "specs": {"ram_gb": 16}}]
+        annotate_use_case_suitability(
+            results, {},
+            use_case_match="gaming",
+            use_case_specs={"label": "Gaming", "apps": [], "priority_factors": []},
+            assess_fn=self._mock_assess,
+            trace_fn=fake_trace,
+            trace_id="t-123",
+        )
+        assert len(traced) == 1
+        assert traced[0]["event_type"] == "use_case_suitability_assessed"

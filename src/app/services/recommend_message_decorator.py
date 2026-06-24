@@ -5,9 +5,8 @@ recommend_message_decorator — CORE (vertical-agnostic)
 Assistant message decoration chain for the recommend pipeline.
 
 Applies budget advice, availability lines, constraint honesty prefixes,
-comparative synthesis, and price range notes to the assistant message.
-These are pure text transforms — they read constraints/results and return
-an augmented message string. No DB or Redis access, no side-effects.
+comparative synthesis, price range notes, confidence gate, and security
+prefix to the assistant message. Also handles use-case suitability annotation.
 """
 from __future__ import annotations
 
@@ -228,3 +227,85 @@ def apply_price_range_note(
     except Exception:
         pass
     return assistant_message
+
+
+def annotate_use_case_suitability(
+    results: List[Dict[str, Any]],
+    payload: Dict[str, Any],
+    *,
+    use_case_match: Optional[str],
+    use_case_specs: Optional[Dict[str, Any]],
+    assess_fn: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+    trace_fn: Optional[Callable[..., None]] = None,
+    trace_id: Optional[str] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Assess suitability of top results for a detected use-case and annotate.
+
+    Mutates results in-place (adds use_case_suitability key) and populates
+    payload["use_case_analysis"].
+
+    Parameters:
+        assess_fn: Callable(use_case_key, product_specs) -> verdict dict
+        trace_fn: Optional log_trace_event function for observability
+
+    Returns (results, payload) for convenience.
+    """
+    try:
+        if not use_case_match or not use_case_specs or not results:
+            return results, payload
+        verdicts: List[Dict[str, Any]] = []
+        for r in results[:3]:
+            specs_dict = r.get("specs") if isinstance(r.get("specs"), dict) else {}
+            prod_specs = {
+                "ram_gb": specs_dict.get("ram_gb"),
+                "storage_gb": specs_dict.get("storage_gb"),
+                "has_dedicated_gpu": bool(specs_dict.get("gpu")),
+                "gpu_vram_gb": specs_dict.get("gpu_vram_gb"),
+                "display_inches": specs_dict.get("display_inches"),
+            }
+            verdict = assess_fn(use_case_match, prod_specs)
+            verdicts.append(verdict)
+            r["use_case_suitability"] = {
+                "use_case": use_case_match,
+                "suitable": verdict.get("suitable"),
+                "verdict": verdict.get("verdict"),
+                "gaps": verdict.get("gaps", [])[:3],
+                "strengths": verdict.get("strengths", [])[:3],
+                "excess": verdict.get("excess", [])[:3],
+                "overkill_score": verdict.get("overkill_score", 0.0),
+            }
+        uc_label = str(use_case_specs.get("label") or use_case_match).replace("_", " ")
+        suitable_count = sum(1 for v in verdicts if v.get("suitable"))
+        total_assessed = len(verdicts)
+        payload["use_case_analysis"] = {
+            "use_case_key": use_case_match,
+            "label": uc_label,
+            "suitable_count": suitable_count,
+            "total_assessed": total_assessed,
+            "apps": (use_case_specs.get("apps") or [])[:5],
+            "priority_factors": (use_case_specs.get("priority_factors") or [])[:5],
+        }
+        if trace_fn and trace_id:
+            try:
+                trace_fn(
+                    trace_id=trace_id,
+                    event_type="use_case_suitability_assessed",
+                    source_type="agent",
+                    source_id="Use_Case_Advisor_Agent",
+                    target_type="user",
+                    target_id=None,
+                    payload={
+                        "use_case_key": use_case_match,
+                        "suitable_count": suitable_count,
+                        "total_assessed": total_assessed,
+                        "verdicts_summary": [
+                            {"sku": (results[i] or {}).get("sku"), "suitable": v.get("suitable"), "gaps": v.get("gaps", [])[:2]}
+                            for i, v in enumerate(verdicts)
+                        ],
+                    },
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return results, payload

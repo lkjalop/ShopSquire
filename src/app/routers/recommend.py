@@ -10655,60 +10655,18 @@ def suggest(
     _synth = _build_comparative_synthesis(query, results or [], _humanize_positive_factor_tokens)
     if _synth:
         assistant_message = _synth
-    # ── Use-Case Advisor: assess suitability of top results and annotate ──
+    # ── Use-Case Advisor (extracted to recommend_message_decorator) ──
     try:
         if _use_case_match and _use_case_specs and results:
             from src.app.services.use_case_advisor import assess_suitability as _assess_suit
-            _uc_verdicts = []
-            for _r in (results or [])[:3]:
-                _prod_specs = {
-                    "ram_gb": _r.get("specs", {}).get("ram_gb") if isinstance(_r.get("specs"), dict) else None,
-                    "storage_gb": _r.get("specs", {}).get("storage_gb") if isinstance(_r.get("specs"), dict) else None,
-                    "has_dedicated_gpu": bool(_r.get("specs", {}).get("gpu")) if isinstance(_r.get("specs"), dict) else False,
-                    "gpu_vram_gb": _r.get("specs", {}).get("gpu_vram_gb") if isinstance(_r.get("specs"), dict) else None,
-                    "display_inches": _r.get("specs", {}).get("display_inches") if isinstance(_r.get("specs"), dict) else None,
-                }
-                verdict = _assess_suit(_use_case_match, _prod_specs)
-                _uc_verdicts.append(verdict)
-                # Annotate the result dict so frontend can show suitability
-                _r["use_case_suitability"] = {
-                    "use_case": _use_case_match,
-                    "suitable": verdict.get("suitable"),
-                    "verdict": verdict.get("verdict"),
-                    "gaps": verdict.get("gaps", [])[:3],
-                    "strengths": verdict.get("strengths", [])[:3],
-                    "excess": verdict.get("excess", [])[:3],
-                    "overkill_score": verdict.get("overkill_score", 0.0),
-                }
-            # Add suitability summary to assistant message
-            _uc_label = str(_use_case_specs.get("label") or _use_case_match).replace("_", " ")
-            _suitable_count = sum(1 for v in _uc_verdicts if v.get("suitable"))
-            _overkill_count = sum(1 for v in _uc_verdicts if v.get("verdict") == "overkill")
-            _total_assessed = len(_uc_verdicts)
-            payload["use_case_analysis"] = {
-                "use_case_key": _use_case_match,
-                "label": _uc_label,
-                "suitable_count": _suitable_count,
-                "total_assessed": _total_assessed,
-                "apps": (_use_case_specs.get("apps") or [])[:5],
-                "priority_factors": (_use_case_specs.get("priority_factors") or [])[:5],
-            }
-            log_trace_event(
+            from src.app.services.recommend_message_decorator import annotate_use_case_suitability as _annotate_uc
+            results, payload = _annotate_uc(
+                results, payload,
+                use_case_match=_use_case_match,
+                use_case_specs=_use_case_specs,
+                assess_fn=_assess_suit,
+                trace_fn=log_trace_event,
                 trace_id=trace_id,
-                event_type="use_case_suitability_assessed",
-                source_type="agent",
-                source_id="Use_Case_Advisor_Agent",
-                target_type="user",
-                target_id=None,
-                payload={
-                    "use_case_key": _use_case_match,
-                    "suitable_count": _suitable_count,
-                    "total_assessed": _total_assessed,
-                    "verdicts_summary": [
-                        {"sku": (results[i] or {}).get("sku"), "suitable": v.get("suitable"), "gaps": v.get("gaps", [])[:2]}
-                        for i, v in enumerate(_uc_verdicts)
-                    ],
-                },
             )
     except Exception:
         pass
