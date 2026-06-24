@@ -410,31 +410,44 @@ def _gpu_prefixes() -> List[str]:
     return [str(x).strip().lower() for x in p if str(x).strip()] if isinstance(p, list) else []
 
 
+# Budget amount: comma-grouped (1,600 / 12,000) OR plain 3-6 digits. Strip commas when parsing.
+_BUDGET_NUM = r"(\d{1,3}(?:,\d{3})+|\d{3,6})"
+
+
+def _budget_int(s: str) -> Optional[int]:
+    try:
+        v = int(str(s).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return v if 50 < v <= 100000 else None
+
+
 def _extract_budget_range(q: str) -> tuple[Optional[int], Optional[int]]:
     """Agnostic numeric budget parse → (min, max). Pure numbers + currency symbols, NO vertical
-    literals, so it is valid for any store. Surfaced into QueryPlan.budget_min/max."""
+    literals, so it is valid for any store. Handles comma-formatted amounts ("$1,600"). Surfaced into
+    QueryPlan.budget_min/max."""
     ql = str(q or "").lower()
-    rng = re.search(r"[\$€£]?\s*(\d{3,6})\s*(?:to|and|-|–|—)\s*[\$€£]?\s*(\d{3,6})\b", ql)
+    rng = re.search(r"[\$€£]?\s*" + _BUDGET_NUM + r"\s*(?:to|and|-|–|—)\s*[\$€£]?\s*" + _BUDGET_NUM + r"\b", ql)
     if rng:
-        lo, hi = int(rng.group(1)), int(rng.group(2))
-        if 50 < lo < hi <= 100000:
+        lo, hi = _budget_int(rng.group(1)), _budget_int(rng.group(2))
+        if lo is not None and hi is not None and lo < hi:
             return lo, hi
-    m = re.search(r"\b(?:under|below|max(?:imum)?|up\s*to|less\s*than|within)\s*[\$€£]?\s*(\d{3,6})\b", ql) \
-        or re.search(r"[\$€£]\s*(\d{3,6})\b", ql)
+    m = re.search(r"\b(?:under|below|max(?:imum)?|up\s*to|less\s*than|within)\s*[\$€£]?\s*" + _BUDGET_NUM + r"\b", ql) \
+        or re.search(r"[\$€£]\s*" + _BUDGET_NUM + r"\b", ql)
     if m:
-        v = int(m.group(1))
-        if 50 < v <= 100000:
+        v = _budget_int(m.group(1))
+        if v is not None:
             return None, v
-    m = re.search(r"\b(?:over|above|at\s*least|more\s*than|starting\s*at)\s*[\$€£]?\s*(\d{3,6})\b", ql)
+    m = re.search(r"\b(?:over|above|at\s*least|more\s*than|starting\s*at)\s*[\$€£]?\s*" + _BUDGET_NUM + r"\b", ql)
     if m:
-        v = int(m.group(1))
-        if 50 < v <= 100000:
+        v = _budget_int(m.group(1))
+        if v is not None:
             return v, None
     # Bare budget anchor: "budget is 1600", "budget of 1600", "budget 1600" (no $/keyword) → ceiling.
-    m = re.search(r"\bbudget(?:\s*(?:is|of|:|=|around|about|~))?\s*[\$€£]?\s*(\d{3,6})\b", ql)
+    m = re.search(r"\bbudget(?:\s*(?:is|of|:|=|around|about|~))?\s*[\$€£]?\s*" + _BUDGET_NUM + r"\b", ql)
     if m:
-        v = int(m.group(1))
-        if 50 < v <= 100000:
+        v = _budget_int(m.group(1))
+        if v is not None:
             return None, v
     return None, None
 

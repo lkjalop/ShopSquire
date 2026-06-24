@@ -177,7 +177,7 @@
     "ml_ai": "\\b(machine learning|deep learning|ai training|train\\w* (a )?model|llm|cuda|tensor|pytorch|data science)\\b",
     "cad_3d": "\\b(cad|autocad|solidworks|revit|3d model\\w*|blender|rendering|engineering student)\\b",
     "photo": "\\b(photo edit\\w*|photoshop|lightroom|raw photo)\\b",
-    "office": "\\b(office work|office laptop|excel|spreadsheet|word processing|email|business|corporate|enterprise|professional|work laptop|for work|productivity)\\b",
+    "office": "\\b(office work|office laptop|office staff|for staff|our staff|company staff|staff laptops?|excel|spreadsheet|word processing|email|business|corporate|enterprise|professional|work laptop|for work|productivity)\\b",
     "study": "\\b(student|university|uni|college|study|school work|note ?taking)\\b"
   },
   "portable_pattern": "\\b(portable|lightweight|light ?weight|thin and light|ultrabook|ultra ?portable|travel|carry around|commut\\w*)\\b",
