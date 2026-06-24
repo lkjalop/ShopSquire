@@ -82,6 +82,19 @@ def _parse_number(s: str) -> int:
     return int(s.replace(",", ""))
 
 
+# A trailing spec/measurement unit means the number is a SPEC, not a budget — "under 2 kg",
+# "16 gb", "240 hz" must never be read as "$2"/"$16"/"$240". Guards the under/over/around parsers.
+_NOT_BUDGET_UNIT = (
+    r"(?!\s*(?:kg|kgs|lb|lbs|gb|tb|mb|kb|hz|ghz|mhz|khz|fps|inch|inches|in|cm|mm|nits|"
+    r"ppi|dpi|wh|mah|mp|cores?|w|watts|k)\b)"
+)
+
+
+def _sane_budget(v: Optional[int]) -> Optional[int]:
+    """Reject nonsensical budgets (e.g. a "$2" misread from "2 kg"). Matches the decomposer's band."""
+    return v if (v is not None and 50 <= v <= 1_000_000) else None
+
+
 def parse_query(query: str) -> ParsedQuery:
     """Parse a free-text shopping query into structured constraints."""
     result = ParsedQuery(raw_query=query)
@@ -110,27 +123,34 @@ def parse_query(query: str) -> ParsedQuery:
     if not range_m:
         range_m = re.search(r"(\d[\d,]*)\s*[-–to]+\s*(\d[\d,]*)\s*(?:dollar|buck|pound|euro|£|\$|€)", q, re.I)
     if range_m:
-        result.budget_min = _parse_number(range_m.group(1))
-        result.budget_max = _parse_number(range_m.group(2))
-        signals += 1
+        _bmin = _sane_budget(_parse_number(range_m.group(1)))
+        _bmax = _sane_budget(_parse_number(range_m.group(2)))
+        if _bmin is not None or _bmax is not None:
+            result.budget_min, result.budget_max = _bmin, _bmax
+            signals += 1
     else:
-        # Under/below X
-        under_m = re.search(r"\b(?:under|below|less than|max|up to)\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+        # Under/below X (not a spec unit — "under 2 kg" is weight, not $2)
+        under_m = re.search(r"\b(?:under|below|less than|max|up to)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if under_m:
-            result.budget_max = _parse_number(under_m.group(1))
-            signals += 1
+            _bmax = _sane_budget(_parse_number(under_m.group(1)))
+            if _bmax is not None:
+                result.budget_max = _bmax
+                signals += 1
         # Above/over X
-        above_m = re.search(r"\b(?:above|over|more than|at least|minimum)\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+        above_m = re.search(r"\b(?:above|over|more than|at least|minimum)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if above_m:
-            result.budget_min = _parse_number(above_m.group(1))
-            signals += 1
+            _bmin = _sane_budget(_parse_number(above_m.group(1)))
+            if _bmin is not None:
+                result.budget_min = _bmin
+                signals += 1
         # Around X
-        around_m = re.search(r"\b(?:around|about|roughly|approximately|~)\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+        around_m = re.search(r"\b(?:around|about|roughly|approximately|~)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if around_m:
-            val = _parse_number(around_m.group(1))
-            result.budget_min = int(val * 0.8)
-            result.budget_max = int(val * 1.2)
-            signals += 1
+            val = _sane_budget(_parse_number(around_m.group(1)))
+            if val is not None:
+                result.budget_min = int(val * 0.8)
+                result.budget_max = int(val * 1.2)
+                signals += 1
         # Fuzzy phrases
         if result.budget_min is None and result.budget_max is None:
             for pat, fmin, fmax in _BUDGET_PHRASES[:3]:
