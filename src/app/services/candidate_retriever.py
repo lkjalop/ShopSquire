@@ -22,6 +22,7 @@ Usage (Sprint R5 scatter-gather pattern):
 """
 
 import logging
+import json
 import math
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +31,20 @@ from sqlalchemy import text as _text, bindparam
 from src.app.models.db import db_session
 
 logger = logging.getLogger("shopsquire.candidate_retriever")
+
+
+def _budget_cents(value: Optional[int]) -> Optional[int]:
+    """from_db callers pass shopper budgets in dollars; products store cents."""
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except Exception:
+        return None
+    # Preserve already-cent-like values from older internal callers.
+    if abs(numeric) >= 100_000:
+        return int(round(numeric))
+    return int(round(numeric * 100.0))
 
 
 def _obs(source: str, n: int, *, error: bool = False) -> None:
@@ -109,10 +124,10 @@ def from_db(
 
         if budget_min is not None:
             conditions.append("p.price_cents >= :budget_min")
-            params["budget_min"] = int(budget_min)
+            params["budget_min"] = _budget_cents(budget_min)
         if budget_max is not None:
             conditions.append("p.price_cents <= :budget_max")
-            params["budget_max"] = int(budget_max)
+            params["budget_max"] = _budget_cents(budget_max)
         if brands:
             brand_placeholders = ", ".join(f":brand_{i}" for i in range(len(brands)))
             conditions.append(f"LOWER(p.brand) IN ({brand_placeholders})")
@@ -124,9 +139,9 @@ def from_db(
 
         # Keyword relevance: TOKENISED LIKE matching (pgvector handles semantic).
         # Match ANY significant token, NOT the whole raw string. A multi-word query
-        # ("gaming laptop $1500-2100") matched as `LIKE %whole phrase%` hits no product
-        # name → 0 results, which is why the scatter-gather DB leg returned empty for
-        # realistic queries (V2 parity = 0). Tokenising restores recall.
+        # (several terms plus a price range) matched as `LIKE %whole phrase%` hits no
+        # product name → 0 results, which is why the scatter-gather DB leg returned empty
+        # for realistic queries (V2 parity = 0). Tokenising restores recall.
         # CAST(... AS TEXT) is portable (Postgres + SQLite); `p.specs::text` was
         # Postgres-only and made from_db raise → empty results on SQLite.
         if query:
@@ -161,18 +176,28 @@ def from_db(
         with db_session() as db:
             rows = db.execute(_text(sql), params).fetchall()
 
-        out = [
-            {
+        out = []
+        for r in rows:
+            raw_specs = r[5]
+            if isinstance(raw_specs, dict):
+                specs = raw_specs
+            elif isinstance(raw_specs, str) and raw_specs.strip():
+                try:
+                    parsed = json.loads(raw_specs)
+                    specs = parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    specs = {}
+            else:
+                specs = {}
+            out.append({
                 "sku": str(r[0]),
                 "name": str(r[1] or ""),
                 "brand": str(r[2] or ""),
                 "price_cents": int(r[3] or 0),
                 "image_url": str(r[4] or ""),
-                "specs": r[5] if isinstance(r[5], dict) else {},
+                "specs": specs,
                 "_source": "db",
-            }
-            for r in rows
-        ]
+            })
         _obs("db", len(out))
         return out
     except Exception as exc:

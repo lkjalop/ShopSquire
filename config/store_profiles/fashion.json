@@ -417,5 +417,6 @@
     }
   },
 
-  "cv_returns_pack": "electronics"
+  "cv_returns_pack": "electronics",
+  "narration_spec_dimensions": [{"label":"Material","variants":[{"key":"material"}]},{"label":"Fit","variants":[{"key":"fit"}]},{"label":"Sizes","variants":[{"key":"size_range"}]},{"label":"Color","variants":[{"key":"color"}]}]
 }

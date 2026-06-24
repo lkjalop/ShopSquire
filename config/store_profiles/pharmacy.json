@@ -383,5 +383,6 @@
     }
   },
 
-  "cv_returns_pack": "electronics"
+  "cv_returns_pack": "electronics",
+  "narration_spec_dimensions": [{"label":"Active","variants":[{"key":"active_ingredient"}]},{"label":"Strength","variants":[{"key":"strength_mg","unit":"mg"}]},{"label":"Form","variants":[{"key":"form"}]},{"label":"Pack","variants":[{"key":"pack_size","unit":" ct"}]}]
 }

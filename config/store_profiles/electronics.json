@@ -160,10 +160,23 @@
     "ml_ai": "\\b(machine learning|deep learning|ai training|train\\w* (a )?model|llm|cuda|tensor|pytorch|data science)\\b",
     "cad_3d": "\\b(cad|autocad|solidworks|revit|3d model\\w*|blender|rendering|engineering student)\\b",
     "photo": "\\b(photo edit\\w*|photoshop|lightroom|raw photo)\\b",
-    "office": "\\b(office work|excel|spreadsheet|word processing|email|business use|productivity)\\b",
+    "office": "\\b(office work|office laptop|excel|spreadsheet|word processing|email|business|corporate|enterprise|professional|work laptop|for work|productivity)\\b",
     "study": "\\b(student|university|uni|college|study|school work|note ?taking)\\b"
   },
   "portable_pattern": "\\b(portable|lightweight|light ?weight|thin and light|ultrabook|ultra ?portable|travel|carry around|commut\\w*)\\b",
+  "portable_weight_kg_max": 2.0,
+
+  "_hard_constraint_rules_comment": "Spec-constraint extraction rules excised VERBATIM from query_decomposer._extract_hard_constraints (NEW-2) so that function is vertical-blind. Each rule: pattern (regex), key (constraint), cast (int|float), group (capture #), optional multiplier. Non-electronics verticals carry their own (or none) — no GPU/refresh/RAM bleed.",
+  "hard_constraint_rules": [
+    {"pattern": "\\b(60|75|90|120|144|165|240|360)\\s*(?:hz|fps|frames?)\\b", "key": "refresh_hz_min", "cast": "int", "group": 1},
+    {"pattern": "\\bunder\\s*([0-9](?:\\.[0-9])?)\\s*kg\\b", "key": "weight_kg_max", "cast": "float", "group": 1},
+    {"pattern": "\\b(8|16|24|32|64)\\s*gb\\b", "key": "ram_gb_min", "cast": "int", "group": 1},
+    {"pattern": "\\b([1248])\\s*tb\\b", "key": "storage_gb_min", "cast": "int", "group": 1, "multiplier": 1024}
+  ],
+  "_use_case_spec_implications_comment": "Implied spec floors when a use-case is present AND a phrase matches (e.g. competitive/esports gaming implies a high refresh floor). mode=setdefault never overrides an explicit value.",
+  "use_case_spec_implications": [
+    {"use_case": "gaming", "pattern": "\\b(esports|competitive|valorant|cs2|counter ?strike|240)\\b", "key": "refresh_hz_min", "value": 144, "mode": "setdefault"}
+  ],
 
   "_use_case_keyword_map_comment": "Detailed use-case keyword matching map (excised from use_case_advisor.match_use_case_from_query). Each key is a use-case slug; value is a list of keywords. First-match scoring with priority tie-break. Vertical-exclusive: pharmacy must NOT inherit gaming/GPU use-cases.",
   "use_case_keyword_map": {
@@ -1247,5 +1260,6 @@
     }
   },
 
-  "cv_returns_pack": "electronics"
+  "cv_returns_pack": "electronics",
+  "narration_spec_dimensions": [{"label":"GPU","variants":[{"key":"gpu_model"},{"key":"gpu_vram_gb","unit":"GB VRAM"}]},{"label":"Display","variants":[{"key":"refresh_hz","unit":"Hz"}]},{"label":"RAM","variants":[{"key":"ram_gb","unit":"GB"}]},{"label":"SSD","variants":[{"key":"storage_gb","unit":"GB"}]},{"label":"CPU","variants":[{"key":"cpu_model"}]}]
 }

@@ -1144,15 +1144,20 @@ export default function App() {
             }
           })(), IMAGE_DEEP_TRIAGE_DELAY_MS);
 
-          // Give the user a feedback message and short-circuit — the right panel handles recs
-          const imageNames = currentAttachedFiles.map(f => f.name).join(', ');
-          setMessages(prev => [...prev, {
-            role: 'assistant' as const,
-            content: `I checked your images (${imageNames}). Open **Visual Search** on the right to see per-image matches, nearest alternatives, and why each pick fits.`,
-            timestamp: new Date(),
-          }]);
-          setIsThinking(false);
-          return;
+          // For a pure visual-search request, the panel can own the response.
+          // For shopping queries with attached images, continue into /chat/query
+          // so the chat bubble summarizes the grounded recommendation instead
+          // of punting the buyer to the side panel.
+          if (!shoppingIntent && explicitVisualIntent) {
+            const imageNames = currentAttachedFiles.map(f => f.name).join(', ');
+            setMessages(prev => [...prev, {
+              role: 'assistant' as const,
+              content: `I checked your images (${imageNames}). Open **Visual Search** on the right to see per-image matches, nearest alternatives, and why each pick fits.`,
+              timestamp: new Date(),
+            }]);
+            setIsThinking(false);
+            return;
+          }
         }
       }
 
@@ -1247,16 +1252,22 @@ export default function App() {
         }
         // Attach image triage data
         if (imageTriageResults.length > 0) {
-          chatPayload.images = imageTriageResults.map((t: any) => ({
-            labels: t?.labels || [],
-            ocr_text: t?.extracted_text || '',
-            image_hash: t?.image_hash || null,
-            product_identity: t?.product_identity || null,
-            damage_score: t?.damage_score ?? 0,
-            is_product_photo: t?.is_product_photo ?? false,
-            intent_routing: t?.intent_routing || null,
-            security: t?.security || null,
-          }));
+          chatPayload.images = imageTriageResults.map((t: any) => {
+            const productIdentity = t?.product_identity || null;
+            const trustedImageEvidence = t?.provider !== 'client_fast_boundary' && (t?.is_product_photo === true || Boolean(productIdentity));
+            return {
+              // Do not pass filename-derived fast labels into /chat/query; names like
+              // apple-red.jpg can otherwise look like product intent and bias ranking.
+              labels: trustedImageEvidence && Array.isArray(t?.labels) ? t.labels : [],
+              ocr_text: trustedImageEvidence ? (t?.extracted_text || '') : '',
+              image_hash: t?.image_hash || null,
+              product_identity: productIdentity,
+              damage_score: t?.damage_score ?? 0,
+              is_product_photo: trustedImageEvidence,
+              intent_routing: t?.intent_routing || null,
+              security: t?.security || null,
+            };
+          });
         } else if (requestImageContext) {
           chatPayload.image_labels = requestImageContext.labels || [];
           chatPayload.image_ocr_text = requestImageContext.ocrText || '';
@@ -1343,10 +1354,13 @@ export default function App() {
         };
 
         let data: any = null;
-        try {
-          data = await tryStreamChat();
-        } catch {
-          data = null;
+        const hasChatImages = Array.isArray(chatPayload.images) && chatPayload.images.length > 0;
+        if (!hasChatImages) {
+          try {
+            data = await tryStreamChat();
+          } catch {
+            data = null;
+          }
         }
         if (!data) {
           const r = await fetch(apiUrl('/api/v1/chat/query'), {
@@ -1429,6 +1443,7 @@ export default function App() {
           setDisplayProducts(visibleProducts);
           if (panelContract?.mode === 'support') switchRightPanelMode('faq');
           else if (cartUpsellIntent) switchRightPanelMode('cart');
+          else if (hasImages && !complaintIntent && !explicitComplaintIntent) switchRightPanelMode('visual_search');
           else switchRightPanelMode(mode === 'none' ? 'grid' : mode);
           const whySummary = _stripTechnicalTokens(summarizeWhy(prods));
           const hasAssistantBody = typeof respAssistant === 'string' && respAssistant.trim().length > 0;

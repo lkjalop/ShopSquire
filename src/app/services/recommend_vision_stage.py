@@ -75,17 +75,26 @@ def _resolve_supported_brand_hint(
     query_text: str | None = None,
 ) -> str:
     supported = _supported_brands()
-    direct = str(explicit or "").strip().lower()
-    if direct in supported:
-        return direct
     c = constraints if isinstance(constraints, dict) else {}
+    # NEW-4: a brand the shopper EXCLUDED ("but not Apple") must never be resolved as a positive
+    # brand_hint — otherwise retrieval anchors to it and the brand-exclude filter then empties the
+    # page. Skip excluded brands in EVERY resolution branch (no-op when there are no exclusions).
+    excluded = {str(x).strip().lower() for x in (c.get("brand_excludes") or []) if str(x).strip()}
+
+    def _ok(b: str) -> bool:
+        b = str(b or "").strip().lower()
+        return bool(b) and b in supported and b not in excluded
+
+    direct = str(explicit or "").strip().lower()
+    if _ok(direct):
+        return direct
     for key in ("_request_brand_hint", "_inferred_image_brand"):
         val = str(c.get(key) or "").strip().lower()
-        if val in supported:
+        if _ok(val):
             return val
     for raw in (c.get("brands") or []):
         val = str(raw or "").strip().lower()
-        if val in supported:
+        if _ok(val):
             return val
     q = str(query_text or "").lower()
     # Profile-driven query-token resolution: a brand/line/alias token maps to its manufacturer when
@@ -96,11 +105,11 @@ def _resolve_supported_brand_hint(
         for token, spec in (product_line_index() or {}).items():
             if token and token in q:
                 mfr = str((spec or {}).get("manufacturer") or "").strip().lower()
-                if mfr in supported:
+                if _ok(mfr):
                     return mfr
     except Exception:
         pass
     for brand in supported:
-        if brand and brand in q:
+        if _ok(brand) and brand in q:
             return brand
     return ""

@@ -32,6 +32,14 @@ _CORE_MODULES = [
     "src/app/policy/execution_gate.py",
     "src/app/services/answer_composer.py",
     "src/app/services/candidate_retriever.py",
+    # profile-driven product narration: dims come from the StoreProfile slot, not hardcoded specs.
+    "src/app/services/narration_tradeoff.py",
+    # availability/fulfilment: stock + lead-time orchestration, vertical-blind (no product literals).
+    "src/app/services/availability_agent.py",
+    # negation/exclusion response filter: matches excluded terms against product DATA, no literals.
+    "src/app/services/negation_filter.py",
+    # LLM intent-planner fallback: prompt seeded from the profile vocab, no hardcoded verticals.
+    "src/app/services/llm_planner.py",
     "src/app/services/recommend_pipeline.py",
     "src/app/services/commerce_source_status.py",
     "src/app/services/checkout_handoff.py",
@@ -49,6 +57,11 @@ _CORE_MODULES = [
     # graduated from _PENDING_EXCISION 2026-06-20: accessory FAMILY taxonomy excised verbatim to
     # electronics.json taxonomy slots; non-electronics verticals get UNK families (no bleed).
     "src/app/services/product_taxonomy.py",
+    # graduated from _PENDING_EXCISION 2026-06-24 (NEW-2): the last spec literals in
+    # _extract_hard_constraints (refresh/RAM/storage/weight/esports) excised to electronics.json
+    # hard_constraint_rules / use_case_spec_implications / portable_weight_kg_max (parity-tested
+    # byte-for-byte). use_case_patterns/portable_pattern already read from the profile.
+    "src/app/services/query_decomposer.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
@@ -85,12 +98,34 @@ def test_lint_actually_detects_flavour():
 # may only move DOWN (new flavour cannot be added; every excision pass lowers the baseline). At
 # 0 the module graduates to _CORE_MODULES (zero-tolerance).
 #
-# Currently EMPTY — both initial entries graduated 2026-06-20:
-#   * category_router  → entity_* slots in electronics.json (electronics byte-identical, no bleed)
-#   * product_taxonomy → accessory-taxonomy slots in electronics.json (electronics byte-identical)
-# Add a module here when a new transitional-flavour island is identified (e.g. when excising a
-# decision-path module whose profile-slot parity can't be built in the same pass).
-_PENDING_EXCISION: dict[str, int] = {}
+# category_router + product_taxonomy graduated 2026-06-20 (→ electronics.json slots, byte-identical).
+#
+# 2026-06-22 audit: the decision-path modules below carry KNOWN transitional electronics flavour and
+# are NOT yet in _CORE_MODULES. Recorded here so NO NEW flavour can be added to them (the ratchet
+# blocks growth) and every excision pass must lower the baseline toward 0 → graduation. Baselines are
+# the EXACT distinct-flavour-token count today (recompute with _distinct_flavour_count before lowering).
+# Excision targets (where the flavour should move):
+#   recommend.py            → brand→canonical/alias maps, brand_price_floors, GPU/gaming token lists,
+#                             refresh-rate logic, SQL brand literals → electronics.json slots / the
+#                             recommend_candidate_classify electronics adapter (LANE D extraction).
+#   recommend_image_hints   → _SUPPORTED_IMAGE_BRAND_HINTS brand catalog → electronics.json image slot.
+#   recommend_budget_advisor→ persona labels + gpu/spec vocab → electronics.json (Phase-2, noted in module).
+#   recommend_nqe_helpers / query_decomposer / *_agent / *_parsing / use_case_advisor / vision_stage
+#                           → spec-key + brand/gpu literals → profile spec/keyword slots.
+_PENDING_EXCISION: dict[str, int] = {
+    "src/app/routers/recommend.py": 14,
+    "src/app/routers/chat.py": 13,  # chat router: clarify-text + brand-alias literals → profile slots
+    "src/app/services/recommend_image_hints.py": 13,
+    "src/app/services/recommend_budget_advisor.py": 4,
+    "src/app/services/recommend_nqe_helpers.py": 3,
+    # query_decomposer.py GRADUATED to _CORE_MODULES 2026-06-24 (NEW-2) — spec logic excised to profile.
+    "src/app/services/product_ranking_agent.py": 2,
+    "src/app/services/recommend_vision_stage.py": 2,
+    "src/app/services/recommend_budget_parsing.py": 1,
+    "src/app/services/use_case_advisor.py": 1,
+    "src/app/services/product_identity_agent.py": 1,
+    "src/app/services/product_classifier.py": 1,
+}
 
 
 def _distinct_flavour_count(module: str) -> int:

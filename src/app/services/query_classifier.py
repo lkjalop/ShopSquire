@@ -145,7 +145,7 @@ def classify_turn_intent(
 # ── Coarse product category ───────────────────────────────────────────────────
 
 _CATEGORY_PATTERNS: List[tuple] = [
-    ("laptop", re.compile(r"\b(laptop|notebook|ultrabook|macbook|chromebook|thinkpad|spectre|legion|rog)\b", re.I)),
+    ("laptop", re.compile(r"\b(laptops?|notebooks?|ultrabooks?|macbooks?|chromebooks?|thinkpads?|spectres?|legions?|rog)\b", re.I)),
     ("desktop", re.compile(r"\b(desktop|tower|mini.pc|nuc|all.in.one)\b", re.I)),
     ("monitor", re.compile(r"\b(monitor|display|screen|4k|1440p|curved)\b", re.I)),
     ("keyboard", re.compile(r"\b(keyboard|mechanical|keycap|switch)\b", re.I)),

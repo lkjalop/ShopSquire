@@ -30,7 +30,8 @@
     "external_research_allowlist",
     "gpu_prefixes",
     "known_brands",
-    "primary_types"
+    "primary_types",
+    "narration_spec_dimensions"
   ],
   "properties": {
     "id": {"type": "string", "description": "Unique vertical id (matches the filename stem)."},
@@ -58,6 +59,7 @@
     "gpu_prefixes": {"type": "array"},
     "known_brands": {"type": "array"},
     "primary_types": {"type": "array"},
+    "narration_spec_dimensions": {"type": "array", "description": "Ordered spec dimensions surfaced in product narration/tradeoff lines: [{label, variants:[{key, unit?}]}]. Vertical-blind: core's narration_tradeoff reads this instead of hardcoding GPU/RAM/refresh."},
     "spec_extraction_rules": {"type": "object", "description": "OPTIONAL (inline-adapter slot): numeric/flag spec parsing rules. fashion/pharmacy carry it; electronics uses the inline adapter in recommend_utils pending byte-equivalent extraction."},
     "ranking_rules": {"type": "array", "description": "OPTIONAL (inline-adapter slot): use-case rank rules. fashion/pharmacy carry it; electronics uses the inline adapter in recommend_ranking pending byte-equivalent extraction."}
   }

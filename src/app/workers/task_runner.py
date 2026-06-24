@@ -186,8 +186,26 @@ def _consumer_loop() -> None:
     _log.info("task consumer stopped")
 
 
+def _task_consumer_enabled() -> bool:
+    """Mirror trace_broker._redis_stream_enabled. The Redis Streams task consumer is OFF in
+    local/dev/test — there, a blocking ``xreadgroup`` against an empty/unavailable stream just
+    churns timeouts and leaks half-closed sockets (CLOSE_WAIT pileup → wedged port). It auto-enables
+    in non-dev when REDIS_URL is configured. Explicit ``TASK_CONSUMER_ENABLED`` always wins."""
+    raw = os.getenv("TASK_CONSUMER_ENABLED")
+    if raw is not None:
+        return str(raw).lower() in ("1", "true", "yes")
+    app_env = str(os.getenv("APP_ENV", "local") or "local").lower()
+    if app_env in ("local", "dev", "development", "test", "testing"):
+        return False
+    return bool(os.getenv("REDIS_URL"))
+
+
 def start_consumer() -> None:
-    """Start the Redis stream consumer in a background thread."""
+    """Start the Redis stream consumer in a background thread (no-op when disabled — see
+    _task_consumer_enabled). Self-gating keeps the app-lifespan call site unconditional + simple."""
+    if not _task_consumer_enabled():
+        _log.info("task consumer disabled (TASK_CONSUMER_ENABLED unset in local/dev/test) — skipping")
+        return
     global _consumer_thread
     if _consumer_thread is not None and _consumer_thread.is_alive():
         return

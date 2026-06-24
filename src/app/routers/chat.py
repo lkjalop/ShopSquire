@@ -1857,13 +1857,18 @@ async def chat_query(
     products: List[Dict] = []
     for item in results:
         price = item.get("price")
+        price_cents = item.get("price_cents")
         if price is None:
             try:
-                price_cents = item.get("price_cents")
                 if price_cents is not None:
                     price = float(price_cents) / 100.0
             except Exception:
                 price = None
+        if price_cents is None and price is not None:
+            try:
+                price_cents = int(round(float(price) * 100.0))
+            except Exception:
+                price_cents = None
         specs = item.get("specs") or {}
         features: List[str] = []
         try:
@@ -1895,15 +1900,31 @@ async def chat_query(
                     why = [str(x) for x in pos if isinstance(x, (str, int, float))][:4]
         except Exception:
             why = []
-        products.append({
+        product_out = {
             "sku": item.get("sku"),
             "name": item.get("name"),
             "price": price,
+            "price_cents": price_cents,
+            "currency": item.get("currency") or "USD",
+            "specs": specs,
             "features": features or (item.get("features") or []),
             "image_url": item.get("image_url"),
             "why": why,
             "score_norm": item.get("score_norm"),
-        })
+            "score": item.get("score"),
+            "factors": item.get("factors") or {},
+            "why_not": item.get("why_not") or [],
+            "stock": item.get("stock"),
+            "stock_level": item.get("stock_level"),
+            "stock_status": item.get("stock_status"),
+            "stock_urgency": item.get("stock_urgency"),
+            "cart_eligible": item.get("cart_eligible"),
+            "confidence": item.get("confidence"),
+        }
+        for optional_key in ("id", "brand", "category", "reason_codes", "contrastive_why", "rank_delta", "rerank_delta"):
+            if optional_key in item:
+                product_out[optional_key] = item.get(optional_key)
+        products.append(product_out)
 
     # Auto view mode heuristic (simple client-like logic)
     ql = q.lower()
@@ -2298,15 +2319,27 @@ async def chat_query(
     # user knows the upload is under review and the SOC has the evidence.
     if breach_assessment is not None or bool(image_security_posture.get("chat_lockdown")):
         _ba = breach_assessment if isinstance(breach_assessment, dict) else None
-        _prod = recognized_image_label or "the product in your photo"
+        # Only claim a product "in your photo" when one was actually recognised in-domain. An
+        # off-domain / unrecognised upload must be narrated as text + sanitized image context — never
+        # "based on the product in your photo" (the apple-image-on-gaming-query case exposed that as
+        # factually wrong).
         if image_handling_mode == "sanitized_visual":
             # We kept the legitimate product recognition; only the QR/OCR/steg
             # channel was quarantined. Stay anchored on the recognised product.
+            if recognized_image_label:
+                _anchor = (
+                    f"I still recognised {recognized_image_label} in the photo, so these "
+                    f"recommendations are anchored to that. Let me know if I read the product wrong."
+                )
+            else:
+                _anchor = (
+                    "I couldn't confidently identify a product in the image, so these recommendations "
+                    "are based on your text plus the image's sanitized context."
+                )
             _warn_msg = (
                 f"⚠️ Heads up: a suspicious element (e.g. QR code / hidden payload) in your image "
                 f"was detected and neutralised — I did not open or follow it, and it's been logged for "
-                f"security review. I still recognised {_prod} in the photo, so these recommendations are "
-                f"anchored to that. Let me know if I read the product wrong."
+                f"security review. {_anchor}"
             )
         elif image_handling_mode == "text_only_fallback":
             # Pixels themselves looked altered → ask the user to recover context.
@@ -2328,9 +2361,13 @@ async def chat_query(
                 out["next_questions"] = [_clarify_q]
             out["needs_disambiguation"] = True
         else:
+            if recognized_image_label:
+                _basis = f"I've based these recommendations on {recognized_image_label} and your text."
+            else:
+                _basis = "I've based these recommendations on your text and the image's sanitized context."
             _warn_msg = (
                 "⚠️ Your uploaded image was flagged by our security system and logged for review. "
-                f"I've based these recommendations on {_prod} and your text."
+                f"{_basis}"
             )
         if _ba and (_ba.get("ip_assessment") or {}).get("known_bad_actor"):
             _warn_msg = _warn_msg + " Note: this request originated from a network flagged as high-risk."

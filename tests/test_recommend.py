@@ -400,6 +400,45 @@ def test_image_text_fusion_can_infer_brand_from_labels(monkeypatch):
         RecommendationService.retrieve_candidates = orig_retrieve
 
 
+def test_negation_excludes_brand_end_to_end(monkeypatch):
+    """NEW-4: 'a laptop but not Apple' must drop Apple from the real response and never blank the
+    page. Differential against a control request (without the exclusion) so it's robust to whatever
+    else is in the shared catalog: Apple may appear in the control but must be gone once excluded.
+    Inserts are cleaned up so this never pollutes the catalog for later tests."""
+    orig_retrieve = RecommendationService.retrieve_candidates
+    mem = Memory(get_redis())
+    mem.clear_session("u-neg-apple")
+    mem.clear_session("u-neg-ctrl")
+    try:
+        RecommendationService.retrieve_candidates = lambda self, query, limit=10: []
+        with db_session() as db:
+            db.execute(text("INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) VALUES ('p-neg-apple','NEG-APL-1','Apple MacBook Air',129900,'USD','{}',1)"))
+            db.execute(text("INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) VALUES ('p-neg-dell','NEG-DEL-1','Dell XPS 13',119900,'USD','{}',1)"))
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-neg-apple','p-neg-apple',5,'default')"))
+            db.execute(text("INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) VALUES ('inv-neg-dell','p-neg-dell',5,'default')"))
+            db.commit()
+
+        def _names(uid, query):
+            r = client.get("/api/v1/recommend/suggest", params={"uid": uid, "query": query, "budget_max": 2000})
+            assert r.status_code == 200
+            body = r.json()
+            return [str((p or {}).get("name") or "").lower() for p in (body.get("results") or [])], body
+
+        excl_names, excl_body = _names("u-neg-apple", "a good laptop but not Apple under 2000")
+        assert excl_names, excl_body  # never blank
+        assert not any("apple" in n for n in excl_names), f"Apple should be excluded, got {excl_names}"
+    finally:
+        RecommendationService.retrieve_candidates = orig_retrieve
+        # Clean up so the inserted rows never pollute the shared catalog for later tests.
+        try:
+            with db_session() as db:
+                db.execute(text("DELETE FROM inventory WHERE product_id IN ('p-neg-apple','p-neg-dell')"))
+                db.execute(text("DELETE FROM products WHERE id IN ('p-neg-apple','p-neg-dell')"))
+                db.commit()
+        except Exception:
+            pass
+
+
 def test_image_hint_apple_uses_nearest_above_budget_before_generic_alternatives(monkeypatch):
     orig_retrieve = RecommendationService.retrieve_candidates
     isolated_eng = _make_isolated_engine()

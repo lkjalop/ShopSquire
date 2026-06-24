@@ -33,6 +33,7 @@ _REQUIRED_IN_ALL = [
     "manufacturers",
     "primary_types",
     "use_cases",
+    "narration_spec_dimensions",     # narration_tradeoff.spec_summary_line (core reads, no inline fallback)
 ]
 
 # Inline-adapter slots: electronics parses these INLINE today (recommend_utils / recommend_ranking);

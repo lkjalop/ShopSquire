@@ -34,9 +34,12 @@ class _FakeAsyncClient:
                         "sku": "IMG-1",
                         "name": "Visual Match Laptop",
                         "price_cents": 149900,
-                        "specs": {"ram_gb": 16},
+                        "currency": "USD",
+                        "specs": {"ram_gb": 16, "gpu": "RTX 4060"},
                         "factors": {"positive": ["+embedding_similarity", "+within_budget"]},
                         "score_norm": 88.0,
+                        "stock_status": "in_stock",
+                        "cart_eligible": True,
                     }
                 ],
                 "assistant_message": "Found 1 visual match.",
@@ -87,6 +90,13 @@ def test_chat_with_image_emits_multimodal_and_intent_routing_events(monkeypatch)
     body = resp.json()
     trace_id = body.get("decision_trace_id") or body.get("trace_id")
     assert trace_id == "trace-chat-mm-1"
+    product = (body.get("products") or [])[0]
+    assert product["price"] == 1499.0
+    assert product["price_cents"] == 149900
+    assert product["specs"]["gpu"] == "RTX 4060"
+    assert product["stock_status"] == "in_stock"
+    assert product["cart_eligible"] is True
+    assert "+embedding_similarity" in product["why"]
 
     ev = client.get(f"/api/v1/trace/{trace_id}/events", headers=headers)
     assert ev.status_code == 200

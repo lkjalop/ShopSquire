@@ -77,6 +77,14 @@ _INJECTION_RE = re.compile(
     re.IGNORECASE,
 )
 _PRICE_RE = re.compile(r"\$\s?(\d[\d,]*)(?:\.\d+)?")
+_PERFORMANCE_CLAIM_RE = re.compile(
+    r"\b(?:\d{2,3}\+?\s*fps|frames per second|high settings|ultra settings|ray tracing|4k gaming)\b",
+    re.IGNORECASE,
+)
+_PERFORMANCE_EVIDENCE_RE = re.compile(
+    r"\b(?:fps|frames per second|benchmark|benchmarked|performance profile|high settings|ultra settings|ray tracing|4k gaming)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -196,6 +204,12 @@ def verify_product_narration(
         if t in ev_text or re.search(rf"\b{re.escape(t)}\b", ev_text):
             continue
         violations.append(f"ungrounded_spec:{t}")
+
+    # 5. Unsupported performance claims: GPU/display specs do not prove game
+    # FPS, ray-tracing, or settings-level benchmark claims. Those need explicit
+    # benchmark/performance evidence in the product data.
+    if _PERFORMANCE_CLAIM_RE.search(text) and not _PERFORMANCE_EVIDENCE_RE.search(ev_text):
+        violations.append("unsupported_performance_claim")
 
     return GuardResult(grounded=not violations, violations=violations)
 

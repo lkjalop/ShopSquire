@@ -51,6 +51,43 @@ def test_rerank_returns_list_and_orders_by_stock_and_specs():
     assert ranked[0]["sku"] == "ELEC-LAP-RTX-001"
 
 
+def test_rerank_budget_factor_accepts_dollar_constraints():
+    svc = RecommendationService()
+    cands = [_sample_candidates()[0]]
+    ranked = svc.rerank_candidates_with_factors(cands, {"budget_max": 1800, "query": "gaming laptop"})
+    factors = ranked[0]["factors"]
+    assert "+within_budget" in factors["positive"]
+    assert "-over_budget" not in factors["negative"]
+
+
+def test_rerank_structured_spec_floors_are_not_false_negatives():
+    svc = RecommendationService()
+    cands = [
+        {
+            "sku": "GAM-RTX4060",
+            "name": "RTX 4060 Gaming Laptop 144Hz",
+            "price_cents": 129900,
+            "currency": "USD",
+            "stock": 5,
+            "specs": {"gpu": "GeForce RTX 4060", "ram_gb": 16, "refresh_hz": 144, "storage_gb": 1024},
+        }
+    ]
+    ranked = svc.rerank_candidates_with_factors(
+        cands,
+        {
+            "budget_max": 1800,
+            "specs": ["ram_gb_min:8", "refresh_hz_min:60", "storage_gb_min:512", "gpu:discrete"],
+            "query": "gaming laptop",
+        },
+    )
+    factors = ranked[0]["factors"]
+    assert "+ram_gb_min:8" in factors["positive"]
+    assert "+refresh_hz_min:60" in factors["positive"]
+    assert "+storage_gb_min:512" in factors["positive"]
+    assert "+gpu:discrete" in factors["positive"]
+    assert not any(v in factors["negative"] for v in ["-ram_gb_min:8", "-refresh_hz_min:60", "-gpu:discrete"])
+
+
 def test_rerank_uses_collaborative_and_clickstream_signals(monkeypatch):
     svc = RecommendationService()
     cands = _sample_candidates()

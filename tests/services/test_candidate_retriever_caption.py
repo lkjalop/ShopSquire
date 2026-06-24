@@ -95,6 +95,32 @@ def test_from_db_tokenises_multiword_query(monkeypatch):
     assert not any("gaming laptop" in v for v in vals)     # never the raw phrase as one term
 
 
+def test_from_db_converts_dollar_budget_to_price_cents(monkeypatch):
+    captured = _capture_db(monkeypatch)
+    cr.from_db("gaming laptop between 1200 and 1800", budget_min=1200, budget_max=1800)
+    assert captured["params"]["budget_min"] == 120000
+    assert captured["params"]["budget_max"] == 180000
+
+
+def test_from_db_parses_sqlite_json_specs(monkeypatch):
+    class _FakeDB:
+        def execute(self, sql, params=None):
+            class _R:
+                def fetchall(self_inner):
+                    return [("GAM-1", "Gaming Laptop", "MSI", 149900, "", '{"gpu":"RTX 4070","ram_gb":16}')]
+            return _R()
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_session():
+        yield _FakeDB()
+
+    monkeypatch.setattr(cr, "db_session", _fake_session)
+    out = cr.from_db("gaming laptop", budget_min=1200, budget_max=1800)
+    assert out[0]["specs"] == {"gpu": "RTX 4070", "ram_gb": 16}
+
+
 def test_from_db_all_filler_query_does_not_force_zero(monkeypatch):
     # A query that is only filler/short tokens adds NO keyword condition → returns the active
     # catalog as a candidate pool rather than being forced to 0 results.

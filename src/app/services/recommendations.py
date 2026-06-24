@@ -1062,6 +1062,85 @@ class RecommendationService:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [p for _s, p in scored[:limit]]
 
+    @staticmethod
+    def _budget_to_cents(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if numeric <= 0:
+            return None
+        if abs(numeric) >= 100_000:
+            return int(numeric)
+        return int(round(numeric * 100))
+
+    @staticmethod
+    def _to_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            m = re.search(r"\d+", str(value))
+            return int(m.group(0)) if m else None
+
+    @classmethod
+    def _candidate_satisfies_spec(cls, candidate: Dict[str, Any], spec: Any) -> Optional[bool]:
+        spec_text = str(spec or "").strip().lower()
+        if not spec_text:
+            return None
+        specs = candidate.get("specs") if isinstance(candidate.get("specs"), dict) else {}
+        try:
+            blob = f"{candidate.get('name') or ''} {json.dumps(specs, ensure_ascii=False)}".lower()
+        except Exception:
+            blob = f"{candidate.get('name') or ''} {specs}".lower()
+
+        def _min_from_spec() -> Optional[int]:
+            if ":" in spec_text:
+                raw = spec_text.split(":", 1)[1]
+            else:
+                raw = spec_text
+            m = re.search(r"\d+", raw)
+            return int(m.group(0)) if m else None
+
+        if spec_text.startswith(("ram_gb_min:", "ram:")):
+            required = _min_from_spec()
+            actual = cls._to_int(specs.get("ram_gb")) or cls._to_int(specs.get("ram"))
+            if actual is None:
+                actual = cls._to_int(re.search(r"(\d+)\s*gb\s*(?:ram|memory)?", blob).group(1)) if re.search(r"(\d+)\s*gb\s*(?:ram|memory)?", blob) else None
+            return None if required is None or actual is None else actual >= required
+
+        if spec_text.startswith("refresh_hz_min:"):
+            required = _min_from_spec()
+            actual = cls._to_int(specs.get("refresh_hz")) or cls._to_int(specs.get("display_hz"))
+            if actual is None:
+                m = re.search(r"(\d+)\s*hz", blob)
+                actual = int(m.group(1)) if m else None
+            return None if required is None or actual is None else actual >= required
+
+        if spec_text.startswith(("storage_gb_min:", "ssd:", "storage:")):
+            required = _min_from_spec()
+            if required is not None and "tb" in spec_text:
+                required *= 1024
+            actual = cls._to_int(specs.get("storage_gb")) or cls._to_int(specs.get("storage"))
+            if actual is None:
+                tb = re.search(r"(\d+)\s*tb", blob)
+                gb = re.search(r"(\d+)\s*gb\s*(?:ssd|storage|disk)?", blob)
+                actual = int(tb.group(1)) * 1024 if tb else (int(gb.group(1)) if gb else None)
+            return None if required is None or actual is None else actual >= required
+
+        if spec_text == "gpu:discrete":
+            try:
+                from src.app.services.recommend_candidate_classify import gpu_tier
+
+                return gpu_tier(candidate) in ("entry", "mid", "high")
+            except Exception:
+                return any(tok in blob for tok in ("rtx", "gtx", "geforce", "radeon rx", "radeon pro", "discrete"))
+
+        return None
+
     def analyze_query(self, query: str, prior: Dict[str, Any] | None = None) -> Dict[str, Any]:
         text, locale = self._apply_multilingual_normalization(query)
         prior = prior or {}
@@ -1274,6 +1353,29 @@ class RecommendationService:
         return constraints
 
     def retrieve_candidates(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        def _candidate_from_product(p: Any, stock: Optional[int] = None) -> Dict[str, Any]:
+            return {
+                "id": p.id,
+                "sku": p.sku,
+                "name": p.name,
+                "price_cents": p.price_cents,
+                "currency": p.currency,
+                "image_url": getattr(p, "image_url", None),
+                "stock": stock,
+                "specs": p.specs or {},
+            }
+
+        def _prepend_unique(preferred: List[Dict[str, Any]], existing: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            merged: List[Dict[str, Any]] = []
+            seen: set[str] = set()
+            for item in (preferred or []) + (existing or []):
+                sku = str((item or {}).get("sku") or "").strip()
+                if not sku or sku in seen:
+                    continue
+                merged.append(item)
+                seen.add(sku)
+            return merged
+
         with self.tracer.start_as_current_span("recommend.retrieve_candidates") as span:
             span.set_attribute("query.length", len(query or ""))
             span.set_attribute("limit", limit)
@@ -1297,18 +1399,7 @@ class RecommendationService:
             stock_map = {}
         for p in products:
             stock = stock_map.get(p.id) if stock_map is not None else None
-            candidates.append(
-                {
-                    "id": p.id,
-                    "sku": p.sku,
-                    "name": p.name,
-                    "price_cents": p.price_cents,
-                    "currency": p.currency,
-                    "image_url": getattr(p, "image_url", None),
-                    "stock": stock,
-                    "specs": p.specs or {},
-                }
-            )
+            candidates.append(_candidate_from_product(p, stock=stock))
 
         # Augment with vector search results when embeddings provider enables it
         provider = (os.getenv("EMBEDDINGS_PROVIDER") or "bow").strip().lower()
@@ -1338,40 +1429,62 @@ class RecommendationService:
                             continue
                         if p.sku in seen:
                             continue
-                        candidates.append(
-                            {
-                                "id": p.id,
-                                "sku": p.sku,
-                                "name": p.name,
-                                "price_cents": p.price_cents,
-                                "currency": p.currency,
-                                "image_url": getattr(p, "image_url", None),
-                                "stock": (v_stock or {}).get(p.id),
-                                "specs": p.specs or {},
-                            }
-                        )
+                        candidates.append(_candidate_from_product(p, stock=(v_stock or {}).get(p.id)))
                         seen.add(p.sku)
                         if len(candidates) >= limit:
                             break
             except Exception:
                 pass
+        try:
+            from src.app.services.recommend_candidate_classify import use_case_fit
+
+            all_products = self.catalog.list_products(limit=400)
+            pool: List[Dict[str, Any]] = []
+            for p in all_products:
+                pool.append(_candidate_from_product(p, stock=None))
+            use_case_topups = []
+            for item in pool:
+                fit = use_case_fit(item, query)
+                reasons = fit.get("reasons") or []
+                if fit.get("use_case") and fit.get("meets") and len(reasons) > 1:
+                    score = 0
+                    tier = str(fit.get("tier") or "")
+                    if tier == "high":
+                        score += 3
+                    elif tier == "mid":
+                        score += 2
+                    elif tier == "entry":
+                        score += 1
+                    score += min(3, len(reasons))
+                    item["_use_case_topup_score"] = score
+                    item["_use_case_topup_reasons"] = reasons
+                    use_case_topups.append(item)
+            if use_case_topups:
+                topup_ids = [p["id"] for p in use_case_topups if p.get("id")]
+                try:
+                    topup_stock = self.catalog.get_stock_by_product_ids(topup_ids)
+                except Exception:
+                    topup_stock = {}
+                for p in use_case_topups:
+                    if p.get("id") in topup_stock:
+                        p["stock"] = topup_stock.get(p.get("id"))
+                use_case_topups.sort(
+                    key=lambda p: (
+                        int(p.get("stock") or 0) > 0,
+                        float(p.get("_use_case_topup_score") or 0.0),
+                        -float(p.get("price_cents") or 0.0),
+                    ),
+                    reverse=True,
+                )
+                candidates = _prepend_unique(use_case_topups[: max(8, limit)], candidates)
+        except Exception:
+            pass
         if len(candidates) < limit:
             try:
                 all_products = self.catalog.list_products(limit=200)
                 pool = []
                 for p in all_products:
-                    pool.append(
-                        {
-                            "id": p.id,
-                            "sku": p.sku,
-                            "name": p.name,
-                            "price_cents": p.price_cents,
-                            "currency": p.currency,
-                            "image_url": getattr(p, "image_url", None),
-                            "stock": None,
-                            "specs": p.specs or {},
-                        }
-                    )
+                    pool.append(_candidate_from_product(p, stock=None))
                 ranked = self._tfidf_rank(query, pool, limit)
                 seen = {c["sku"] for c in candidates}
                 # Batch-fetch stock for ranked candidates
@@ -1662,6 +1775,7 @@ class RecommendationService:
     def rerank_candidates_with_factors(self, candidates: List[Dict[str, Any]], constraints: Dict[str, Any]) -> List[Dict[str, Any]]:
         t0 = time.perf_counter()
         budget = constraints.get("budget_max")
+        budget_cents = self._budget_to_cents(budget)
         brands = constraints.get("brands") or []
         specs = constraints.get("specs") or []
         intent = constraints.get("intent") or "recommend"
@@ -1689,7 +1803,7 @@ class RecommendationService:
         bandit_arm = "balanced"
         try:
             bandit_ctx = {
-                "budget_tight": 1.0 if budget and int(budget) <= 100000 else 0.0,
+                "budget_tight": 1.0 if budget_cents and budget_cents <= 100000 else 0.0,
                 "is_repeat_user": 1.0 if uid_hash else 0.0,
                 "query_specificity": min(1.0, len((specs or [])) / 3.0),
                 "inventory_pressure": 1.0 if any((c.get("stock") or 0) <= 2 for c in candidates) else 0.0,
@@ -1733,8 +1847,8 @@ class RecommendationService:
                 factors["negative"].append("-out_of_stock")
                 factors["weights"]["out_of_stock"] = -6.0
             price = c.get("price_cents", 0)
-            if budget:
-                if price <= budget:
+            if budget_cents:
+                if price <= budget_cents:
                     s += 5.0
                     factors["positive"].append("+within_budget")
                     factors["weights"]["within_budget"] = 5.0
@@ -1758,8 +1872,9 @@ class RecommendationService:
             if specs:
                 spec_text = json.dumps(c.get("specs") or {}, ensure_ascii=False).lower()
                 for spec in specs:
+                    spec_match = self._candidate_satisfies_spec(c, spec)
                     key = str(spec).replace(":", " ")
-                    if key.split()[0] in spec_text:
+                    if spec_match is True or (spec_match is None and key.split()[0] in spec_text):
                         s += 1.5
                         factors["positive"].append(f"+{spec}")
                         factors["weights"][spec] = 1.5

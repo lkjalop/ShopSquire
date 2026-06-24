@@ -438,6 +438,13 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
     # Run AFTER localize (which re-expands results) so these are the final word:
     # off-category exclusion -> never-empty formatter -> [N] dereference.
     payload = _exclude_off_category_in_payload(payload)  # drop off-TYPE (router/monitor…)
+    # NEW-4 — honour explicit negation ("but not Apple", "without X") on EVERY return branch. The plan
+    # (with its agnostic exclusion terms) is stashed on the contextvar at decompose time; ContextVar
+    # .get()/getattr are non-raising, so this needs no try/except (recommend.py silent-except ratchet).
+    from src.app.services.negation_filter import apply_negation_exclusions as _apply_neg
+    _kctx = _KNOWLEDGE_QUERY_CTX.get()
+    _neg_terms = list(getattr((_kctx or {}).get("plan") if isinstance(_kctx, dict) else None, "exclusions", []) or [])
+    payload = _apply_neg(payload, _neg_terms)
     payload = _annotate_type_and_price_integrity(payload)  # product_type + price-poisoning guard
     if _formatter_enabled():
         payload = _finalize_answer(payload)
@@ -1744,12 +1751,43 @@ def _build_question_plan(
     }
 
 
+# Follow-up questions that mean the answer is genuinely UNCERTAIN (the UI should show "let's narrow
+# this down"), as opposed to OPTIONAL refinement chips offered on top of a good answer. Only these
+# set needs_disambiguation.
+_BLOCKING_QUESTION_IDS = {"resolve_reference", "clarify", "disambiguate"}
+
+
 def _compute_needs_disambiguation(
     *, question_plan: Dict[str, Any] | None, next_questions: list[dict] | None = None
 ) -> bool:
+    """True ONLY for blocking clarification — when the system genuinely can't answer confidently —
+    NOT when a good product answer merely offers optional refinement chips.
+
+    The previous logic set this True on the mere PRESENCE of any next_questions, so an optional
+    "want to narrow by GPU class?" chip made the UI imply "I'm not sure" even when the products were
+    a strong match. We now split:
+      * blocking  → question_plan mode alternative/clarify with a real ambiguity reason (NOT the
+                    'refine_top_matches' good-answer case) at low/medium confidence; or a
+                    blocking-type follow-up (e.g. an unresolved reference).
+      * optional  → refinement chips on a confident answer → does NOT set needs_disambiguation.
+    """
     qp = question_plan or {}
     mode = str(qp.get("mode") or "").strip().lower()
     band = str(qp.get("confidence_band") or "").strip().lower()
+    reason = str(qp.get("ambiguity_reason") or "").strip().lower()
+    # 1) A blocking-type follow-up (e.g. an unresolved "show me those" reference) ALWAYS needs
+    #    disambiguation, even when results exist.
+    for q in (next_questions or []):
+        if isinstance(q, dict) and str(q.get("id") or "").strip().lower() in _BLOCKING_QUESTION_IDS:
+            return True
+    # 2) The ONLY relaxation vs the old behaviour: 'refine_top_matches' is the confident good-answer
+    #    case — optional refinement chips on top of a strong match must NOT make the UI imply
+    #    "I'm not sure". Everything else keeps the prior semantics.
+    if reason == "refine_top_matches":
+        return False
+    # 3) Otherwise: any follow-up question, or a genuinely low/medium-confidence clarify/alternative
+    #    plan (e.g. underspecified "help me choose a laptop", or assume-with-missing-fields), is
+    #    disambiguation as before.
     if next_questions and isinstance(next_questions, list) and len(next_questions) > 0:
         return True
     if mode in {"alternative", "clarify"} and band in {"low", "medium"}:
@@ -3539,28 +3577,12 @@ def _summarize_results(
             return low.startswith(("yes", "no", "it depends"))
         # ── Build rich product context (name + key specs + price) for top 3 ──
         def _spec_summary_for_llm(r: dict, rank: int = 0) -> str:
-            specs = r.get("specs") if isinstance(r.get("specs"), dict) else {}
-            parts: list[str] = []
-            if specs.get("gpu_model"):
-                parts.append(f"GPU: {specs['gpu_model']}")
-            elif specs.get("gpu_vram_gb"):
-                parts.append(f"GPU: {specs['gpu_vram_gb']}GB VRAM")
-            if specs.get("refresh_hz"):
-                parts.append(f"Display: {specs['refresh_hz']}Hz")
-            if specs.get("ram_gb"):
-                parts.append(f"RAM: {specs['ram_gb']}GB")
-            if specs.get("storage_gb"):
-                parts.append(f"SSD: {specs['storage_gb']}GB")
-            if specs.get("cpu_model"):
-                parts.append(f"CPU: {specs['cpu_model']}")
-            price_cents = r.get("price_cents") or 0
-            try:
-                price_str = f"${int(float(price_cents) / 100):,}" if float(price_cents) > 0 else ""
-            except Exception:
-                price_str = ""
-            spec_str = " | ".join(parts) if parts else "specs unavailable"
-            name = r.get("name") or "Unknown"
-            return f"[{rank + 1}] {name} ({price_str}) — {spec_str}"
+            # Profile-driven (agnostic): the spec dimensions/labels/units come from the active
+            # StoreProfile's narration_spec_dimensions slot, not hardcoded electronics specs — so a
+            # pharmacy/fashion vertical narrates its own tradeoffs with no code change. Electronics
+            # output is byte-identical (the slot reproduces GPU/Display/RAM/SSD/CPU).
+            from src.app.services.narration_tradeoff import spec_summary_line
+            return spec_summary_line(r, rank)
 
         top = results[:3]
         product_lines = "\n".join(_spec_summary_for_llm(r, idx) for idx, r in enumerate(top))
@@ -4331,14 +4353,39 @@ def suggest(
         pass
     image_context = {"labels": [], "ocr": "", "hash": None, "intent": None, "product_identity": {}}
     fast_path_enabled = bool(fast_path)
+    _plan_exclusions = []  # NEW-4: agnostic negation terms ("but not Apple") carried to constraints
     # WS2.2 — decompose once; stash the plan so the universal return wrapper can
     # answer comparison/knowledge questions on any path, and route those off the
     # fast path (which only does catalog lookup → blank for "4060 vs 4070").
     try:
         from src.app.services.query_decomposer import decompose as _dq_top
         _top_plan = _dq_top(query)
+        _plan_exclusions = list(getattr(_top_plan, "exclusions", []) or [])
+        # STEP 2 — LLM planner FALLBACK (flag-gated, default OFF): only for the residual novel
+        # phrasings the rules can't parse (low-confidence). Fills GAPS in the plan; never overrides a
+        # confident rule extraction; the LLM proposes structure only — the deterministic agents still
+        # execute and the policy gate still decides. plan_with_llm/merge_llm_plan never raise, so no
+        # new silent-except is introduced.
+        from src.app.services.llm_planner import (
+            llm_planner_enabled as _lpe, is_low_confidence as _ilc,
+            plan_with_llm as _pwl, merge_llm_plan as _mlp,
+        )
+        if _lpe() and _ilc(_top_plan):
+            _filled = _mlp(_top_plan, _pwl(query))
+            if _filled and trace_id:
+                log_trace_event(
+                    trace_id, "llm_planner_fallback", "agent", "LLM_Planner",
+                    "system", None, {"filled_fields": _filled, "intent": _top_plan.intent,
+                                     "decomposition_confidence": getattr(_top_plan, "decomposition_confidence", None)},
+                )
         _KNOWLEDGE_QUERY_CTX.set({"query": query, "plan": _top_plan})
         if fast_path_enabled and getattr(_top_plan, "answer_without_products", False):
+            fast_path_enabled = False
+        # Bulk/B2B + availability asks need the full path (the Availability_Agent runs there) — the
+        # fast catalog shortcut can't answer "N units by date D".
+        if fast_path_enabled and (
+            getattr(_top_plan, "quantity", None) or getattr(_top_plan, "availability_horizon_days", None)
+        ):
             fast_path_enabled = False
         # Compound queries need the slow path: it carries the per-sub-question retrieval
         # scoping + the answer composer (the fast path would over-constrain and drop the
@@ -5965,6 +6012,17 @@ def suggest(
             constraints["brand_excludes"] = _merged_ex[:8]
     except Exception:
         pass
+
+    # NEW-4: ensure an excluded term ("but not Apple") is NEVER also a POSITIVE brand filter — that
+    # would pin the result set to the excluded brand and then empty it. We do NOT push the term into
+    # constraints["brand_excludes"] here (that over-narrows the DB retrieval); the actual drop happens
+    # at the response chokepoint via the fail-safe negation_filter. Pure dict ops → no silent-except.
+    if _plan_exclusions:
+        _ex_lc = {str(t).strip().lower() for t in _plan_exclusions if str(t).strip()}
+        _pos_brands = list(constraints.get("brands") or [])
+        _pos_kept = [b for b in _pos_brands if str(b).strip().lower() not in _ex_lc]
+        if len(_pos_kept) != len(_pos_brands):
+            constraints["brands"] = _pos_kept
 
     # ── Session slot accumulation: merge NQE-answered fields from prior turns ──
     try:
@@ -10009,6 +10067,13 @@ def suggest(
     try:
         from src.app.services.query_decomposer import decompose as _decompose_q
         _qplan = _decompose_q(query)
+        if _qplan.quantity and int(_qplan.quantity) > 1:
+            # Bulk/B2B order quantity ("10 laptops") → single source of truth on constraints so
+            # availability/fulfilment (Step 3) can reason about N units. Distinct from the display
+            # limit ("show me 5"), which only controls how many cards render.
+            constraints["order_quantity"] = int(_qplan.quantity)
+        if _qplan.availability_horizon_days:
+            constraints["availability_horizon_days"] = int(_qplan.availability_horizon_days)
         results, _plan_drops = _apply_query_plan_filters(results, _qplan)
         if _plan_drops and trace_id:
             try:
@@ -10550,6 +10615,21 @@ def suggest(
         demote_off_category=_demote_off_category, log=logger,
     )
 
+    # Availability/fulfilment verdict (Step 3b): when a bulk order_quantity was asked, assess
+    # "can we fulfil N of the primary pick by day D?" from stock + supplier lead-time. Fast path
+    # (draft_reorder=False); the human-gated reorder draft is created on explicit confirm, not here.
+    # assess_availability never raises, so no try/except is needed (keeps the silent-except ratchet).
+    _availability_line = ""
+    _order_qty = constraints.get("order_quantity")
+    if _order_qty and int(_order_qty) > 1:
+        from src.app.services.availability_agent import assess_availability, availability_summary_line
+        _avail_skus = [str(r.get("sku")) for r in (results or [])[:5] if isinstance(r, dict) and r.get("sku")]
+        if _avail_skus:
+            payload["availability"] = assess_availability(
+                _avail_skus, int(_order_qty), constraints.get("availability_horizon_days"), draft_reorder=False
+            )
+            _availability_line = availability_summary_line(payload["availability"])
+
     assistant_message = None
     llm_summary_job_id = None
     # Narration prep (extracted to recommend_narration_stage.prepare_narration): stamp price/brand
@@ -10595,6 +10675,12 @@ def suggest(
             payload["summary_pending"] = True
         except Exception:
             pass
+    # Telemetry split (#4): separate the INTENT-ROUTER model from the NARRATION model + mode +
+    # claim-guard outcome, so a debug view never conflates "rule-based (escalate_to_big)" routing
+    # with the prose model (e.g. qwen3:14b). Defaults cover skip/async/deterministic paths.
+    _narration_mode_tel = "skip"
+    _narration_model_tel = None
+    _claim_guard_result = "not_run"
     if assistant_message is None and llm_summary_requested and rule_eval.get("recommend_llm", True):
         # Build the narration preamble (memory + trace + session + SANITIZED image notes) and resolve
         # the summary model. Extracted to recommend_narration_stage.build_narration_preamble; the
@@ -10632,10 +10718,16 @@ def suggest(
         # 0.4 Grounded narration guard (flag COMMERCE_NARRATION_GUARD) — reject ungrounded LLM claims
         # and fall back to deterministic prose. Extracted to apply_product_claim_guard.
         from src.app.services.recommend_narration_stage import apply_product_claim_guard as _apply_claim_guard
+        _pre_guard_msg = assistant_message
         assistant_message = _apply_claim_guard(
             assistant_message, query=query, results=results, constraints=constraints,
             brand_budget_answer=brand_budget_answer, trace_id=trace_id,
             deterministic_fn=_deterministic_assistant_message,
+        )
+        _narration_mode_tel = _narr_mode
+        _narration_model_tel = _summ_model
+        _claim_guard_result = (
+            "fell_back_to_deterministic" if (assistant_message or "") != (_pre_guard_msg or "") else "passed"
         )
     if explanation_request:
         payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
@@ -10661,6 +10753,14 @@ def suggest(
         _assistant_low = str(assistant_message or "").strip().lower()
         if not (_assistant_low.startswith("yes,") or _assistant_low.startswith("no,")):
             assistant_message = f"{brand_budget_answer} {assistant_message}"
+    # Telemetry split (#4) — distinct observability fields (intent router vs narration vs guard).
+    # No try/except: ollama_meta is a dict already used above, payload is a dict, and the _tel vars
+    # are pre-initialised — so these assignments can't fail (and a silent-except would trip the
+    # no-silent-except ratchet on recommend.py).
+    payload["intent_router_model"] = ollama_meta.get("selected") or ollama_meta.get("model")
+    payload["narration_model"] = _narration_model_tel
+    payload["narration_mode"] = _narration_mode_tel
+    payload["claim_guard_result"] = _claim_guard_result
     try:
         _bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
         _bf_status = str(_bf.get("status") or "").strip().lower()
@@ -10681,6 +10781,9 @@ def suggest(
         assistant_message = f"{assistant_message} {image_brand_mismatch_note}" if assistant_message else image_brand_mismatch_note
     if gpu_inference_note:
         assistant_message = f"{assistant_message} {gpu_inference_note}" if assistant_message else gpu_inference_note
+    # Step 4 — surface the fulfilment verdict (Step 3b) as a plain availability line on the answer.
+    if _availability_line:
+        assistant_message = f"{assistant_message} {_availability_line}".strip() if assistant_message else _availability_line
     # Inventory presence note when requested brands are missing (via helper for testability)
     note, unmatched = _emit_inventory_brand_notice(results=results, constraints=constraints, decision_id=decision_id, trace_id=trace_id)
     if note:
