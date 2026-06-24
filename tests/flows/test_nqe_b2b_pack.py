@@ -42,3 +42,38 @@ def test_b2b_pack_keyword_matches_bulk_query():
 
 def test_electronics_json_still_valid():
     json.loads(Path("config/store_profiles/electronics.json").read_text(encoding="utf-8"))
+
+
+# ── propose-level: intent-aware firing + procurement-first prioritization ─────
+def _engine():
+    from src.app.flows.nqe import NextQuestionEngine
+    from src.app.rag.retrieve import Retriever
+    from src.app.flows.catalog import QuestionTemplateCatalog
+    return NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
+
+
+def _ids(query, *, quantity=None, use_case=None):
+    from src.app.flows.nqe import NQEInput
+    inp = NQEInput(query=query, intent="recommend", product_category="laptop",
+                   detected_use_case=use_case, order_quantity=quantity, answered_fields={})
+    return [q.id for q in _engine().propose(inp)]
+
+
+def test_b2b_intent_leads_procurement_question():
+    ids = _ids("10 laptops for the company under $1500", quantity=10)
+    assert ids and ids[0] == "ask_b2b_procurement"  # procurement leads over consumer questions
+
+
+def test_ambiguous_bulk_also_surfaces_procurement():
+    ids = _ids("I want 10 laptops", quantity=10)
+    assert "ask_b2b_procurement" in ids
+
+
+def test_personal_multibuy_has_no_procurement_question():
+    ids = _ids("3 laptops for my family", quantity=3)
+    assert "ask_b2b_procurement" not in ids
+
+
+def test_single_consumer_has_no_procurement_question():
+    ids = _ids("a gaming laptop", quantity=1, use_case="gaming")
+    assert "ask_b2b_procurement" not in ids

@@ -1003,11 +1003,15 @@ class NextQuestionEngine:
             if inp.has_image and (inp.image_identity_confidence < 0.6 or inp.identity_residual_question):
                 _keep_set.add('ask_image_model')
 
+            # B2B procurement leads over consumer use-case questions when the buyer is business/bulk
+            # (the pack only entered `out` when assess_b2b_intent wanted procurement questions).
+            _keep_set.add('ask_b2b_procurement')
             # 2. Generic slot coverage comes after domain-specific questions
             _keep_set.update({'ask_budget', 'ask_budget_tier', 'ask_use_case', 'ask_platform', 'ask_brand_pref'})
 
-            # Build result in priority order: domain-specific first, then generic slots
+            # Build result in priority order: procurement → domain-specific → generic slots
             _domain_priority = [
+                'ask_b2b_procurement',
                 'ask_high_school_activity',
                 'ask_university_subject', 'ask_gaming_depth', 'ask_software_confirm',
                 'ask_corporate_work_type', 'ask_touch_screen_type', 'ask_image_model',
@@ -1023,6 +1027,7 @@ class NextQuestionEngine:
             # consume two cap slots on the same field (e.g. ask_budget_tier AND
             # ask_budget both count for 'budget', leaving no room for brand_pref).
             _template_field_map: dict[str, str] = {
+                'ask_b2b_procurement': 'b2b_requirements',
                 'ask_high_school_activity': 'use_case',
                 'ask_budget_tier': 'budget',
                 'ask_budget': 'budget',
