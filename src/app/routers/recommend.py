@@ -10808,6 +10808,34 @@ def suggest(
     payload["narration_model"] = _narration_model_tel
     payload["narration_mode"] = _narration_mode_tel
     payload["claim_guard_result"] = _claim_guard_result
+    # Escalation policy (deterministic, no added latency): fold the risk/complexity signals into one
+    # human-in-the-loop decision and surface it. All inputs are read via non-raising dict/getattr
+    # access and assess_escalation/decompose never raise, so this needs NO try/except (keeps the
+    # recommend.py silent-except ratchet intact). For B2B/bulk + risk this flags human review.
+    from src.app.services.escalation_policy import assess_escalation as _assess_esc
+    from src.app.services.query_decomposer import decompose as _dq_esc
+    _esc_cstat = constraints.get("constraint_status") if isinstance(constraints.get("constraint_status"), dict) else {}
+    _esc_qty = constraints.get("order_quantity")
+    _esc_qty = int(_esc_qty) if isinstance(_esc_qty, int) else 1
+    _esc_risk = (analysis.get("details") or {}).get("risk_adj") if isinstance(analysis, dict) else None
+    _esc_risk = float(_esc_risk) if isinstance(_esc_risk, (int, float)) else 0.0
+    if _esc_risk > 1.0:
+        _esc_risk = min(1.0, _esc_risk / 100.0)
+    _esc_value = 0
+    if isinstance(results, list) and results and isinstance(results[0], dict):
+        _esc_p0 = results[0].get("price_cents")
+        _esc_value = int(_esc_p0) * _esc_qty if isinstance(_esc_p0, int) else 0
+    _esc_decision = _assess_esc(
+        decomposition_confidence=getattr(_dq_esc(query), "decomposition_confidence", 1.0),
+        irreversible_action=False,  # suggest() is a recommendation, not an irreversible action
+        order_quantity=_esc_qty,
+        order_value_cents=_esc_value,
+        fraud_score=_esc_risk,
+        constraint_conflict=(_esc_cstat.get("exact_match") is False),
+        claim_guard_rejected=(_claim_guard_result == "fell_back_to_deterministic"),
+        b2b=(_esc_qty > 1),
+    )
+    payload["escalation_assessment"] = _esc_decision.to_dict()
     try:
         _bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
         _bf_status = str(_bf.get("status") or "").strip().lower()

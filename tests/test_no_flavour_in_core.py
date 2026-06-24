@@ -38,6 +38,8 @@ _CORE_MODULES = [
     "src/app/services/availability_agent.py",
     # negation/exclusion response filter: matches excluded terms against product DATA, no literals.
     "src/app/services/negation_filter.py",
+    # escalation policy: risk/complexity → human-in-the-loop decision, vertical-blind signal math.
+    "src/app/services/escalation_policy.py",
     # LLM intent-planner fallback: prompt seeded from the profile vocab, no hardcoded verticals.
     "src/app/services/llm_planner.py",
     "src/app/services/recommend_pipeline.py",
