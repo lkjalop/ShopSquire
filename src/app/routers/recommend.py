@@ -11667,7 +11667,10 @@ def log_recommend_interaction(
                 "dismiss": -0.4,
                 "dislike": -0.5,
             }
-            arm = str(safe_ctx.get("bandit_arm") or "balanced")
+            # Resolve the arm that actually ranked this trace (E0), not a constant — the feedback
+            # endpoint is a separate request, so look it up by trace_id (honor an explicit arm if sent).
+            from src.app.services.attribution import arm_for_trace as _arm_for_trace
+            arm = str(safe_ctx.get("bandit_arm") or "").strip() or _arm_for_trace(db, str(payload.trace_id or ""))
             reward = float(reward_map.get(action, 0.0))
             bandit_ctx = safe_ctx.get("bandit_context") if isinstance(safe_ctx.get("bandit_context"), dict) else safe_ctx
             record_bandit_reward(
@@ -11745,11 +11748,12 @@ def recommend_feedback(
             "corrected": -0.7,
         }
         if sku:
+            from src.app.services.attribution import arm_for_trace as _arm_for_trace
             record_bandit_reward(
                 db,
                 uid_hash=uid_h,
                 sku=sku,
-                arm=str(safe_ctx.get("bandit_arm") or "balanced"),
+                arm=(str(safe_ctx.get("bandit_arm") or "").strip() or _arm_for_trace(db, trace_id)),
                 reward=float(reward_map.get(outcome, 0.0)),
                 context=safe_ctx,
             )

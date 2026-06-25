@@ -292,6 +292,30 @@ def run_reward_feed(
     return summary
 
 
+def arm_for_trace(db, trace_id: Optional[str]) -> str:
+    """The bandit arm recorded for a trace's decision (E0), or 'balanced' as a safe default.
+
+    Lets the feedback/interaction path reward the arm that ACTUALLY ranked the results — the
+    feedback endpoint runs in a separate request, so it can't read the request-scoped ContextVar;
+    it must look the arm up by trace_id. Never raises."""
+    if db is None or not trace_id:
+        return "balanced"
+    try:
+        ensure_tables(db)
+        row = db.execute(
+            text(
+                "SELECT arm FROM recommendation_decision WHERE trace_id = :t "
+                "ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"t": str(trace_id)},
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        return "balanced"
+    return "balanced"
+
+
 def reward_from_outcome(result: AttributionResult) -> float:
     """Map an attribution outcome to a bounded [0,1] bandit reward.
 

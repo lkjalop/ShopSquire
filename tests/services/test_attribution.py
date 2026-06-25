@@ -92,6 +92,19 @@ def test_attribute_order_never_raises_on_bad_db():
     assert isinstance(res, AttributionResult) and res.attributed is False
 
 
+def test_arm_for_trace_resolves_recorded_arm(db):
+    attribution.record_decision(db, trace_id="AT", decision_id="AD", uid_hash="u", skus=["S"], arm="explore_novelty")
+    db.commit()
+    assert attribution.arm_for_trace(db, "AT") == "explore_novelty"
+
+
+def test_arm_for_trace_defaults_balanced(db):
+    attribution.ensure_tables(db)
+    assert attribution.arm_for_trace(db, "UNKNOWN") == "balanced"
+    assert attribution.arm_for_trace(db, None) == "balanced"
+    assert attribution.arm_for_trace(None, "x") == "balanced"
+
+
 def test_reward_bounded():
     assert attribution.reward_from_outcome(AttributionResult(attributed=True)) == 1.0
     assert attribution.reward_from_outcome(AttributionResult(attributed=False)) == 0.0
