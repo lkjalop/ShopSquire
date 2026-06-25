@@ -324,6 +324,13 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{max(1, int(os.getenv('MARKET_ANALYSIS_INTERVAL_MIN', '30')))}"),
             "args": (),
         }
+    # Human-feedback backfill (returns + finding corrections → learning signal) — only when enabled.
+    if str(os.getenv("HUMAN_FEEDBACK_BACKFILL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["human-feedback-backfill"] = {
+            "task": "src.app.tasks.human_feedback_tasks.human_feedback_backfill",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('HUMAN_FEEDBACK_BACKFILL_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -354,6 +361,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.market_signal_tasks.market_signal_backfill": {"queue": default_q},
             "src.app.tasks.experiment_tasks.evaluate_experiments": {"queue": default_q},
             "src.app.tasks.market_analysis_tasks.run_market_analysis": {"queue": default_q},
+            "src.app.tasks.human_feedback_tasks.human_feedback_backfill": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -367,6 +375,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.market_signal_tasks",
             "src.app.tasks.experiment_tasks",
             "src.app.tasks.market_analysis_tasks",
+            "src.app.tasks.human_feedback_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

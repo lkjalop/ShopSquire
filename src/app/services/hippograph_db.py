@@ -35,6 +35,16 @@ def _maybe_project_findings(db, graph: HippoGraph, *, limit: int, sku_pattern: s
         return graph  # findings are additive — degrade to the base graph, never break it
 
 
+def _maybe_project_human_feedback(db, graph: HippoGraph, *, limit: int, sku_pattern: str) -> HippoGraph:
+    try:
+        from src.app.services.hippograph import project_human_feedback
+        from src.app.services.human_feedback import load_recent
+        rows = load_recent(db, limit=limit)
+        return project_human_feedback(graph, rows, sku_pattern=sku_pattern) if rows else graph
+    except Exception:
+        return graph  # feedback is additive — degrade to the base graph, never break it
+
+
 def build_from_db(
     db,
     *,
@@ -42,10 +52,12 @@ def build_from_db(
     profile_id: Optional[str] = None,
     sku_pattern: str = _DEFAULT_SKU_PATTERN,
     include_findings: bool = False,
+    include_human_feedback: bool = False,
     anomaly_fn=None,
 ) -> HippoGraph:
     """Project the most recent ``limit`` trace + conversion rows into an in-memory hippograph. Set
-    ``include_findings`` to also run M3 analysis and project its findings as ``finding`` nodes."""
+    ``include_findings`` to also project M3 findings as ``finding`` nodes; ``include_human_feedback``
+    to fold in human-in-the-loop signals (approvals/rejections/returns/...) as signed recall priors."""
     if db is None:
         return HippoGraph()
     alias_map, known = _brand_alias_map_for_profile(profile_id)
@@ -95,4 +107,6 @@ def build_from_db(
     )
     if include_findings:
         graph = _maybe_project_findings(db, graph, limit=limit, sku_pattern=sku_pattern, anomaly_fn=anomaly_fn)
+    if include_human_feedback:
+        graph = _maybe_project_human_feedback(db, graph, limit=limit, sku_pattern=sku_pattern)
     return graph

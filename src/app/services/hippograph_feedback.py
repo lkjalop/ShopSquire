@@ -30,12 +30,16 @@ def build_hippograph_insights(
     market finding tied to a surfaced product (or a query term) recalls alongside it — query-scoped
     by the seeds, not a global dump. Empty list when there's nothing to say or on any error."""
     try:
+        import os
+
         from src.app.services.hippograph import recall, resolve_product
         from src.app.services.hippograph_db import build_from_db
 
         # include_findings projects persisted M3 findings as `finding` nodes (fast — batch computes
         # them); finding↔entity edges make a finding reachable from its product/term seed.
-        graph = build_from_db(db, limit=limit, include_findings=True)
+        # Human-correction learning folds in signed recall priors — opt-in (changes recall ordering).
+        _hf_on = str(os.getenv("HIPPOGRAPH_HUMAN_FEEDBACK_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+        graph = build_from_db(db, limit=limit, include_findings=True, include_human_feedback=_hf_on)
         if not graph.nodes:
             return []
         seeds: List[str] = []

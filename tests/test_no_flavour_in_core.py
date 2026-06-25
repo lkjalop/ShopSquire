@@ -110,6 +110,9 @@ _CORE_MODULES = [
     # recommend intelligence stage: capture · market-intel · nudge orchestration, opaque state —
     # no product vocabulary.
     "src/app/services/recommend_intelligence_stage.py",
+    # human-correction learning: signed feedback envelope + projection, opaque types/entities —
+    # no product vocabulary.
+    "src/app/services/human_feedback.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

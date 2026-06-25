@@ -191,3 +191,50 @@ def project_findings(graph: HippoGraph, findings: Optional[Iterable[Any]], *, sk
             graph.adjacency.setdefault(fid, {})[ent_node] = graph.adjacency.setdefault(fid, {}).get(ent_node, 0.0) + w
             graph.adjacency.setdefault(ent_node, {})[fid] = graph.adjacency.setdefault(ent_node, {}).get(fid, 0.0) + w
     return graph
+
+
+def project_human_feedback(graph: HippoGraph, feedback: Optional[Iterable[Any]], *,
+                           sku_pattern: Optional[str] = None) -> HippoGraph:
+    """Add human-in-the-loop feedback as a SIGNED learning signal (in place). For each row, the
+    entity's recall PRIOR moves by polarity×weight — an approval/accepted recommendation lifts it, a
+    rejection/return/escalation/finding-correction suppresses it (so the rejected entity ranks lower
+    next time). The sign lives in the prior; CONNECTIVITY edges are always positive (relatedness, not
+    judgement), keeping the spreading-activation math sound:
+      • subject(user) → entity edge (|signed|) so the signal is personalized to who gave it,
+      • a ``human:<feedback_type>`` node + edge for visibility/dashboards.
+    Accepts HumanFeedback objects or dicts. Returns the same graph."""
+    for f in (feedback or []):
+        ftype = str(_finding_attr(f, "feedback_type") or "").strip()
+        entity = _finding_attr(f, "entity_ref")
+        subject = _finding_attr(f, "subject_hash")
+        polarity = float(_finding_attr(f, "polarity", 1.0) or 0.0)
+        weight = float(_finding_attr(f, "weight", 1.0) or 0.0)
+        signed = polarity * weight
+        if not ftype or signed == 0.0:
+            continue
+        ent_node: Optional[str] = None
+        if entity:
+            ref = resolve_product(str(entity), sku_pattern=sku_pattern)
+            if ref:
+                ent_node = ref.id
+                node = graph.nodes.get(ent_node)
+                if node is None:
+                    node = HippoNode(ent_node, "product", ref.label, 0.0)
+                    graph.nodes[ent_node] = node
+                node.weight += signed  # the human judgement tips the recall prior (can go negative)
+        # visibility node — what human signal touched this turn's context
+        hid = f"human:{ftype}"
+        if hid not in graph.nodes:
+            graph.nodes[hid] = HippoNode(hid, "feedback", ftype, 0.0)
+        mag = abs(signed)
+        if ent_node:
+            graph.edges[(hid, ent_node)] = graph.edges.get((hid, ent_node), 0.0) + mag
+            graph.adjacency.setdefault(hid, {})[ent_node] = graph.adjacency.setdefault(hid, {}).get(ent_node, 0.0) + mag
+            graph.adjacency.setdefault(ent_node, {})[hid] = graph.adjacency.setdefault(ent_node, {}).get(hid, 0.0) + mag
+        if subject and ent_node:
+            sid = str(subject)
+            if sid not in graph.nodes:
+                graph.nodes[sid] = HippoNode(sid, "user", sid, 0.0)
+            graph.adjacency.setdefault(sid, {})[ent_node] = graph.adjacency.setdefault(sid, {}).get(ent_node, 0.0) + mag
+            graph.adjacency.setdefault(ent_node, {})[sid] = graph.adjacency.setdefault(ent_node, {}).get(sid, 0.0) + mag
+    return graph
