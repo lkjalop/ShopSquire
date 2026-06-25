@@ -115,6 +115,9 @@ _CORE_MODULES = [
     "src/app/services/human_feedback.py",
     # typed shadow actions: findings → log-only proposals, opaque action/target — no product vocabulary.
     "src/app/services/shadow_actions.py",
+    # contact-frequency governance: consent/frequency/region gate, opaque channel/campaign —
+    # no product vocabulary.
+    "src/app/services/contact_governance.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
