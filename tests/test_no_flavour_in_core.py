@@ -69,6 +69,9 @@ _CORE_MODULES = [
     # attribution backbone: decision→conversion measurement loop, vertical-blind (speaks only
     # decision_id/trace_id/sku/uid_hash/value_cents/window — no product vocabulary).
     "src/app/services/attribution.py",
+    # adaptive agent budgets: tier/risk/event-signal → per-agent tool+token budget, agent names
+    # only (no product vocabulary). Extracted from orchestrator.
+    "src/app/services/agent_budgets.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
