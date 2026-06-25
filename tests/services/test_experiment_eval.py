@@ -24,11 +24,13 @@ def db():
 
 
 def _seed(db, eid, *, control_value, treatment_value, n=8):
-    """n subjects per arm; each control subject converts at control_value$, treatment at treatment_value$."""
+    """n subjects per arm; each control subject converts at control_value$, treatment at treatment_value$.
+    Assignment is stamped BEFORE the conversion (2026-06-24 < 2026-06-25) so the post-assignment
+    attribution window credits the conversion to the experiment."""
     for arm, val in (("control", control_value), ("treatment", treatment_value)):
         for i in range(n):
             subj = f"{eid}-{arm}-{i}"  # namespaced per experiment so subjects/conversions don't collide
-            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm)
+            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-24")
             if val > 0:
                 db.execute(text("INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, "
                                 "attributed_skus_json, value_cents, converted_at) "
@@ -86,6 +88,30 @@ def test_none_db_safe():
     assert evaluate_live_experiments(None) == []
 
 
+def test_pre_assignment_conversions_are_not_credited(db):
+    """A conversion that happened BEFORE the subject was assigned must NOT count toward uplift —
+    otherwise pre-existing buyers inflate whichever arm they land in."""
+    eid = ex.create_experiment(db, name="causal", target_metric="rpv", status="live")
+    # treatment subjects each have a BIG conversion that PREDATES assignment (should be excluded),
+    # plus a small valid one after; control has a valid one after. Without the window the treatment
+    # would look like a huge winner purely from pre-existing revenue.
+    for arm in ("control", "treatment"):
+        for i in range(6):
+            subj = f"{eid}-{arm}-{i}"
+            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-10")
+            db.execute(text("INSERT INTO conversion_event (id,decision_id,order_id,uid_hash,"
+                            "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d','o',:u,'[]',:v,:t)"),
+                       {"id": f"{subj}-after", "u": subj, "v": 10000, "t": "2026-06-12"})  # valid (after)
+            if arm == "treatment":
+                db.execute(text("INSERT INTO conversion_event (id,decision_id,order_id,uid_hash,"
+                                "attributed_skus_json,value_cents,converted_at) VALUES (:id,'d','o',:u,'[]',:v,:t)"),
+                           {"id": f"{subj}-before", "u": subj, "v": 999999, "t": "2026-06-01"})  # PRE-assignment
+    db.commit()
+    out = evaluate_experiment(db, eid, min_samples=2)
+    # both arms have equal POST-assignment revenue → ~0% uplift (the pre-assignment windfall is excluded)
+    assert abs(out["uplift_pct"]) < 1.0, f"pre-assignment revenue leaked into uplift: {out['uplift_pct']}"
+
+
 def test_returns_guardrail_reverts_revenue_win_with_higher_returns(db):
     from src.app.services.experiment_eval import returns_guardrail
     db.execute(text("CREATE TABLE orders (id TEXT, customer_id TEXT, total_cents INTEGER, status TEXT, "
@@ -96,7 +122,7 @@ def test_returns_guardrail_reverts_revenue_win_with_higher_returns(db):
         for i in range(8):
             subj = f"{eid}-{arm}-{i}"
             oid = f"O-{subj}"
-            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm)
+            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-24")
             status = "refunded" if (i % refund_every == 0) else "paid"
             db.execute(text("INSERT INTO orders (id, status) VALUES (:o,:s)"), {"o": oid, "s": status})
             db.execute(text("INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, "

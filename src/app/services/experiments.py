@@ -34,7 +34,7 @@ _DDL = (
     """
     CREATE TABLE IF NOT EXISTS experiment_run (
         id TEXT PRIMARY KEY, name TEXT, target_metric TEXT, status TEXT DEFAULT 'draft',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP, started_at TEXT, ended_at TEXT
     )
     """,
     """
@@ -54,11 +54,32 @@ _INDEXES = (
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_expasn_subject ON experiment_assignment(experiment_id, subject_hash)",
     "CREATE INDEX IF NOT EXISTS ix_expresult_exp ON experiment_result(experiment_id)",
 )
+# started_at = ACTIVATION time (status→live); ended_at = terminal time. Added after the table first
+# shipped → applied to pre-existing experiment_run tables on upgrade.
+_RUN_UPGRADE_COLS = (("started_at", "TEXT"), ("ended_at", "TEXT"))
+_TERMINAL_STATUSES = ("reverted", "paused", "ended", "completed")
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _ensure_run_columns(db) -> None:
+    from sqlalchemy import inspect as _sa_inspect
+    try:
+        have = {c["name"] for c in _sa_inspect(db.connection()).get_columns("experiment_run")}
+    except Exception:
+        return
+    for name, decl in _RUN_UPGRADE_COLS:
+        if name not in have:
+            db.execute(text(f"ALTER TABLE experiment_run ADD COLUMN {name} {decl}"))
 
 
 def ensure_tables(db) -> None:
     for stmt in _DDL:
         db.execute(text(stmt))
+    _ensure_run_columns(db)
     for stmt in _INDEXES:
         db.execute(text(stmt))
 
@@ -162,15 +183,21 @@ def create_experiment(db, *, name: str, target_metric: str, status: str = "draft
     try:
         ensure_tables(db)
         eid = str(uuid.uuid4())
-        db.execute(text("INSERT INTO experiment_run (id, name, target_metric, status) VALUES (:i,:n,:m,:s)"),
-                   {"i": eid, "n": name, "m": target_metric, "s": status})
+        # an experiment created already-live records its activation time now (started_at).
+        started = _now_iso() if str(status).strip().lower() == "live" else None
+        db.execute(text("INSERT INTO experiment_run (id, name, target_metric, status, started_at) "
+                        "VALUES (:i,:n,:m,:s,:st)"),
+                   {"i": eid, "n": name, "m": target_metric, "s": status, "st": started})
         return eid
     except Exception:
         return None
 
 
-def record_assignment(db, *, experiment_id: str, subject_hash: str, variant: str) -> bool:
-    """Idempotent per (experiment, subject) — the UNIQUE index closes the assignment race."""
+def record_assignment(db, *, experiment_id: str, subject_hash: str, variant: str,
+                      assigned_at: Optional[str] = None) -> bool:
+    """Idempotent per (experiment, subject) — the UNIQUE index closes the assignment race. ``assigned_at``
+    overrides the default CURRENT_TIMESTAMP (used by tests to place assignment BEFORE a conversion so
+    the post-assignment attribution window is exercised deterministically)."""
     if db is None:
         return False
     try:
@@ -181,9 +208,15 @@ def record_assignment(db, *, experiment_id: str, subject_hash: str, variant: str
         ).fetchone()
         if existing:
             return False
-        db.execute(text("INSERT INTO experiment_assignment (id, experiment_id, subject_hash, variant) "
-                        "VALUES (:i,:e,:s,:v)"),
-                   {"i": str(uuid.uuid4()), "e": experiment_id, "s": subject_hash, "v": variant})
+        if assigned_at is None:
+            db.execute(text("INSERT INTO experiment_assignment (id, experiment_id, subject_hash, variant) "
+                            "VALUES (:i,:e,:s,:v)"),
+                       {"i": str(uuid.uuid4()), "e": experiment_id, "s": subject_hash, "v": variant})
+        else:
+            db.execute(text("INSERT INTO experiment_assignment (id, experiment_id, subject_hash, variant, "
+                            "assigned_at) VALUES (:i,:e,:s,:v,:a)"),
+                       {"i": str(uuid.uuid4()), "e": experiment_id, "s": subject_hash, "v": variant,
+                        "a": str(assigned_at)})
         return True
     except Exception:
         return False
@@ -206,13 +239,24 @@ def is_experiment_live(db, experiment_id: str) -> bool:
 
 
 def set_status(db, *, experiment_id: str, status: str) -> bool:
-    """Flip an experiment's status (e.g. draft→live, live→reverted). The reversibility lever."""
+    """Flip an experiment's status (e.g. draft→live, live→reverted). The reversibility lever. Stamps
+    started_at on the FIRST activation (status→live) and ended_at on a terminal status, so experiment
+    age + the attribution window are measured from real activation, not creation."""
     if db is None or not experiment_id:
         return False
     try:
         ensure_tables(db)
-        db.execute(text("UPDATE experiment_run SET status = :s WHERE id = :i OR name = :i"),
-                   {"s": str(status), "i": str(experiment_id)})
+        s = str(status).strip().lower()
+        now = _now_iso()
+        if s == "live":
+            db.execute(text("UPDATE experiment_run SET status=:s, started_at=COALESCE(started_at, :now) "
+                            "WHERE id=:i OR name=:i"), {"s": status, "now": now, "i": str(experiment_id)})
+        elif s in _TERMINAL_STATUSES:
+            db.execute(text("UPDATE experiment_run SET status=:s, ended_at=:now WHERE id=:i OR name=:i"),
+                       {"s": status, "now": now, "i": str(experiment_id)})
+        else:
+            db.execute(text("UPDATE experiment_run SET status=:s WHERE id=:i OR name=:i"),
+                       {"s": status, "i": str(experiment_id)})
         return True
     except Exception:
         return False

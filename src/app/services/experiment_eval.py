@@ -29,11 +29,17 @@ from src.app.services.experiments import (
 def _subject_metric_by_variant(db, experiment_id: str) -> Dict[str, List[float]]:
     """Revenue-per-assigned-subject ($), grouped by variant. A subject with no conversion → 0, so the
     metric is revenue-per-visitor (the deck's target), not just converters."""
+    # Causal attribution window: only count a subject's conversions that happened AFTER they were
+    # assigned and BEFORE the experiment ended (open-ended while live). A conversion before assignment —
+    # or after the experiment was reverted — must not be credited to the treatment.
     rows = db.execute(
         text(
             "SELECT a.variant, a.subject_hash, COALESCE(SUM(c.value_cents), 0) "
             "FROM experiment_assignment a "
+            "JOIN experiment_run r ON r.id = a.experiment_id "
             "LEFT JOIN conversion_event c ON c.uid_hash = a.subject_hash "
+            "  AND c.converted_at >= a.assigned_at "
+            "  AND (r.ended_at IS NULL OR c.converted_at <= r.ended_at) "
             "WHERE a.experiment_id = :e "
             "GROUP BY a.variant, a.subject_hash"
         ),
@@ -56,7 +62,10 @@ def returns_guardrail(db, experiment_id: str) -> Dict[str, float]:
                 "SELECT a.variant, COUNT(c.order_id) AS conv, "
                 "SUM(CASE WHEN o.status IN ('refunded','chargebacked') THEN 1 ELSE 0 END) AS ret "
                 "FROM experiment_assignment a "
+                "JOIN experiment_run r ON r.id = a.experiment_id "
                 "JOIN conversion_event c ON c.uid_hash = a.subject_hash "
+                "  AND c.converted_at >= a.assigned_at "
+                "  AND (r.ended_at IS NULL OR c.converted_at <= r.ended_at) "
                 "LEFT JOIN orders o ON o.id = c.order_id "
                 "WHERE a.experiment_id = :e GROUP BY a.variant"
             ),

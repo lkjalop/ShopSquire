@@ -214,13 +214,16 @@ def detect_stale_experiments(db, *, max_age_seconds: float, now_iso: Optional[st
         return []
     try:
         ensure_tables(db)
-        rows = db.execute(text("SELECT id, name, created_at FROM experiment_run WHERE status='live'")).fetchall()
+        rows = db.execute(text("SELECT id, name, started_at, created_at FROM experiment_run "
+                               "WHERE status='live'")).fetchall()
     except Exception:
         return []
     now = _now(now_iso)
     out: List[Dict[str, Any]] = []
-    for eid, name, created in rows:
-        started = _parse(created)
+    for eid, name, started_at, created in rows:
+        # age from ACTIVATION (started_at), not creation — an old DRAFT activated today is fresh, not
+        # stale. Fall back to created_at only when started_at is absent (legacy rows).
+        started = _parse(started_at) or _parse(created)
         age = (now - started).total_seconds() if started else None
         if age is not None and age > float(max_age_seconds):
             out.append({"experiment_id": eid, "name": name, "age_seconds": round(age, 1)})

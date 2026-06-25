@@ -101,7 +101,8 @@ def test_gate3_assignment_delta_outcome_guardrail_rollback(db):
         for i in range(8):
             subj = f"{eid}-{arm}-{i}"
             oid = f"O-{subj}"
-            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm)
+            # assign BEFORE the conversion so the post-assignment attribution window credits it
+            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm, assigned_at="2026-06-24")
             db.execute(text("INSERT INTO orders (id, status) VALUES (:o,:s)"),
                        {"o": oid, "s": "refunded" if (i % refund_every == 0) else "paid"})
             db.execute(text("INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, "

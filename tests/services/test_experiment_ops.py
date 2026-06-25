@@ -81,12 +81,26 @@ def test_no_pause_when_eval_fresh(db):
 # ── stale-experiment detection ────────────────────────────────────────────────
 def test_detect_and_revert_zombie_experiments(db):
     eid = ex.create_experiment(db, name="zombie", target_metric="rpv", status="live")
-    db.execute(text("UPDATE experiment_run SET created_at='2026-06-01 00:00:00' WHERE id=:i"), {"i": eid})
+    # ACTIVATED long ago (started_at), so it's a genuine zombie
+    db.execute(text("UPDATE experiment_run SET started_at='2026-06-01 00:00:00' WHERE id=:i"), {"i": eid})
     db.commit()
     stale = ops.detect_stale_experiments(db, max_age_seconds=86400, now_iso="2026-06-25 00:00:00")
     assert any(s["experiment_id"] == eid for s in stale)
     reverted = ops.auto_revert_stale(db, max_age_seconds=86400, now_iso="2026-06-25 00:00:00")
     assert eid in reverted and ex.is_experiment_live(db, eid) is False
+
+
+def test_old_draft_activated_today_is_not_stale(db):
+    """Finding 5: age is measured from ACTIVATION, not creation — an old draft flipped live today must
+    NOT be classified stale immediately."""
+    eid = ex.create_experiment(db, name="reborn", target_metric="rpv", status="draft")
+    db.execute(text("UPDATE experiment_run SET created_at='2026-01-01 00:00:00' WHERE id=:i"), {"i": eid})
+    db.commit()
+    ex.set_status(db, experiment_id=eid, status="live")  # activates TODAY → started_at = now
+    db.execute(text("UPDATE experiment_run SET started_at='2026-06-25 09:00:00' WHERE id=:i"), {"i": eid})
+    db.commit()
+    stale = ops.detect_stale_experiments(db, max_age_seconds=86400, now_iso="2026-06-25 10:00:00")
+    assert all(s["experiment_id"] != eid for s in stale)  # 1h since activation → fresh
 
 
 # ── forced rollback drill ─────────────────────────────────────────────────────

@@ -141,7 +141,7 @@ TABLE_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS experiment_run (
         id TEXT PRIMARY KEY, name TEXT, target_metric TEXT, status TEXT DEFAULT 'draft',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP, started_at TEXT, ended_at TEXT
     )
     """,
     """
