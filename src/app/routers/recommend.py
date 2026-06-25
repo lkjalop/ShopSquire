@@ -10236,96 +10236,17 @@ def suggest(
             "playbook_hint": {"id": "PB-INV-004"},
         } if insufficient_stock_skus else None),
     }, trace_id)
-    # E0 — attribution capture (measurement-only, default-on): record which SKUs this decision
-    # proposed so a later order can be attributed back to it (services/attribution.py). Isolated
-    # session + fire-and-forget; observable on failure (never blocks or breaks the response).
-    if flags.get("ATTRIBUTION_ENABLED", True) and not simulate:
-        try:
-            from src.app.services.attribution import record_decision as _record_decision
-            from src.app.models.db import db_session as _attr_db_session
-            from src.app.services.bandit_context import get_bandit_arm as _get_bandit_arm
-            _attr_skus = [r.get("sku") for r in results if isinstance(r, dict) and r.get("sku")]
-            # arm = the LinUCB ranking arm (for the E3 reward), variant = the A/B test arm — distinct.
-            with _attr_db_session() as _attr_db:
-                _record_decision(
-                    _attr_db,
-                    trace_id=trace_id,
-                    decision_id=decision_id,
-                    uid_hash=uid_hash,
-                    skus=_attr_skus,
-                    surface="recommend",
-                    arm=_get_bandit_arm(),
-                    variant=(proposal or {}).get("ab_variant"),
-                    context={"budget_max": constraints.get("budget_max"),
-                             "use_case": constraints.get("use_case")},
-                )
-                _attr_db.commit()
-        except Exception as _e_attr:
-            _record_partial_failure("attribution_capture", _e_attr, trace_id=trace_id)
-    # Hippograph feedback (advisory-OFF): annotate the response + session with reward-weighted
-    # entities the graph relates to this turn, so agents/dashboards can READ what it knows. Read-only
-    # — never changes ranking or acts; flag-gated until benched. Isolated session, never blocks.
-    if flags.get("HIPPOGRAPH_FEEDBACK_ENABLED", False) and not simulate:
-        try:
-            from src.app.services.market_intelligence_agent import gather_market_context as _mi_ctx
-            from src.app.models.db import db_session as _hg_db_session
-            _hg_seed_skus = [r.get("sku") for r in results if isinstance(r, dict) and r.get("sku")][:5]
-            with _hg_db_session() as _hg_db:
-                _mi = _mi_ctx(_hg_db, query=query, uid_hash=uid_hash, result_skus=_hg_seed_skus, top_k=8)
-            _hg_insights = _mi.get("hippograph_insights") or []
-            _mi_findings = _mi.get("market_findings") or []
-            if _hg_insights or _mi_findings:
-                if _hg_insights:
-                    payload["hippograph_insights"] = _hg_insights
-                if _mi_findings:
-                    payload["market_findings"] = _mi_findings
-                # Flow into THIS turn's NQE agent (state.kv is this kv dict) + persist for next turn.
-                if isinstance(kv, dict):
-                    kv["hippograph_insights"] = _hg_insights
-                    if _mi_findings:
-                        kv["market_findings"] = _mi_findings
-                _hg_kv = mem.get_kv(uid) or {}
-                _hg_kv["hippograph_insights"] = _hg_insights
-                mem.set_kv(uid, _hg_kv)
-                log_trace_event(
-                    trace_id=trace_id, event_type="market_intelligence", source_type="agent",
-                    source_id="Market_Intelligence_Agent", target_type="recommendation", target_id=decision_id,
-                    payload={"insights": len(_hg_insights), "findings": len(_mi_findings),
-                             "needs_market_evidence": bool(_mi.get("needs_market_evidence"))},
-                )
-        except Exception as _e_hg:
-            _record_partial_failure("market_intelligence", _e_hg, trace_id=trace_id)
-    # Reversible ranking nudge THROUGH the experiment gate (Phase 3 — the FIRST measured live
-    # adaptation, default-OFF). A LIVE ranking experiment gives TREATMENT users a small bounded boost
-    # to hippograph-recalled products; control + non-live users are untouched; fully reversible (capped
-    # additive delta; the gate's REVERT flips the experiment off-live and stops it globally).
-    if flags.get("RANKING_NUDGE_EXPERIMENT_ENABLED", False) and not simulate and results:
-        try:
-            from src.app.services.experiments import assign_variant, is_experiment_live, record_assignment
-            from src.app.services.ranking_nudge import apply_experiment_nudge
-            from src.app.models.db import db_session as _nudge_db_session
-            _exp_id = str(flags.get("RANKING_NUDGE_EXPERIMENT_ID") or "ranking_nudge_v1")
-            _subject = str(uid_hash or uid or "")
-            _variant = assign_variant(experiment_id=_exp_id, subject=_subject, variants=["control", "treatment"])
-            _recall_ids = [i.get("id") for i in (payload.get("hippograph_insights") or [])
-                           if isinstance(i, dict) and i.get("kind") == "product"]
-            with _nudge_db_session() as _ndb:
-                _live = is_experiment_live(_ndb, _exp_id)
-                record_assignment(_ndb, experiment_id=_exp_id, subject_hash=_subject, variant=_variant)
-                _ndb.commit()
-            _nudged = apply_experiment_nudge(results, recall_ids=_recall_ids, assignment=_variant, live=_live)
-            if _nudged is not results:
-                results = _nudged
-                payload["results"] = results
-            payload["ranking_experiment"] = {
-                "experiment_id": _exp_id, "variant": _variant, "live": bool(_live),
-                "nudged": sum(1 for r in results if isinstance(r, dict) and r.get("_nudge_delta")),
-            }
-            log_trace_event(trace_id=trace_id, event_type="ranking_nudge", source_type="agent",
-                            source_id="ExperimentGate", target_type="recommendation", target_id=decision_id,
-                            payload=payload["ranking_experiment"])
-        except Exception as _e_nudge:
-            _record_partial_failure("ranking_nudge", _e_nudge, trace_id=trace_id)
+    # Post-results intelligence stage (extracted): E0 attribution capture · market-intelligence inject
+    # (recall + gated findings) · reversible experiment-gated nudge. Each flag-gated + fire-and-forget;
+    # returns the (possibly nudged) results and mutates payload/kv in place.
+    from src.app.services.recommend_intelligence_stage import IntelligenceStageState, run_intelligence_stage
+    results = run_intelligence_stage(
+        IntelligenceStageState(
+            results=results, payload=payload, flags=flags, simulate=simulate, uid=uid, uid_hash=uid_hash,
+            query=query, constraints=constraints, kv=kv, proposal=proposal, trace_id=trace_id, decision_id=decision_id,
+        ),
+        mem=mem,
+    )
     # Safe internet search (EXTERNAL_RESEARCH_ENABLED, off by default): a SEPARATE labeled source.
     # NullFetcher = no network until a real allowlisted httpx adapter is wired -> stays 'empty' even
     # if enabled. NEVER merged into owned `results`/cart (external items have sku=None -> structurally

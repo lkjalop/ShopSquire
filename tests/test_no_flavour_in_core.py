@@ -107,6 +107,9 @@ _CORE_MODULES = [
     # market intelligence agent: read-only context gatherer (recall + gated findings), opaque —
     # no product vocabulary.
     "src/app/services/market_intelligence_agent.py",
+    # recommend intelligence stage: capture · market-intel · nudge orchestration, opaque state —
+    # no product vocabulary.
+    "src/app/services/recommend_intelligence_stage.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
