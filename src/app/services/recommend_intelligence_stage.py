@@ -99,18 +99,31 @@ def _nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List
         return results
     try:
         from src.app.models.db import db_session
-        from src.app.services.experiments import assign_variant, is_experiment_live, record_assignment
+        from src.app.services.experiment_ops import adaptation_killed, canary_assignment
+        from src.app.services.experiments import is_experiment_live, record_assignment
         from src.app.services.ranking_nudge import apply_experiment_nudge
+        if adaptation_killed():
+            return results  # global kill switch — no adaptation, regardless of experiment status
         exp_id = str(state.flags.get("RANKING_NUDGE_EXPERIMENT_ID") or "ranking_nudge_v1")
         subject = str(state.uid_hash or state.uid or "")
-        variant = assign_variant(experiment_id=exp_id, subject=subject, variants=["control", "treatment"])
+        try:
+            canary = float(state.flags.get("RANKING_NUDGE_CANARY_FRACTION") or 0.1)
+        except Exception:
+            canary = 0.1
+        try:
+            max_items = int(state.flags.get("RANKING_NUDGE_MAX_ITEMS") or 3)
+        except Exception:
+            max_items = 3
+        # SMALL CANARY: only a fraction of subjects are eligible for treatment (the rest are control)
+        variant = canary_assignment(experiment_id=exp_id, subject=subject, canary_fraction=canary)
         recall_ids = [i.get("id") for i in (state.payload.get("hippograph_insights") or [])
                       if isinstance(i, dict) and i.get("kind") == "product"]
         with db_session() as db:
             live = is_experiment_live(db, exp_id)
             record_assignment(db, experiment_id=exp_id, subject_hash=subject, variant=variant)
             db.commit()
-        nudged = apply_experiment_nudge(results, recall_ids=recall_ids, assignment=variant, live=live)
+        nudged = apply_experiment_nudge(results, recall_ids=recall_ids, assignment=variant, live=live,
+                                        max_nudged_items=max_items)
         if nudged is not results:
             results = nudged
             state.payload["results"] = results

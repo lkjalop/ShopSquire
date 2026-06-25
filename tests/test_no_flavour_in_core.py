@@ -121,6 +121,8 @@ _CORE_MODULES = [
     # experiment operationalization: guardrails/heartbeat/stale-detect/drill, opaque metrics —
     # no product vocabulary.
     "src/app/services/experiment_ops.py",
+    # controlled template phrasing: tone-only message variants, opaque string — no product vocabulary.
+    "src/app/services/template_phrasing.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

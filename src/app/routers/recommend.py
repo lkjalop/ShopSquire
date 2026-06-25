@@ -11093,6 +11093,19 @@ def suggest(
             image_cv_signals_parsed=image_cv_signals_parsed,
             has_incoming_image=bool(incoming_image_payload),
         )
+        # S7 — controlled template phrasing (default-OFF). Bounded, claim-safe, small-canary +
+        # kill-switch; only varies tone, never facts. Behavior-changing → gated by the flag.
+        if isinstance(flags, dict) and flags.get("TEMPLATE_PHRASING_EXPERIMENT_ENABLED") and assistant_message:
+            try:
+                from src.app.models.db import db_session as _phrasing_db
+                from src.app.services.template_phrasing import apply_phrasing_experiment
+                with _phrasing_db() as _pdb:
+                    assistant_message, _phrasing_info = apply_phrasing_experiment(
+                        _pdb, assistant_message, subject=str(uid_hash or uid or ""), flags=flags)
+                if _phrasing_info:
+                    payload["phrasing_experiment"] = _phrasing_info
+            except Exception:
+                pass  # phrasing is advisory; never break the response over a tone variant
         payload["assistant_message"] = assistant_message
         payload["catalog_profile"] = catalog_profile
         payload["catalog_relevance"] = catalog_relevance

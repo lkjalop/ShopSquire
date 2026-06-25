@@ -138,6 +138,7 @@ def test_top_level_contract(i, query):
     assert "market_evidence" not in body, "structured market evidence must be flag-gated (absent by default)"
     assert "market_evidence_note" not in body, "narration evidence must be flag-gated (absent by default)"
     assert "ranking_experiment" not in body, "live ranking nudge must be flag-gated (absent by default)"
+    assert "phrasing_experiment" not in body, "template phrasing must be flag-gated (absent by default)"
 
 
 # ── Per-product item contract (the fields the grid renders) ──────────────────

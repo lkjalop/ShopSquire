@@ -23,20 +23,25 @@ def apply_experiment_nudge(
     assignment: str,
     live: bool,
     max_boost: float = 0.05,
+    max_nudged_items: int = 3,
 ) -> List[Dict[str, Any]]:
     """Boost recalled products for TREATMENT users in a LIVE experiment, else return ``results``
-    unchanged (identity). The boost is a single capped additive delta; movement is bounded by its
-    small magnitude. Returns the SAME object when nothing is nudged, so callers can `is`-check."""
+    unchanged (identity). TWO treatment caps bound the blast radius: ``max_boost`` (per-item delta
+    magnitude) and ``max_nudged_items`` (how many products can be boosted at all), so a treatment can
+    never reshuffle the whole list. Returns the SAME object when nothing is nudged, so callers can
+    `is`-check."""
     if str(assignment) != "treatment" or not live:
         return results
     boost = {str(x) for x in (recall_ids or []) if str(x).strip()}
     rows = results or []
     if not boost or not rows:
         return results
+    cap = max(0, int(max_nudged_items))
     out: List[Dict[str, Any]] = []
     changed = False
+    nudged = 0
     for r in rows:
-        if isinstance(r, dict) and str(r.get("sku")) in boost:
+        if isinstance(r, dict) and str(r.get("sku")) in boost and nudged < cap:
             r2 = dict(r)
             base = float(r2.get("score") or r2.get("score_norm") or 0.0)
             r2["score"] = base + float(max_boost)
@@ -47,6 +52,7 @@ def apply_experiment_nudge(
             r2["why"] = why[:5]
             out.append(r2)
             changed = True
+            nudged += 1
         else:
             out.append(r)
     if not changed:

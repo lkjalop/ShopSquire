@@ -18,15 +18,45 @@ Vertical-blind; best-effort; never raises into a caller.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import text
 
-from src.app.services.experiments import ensure_tables, is_experiment_live, set_status
+from src.app.services.experiments import assign_variant, ensure_tables, is_experiment_live, set_status
 
 GuardrailFn = Callable[[Any, str], Dict[str, float]]
+
+
+# ── low-risk rollout controls: canary exposure + global kill switch ───────────
+def adaptation_killed() -> bool:
+    """Global emergency brake. ADAPTATION_KILL_SWITCH=1 forces ALL adaptation OFF (ranking nudge,
+    template phrasing, ...) regardless of any experiment's status — independent of the per-experiment
+    revert lever, so one env flip stops everything at once."""
+    return str(os.getenv("ADAPTATION_KILL_SWITCH", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _in_canary(experiment_id: str, subject: str, fraction: float) -> bool:
+    """Deterministic, stable membership of the small canary cohort. Same subject → same answer."""
+    f = max(0.0, min(1.0, float(fraction)))
+    if f >= 1.0:
+        return True
+    if f <= 0.0:
+        return False
+    h = int(hashlib.sha256(f"canary|{experiment_id}|{subject}".encode("utf-8")).hexdigest()[:8], 16)
+    return (h % 10000) / 10000.0 < f
+
+
+def canary_assignment(*, experiment_id: str, subject: str, canary_fraction: float = 0.1) -> str:
+    """Small-canary exposure: only subjects INSIDE the canary fraction are eligible for treatment;
+    everyone else is control. Within the canary, the usual deterministic split applies. So overall
+    treatment exposure ≈ canary_fraction × 0.5 — the deck's 'start small' for live adaptation."""
+    if not _in_canary(experiment_id, subject, canary_fraction):
+        return "control"
+    return assign_variant(experiment_id=experiment_id, subject=subject, variants=["control", "treatment"])
 
 
 def _now(now_iso: Optional[str]) -> datetime:
