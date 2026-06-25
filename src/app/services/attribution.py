@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS conversion_event (
     window_s INTEGER,
     attribution_model TEXT,
     converted_at TEXT,
+    rewarded_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -221,6 +222,74 @@ def attribute_order(
         )
     except Exception as exc:
         return AttributionResult(attributed=False, order_id=order_id, reason=f"error:{type(exc).__name__}")
+
+
+def _mark_rewarded(db, conversion_event_id: str) -> None:
+    db.execute(
+        text("UPDATE conversion_event SET rewarded_at = CURRENT_TIMESTAMP WHERE id = :id"),
+        {"id": conversion_event_id},
+    )
+
+
+def run_reward_feed(
+    db,
+    *,
+    settle_cutoff_iso: str,
+    per_uid_cap: int = 50,
+    batch_limit: int = 500,
+    bandit_reward_fn=None,
+    reward_fn=None,
+) -> Dict[str, int]:
+    """E3 — turn SETTLED, un-rewarded conversions into bandit rewards.
+
+    Quarantine controls (anti-poison): only conversions whose converted_at (fallback created_at)
+    is at/older than ``settle_cutoff_iso`` are processed (settled-order gate, past the return
+    window); each conversion is rewarded at most once (``rewarded_at`` marker → idempotent); and a
+    per-uid cap bounds a single uid's influence per batch (anti-self-attribution; over-cap
+    conversions are consumed but NOT rewarded). The reward is bounded [0,1] via reward_from_outcome.
+
+    ``bandit_reward_fn``/``reward_fn`` are injectable for testing; defaults wire the real bandit.
+    Does not swallow errors — the Celery task wrapper logs and isolates failures.
+    """
+    if db is None:
+        return {"processed": 0, "rewarded": 0, "skipped_no_decision": 0, "skipped_cap": 0}
+    if bandit_reward_fn is None:
+        from src.app.services.recommendation_bandit import record_bandit_reward as bandit_reward_fn
+    if reward_fn is None:
+        reward_fn = reward_from_outcome
+    ensure_tables(db)
+    rows = db.execute(
+        text(
+            "SELECT ce.id, ce.decision_id, ce.uid_hash, ce.attributed_skus_json, rd.arm "
+            "FROM conversion_event ce "
+            "LEFT JOIN recommendation_decision rd ON rd.decision_id = ce.decision_id "
+            "WHERE ce.rewarded_at IS NULL "
+            "  AND COALESCE(ce.converted_at, ce.created_at) <= :cut "
+            "ORDER BY ce.created_at ASC LIMIT :lim"
+        ),
+        {"cut": settle_cutoff_iso, "lim": int(batch_limit)},
+    ).fetchall()
+    summary = {"processed": 0, "rewarded": 0, "skipped_no_decision": 0, "skipped_cap": 0}
+    uid_counts: Dict[str, int] = {}
+    for r in rows:
+        ce_id, decision_id, uid_hash, skus_json, arm = r[0], r[1], r[2], r[3], r[4]
+        summary["processed"] += 1
+        if not decision_id or arm is None:
+            _mark_rewarded(db, ce_id)  # consume so it isn't reprocessed every batch
+            summary["skipped_no_decision"] += 1
+            continue
+        uid_counts[uid_hash] = uid_counts.get(uid_hash, 0) + 1
+        if uid_counts[uid_hash] > int(per_uid_cap):
+            _mark_rewarded(db, ce_id)  # quarantine: consume but do NOT reward
+            summary["skipped_cap"] += 1
+            continue
+        reward = float(reward_fn(AttributionResult(attributed=True)))
+        for sku in _loads_list(skus_json):
+            bandit_reward_fn(db, uid_hash=uid_hash, sku=sku, arm=arm, reward=reward, context={})
+        _mark_rewarded(db, ce_id)
+        summary["rewarded"] += 1
+    db.commit()
+    return summary
 
 
 def reward_from_outcome(result: AttributionResult) -> float:

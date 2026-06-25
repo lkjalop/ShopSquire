@@ -62,10 +62,13 @@ def upgrade() -> None:
             sa.Column("window_s", sa.Integer(), nullable=True),
             sa.Column("attribution_model", sa.Text(), nullable=True),
             sa.Column("converted_at", sa.Text(), nullable=True),
+            sa.Column("rewarded_at", sa.Text(), nullable=True),  # E3: set once the bandit reward is applied
             sa.Column("created_at", sa.Text(), nullable=True, server_default=sa.text("CURRENT_TIMESTAMP")),
         )
         op.create_index("ix_convevent_order", "conversion_event", ["order_id"])
         op.create_index("ix_convevent_decision", "conversion_event", ["decision_id"])
+    # Defensive for a conversion_event created before rewarded_at existed.
+    _ensure_col("conversion_event", "rewarded_at", sa.Text())
 
     # Order attribution columns (E1 populates trace_id at order creation).
     _ensure_col("orders", "trace_id", sa.Text())

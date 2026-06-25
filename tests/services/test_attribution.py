@@ -96,3 +96,62 @@ def test_reward_bounded():
     assert attribution.reward_from_outcome(AttributionResult(attributed=True)) == 1.0
     assert attribution.reward_from_outcome(AttributionResult(attributed=False)) == 0.0
     assert attribution.reward_from_outcome("not-a-result") == 0.0  # type: ignore[arg-type]
+
+
+# ── E3 reward feed ────────────────────────────────────────────────────────────
+def _settled_conversion(db, *, n, decision_id, uid_hash, sku, arm="balanced", converted="2020-01-01T00:00:00"):
+    attribution.record_decision(db, trace_id=f"RT{n}", decision_id=decision_id, uid_hash=uid_hash,
+                                skus=[sku], arm=arm)
+    attribution.attribute_order(db, order_id=f"RO{n}", trace_id=f"RT{n}", uid_hash=uid_hash,
+                                value_cents=100, line_skus=[sku], converted_at=converted)
+
+
+def test_reward_feed_rewards_settled_conversion(db):
+    attribution.ensure_tables(db)
+    _settled_conversion(db, n=1, decision_id="RD1", uid_hash="u1", sku="S1", arm="price_value")
+    db.commit()
+    calls = []
+    def fake(db, *, uid_hash, sku, arm, reward, context):
+        calls.append((uid_hash, sku, arm, reward))
+    s = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00", bandit_reward_fn=fake)
+    assert s["rewarded"] == 1
+    assert calls == [("u1", "S1", "price_value", 1.0)]
+    # idempotent: a second pass rewards nothing (rewarded_at marker).
+    s2 = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00", bandit_reward_fn=fake)
+    assert s2["rewarded"] == 0 and len(calls) == 1
+
+
+def test_reward_feed_skips_unsettled(db):
+    attribution.ensure_tables(db)
+    _settled_conversion(db, n=2, decision_id="RD2", uid_hash="u2", sku="S2", converted="2099-12-31T00:00:00")
+    db.commit()
+    calls = []
+    s = attribution.run_reward_feed(db, settle_cutoff_iso="2000-01-01T00:00:00",
+                                    bandit_reward_fn=lambda *a, **k: calls.append(1))
+    assert s["rewarded"] == 0 and not calls  # converted_at is after the settle cutoff → not yet settled
+
+
+def test_reward_feed_per_uid_cap(db):
+    attribution.ensure_tables(db)
+    for i in range(3):
+        _settled_conversion(db, n=10 + i, decision_id=f"CD{i}", uid_hash="capuid", sku="SC")
+    db.commit()
+    calls = []
+    s = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00", per_uid_cap=2,
+                                    bandit_reward_fn=lambda db, **k: calls.append(1))
+    assert s["rewarded"] == 2 and s["skipped_cap"] == 1  # one uid's influence is capped per batch
+
+
+def test_reward_feed_marks_no_decision_and_skips(db):
+    attribution.ensure_tables(db)
+    # a conversion with no matching decision (orphan) is consumed but not rewarded.
+    attribution.attribute_order(db, order_id="ORPHAN", trace_id=None, uid_hash="ux", line_skus=["S"],
+                                converted_at="2020-01-01T00:00:00")
+    # attribute_order with no decision returns no row, so insert an orphan conversion directly:
+    db.execute(text(
+        "INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, attributed_skus_json, "
+        "value_cents, converted_at) VALUES ('orph','MISSING','O9','ux','[\"S\"]',1,'2020-01-01T00:00:00')"))
+    db.commit()
+    s = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00",
+                                    bandit_reward_fn=lambda *a, **k: None)
+    assert s["skipped_no_decision"] >= 1 and s["rewarded"] == 0
