@@ -45,6 +45,40 @@ def _subject_metric_by_variant(db, experiment_id: str) -> Dict[str, List[float]]
     return by_variant
 
 
+def returns_guardrail(db, experiment_id: str) -> Dict[str, float]:
+    """The real anti-Goodhart guardrail: return-rate degradation per variant. A treatment that raises
+    the return rate (refunded/chargebacked orders among its conversions) yields a NEGATIVE 'returns'
+    delta, so decide() REVERTS even if revenue improved (winning on revenue while hurting trust/margin).
+    Returns {} when the link can't be computed (then decide runs on uplift alone)."""
+    try:
+        rows = db.execute(
+            text(
+                "SELECT a.variant, COUNT(c.order_id) AS conv, "
+                "SUM(CASE WHEN o.status IN ('refunded','chargebacked') THEN 1 ELSE 0 END) AS ret "
+                "FROM experiment_assignment a "
+                "JOIN conversion_event c ON c.uid_hash = a.subject_hash "
+                "LEFT JOIN orders o ON o.id = c.order_id "
+                "WHERE a.experiment_id = :e GROUP BY a.variant"
+            ),
+            {"e": str(experiment_id)},
+        ).fetchall()
+    except Exception:
+        return {}
+    rate: Dict[str, float] = {}
+    for variant, conv, ret in rows:
+        c = float(conv or 0)
+        rate[str(variant)] = (float(ret or 0) / c) if c > 0 else 0.0
+    cr = rate.get("control")
+    tr = rate.get("treatment")
+    if cr is None or tr is None:
+        return {}
+    if cr > 0:
+        delta_pct = (tr - cr) / cr * 100.0
+    else:
+        delta_pct = 0.0 if tr == 0 else 100.0
+    return {"returns": round(-delta_pct, 3)}  # more returns → negative → breach
+
+
 def evaluate_experiment(
     db,
     experiment_id: str,

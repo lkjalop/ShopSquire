@@ -44,6 +44,17 @@ def from_conversion(row: Dict[str, Any]) -> Optional[MarketSignal]:
     )
 
 
+def from_return(row: Dict[str, Any]) -> Optional[MarketSignal]:
+    oid = str((row.get("order_id") or row.get("id")) or "").strip()
+    if not oid:
+        return None
+    return normalize(
+        signal_type="return", source="orders",
+        payload={"order_id": oid, "status": row.get("status")},
+        occurred_at=row.get("updated_at") or row.get("created_at"), trust_score=1.0, dedup_fields=["order_id"],
+    )
+
+
 def from_search(row: Dict[str, Any]) -> Optional[MarketSignal]:
     eid = str(row.get("id") or "").strip()
     if not eid:
@@ -72,6 +83,12 @@ _SOURCES = {
         "SELECT id, query, result_count, event_time FROM search_events ORDER BY event_time DESC LIMIT :lim",
         lambda r: {"id": r[0], "query": r[1], "result_count": r[2], "event_time": r[3]},
         from_search,
+    ),
+    "returns": (
+        "SELECT id, status, updated_at, created_at FROM orders "
+        "WHERE status IN ('refunded','chargebacked') ORDER BY updated_at DESC LIMIT :lim",
+        lambda r: {"id": r[0], "status": r[1], "updated_at": r[2], "created_at": r[3]},
+        from_return,
     ),
 }
 

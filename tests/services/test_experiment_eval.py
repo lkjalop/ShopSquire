@@ -86,6 +86,38 @@ def test_none_db_safe():
     assert evaluate_live_experiments(None) == []
 
 
+def test_returns_guardrail_reverts_revenue_win_with_higher_returns(db):
+    from src.app.services.experiment_eval import returns_guardrail
+    db.execute(text("CREATE TABLE orders (id TEXT, customer_id TEXT, total_cents INTEGER, status TEXT, "
+                    "created_at TEXT, updated_at TEXT)"))
+    eid = ex.create_experiment(db, name="returns-x", target_metric="rpv", status="live")
+    # treatment earns MORE revenue but its orders get refunded more often → trust/margin damage
+    for arm, val, refund_every in (("control", 100.0, 5), ("treatment", 140.0, 2)):
+        for i in range(8):
+            subj = f"{eid}-{arm}-{i}"
+            oid = f"O-{subj}"
+            ex.record_assignment(db, experiment_id=eid, subject_hash=subj, variant=arm)
+            status = "refunded" if (i % refund_every == 0) else "paid"
+            db.execute(text("INSERT INTO orders (id, status) VALUES (:o,:s)"), {"o": oid, "s": status})
+            db.execute(text("INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, "
+                            "attributed_skus_json, value_cents, converted_at) VALUES (:id,:d,:o,:u,'[]',:v,'2026-06-25')"),
+                       {"id": f"{subj}-c", "d": f"D{subj}", "o": oid, "u": subj, "v": int(val * 100)})
+    db.commit()
+    g = returns_guardrail(db, eid)
+    assert g.get("returns", 0) < 0  # treatment returns higher → negative guardrail delta
+    out = evaluate_experiment(db, eid, min_samples=2, guardrail_fn=returns_guardrail)
+    assert out["uplift_pct"] > 0  # revenue went UP ...
+    assert out["decision"] == "revert" and out["reason"] == "guardrail_breach"  # ... but returns reverts it
+    assert ex.is_experiment_live(db, eid) is False
+
+
+def test_from_return_adapter_maps_envelope():
+    from src.app.services.market_signal_adapters import from_return
+    sig = from_return({"id": "O1", "status": "refunded", "updated_at": "2026-06-25"})
+    assert sig and sig.signal_type == "return" and sig.payload["order_id"] == "O1"
+    assert from_return({"status": "refunded"}) is None  # no order id → skip
+
+
 def test_eval_task_registered_and_default_off():
     from src.app.workers.celery_app import celery_app
     from src.app.tasks.experiment_tasks import evaluate_experiments, _enabled

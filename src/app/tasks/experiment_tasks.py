@@ -26,9 +26,10 @@ def evaluate_experiments() -> Dict[str, Any]:
     try:
         min_samples = max(2, int(float(os.getenv("EXPERIMENT_EVAL_MIN_SAMPLES", "30") or 30)))
         from src.app.models.db import db_session
-        from src.app.services.experiment_eval import evaluate_live_experiments
+        from src.app.services.experiment_eval import evaluate_live_experiments, returns_guardrail
         with db_session() as db:
-            outcomes = evaluate_live_experiments(db, min_samples=min_samples)
+            # The returns guardrail is always on — anti-Goodhart is not optional.
+            outcomes = evaluate_live_experiments(db, min_samples=min_samples, guardrail_fn=returns_guardrail)
         reverted = [o.get("experiment_id") for o in outcomes if o.get("reverted")]
         logger.info("evaluate_experiments outcomes=%d reverted=%s", len(outcomes), reverted)
         return {"evaluated": len(outcomes), "reverted": reverted}
