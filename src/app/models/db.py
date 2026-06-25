@@ -742,6 +742,9 @@ def _ensure_minimal_sqlite_tables(bind):
                     "ALTER TABLE orders ADD COLUMN stripe_intent_id TEXT",
                     "ALTER TABLE orders ADD COLUMN tracking_number TEXT",
                     "ALTER TABLE orders ADD COLUMN carrier TEXT",
+                    # attribution (E1): link an order back to the recommendation decision.
+                    "ALTER TABLE orders ADD COLUMN trace_id TEXT",
+                    "ALTER TABLE orders ADD COLUMN decision_id TEXT",
                 ):
                     try:
                         conn.execute(sql_text(_stmt))

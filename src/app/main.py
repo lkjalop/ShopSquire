@@ -782,7 +782,7 @@ def create_app() -> FastAPI:
                 if m == "PUT":
                     return {"keys": {"uid", "items"}, "nested": {"items": {"sku", "quantity"}}}
             if p == "/api/v1/orders/create":
-                return {"keys": {"uid", "items", "customer_id", "guest_email"}, "nested": {"items": {"sku", "quantity"}}}
+                return {"keys": {"uid", "items", "customer_id", "guest_email", "trace_id"}, "nested": {"items": {"sku", "quantity"}}}
             if p == "/api/v1/orders/guest/lookup":
                 return {"keys": {"order_id", "email"}}
             if p.startswith("/api/v1/admin/") and m in {"POST", "PUT", "PATCH", "DELETE"}:

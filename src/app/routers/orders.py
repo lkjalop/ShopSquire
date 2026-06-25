@@ -33,6 +33,9 @@ class OrderCreate(BaseModel):
     items: List[OrderItem]
     customer_id: str | None = None
     guest_email: EmailStr | None = None
+    # E1 — attribution: the recommendation trace_id the cart carried, so the order can be
+    # linked back to the decision that produced it. Optional (direct orders leave it null).
+    trace_id: str | None = None
 
 class OrderStatusUpdate(BaseModel):
     status: str
@@ -187,8 +190,8 @@ def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHA
             )
             db.execute(
                 sql_text(
-                    "INSERT INTO orders (id, draft_order_id, customer_id, guest_email, guest_email_hash, guest_email_encrypted, total_cents, currency, status) "
-                    "VALUES (:id, :draft_id, :customer_id, :guest_email, :guest_email_hash, :guest_email_encrypted, :total_cents, :currency, :status)"
+                    "INSERT INTO orders (id, draft_order_id, customer_id, guest_email, guest_email_hash, guest_email_encrypted, total_cents, currency, status, trace_id) "
+                    "VALUES (:id, :draft_id, :customer_id, :guest_email, :guest_email_hash, :guest_email_encrypted, :total_cents, :currency, :status, :trace_id)"
                 ),
                 {
                     "id": order_id,
@@ -200,6 +203,7 @@ def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHA
                     "total_cents": total_cents,
                     "currency": "USD",
                     "status": "created",
+                    "trace_id": req.trace_id,  # E1
                 },
             )
             db.execute(
@@ -213,6 +217,31 @@ def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHA
                     db.rollback()
                 except Exception:
                     pass
+
+        # E2 — attribution: link this order back to the recommendation decision that produced it
+        # (trace_id match first, uid_hash fallback). Isolated session + observable-on-failure;
+        # never affects the order result. Flag-gated for parity with E0 capture.
+        try:
+            from src.app.feature_flags import get_flags as _get_flags
+            if (_get_flags() or {}).get("ATTRIBUTION_ENABLED", True):
+                from src.app.services.attribution import attribute_order as _attribute_order
+                from src.app.deps import hash_uid as _hash_uid
+                _attr_uid_hash = _hash_uid(session_uid) if session_uid else None
+                _attr_skus = [li.get("sku") for li in line_items if li.get("sku")]
+                with db_session() as _attr_db:
+                    _attribute_order(
+                        _attr_db,
+                        order_id=order_id,
+                        trace_id=req.trace_id,
+                        uid_hash=_attr_uid_hash,
+                        value_cents=total_cents,
+                        line_skus=_attr_skus,
+                        converted_at=datetime.utcnow().isoformat(),
+                    )
+                    _attr_db.commit()
+        except Exception as _e_attr:
+            from src.app.services.safe_stage import record_partial_failure as _rpf
+            _rpf("attribution_order", _e_attr, trace_id=req.trace_id)
 
         summary = {"order_id": order_id, "total_cents": total_cents, "created_at": datetime.utcnow().isoformat()}
         return {"created": True, "order_id": order_id, "total_cents": total_cents, "created_at": summary["created_at"], "status": "created", "customer_id": customer_id}
