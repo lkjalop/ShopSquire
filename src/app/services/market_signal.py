@@ -25,11 +25,17 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
+from sqlalchemy import inspect as _sa_inspect
 from sqlalchemy import text
+
+SCHEMA_VERSION = 1  # bump when the envelope shape changes; stored per row so old rows stay readable
+DEFAULT_TENANT = "default"  # single-tenant today; the column isolates a future multi-tenant deployment
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS market_signal (
     id TEXT PRIMARY KEY,
+    tenant_id TEXT DEFAULT 'default',
+    schema_version INTEGER DEFAULT 1,
     signal_type TEXT,
     source TEXT,
     dedup_key TEXT,
@@ -40,6 +46,12 @@ CREATE TABLE IF NOT EXISTS market_signal (
 )
 """
 
+# Columns added AFTER the table first shipped — applied to pre-existing tables on upgrade.
+_UPGRADE_COLS = (
+    ("tenant_id", "TEXT DEFAULT 'default'"),
+    ("schema_version", "INTEGER DEFAULT 1"),
+)
+
 
 @dataclass(frozen=True)
 class MarketSignal:
@@ -49,20 +61,38 @@ class MarketSignal:
     occurred_at: str          # normalized string (may be "")
     trust_score: float        # 0..1
     dedup_key: str
+    tenant_id: str = DEFAULT_TENANT
+    schema_version: int = SCHEMA_VERSION
 
 
-# Race-safe dedup (UNIQUE on dedup_key) + query indexes for time/type/source scans. The table is
-# created already-deduped, so the unique index is always satisfiable.
+# Dedup is per-tenant (UNIQUE on tenant_id+dedup_key) so two tenants with identical payloads keep
+# distinct rows; the content hash stays tenant-blind. Plus query indexes for time/type/source scans.
 _INDEXES = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS ix_market_signal_dedup ON market_signal(dedup_key)",
+    "DROP INDEX IF EXISTS ix_market_signal_dedup",  # was (dedup_key) only — recreate as composite
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_market_signal_dedup ON market_signal(tenant_id, dedup_key)",
     "CREATE INDEX IF NOT EXISTS ix_market_signal_type ON market_signal(signal_type)",
     "CREATE INDEX IF NOT EXISTS ix_market_signal_source ON market_signal(source)",
     "CREATE INDEX IF NOT EXISTS ix_market_signal_occurred ON market_signal(occurred_at)",
 )
 
 
+def _ensure_columns(db, table: str, coldefs) -> None:
+    """Add missing columns to a pre-existing table (portable upgrade). Introspects first so the normal
+    path issues no failing DDL (a duplicate-column ALTER can poison a transaction on some backends)."""
+    try:
+        # introspect via the session's OWN connection — never the engine (a pooled checkout would be
+        # returned + rolled back, discarding the session's uncommitted inserts).
+        have = {c["name"] for c in _sa_inspect(db.connection()).get_columns(table)}
+    except Exception:
+        return  # table not present yet (CREATE above will include every column) → nothing to upgrade
+    for name, decl in coldefs:
+        if name not in have:
+            db.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
+
+
 def ensure_table(db) -> None:
     db.execute(text(_DDL))
+    _ensure_columns(db, "market_signal", _UPGRADE_COLS)  # before the composite index needs tenant_id
     for stmt in _INDEXES:
         db.execute(text(stmt))
 
@@ -92,10 +122,11 @@ def normalize(
     occurred_at: Any = None,
     trust_score: Any = 1.0,
     dedup_fields: Optional[Iterable[str]] = None,
+    tenant_id: Any = DEFAULT_TENANT,
 ) -> Optional[MarketSignal]:
     """Validate + normalize a raw event into a MarketSignal. Returns None on schema-validation
     failure (missing type/source or non-dict payload). ``dedup_fields`` names the payload keys that
-    identify uniqueness (else the whole payload is hashed)."""
+    identify uniqueness (else the whole payload is hashed). ``tenant_id`` scopes dedup + isolation."""
     st = str(signal_type or "").strip()
     src = str(source or "").strip()
     if not st or not src or not isinstance(payload, dict):
@@ -112,6 +143,7 @@ def normalize(
         occurred_at=_norm_ts(occurred_at),
         trust_score=trust,
         dedup_key=_dedup_key(src, st, payload, dedup_fields),
+        tenant_id=(str(tenant_id).strip() or DEFAULT_TENANT),
     )
 
 
@@ -155,19 +187,21 @@ def ingest(
     try:
         ensure_table(db)
         existing = db.execute(
-            text("SELECT 1 FROM market_signal WHERE dedup_key = :k LIMIT 1"),
-            {"k": signal.dedup_key},
+            text("SELECT 1 FROM market_signal WHERE tenant_id = :t AND dedup_key = :k LIMIT 1"),
+            {"t": signal.tenant_id, "k": signal.dedup_key},
         ).fetchone()
         if existing:
             return False
         db.execute(
             text(
                 "INSERT INTO market_signal "
-                "(id, signal_type, source, dedup_key, trust_score, payload_json, occurred_at) "
-                "VALUES (:id,:st,:src,:k,:tr,:pl,:occ)"
+                "(id, tenant_id, schema_version, signal_type, source, dedup_key, trust_score, "
+                "payload_json, occurred_at) VALUES (:id,:tn,:sv,:st,:src,:k,:tr,:pl,:occ)"
             ),
             {
                 "id": str(uuid.uuid4()),
+                "tn": signal.tenant_id,
+                "sv": int(signal.schema_version),
                 "st": signal.signal_type,
                 "src": signal.source,
                 "k": signal.dedup_key,

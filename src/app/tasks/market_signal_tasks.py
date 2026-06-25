@@ -27,11 +27,18 @@ def market_signal_backfill() -> Dict[str, Any]:
     try:
         limit = max(1, int(float(os.getenv("MARKET_SIGNAL_BACKFILL_LIMIT", "1000") or 1000)))
         min_trust = max(0.0, min(1.0, float(os.getenv("MARKET_SIGNAL_MIN_TRUST", "0") or 0)))
+        max_age = os.getenv("MARKET_SIGNAL_MAX_AGE_SECONDS", "").strip()  # blank → no freshness gate
+        max_age_seconds = float(max_age) if max_age else None
+        now_iso = None
+        if max_age_seconds is not None:
+            from datetime import datetime, timezone
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         from src.app.models.db import db_session
         from src.app.services.market_signal_adapters import backfill_from_db
         with db_session() as db:
-            counts = backfill_from_db(db, limit=limit, min_trust=min_trust)
-        logger.info("market_signal_backfill counts=%s", counts)
+            counts = backfill_from_db(db, limit=limit, min_trust=min_trust,
+                                      max_age_seconds=max_age_seconds, now_iso=now_iso)
+        logger.info("market_signal_backfill counts=%s (min_trust=%s max_age=%s)", counts, min_trust, max_age_seconds)
         return counts
     except Exception as exc:
         logger.warning("market_signal_backfill failed: %s", exc)

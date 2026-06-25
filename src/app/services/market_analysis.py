@@ -187,9 +187,17 @@ def run_analysis(db, *, limit: int = 2000, anomaly_fn: Optional[Callable] = None
 
 
 # ── findings persistence (batch writes, hot path reads) ──────────────────────
+# Lifecycle: a fresh batch run SUPERSEDES the prior active finding for the same (tenant, type, entity,
+# window) — so re-running analysis updates rather than duplicates, and load returns only status='active'
+# (or human-'corrected' rows kept as a learning record, never auto-overwritten).
+SCHEMA_VERSION = 1
+DEFAULT_TENANT = "default"
+
 _FINDING_DDL = """
 CREATE TABLE IF NOT EXISTS market_finding (
     id TEXT PRIMARY KEY,
+    tenant_id TEXT DEFAULT 'default',
+    schema_version INTEGER DEFAULT 1,
     finding_type TEXT,
     entity_ref TEXT,
     severity TEXT,
@@ -197,36 +205,86 @@ CREATE TABLE IF NOT EXISTS market_finding (
     summary TEXT,
     evidence_json TEXT,
     window TEXT,
+    dedup_key TEXT,
+    status TEXT DEFAULT 'active',
+    corrected_by_human INTEGER DEFAULT 0,
+    correction_note TEXT,
+    superseded_by TEXT,
     detected_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
+# Columns added after the table first shipped — applied to pre-existing tables on upgrade.
+_FINDING_UPGRADE_COLS = (
+    ("tenant_id", "TEXT DEFAULT 'default'"),
+    ("schema_version", "INTEGER DEFAULT 1"),
+    ("dedup_key", "TEXT"),
+    ("status", "TEXT DEFAULT 'active'"),
+    ("corrected_by_human", "INTEGER DEFAULT 0"),
+    ("correction_note", "TEXT"),
+    ("superseded_by", "TEXT"),
+)
 _FINDING_INDEXES = (
     "CREATE INDEX IF NOT EXISTS ix_market_finding_type ON market_finding(finding_type)",
     "CREATE INDEX IF NOT EXISTS ix_market_finding_detected ON market_finding(detected_at)",
+    "CREATE INDEX IF NOT EXISTS ix_market_finding_dedup ON market_finding(tenant_id, dedup_key, status)",
 )
+
+
+def _finding_dedup_key(tenant_id: str, finding_type: str, entity_ref: Any, window: str) -> str:
+    import hashlib
+    raw = "|".join([str(tenant_id), str(finding_type), str(entity_ref or ""), str(window or "")])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _ensure_finding_columns(db) -> None:
+    """Add post-ship columns to a pre-existing market_finding (portable upgrade; no failing DDL)."""
+    from sqlalchemy import inspect as _sa_inspect
+    try:
+        # session's OWN connection, not the engine — a pooled checkout would roll back pending inserts.
+        have = {c["name"] for c in _sa_inspect(db.connection()).get_columns("market_finding")}
+    except Exception:
+        return
+    for name, decl in _FINDING_UPGRADE_COLS:
+        if name not in have:
+            db.execute(text(f"ALTER TABLE market_finding ADD COLUMN {name} {decl}"))
 
 
 def ensure_finding_table(db) -> None:
     db.execute(text(_FINDING_DDL))
+    _ensure_finding_columns(db)
     for stmt in _FINDING_INDEXES:
         db.execute(text(stmt))
 
 
-def persist_findings(db, findings: List[MarketFinding]) -> int:
-    """Write a batch run's findings. Returns the count written. Best-effort; never raises."""
+def persist_findings(db, findings: List[MarketFinding], *, tenant_id: str = DEFAULT_TENANT) -> int:
+    """Write a batch run's findings, SUPERSEDING the prior active finding per (tenant,type,entity,window)
+    so re-runs update rather than accumulate. Human-corrected rows are left untouched (the human wins).
+    Returns the count written. Best-effort; never raises."""
     if db is None or not findings:
         return 0
     try:
         import json
         import uuid
         ensure_finding_table(db)
+        tid = str(tenant_id).strip() or DEFAULT_TENANT
         n = 0
         for f in findings:
+            dk = _finding_dedup_key(tid, f.finding_type, f.entity_ref, f.window)
+            new_id = str(uuid.uuid4())
+            # supersede the prior active machine finding for this key (never a human-corrected one)
             db.execute(
-                text("INSERT INTO market_finding (id, finding_type, entity_ref, severity, confidence, "
-                     "summary, evidence_json, window) VALUES (:i,:t,:e,:s,:c,:m,:j,:w)"),
-                {"i": str(uuid.uuid4()), "t": f.finding_type, "e": f.entity_ref, "s": f.severity,
-                 "c": float(f.confidence), "m": f.summary, "j": json.dumps(f.evidence, default=str), "w": f.window},
+                text("UPDATE market_finding SET status='superseded', superseded_by=:nid "
+                     "WHERE tenant_id=:t AND dedup_key=:dk AND status='active' "
+                     "AND COALESCE(corrected_by_human,0)=0"),
+                {"nid": new_id, "t": tid, "dk": dk},
+            )
+            db.execute(
+                text("INSERT INTO market_finding (id, tenant_id, schema_version, finding_type, entity_ref, "
+                     "severity, confidence, summary, evidence_json, window, dedup_key, status) "
+                     "VALUES (:i,:tn,:sv,:t,:e,:s,:c,:m,:j,:w,:dk,'active')"),
+                {"i": new_id, "tn": tid, "sv": int(SCHEMA_VERSION), "t": f.finding_type, "e": f.entity_ref,
+                 "s": f.severity, "c": float(f.confidence), "m": f.summary,
+                 "j": json.dumps(f.evidence, default=str), "w": f.window, "dk": dk},
             )
             n += 1
         return n
@@ -234,15 +292,37 @@ def persist_findings(db, findings: List[MarketFinding]) -> int:
         return 0
 
 
-def load_recent_findings(db, *, limit: int = 50) -> List[MarketFinding]:
-    """Read recent PERSISTED findings (fast — the hot-path read). Best-effort."""
+def correct_finding(db, finding_id: str, *, note: str = "", tenant_id: str = DEFAULT_TENANT) -> bool:
+    """Human-in-the-loop correction: flag a finding as human-corrected so future batch runs never
+    silently overwrite it. The correction becomes a learning signal (projected as a weighted hippograph
+    edge by the human-correction learner). Returns True when a row was updated. Never raises."""
+    if db is None or not finding_id:
+        return False
+    try:
+        ensure_finding_table(db)
+        res = db.execute(
+            text("UPDATE market_finding SET corrected_by_human=1, status='corrected', correction_note=:n "
+                 "WHERE id=:i AND tenant_id=:t"),
+            {"n": str(note or ""), "i": str(finding_id), "t": str(tenant_id).strip() or DEFAULT_TENANT},
+        )
+        return bool(getattr(res, "rowcount", 0) or 0)
+    except Exception:
+        return False
+
+
+def load_recent_findings(db, *, limit: int = 50, tenant_id: str = DEFAULT_TENANT) -> List[MarketFinding]:
+    """Read recent ACTIVE persisted findings (fast — the hot-path read), tenant-scoped. Superseded and
+    human-corrected rows are excluded from the live read. Best-effort."""
     if db is None:
         return []
     try:
+        ensure_finding_table(db)
         rows = db.execute(
             text("SELECT finding_type, entity_ref, severity, confidence, summary, evidence_json, window "
-                 "FROM market_finding ORDER BY detected_at DESC LIMIT :lim"),
-            {"lim": int(limit)},
+                 "FROM market_finding "
+                 "WHERE COALESCE(status,'active')='active' AND COALESCE(tenant_id,'default')=:t "
+                 "ORDER BY detected_at DESC LIMIT :lim"),
+            {"lim": int(limit), "t": str(tenant_id).strip() or DEFAULT_TENANT},
         ).fetchall()
     except Exception:
         return []

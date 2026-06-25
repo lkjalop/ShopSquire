@@ -93,13 +93,15 @@ _SOURCES = {
 }
 
 
-def _backfill_one(db, sql: str, row_map, sig_map, *, limit: int, min_trust: float) -> int:
+def _backfill_one(db, sql: str, row_map, sig_map, *, limit: int, min_trust: float,
+                  max_age_seconds: Optional[float], now_iso: Optional[str]) -> int:
     n = 0
     try:
         rows = db.execute(text(sql), {"lim": int(limit)}).fetchall()
         for r in rows:
             sig = sig_map(row_map(r))
-            if sig and ingest(db, sig, min_trust=min_trust):
+            if sig and ingest(db, sig, min_trust=min_trust,
+                              max_age_seconds=max_age_seconds, now_iso=now_iso):
                 n += 1
         return n
     except Exception:
@@ -119,9 +121,13 @@ def backfill_from_db(
     sources: Optional[Iterable[str]] = None,
     limit: int = 1000,
     min_trust: float = 0.0,
+    max_age_seconds: Optional[float] = None,
+    now_iso: Optional[str] = None,
     commit: bool = True,
 ) -> Dict[str, int]:
-    """Ingest recent rows from each source into market_signal (idempotent). Returns {source: count}."""
+    """Ingest recent rows from each source into market_signal (idempotent). Trust- and (when
+    ``max_age_seconds`` is set) freshness-gated at the write — bad/stale input is quarantined before it
+    can drive autonomous behaviour. Returns {source: count}."""
     if db is None:
         return {}
     ensure_table(db)
@@ -130,7 +136,8 @@ def backfill_from_db(
     for name, (sql, row_map, sig_map) in _SOURCES.items():
         if want is not None and name not in want:
             continue
-        counts[name] = _backfill_one(db, sql, row_map, sig_map, limit=limit, min_trust=min_trust)
+        counts[name] = _backfill_one(db, sql, row_map, sig_map, limit=limit, min_trust=min_trust,
+                                     max_age_seconds=max_age_seconds, now_iso=now_iso)
     if commit:
         _safe_commit(db)
     return counts
