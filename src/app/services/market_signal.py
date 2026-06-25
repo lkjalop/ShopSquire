@@ -68,8 +68,11 @@ class MarketSignal:
 
 # Dedup is per-tenant (UNIQUE on tenant_id+dedup_key) so two tenants with identical payloads keep
 # distinct rows; the content hash stays tenant-blind. Plus query indexes for time/type/source scans.
+# NOTE: no DROP INDEX here — that ran on EVERY ingest, dropping+recreating the unique index per event
+# (table lock + a window with no dedup protection). The one-time conversion of a legacy single-column
+# ix_market_signal_dedup → the composite lives in the Alembic migration (20260626_market_autonomy),
+# which runs once. CREATE ... IF NOT EXISTS here is a cheap catalog no-op once the index exists.
 _INDEXES = (
-    "DROP INDEX IF EXISTS ix_market_signal_dedup",  # was (dedup_key) only — recreate as composite
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_market_signal_dedup ON market_signal(tenant_id, dedup_key)",
     "CREATE INDEX IF NOT EXISTS ix_market_signal_type ON market_signal(signal_type)",
     "CREATE INDEX IF NOT EXISTS ix_market_signal_source ON market_signal(source)",

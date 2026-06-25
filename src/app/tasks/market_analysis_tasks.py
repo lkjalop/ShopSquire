@@ -28,7 +28,8 @@ def run_market_analysis() -> Dict[str, Any]:
         from src.app.services.market_analysis import persist_findings, run_analysis
         with db_session() as db:
             findings = run_analysis(db, limit=limit)
-            written = persist_findings(db, findings)
+            # expire_unobserved: this run is the current truth — retire active findings it no longer sees
+            written = persist_findings(db, findings, expire_unobserved=True)
             db.commit()
         logger.info("run_market_analysis findings=%d persisted=%d", len(findings), written)
         return {"findings": len(findings), "persisted": written}

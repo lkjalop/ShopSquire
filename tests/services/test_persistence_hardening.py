@@ -96,3 +96,36 @@ def test_human_correction_survives_a_later_batch_run(db):
 def test_correct_finding_safe_on_missing(db):
     assert correct_finding(db, "nope") is False
     assert correct_finding(None, "x") is False
+
+
+def test_unobserved_findings_expire_on_next_run(db):
+    # run 1 produces findings for two entities
+    persist_findings(db, [_f(entity="q-stays"), _f(entity="q-gone")], expire_unobserved=True)
+    assert {f.entity_ref for f in load_recent_findings(db)} == {"q-stays", "q-gone"}
+    # run 2 only re-observes q-stays → q-gone's anomaly is gone and must EXPIRE (not linger active)
+    persist_findings(db, [_f(entity="q-stays", summ="still here")], expire_unobserved=True)
+    active = load_recent_findings(db)
+    assert [f.entity_ref for f in active] == ["q-stays"]
+    expired = db.execute(text("SELECT entity_ref FROM market_finding WHERE status='expired'")).fetchall()
+    assert {r[0] for r in expired} == {"q-gone"}
+
+
+def test_empty_run_expires_all_active(db):
+    persist_findings(db, [_f(entity="q1"), _f(entity="q2")], expire_unobserved=True)
+    persist_findings(db, [], expire_unobserved=True)  # nothing observed → all active retired
+    assert load_recent_findings(db) == []
+
+
+def test_human_corrected_findings_never_expire(db):
+    persist_findings(db, [_f(entity="q-keep")])
+    fid = db.execute(text("SELECT id FROM market_finding WHERE status='active'")).scalar()
+    correct_finding(db, fid, note="keep me")
+    persist_findings(db, [], expire_unobserved=True)  # a corrected row is human-owned, not expired
+    row = db.execute(text("SELECT status FROM market_finding WHERE id=:i"), {"i": fid}).fetchone()
+    assert row[0] == "corrected"  # untouched by expiry
+
+
+def test_expire_unobserved_off_by_default_leaves_old_active(db):
+    persist_findings(db, [_f(entity="q-old")])
+    persist_findings(db, [_f(entity="q-new")])  # default: no expiry → both active (legacy behaviour)
+    assert {f.entity_ref for f in load_recent_findings(db)} == {"q-old", "q-new"}

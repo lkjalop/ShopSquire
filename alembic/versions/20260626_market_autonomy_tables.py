@@ -191,6 +191,10 @@ _DROP_TABLES = (
 def upgrade() -> None:
     for stmt in TABLE_STATEMENTS:
         op.execute(stmt)
+    # One-time conversion: an older deploy may have ix_market_signal_dedup as a single-column UNIQUE
+    # index on (dedup_key). Drop it here (ONCE, in the migration) so the composite per-tenant index can
+    # take its place — the runtime no longer does this drop on every ingest.
+    op.execute("DROP INDEX IF EXISTS ix_market_signal_dedup")
     for stmt in INDEX_STATEMENTS:
         op.execute(stmt)
 

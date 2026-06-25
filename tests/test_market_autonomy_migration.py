@@ -78,15 +78,12 @@ def test_downgrade_drops_tables(mig):
     assert remaining == set(), f"downgrade left tables behind: {remaining}"
 
 
-def test_migration_ddl_matches_runtime_tables(mig):
-    """The migration must create EXACTLY what the services create at runtime (no schema drift)."""
+def _runtime_engine():
+    """Build a SQLite db by calling every service ensure_* (the runtime path)."""
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
-
-    # runtime path: call each service ensure_* into one SQLite db
-    runtime_eng = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                                poolclass=StaticPool, future=True)
-    s = sessionmaker(bind=runtime_eng, future=True)()
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    s = sessionmaker(bind=eng, future=True)()
     from src.app.services import contact_governance, experiments, human_feedback, market_signal, shadow_actions
     from src.app.services.experiment_ops import _ensure_heartbeat
     from src.app.services.market_analysis import ensure_finding_table
@@ -98,12 +95,39 @@ def test_migration_ddl_matches_runtime_tables(mig):
     _ensure_heartbeat(s)
     experiments.ensure_tables(s)
     s.commit()
-    runtime_tables = {t for t in inspect(runtime_eng).get_table_names() if t in _EXPECTED_TABLES}
+    return eng
 
-    # migration path
-    mig_eng = create_engine("sqlite://", future=True)
-    with mig_eng.begin() as conn:
+
+def _migration_engine(mig):
+    eng = create_engine("sqlite://", future=True)
+    with eng.begin() as conn:
         _apply(conn, mig.TABLE_STATEMENTS)
-    mig_tables = {t for t in inspect(mig_eng).get_table_names() if t in _EXPECTED_TABLES}
+        _apply(conn, mig.INDEX_STATEMENTS)
+    return eng
 
-    assert runtime_tables == mig_tables == _EXPECTED_TABLES  # migration ≡ runtime, no drift
+
+def _schema(eng):
+    """{table: ({columns}, {(index_name, unique)})} for the adaptive-growth tables."""
+    insp = inspect(eng)
+    out = {}
+    for t in _EXPECTED_TABLES:
+        if not insp.has_table(t):
+            continue
+        cols = {c["name"] for c in insp.get_columns(t)}
+        idx = {(i["name"], bool(i["unique"])) for i in insp.get_indexes(t)}
+        out[t] = (cols, idx)
+    return out
+
+
+def test_migration_ddl_matches_runtime_tables(mig):
+    """The migration must create EXACTLY what the services create at runtime — same tables, COLUMNS,
+    and INDEXES (incl. uniqueness). Comparing only table names would miss a column/index drift such as
+    the per-event index-drop the runtime no longer does."""
+    runtime = _schema(_runtime_engine())
+    migrated = _schema(_migration_engine(mig))
+    assert set(runtime) == set(migrated) == _EXPECTED_TABLES
+    for t in _EXPECTED_TABLES:
+        r_cols, r_idx = runtime[t]
+        m_cols, m_idx = migrated[t]
+        assert r_cols == m_cols, f"{t}: column drift runtime={r_cols} migration={m_cols}"
+        assert r_idx == m_idx, f"{t}: index drift runtime={r_idx} migration={m_idx}"

@@ -79,7 +79,10 @@ def detect_demand_shift(signals, *, anomaly_fn: Optional[Callable] = None, min_p
     return [MarketFinding(
         FINDING_DEMAND_SHIFT, None, str(getattr(top, "severity", "warn")), float(getattr(top, "confidence", 0.5)),
         f"Search demand {direction}: {int(latest)} vs ~{base:.0f} baseline.",
-        {"latest": latest, "baseline": round(base, 2), "z_score": getattr(top, "z_score", None), "days": days[-min_points:]},
+        # direction is CARRIED in evidence so a downstream proposal demotes a slowdown instead of
+        # boosting it (shadow_actions._direction_for reads evidence['direction']).
+        {"latest": latest, "baseline": round(base, 2), "direction": direction,
+         "z_score": getattr(top, "z_score", None), "days": days[-min_points:]},
         "daily",
     )]
 
@@ -271,20 +274,30 @@ def ensure_finding_table(db) -> None:
         db.execute(text(stmt))
 
 
-def persist_findings(db, findings: List[MarketFinding], *, tenant_id: str = DEFAULT_TENANT) -> int:
+def persist_findings(db, findings: List[MarketFinding], *, tenant_id: str = DEFAULT_TENANT,
+                     expire_unobserved: bool = False) -> int:
     """Write a batch run's findings, SUPERSEDING the prior active finding per (tenant,type,entity,window)
     so re-runs update rather than accumulate. Human-corrected rows are left untouched (the human wins).
-    Returns the count written. Best-effort; never raises."""
-    if db is None or not findings:
+
+    When ``expire_unobserved`` is set (the batch passes it), any ACTIVE machine finding whose key was
+    NOT produced by THIS run is marked 'expired' — so a finding for an anomaly that has since
+    disappeared does not stay active forever (a later run that no longer sees it retires it). Returns
+    the count written. Best-effort; never raises."""
+    if db is None:
         return 0
+    findings = findings or []
     try:
         import json
         import uuid
+
+        from sqlalchemy import bindparam
         ensure_finding_table(db)
         tid = str(tenant_id).strip() or DEFAULT_TENANT
+        observed: List[str] = []
         n = 0
         for f in findings:
             dk = _finding_dedup_key(tid, f.finding_type, f.entity_ref, f.window)
+            observed.append(dk)
             new_id = str(uuid.uuid4())
             # supersede the prior active machine finding for this key (never a human-corrected one)
             db.execute(
@@ -302,6 +315,17 @@ def persist_findings(db, findings: List[MarketFinding], *, tenant_id: str = DEFA
                  "j": json.dumps(f.evidence, default=str), "w": f.window, "dk": dk},
             )
             n += 1
+        if expire_unobserved:
+            # retire active machine findings this run did NOT re-observe (anomaly gone). With no
+            # observations at all, every active machine finding is retired.
+            if observed:
+                stmt = text("UPDATE market_finding SET status='expired' WHERE tenant_id=:t "
+                            "AND status='active' AND COALESCE(corrected_by_human,0)=0 "
+                            "AND dedup_key NOT IN :keys").bindparams(bindparam("keys", expanding=True))
+                db.execute(stmt, {"t": tid, "keys": observed})
+            else:
+                db.execute(text("UPDATE market_finding SET status='expired' WHERE tenant_id=:t "
+                                "AND status='active' AND COALESCE(corrected_by_human,0)=0"), {"t": tid})
         return n
     except Exception:
         return 0

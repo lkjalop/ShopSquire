@@ -56,6 +56,27 @@ def test_demand_shift_needs_min_history():
     assert detect_demand_shift(_demand("2026-06-24", 50), anomaly_fn=_flag_last_outlier) == []  # 1 day only
 
 
+def test_demand_shift_slowdown_carries_direction_and_proposes_demote():
+    # a SLOWDOWN must tag evidence direction='slowdown' so the shadow proposal DEMOTES, not boosts
+    sigs = (_demand("2026-06-20", 20) + _demand("2026-06-21", 20) + _demand("2026-06-22", 20)
+            + _demand("2026-06-23", 20) + _demand("2026-06-24", 2))  # collapse on the last day
+    found = detect_demand_shift(sigs, anomaly_fn=_flag_last_outlier)
+    assert len(found) == 1 and "slowdown" in found[0].summary
+    assert found[0].evidence.get("direction") == "slowdown"  # the bug: direction was missing from evidence
+    from src.app.services.shadow_actions import ACTION_ADJUST_RANKING, propose_from_findings
+    proposals = propose_from_findings(found)
+    assert proposals[0].action_type == ACTION_ADJUST_RANKING and proposals[0].direction == "demote"
+
+
+def test_demand_shift_spike_proposes_boost():
+    sigs = (_demand("2026-06-20", 2) + _demand("2026-06-21", 2) + _demand("2026-06-22", 2)
+            + _demand("2026-06-23", 2) + _demand("2026-06-24", 20))
+    found = detect_demand_shift(sigs, anomaly_fn=_flag_last_outlier)
+    assert found[0].evidence.get("direction") == "spike"
+    from src.app.services.shadow_actions import propose_from_findings
+    assert propose_from_findings(found)[0].direction == "boost"
+
+
 # ── conversion anomaly (drop only) ───────────────────────────────────────────
 def test_conversion_drop_flagged():
     sigs = []

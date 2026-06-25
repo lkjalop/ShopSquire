@@ -37,6 +37,7 @@ def nudge_stack(monkeypatch):
         "HIPPOGRAPH_FEEDBACK_ENABLED": True,        # needed so recall_ids exist
         "RANKING_NUDGE_EXPERIMENT_ENABLED": True,
         "RANKING_NUDGE_EXPERIMENT_ID": "ranking_nudge_v1",
+        "RANKING_NUDGE_CANARY_FRACTION": 1.0,       # 100% canary so the forced assign_variant applies
     })
     with db_session() as db:
         db.execute(text("INSERT OR REPLACE INTO products (id,sku,name,price_cents,currency,specs,active) "
@@ -67,7 +68,9 @@ def _suggest(uid):
 
 
 def test_treatment_user_is_nudged(nudge_stack):
-    nudge_stack.setattr("src.app.services.experiments.assign_variant", lambda **k: "treatment")
+    # canary_assignment resolves assign_variant from the experiment_ops namespace (imported there);
+    # with a 100% canary fraction every subject is eligible, so the forced arm applies.
+    nudge_stack.setattr("src.app.services.experiment_ops.assign_variant", lambda **k: "treatment")
     body = _suggest("rnw-treat")
     exp = body.get("ranking_experiment")
     assert exp and exp["variant"] == "treatment" and exp["live"] is True
@@ -75,7 +78,7 @@ def test_treatment_user_is_nudged(nudge_stack):
 
 
 def test_control_user_is_untouched(nudge_stack):
-    nudge_stack.setattr("src.app.services.experiments.assign_variant", lambda **k: "control")
+    nudge_stack.setattr("src.app.services.experiment_ops.assign_variant", lambda **k: "control")
     body = _suggest("rnw-ctrl")
     exp = body.get("ranking_experiment")
     assert exp and exp["variant"] == "control"
