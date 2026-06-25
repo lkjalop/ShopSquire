@@ -74,6 +74,9 @@ _CORE_MODULES = [
     "src/app/services/agent_budgets.py",
     # request-scoped bandit-arm carrier: an "arm" is an opaque label, zero product vocabulary.
     "src/app/services/bandit_context.py",
+    # entity resolution: canonicalize brand/product/user → stable graph-node ids; alias DATA comes
+    # from the profile, the normalize+lookup MECHANISM is vertical-blind.
+    "src/app/services/entity_resolution.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
