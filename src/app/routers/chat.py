@@ -31,6 +31,9 @@ from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
