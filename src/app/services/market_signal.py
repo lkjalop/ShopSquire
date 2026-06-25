@@ -51,8 +51,20 @@ class MarketSignal:
     dedup_key: str
 
 
+# Race-safe dedup (UNIQUE on dedup_key) + query indexes for time/type/source scans. The table is
+# created already-deduped, so the unique index is always satisfiable.
+_INDEXES = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS ix_market_signal_dedup ON market_signal(dedup_key)",
+    "CREATE INDEX IF NOT EXISTS ix_market_signal_type ON market_signal(signal_type)",
+    "CREATE INDEX IF NOT EXISTS ix_market_signal_source ON market_signal(source)",
+    "CREATE INDEX IF NOT EXISTS ix_market_signal_occurred ON market_signal(occurred_at)",
+)
+
+
 def ensure_table(db) -> None:
     db.execute(text(_DDL))
+    for stmt in _INDEXES:
+        db.execute(text(stmt))
 
 
 def _norm_ts(value: Any) -> str:
@@ -122,13 +134,24 @@ def is_fresh(signal: Optional[MarketSignal], *, max_age_seconds: float, now_iso:
         return True
 
 
-def ingest(db, signal: Optional[MarketSignal], *, min_trust: float = 0.0) -> bool:
-    """Idempotent insert (skips a duplicate dedup_key) gated by trust (quarantine below min_trust).
-    Returns True only when a new row is written. Never raises."""
+def ingest(
+    db,
+    signal: Optional[MarketSignal],
+    *,
+    min_trust: float = 0.0,
+    max_age_seconds: Optional[float] = None,
+    now_iso: Optional[str] = None,
+) -> bool:
+    """Idempotent insert (skips a duplicate dedup_key) gated by trust (quarantine below min_trust)
+    and, when ``max_age_seconds`` is given, by freshness (drop stale signals). Returns True only when
+    a new row is written. Never raises. A concurrent race is closed by the UNIQUE dedup index — the
+    losing insert raises and is caught → False."""
     if db is None or signal is None:
         return False
     if signal.trust_score < float(min_trust):
         return False  # quarantine low-trust signal
+    if max_age_seconds is not None and not is_fresh(signal, max_age_seconds=max_age_seconds, now_iso=now_iso):
+        return False  # quarantine stale signal
     try:
         ensure_table(db)
         existing = db.execute(

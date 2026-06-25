@@ -80,3 +80,17 @@ def test_is_fresh_window():
 def test_is_fresh_tolerant_when_undated():
     undated = MarketSignal("d", "s", {}, "", 1.0, "k")
     assert is_fresh(undated, max_age_seconds=1, now_iso="2026-06-25T12:00:00") is True  # never wrongly drop
+
+
+def test_ingest_drops_stale_when_enforced(db):
+    stale = normalize(signal_type="d", source="s", payload={"x": 1}, occurred_at="2020-01-01T00:00:00")
+    assert ingest(db, stale, max_age_seconds=3600, now_iso="2026-06-25T12:00:00") is False
+    fresh = normalize(signal_type="d", source="s", payload={"x": 2}, occurred_at="2026-06-25T11:59:00")
+    assert ingest(db, fresh, max_age_seconds=3600, now_iso="2026-06-25T12:00:00") is True
+
+
+def test_dedup_unique_index_present(db):
+    ms.ensure_table(db)
+    idx = db.execute(text(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='ix_market_signal_dedup'")).fetchone()
+    assert idx is not None  # race-safe dedup is enforced at the DB level

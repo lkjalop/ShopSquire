@@ -296,6 +296,20 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{email_connector_min}"),
             "args": (),
         }
+    # Attribution E3 reward feed — the task self-gates, but only schedule it when enabled.
+    if str(os.getenv("ATTRIBUTION_REWARD_FEED_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["attribution-reward-feed"] = {
+            "task": "src.app.tasks.attribution_tasks.attribution_reward_feed",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('ATTRIBUTION_REWARD_FEED_INTERVAL_MIN', '60')))}"),
+            "args": (),
+        }
+    # Market signal backfill (Module 1 batch wiring) — schedule only when enabled.
+    if str(os.getenv("MARKET_SIGNAL_BACKFILL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["market-signal-backfill"] = {
+            "task": "src.app.tasks.market_signal_tasks.market_signal_backfill",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('MARKET_SIGNAL_BACKFILL_INTERVAL_MIN', '15')))}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -322,6 +336,8 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "sandbox.detonate": {"queue": "security"},
             "src.app.tasks.email_poll_tasks.poll_dmarc_filesystem": {"queue": default_q},
             "src.app.tasks.email_poll_tasks.poll_email_connector": {"queue": default_q},
+            "src.app.tasks.attribution_tasks.attribution_reward_feed": {"queue": default_q},
+            "src.app.tasks.market_signal_tasks.market_signal_backfill": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -331,6 +347,8 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.anomaly_tasks",
             "src.app.tasks.sandbox_tasks",
             "src.app.tasks.email_poll_tasks",
+            "src.app.tasks.attribution_tasks",
+            "src.app.tasks.market_signal_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
