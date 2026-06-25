@@ -39,6 +39,8 @@ SUPPRESS_QUIET_HOURS = "quiet_hours"
 SUPPRESS_NO_CONSENT = "no_consent"
 SUPPRESS_CAMPAIGN_CAP = "campaign_cap"
 SUPPRESS_FREQUENCY = "frequency_cap"
+SUPPRESS_ERROR_FAIL_CLOSED = "error_fail_closed"  # history unreadable → suppress (never permit blindly)
+SUPPRESS_AUDIT_UNAVAILABLE = "audit_unavailable"  # couldn't persist the authz record → suppress
 
 _DDL = (
     """
@@ -162,35 +164,36 @@ def record_contact(db, *, uid_hash: str, channel: str, campaign_id: Optional[str
 
 
 def _count_in_window(db, *, uid_hash: str, channel: str, since: datetime, tenant_id: str) -> int:
-    try:
-        row = db.execute(
-            text("SELECT COUNT(*) FROM contact_event WHERE tenant_id=:t AND uid_hash=:u AND channel=:c "
-                 "AND sent_at >= :s"),
-            {"t": tenant_id, "u": str(uid_hash), "c": str(channel), "s": since.strftime("%Y-%m-%d %H:%M:%S")},
-        ).fetchone()
-        return int(row[0] or 0)
-    except Exception:
-        return 0
+    # NO internal swallow: if the history can't be read, the error MUST propagate to evaluate_contact's
+    # fail-closed handler — returning 0 here would PERMIT contact on an unreadable history (fail-open).
+    row = db.execute(
+        text("SELECT COUNT(*) FROM contact_event WHERE tenant_id=:t AND uid_hash=:u AND channel=:c "
+             "AND sent_at >= :s"),
+        {"t": tenant_id, "u": str(uid_hash), "c": str(channel), "s": since.strftime("%Y-%m-%d %H:%M:%S")},
+    ).fetchone()
+    return int(row[0] or 0)
 
 
 def _contacted_for_campaign(db, *, uid_hash: str, campaign_id: str, tenant_id: str) -> bool:
-    try:
-        row = db.execute(text("SELECT 1 FROM contact_event WHERE tenant_id=:t AND uid_hash=:u AND campaign_id=:cm LIMIT 1"),
-                         {"t": tenant_id, "u": str(uid_hash), "cm": str(campaign_id)}).fetchone()
-        return bool(row)
-    except Exception:
-        return False
+    # NO internal swallow (see _count_in_window): an unreadable campaign history must fail closed, not
+    # return False (= "not yet contacted" = permit).
+    row = db.execute(text("SELECT 1 FROM contact_event WHERE tenant_id=:t AND uid_hash=:u AND campaign_id=:cm LIMIT 1"),
+                     {"t": tenant_id, "u": str(uid_hash), "cm": str(campaign_id)}).fetchone()
+    return bool(row)
 
 
-def _write_audit(db, decision: ContactDecision, *, uid_hash: str, tenant_id: str) -> None:
+def _write_audit(db, decision: ContactDecision, *, uid_hash: str, tenant_id: str) -> bool:
+    """Persist the authorization decision. Returns True on success. A FALSE here on an ALLOW must
+    suppress the contact (no customer-impacting action without a durable authorization record)."""
     try:
         db.execute(text("INSERT INTO contact_audit (id, tenant_id, uid_hash, channel, campaign_id, decision, "
                         "reason, region) VALUES (:i,:t,:u,:c,:cm,:d,:r,:rg)"),
                    {"i": str(uuid.uuid4()), "t": tenant_id, "u": str(uid_hash), "c": decision.channel,
                     "cm": decision.campaign_id, "d": "allow" if decision.allowed else "suppress",
                     "r": decision.reason, "rg": decision.region})
+        return True
     except Exception:
-        return  # audit is best-effort; the decision itself already stands
+        return False
 
 
 def evaluate_contact(
@@ -242,14 +245,18 @@ def evaluate_contact(
                 decision = ContactDecision(True, ALLOW, str(channel), campaign_id, region,
                                            detail={"count": count, "per_window": int(per_window)})
     except Exception:
-        decision = ContactDecision(False, "error_fail_closed", str(channel), campaign_id, region)
+        decision = ContactDecision(False, SUPPRESS_ERROR_FAIL_CLOSED, str(channel), campaign_id, region)
 
     if write_audit and db is not None:
-        _write_audit(db, decision, uid_hash=uid_hash, tenant_id=tid)
+        audited = _write_audit(db, decision, uid_hash=uid_hash, tenant_id=tid)
+        # Durable authorization evidence is mandatory: if we CANNOT record an ALLOW, we must not send.
+        if decision.allowed and not audited:
+            decision = ContactDecision(False, SUPPRESS_AUDIT_UNAVAILABLE, str(channel), campaign_id, region)
+            _write_audit(db, decision, uid_hash=uid_hash, tenant_id=tid)  # best-effort record of the flip
         try:
             db.commit()
         except Exception:
-            pass
+            return decision  # commit failed → keep the (possibly fail-closed) decision; never raise
     return decision
 
 

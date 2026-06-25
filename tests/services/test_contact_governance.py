@@ -90,3 +90,21 @@ def test_tenant_isolation_of_consent(db):
     a = cg.evaluate_contact(db, uid_hash="u1", channel="email", tenant_id="t-a", now_iso="2026-06-25 10:00:00")
     b = cg.evaluate_contact(db, uid_hash="u1", channel="email", tenant_id="t-b", now_iso="2026-06-25 10:00:00")
     assert a.allowed is True and b.allowed is False  # consent in t-a doesn't leak to t-b
+
+
+# ── fail-closed hardening (Finding 7) ────────────────────────────────────────
+def test_unreadable_history_fails_closed(db, monkeypatch):
+    cg.record_consent(db, uid_hash="u1", channel="email", granted=True)
+    # frequency history can't be read → must NOT permit blindly (was: returned 0 → allowed)
+    def _boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(cg, "_count_in_window", _boom)
+    d = cg.evaluate_contact(db, uid_hash="u1", channel="email", now_iso="2026-06-25 10:00:00")
+    assert d.allowed is False and d.reason == cg.SUPPRESS_ERROR_FAIL_CLOSED
+
+
+def test_allow_suppressed_when_audit_cannot_persist(db, monkeypatch):
+    cg.record_consent(db, uid_hash="u1", channel="email", granted=True)
+    monkeypatch.setattr(cg, "_write_audit", lambda *a, **k: False)  # authz record can't be persisted
+    d = cg.evaluate_contact(db, uid_hash="u1", channel="email", now_iso="2026-06-25 10:00:00")
+    assert d.allowed is False and d.reason == cg.SUPPRESS_AUDIT_UNAVAILABLE  # no record → no send

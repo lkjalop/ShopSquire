@@ -18,10 +18,16 @@ This module encodes that as a hard precondition, not a guideline:
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy import text
+
+
+def _offers_enabled() -> bool:
+    """The OFFERS_CAMPAIGNS_ENABLED kill flag (default-OFF) — the outer half of the double lock."""
+    return str(os.getenv("OFFERS_CAMPAIGNS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
 
 
 # ── readiness gate (the "offers last, only when proven" precondition) ─────────
@@ -35,29 +41,34 @@ def adaptation_readiness(db, *, eval_max_stale_seconds: float = 3600.0,
     if db is None:
         return {"ready": False, "rollback_proven": False, "contact_freq_proven": False,
                 "reasons": ["no_db"]}
-    # rollback proven: an experiment was actually reverted AND the eval loop is currently alive
+    # rollback proven: the EVALUATOR recorded a data-driven REVERT decision (experiment_result), not
+    # merely a status flip — a manual forced_rollback_drill sets status='reverted' but writes no
+    # experiment_result, so a drill alone does NOT satisfy readiness. AND the eval loop is alive.
     try:
         from src.app.services.experiment_ops import eval_is_stale
         from src.app.services.experiments import ensure_tables
         ensure_tables(db)
-        reverted = db.execute(text("SELECT COUNT(*) FROM experiment_run WHERE status='reverted'")).scalar() or 0
+        reverted = db.execute(
+            text("SELECT COUNT(*) FROM experiment_result WHERE decision='revert'")).scalar() or 0
         loop_alive = not eval_is_stale(db, max_age_seconds=eval_max_stale_seconds, now_iso=now_iso)
         rollback_proven = bool(reverted) and bool(loop_alive)
         if not reverted:
-            reasons.append("no_rollback_demonstrated")
+            reasons.append("no_data_driven_rollback")
         if not loop_alive:
             reasons.append("eval_loop_stale")
     except Exception:
         reasons.append("rollback_check_error")
-    # contact-frequency proven: the gate has actually suppressed at least one contact
+    # contact-frequency proven: the FREQUENCY gate specifically has fired (a frequency_cap suppression),
+    # not just any suppression — a missing-consent block is too easy and proves nothing about throttling.
     try:
+        from src.app.services.contact_governance import SUPPRESS_FREQUENCY
         from src.app.services.contact_governance import ensure_tables as _ensure_contact
         _ensure_contact(db)
         suppressed = db.execute(
-            text("SELECT COUNT(*) FROM contact_audit WHERE decision='suppress'")).scalar() or 0
+            text("SELECT COUNT(*) FROM contact_audit WHERE reason=:r"), {"r": SUPPRESS_FREQUENCY}).scalar() or 0
         contact_freq_proven = bool(suppressed)
         if not suppressed:
-            reasons.append("contact_governance_not_exercised")
+            reasons.append("frequency_governance_not_exercised")
     except Exception:
         reasons.append("contact_check_error")
     return {"ready": bool(rollback_proven and contact_freq_proven),
@@ -111,9 +122,15 @@ def dispatch_campaign(
     per-recipient contact-governance gate) and who is suppressed + why. Sends NOTHING — a connector
     consumes the allow-list and is the only thing that calls contact_governance.record_contact() after
     a real send. Blocked entirely until the safety machinery is proven."""
+    # OUTER lock: the OFFERS_CAMPAIGNS_ENABLED flag (default-OFF). Documented as a double-lock with the
+    # readiness gate — now actually enforced. (require_readiness=False is a test-only bypass of both.)
+    if require_readiness and not _offers_enabled():
+        return {"allowed": [], "suppressed": [], "blocked_by_flag": True,
+                "blocked_by_readiness": False, "readiness": {"ready": False, "reasons": ["offers_flag_off"]}}
     readiness = adaptation_readiness(db, eval_max_stale_seconds=eval_max_stale_seconds, now_iso=now_iso)
     if require_readiness and not readiness.get("ready"):
-        return {"allowed": [], "suppressed": [], "blocked_by_readiness": True, "readiness": readiness}
+        return {"allowed": [], "suppressed": [], "blocked_by_flag": False,
+                "blocked_by_readiness": True, "readiness": readiness}
 
     from src.app.services.contact_governance import evaluate_contact
     allowed: List[str] = []
