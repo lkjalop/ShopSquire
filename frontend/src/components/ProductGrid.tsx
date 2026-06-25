@@ -2,6 +2,12 @@ import styles from './ProductGrid.module.css';
 import type { Product } from '../App';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 
+// Honest price: from price OR price_cents; em-dash (not "$0") when the object carries no price.
+function priceText(p: any): string {
+  const v = Number(p?.price) > 0 ? Number(p.price) : (Number(p?.price_cents) > 0 ? Number(p.price_cents) / 100 : 0);
+  return v > 0 ? `$${v.toLocaleString()}` : '—';
+}
+
 const LAPTOP_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 150" fill="none"><rect width="200" height="150" fill="#f3f4f6"/><rect x="30" y="20" width="140" height="85" rx="4" fill="#e5e7eb" stroke="#d1d5db" stroke-width="2"/><rect x="35" y="25" width="130" height="75" rx="2" fill="#fff"/><rect x="50" y="105" width="100" height="8" rx="2" fill="#d1d5db"/><rect x="45" y="113" width="110" height="3" rx="1" fill="#e5e7eb"/><circle cx="100" cy="62" r="20" fill="#e5e7eb"/><path d="M92 62l6 6 12-12" stroke="#9ca3af" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>')}`;
 
 // Stock honesty — surface the backend's per-item stock_status so a shopper never discovers an item
@@ -68,7 +74,7 @@ export default function ProductGrid({ products, onToggle, onAdd, onWhy, viewMode
               <div className={styles.detailedInfo}>
                 <h3 className={styles.detailedTitle}>{title}</h3>
                 {subtitle && <div className={styles.features} style={{ marginTop: 4 }}>{subtitle}</div>}
-                <div className={styles.detailedPrice}>${p.price.toLocaleString()}</div>
+                <div className={styles.detailedPrice}>{priceText(p)}</div>
                 <StockBadge p={p} />
                 {(p.why && p.why.length > 0) && (
                   <div className={styles.features} style={{ marginTop: 6 }}>
@@ -119,7 +125,7 @@ export default function ProductGrid({ products, onToggle, onAdd, onWhy, viewMode
             <div className={styles.cardContent}>
               <div className={styles.title}>{title}</div>
               {subtitle && <div className={styles.features}>{subtitle}</div>}
-              <div className={styles.price}>${p.price.toLocaleString()}</div>
+              <div className={styles.price}>{priceText(p)}</div>
               <StockBadge p={p} />
               {(p.why && p.why.length > 0) && (
                 <div className={styles.features}>{p.why.slice(0, 3).join(' • ')}</div>

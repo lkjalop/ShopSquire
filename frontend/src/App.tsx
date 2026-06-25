@@ -173,6 +173,14 @@ function formatAUD(n: number): string {
   return n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 });
 }
 
+// Render a product price honestly: a real amount when we have one (from price OR price_cents), and an
+// em-dash when the object carries no price — never a misleading "$0" (demo-truth, same class as the
+// $0 budget-band fix).
+function formatPrice(p: any): string {
+  const v = productPrice(p);
+  return v > 0 ? formatAUD(v) : '—';
+}
+
 function isShoppingIntentQuery(query: string): boolean {
   const q = String(query || '').toLowerCase();
   return /laptop|computer|price|under|below|above|budget|cheap|affordable|\$|show|find|search|gaming|macbook|dell|hp|asus|lenovo|msi|university|student|study/.test(q);
@@ -1945,7 +1953,7 @@ export default function App() {
                             {(section?.top_products || []).slice(0, 3).map((p) => (
                               <article key={`anchor-${idx}-${p.sku}`} className={styles.tierCard}>
                                 <div className={styles.tierName}>{p.name}</div>
-                                <div className={styles.tierPrice}>{formatAUD(productPrice(p))}</div>
+                                <div className={styles.tierPrice}>{formatPrice(p)}</div>
                                 <button className={styles.tierAdd} onClick={() => addToCart(p.sku)}>Add</button>
                               </article>
                             ))}
@@ -1982,7 +1990,7 @@ export default function App() {
                                     <div className={styles.deviceLaneImgPlaceholder}>No image</div>
                                   )}
                                   <div className={styles.deviceLaneName}>{p.name}</div>
-                                  <div className={styles.deviceLanePrice}>{formatAUD(productPrice(p))}</div>
+                                  <div className={styles.deviceLanePrice}>{formatPrice(p)}</div>
                                   <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
                                 </article>
                               ))}
@@ -2160,7 +2168,7 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          <tr><td>Price</td>{filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>{formatAUD(productPrice(p))}</td>)}</tr>
+                          <tr><td>Price</td>{filteredDisplayProducts.slice(0, 3).map(p => <td key={p.sku}>{formatPrice(p)}</td>)}</tr>
                           {['Display', 'Processor', 'RAM', 'Storage', 'Graphics'].map((feat, i) => (
                             <tr key={feat}>
                               <td>{feat}</td>

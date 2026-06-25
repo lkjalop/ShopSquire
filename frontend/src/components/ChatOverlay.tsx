@@ -3,6 +3,12 @@ import styles from './ChatOverlay.module.css';
 import type { Product } from '../App';
 import { focusFirst, trapFocus } from '../utils/a11y';
 
+// Honest price: from price OR price_cents; em-dash (not "$0") when the object carries no price.
+function priceText(p: any): string {
+  const v = Number(p?.price) > 0 ? Number(p.price) : (Number(p?.price_cents) > 0 ? Number(p.price_cents) / 100 : 0);
+  return v > 0 ? `$${v.toLocaleString()}` : '—';
+}
+
 // Inline SVG icons to avoid heroicons dependency issues
 const CogIcon = () => (
   <svg className={styles.traceIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -93,7 +99,7 @@ export default function ChatOverlay({
                 </div>
                 <div className={styles.cardContent}>
                   <div className={styles.cardName}>{p.name}</div>
-                  <div className={styles.cardPrice} aria-label={`Price: $${p.price.toLocaleString()}`}>${p.price.toLocaleString()}</div>
+                  <div className={styles.cardPrice} aria-label={`Price: ${priceText(p)}`}>{priceText(p)}</div>
                   <div className={styles.cardFeatures}>{(p.features || []).slice(1, 3).join(' • ')}</div>
                 </div>
                 <button className={styles.addBtn} aria-label={`Add ${p.name} to cart`}>Add</button>
