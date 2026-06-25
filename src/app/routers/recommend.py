@@ -10287,6 +10287,37 @@ def suggest(
                 )
         except Exception as _e_hg:
             _record_partial_failure("hippograph_feedback", _e_hg, trace_id=trace_id)
+    # Reversible ranking nudge THROUGH the experiment gate (Phase 3 — the FIRST measured live
+    # adaptation, default-OFF). A LIVE ranking experiment gives TREATMENT users a small bounded boost
+    # to hippograph-recalled products; control + non-live users are untouched; fully reversible (capped
+    # additive delta; the gate's REVERT flips the experiment off-live and stops it globally).
+    if flags.get("RANKING_NUDGE_EXPERIMENT_ENABLED", False) and not simulate and results:
+        try:
+            from src.app.services.experiments import assign_variant, is_experiment_live, record_assignment
+            from src.app.services.ranking_nudge import apply_experiment_nudge
+            from src.app.models.db import db_session as _nudge_db_session
+            _exp_id = str(flags.get("RANKING_NUDGE_EXPERIMENT_ID") or "ranking_nudge_v1")
+            _subject = str(uid_hash or uid or "")
+            _variant = assign_variant(experiment_id=_exp_id, subject=_subject, variants=["control", "treatment"])
+            _recall_ids = [i.get("id") for i in (payload.get("hippograph_insights") or [])
+                           if isinstance(i, dict) and i.get("kind") == "product"]
+            with _nudge_db_session() as _ndb:
+                _live = is_experiment_live(_ndb, _exp_id)
+                record_assignment(_ndb, experiment_id=_exp_id, subject_hash=_subject, variant=_variant)
+                _ndb.commit()
+            _nudged = apply_experiment_nudge(results, recall_ids=_recall_ids, assignment=_variant, live=_live)
+            if _nudged is not results:
+                results = _nudged
+                payload["results"] = results
+            payload["ranking_experiment"] = {
+                "experiment_id": _exp_id, "variant": _variant, "live": bool(_live),
+                "nudged": sum(1 for r in results if isinstance(r, dict) and r.get("_nudge_delta")),
+            }
+            log_trace_event(trace_id=trace_id, event_type="ranking_nudge", source_type="agent",
+                            source_id="ExperimentGate", target_type="recommendation", target_id=decision_id,
+                            payload=payload["ranking_experiment"])
+        except Exception as _e_nudge:
+            _record_partial_failure("ranking_nudge", _e_nudge, trace_id=trace_id)
     # Safe internet search (EXTERNAL_RESEARCH_ENABLED, off by default): a SEPARATE labeled source.
     # NullFetcher = no network until a real allowlisted httpx adapter is wired -> stays 'empty' even
     # if enabled. NEVER merged into owned `results`/cart (external items have sku=None -> structurally

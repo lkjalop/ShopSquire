@@ -189,6 +189,35 @@ def record_assignment(db, *, experiment_id: str, subject_hash: str, variant: str
         return False
 
 
+def is_experiment_live(db, experiment_id: str) -> bool:
+    """True only when the experiment's status is 'live'. The nudge gate reads this every request, so a
+    batch/human flipping status to 'reverted' (anti-Goodhart) stops the adaptation globally."""
+    if db is None or not experiment_id:
+        return False
+    try:
+        ensure_tables(db)
+        row = db.execute(
+            text("SELECT status FROM experiment_run WHERE id = :i OR name = :i LIMIT 1"),
+            {"i": str(experiment_id)},
+        ).fetchone()
+        return bool(row) and str(row[0] or "").strip().lower() == "live"
+    except Exception:
+        return False
+
+
+def set_status(db, *, experiment_id: str, status: str) -> bool:
+    """Flip an experiment's status (e.g. draft→live, live→reverted). The reversibility lever."""
+    if db is None or not experiment_id:
+        return False
+    try:
+        ensure_tables(db)
+        db.execute(text("UPDATE experiment_run SET status = :s WHERE id = :i OR name = :i"),
+                   {"s": str(status), "i": str(experiment_id)})
+        return True
+    except Exception:
+        return False
+
+
 def record_result(db, *, experiment_id: str, variant: str, outcome: Dict[str, Any]) -> Optional[str]:
     if db is None:
         return None

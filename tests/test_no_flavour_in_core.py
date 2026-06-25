@@ -98,6 +98,9 @@ _CORE_MODULES = [
     # experiment + rollback framework (M6b): assignment/uplift/anti-Goodhart decision math; metrics
     # and variants are opaque labels — no product vocabulary.
     "src/app/services/experiments.py",
+    # reversible ranking nudge: bounded additive score boost for treatment users, sku+score only —
+    # no product vocabulary.
+    "src/app/services/ranking_nudge.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
