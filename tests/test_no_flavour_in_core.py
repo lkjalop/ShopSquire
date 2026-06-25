@@ -89,6 +89,9 @@ _CORE_MODULES = [
     # market signal envelope + ingestion (Module 1): normalize+reliability over opaque signals;
     # signal_type/source are labels, payload is opaque — zero product vocabulary.
     "src/app/services/market_signal.py",
+    # market signal source adapters: map orders/conversion/search rows → envelope; opaque payloads,
+    # no product vocabulary.
+    "src/app/services/market_signal_adapters.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
