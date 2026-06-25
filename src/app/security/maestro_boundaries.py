@@ -155,6 +155,39 @@ AGENT_BOUNDARIES: Dict[str, AgentBoundary] = {
         ]),
         risk_tier="critical",
     ),
+    # Procurement: prepares + drafts ONLY. It can rank suppliers, gather evidence (hippograph /
+    # market-intel / external benchmark), draft a quote request and generate options — but it has ZERO
+    # autonomous value authority and CANNOT send. The external send is human-fired (domain GATE 2 +
+    # execution_gate SUP-04). Registered so MAESTRO is real defense-in-depth, not fail-open.
+    "Procurement_Agent": AgentBoundary(
+        agent_name="Procurement_Agent",
+        allowed_tools=frozenset([
+            "assess_availability", "rank_suppliers", "gather_evidence",
+            "draft_external_message", "generate_fulfillment_options", "propose_purchase_order",
+        ]),
+        allowed_data_scopes=frozenset(["products", "inventory", "suppliers", "market_signals"]),
+        max_autonomous_value_usd=0.0,   # NEVER auto-commits commercial value
+        can_write_db=True,
+        can_call_external_api=False,    # it DRAFTS; it does not transmit
+        can_invoke_llm=True,            # drafting + parsing may use an LLM (within policy)
+        can_escalate=True,
+        allowed_peers=frozenset(["Supplier_Communication_Agent", "Inventory_Agent", "Escalation_Agent"]),
+        risk_tier="high",
+    ),
+    # Supplier comms: the transport boundary. Zero autonomous value — every send is human-approved
+    # (held by execution_gate SUP-04). Registered so an unregistered-agent fail-open can't bypass it.
+    "Supplier_Communication_Agent": AgentBoundary(
+        agent_name="Supplier_Communication_Agent",
+        allowed_tools=frozenset(["dispatch_supplier_message", "stage_draft"]),
+        allowed_data_scopes=frozenset(["suppliers"]),
+        max_autonomous_value_usd=0.0,   # NEVER auto-sends a commercial commitment
+        can_write_db=True,
+        can_call_external_api=True,     # it is the transport — but only on a human-approved send
+        can_invoke_llm=False,
+        can_escalate=True,
+        allowed_peers=frozenset(["Procurement_Agent", "Escalation_Agent"]),
+        risk_tier="critical",
+    ),
     "Debate_Coordinator": AgentBoundary(
         agent_name="Debate_Coordinator",
         allowed_tools=frozenset(["run_debate", "score_risk"]),

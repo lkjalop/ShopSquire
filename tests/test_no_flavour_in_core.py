@@ -128,6 +128,9 @@ _CORE_MODULES = [
     # offers/campaigns governance: readiness gate + governed dispatch planner, opaque channel/offer —
     # no product vocabulary.
     "src/app/services/campaign_governance.py",
+    # fulfilment domain: bounded-autonomy state machine + actor guards, opaque states/events —
+    # no product vocabulary, no channel detail.
+    "src/app/services/fulfillment/domain.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

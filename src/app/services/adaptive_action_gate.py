@@ -37,6 +37,9 @@ DENY_ERROR = "error_fail_closed"
 # "never an unbounded or undefined response").
 ALLOWED_ACTION_TYPES = frozenset({
     "adjust_ranking", "suppress_low_stock", "revise_support_copy", "template_phrasing", "offer", "campaign",
+    # procurement: the confidence-gated "engage an external party" + "generate options" steps. Drafting
+    # is authorized here (and still requires a human to SEND); low confidence routes to NQE/human.
+    "supplier_contact_draft", "fulfillment_options",
 })
 
 _DDL = """
