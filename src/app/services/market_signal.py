@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+import weakref
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
@@ -76,18 +77,31 @@ _INDEXES = (
 )
 
 
+_COLS_INTROSPECTED = weakref.WeakSet()  # engines whose column-upgrade check has already run
+
+
 def _ensure_columns(db, table: str, coldefs) -> None:
     """Add missing columns to a pre-existing table (portable upgrade). Introspects first so the normal
-    path issues no failing DDL (a duplicate-column ALTER can poison a transaction on some backends)."""
+    path issues no failing DDL (a duplicate-column ALTER can poison a transaction on some backends).
+    The reflection is memoized per-engine — fresh tables already have every column, and a real upgrade
+    only needs to run once, so we don't pay get_columns() on every ingest/read."""
+    try:
+        bind = db.get_bind()
+    except Exception:
+        bind = None
+    if bind is not None and bind in _COLS_INTROSPECTED:
+        return  # already checked this engine — skip the reflection cost
     try:
         # introspect via the session's OWN connection — never the engine (a pooled checkout would be
         # returned + rolled back, discarding the session's uncommitted inserts).
         have = {c["name"] for c in _sa_inspect(db.connection()).get_columns(table)}
     except Exception:
-        return  # table not present yet (CREATE above will include every column) → nothing to upgrade
+        return  # table not present yet (CREATE above will include every column) → don't memoize, retry
     for name, decl in coldefs:
         if name not in have:
             db.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
+    if bind is not None:
+        _COLS_INTROSPECTED.add(bind)
 
 
 def ensure_table(db) -> None:

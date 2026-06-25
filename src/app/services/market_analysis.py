@@ -236,17 +236,32 @@ def _finding_dedup_key(tenant_id: str, finding_type: str, entity_ref: Any, windo
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
+import weakref as _weakref
+
+_FINDING_COLS_INTROSPECTED = _weakref.WeakSet()  # engines whose finding-column upgrade has run
+
+
 def _ensure_finding_columns(db) -> None:
-    """Add post-ship columns to a pre-existing market_finding (portable upgrade; no failing DDL)."""
+    """Add post-ship columns to a pre-existing market_finding (portable upgrade; no failing DDL).
+    Reflection memoized per-engine so load_recent_findings() (hot path) doesn't pay get_columns()
+    every call — fresh tables already have every column; a real upgrade runs once."""
     from sqlalchemy import inspect as _sa_inspect
+    try:
+        bind = db.get_bind()
+    except Exception:
+        bind = None
+    if bind is not None and bind in _FINDING_COLS_INTROSPECTED:
+        return
     try:
         # session's OWN connection, not the engine — a pooled checkout would roll back pending inserts.
         have = {c["name"] for c in _sa_inspect(db.connection()).get_columns("market_finding")}
     except Exception:
-        return
+        return  # table not present yet → don't memoize, retry next call
     for name, decl in _FINDING_UPGRADE_COLS:
         if name not in have:
             db.execute(text(f"ALTER TABLE market_finding ADD COLUMN {name} {decl}"))
+    if bind is not None:
+        _FINDING_COLS_INTROSPECTED.add(bind)
 
 
 def ensure_finding_table(db) -> None:

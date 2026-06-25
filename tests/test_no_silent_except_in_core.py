@@ -38,6 +38,26 @@ _BASELINE = {
     "src/app/services/checkout_handoff.py": 1,
     "src/app/services/grounding_ladder.py": 3,
     "src/app/services/recommend_image_hints.py": 3,
+    # adaptive-growth core (market-intel / hippograph / experiments / governance) — locked at their
+    # current counts so no NEW silent swallow can land. Most are 0 (they use observable
+    # `except Exception: return X`); the few >0 are best-effort commit/telemetry guards.
+    "src/app/services/market_signal.py": 0,
+    "src/app/services/market_signal_adapters.py": 0,
+    "src/app/services/market_analysis.py": 0,
+    "src/app/services/market_intelligence_agent.py": 0,
+    "src/app/services/recommend_intelligence_stage.py": 0,
+    "src/app/services/human_feedback.py": 0,
+    "src/app/services/shadow_actions.py": 1,
+    "src/app/services/contact_governance.py": 2,
+    "src/app/services/campaign_governance.py": 0,
+    "src/app/services/experiments.py": 0,
+    "src/app/services/experiment_eval.py": 0,
+    "src/app/services/experiment_ops.py": 2,
+    "src/app/services/ranking_nudge.py": 0,
+    "src/app/services/template_phrasing.py": 0,
+    "src/app/services/hippograph.py": 0,
+    "src/app/services/hippograph_db.py": 0,
+    "src/app/services/hippograph_feedback.py": 0,
 }
 
 
