@@ -69,6 +69,26 @@ def test_ambiguous_bulk_also_surfaces_procurement():
     assert "ask_b2b_procurement" in ids
 
 
+def test_b2b_clarification_survives_generic_convergence():
+    from src.app.flows.nqe import NQEInput
+
+    inp = NQEInput(
+        query="I am thinking to buy 10 laptops for work in 2 weeks",
+        intent="recommend",
+        product_category="laptop",
+        detected_use_case="office_general",
+        order_quantity=10,
+        missing_fields=["brand_preference", "b2b_requirements"],
+        answered_fields={
+            "budget_min": 1300,
+            "budget_max": 1500,
+            "use_case": "office_general",
+        },
+    )
+    ids = [question.id for question in _engine().propose(inp)]
+    assert "ask_b2b_procurement" in ids
+
+
 def test_personal_multibuy_has_no_procurement_question():
     ids = _ids("3 laptops for my family", quantity=3)
     assert "ask_b2b_procurement" not in ids

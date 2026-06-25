@@ -238,11 +238,6 @@ def run_recommend_nqe_stage(
 ) -> RecommendStageState:
     next_questions: list[dict] = []
     try:
-        skip_nqe_clarify = bool(
-            str(state.turn_intent or "").upper() == "EXPLAIN"
-            or state.followup_explain
-            or state.shortlist_lock_active
-        )
         query_understanding = _query_understanding_for_state(state)
         missing_fields = hooks.suppress_missing_fields_for_turn_intent(
             hooks.infer_missing_fields(
@@ -260,9 +255,23 @@ def run_recommend_nqe_stage(
         # consumer; an absurd count is anomalous (handled by escalation). assess_b2b_intent combines
         # the quantity with the query's business language.
         order_quantity = state.constraints.get("order_quantity")
+        if (
+            not isinstance(order_quantity, int)
+            and query_understanding is not None
+            and isinstance(query_understanding.order_quantity, int)
+        ):
+            order_quantity = query_understanding.order_quantity
         from src.app.services.b2b_intent import assess_b2b_intent
         _b2b_assessment = assess_b2b_intent(state.query, quantity=order_quantity)
         bulk_procurement = _b2b_assessment.wants_procurement_questions
+        skip_nqe_clarify = bool(
+            (
+                str(state.turn_intent or "").upper() == "EXPLAIN"
+                or state.followup_explain
+                or state.shortlist_lock_active
+            )
+            and not bulk_procurement
+        )
         if bulk_procurement and "b2b_requirements" not in missing_fields:
             missing_fields.append("b2b_requirements")
         if (missing_fields or bulk_procurement) and not skip_nqe_clarify:
@@ -320,6 +329,15 @@ def run_recommend_nqe_stage(
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
+            procurement_question = next(
+                (
+                    dict(question)
+                    for question in next_questions
+                    if str((question or {}).get("id") or "").strip().lower()
+                    == "ask_b2b_procurement"
+                ),
+                None,
+            )
             next_questions = hooks.filter_nqe_questions_by_missing_fields(
                 next_questions,
                 missing_fields=missing_fields,
@@ -407,6 +425,12 @@ def run_recommend_nqe_stage(
                 next_questions,
                 sentiment=str(state.nlp.get("sentiment") or "neutral"),
             )
+            if procurement_question and not any(
+                str((question or {}).get("id") or "").strip().lower()
+                == "ask_b2b_procurement"
+                for question in next_questions
+            ):
+                next_questions = [procurement_question] + (next_questions or [])
             next_questions = prioritize_domain_refinement_questions(next_questions)
             next_questions = hooks.dedupe_next_questions_for_render(next_questions)
             if next_questions:

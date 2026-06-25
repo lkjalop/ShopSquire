@@ -320,7 +320,20 @@ class NextQuestionEngine:
         for k in (inp.answered_fields or {}):
             if str(k).lower() in _HIGH_SIGNAL_SLOTS:
                 _answered_high += 1
-        if _answered_high >= _CONVERGENCE_THRESHOLD:
+        _pending_b2b_clarification = False
+        if "b2b_requirements" in {
+            str(field or "").strip().lower() for field in (inp.missing_fields or [])
+        }:
+            try:
+                from src.app.services.b2b_intent import assess_b2b_intent
+
+                _pending_b2b_clarification = assess_b2b_intent(
+                    query_text,
+                    quantity=inp.order_quantity,
+                ).wants_procurement_questions
+            except Exception:
+                _pending_b2b_clarification = False
+        if _answered_high >= _CONVERGENCE_THRESHOLD and not _pending_b2b_clarification:
             # Enough info to recommend — emit trace and return no questions
             if inp.trace_id:
                 try:

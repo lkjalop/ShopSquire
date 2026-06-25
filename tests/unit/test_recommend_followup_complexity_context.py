@@ -16,6 +16,30 @@ def test_followup_explain_detector_extended_phrases():
         assert recommend_router._is_followup_explain_query(q) is True
 
 
+def test_fresh_search_with_rationale_is_not_explain_turn():
+    query = (
+        "I am thinking to buy 10 laptops for work in 2 weeks, "
+        "what is good for 1300 to 1500? why those?"
+    )
+    assert recommend_router._is_followup_explain_query(query) is True
+    assert recommend_router._query_is_standalone_search(query) is True
+    assert recommend_router._classify_turn_intent(
+        query=query,
+        nlp={"intent": "product_search"},
+        followup_explain=False,
+        explicit_constraint_update=True,
+    ) == "FILTER"
+
+
+def test_inferred_product_search_with_rationale_is_not_followup_explain():
+    query = (
+        "I need something portable for university but good enough for gaming. "
+        "Why are your picks suitable?"
+    )
+    assert recommend_router._is_followup_explain_query(query) is True
+    assert recommend_router._query_is_standalone_search(query) is True
+
+
 def test_recommend_passes_has_image_to_complexity_context(monkeypatch):
     orig_retrieve = RecommendationService.retrieve_candidates
     captured_contexts = []

@@ -16,6 +16,26 @@ def test_clean_simple_request_auto_proceeds():
     assert d.band == BAND_AUTO and d.escalate is False
 
 
+def test_low_fraud_noise_does_not_create_review():
+    d = assess_escalation(
+        decomposition_confidence=0.9,
+        fraud_score=0.0432,
+        order_quantity=1,
+    )
+    assert d.band == BAND_AUTO
+    assert d.factors["fraud"] == 0.0
+
+
+def test_explicit_async_review_request_is_non_blocking_review():
+    d = assess_escalation(
+        decomposition_confidence=0.9,
+        order_quantity=10,
+        review_requested=True,
+    )
+    assert d.band == BAND_REVIEW and d.escalate is True
+    assert any("asynchronous" in reason for reason in d.reasons)
+
+
 def test_high_fraud_forces_human():
     d = assess_escalation(fraud_score=0.85)
     assert d.band == BAND_HUMAN and d.escalate is True

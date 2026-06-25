@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -172,3 +173,67 @@ def test_personal_multibuy_is_not_routed_b2b():
     body = _suggest("mtx-b2b3", "3 laptops for my family under $1,500")
     assert "ask_b2b_procurement" not in _nq_ids(body)
     assert (body.get("b2b_assessment") or {}).get("verdict") == "consumer"
+
+
+def test_exact_compound_query_keeps_procurement_and_consistent_budget(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
+    query = (
+        "I am thinking to buy 10 laptops for work in 2 weeks, "
+        "what is good for 1300 to 1500? why those?"
+    )
+    body = _suggest(f"mtx-exact-compound-{uuid4().hex}", query)
+    constraints = _cu(body)
+    assert constraints.get("budget_min") == 1300
+    assert constraints.get("budget_max") == 1500
+    assert (constraints.get("slots") or {}).get("price_max") == 1500
+    assert constraints.get("turn_intent") != "EXPLAIN"
+    assert "ask_b2b_procurement" in _nq_ids(body)
+    assert (body.get("b2b_assessment") or {}).get("verdict") == "ambiguous_bulk"
+    escalation = body.get("escalation_assessment") or {}
+    assert escalation.get("band") == "review"
+    assert body.get("needs_human_review") is True
+    assert body.get("incident_id")
+
+
+def test_exact_compound_query_warm_latency_under_five_seconds(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
+    query = (
+        "I am thinking to buy 10 laptops for work in 2 weeks, "
+        "what is good for 1300 to 1500? why those?"
+    )
+    run_id = uuid4().hex
+    _suggest(f"mtx-latency-warmup-{run_id}", query)
+    samples = [
+        _suggest(f"mtx-latency-{run_id}-{i}", query)
+        for i in range(2)
+    ]
+    route_ms = [
+        int((body.get("timing_breakdown") or {}).get("route_total_ms") or 999999)
+        for body in samples
+    ]
+    assert max(route_ms) < 5000, route_ms
+    assert all(
+        (
+            (body.get("timing_breakdown") or {}).get("compound_needed") is False
+            or (body.get("timing_breakdown") or {}).get("compound_mode") == "skip"
+        )
+        for body in samples
+    )
+
+
+def test_portable_university_gaming_rationale_is_a_fresh_search(monkeypatch):
+    monkeypatch.setenv("RECOMMEND_NARRATION_MODE", "skip")
+    body = _suggest(
+        f"mtx-portable-rationale-{uuid4().hex}",
+        "I need something portable for university but good enough for gaming. "
+        "Why are your picks suitable?",
+    )
+    constraints = _cu(body)
+    assert constraints.get("turn_intent") != "EXPLAIN"
+    assert {"student", "gaming"} <= set(constraints.get("use_case_tags") or [])
+    assert (
+        body.get("results")
+        or body.get("next_questions")
+        or str(body.get("assistant_message") or "").strip()
+        or str(body.get("message") or "").strip()
+    )

@@ -95,6 +95,7 @@ def assess_escalation(
     free_email_domain: bool = False,
     billing_shipping_mismatch: bool = False,
     rush_delivery: bool = False,
+    review_requested: bool = False,
     thresholds: Optional[Dict[str, float]] = None,
 ) -> EscalationDecision:
     """Combine the risk signals into a bounded escalation decision. Never raises."""
@@ -103,11 +104,13 @@ def assess_escalation(
         review_at = float(t.get("review", _f("ESCALATION_REVIEW_AT", 0.35)))
         human_at = float(t.get("human", _f("ESCALATION_HUMAN_AT", 0.60)))
         fraud_hard = float(t.get("fraud_hard", _f("ESCALATION_FRAUD_HARD", 0.70)))
+        fraud_noise_floor = float(t.get("fraud_noise_floor", _f("ESCALATION_FRAUD_NOISE_FLOOR", 0.10)))
         bulk_qty = int(t.get("bulk_qty", _f("ESCALATION_BULK_QTY", 5)))
         bulk_value = int(t.get("bulk_value_cents", _f("ESCALATION_BULK_VALUE_CENTS", 500000)))  # $5,000
 
         conf = max(0.0, min(1.0, float(decomposition_confidence if decomposition_confidence is not None else 1.0)))
-        fraud = max(0.0, min(1.0, float(fraud_score or 0.0)))
+        raw_fraud = max(0.0, min(1.0, float(fraud_score or 0.0)))
+        fraud = 0.0 if raw_fraud < fraud_noise_floor else raw_fraud
         # B2B legitimacy ("real business purchase or fraud?") acts like fraud for a B2B order.
         b2b_risk = b2b_legitimacy_risk(
             new_account=new_account, free_email_domain=free_email_domain,
@@ -146,7 +149,9 @@ def assess_escalation(
             review_reasons.append("low intent-parse confidence on an irreversible action")
         if claim_guard_rejected:
             review_reasons.append("narration was rejected as ungrounded")
-        if 0 < fraud < fraud_hard:
+        if review_requested:
+            review_reasons.append("request requires asynchronous human review")
+        if fraud_noise_floor <= fraud < fraud_hard:
             review_reasons.append("fraud signals present")
 
         if b2b and b2b_risk >= 0.33 and not any("fraud" in r or "B2B" in r for r in (hard_reasons + review_reasons)):

@@ -109,7 +109,11 @@ def needs_composition(plan: object) -> bool:
         for sq in subs:
             if getattr(sq, "answer_without_products", False) or getattr(sq, "is_budget_question", False):
                 kinds.add("conceptual")
-            if str(getattr(sq, "intent", "")) in ("product_search", "recommendation_multi"):
+            if str(getattr(sq, "intent", "")) in (
+                "product_search",
+                "recommendation_multi",
+                "availability",
+            ):
                 kinds.add("product")
         # conceptual + (product or a second conceptual of different shape) → compose
         return "conceptual" in kinds and len(subs) >= 2

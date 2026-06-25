@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from src.app.services.query_decomposer import _extract_budget_range, decompose
+from src.app.services.recommendations import RecommendationService
 
 
 @pytest.mark.parametrize("q,expected", [
@@ -37,3 +38,13 @@ def test_office_staff_budget_together():
     assert "office" in p.use_cases
     assert p.budget_max == 1600
     assert p.quantity == 10
+
+
+def test_legacy_nlp_parser_does_not_backtrack_comma_budget_before_in():
+    query = (
+        "I need 10 portable laptops for our developers under $1,500 "
+        "in two weeks; why these and can you deliver?"
+    )
+    service = RecommendationService(None)
+    assert service._extract_price_range(query) == (None, 1500, None)
+    assert service.analyze_query(query)["slots"]["price_max"] == 1500

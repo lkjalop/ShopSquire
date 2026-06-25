@@ -44,6 +44,8 @@ class QueryUnderstanding:
     budget_max: Optional[float] = None
     brands: List[str] = field(default_factory=list)
     use_case: Optional[str] = None
+    order_quantity: Optional[int] = None
+    availability_horizon_days: Optional[int] = None
     constraints: Dict[str, Any] = field(default_factory=dict)
     image_relation: str = NO_IMAGE
     missing: List[str] = field(default_factory=list)            # fields we have no value for
@@ -67,6 +69,8 @@ class QueryUnderstanding:
             "budget_max": self.budget_max,
             "brands": list(self.brands),
             "use_case": self.use_case,
+            "order_quantity": self.order_quantity,
+            "availability_horizon_days": self.availability_horizon_days,
             "image_relation": self.image_relation,
             "missing": list(self.missing),
             "assumptions": list(self.assumptions),
@@ -103,9 +107,15 @@ def build_query_understanding(
     prov: Dict[str, str] = {}
 
     budget_max, p = _first(c, ("budget_max", "_request_budget_max"), {"_request_budget_max": USER_TEXT})
+    if budget_max is None and query_plan is not None:
+        budget_max = getattr(query_plan, "budget_max", None)
+        p = USER_TEXT if budget_max is not None else None
     if p:
         prov["budget_max"] = p
     budget_min, p = _first(c, ("budget_min", "_request_budget_min"), {"_request_budget_min": USER_TEXT})
+    if budget_min is None and query_plan is not None:
+        budget_min = getattr(query_plan, "budget_min", None)
+        p = USER_TEXT if budget_min is not None else None
     if p:
         prov["budget_min"] = p
 
@@ -119,15 +129,25 @@ def build_query_understanding(
     if brands:
         prov["brands"] = p or USER_TEXT
 
-    use_case = c.get("use_case") or (getattr(query_plan, "intent", None) if query_plan is not None else None)
+    plan_use_cases = list(getattr(query_plan, "use_cases", []) or []) if query_plan is not None else []
+    use_case = c.get("use_case") or (plan_use_cases[0] if plan_use_cases else None)
     if use_case:
-        prov["use_case"] = USER_TEXT if c.get("use_case") else LLM_INFERRED
+        prov["use_case"] = USER_TEXT
 
     product_intent = (
-        getattr(query_plan, "intent", None) if query_plan is not None else None
-    ) or c.get("product_type") or c.get("category")
+        c.get("product_type")
+        or c.get("category")
+        or (getattr(query_plan, "category", None) if query_plan is not None else None)
+    )
     if product_intent:
-        prov["product_intent"] = USER_TEXT if (c.get("product_type") or c.get("category")) else LLM_INFERRED
+        prov["product_intent"] = USER_TEXT
+
+    order_quantity = c.get("order_quantity") or c.get("quantity")
+    if order_quantity is None and query_plan is not None:
+        order_quantity = getattr(query_plan, "quantity", None)
+    horizon_days = c.get("availability_horizon_days")
+    if horizon_days is None and query_plan is not None:
+        horizon_days = getattr(query_plan, "availability_horizon_days", None)
 
     rel = image_relation or (str(c.get("_image_relation")).strip().lower() if c.get("_image_relation") else NO_IMAGE)
     if rel not in (ON_TOPIC, ADJACENT, OFF_TOPIC, NO_IMAGE):
@@ -140,6 +160,8 @@ def build_query_understanding(
         budget_max=float(budget_max) if isinstance(budget_max, (int, float)) else None,
         brands=brands,
         use_case=use_case,
+        order_quantity=int(order_quantity) if isinstance(order_quantity, int) else None,
+        availability_horizon_days=int(horizon_days) if isinstance(horizon_days, int) else None,
         constraints=c,
         image_relation=rel,
         provenance=prov,

@@ -261,6 +261,50 @@ def _image_security_event(
     }
 
 
+def _bounded_knowledge_answer(
+    payload: Dict[str, Any],
+    *,
+    query: str,
+    plan: Any,
+    results: list[dict],
+    model: str,
+    trace_id: str | None,
+    timing_prefix: str,
+) -> str | None:
+    timing = payload.setdefault("timing_breakdown", {})
+    started = time.perf_counter()
+    mode = str(
+        payload.get("narration_mode")
+        or timing.get("narration_mode")
+        or os.getenv("RECOMMEND_NARRATION_MODE", "blocking")
+    ).strip().lower()
+    timing[f"{timing_prefix}_mode"] = mode
+    if mode != "blocking":
+        timing[f"{timing_prefix}_skipped"] = True
+        timing[f"{timing_prefix}_ms"] = int((time.perf_counter() - started) * 1000)
+        return None
+    try:
+        narration_budget = float(os.getenv("RECOMMEND_NARRATION_TIMEOUT_SEC", "8") or 8)
+    except (TypeError, ValueError):
+        narration_budget = 8.0
+    budget = max(0.0, min(narration_budget, 3.0))
+    future = _NARRATION_EXECUTOR.submit(
+        _build_knowledge_answer,
+        query,
+        plan,
+        results,
+        model,
+        trace_id,
+    )
+    try:
+        return future.result(timeout=budget)
+    except _futures.TimeoutError:
+        timing[f"{timing_prefix}_timed_out"] = True
+        return None
+    finally:
+        timing[f"{timing_prefix}_ms"] = int((time.perf_counter() - started) * 1000)
+
+
 def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None) -> None:
     """If this is a comparison/knowledge turn and the message is empty or a generic
     disambiguation/no-results fallback, replace it with a real conceptual answer."""
@@ -280,10 +324,14 @@ def _maybe_inject_knowledge_answer(payload: Dict[str, Any], trace_id: str | None
         )
         if not _generic:
             return
-        _ans = _build_knowledge_answer(
-            _kq.get("query") or "", _plan, payload.get("results") or [],
-            os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b")),
-            trace_id,
+        _ans = _bounded_knowledge_answer(
+            payload,
+            query=_kq.get("query") or "",
+            plan=_plan,
+            results=payload.get("results") or [],
+            model=os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b")),
+            trace_id=trace_id,
+            timing_prefix="knowledge",
         )
         if _ans:
             payload["assistant_message"] = _ans
@@ -379,8 +427,12 @@ def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -
         from src.app.services.answer_composer import (
             needs_composition, conceptual_sub_questions, compose_answer, AnswerSection,
         )
+        timing = payload.setdefault("timing_breakdown", {})
         if not needs_composition(plan):
+            timing["compound_needed"] = False
+            timing["compound_ms"] = 0
             return payload
+        timing["compound_needed"] = True
         existing = str(payload.get("assistant_message") or "").strip()
         # Pick the first conceptual sub-question and answer it on its OWN text (so the
         # knowledge clause's specs don't pollute the product clause).
@@ -390,11 +442,18 @@ def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -
             if str(getattr(sq, "text", "")) in concept_texts:
                 sub_obj = sq
                 break
+        compound_t0 = time.perf_counter()
         knowledge_txt = None
         if sub_obj is not None:
             _model = os.getenv("OLLAMA_SUMMARY_MODEL", os.getenv("OLLAMA_MEDIUM_MODEL", "qwen3:14b"))
-            knowledge_txt = _build_knowledge_answer(
-                str(getattr(sub_obj, "text", "")), sub_obj, payload.get("results") or [], _model, trace_id
+            knowledge_txt = _bounded_knowledge_answer(
+                payload,
+                query=str(getattr(sub_obj, "text", "")),
+                plan=sub_obj,
+                results=payload.get("results") or [],
+                model=_model,
+                trace_id=trace_id,
+                timing_prefix="compound",
             )
         sections: list = []
         # Security challenge leads when present (Thread 3).
@@ -415,6 +474,7 @@ def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -
                                                  "sections": [s.kind for s in sections]})
             except Exception:
                 pass
+        timing["compound_ms"] = int((time.perf_counter() - compound_t0) * 1000)
     except Exception:
         pass
     return payload
@@ -3967,7 +4027,25 @@ def _query_is_standalone_search(query: str | None) -> bool:
         "tower", "workstation", "tablet", "ipad", "phone", "smartphone", "monitor",
         "pc", "computer", "headset", "keyboard", "mouse",
     )
-    return any(re.search(rf"\b{re.escape(w)}\b", q_low) for w in _category_words)
+    if any(re.search(rf"\b{re.escape(w)}\b", q_low) for w in _category_words):
+        return True
+    try:
+        from src.app.services.query_decomposer import decompose
+
+        plan = decompose(q_low)
+        if getattr(plan, "answer_without_products", False):
+            return False
+        if getattr(plan, "category", None) or str(getattr(plan, "intent", "")) == "recommendation_multi":
+            return True
+        for sub_question in getattr(plan, "sub_questions", []) or []:
+            if (
+                getattr(sub_question, "use_cases", None)
+                or getattr(sub_question, "hard_constraints", None)
+            ):
+                return True
+    except Exception:
+        return False
+    return False
 
 
 
@@ -5618,7 +5696,15 @@ def suggest(
     # SuggestContext adoption (Pass 4): nlp is assigned once above, then mutated in-place.
     # Bind it onto the ctx by reference so downstream mutations flow into the ctx.
     _ctx.nlp = nlp if isinstance(nlp, dict) else {}
-    followup_explain = _is_followup_explain_query(query)
+    rationale_requested = _is_followup_explain_query(query)
+    # A rationale clause can be part of a fresh request ("find 10 laptops; why
+    # those?"). Treat it as a memory follow-up only when the turn does not carry
+    # its own category/budget search. This prevents first-turn rationale wording
+    # from suppressing NQE and procurement clarification.
+    followup_explain = bool(
+        rationale_requested
+        and not _query_is_standalone_search(query)
+    )
     complexity_context = {
         "conversation_turn": int(kv.get("conversation_turn") or 0),
         "has_image": bool(
@@ -10304,6 +10390,11 @@ def suggest(
             turn_intent=turn_intent,
             followup_explain=followup_explain,
             shortlist_lock_active=shortlist_lock_active,
+            query_understanding=build_query_understanding(
+                query_effective or query or "",
+                constraints,
+                query_plan=_ranking_plan,
+            ),
         ),
         hooks=RecommendNQEHooks(
             suppress_missing_fields_for_turn_intent=_suppress_missing_fields_for_turn_intent,
@@ -10483,6 +10574,7 @@ def suggest(
         inferred_image_brand=inferred_image_brand,
         demote_off_category=_demote_off_category,
         build_brand_budget_answer=_build_brand_budget_answer_v2,
+        query_plan=_ranking_plan,
     )
     constraints = _prep.constraints
     _ctx.constraints = constraints  # re-bind: apply_narration returns a NEW dict (Pass 5)
@@ -10651,12 +10743,13 @@ def suggest(
         claim_guard_rejected=(_claim_guard_result == "fell_back_to_deterministic"),
         b2b=_b2b.wants_procurement_questions,  # b2b OR ambiguous-bulk → B2B review treatment
         rush_delivery=_esc_rush,  # account/email/billing red flags are checkout-time (not at suggest)
+        review_requested=(_b2b.verdict == "ambiguous_bulk"),
     )
     payload["escalation_assessment"] = _esc_decision.to_dict()
     # B2B escalation -> human room: when the bounded decision requires a human, surface a review
     # envelope and reuse the existing (flag-gated) incident creator so the escalation room/admin can
     # act, with a direct-contact affordance for B2B deals. All non-raising calls -> no new try/except.
-    if _esc_decision.band == "human_required":
+    if _esc_decision.band in {"review", "human_required"}:
         payload["needs_human_review"] = True
         _esc_env = payload.get("escalation") if isinstance(payload.get("escalation"), dict) else {}
         if not _esc_env.get("route"):
@@ -10666,10 +10759,14 @@ def suggest(
                 "reasons": list(_esc_decision.reasons),
                 "talk_to_client": _esc_decision.talk_to_client,
                 "band": _esc_decision.band,
+                "blocking": _esc_decision.band == "human_required",
+                "approval_required": bool(payload.get("approval_id"))
+                or _esc_decision.band == "human_required",
             }
         _auto_create_incident_for_review(
             payload=payload, trace_id=trace_id, uid=uid, query=query,
-            severity="high", source="recommend_escalation",
+            severity=("high" if _esc_decision.band == "human_required" else "warn"),
+            source="recommend_escalation",
             extra_context={"escalation_assessment": _esc_decision.to_dict()},
         )
     # ── Message decoration (extracted to recommend_message_decorator) ──
@@ -11166,6 +11263,7 @@ def suggest(
             retrieved_context=retrieved_context if isinstance(retrieved_context, dict) else {},
             skip_recommend_observer=skip_recommend_observer,
             probe_result=probe_result if isinstance(probe_result, dict) else {},
+            started_at=route_t0,
         ),
         _PostPipelineHooks(
             get_policy=get_policy,

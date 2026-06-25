@@ -455,7 +455,7 @@ class RecommendationService:
             # look for single-value budget mentions: "under $500", "below 1000", or standalone $1000.
             # A trailing spec/measurement unit means the number is a SPEC, not a budget — "under 2 kg"
             # / "under 2kg" / "under 16 gb" must NOT become $2 / $2000 / $16 (live Tier-0 finding).
-            _unit_guard = (r"(?!\s*(?:kg|kgs|lb|lbs|g|gb|tb|mb|kb|hz|ghz|mhz|khz|fps|inch|inches|in|"
+            _unit_guard = (r"(?!\s*(?:kg|kgs|lb|lbs|g|gb|tb|mb|kb|hz|ghz|mhz|khz|fps|inch|inches|"
                            r"cm|mm|w|watts|wh|mah|mp|cores?|nits|ppi|dpi)\b)")
             m = re.search(r"(?:under|below|less than)\s*\$?([\d\.,]+[kKmM]?)" + _unit_guard, t)
             if m:

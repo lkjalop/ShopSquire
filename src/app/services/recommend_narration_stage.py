@@ -34,6 +34,7 @@ def prepare_narration(
     inferred_image_brand: Any,
     demote_off_category: Callable[[Any, Any], Any],
     build_brand_budget_answer: Callable[..., Any],
+    query_plan: Any = None,
 ) -> NarrationPrep:
     """Pre-narration setup: stamp price/brand metadata onto constraints, build the narration
     envelope (build_narration_inputs + apply_narration_inputs_to_constraints — note this REBINDS
@@ -46,7 +47,11 @@ def prepare_narration(
     narration_inputs = build_narration_inputs(
         query_effective or query,
         constraints,
-        query_understanding=build_query_understanding(query_effective or query or "", constraints),
+        query_understanding=build_query_understanding(
+            query_effective or query or "",
+            constraints,
+            query_plan=query_plan,
+        ),
     )
     constraints = apply_narration_inputs_to_constraints(constraints, narration_inputs)
     # Off-category relevance guard: a primary-product query must not be led by a peripheral.

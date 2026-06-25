@@ -810,7 +810,14 @@ def decompose(query: Optional[str], *, has_image: bool = False) -> QueryPlan:
         # an accessory/knowledge clause ("do I need an external hard drive?") hijack category/intent
         # into a prose-only answer that surfaces no products.
         if plan.is_compound and plan.intent in (INTENT_KNOWLEDGE, INTENT_COMPARISON, INTENT_AVAILABILITY):
-            prod_subs = [s for s in plan.sub_questions if s.intent in (INTENT_PRODUCT_SEARCH, INTENT_MULTI)]
+            prod_subs = [
+                s for s in plan.sub_questions
+                if s.intent in (INTENT_PRODUCT_SEARCH, INTENT_MULTI)
+                or (
+                    s.intent == INTENT_AVAILABILITY
+                    and bool(coarse_product_category(s.text) or s.use_cases)
+                )
+            ]
             if prod_subs:
                 plan.intent = INTENT_PRODUCT_SEARCH
                 plan.answer_without_products = False

@@ -64,3 +64,17 @@ def test_pure_availability_query_stays_availability():
     d = decompose("when can you deliver?").to_dict()
     assert d["intent"] == "availability"
     assert not d["category"] and not d["use_cases"]
+
+
+def test_exact_bulk_reference_query_keeps_full_structured_state():
+    plan = decompose(
+        "I am thinking to buy 10 laptops for work in 2 weeks, "
+        "what is good for 1300 to 1500? why those?"
+    )
+    assert plan.category == "laptop"
+    assert plan.budget_min == 1300 and plan.budget_max == 1500
+    assert plan.quantity == 10 and plan.availability_horizon_days == 14
+    assert "office" in plan.use_cases
+    assert plan.is_compound is True
+    assert plan.intent == "product_search"
+    assert plan.answer_without_products is False

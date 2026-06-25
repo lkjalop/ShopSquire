@@ -38,12 +38,22 @@ def test_provenance_marks_image_derived_and_inferred():
     assert qu.provenance["brands"] == SAFE_IMAGE_LABEL  # came from an image, not typed
 
 
-def test_use_case_from_query_plan_is_inferred():
+def test_query_plan_supplies_domain_fields_not_orchestration_intent():
     class _Plan:
-        intent = "content_creation"
-    qu = build_query_understanding("editing videos", {}, query_plan=_Plan())
-    assert qu.use_case == "content_creation"
-    assert qu.provenance["use_case"] == LLM_INFERRED  # inferred, not typed
+        intent = "recommendation_multi"
+        category = "laptop"
+        use_cases = ["gaming", "study"]
+        budget_min = 1300
+        budget_max = 1500
+        quantity = 10
+        availability_horizon_days = 14
+    qu = build_query_understanding("ten laptops", {}, query_plan=_Plan())
+    assert qu.product_intent == "laptop"
+    assert qu.use_case == "gaming"
+    assert qu.budget_min == 1300.0 and qu.budget_max == 1500.0
+    assert qu.order_quantity == 10 and qu.availability_horizon_days == 14
+    assert qu.provenance["use_case"] == USER_TEXT
+    assert qu.provenance["product_intent"] == USER_TEXT
 
 
 def test_missing_fields_detected_for_vague_query():

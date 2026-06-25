@@ -13,6 +13,7 @@ Extracted from the tail of recommend.py suggest() to reduce the monolith body.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -32,6 +33,7 @@ class PostPipelineInput:
     retrieved_context: Dict[str, Any]
     skip_recommend_observer: bool
     probe_result: Dict[str, Any]
+    started_at: Optional[float] = None
 
 
 @dataclass
@@ -223,6 +225,11 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
     # ── Final transforms ──────────────────────────────────────────────────────
     redacted = hooks.compose_compound_if_needed(redacted, redacted.get("trace_id"))
     redacted = hooks.finalize_response_payload(redacted)
+    timing = redacted.setdefault("timing_breakdown", {})
+    timing.setdefault("compound_needed", False)
+    timing.setdefault("compound_ms", 0)
+    if inp.started_at is not None:
+        timing["route_total_ms"] = int((time.perf_counter() - inp.started_at) * 1000)
 
     # ── Latency recording ─────────────────────────────────────────────────────
     try:
