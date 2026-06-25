@@ -377,6 +377,12 @@ class QueryPlan:
     # Deterministic 0..1 confidence that the rules parsed this query well (more extracted signals →
     # higher). Drives WHEN the LLM-planner fallback is worth invoking, and is useful telemetry. Agnostic.
     decomposition_confidence: float = 0.0
+    # The agnostic "WHEN to leverage market intelligence" gate: True when the query INTENT wants market
+    # state (trend/popularity, competitor/timing, or bulk demand) — keyed on intent verbs/structure, not
+    # vertical vocabulary. Only then does the swarm spend the market-intel recall/findings cost.
+    needs_market_evidence: bool = False
+    # Which kinds of market evidence the query implies: demand | competitor | historical_outcome | supply.
+    market_evidence_kinds: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -398,6 +404,8 @@ class QueryPlan:
             "availability_horizon_days": self.availability_horizon_days,
             "exclusions": self.exclusions,
             "decomposition_confidence": self.decomposition_confidence,
+            "needs_market_evidence": self.needs_market_evidence,
+            "market_evidence_kinds": self.market_evidence_kinds,
         }
 
 
@@ -636,6 +644,37 @@ def _extract_hard_constraints(q: str, use_cases: List[str]) -> Dict[str, Any]:
     return out
 
 
+# Agnostic market-evidence intent signals — keyed on intent verbs/structure, NOT vertical vocabulary
+# (so "trending laptops" and "trending shoes" both fire on "trending"). Tuning lives here, not flavour.
+_MARKET_DEMAND_RE = re.compile(
+    r"\b(trending|popular|best[\s-]?sell\w*|in demand|hot right now|"
+    r"what'?s (selling|hot|popular)|most (bought|popular)|top sellers?|selling well)\b", re.IGNORECASE)
+_MARKET_COMPETITOR_RE = re.compile(
+    r"\b(vs\.?|versus|better than|cheaper (elsewhere|online|somewhere)|"
+    r"price[\s-]?match\w*|competitor'?s?|undercut\w*)\b", re.IGNORECASE)
+_MARKET_OUTCOME_RE = re.compile(
+    r"\b(worth it|should i (wait|buy|get|hold off)|good time to buy|"
+    r"is it (good|reliable|any good|worth)|do people (like|buy|recommend))\b", re.IGNORECASE)
+
+
+def _detect_market_evidence_need(q: str, plan: "QueryPlan") -> "tuple[bool, List[str]]":
+    """The agnostic 'WHEN to leverage market intelligence' gate: True only when the query INTENT wants
+    market state. Keyed on intent shape (trend/popularity, competitor/timing, bulk demand), never on
+    product vocabulary. A plain product lookup or support question returns (False, []) so the swarm
+    never pays the market-intel cost it doesn't need."""
+    text = str(q or "")
+    kinds: List[str] = []
+    if _MARKET_DEMAND_RE.search(text):
+        kinds.append("demand")
+    if _MARKET_COMPETITOR_RE.search(text):
+        kinds.append("competitor")
+    if _MARKET_OUTCOME_RE.search(text):
+        kinds.append("historical_outcome")
+    if (plan.quantity or 0) >= 5:  # bulk / B2B → supply + demand evidence
+        kinds.append("supply")
+    return (bool(kinds), kinds)
+
+
 def _decomposition_confidence(plan: "QueryPlan", q: str) -> float:
     """Deterministic 0..1 confidence that the rules parsed this query well — the count of structured
     signals they pulled out (category, use-cases, budget, constraints, a specific intent…). Used to
@@ -848,6 +887,8 @@ def decompose(query: Optional[str], *, has_image: bool = False) -> QueryPlan:
 
         # Negation/exclusion terms (after category is finalized, so the search category is guarded out).
         plan.exclusions = _extract_exclusions(q, plan.category)
+        # Agnostic "when to leverage market intel" gate (keyed on intent shape, after quantity is set).
+        plan.needs_market_evidence, plan.market_evidence_kinds = _detect_market_evidence_need(q, plan)
         # Confidence is scored LAST — after every signal above is populated.
         plan.decomposition_confidence = _decomposition_confidence(plan, q)
     except Exception:
