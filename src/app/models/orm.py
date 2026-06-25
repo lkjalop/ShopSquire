@@ -58,6 +58,11 @@ class Order(Base):
     status: Mapped[str] = mapped_column(Text, default="pending_payment")
     created_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
     updated_at: Mapped[str | None] = mapped_column(TIMESTAMP, nullable=True)
+    # Attribution: links an order back to the recommendation decision that produced it
+    # (populated by the cart trace at order creation — edge E1). Nullable so non-attributed
+    # / direct orders are unaffected.
+    trace_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_id: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class ReturnCase(Base):

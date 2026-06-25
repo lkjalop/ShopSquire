@@ -30,7 +30,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from src.app.main import create_app
+from src.app.main import app
 from src.app.models.db import db_session
 from src.app.services.recommendations import RecommendationService
 from tests.utils import default_headers
@@ -49,7 +49,7 @@ _PRODUCT_PATH_FLAGS = {
     "TEST_FORCE_BAD_SKU": False,
 }
 
-client = TestClient(create_app(), headers=default_headers())
+client = TestClient(app, headers=default_headers())
 
 # (sku, name, price_cents, stock) — FBP-3 is OOS to exercise the stock/cart gate.
 _CATALOG = [
@@ -75,7 +75,11 @@ def _seed():
             db.execute(text(
                 "INSERT OR REPLACE INTO products (id, sku, name, price_cents, currency, specs, active) "
                 "VALUES (:id,:sku,:n,:c,'USD',:s,1)"),
-                {"id": sku, "sku": sku, "n": name, "c": cents, "s": '{"ram_gb": 16}'})
+                # Rich specs so the products satisfy any use-case spec floors the pipeline may
+                # enrich (e.g. storage_gb_min:256) regardless of test ordering — keeps the gate
+                # order-independent.
+                {"id": sku, "sku": sku, "n": name, "c": cents,
+                 "s": '{"ram_gb": 16, "storage_gb": 1024, "display": "15.6 FHD"}'})
             db.execute(text(
                 "INSERT OR REPLACE INTO inventory (id, product_id, stock, warehouse) "
                 "VALUES (:i,:p,:st,'default')"), {"i": "inv-" + sku, "p": sku, "st": stock})
