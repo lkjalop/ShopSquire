@@ -77,6 +77,9 @@ _CORE_MODULES = [
     # entity resolution: canonicalize brand/product/user → stable graph-node ids; alias DATA comes
     # from the profile, the normalize+lookup MECHANISM is vertical-blind.
     "src/app/services/entity_resolution.py",
+    # hippograph projection + recall: build the in-memory graph from trace/conversion rows and
+    # spread-activation recall, reward-weighted. Node math only — zero product vocabulary.
+    "src/app/services/hippograph.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
