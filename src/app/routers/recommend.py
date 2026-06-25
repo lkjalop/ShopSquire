@@ -6097,9 +6097,10 @@ def suggest(
                 from src.app.models.db import db_session as _hf_db
                 from src.app.services.human_feedback import capture_feedback
                 with _hf_db() as _hfdb:
+
                     for _fk, _fv in nqe_selection_applied.items():
                         capture_feedback(_hfdb, "nqe_correction", subject_hash=uid_hash,
-                                         entity_ref=str(_fk), source="nqe",
+                                         entity_ref=str(_fk), entity_type="attribute", source="nqe",
                                          dedup_fields={"uid": str(uid), "field": str(_fk), "value": str(_fv)})
             except Exception:
                 pass

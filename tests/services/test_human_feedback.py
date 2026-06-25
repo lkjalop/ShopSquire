@@ -75,6 +75,38 @@ def test_connectivity_edges_are_positive_even_for_negative_feedback():
     assert g.adjacency["u1"]["BAD-1"] > 0
 
 
+# ── typed entities (Finding 8): non-product ids must NOT become product nodes ─
+def test_non_product_feedback_does_not_create_product_nodes():
+    g = HippoGraph()
+    project_human_feedback(g, [
+        {"feedback_type": "approval", "subject_hash": "u1", "entity_ref": "appr-123",
+         "entity_type": "decision", "polarity": 1.0, "weight": 1.0},
+        {"feedback_type": "escalation", "subject_hash": "u1", "entity_ref": "inc-9",
+         "entity_type": "incident", "polarity": -1.0, "weight": 1.0},
+        {"feedback_type": "nqe_correction", "subject_hash": "u1", "entity_ref": "use_case",
+         "entity_type": "attribute", "polarity": 1.0, "weight": 1.0},
+    ], sku_pattern=_DEFAULT_SKU_PATTERN)
+    # typed nodes, NOT products
+    assert g.nodes["decision:appr-123"].kind == "decision"
+    assert g.nodes["incident:inc-9"].kind == "incident"
+    assert g.nodes["attribute:use_case"].kind == "attribute"
+    assert not any(n.kind == "product" for n in g.nodes.values())  # no fake products
+
+
+def test_product_feedback_still_resolves_to_product():
+    g = HippoGraph()
+    project_human_feedback(g, [{"feedback_type": "recommendation_accepted", "subject_hash": "u1",
+                                "entity_ref": "SKU-7", "entity_type": "product", "polarity": 1.0, "weight": 1.0}],
+                           sku_pattern=_DEFAULT_SKU_PATTERN)
+    assert g.nodes["SKU-7"].kind == "product" and g.nodes["SKU-7"].weight > 0
+
+
+def test_entity_type_roundtrips_through_envelope(db):
+    hf.record_feedback(db, "approval", subject_hash="u1", entity_ref="appr-1", entity_type="decision")
+    row = hf.load_recent(db)[0]
+    assert row["entity_type"] == "decision" and row["entity_ref"] == "appr-1"
+
+
 # ── batch derivation from existing tables ────────────────────────────────────
 def test_backfill_returns_and_corrections(db):
     db.execute(text("CREATE TABLE orders (id TEXT, status TEXT)"))

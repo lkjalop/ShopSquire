@@ -117,7 +117,8 @@ def approve(approval_id: str, role: str = Depends(require_role([ROLE_MERCHANT, R
             try:
                 from src.app.services.human_feedback import capture_feedback
                 capture_feedback(db, "approval", subject_hash=str(role), entity_ref=str(approval_id),
-                                 source="approvals.approve", dedup_fields={"approval_id": approval_id})
+                                 entity_type="decision", source="approvals.approve",
+                                 dedup_fields={"approval_id": approval_id})
             except Exception:
                 pass
         # Update in-memory cache
@@ -147,7 +148,8 @@ def reject(approval_id: str, role: str = Depends(require_role([ROLE_MERCHANT, RO
             try:
                 from src.app.services.human_feedback import capture_feedback
                 capture_feedback(db, "rejection", subject_hash=str(role), entity_ref=str(approval_id),
-                                 source="approvals.reject", dedup_fields={"approval_id": approval_id})
+                                 entity_type="decision", source="approvals.reject",
+                                 dedup_fields={"approval_id": approval_id})
             except Exception:
                 pass
         if approval_id in _PENDING:

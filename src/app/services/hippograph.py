@@ -206,6 +206,7 @@ def project_human_feedback(graph: HippoGraph, feedback: Optional[Iterable[Any]],
     for f in (feedback or []):
         ftype = str(_finding_attr(f, "feedback_type") or "").strip()
         entity = _finding_attr(f, "entity_ref")
+        etype = str(_finding_attr(f, "entity_type", "product") or "product")
         subject = _finding_attr(f, "subject_hash")
         polarity = float(_finding_attr(f, "polarity", 1.0) or 0.0)
         weight = float(_finding_attr(f, "weight", 1.0) or 0.0)
@@ -214,12 +215,21 @@ def project_human_feedback(graph: HippoGraph, feedback: Optional[Iterable[Any]],
             continue
         ent_node: Optional[str] = None
         if entity:
-            ref = resolve_product(str(entity), sku_pattern=sku_pattern)
-            if ref:
-                ent_node = ref.id
+            # TYPED resolution: only a 'product' entity is resolved through the product resolver. A
+            # decision/incident/attribute/campaign id becomes its OWN typed node (kind:id) — never a
+            # fake product node (the bug: every entity_ref was resolved as a product).
+            if etype == "product":
+                ref = resolve_product(str(entity), sku_pattern=sku_pattern)
+                if ref:
+                    ent_node, ent_kind, ent_label = ref.id, "product", ref.label
+                else:
+                    ent_node = None
+            else:
+                ent_node, ent_kind, ent_label = f"{etype}:{entity}", etype, str(entity)
+            if ent_node:
                 node = graph.nodes.get(ent_node)
                 if node is None:
-                    node = HippoNode(ent_node, "product", ref.label, 0.0)
+                    node = HippoNode(ent_node, ent_kind, ent_label, 0.0)
                     graph.nodes[ent_node] = node
                 node.weight += signed  # the human judgement tips the recall prior (can go negative)
         # visibility node — what human signal touched this turn's context

@@ -1668,8 +1668,8 @@ def create_incident_record(
             _uidh = str((context or {}).get("uid_hash") or (context or {}).get("uid") or "") or None
             with _hf_db() as _hfdb:
                 capture_feedback(_hfdb, "escalation", subject_hash=_uidh,
-                                 entity_ref=str(trace_id or incident_id), source="escalation_room",
-                                 dedup_fields={"incident_id": incident_id})
+                                 entity_ref=str(trace_id or incident_id), entity_type="incident",
+                                 source="escalation_room", dedup_fields={"incident_id": incident_id})
         except Exception:
             pass
     toks = _issue_tokens(incident_id)

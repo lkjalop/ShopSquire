@@ -68,6 +68,7 @@ TABLE_STATEMENTS = (
         feedback_type TEXT,
         subject_hash TEXT,
         entity_ref TEXT,
+        entity_type TEXT DEFAULT 'product',
         polarity REAL,
         weight REAL,
         source TEXT,

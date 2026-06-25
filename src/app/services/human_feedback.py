@@ -44,6 +44,12 @@ _DEFAULT_POLARITY: Dict[str, float] = {
     "finding_correction": -1.0,       # a human marked a finding wrong → distrust that finding/entity
 }
 
+# entity_type tells the projection HOW to resolve entity_ref — so an approval/incident/attribute id is
+# NOT mistaken for a product. "product" is the default (returns/cart feedback is product-keyed); the
+# event hooks override it (nqe→attribute, approval/rejection→decision, escalation→incident).
+ENTITY_PRODUCT = "product"
+_KNOWN_ENTITY_TYPES = ("product", "decision", "incident", "attribute", "finding", "campaign", "entity")
+
 _DDL = """
 CREATE TABLE IF NOT EXISTS human_feedback (
     id TEXT PRIMARY KEY,
@@ -52,6 +58,7 @@ CREATE TABLE IF NOT EXISTS human_feedback (
     feedback_type TEXT,
     subject_hash TEXT,
     entity_ref TEXT,
+    entity_type TEXT DEFAULT 'product',
     polarity REAL,
     weight REAL,
     source TEXT,
@@ -60,11 +67,13 @@ CREATE TABLE IF NOT EXISTS human_feedback (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
 """
+_UPGRADE_COLS = (("entity_type", "TEXT DEFAULT 'product'"),)
 _INDEXES = (
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_human_feedback_dedup ON human_feedback(tenant_id, dedup_key)",
     "CREATE INDEX IF NOT EXISTS ix_human_feedback_type ON human_feedback(feedback_type)",
     "CREATE INDEX IF NOT EXISTS ix_human_feedback_entity ON human_feedback(entity_ref)",
 )
+_COLS_INTROSPECTED = __import__("weakref").WeakSet()
 
 
 @dataclass(frozen=True)
@@ -76,6 +85,7 @@ class HumanFeedback:
     weight: float         # magnitude in [0,1]
     source: str
     dedup_key: str
+    entity_type: str = ENTITY_PRODUCT
     tenant_id: str = DEFAULT_TENANT
     schema_version: int = SCHEMA_VERSION
 
@@ -84,8 +94,28 @@ class HumanFeedback:
         return float(self.polarity) * float(self.weight)
 
 
+def _ensure_columns(db) -> None:
+    from sqlalchemy import inspect as _sa_inspect
+    try:
+        bind = db.get_bind()
+    except Exception:
+        bind = None
+    if bind is not None and bind in _COLS_INTROSPECTED:
+        return
+    try:
+        have = {c["name"] for c in _sa_inspect(db.connection()).get_columns("human_feedback")}
+    except Exception:
+        return
+    for name, decl in _UPGRADE_COLS:
+        if name not in have:
+            db.execute(text(f"ALTER TABLE human_feedback ADD COLUMN {name} {decl}"))
+    if bind is not None:
+        _COLS_INTROSPECTED.add(bind)
+
+
 def ensure_table(db) -> None:
     db.execute(text(_DDL))
+    _ensure_columns(db)
     for stmt in _INDEXES:
         db.execute(text(stmt))
 
@@ -107,6 +137,7 @@ def normalize(
     *,
     subject_hash: Any = None,
     entity_ref: Any = None,
+    entity_type: Any = ENTITY_PRODUCT,
     polarity: Any = None,
     weight: Any = 1.0,
     source: Any = "",
@@ -114,7 +145,8 @@ def normalize(
     tenant_id: Any = DEFAULT_TENANT,
 ) -> Optional[HumanFeedback]:
     """Validate + normalize a human judgement. Returns None when feedback_type is missing OR there is
-    nothing to attach it to (no subject and no entity). Polarity defaults by type; weight clamps [0,1]."""
+    nothing to attach it to (no subject and no entity). Polarity defaults by type; weight clamps [0,1].
+    ``entity_type`` tells the projection how to resolve entity_ref (product vs decision/incident/...)."""
     ft = str(feedback_type or "").strip()
     subj = str(subject_hash).strip() if subject_hash else None
     ent = str(entity_ref).strip() if entity_ref else None
@@ -125,11 +157,12 @@ def normalize(
         w = max(0.0, min(1.0, float(weight if weight is not None else 1.0)))
     except Exception:
         w = 1.0
+    et = str(entity_type or ENTITY_PRODUCT).strip() or ENTITY_PRODUCT
     # occurred_at is stored by ingest(), not a dataclass field — it doesn't affect identity/dedup.
     return HumanFeedback(
         feedback_type=ft, subject_hash=subj, entity_ref=ent, polarity=float(pol), weight=w,
         source=str(source or ""), dedup_key=_dedup_key(ft, subj, ent, str(source or ""), dedup_fields),
-        tenant_id=(str(tenant_id).strip() or DEFAULT_TENANT),
+        entity_type=et, tenant_id=(str(tenant_id).strip() or DEFAULT_TENANT),
     )
 
 
@@ -144,11 +177,12 @@ def ingest(db, fb: Optional[HumanFeedback], *, occurred_at: Any = None) -> bool:
             return False
         db.execute(
             text("INSERT INTO human_feedback (id, tenant_id, schema_version, feedback_type, subject_hash, "
-                 "entity_ref, polarity, weight, source, dedup_key, occurred_at) "
-                 "VALUES (:i,:tn,:sv,:ft,:sh,:er,:po,:we,:so,:dk,:oc)"),
+                 "entity_ref, entity_type, polarity, weight, source, dedup_key, occurred_at) "
+                 "VALUES (:i,:tn,:sv,:ft,:sh,:er,:et,:po,:we,:so,:dk,:oc)"),
             {"i": str(uuid.uuid4()), "tn": fb.tenant_id, "sv": int(fb.schema_version), "ft": fb.feedback_type,
-             "sh": fb.subject_hash, "er": fb.entity_ref, "po": float(fb.polarity), "we": float(fb.weight),
-             "so": fb.source, "dk": fb.dedup_key, "oc": None if occurred_at is None else str(occurred_at)},
+             "sh": fb.subject_hash, "er": fb.entity_ref, "et": fb.entity_type, "po": float(fb.polarity),
+             "we": float(fb.weight), "so": fb.source, "dk": fb.dedup_key,
+             "oc": None if occurred_at is None else str(occurred_at)},
         )
         return True
     except Exception:
@@ -200,15 +234,16 @@ def load_recent(db, *, limit: int = 500, tenant_id: str = DEFAULT_TENANT) -> Lis
     try:
         ensure_table(db)
         rows = db.execute(
-            text("SELECT feedback_type, subject_hash, entity_ref, polarity, weight, source "
-                 "FROM human_feedback WHERE COALESCE(tenant_id,'default')=:t "
+            text("SELECT feedback_type, subject_hash, entity_ref, polarity, weight, source, "
+                 "COALESCE(entity_type,'product') FROM human_feedback WHERE COALESCE(tenant_id,'default')=:t "
                  "ORDER BY created_at DESC LIMIT :lim"),
             {"lim": int(limit), "t": str(tenant_id).strip() or DEFAULT_TENANT},
         ).fetchall()
     except Exception:
         return []
     return [{"feedback_type": r[0], "subject_hash": r[1], "entity_ref": r[2],
-             "polarity": float(r[3] or 0.0), "weight": float(r[4] or 0.0), "source": r[5]} for r in rows]
+             "polarity": float(r[3] or 0.0), "weight": float(r[4] or 0.0), "source": r[5],
+             "entity_type": r[6]} for r in rows]
 
 
 # ── batch derivation from tables that already hold the judgement ──────────────
