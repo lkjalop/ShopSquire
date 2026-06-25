@@ -72,6 +72,8 @@ _CORE_MODULES = [
     # adaptive agent budgets: tier/risk/event-signal → per-agent tool+token budget, agent names
     # only (no product vocabulary). Extracted from orchestrator.
     "src/app/services/agent_budgets.py",
+    # request-scoped bandit-arm carrier: an "arm" is an opaque label, zero product vocabulary.
+    "src/app/services/bandit_context.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

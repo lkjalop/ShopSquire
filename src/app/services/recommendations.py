@@ -1825,6 +1825,10 @@ class RecommendationService:
             bandit_arm = str((bandit or {}).get("arm") or "balanced")
         except Exception:
             bandit_arm = "balanced"
+        # Carry the chosen arm to the attribution capture seam (E0) + feedback endpoints so the
+        # arm that ranked the results is the arm that gets rewarded (E3), not the A/B variant.
+        from src.app.services.bandit_context import set_bandit_arm
+        set_bandit_arm(bandit_arm)
         arm_weights = {
             "balanced": {"cf": 1.30, "click": 0.80, "supplier": 0.65, "cross": 0.60},
             "explore_novelty": {"cf": 0.95, "click": 1.15, "supplier": 0.50, "cross": 0.80},

@@ -10243,7 +10243,9 @@ def suggest(
         try:
             from src.app.services.attribution import record_decision as _record_decision
             from src.app.models.db import db_session as _attr_db_session
+            from src.app.services.bandit_context import get_bandit_arm as _get_bandit_arm
             _attr_skus = [r.get("sku") for r in results if isinstance(r, dict) and r.get("sku")]
+            # arm = the LinUCB ranking arm (for the E3 reward), variant = the A/B test arm — distinct.
             with _attr_db_session() as _attr_db:
                 _record_decision(
                     _attr_db,
@@ -10252,7 +10254,7 @@ def suggest(
                     uid_hash=uid_hash,
                     skus=_attr_skus,
                     surface="recommend",
-                    arm=(proposal or {}).get("ab_variant"),
+                    arm=_get_bandit_arm(),
                     variant=(proposal or {}).get("ab_variant"),
                     context={"budget_max": constraints.get("budget_max"),
                              "use_case": constraints.get("use_case")},

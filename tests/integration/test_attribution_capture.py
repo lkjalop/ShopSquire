@@ -80,3 +80,23 @@ def test_order_attributes_to_decision(stack):
     assert order_trace and order_trace[0] == "ATTR-T", "E1: order should carry the trace_id"
     assert conv and conv[0] == "ATTR-D", "E2: order should link to the recorded decision"
     assert int(conv[1] or 0) == 119900, "E2: conversion should carry the order value"
+
+
+def test_e0_records_bandit_arm_not_ab_variant(stack):
+    """Increment 3: E0 must capture the LinUCB *arm* (so E3 rewards the right arm), never the
+    A/B *variant*. Regression guard for the arm/variant conflation."""
+    from src.app.models.db import db_session
+    r = stack.get("/api/v1/recommend/suggest", params={"uid": "arm-user", "query": "laptop under 1500"})
+    assert r.status_code == 200, r.text
+    with db_session() as db:
+        rows = db.execute(text(
+            "SELECT arm, variant FROM recommendation_decision "
+            "WHERE surface='recommend' ORDER BY created_at DESC LIMIT 5"
+        )).fetchall()
+    arms = [row[0] for row in rows if row[0]]
+    valid_arms = {"balanced", "explore_novelty", "price_value", "personalized_heavy"}
+    # never stamp the A/B variant label as the arm
+    assert not any(a in ("A", "B") for a in arms), f"arm must not be the A/B variant; got {arms}"
+    # if a decision was captured, its arm is a real bandit arm
+    if arms:
+        assert any(a in valid_arms for a in arms), f"E0 should record a real bandit arm; got {arms}"
