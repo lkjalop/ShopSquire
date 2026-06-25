@@ -10236,6 +10236,30 @@ def suggest(
             "playbook_hint": {"id": "PB-INV-004"},
         } if insufficient_stock_skus else None),
     }, trace_id)
+    # E0 — attribution capture (measurement-only, default-on): record which SKUs this decision
+    # proposed so a later order can be attributed back to it (services/attribution.py). Isolated
+    # session + fire-and-forget; observable on failure (never blocks or breaks the response).
+    if flags.get("ATTRIBUTION_ENABLED", True) and not simulate:
+        try:
+            from src.app.services.attribution import record_decision as _record_decision
+            from src.app.models.db import db_session as _attr_db_session
+            _attr_skus = [r.get("sku") for r in results if isinstance(r, dict) and r.get("sku")]
+            with _attr_db_session() as _attr_db:
+                _record_decision(
+                    _attr_db,
+                    trace_id=trace_id,
+                    decision_id=decision_id,
+                    uid_hash=uid_hash,
+                    skus=_attr_skus,
+                    surface="recommend",
+                    arm=(proposal or {}).get("ab_variant"),
+                    variant=(proposal or {}).get("ab_variant"),
+                    context={"budget_max": constraints.get("budget_max"),
+                             "use_case": constraints.get("use_case")},
+                )
+                _attr_db.commit()
+        except Exception as _e_attr:
+            _record_partial_failure("attribution_capture", _e_attr, trace_id=trace_id)
     # Safe internet search (EXTERNAL_RESEARCH_ENABLED, off by default): a SEPARATE labeled source.
     # NullFetcher = no network until a real allowlisted httpx adapter is wired -> stays 'empty' even
     # if enabled. NEVER merged into owned `results`/cart (external items have sku=None -> structurally

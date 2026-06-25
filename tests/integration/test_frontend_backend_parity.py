@@ -168,6 +168,25 @@ def test_next_questions_option_shape():
             assert opt.get("id") and ("label" in opt), f"malformed option: {opt}"
 
 
+# ── E0 attribution capture: a success turn records its decision ──────────────
+def test_e0_capture_records_decision_row():
+    from src.app.services import attribution
+    body = _suggest("fbp-e0", "a good laptop under 1500")
+    tid = body.get("trace_id")
+    assert tid, "no trace_id on response"
+    if not _items(body):
+        import pytest as _pt
+        _pt.skip("no products surfaced this run; E0 captures on the success path")
+    with db_session() as adb:
+        attribution.ensure_tables(adb)
+        row = adb.execute(
+            text("SELECT skus_json FROM recommendation_decision "
+                 "WHERE trace_id = :t ORDER BY created_at DESC LIMIT 1"),
+            {"t": tid},
+        ).fetchone()
+    assert row, "E0 should have recorded a recommendation_decision row for this trace_id"
+
+
 # ── Stock honesty: an OOS item must not be cart-eligible ──────────────────────
 def test_oos_product_not_cart_eligible():
     body = _suggest("fbp-oos", "office laptop")
