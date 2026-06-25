@@ -66,6 +66,9 @@ _CORE_MODULES = [
     # hard_constraint_rules / use_case_spec_implications / portable_weight_kg_max (parity-tested
     # byte-for-byte). use_case_patterns/portable_pattern already read from the profile.
     "src/app/services/query_decomposer.py",
+    # attribution backbone: decision→conversion measurement loop, vertical-blind (speaks only
+    # decision_id/trace_id/sku/uid_hash/value_cents/window — no product vocabulary).
+    "src/app/services/attribution.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
