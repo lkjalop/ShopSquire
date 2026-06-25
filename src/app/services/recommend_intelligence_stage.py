@@ -66,12 +66,18 @@ def _market_intelligence(state: IntelligenceStageState, results: List[Dict[str, 
             mi = gather_market_context(db, query=state.query, uid_hash=state.uid_hash, result_skus=seed, top_k=8)
         insights = mi.get("hippograph_insights") or []
         findings = mi.get("market_findings") or []
+        evidence = mi.get("market_evidence") or {}
+        note = mi.get("narration_note") or ""
         if not (insights or findings):
             return
         if insights:
             state.payload["hippograph_insights"] = insights
         if findings:
             state.payload["market_findings"] = findings
+        if evidence:
+            state.payload["market_evidence"] = evidence       # structured (frontend/agents)
+        if note:
+            state.payload["market_evidence_note"] = note      # narration-ready preamble (S2)
         if isinstance(state.kv, dict):  # flow into THIS turn's NQE agent (state.kv) + persist next turn
             state.kv["hippograph_insights"] = insights
             if findings:

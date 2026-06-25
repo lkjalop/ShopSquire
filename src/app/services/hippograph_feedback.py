@@ -22,16 +22,20 @@ def build_hippograph_insights(
     uid_hash: Optional[str] = None,
     seed_skus: Optional[List[str]] = None,
     seed_brands: Optional[List[str]] = None,
+    seed_terms: Optional[List[str]] = None,
     top_k: int = 8,
     limit: int = 2000,
 ) -> List[Dict[str, Any]]:
-    """Reward-weighted entities related to this turn's seeds. Empty list when there's nothing to
-    say (no graph, no seed in the graph) or on any error."""
+    """Reward-weighted entities related to this turn's seeds. Includes M3 ``finding`` nodes so a
+    market finding tied to a surfaced product (or a query term) recalls alongside it — query-scoped
+    by the seeds, not a global dump. Empty list when there's nothing to say or on any error."""
     try:
-        from src.app.services.hippograph import recall
+        from src.app.services.hippograph import recall, resolve_product
         from src.app.services.hippograph_db import build_from_db
 
-        graph = build_from_db(db, limit=limit)
+        # include_findings projects persisted M3 findings as `finding` nodes (fast — batch computes
+        # them); finding↔entity edges make a finding reachable from its product/term seed.
+        graph = build_from_db(db, limit=limit, include_findings=True)
         if not graph.nodes:
             return []
         seeds: List[str] = []
@@ -44,6 +48,14 @@ def build_hippograph_insights(
                 ref = resolve_brand_for_profile(b)
                 if ref:
                     seeds.append(ref.id)
+        # Query terms → canonical entity ids (same resolution the finding projection used), so an
+        # entity-scoped finding named by a query token is reachable. This is the query-scoping lever.
+        for term in (seed_terms or []):
+            if not term:
+                continue
+            ref = resolve_product(str(term))
+            if ref:
+                seeds.append(ref.id)
         seeds = [s for s in seeds if s in graph.nodes]  # only seeds the graph actually knows
         if not seeds:
             return []

@@ -135,6 +135,8 @@ def test_top_level_contract(i, query):
     # advisory-OFF fields must NOT appear unless their flag is enabled (operating rule).
     assert "hippograph_insights" not in body, "hippograph feedback must be flag-gated (absent by default)"
     assert "market_findings" not in body, "market intelligence must be flag-gated (absent by default)"
+    assert "market_evidence" not in body, "structured market evidence must be flag-gated (absent by default)"
+    assert "market_evidence_note" not in body, "narration evidence must be flag-gated (absent by default)"
     assert "ranking_experiment" not in body, "live ranking nudge must be flag-gated (absent by default)"
 
 

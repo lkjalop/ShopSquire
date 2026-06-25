@@ -10640,6 +10640,17 @@ def suggest(
             trace_to_context_summary=_trace_to_context_summary,
             image_security_preamble_note=_image_security_preamble_note,
         )
+        # S2 — supply structured market evidence to narration (default-OFF, behavior-changing). When
+        # the intelligence stage gathered query-scoped findings (HIPPOGRAPH_FEEDBACK_ENABLED), prepend
+        # them as verified factual context so the LLM can GROUND its answer in real findings — phrased
+        # to cite only what's listed, never invent. Absent the flag, narration is unchanged.
+        _ev_on = str(
+            os.getenv("MARKET_EVIDENCE_IN_NARRATION", "")
+            or (flags.get("MARKET_EVIDENCE_IN_NARRATION") if isinstance(flags, dict) else "")
+        ).strip().lower() in ("1", "true", "yes", "on")
+        _ev_note = payload.get("market_evidence_note") if isinstance(payload, dict) else None
+        if _ev_note and _ev_on:
+            _combined_preamble = f"{_combined_preamble}\n\n{_ev_note}" if _combined_preamble else _ev_note
         # Tier 1 — narration mode (RECOMMEND_NARRATION_MODE): blocking (default; LLM prose) | skip
         # (deterministic grounded answer only) | async (skip + enqueue prose out-of-band). LLM
         # narration was 85-91% of route latency; skip/async leave assistant_message None here so the
