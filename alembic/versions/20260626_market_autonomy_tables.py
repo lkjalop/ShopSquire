@@ -157,6 +157,20 @@ TABLE_STATEMENTS = (
         uplift_pct REAL, evidence_json TEXT, decided_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    # adaptive_action_audit — src/app/services/adaptive_action_gate.py
+    """
+    CREATE TABLE IF NOT EXISTS adaptive_action_audit (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT DEFAULT 'default',
+        action_type TEXT,
+        decision TEXT,
+        reason TEXT,
+        confidence REAL,
+        subject TEXT,
+        target TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 )
 
 # CREATE [UNIQUE] INDEX IF NOT EXISTS — copied verbatim from each service.
@@ -178,14 +192,15 @@ INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS ix_contact_audit_uid ON contact_audit(tenant_id, uid_hash, created_at)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ix_expasn_subject ON experiment_assignment(experiment_id, subject_hash)",
     "CREATE INDEX IF NOT EXISTS ix_expresult_exp ON experiment_result(experiment_id)",
+    "CREATE INDEX IF NOT EXISTS ix_adaptive_audit_action ON adaptive_action_audit(tenant_id, action_type, created_at)",
 )
 
 # Drop order: indexes implicitly drop with their tables on both PG and SQLite, so dropping the tables
 # is sufficient. Reverse of creation just for tidiness.
 _DROP_TABLES = (
-    "experiment_result", "experiment_assignment", "experiment_run", "experiment_ops_heartbeat",
-    "contact_audit", "contact_event", "contact_consent", "shadow_action", "human_feedback",
-    "market_finding", "market_signal",
+    "adaptive_action_audit", "experiment_result", "experiment_assignment", "experiment_run",
+    "experiment_ops_heartbeat", "contact_audit", "contact_event", "contact_consent", "shadow_action",
+    "human_feedback", "market_finding", "market_signal",
 )
 
 

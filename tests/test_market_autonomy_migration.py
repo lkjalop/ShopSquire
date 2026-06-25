@@ -18,7 +18,7 @@ _MIG = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "20260626_
 _EXPECTED_TABLES = {
     "market_signal", "market_finding", "human_feedback", "shadow_action",
     "contact_consent", "contact_event", "contact_audit", "experiment_ops_heartbeat",
-    "experiment_run", "experiment_assignment", "experiment_result",
+    "experiment_run", "experiment_assignment", "experiment_result", "adaptive_action_audit",
 }
 
 
@@ -38,7 +38,7 @@ def _apply(conn, statements):
 def test_migration_metadata(mig):
     assert mig.revision == "20260626_market_autonomy"
     assert mig.down_revision == "20260625_attribution"  # chains off the single existing head
-    assert len(mig.TABLE_STATEMENTS) == 11
+    assert len(mig.TABLE_STATEMENTS) == 12
 
 
 def test_upgrade_creates_all_tables_and_is_idempotent(mig):
@@ -84,7 +84,14 @@ def _runtime_engine():
     from sqlalchemy.pool import StaticPool
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
     s = sessionmaker(bind=eng, future=True)()
-    from src.app.services import contact_governance, experiments, human_feedback, market_signal, shadow_actions
+    from src.app.services import (
+        adaptive_action_gate,
+        contact_governance,
+        experiments,
+        human_feedback,
+        market_signal,
+        shadow_actions,
+    )
     from src.app.services.experiment_ops import _ensure_heartbeat
     from src.app.services.market_analysis import ensure_finding_table
     market_signal.ensure_table(s)
@@ -94,6 +101,7 @@ def _runtime_engine():
     contact_governance.ensure_tables(s)
     _ensure_heartbeat(s)
     experiments.ensure_tables(s)
+    adaptive_action_gate.ensure_table(s)
     s.commit()
     return eng
 

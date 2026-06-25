@@ -122,6 +122,22 @@ def _nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List
             live = is_experiment_live(db, exp_id)
             record_assignment(db, experiment_id=exp_id, subject_hash=subject, variant=variant)
             db.commit()
+        # UNIFIED GATE: an actual ranking adjustment (treatment + live + something to boost) must be
+        # AUTHORIZED — confidence threshold + action authorization + a DURABLE audit record. A DENY
+        # skips the nudge. The confidence is the strength of the hippograph recall driving it.
+        gate_reason = None
+        if variant == "treatment" and live and recall_ids:
+            from src.app.services.adaptive_action_gate import authorize
+            _conf = max((float(i.get("score") or 0.0) for i in (state.payload.get("hippograph_insights") or [])
+                        if isinstance(i, dict) and i.get("kind") == "product"), default=1.0)
+            with db_session() as gdb:
+                gate = authorize(gdb, action_type="adjust_ranking", confidence=_conf,
+                                 subject=subject, target=str(recall_ids[0]))
+            gate_reason = gate.reason
+            if not gate.allowed:
+                state.payload["ranking_experiment"] = {"experiment_id": exp_id, "variant": variant,
+                    "live": bool(live), "nudged": 0, "gate": gate_reason}
+                return results  # authorized DENY — no adjustment
         nudged = apply_experiment_nudge(results, recall_ids=recall_ids, assignment=variant, live=live,
                                         max_nudged_items=max_items)
         if nudged is not results:
@@ -130,6 +146,7 @@ def _nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List
         state.payload["ranking_experiment"] = {
             "experiment_id": exp_id, "variant": variant, "live": bool(live),
             "nudged": sum(1 for r in results if isinstance(r, dict) and r.get("_nudge_delta")),
+            "gate": gate_reason,
         }
         log_trace_event(trace_id=state.trace_id, event_type="ranking_nudge", source_type="agent",
                         source_id="ExperimentGate", target_type="recommendation", target_id=state.decision_id,

@@ -123,6 +123,8 @@ _CORE_MODULES = [
     "src/app/services/experiment_ops.py",
     # controlled template phrasing: tone-only message variants, opaque string — no product vocabulary.
     "src/app/services/template_phrasing.py",
+    # adaptive-action gate: confidence/authz/audit chokepoint, opaque action types — no product vocabulary.
+    "src/app/services/adaptive_action_gate.py",
     # offers/campaigns governance: readiness gate + governed dispatch planner, opaque channel/offer —
     # no product vocabulary.
     "src/app/services/campaign_governance.py",
