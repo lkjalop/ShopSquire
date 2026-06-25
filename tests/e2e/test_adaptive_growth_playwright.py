@@ -109,14 +109,24 @@ def test_gate2_finding_to_hippograph_to_narration_to_trace():
                        headers={"X-API-Key": API_KEY}, timeout=20)
     assert ev.status_code < 500, "decision trace endpoint must serve the trace"
 
-    # UI: the Decision Trace renders for this turn
+    # UI: the turn must RENDER a response (not just not-error). Assert the assistant produced visible
+    # output — a results region or a non-trivial assistant message — within a real timeout.
+    import re as _re
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(FRONTEND_URL, timeout=20000)
         page.get_by_placeholder("Type your message...").fill("what is trending in the market right now")
         page.keyboard.press("Enter")
-        page.wait_for_timeout(4000)
+        # wait for actual rendered content: a product card OR a decision-trace trigger OR assistant prose
+        rendered = page.locator(
+            "xpath=//*[contains(@class,'product') or contains(@class,'result') or "
+            "contains(@class,'message') or contains(@class,'assistant')]"
+            "| //*[contains(., 'Decision Trace')]"
+        )
+        rendered.first.wait_for(timeout=20000)  # FAILS if nothing renders (the prior version asserted nothing)
+        body = (page.locator("body").text_content() or "")
+        assert len(body) > 200, "expected a rendered response, got an empty/blank page"
         browser.close()
 
 
@@ -124,10 +134,14 @@ def test_gate2_finding_to_hippograph_to_narration_to_trace():
 @pytest.mark.skipif(_PW_SKIP, reason="playwright disabled or unsupported on this platform")
 @pytest.mark.skipif(os.getenv("GATE3_LIVE_RANKING", "0").lower() not in ("1", "true", "yes"),
                     reason="set GATE3_LIVE_RANKING=1 against a RANKING_NUDGE_EXPERIMENT_ENABLED + live experiment")
-def test_gate3_assignment_delta_outcome_guardrail_rollback():
-    """Before live ranking: two distinct subjects get distinct variants; treatment shows a ranking
-    delta; the experiment can be force-rolled-back and stops. (The full attributed-outcome → guardrail
-    → auto-rollback math is proven deterministically in test_adaptive_growth_pipeline.py.)"""
+def test_gate3_assignment_and_visible_ranking_delta():
+    """Before live ranking, the BROWSER-observable half: across enough subjects the experiment assigns
+    variants and a live treatment produces a visible ranking delta (nudged>=1) in the API the UI renders.
+
+    NOTE (honest scope): the attributed-outcome → guardrail-breach → AUTOMATIC-rollback half is NOT
+    asserted here — it needs the eval batch + time, so it is proven deterministically end-to-end in
+    tests/integration/test_adaptive_growth_pipeline.py::test_gate3_assignment_delta_outcome_guardrail_rollback.
+    This gate covers only what a browser can observe in one session."""
     if not _backend_up():
         pytest.skip("backend not reachable; skip gate-3")
     variants = set()
