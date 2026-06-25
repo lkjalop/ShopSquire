@@ -33,7 +33,7 @@ def build_hippograph_insights(
         import os
 
         from src.app.services.hippograph import recall, resolve_product
-        from src.app.services.hippograph_db import build_from_db
+        from src.app.services.hippograph_db import _DEFAULT_SKU_PATTERN, build_from_db
 
         # include_findings projects persisted M3 findings as `finding` nodes (fast — batch computes
         # them); finding↔entity edges make a finding reachable from its product/term seed.
@@ -52,12 +52,14 @@ def build_hippograph_insights(
                 ref = resolve_brand_for_profile(b)
                 if ref:
                     seeds.append(ref.id)
-        # Query terms → canonical entity ids (same resolution the finding projection used), so an
-        # entity-scoped finding named by a query token is reachable. This is the query-scoping lever.
+        # Query terms → canonical entity ids using the SAME sku_pattern the finding projection used
+        # (build_from_db's default), so an entity-scoped finding named by a query token resolves to the
+        # identical node id and is reachable. (Without the pattern a token resolves to a `name:` node
+        # that never matches the finding's product node.) This is the query-scoping lever.
         for term in (seed_terms or []):
             if not term:
                 continue
-            ref = resolve_product(str(term))
+            ref = resolve_product(str(term), sku_pattern=_DEFAULT_SKU_PATTERN)
             if ref:
                 seeds.append(ref.id)
         seeds = [s for s in seeds if s in graph.nodes]  # only seeds the graph actually knows
