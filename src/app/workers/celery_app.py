@@ -331,6 +331,13 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{max(1, int(os.getenv('HUMAN_FEEDBACK_BACKFILL_INTERVAL_MIN', '30')))}"),
             "args": (),
         }
+    # Shadow-action generation (findings → typed proposals, LOG-ONLY) — schedule only when enabled.
+    if str(os.getenv("SHADOW_ACTIONS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["shadow-actions"] = {
+            "task": "src.app.tasks.shadow_action_tasks.generate_shadow_actions",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('SHADOW_ACTIONS_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -362,6 +369,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.experiment_tasks.evaluate_experiments": {"queue": default_q},
             "src.app.tasks.market_analysis_tasks.run_market_analysis": {"queue": default_q},
             "src.app.tasks.human_feedback_tasks.human_feedback_backfill": {"queue": default_q},
+            "src.app.tasks.shadow_action_tasks.generate_shadow_actions": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -376,6 +384,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.experiment_tasks",
             "src.app.tasks.market_analysis_tasks",
             "src.app.tasks.human_feedback_tasks",
+            "src.app.tasks.shadow_action_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

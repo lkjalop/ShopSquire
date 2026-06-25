@@ -113,6 +113,8 @@ _CORE_MODULES = [
     # human-correction learning: signed feedback envelope + projection, opaque types/entities —
     # no product vocabulary.
     "src/app/services/human_feedback.py",
+    # typed shadow actions: findings → log-only proposals, opaque action/target — no product vocabulary.
+    "src/app/services/shadow_actions.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
