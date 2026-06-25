@@ -10274,9 +10274,17 @@ def suggest(
                 _hg_insights = _hg_insights_fn(_hg_db, uid_hash=uid_hash, seed_skus=_hg_seed_skus, top_k=8)
             if _hg_insights:
                 payload["hippograph_insights"] = _hg_insights
+                # Flow into THIS turn's NQE agent (state.kv is this kv dict) + persist for next turn.
+                if isinstance(kv, dict):
+                    kv["hippograph_insights"] = _hg_insights
                 _hg_kv = mem.get_kv(uid) or {}
                 _hg_kv["hippograph_insights"] = _hg_insights
                 mem.set_kv(uid, _hg_kv)
+                log_trace_event(
+                    trace_id=trace_id, event_type="hippograph_insight", source_type="agent",
+                    source_id="Hippograph", target_type="recommendation", target_id=decision_id,
+                    payload={"count": len(_hg_insights), "top": _hg_insights[:3]},
+                )
         except Exception as _e_hg:
             _record_partial_failure("hippograph_feedback", _e_hg, trace_id=trace_id)
     # Safe internet search (EXTERNAL_RESEARCH_ENABLED, off by default): a SEPARATE labeled source.

@@ -63,3 +63,16 @@ def test_empty_when_seed_not_in_graph(db):
 
 def test_empty_on_bad_db():
     assert build_hippograph_insights(None, uid_hash="u1") == []
+
+
+def test_insights_exclude_internal_nodes(db):
+    # a decision→product edge + the seed user; insights must carry the PRODUCT, not the
+    # decision/user plumbing nodes (GPT-5.5: recall was surfacing a decision + the user node).
+    _tev(db, "decision", "D1", "product", "GAM-1")
+    _tev(db, "user", "u1", "product", "GAM-1")
+    db.commit()
+    ins = build_hippograph_insights(db, uid_hash="u1", seed_skus=["GAM-1"], top_k=8)
+    ids = [i["id"] for i in ins]
+    assert all(i["kind"] in {"product", "brand", "finding", "segment"} for i in ins)
+    assert not any(x.startswith("decision:") for x in ids)
+    assert "u1" not in ids  # the seed user is excluded

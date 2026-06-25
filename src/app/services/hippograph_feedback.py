@@ -11,6 +11,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+# Buyer-/analysis-facing entity kinds. Internal graph nodes (the current user, decision nodes,
+# agents) are excluded from insights — they are graph plumbing, not evidence.
+_USEFUL_KINDS = {"product", "brand", "finding", "segment"}
+
 
 def build_hippograph_insights(
     db,
@@ -44,15 +48,21 @@ def build_hippograph_insights(
         if not seeds:
             return []
         out: List[Dict[str, Any]] = []
-        for nid, score in recall(graph, seeds, top_k=top_k):
+        # Over-fetch then keep only useful kinds, so internal nodes (decision/user/agent) don't crowd
+        # out real product/market evidence (GPT-5.5: recall was returning a decision + the user node).
+        for nid, score in recall(graph, seeds, top_k=max(top_k * 4, top_k)):
             node = graph.nodes.get(nid)
+            if not node or node.kind not in _USEFUL_KINDS:
+                continue
             out.append({
                 "id": nid,
-                "kind": node.kind if node else None,
-                "label": node.label if node else nid,
+                "kind": node.kind,
+                "label": node.label,
                 "score": round(float(score), 4),
-                "reward_weight": round(float(node.weight), 2) if node else 0.0,
+                "reward_weight": round(float(node.weight), 2),
             })
+            if len(out) >= top_k:
+                break
         return out
     except Exception:
         return []

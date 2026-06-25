@@ -326,6 +326,9 @@ def run_recommend_nqe_stage(
                 turn_intent=state.turn_intent,
                 order_quantity=order_quantity if isinstance(order_quantity, int) else None,
                 identity_residual_question=state.constraints.get("_identity_residual_question"),
+                # Advisory hippograph recall for this turn (written upstream into kv when the flag is
+                # on); empty otherwise. Carried for the NQE agent to read.
+                hippograph_context=(state.kv.get("hippograph_insights") or []) if isinstance(state.kv, dict) else [],
             )
             engine = NextQuestionEngine(Retriever(), QuestionTemplateCatalog())
             next_questions = [q.model_dump() for q in engine.propose(nqe_input)]
