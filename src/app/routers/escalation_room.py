@@ -1658,6 +1658,20 @@ def create_incident_record(
                 created = True
         except Exception:
             logging.getLogger(__name__).exception("incident_auto_create_failed")
+    # S3 human-correction learning: an escalation means the autonomous flow under-served — a negative
+    # signal against the user + decision (gated by HUMAN_FEEDBACK_CAPTURE_ENABLED; inert + best-effort).
+    # Uses the main app DB (where human_feedback lives), not the incident engine.
+    if created:
+        try:
+            from src.app.models.db import db_session as _hf_db
+            from src.app.services.human_feedback import capture_feedback
+            _uidh = str((context or {}).get("uid_hash") or (context or {}).get("uid") or "") or None
+            with _hf_db() as _hfdb:
+                capture_feedback(_hfdb, "escalation", subject_hash=_uidh,
+                                 entity_ref=str(trace_id or incident_id), source="escalation_room",
+                                 dedup_fields={"incident_id": incident_id})
+        except Exception:
+            pass
     toks = _issue_tokens(incident_id)
     _seed_incident_chat_context(
         incident_id,

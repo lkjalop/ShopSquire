@@ -110,3 +110,25 @@ def test_task_registered_and_default_off():
     assert "src.app.tasks.human_feedback_tasks" in (celery_app.conf.imports or ())
     assert _enabled() is False
     assert human_feedback_backfill.run() == {"skipped": "disabled"}
+
+
+# ── event-site capture hook (gated, default-OFF) ─────────────────────────────
+def test_capture_feedback_is_inert_by_default(db, monkeypatch):
+    monkeypatch.delenv("HUMAN_FEEDBACK_CAPTURE_ENABLED", raising=False)
+    assert hf.capture_enabled() is False
+    assert hf.capture_feedback(db, "approval", entity_ref="P1", subject_hash="u1") is False  # no-op
+    assert hf.load_recent(db) == []  # nothing written when capture is off
+
+
+def test_capture_feedback_writes_when_enabled(db, monkeypatch):
+    monkeypatch.setenv("HUMAN_FEEDBACK_CAPTURE_ENABLED", "1")
+    assert hf.capture_enabled() is True
+    assert hf.capture_feedback(db, "nqe_correction", entity_ref="use_case", subject_hash="u1",
+                               source="nqe", dedup_fields={"uid": "u1", "field": "use_case"}) is True
+    rows = hf.load_recent(db)
+    assert len(rows) == 1 and rows[0]["feedback_type"] == "nqe_correction" and rows[0]["polarity"] > 0
+
+
+def test_capture_feedback_never_raises(monkeypatch):
+    monkeypatch.setenv("HUMAN_FEEDBACK_CAPTURE_ENABLED", "1")
+    assert hf.capture_feedback(None, "approval", entity_ref="P1") is False  # bad db → False, no raise

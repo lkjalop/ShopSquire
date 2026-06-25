@@ -299,6 +299,17 @@ def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_ME
         if not found:
             items.append({"sku": payload.sku, "quantity": requested_qty})
         _save_cart(cart_id, items)
+        # S3 human-correction learning: adding a SKU to cart is an acceptance signal for that product
+        # (gated by HUMAN_FEEDBACK_CAPTURE_ENABLED; inert + best-effort by default).
+        try:
+            from src.app.models.db import db_session as _hf_db
+            from src.app.services.human_feedback import capture_feedback
+            with _hf_db() as _hfdb:
+                capture_feedback(_hfdb, "recommendation_accepted", subject_hash=str(payload.uid),
+                                 entity_ref=str(payload.sku), source="cart.add_item",
+                                 dedup_fields={"uid": str(payload.uid), "sku": str(payload.sku)})
+        except Exception:
+            pass
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
         hydrated = _with_bundle_state(cart_id=cart_id, uid=payload.uid, role=role, hydrated=hydrated)

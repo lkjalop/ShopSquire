@@ -173,6 +173,26 @@ def record_feedback(db, feedback_type: str, *, commit: bool = True, **kw) -> boo
         return False
 
 
+def capture_enabled() -> bool:
+    """Whether event-site feedback capture is on. Default-OFF so wiring a hook at a call site is inert
+    until a deployment opts in (HUMAN_FEEDBACK_CAPTURE_ENABLED) — capturing human judgements is pure
+    data ingestion (Phase-1 visibility), but gated to avoid surprise writes."""
+    import os
+    return str(os.getenv("HUMAN_FEEDBACK_CAPTURE_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def capture_feedback(db, feedback_type: str, **kw) -> bool:
+    """The GATED, best-effort wrapper that call sites use. A no-op unless HUMAN_FEEDBACK_CAPTURE_ENABLED
+    is set — so dropping this hook into a router/event site never changes behaviour by default and never
+    raises into the caller. When enabled, records the judgement via record_feedback()."""
+    if not capture_enabled():
+        return False
+    try:
+        return record_feedback(db, feedback_type, **kw)
+    except Exception:
+        return False
+
+
 def load_recent(db, *, limit: int = 500, tenant_id: str = DEFAULT_TENANT) -> List[Dict[str, Any]]:
     """Recent feedback rows (the read side for projection), tenant-scoped. Best-effort."""
     if db is None:

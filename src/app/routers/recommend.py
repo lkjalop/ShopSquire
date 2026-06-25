@@ -6091,6 +6091,18 @@ def suggest(
                 structured_state = _nqe_state
             except Exception:
                 pass
+            # S3 human-correction learning: the user's NQE answer is an explicit correction signal —
+            # capture it (gated by HUMAN_FEEDBACK_CAPTURE_ENABLED; inert + best-effort by default).
+            try:
+                from src.app.models.db import db_session as _hf_db
+                from src.app.services.human_feedback import capture_feedback
+                with _hf_db() as _hfdb:
+                    for _fk, _fv in nqe_selection_applied.items():
+                        capture_feedback(_hfdb, "nqe_correction", subject_hash=uid_hash,
+                                         entity_ref=str(_fk), source="nqe",
+                                         dedup_fields={"uid": str(uid), "field": str(_fk), "value": str(_fv)})
+            except Exception:
+                pass
             log_trace_event(
                 trace_id=trace_id,
                 event_type="nqe_option_applied",
