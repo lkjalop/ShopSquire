@@ -179,5 +179,80 @@ def load_recent_signals(db, *, limit: int = 2000) -> List[Dict[str, Any]]:
 
 
 def run_analysis(db, *, limit: int = 2000, anomaly_fn: Optional[Callable] = None) -> List[MarketFinding]:
-    """Load recent market_signal rows + analyze them. The DB entry point for the task/dashboard."""
+    """Load recent market_signal rows + analyze them. The DB entry point for the BATCH task.
+
+    NOTE: analysis runs the real statistical models (~1.6s) — batch-only, never the request path.
+    The hot path reads PERSISTED findings via load_recent_findings()."""
     return analyze(load_recent_signals(db, limit=limit), anomaly_fn=anomaly_fn)
+
+
+# ── findings persistence (batch writes, hot path reads) ──────────────────────
+_FINDING_DDL = """
+CREATE TABLE IF NOT EXISTS market_finding (
+    id TEXT PRIMARY KEY,
+    finding_type TEXT,
+    entity_ref TEXT,
+    severity TEXT,
+    confidence REAL,
+    summary TEXT,
+    evidence_json TEXT,
+    window TEXT,
+    detected_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+"""
+_FINDING_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS ix_market_finding_type ON market_finding(finding_type)",
+    "CREATE INDEX IF NOT EXISTS ix_market_finding_detected ON market_finding(detected_at)",
+)
+
+
+def ensure_finding_table(db) -> None:
+    db.execute(text(_FINDING_DDL))
+    for stmt in _FINDING_INDEXES:
+        db.execute(text(stmt))
+
+
+def persist_findings(db, findings: List[MarketFinding]) -> int:
+    """Write a batch run's findings. Returns the count written. Best-effort; never raises."""
+    if db is None or not findings:
+        return 0
+    try:
+        import json
+        import uuid
+        ensure_finding_table(db)
+        n = 0
+        for f in findings:
+            db.execute(
+                text("INSERT INTO market_finding (id, finding_type, entity_ref, severity, confidence, "
+                     "summary, evidence_json, window) VALUES (:i,:t,:e,:s,:c,:m,:j,:w)"),
+                {"i": str(uuid.uuid4()), "t": f.finding_type, "e": f.entity_ref, "s": f.severity,
+                 "c": float(f.confidence), "m": f.summary, "j": json.dumps(f.evidence, default=str), "w": f.window},
+            )
+            n += 1
+        return n
+    except Exception:
+        return 0
+
+
+def load_recent_findings(db, *, limit: int = 50) -> List[MarketFinding]:
+    """Read recent PERSISTED findings (fast — the hot-path read). Best-effort."""
+    if db is None:
+        return []
+    try:
+        rows = db.execute(
+            text("SELECT finding_type, entity_ref, severity, confidence, summary, evidence_json, window "
+                 "FROM market_finding ORDER BY detected_at DESC LIMIT :lim"),
+            {"lim": int(limit)},
+        ).fetchall()
+    except Exception:
+        return []
+    import json
+    out: List[MarketFinding] = []
+    for r in rows:
+        try:
+            ev = json.loads(r[5]) if r[5] else {}
+        except Exception:
+            ev = {}
+        out.append(MarketFinding(r[0], r[1], r[2], float(r[3] or 0.0), r[4] or "",
+                                 ev if isinstance(ev, dict) else {}, r[6] or "recent"))
+    return out

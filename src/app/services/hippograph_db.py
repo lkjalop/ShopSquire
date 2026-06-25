@@ -24,8 +24,13 @@ _DEFAULT_SKU_PATTERN = r"[A-Za-z0-9][\w.\-]{0,63}"
 def _maybe_project_findings(db, graph: HippoGraph, *, limit: int, sku_pattern: str, anomaly_fn) -> HippoGraph:
     try:
         from src.app.services.hippograph import project_findings
-        from src.app.services.market_analysis import run_analysis
-        return project_findings(graph, run_analysis(db, limit=limit, anomaly_fn=anomaly_fn), sku_pattern=sku_pattern)
+        from src.app.services.market_analysis import load_recent_findings, run_analysis
+        # Read PERSISTED findings (fast — the batch computes them); only fall back to inline analysis
+        # when an anomaly_fn is injected (tests) or no findings have been persisted yet.
+        findings = load_recent_findings(db, limit=200)
+        if not findings or anomaly_fn is not None:
+            findings = run_analysis(db, limit=limit, anomaly_fn=anomaly_fn)
+        return project_findings(graph, findings, sku_pattern=sku_pattern)
     except Exception:
         return graph  # findings are additive — degrade to the base graph, never break it
 

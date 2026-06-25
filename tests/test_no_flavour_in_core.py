@@ -104,6 +104,9 @@ _CORE_MODULES = [
     # experiment evaluation runtime: per-variant uplift → decide → auto-revert; opaque metrics —
     # no product vocabulary.
     "src/app/services/experiment_eval.py",
+    # market intelligence agent: read-only context gatherer (recall + gated findings), opaque —
+    # no product vocabulary.
+    "src/app/services/market_intelligence_agent.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

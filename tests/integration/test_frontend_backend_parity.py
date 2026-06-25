@@ -134,6 +134,7 @@ def test_top_level_contract(i, query):
     assert isinstance(body.get("next_questions") or [], list), "next_questions must be a list"
     # advisory-OFF fields must NOT appear unless their flag is enabled (operating rule).
     assert "hippograph_insights" not in body, "hippograph feedback must be flag-gated (absent by default)"
+    assert "market_findings" not in body, "market intelligence must be flag-gated (absent by default)"
     assert "ranking_experiment" not in body, "live ranking nudge must be flag-gated (absent by default)"
 
 

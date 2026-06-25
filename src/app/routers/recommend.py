@@ -10267,26 +10267,34 @@ def suggest(
     # — never changes ranking or acts; flag-gated until benched. Isolated session, never blocks.
     if flags.get("HIPPOGRAPH_FEEDBACK_ENABLED", False) and not simulate:
         try:
-            from src.app.services.hippograph_feedback import build_hippograph_insights as _hg_insights_fn
+            from src.app.services.market_intelligence_agent import gather_market_context as _mi_ctx
             from src.app.models.db import db_session as _hg_db_session
             _hg_seed_skus = [r.get("sku") for r in results if isinstance(r, dict) and r.get("sku")][:5]
             with _hg_db_session() as _hg_db:
-                _hg_insights = _hg_insights_fn(_hg_db, uid_hash=uid_hash, seed_skus=_hg_seed_skus, top_k=8)
-            if _hg_insights:
-                payload["hippograph_insights"] = _hg_insights
+                _mi = _mi_ctx(_hg_db, query=query, uid_hash=uid_hash, result_skus=_hg_seed_skus, top_k=8)
+            _hg_insights = _mi.get("hippograph_insights") or []
+            _mi_findings = _mi.get("market_findings") or []
+            if _hg_insights or _mi_findings:
+                if _hg_insights:
+                    payload["hippograph_insights"] = _hg_insights
+                if _mi_findings:
+                    payload["market_findings"] = _mi_findings
                 # Flow into THIS turn's NQE agent (state.kv is this kv dict) + persist for next turn.
                 if isinstance(kv, dict):
                     kv["hippograph_insights"] = _hg_insights
+                    if _mi_findings:
+                        kv["market_findings"] = _mi_findings
                 _hg_kv = mem.get_kv(uid) or {}
                 _hg_kv["hippograph_insights"] = _hg_insights
                 mem.set_kv(uid, _hg_kv)
                 log_trace_event(
-                    trace_id=trace_id, event_type="hippograph_insight", source_type="agent",
-                    source_id="Hippograph", target_type="recommendation", target_id=decision_id,
-                    payload={"count": len(_hg_insights), "top": _hg_insights[:3]},
+                    trace_id=trace_id, event_type="market_intelligence", source_type="agent",
+                    source_id="Market_Intelligence_Agent", target_type="recommendation", target_id=decision_id,
+                    payload={"insights": len(_hg_insights), "findings": len(_mi_findings),
+                             "needs_market_evidence": bool(_mi.get("needs_market_evidence"))},
                 )
         except Exception as _e_hg:
-            _record_partial_failure("hippograph_feedback", _e_hg, trace_id=trace_id)
+            _record_partial_failure("market_intelligence", _e_hg, trace_id=trace_id)
     # Reversible ranking nudge THROUGH the experiment gate (Phase 3 — the FIRST measured live
     # adaptation, default-OFF). A LIVE ranking experiment gives TREATMENT users a small bounded boost
     # to hippograph-recalled products; control + non-live users are untouched; fully reversible (capped

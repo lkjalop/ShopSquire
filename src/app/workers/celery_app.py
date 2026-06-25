@@ -317,6 +317,13 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{max(1, int(os.getenv('EXPERIMENT_EVAL_INTERVAL_MIN', '30')))}"),
             "args": (),
         }
+    # Market analysis (M3 detectors → persisted findings) — schedule only when enabled.
+    if str(os.getenv("MARKET_ANALYSIS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["market-analysis"] = {
+            "task": "src.app.tasks.market_analysis_tasks.run_market_analysis",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('MARKET_ANALYSIS_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -346,6 +353,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.attribution_tasks.attribution_reward_feed": {"queue": default_q},
             "src.app.tasks.market_signal_tasks.market_signal_backfill": {"queue": default_q},
             "src.app.tasks.experiment_tasks.evaluate_experiments": {"queue": default_q},
+            "src.app.tasks.market_analysis_tasks.run_market_analysis": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -358,6 +366,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.attribution_tasks",
             "src.app.tasks.market_signal_tasks",
             "src.app.tasks.experiment_tasks",
+            "src.app.tasks.market_analysis_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
