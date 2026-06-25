@@ -80,6 +80,9 @@ _CORE_MODULES = [
     # hippograph projection + recall: build the in-memory graph from trace/conversion rows and
     # spread-activation recall, reward-weighted. Node math only — zero product vocabulary.
     "src/app/services/hippograph.py",
+    # DB-backed hippograph projection: queries the agnostic trace/conversion tables, no product
+    # vocabulary (brand aliases come from the profile).
+    "src/app/services/hippograph_db.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

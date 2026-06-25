@@ -1999,6 +1999,13 @@ def create_app() -> FastAPI:
 
         logging.getLogger("shopsquire.startup").exception("failed to include decision_trace_events router: %s", e)
     try:
+        from src.app.routers.hippograph import router as hippograph_router
+        app.include_router(hippograph_router)
+    except Exception as e:
+        import logging
+
+        logging.getLogger("shopsquire.startup").exception("failed to include hippograph router: %s", e)
+    try:
         from src.app.routers.decision_replay import router as decision_replay_router
         app.include_router(decision_replay_router)
     except Exception as e:

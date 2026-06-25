@@ -1,0 +1,81 @@
+"""DB-backed hippograph projection + the read-only /api/v1/hippograph/recall endpoint."""
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from src.app.main import app
+from src.app.services import attribution
+from src.app.services.hippograph import recall
+from src.app.services.hippograph_db import build_from_db
+from tests.utils import default_headers
+
+
+@pytest.fixture()
+def db():
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    s = sessionmaker(bind=eng, future=True)()
+    s.execute(text(
+        "CREATE TABLE decision_trace_events (id TEXT, trace_id TEXT, event_type TEXT, "
+        "source_type TEXT, source_id TEXT, target_type TEXT, target_id TEXT, payload TEXT, "
+        "created_at TEXT DEFAULT CURRENT_TIMESTAMP)"))
+    attribution.ensure_tables(s)
+    s.commit()
+    try:
+        yield s
+    finally:
+        s.close()
+
+
+def _tev(s, st, si, tt, ti):
+    s.execute(text(
+        "INSERT INTO decision_trace_events (id, trace_id, event_type, source_type, source_id, "
+        "target_type, target_id, payload) VALUES (:id,'T','e',:st,:si,:tt,:ti,'{}')"),
+        {"id": f"{si}-{ti}", "st": st, "si": si, "tt": tt, "ti": ti})
+
+
+def test_build_from_db_projects_trace_and_reward(db):
+    _tev(db, "user", "u1", "product", "GAM-1")
+    _tev(db, "user", "u1", "product", "GAM-2")
+    db.execute(text(
+        "INSERT INTO conversion_event (id, decision_id, order_id, uid_hash, attributed_skus_json, "
+        "value_cents, converted_at) VALUES ('c1','D1','O1','u1','[\"GAM-1\"]',500000,'2020-01-01')"))
+    db.commit()
+    g = build_from_db(db)
+    # SKUs stayed canonical (sku_pattern), not name-mangled
+    assert "GAM-1" in g.nodes and "GAM-2" in g.nodes
+    assert g.nodes["GAM-1"].weight > 0  # conversion reward applied
+    order = [n for n, _ in recall(g, ["u1"], top_k=5)]
+    assert order.index("GAM-1") < order.index("GAM-2")  # the converter is recalled first
+
+
+def test_build_from_db_none_is_empty():
+    g = build_from_db(None)
+    assert g.nodes == {} and g.edges == {}
+
+
+def test_build_from_db_degrades_when_tables_absent():
+    # an engine with no tables → best-effort empty graph, never raises
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    s = sessionmaker(bind=eng, future=True)()
+    try:
+        g = build_from_db(s)
+        assert g.nodes == {}
+    finally:
+        s.close()
+
+
+# ── endpoint contract (read-only, role-gated) ────────────────────────────────
+_client = TestClient(app, headers=default_headers())
+
+
+def test_hippograph_recall_endpoint_contract():
+    r = _client.get("/api/v1/hippograph/recall", params={"seed": "GAM-1", "kind": "product", "top_k": 5})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["kind"] == "product"
+    assert isinstance(b["recall"], list)
+    assert "node_count" in b and "edge_count" in b

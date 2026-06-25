@@ -33,11 +33,11 @@ class HippoGraph:
     adjacency: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
 
-def _node_for(kind_hint: Any, raw_id: Any, *, alias_map, known, catalog_skus) -> Optional[Tuple[str, str, str]]:
+def _node_for(kind_hint: Any, raw_id: Any, *, alias_map, known, catalog_skus, sku_pattern=None) -> Optional[Tuple[str, str, str]]:
     """Map a (type, id) trace endpoint to a canonical (node_id, kind, label)."""
     k = str(kind_hint or "").strip().lower()
     if k == "product":
-        ref = resolve_product(raw_id, catalog_skus=catalog_skus)
+        ref = resolve_product(raw_id, sku_pattern=sku_pattern, catalog_skus=catalog_skus)
         return (ref.id, "product", ref.label) if ref else None
     if k == "brand":
         ref = resolve_brand(raw_id, alias_map=alias_map, known=known)
@@ -59,11 +59,14 @@ def project_graph(
     alias_map: Optional[Dict[str, str]] = None,
     known: Optional[Iterable[str]] = None,
     catalog_skus: Optional[Iterable[str]] = None,
+    sku_pattern: Optional[str] = None,
 ) -> HippoGraph:
     """Build the in-memory graph from trace edges + conversion reward edges.
 
     trace_rows: dicts with source_type/source_id/target_type/target_id (event_type optional).
     conversion_rows: dicts with decision_id, attributed_skus (list), value_cents.
+    Pass ``catalog_skus`` (authoritative) or ``sku_pattern`` (permissive, for DB ids) so product
+    ids stay canonical instead of being treated as free-text names.
     """
     g = HippoGraph()
 
@@ -81,8 +84,8 @@ def project_graph(
         g.adjacency.setdefault(d, {})[s] = g.adjacency.setdefault(d, {}).get(s, 0.0) + w * 0.5
 
     for r in (trace_rows or []):
-        s = _node_for(r.get("source_type"), r.get("source_id"), alias_map=alias_map, known=known, catalog_skus=catalog_skus)
-        d = _node_for(r.get("target_type"), r.get("target_id"), alias_map=alias_map, known=known, catalog_skus=catalog_skus)
+        s = _node_for(r.get("source_type"), r.get("source_id"), alias_map=alias_map, known=known, catalog_skus=catalog_skus, sku_pattern=sku_pattern)
+        d = _node_for(r.get("target_type"), r.get("target_id"), alias_map=alias_map, known=known, catalog_skus=catalog_skus, sku_pattern=sku_pattern)
         if s:
             ensure(*s)
         if d:
@@ -97,7 +100,7 @@ def project_graph(
         if dn:
             ensure(dn, "decision", decision_id)
         for sku in (c.get("attributed_skus") or []):
-            ref = resolve_product(sku, catalog_skus=catalog_skus)
+            ref = resolve_product(sku, sku_pattern=sku_pattern, catalog_skus=catalog_skus)
             if not ref:
                 continue
             node = ensure(ref.id, "product", ref.label)
