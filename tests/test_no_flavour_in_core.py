@@ -86,6 +86,9 @@ _CORE_MODULES = [
     # hippograph feedback injection: reward-weighted recall for the current turn (advisory-OFF),
     # node math + ids only — zero product vocabulary.
     "src/app/services/hippograph_feedback.py",
+    # market signal envelope + ingestion (Module 1): normalize+reliability over opaque signals;
+    # signal_type/source are labels, payload is opaque — zero product vocabulary.
+    "src/app/services/market_signal.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
