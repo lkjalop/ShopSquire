@@ -4511,8 +4511,8 @@ def suggest(
                 },
                 trace_id,
             )
-    except Exception:
-        pass  # Inventory fast-path failure is non-fatal; fall through to normal pipeline
+    except Exception as _e_inv_fastpath:  # observability boundary: never raises
+        _record_partial_failure("inventory_fast_path", _e_inv_fastpath, trace_id=trace_id)
 
     # MAESTRO boundary check for the Orchestrator agent at recommend ingress.
     # In "block" mode (MAESTRO_ENFORCEMENT_MODE=block), a critical/high violation
@@ -6666,8 +6666,8 @@ def suggest(
                         "apps": (_uc_spec.get("apps") or [])[:5],
                     },
                 )
-    except Exception:
-        pass
+    except Exception as _e_uc_advisor:  # observability boundary
+        _record_partial_failure("use_case_advisor_enrichment", _e_uc_advisor, trace_id=trace_id)
     # ── Game/Software Requirements Enrichment ──
     _detected_games_for_nqe: list = []
     _detected_software_for_nqe: list = []
@@ -6698,8 +6698,8 @@ def suggest(
             if _sw_reqs.get("gpu_needed"):
                 constraints["must_have_gpu"] = True
                 constraints["gpu_preference"] = "with_discrete"
-    except Exception:
-        pass
+    except Exception as _e_game_sw:  # observability boundary
+        _record_partial_failure("game_software_requirements_enrichment", _e_game_sw, trace_id=trace_id)
     try:
         q_low = str(query_effective or "").lower()
         uc_low = str(constraints.get("use_case") or "").lower()
@@ -6740,8 +6740,8 @@ def suggest(
             )
             if not _any_apple_hint and not constraints.get("_image_os_hint"):
                 constraints["_image_os_hint"] = "windows"
-    except Exception:
-        pass
+    except Exception as _e_generic_gaming:  # observability boundary
+        _record_partial_failure("generic_gaming_defaults", _e_generic_gaming, trace_id=trace_id)
     # ── Product Identity Agent: extract identity from image labels/OCR text ──
     _identity_constraints: Dict[str, Any] = {}
     _id_result: Dict[str, Any] = {}
