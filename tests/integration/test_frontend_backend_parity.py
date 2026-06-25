@@ -132,6 +132,8 @@ def test_top_level_contract(i, query):
     body = _suggest(f"fbp-top-{i}", query)
     assert isinstance(body.get("results"), list), "results must be a list"
     assert isinstance(body.get("next_questions") or [], list), "next_questions must be a list"
+    # advisory-OFF fields must NOT appear unless their flag is enabled (operating rule).
+    assert "hippograph_insights" not in body, "hippograph feedback must be flag-gated (absent by default)"
 
 
 # ── Per-product item contract (the fields the grid renders) ──────────────────

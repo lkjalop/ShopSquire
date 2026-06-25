@@ -10262,6 +10262,23 @@ def suggest(
                 _attr_db.commit()
         except Exception as _e_attr:
             _record_partial_failure("attribution_capture", _e_attr, trace_id=trace_id)
+    # Hippograph feedback (advisory-OFF): annotate the response + session with reward-weighted
+    # entities the graph relates to this turn, so agents/dashboards can READ what it knows. Read-only
+    # — never changes ranking or acts; flag-gated until benched. Isolated session, never blocks.
+    if flags.get("HIPPOGRAPH_FEEDBACK_ENABLED", False) and not simulate:
+        try:
+            from src.app.services.hippograph_feedback import build_hippograph_insights as _hg_insights_fn
+            from src.app.models.db import db_session as _hg_db_session
+            _hg_seed_skus = [r.get("sku") for r in results if isinstance(r, dict) and r.get("sku")][:5]
+            with _hg_db_session() as _hg_db:
+                _hg_insights = _hg_insights_fn(_hg_db, uid_hash=uid_hash, seed_skus=_hg_seed_skus, top_k=8)
+            if _hg_insights:
+                payload["hippograph_insights"] = _hg_insights
+                _hg_kv = mem.get_kv(uid) or {}
+                _hg_kv["hippograph_insights"] = _hg_insights
+                mem.set_kv(uid, _hg_kv)
+        except Exception as _e_hg:
+            _record_partial_failure("hippograph_feedback", _e_hg, trace_id=trace_id)
     # Safe internet search (EXTERNAL_RESEARCH_ENABLED, off by default): a SEPARATE labeled source.
     # NullFetcher = no network until a real allowlisted httpx adapter is wired -> stays 'empty' even
     # if enabled. NEVER merged into owned `results`/cart (external items have sku=None -> structurally

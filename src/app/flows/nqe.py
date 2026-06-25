@@ -72,6 +72,9 @@ class NQEInput(BaseModel):
     answered_fields: Dict[str, Any] = {}
     # Extracted structured facts from conversation (Layer 1 memory)
     facts: Dict[str, Any] = {}
+    # Reward-weighted entities the hippograph recalls for this turn (advisory-OFF; populated only
+    # when HIPPOGRAPH_FEEDBACK_ENABLED). Carried for agent context; consumption is opt-in.
+    hippograph_context: List[Dict[str, Any]] = []
     # Image context fields (populated when image is uploaded)
     has_image: bool = False
     image_identity_confidence: float = 1.0  # 0.0 = unknown, 1.0 = fully identified
