@@ -81,11 +81,18 @@ def assess_availability(
 
     if shortfall <= 0:
         result.update({"feasible": True, "eta_days": 0, "fulfilment": "in_stock"})
+        # Per-SKU allocation evidence so "all N in stock" is auditable (which SKU, how many).
+        result["allocation"] = [{"sku": primary, "from_stock": n, "from_reorder": 0, "eta_days": 0}]
         return result
 
     lead = int(lead_time_fn(primary) or 7)
     result["lead_time_days"] = lead
     result["eta_days"] = lead
+    # Per-SKU allocation evidence: how the quantity is covered (current stock vs supplier reorder),
+    # so the availability claim is auditable in the payload + decision trace, not just asserted.
+    result["allocation"] = [{
+        "sku": primary, "from_stock": in_stock, "from_reorder": shortfall, "eta_days": lead,
+    }]
     if horizon_days is not None:
         result["feasible"] = lead <= int(horizon_days)
         result["fulfilment"] = "reorder_within_horizon" if result["feasible"] else "reorder_exceeds_horizon"
@@ -128,3 +135,28 @@ def availability_summary_line(verdict: Dict[str, Any]) -> str:
         return (f"{base}; the other {short} would take {eta_txt}, beyond your {int(horizon)}-day window "
                 f"— I can draft a supplier reorder for your approval.")
     return f"{base}; the other {short} in {eta_txt} via supplier (a draft reorder is available on request)."
+
+
+def availability_allocation_line(verdict: Dict[str, Any]) -> str:
+    """Auditable per-SKU allocation evidence ("SKU-X: 5 of 10 from stock, 5 via reorder (ETA 7d)").
+    Pure formatting from the structured allocation; empty when there's nothing to attribute."""
+    if not isinstance(verdict, dict):
+        return ""
+    rows = verdict.get("allocation")
+    if not isinstance(rows, list) or not rows:
+        return ""
+    parts: List[str] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        sku = str(r.get("sku") or "")
+        from_stock = int(r.get("from_stock") or 0)
+        from_reorder = int(r.get("from_reorder") or 0)
+        total = from_stock + from_reorder
+        seg = f"{sku}: {from_stock} of {total} from stock"
+        if from_reorder > 0:
+            eta = r.get("eta_days")
+            eta_txt = f" (ETA ~{int(eta)}d)" if eta else ""
+            seg += f", {from_reorder} via reorder{eta_txt}"
+        parts.append(seg)
+    return " | ".join(parts)

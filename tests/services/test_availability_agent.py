@@ -83,3 +83,21 @@ def test_full_chain_decompose_to_line():
                             stock_fn=lambda s: {"LAP-1": 4}, lead_time_fn=lambda x: 14)
     line = availability_summary_line(v)
     assert "4 in stock now" in line and "10 within 28 days is feasible" in line
+
+
+# ── Per-SKU allocation evidence (auditable availability) ─────────────────────
+def test_allocation_evidence_on_shortfall():
+    from src.app.services.availability_agent import assess_availability, availability_allocation_line
+    v = assess_availability(["GAM-X"], 10, horizon_days=14,
+                            stock_fn=lambda s: {"GAM-X": 5}, lead_time_fn=lambda s: 7)
+    alloc = v.get("allocation")
+    assert alloc == [{"sku": "GAM-X", "from_stock": 5, "from_reorder": 5, "eta_days": 7}]
+    assert availability_allocation_line(v) == "GAM-X: 5 of 10 from stock, 5 via reorder (ETA ~7d)"
+
+
+def test_allocation_evidence_in_stock():
+    from src.app.services.availability_agent import assess_availability, availability_allocation_line
+    v = assess_availability(["GAM-X"], 10, horizon_days=14,
+                            stock_fn=lambda s: {"GAM-X": 13}, lead_time_fn=lambda s: 7)
+    assert v.get("allocation") == [{"sku": "GAM-X", "from_stock": 10, "from_reorder": 0, "eta_days": 0}]
+    assert availability_allocation_line(v) == "GAM-X: 10 of 10 from stock"
