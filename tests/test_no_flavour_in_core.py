@@ -95,6 +95,9 @@ _CORE_MODULES = [
     # market analysis engine (M3): market_signal → typed findings via deterministic detectors;
     # finding_type/entity_ref/evidence are opaque — no product vocabulary.
     "src/app/services/market_analysis.py",
+    # experiment + rollback framework (M6b): assignment/uplift/anti-Goodhart decision math; metrics
+    # and variants are opaque labels — no product vocabulary.
+    "src/app/services/experiments.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
