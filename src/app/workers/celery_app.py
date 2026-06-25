@@ -310,6 +310,13 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{max(1, int(os.getenv('MARKET_SIGNAL_BACKFILL_INTERVAL_MIN', '15')))}"),
             "args": (),
         }
+    # Experiment evaluation (the autonomous rollback cadence) — schedule only when enabled.
+    if str(os.getenv("EXPERIMENT_EVAL_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["experiment-eval"] = {
+            "task": "src.app.tasks.experiment_tasks.evaluate_experiments",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('EXPERIMENT_EVAL_INTERVAL_MIN', '30')))}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -338,6 +345,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.email_poll_tasks.poll_email_connector": {"queue": default_q},
             "src.app.tasks.attribution_tasks.attribution_reward_feed": {"queue": default_q},
             "src.app.tasks.market_signal_tasks.market_signal_backfill": {"queue": default_q},
+            "src.app.tasks.experiment_tasks.evaluate_experiments": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -349,6 +357,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.email_poll_tasks",
             "src.app.tasks.attribution_tasks",
             "src.app.tasks.market_signal_tasks",
+            "src.app.tasks.experiment_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

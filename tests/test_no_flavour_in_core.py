@@ -101,6 +101,9 @@ _CORE_MODULES = [
     # reversible ranking nudge: bounded additive score boost for treatment users, sku+score only —
     # no product vocabulary.
     "src/app/services/ranking_nudge.py",
+    # experiment evaluation runtime: per-variant uplift → decide → auto-revert; opaque metrics —
+    # no product vocabulary.
+    "src/app/services/experiment_eval.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
