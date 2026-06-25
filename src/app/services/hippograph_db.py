@@ -21,14 +21,26 @@ from src.app.services.hippograph import HippoGraph, project_graph
 _DEFAULT_SKU_PATTERN = r"[A-Za-z0-9][\w.\-]{0,63}"
 
 
+def _maybe_project_findings(db, graph: HippoGraph, *, limit: int, sku_pattern: str, anomaly_fn) -> HippoGraph:
+    try:
+        from src.app.services.hippograph import project_findings
+        from src.app.services.market_analysis import run_analysis
+        return project_findings(graph, run_analysis(db, limit=limit, anomaly_fn=anomaly_fn), sku_pattern=sku_pattern)
+    except Exception:
+        return graph  # findings are additive — degrade to the base graph, never break it
+
+
 def build_from_db(
     db,
     *,
     limit: int = 2000,
     profile_id: Optional[str] = None,
     sku_pattern: str = _DEFAULT_SKU_PATTERN,
+    include_findings: bool = False,
+    anomaly_fn=None,
 ) -> HippoGraph:
-    """Project the most recent ``limit`` trace + conversion rows into an in-memory hippograph."""
+    """Project the most recent ``limit`` trace + conversion rows into an in-memory hippograph. Set
+    ``include_findings`` to also run M3 analysis and project its findings as ``finding`` nodes."""
     if db is None:
         return HippoGraph()
     alias_map, known = _brand_alias_map_for_profile(profile_id)
@@ -73,6 +85,9 @@ def build_from_db(
     except Exception:
         conv_rows = []
 
-    return project_graph(
+    graph = project_graph(
         trace_rows, conv_rows, alias_map=alias_map, known=known, sku_pattern=sku_pattern
     )
+    if include_findings:
+        graph = _maybe_project_findings(db, graph, limit=limit, sku_pattern=sku_pattern, anomaly_fn=anomaly_fn)
+    return graph

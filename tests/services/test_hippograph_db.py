@@ -57,6 +57,21 @@ def test_build_from_db_none_is_empty():
     assert g.nodes == {} and g.edges == {}
 
 
+def test_build_from_db_include_findings_projects_finding_nodes(db):
+    # seed market_signal with recurring zero-result searches → inventory_demand_mismatch finding
+    from src.app.services.market_signal import ensure_table as _ms_ensure
+    _ms_ensure(db)
+    for i in range(4):
+        db.execute(text("INSERT INTO market_signal (id, signal_type, source, dedup_key, trust_score, "
+                        "payload_json, occurred_at) VALUES (:id,'demand','search_events',:k,0.8,:pl,'2026-06-24T10:00:00')"),
+                   {"id": f"ms{i}", "k": f"ms{i}", "pl": '{"query": "framework 16", "result_count": 0}'})
+    db.commit()
+    base = build_from_db(db, include_findings=False)
+    enriched = build_from_db(db, include_findings=True)
+    assert not any(n.startswith("finding:") for n in base.nodes)  # off by default
+    assert any(n.startswith("finding:inventory_demand_mismatch") for n in enriched.nodes)  # M3 → hippograph
+
+
 def test_build_from_db_degrades_when_tables_absent():
     # an engine with no tables → best-effort empty graph, never raises
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)

@@ -74,3 +74,35 @@ def test_recall_deterministic():
     rows = [_trace("user", "u1", "product", "P1"), _trace("user", "u1", "product", "P2")]
     g = project_graph(rows, [], catalog_skus=["P1", "P2"])
     assert recall(g, ["u1"]) == recall(g, ["u1"])  # stable ordering
+
+
+# ── findings projection ──────────────────────────────────────────────────────
+def test_project_findings_creates_finding_node_and_edge():
+    from src.app.services.hippograph import project_findings
+    g = project_graph([_trace("user", "u1", "product", "GAM-1")], [], catalog_skus=["GAM-1"])
+    finding = {"finding_type": "inventory_demand_mismatch", "entity_ref": "GAM-1",
+               "severity": "critical", "confidence": 0.9}
+    project_findings(g, [finding], sku_pattern=r"[A-Za-z0-9][\w.\-]{0,63}")
+    fid = "finding:inventory_demand_mismatch:GAM-1"
+    assert fid in g.nodes and g.nodes[fid].kind == "finding"
+    assert g.nodes[fid].weight > 0  # severity*confidence
+    assert (fid, "GAM-1") in g.edges  # indicates edge to the entity
+
+
+def test_recall_from_entity_surfaces_its_finding():
+    from src.app.services.hippograph import project_findings
+    g = project_graph([_trace("user", "u1", "product", "GAM-1")], [], catalog_skus=["GAM-1"])
+    project_findings(g, [{"finding_type": "conversion_anomaly", "entity_ref": "GAM-1",
+                          "severity": "warn", "confidence": 0.8}],
+                     sku_pattern=r"[A-Za-z0-9][\w.\-]{0,63}")
+    out = dict(recall(g, ["GAM-1"], top_k=10))
+    assert "finding:conversion_anomaly:GAM-1" in out  # the finding is recalled from the entity
+
+
+def test_project_findings_global_node_no_entity_edge():
+    from src.app.services.hippograph import project_findings
+    g = project_graph([], [])
+    project_findings(g, [{"finding_type": "demand_shift", "entity_ref": None,
+                          "severity": "info", "confidence": 0.5}])
+    assert "finding:demand_shift:global" in g.nodes
+    assert g.edges == {}  # global finding has no entity edge

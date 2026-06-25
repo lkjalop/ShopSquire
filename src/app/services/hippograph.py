@@ -146,3 +146,48 @@ def recall(
         ranked.append((nid, sc + 0.1 * prior))
     ranked.sort(key=lambda x: (-x[1], x[0]))
     return ranked[: max(0, int(top_k))]
+
+
+_SEVERITY_WEIGHT = {"info": 0.3, "warn": 0.7, "critical": 1.0}
+
+
+def _finding_attr(f: Any, name: str, default: Any = None) -> Any:
+    return f.get(name, default) if isinstance(f, dict) else getattr(f, name, default)
+
+
+def project_findings(graph: HippoGraph, findings: Optional[Iterable[Any]], *, sku_pattern: Optional[str] = None) -> HippoGraph:
+    """Add M3 findings as ``finding`` nodes (in place). Each finding becomes a node
+    ``finding:<type>:<entity-or-global>`` whose weight is severity×confidence; when it names an
+    entity, an ``indicates`` edge connects it to the (canonical) entity node so recall from that
+    entity surfaces the finding. A negative finding (e.g. conversion drop) surfaces AS a finding
+    without boosting the entity's own weight — the warning shows up, the entity isn't promoted.
+    Accepts MarketFinding objects or dicts. Returns the same graph."""
+    for f in (findings or []):
+        ftype = str(_finding_attr(f, "finding_type") or "").strip()
+        if not ftype:
+            continue
+        entity = _finding_attr(f, "entity_ref")
+        severity = str(_finding_attr(f, "severity") or "info")
+        confidence = float(_finding_attr(f, "confidence") or 0.0)
+        weight = confidence * _SEVERITY_WEIGHT.get(severity, 0.5)
+        ent_node: Optional[str] = None
+        ent_key = "global"
+        if entity:
+            ref = resolve_product(str(entity), sku_pattern=sku_pattern)
+            if ref:
+                ent_node = ref.id
+                ent_key = ref.id
+        fid = f"finding:{ftype}:{ent_key}"
+        node = graph.nodes.get(fid)
+        if node is None:
+            node = HippoNode(fid, "finding", f"{ftype} ({severity})", 0.0)
+            graph.nodes[fid] = node
+        node.weight += weight
+        if ent_node:
+            if ent_node not in graph.nodes:
+                graph.nodes[ent_node] = HippoNode(ent_node, "product", str(entity), 0.0)
+            w = max(0.5, weight)
+            graph.edges[(fid, ent_node)] = graph.edges.get((fid, ent_node), 0.0) + w
+            graph.adjacency.setdefault(fid, {})[ent_node] = graph.adjacency.setdefault(fid, {}).get(ent_node, 0.0) + w
+            graph.adjacency.setdefault(ent_node, {})[fid] = graph.adjacency.setdefault(ent_node, {}).get(fid, 0.0) + w
+    return graph
