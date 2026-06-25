@@ -118,6 +118,9 @@ _CORE_MODULES = [
     # contact-frequency governance: consent/frequency/region gate, opaque channel/campaign —
     # no product vocabulary.
     "src/app/services/contact_governance.py",
+    # experiment operationalization: guardrails/heartbeat/stale-detect/drill, opaque metrics —
+    # no product vocabulary.
+    "src/app/services/experiment_ops.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

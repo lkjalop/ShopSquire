@@ -338,6 +338,13 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "schedule": crontab(minute=f"*/{max(1, int(os.getenv('SHADOW_ACTIONS_INTERVAL_MIN', '30')))}"),
             "args": (),
         }
+    # Experiment watchdog (fail-safe pause if eval stale + zombie revert) — schedule only when enabled.
+    if str(os.getenv("EXPERIMENT_WATCHDOG_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        beat_schedule["experiment-watchdog"] = {
+            "task": "src.app.tasks.experiment_ops_tasks.experiment_watchdog",
+            "schedule": crontab(minute=f"*/{max(1, int(os.getenv('EXPERIMENT_WATCHDOG_INTERVAL_MIN', '10')))}"),
+            "args": (),
+        }
 
     celery.conf.update(
         timezone="UTC",
@@ -370,6 +377,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.market_analysis_tasks.run_market_analysis": {"queue": default_q},
             "src.app.tasks.human_feedback_tasks.human_feedback_backfill": {"queue": default_q},
             "src.app.tasks.shadow_action_tasks.generate_shadow_actions": {"queue": default_q},
+            "src.app.tasks.experiment_ops_tasks.experiment_watchdog": {"queue": default_q},
         },
         imports=(
             "src.app.tasks.swarm_tasks",
@@ -385,6 +393,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.market_analysis_tasks",
             "src.app.tasks.human_feedback_tasks",
             "src.app.tasks.shadow_action_tasks",
+            "src.app.tasks.experiment_ops_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

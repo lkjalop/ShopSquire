@@ -27,9 +27,18 @@ def evaluate_experiments() -> Dict[str, Any]:
         min_samples = max(2, int(float(os.getenv("EXPERIMENT_EVAL_MIN_SAMPLES", "30") or 30)))
         from src.app.models.db import db_session
         from src.app.services.experiment_eval import evaluate_live_experiments, returns_guardrail
+        from src.app.services.experiment_ops import (
+            composite_guardrail,
+            escalation_rate_guardrail,
+            record_heartbeat,
+        )
+        # Broader guardrails: returns AND escalation-rate (anti-Goodhart is multi-dimensional, not
+        # just refunds). Either breaching reverts the treatment.
+        guardrail = composite_guardrail(returns_guardrail, escalation_rate_guardrail)
         with db_session() as db:
-            # The returns guardrail is always on — anti-Goodhart is not optional.
-            outcomes = evaluate_live_experiments(db, min_samples=min_samples, guardrail_fn=returns_guardrail)
+            outcomes = evaluate_live_experiments(db, min_samples=min_samples, guardrail_fn=guardrail)
+            record_heartbeat(db)  # stamp the safety loop's liveness (worker-health watchdog reads it)
+            db.commit()
         reverted = [o.get("experiment_id") for o in outcomes if o.get("reverted")]
         logger.info("evaluate_experiments outcomes=%d reverted=%s", len(outcomes), reverted)
         return {"evaluated": len(outcomes), "reverted": reverted}
