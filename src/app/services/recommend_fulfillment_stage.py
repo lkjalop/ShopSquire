@@ -82,7 +82,9 @@ def _maybe_open_case(*, payload, avail, order_qty, uid, uid_hash, trace_id, flag
                                         "in_stock": int((avail or {}).get("in_stock") or 0),
                                         "shortfall": shortfall, "item_ref": item_ref}})
             fwf.transition(db, case_id=cid, event="request_buyer_commitment", actor=agent, trace_id=trace_id)
-            db.commit()
+            # no db.commit() here — workflow.transition is the single transaction owner (it commits each
+            # applied transition, incl. the case row created in the same session). A trailing commit here
+            # was redundant and blurred ownership.
         # buyer-safe summary only (no supplier-private data ever in the recommend payload)
         payload["fulfillment_case"] = {"case_id": cid, "status": "awaiting_buyer_commitment",
                                        "item_ref": item_ref, "shortfall": shortfall}

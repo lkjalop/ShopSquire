@@ -149,6 +149,27 @@ def retail_unit_cents(db, sku: str, *, channel: str = "default", currency: str =
         return None
 
 
+def batch_available(db, skus: List[str], *, tenant_id: str = DEFAULT_TENANT) -> Dict[str, int]:
+    """{sku: SUM(available)} for the skus that HAVE inventory_level rows. A sku with no row is OMITTED
+    (not zeroed) so an overlay over a legacy source never hides real stock for an un-synced sku."""
+    skus = [str(s) for s in (skus or []) if str(s).strip()]
+    if db is None or not skus:
+        return {}
+    try:
+        ensure_tables(db)
+        params: Dict[str, Any] = {"t": str(tenant_id).strip() or DEFAULT_TENANT}
+        placeholders = []
+        for i, s in enumerate(skus):
+            params[f"s{i}"] = s
+            placeholders.append(f":s{i}")
+        rows = db.execute(text(
+            f"SELECT sku, COALESCE(SUM(available),0) FROM inventory_level "
+            f"WHERE tenant_id=:t AND sku IN ({', '.join(placeholders)}) GROUP BY sku"), params).fetchall()
+        return {str(r[0]): int(r[1] or 0) for r in rows}
+    except Exception:
+        return {}
+
+
 def inventory_for(db, sku: str, *, location_id: Optional[str] = None,
                   tenant_id: str = DEFAULT_TENANT) -> Optional[Dict[str, int]]:
     """Stock for a sku, summed across locations (or one location). None when the sku has no rows."""

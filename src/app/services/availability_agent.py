@@ -16,8 +16,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 
 def _default_stock_fn(skus: List[str]) -> Dict[str, int]:
-    from src.app.services.inventory_query_service import batch_stock_levels
-    return batch_stock_levels(skus) or {}
+    # the inventory-source adapter: canonical commerce_catalog stock when COMMERCE_CATALOG_ENABLED,
+    # else the legacy batch_stock_levels (per-sku overlay — see services/inventory_source.py).
+    from src.app.services.inventory_source import stock_levels
+    return stock_levels(skus) or {}
 
 
 def _default_lead_time_fn(sku: str) -> int:

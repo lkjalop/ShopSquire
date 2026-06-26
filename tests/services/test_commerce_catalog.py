@@ -72,6 +72,13 @@ def test_inventory_none_when_absent(db):
     assert cc.inventory_for(db, "NOPE") is None
 
 
+def test_batch_available_omits_unknown_skus(db):
+    cc.upsert_inventory(db, sku="LAP-021", on_hand=10, reserved=3)   # available 7
+    cc.upsert_inventory(db, sku="GAM-1", on_hand=6)                  # available 6
+    out = cc.batch_available(db, ["LAP-021", "GAM-1", "UNKNOWN"])
+    assert out == {"LAP-021": 7, "GAM-1": 6}  # UNKNOWN omitted (not zeroed) so an overlay can't hide stock
+
+
 # ── seed ─────────────────────────────────────────────────────────────────────
 def test_seed_demo_populates_and_is_idempotent(db):
     c = cc.seed_demo(db)
