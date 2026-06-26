@@ -35,6 +35,7 @@ FINDING_DEMAND_FORECAST = "demand_forecast"
 FINDING_SEASONAL_DEMAND = "seasonal_demand"
 FINDING_COMPETITOR_UNDERCUT = "competitor_undercut"
 FINDING_OBJECTION_CLUSTER = "objection_cluster"
+FINDING_FUNNEL_DROPOFF = "funnel_dropoff"
 
 _MIN_POINTS = 4  # need enough history before an anomaly finding is actionable
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -180,6 +181,13 @@ def _safe_weekday(d: Any) -> Optional[int]:
         return None
 
 
+def _safe_int(x: Any) -> Optional[int]:
+    try:
+        return int(x)
+    except Exception:
+        return None
+
+
 def _ewma_forecast(series: List[float], *, alpha: float = 0.28):
     """One-step-ahead EWMA projection — the dependency-free leg DemandForecaster itself falls back to.
     Returns (prediction, method)."""
@@ -315,6 +323,37 @@ def detect_objection_cluster(signals, *, min_count: int = 3) -> List[MarketFindi
     return out
 
 
+def detect_funnel_dropoff(signals, *, min_rate: float = 0.5, min_volume: int = 10) -> List[MarketFinding]:
+    """A purchase-funnel stage losing a high fraction of the buyers who reached it → a finding. payload:
+    {stage, entered, abandoned} (aggregated across rows per stage). Vertical-blind (stage is an opaque
+    label). Only flags a stage with enough volume so a tiny sample can't trip it."""
+    by_stage: Dict[str, List[int]] = {}
+    for s in signals or []:
+        if (s or {}).get("signal_type") != "funnel":
+            continue
+        p = s.get("payload") or {}
+        stage = str(p.get("stage") or "").strip().lower()
+        entered = _safe_int(p.get("entered"))
+        abandoned = _safe_int(p.get("abandoned"))
+        if stage and entered is not None and abandoned is not None:
+            agg = by_stage.setdefault(stage, [0, 0])
+            agg[0] += max(0, entered)
+            agg[1] += max(0, abandoned)
+    out: List[MarketFinding] = []
+    for stage, (entered, abandoned) in sorted(by_stage.items(), key=lambda kv: (-kv[1][1], kv[0])):
+        if entered < min_volume:
+            continue
+        rate = abandoned / entered if entered else 0.0
+        if rate < min_rate:
+            continue
+        out.append(MarketFinding(
+            FINDING_FUNNEL_DROPOFF, stage, "critical" if rate >= 0.75 else "warn", round(min(1.0, rate), 3),
+            f"High drop-off at '{stage}': {rate * 100:.0f}% abandoned ({abandoned}/{entered}).",
+            {"stage": stage, "entered": entered, "abandoned": abandoned, "rate": round(rate, 4)}, "recent",
+        ))
+    return out
+
+
 def _safe(fn: Callable, *args, **kw) -> List[MarketFinding]:
     try:
         return fn(*args, **kw)
@@ -333,6 +372,7 @@ def analyze(signals, *, anomaly_fn: Optional[Callable] = None,
     out += _safe(detect_seasonal_demand, signals)
     out += _safe(detect_competitor_undercut, signals)
     out += _safe(detect_objection_cluster, signals)
+    out += _safe(detect_funnel_dropoff, signals)
     return out
 
 

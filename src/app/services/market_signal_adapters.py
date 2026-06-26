@@ -100,6 +100,21 @@ def from_support_objection(row: Dict[str, Any]) -> Optional[MarketSignal]:
     )
 
 
+def from_funnel(row: Dict[str, Any]) -> Optional[MarketSignal]:
+    """A purchase-funnel observation → funnel signal. row: {obs_id, stage, entered, abandoned,
+    observed_at?}. ``stage`` is an opaque label (cart / shipping / payment / ...)."""
+    oid = str((row.get("obs_id") or row.get("id")) or "").strip()
+    stage = str(row.get("stage") or "").strip()
+    if not oid or not stage:
+        return None
+    return normalize(
+        signal_type="funnel", source="funnel_events",
+        payload={"obs_id": oid, "stage": stage, "entered": row.get("entered"),
+                 "abandoned": row.get("abandoned")},
+        occurred_at=row.get("observed_at"), trust_score=0.7, dedup_fields=["obs_id"],
+    )
+
+
 # name -> (sql, row->dict mapper, dict->MarketSignal mapper)
 _SOURCES = {
     "orders": (
@@ -142,6 +157,13 @@ _SOURCES = {
         "SELECT id, theme, entity_ref, raised_at FROM support_objection ORDER BY raised_at DESC LIMIT :lim",
         lambda r: {"obs_id": r[0], "theme": r[1], "entity_ref": r[2], "raised_at": r[3]},
         from_support_objection,
+    ),
+    # funnel: a REAL source — purchase-funnel stage drop-off feeds detect_funnel_dropoff. No-op when absent.
+    "funnel": (
+        "SELECT id, stage, entered, abandoned, observed_at FROM cart_funnel_event "
+        "ORDER BY observed_at DESC LIMIT :lim",
+        lambda r: {"obs_id": r[0], "stage": r[1], "entered": r[2], "abandoned": r[3], "observed_at": r[4]},
+        from_funnel,
     ),
 }
 

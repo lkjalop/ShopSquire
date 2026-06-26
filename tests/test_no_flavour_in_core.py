@@ -158,6 +158,8 @@ _CORE_MODULES = [
     "src/app/services/competitor_source.py",
     # support-objection source: buyer-objection table + seed, opaque theme — no product vocabulary.
     "src/app/services/support_objection_source.py",
+    # funnel source: cart-abandonment table + seed, opaque stage·counts — no product vocabulary.
+    "src/app/services/funnel_source.py",
     # supplier catalog: suppliers/supplier_products schema + demo seed, opaque ids — no product vocabulary.
     "src/app/services/supplier_catalog.py",
     # PO finalization: propose/approve/create/complete via the workflow chokepoint, opaque refs —

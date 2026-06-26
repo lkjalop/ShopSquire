@@ -227,6 +227,36 @@ def test_objection_below_threshold_silent():
     assert detect_objection_cluster(_objections("price", 2)) == []
 
 
+# ── funnel drop-off ──────────────────────────────────────────────────────────
+def _funnel(stage, entered, abandoned):
+    return [{"signal_type": "funnel", "source": "funnel_events",
+             "payload": {"stage": stage, "entered": entered, "abandoned": abandoned},
+             "occurred_at": "2026-06-26T08:00:00"}]
+
+
+def test_funnel_dropoff_flagged():
+    from src.app.services.market_analysis import FINDING_FUNNEL_DROPOFF, detect_funnel_dropoff
+    found = detect_funnel_dropoff(_funnel("payment", 60, 42))  # 70% drop-off
+    assert len(found) == 1 and found[0].finding_type == FINDING_FUNNEL_DROPOFF
+    assert found[0].entity_ref == "payment" and found[0].severity == "warn"
+    assert found[0].evidence["rate"] == 0.7
+
+
+def test_funnel_critical_above_75pct():
+    from src.app.services.market_analysis import detect_funnel_dropoff
+    assert detect_funnel_dropoff(_funnel("payment", 100, 80))[0].severity == "critical"
+
+
+def test_funnel_below_min_volume_ignored():
+    from src.app.services.market_analysis import detect_funnel_dropoff
+    assert detect_funnel_dropoff(_funnel("payment", 4, 4)) == []  # tiny sample can't trip it
+
+
+def test_funnel_healthy_stage_not_flagged():
+    from src.app.services.market_analysis import detect_funnel_dropoff
+    assert detect_funnel_dropoff(_funnel("cart", 100, 10)) == []  # 10% drop-off → fine
+
+
 # ── analyze() composes + never raises ────────────────────────────────────────
 def test_analyze_runs_all_and_is_safe():
     assert analyze([]) == []  # empty → no findings, no raise
