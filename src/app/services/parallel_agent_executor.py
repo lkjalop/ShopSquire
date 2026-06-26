@@ -142,8 +142,11 @@ def _run_cv(payload: Dict[str, Any], retries: int | None = None, timeout_ms: int
             images = payload.get("images") or payload.get("image_b64s") or payload.get("image_data")
             if images:
                 img = images[0] if isinstance(images, list) else images
-                labels, text, *_ = _asyncio.run(ManagedCVProvider().get_labels_and_text(img))
-                res = _asyncio.run(BasicCVTriage().analyze(labels, text)) or {}
+                # run_async_safe: this path can be reached from inside a running event loop (async route),
+                # where a raw asyncio.run() raises RuntimeError; the safe runner offloads to a loop-free thread.
+                from src.app.services.async_safe import run_async_safe
+                labels, text, *_ = run_async_safe(ManagedCVProvider().get_labels_and_text(img))
+                res = run_async_safe(BasicCVTriage().analyze(labels, text)) or {}
                 # Record latency as a trace event and metrics
                 try:
                     from src.app.services.decision_log import log_trace_event
