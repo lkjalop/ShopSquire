@@ -160,6 +160,8 @@ _CORE_MODULES = [
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.
     "src/app/services/inventory_source.py",
+    # supplier inbox reader: read-only supplier-history context (domain/cents/email) — no product vocab.
+    "src/app/services/supplier_inbox_reader.py",
     # canonical identity + integration seam: product/variant/external_ref, attributes in JSON — no product vocab.
     "src/app/services/catalog_entities.py",
     # Shopify→canonical adapter (platform edge): speaks Shopify field names, not a product vertical.

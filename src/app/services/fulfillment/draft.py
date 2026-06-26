@@ -86,12 +86,14 @@ def gather_evidence(
     *,
     item_ref: str,
     case_state: Optional[Dict[str, Any]] = None,
+    recipient_domain: str = "",
     hippograph_fn: Optional[Callable] = None,
     market_fn: Optional[Callable] = None,
     benchmark_fn: Optional[Callable] = None,
+    inbox_fn: Optional[Callable] = None,
     tenant_id: str = "default",
 ) -> List[DraftEvidence]:
-    """Fan out across the four independent evidence sources (the design is parallel; this sync impl is
+    """Fan out across the independent evidence sources (the design is parallel; this sync impl is
     sequential + best-effort — a failing source never blocks the draft). Each returns a discrete
     evidence id that lands on the trace."""
     ev: List[DraftEvidence] = []
@@ -119,7 +121,23 @@ def gather_evidence(
         ev.append(DraftEvidence("external_benchmark", f"EXT-{uuid.uuid4().hex[:8]}",
                                 str(b.get("summary") or "benchmark"),
                                 provenance=f"external:{b.get('source', 'unknown')}", payload=b))
+
+    # supplier history (READ-ONLY) — recent dealings with the ALREADY-resolved recipient domain, so the
+    # human reviewer sees "last invoice / contact" context. Bounded to the allowlist domain (never buyer
+    # text); only added when something is actually known. Default off when no inbox source / no history.
+    if recipient_domain:
+        ctx = _safe_one(inbox_fn or _default_inbox, recipient_domain, tenant_id)
+        if ctx:
+            ev.append(DraftEvidence("supplier_history", f"SUP-HIST-{uuid.uuid4().hex[:8]}",
+                                    str(ctx.get("summary") or "history"), payload=ctx))
     return ev
+
+
+def _default_inbox(recipient_domain, tenant_id):
+    """Read-only supplier-history context for the resolved domain (Supplier_Inbox_Reader). None if none."""
+    from src.app.services.supplier_inbox_reader import recent_supplier_context
+    ctx = recent_supplier_context(domain=recipient_domain, tenant_id=tenant_id)
+    return ctx.to_dict() if ctx else None
 
 
 def _safe_list(fn, *args) -> List[Dict[str, Any]]:
@@ -219,6 +237,7 @@ def build_draft(
     hippograph_fn: Optional[Callable] = None,
     market_fn: Optional[Callable] = None,
     benchmark_fn: Optional[Callable] = None,
+    inbox_fn: Optional[Callable] = None,
     llm_fn: Optional[Callable] = None,
     tenant_id: str = "default",
 ) -> Optional[SupplierDraft]:
@@ -228,8 +247,9 @@ def build_draft(
     if not recipient_ref:
         return None  # → caller fires no_approved_supplier
 
-    evidence = gather_evidence(db, item_ref=item_ref, case_state=case_state, hippograph_fn=hippograph_fn,
-                               market_fn=market_fn, benchmark_fn=benchmark_fn, tenant_id=tenant_id)
+    evidence = gather_evidence(db, item_ref=item_ref, case_state=case_state, recipient_domain=domain,
+                               hippograph_fn=hippograph_fn, market_fn=market_fn, benchmark_fn=benchmark_fn,
+                               inbox_fn=inbox_fn, tenant_id=tenant_id)
     tmpl = template or DEFAULT_TEMPLATE
     slots = {"item_ref": item_ref, "quantity": quantity, "case_ref": case_ref,
              "supplier_name": recipient_ref, "needed_by": needed_by, "urgency_note": _urgency_note(evidence)}

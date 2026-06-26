@@ -188,6 +188,22 @@ AGENT_BOUNDARIES: Dict[str, AgentBoundary] = {
         allowed_peers=frozenset(["Procurement_Agent", "Escalation_Agent"]),
         risk_tier="critical",
     ),
+    # Supplier inbox reader: READ-ONLY context gatherer. Summarizes recent dealings with an
+    # ALREADY-resolved supplier domain (last invoice, prior messages, contact) to enrich a draft. It
+    # cannot write, cannot send, cannot escalate, and NEVER picks the recipient (the allowlist stays
+    # authoritative). Registered so an unregistered-agent fail-open can't grant it more than this.
+    "Supplier_Inbox_Reader": AgentBoundary(
+        agent_name="Supplier_Inbox_Reader",
+        allowed_tools=frozenset(["read_supplier_history"]),
+        allowed_data_scopes=frozenset(["suppliers", "emails"]),
+        max_autonomous_value_usd=0.0,
+        can_write_db=False,
+        can_call_external_api=False,
+        can_invoke_llm=False,
+        can_escalate=False,
+        allowed_peers=frozenset(["Procurement_Agent"]),
+        risk_tier="medium",
+    ),
     "Debate_Coordinator": AgentBoundary(
         agent_name="Debate_Coordinator",
         allowed_tools=frozenset(["run_debate", "score_risk"]),

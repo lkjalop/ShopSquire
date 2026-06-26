@@ -70,6 +70,7 @@ _BASELINE = {
     "src/app/services/fulfillment/economics.py": 0,
     "src/app/services/commerce_catalog.py": 0,
     "src/app/services/inventory_source.py": 0,
+    "src/app/services/supplier_inbox_reader.py": 0,
     "src/app/services/catalog_entities.py": 0,
     "src/app/services/shopify_catalog_adapter.py": 0,
     "src/app/services/magento_catalog_adapter.py": 0,
