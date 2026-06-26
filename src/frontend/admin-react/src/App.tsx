@@ -18,6 +18,7 @@ import { CVIncidents } from './components/CVIncidents';
 import { Playbooks } from './components/Playbooks';
 import { MerchantBIPro } from './components/MerchantBIPro';
 import { EscalationsConsole } from './components/EscalationsConsole';
+import { ProcurementCases } from './components/ProcurementCases';
 import { EmailXdr } from './components/EmailXdr';
 import { SupplyChainSim } from './components/SupplyChainSim';
 import { AgentIntelligence } from './components/AgentIntelligence';
@@ -125,7 +126,7 @@ export default function App() {
 
         <div className="nav-section">Merchant</div>
         <div className="nav">
-          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
+          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'procurement', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
             const locked = (key === 'compliance' && !canOwner) || (key === 'rules' && !(canOwner || canDeveloper)) || (key === 'grc' && !(canOwner || canDeveloper));
             return (
               <button
@@ -227,6 +228,7 @@ export default function App() {
             {active === 'rules' && 'Rules Admin'}
             {active === 'playbooks' && 'Playbook Editor'}
             {active === 'approvals' && 'Human Approvals'}
+            {active === 'procurement' && 'Procurement Control Room'}
             {active === 'grafana' && 'Grafana Observability'}
             {active === 'escalations' && 'Human Escalations Console'}
             {active === 'owner' && 'Owner Console'}
@@ -248,6 +250,7 @@ export default function App() {
             {active === 'rules' && 'Create, validate, and preview prioritized rules (tenant-scoped).'}
             {active === 'playbooks' && 'Validate, dry-run, publish, rollback, and audit playbook changes.'}
             {active === 'approvals' && 'Review and approve high-stakes proposals.'}
+            {active === 'procurement' && 'Auditable buyer→supplier procurement: draft, approve+send (GATE 2), supplier reply, validate, options — every step bitemporally traced.'}
             {active === 'orders' && 'Manage order lifecycle for refunds, cancellations, and returns.'}
             {active === 'analytics' && 'Time-series performance across orders, decisions, and security.'}
             {active === 'grafana' && 'Full Grafana observability suite with drill-down dashboards.'}
@@ -279,6 +282,7 @@ export default function App() {
         {active === 'playbooks' && <Playbooks />}
         {active === 'rules' && <RulesAdmin role={role} />}
         {active === 'approvals' && <Approvals role={role} />}
+        {active === 'procurement' && <ProcurementCases />}
         {active === 'orders' && <Orders role={role} />}
         {active === 'analytics' && <Analytics role={role} />}
         {active === 'grafana' && <GrafanaDashboards role={role} />}

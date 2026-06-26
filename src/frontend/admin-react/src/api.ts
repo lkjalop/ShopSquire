@@ -532,6 +532,38 @@ export async function fetchApprovals(): Promise<ApprovalItem[]> {
   return data.pending || [];
 }
 
+// ── Fulfilment / procurement (operator control room) ──────────────────────────
+export interface FulfillmentCaseRow {
+  case_id: string; buyer_uid_hash?: string | null; status: string;
+  requested_by?: string | null; source_trace_id?: string | null; updated_at?: string | null;
+}
+export interface FulfillmentCaseView {
+  case_id: string; state: string; state_json: Record<string, any>; source_trace_id?: string | null;
+}
+export interface JourneyEvent {
+  state: string; event: string; actor_type: string; actor_id: string;
+  reason_code?: string; evidence?: any; valid_from?: string; valid_to?: string | null;
+}
+
+const _fc = (id: string) => `/api/v1/fulfillment/cases/${encodeURIComponent(id)}`;
+const _fcPost = (path: string, body?: any) =>
+  http<FulfillmentCaseView>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
+
+export const listFulfillmentCases = () =>
+  http<{ cases: FulfillmentCaseRow[] }>(`/api/v1/fulfillment/cases`).then((d) => d.cases || []);
+export const getFulfillmentCaseOp = (id: string) => http<FulfillmentCaseView>(_fc(id));
+export const getFulfillmentJourney = (id: string) =>
+  http<{ journey: JourneyEvent[] }>(`${_fc(id)}/journey`).then((d) => d.journey || []);
+export const fcDraftQuote = (id: string, item_ref: string, quantity: number, estimated_value_cents = 0) =>
+  _fcPost(`${_fc(id)}/draft-quote`, { item_ref, quantity, estimated_value_cents });
+export const fcRequestApproval = (id: string) =>
+  http<FulfillmentCaseView & { approval_id?: string }>(`${_fc(id)}/request-approval`, { method: 'POST' });
+export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
+export const fcDemoReply = (id: string, scenario: string, requested_qty: number) =>
+  _fcPost(`${_fc(id)}/demo-reply`, { scenario, requested_qty });
+export const fcValidateQuote = (id: string) => _fcPost(`${_fc(id)}/validate-quote`);
+export const fcGenerateOptions = (id: string, body?: any) => _fcPost(`${_fc(id)}/options`, body || {});
+
 export async function approveApproval(id: string): Promise<void> {
   await http(`/api/v1/approvals/${encodeURIComponent(id)}/approve`, { method: 'POST' });
 }
