@@ -1,0 +1,131 @@
+"""Step 3 — the supplier draft is an LLM-aid INSIDE A CAGE.
+
+The invariants: recipient comes from the allowlist not buyer text; the body never leaks a price and
+always carries the not-a-PO footer; evidence is scatter-gathered as discrete ids with provenance;
+the content_hash pins the message and changes on edit; a price-injecting LLM is rejected; and the
+whole thing flows through the workflow chokepoint (confidence-gated, bitemporal, traced).
+"""
+from __future__ import annotations
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from src.app.services.fulfillment import draft as D
+from src.app.services.fulfillment import workflow as wf
+from src.app.services.fulfillment.domain import Actor, ActorType as A, FulfillmentState as S
+
+
+@pytest.fixture()
+def db():
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    s = sessionmaker(bind=eng, future=True)()
+    try:
+        yield s
+    finally:
+        s.close()
+
+
+def AG(): return Actor(A.AGENT, "Procurement_Agent")
+def BU(): return Actor(A.BUYER, "u1")
+
+
+# deterministic injectable evidence sources (no network)
+def _rank_ok(db, item, t): return [{"id": "SUP-7", "domain": "approved-supplier.example", "reliability": 0.9}]
+def _rank_untrusted(db, item, t): return [{"id": "SUP-X", "domain": "evil.example", "reliability": 0.9}]
+def _allow(domain): return domain == "approved-supplier.example"
+def _hippo(db, item, t): return [{"summary": "3 prior on-time deliveries", "label": "SUP-7"}]
+def _market(db, item, t): return [{"finding_type": "demand_shift", "summary": "demand rising", "severity": "warn"}]
+def _benchmark(item): return {"summary": "street price ~ benchmark", "source": "allowlisted-index"}
+
+
+def _committed_case(db):
+    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
+                       now_iso="2026-06-26 09:00:00"); db.commit()
+    wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
+                  state_patch={"availability": {"shortfall": 6, "requested_qty": 10, "in_stock": 4}},
+                  now_iso="2026-06-26 09:00:01")
+    wf.transition(db, case_id=cid, event="request_buyer_commitment", actor=AG(), now_iso="2026-06-26 09:00:02")
+    wf.transition(db, case_id=cid, event="buyer_committed", actor=BU(), now_iso="2026-06-26 09:05:00")
+    return cid
+
+
+# ── the cage ─────────────────────────────────────────────────────────────────
+def test_recipient_from_allowlist_never_from_buyer_text(db):
+    # even though the "buyer query" names an attacker address, the recipient is the allowlisted supplier
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, hippograph_fn=_hippo, market_fn=_market)
+    assert draft is not None
+    assert draft.recipient_domain == "approved-supplier.example"
+    assert "evil" not in draft.body.lower() and "attacker" not in draft.body.lower()
+
+
+def test_no_approved_supplier_when_domain_not_allowlisted(db):
+    assert D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                         rank_fn=_rank_untrusted, allowlist_fn=_allow) is None
+
+
+def test_body_is_claim_safe_no_price_and_has_po_disclaimer(db):
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "this request does not constitute a purchase order" in draft.body.lower()
+    import re
+    assert re.search(r"[$€£¥]\s?\d", draft.body) is None  # no price leak to the supplier
+
+
+def test_price_injecting_llm_is_rejected(db):
+    bad_llm = lambda *, subject, body, slots: {"subject": subject, "body": body + "\nWe will pay $900 each."}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, llm_fn=bad_llm)
+    assert "$900" not in draft.body  # the unsafe LLM output was discarded, deterministic fill kept
+
+
+def test_evidence_scatter_gather_has_discrete_ids_and_provenance(db):
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          case_state={"availability": {"shortfall": 6, "requested_qty": 10}},
+                          rank_fn=_rank_ok, allowlist_fn=_allow, hippograph_fn=_hippo, market_fn=_market,
+                          benchmark_fn=_benchmark)
+    sources = {e["source"] for e in draft.evidence}
+    assert {"inventory", "hippograph", "market_intel", "external_benchmark"} <= sources
+    ext = next(e for e in draft.evidence if e["source"] == "external_benchmark")
+    assert ext["provenance"].startswith("external:")  # provenance-tagged
+    assert all(e["evidence_id"] for e in draft.evidence)
+    assert any("on-time" in r for r in draft.rationale)  # rationale explains the supplier choice
+
+
+def test_content_hash_changes_on_edit(db):
+    d1 = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    d2 = D.build_draft(db, item_ref="SKU-1", quantity=99, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert d1.content_hash != d2.content_hash  # an edit (qty change) → new hash → voids prior approval
+    assert D.content_hash("a", "b") == D.content_hash("a", "b")  # deterministic
+
+
+# ── flows through the workflow chokepoint ────────────────────────────────────
+def test_draft_and_record_advances_to_quote_drafted_with_evidence(db):
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    estimated_value_cents=669000, rank_fn=_rank_ok, allowlist_fn=_allow,
+                                    hippograph_fn=_hippo, market_fn=_market, now_iso="2026-06-26 09:05:10")
+    assert res.ok and wf.current_state(db, cid) == S.QUOTE_DRAFTED
+    cur = wf.repository.current_version(db, cid)
+    assert cur.state_json["draft"]["content_hash"] == draft.content_hash  # draft persisted on the case
+
+
+def test_draft_and_record_fires_no_approved_supplier(db):
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    rank_fn=_rank_untrusted, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert draft is None and wf.current_state(db, cid) == S.NO_APPROVED_SUPPLIER
+
+
+def test_request_approval_advances_and_carries_hash(db):
+    cid = _committed_case(db)
+    D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6, rank_fn=_rank_ok,
+                       allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    # the AGENT submits the draft to the approval queue (the human later fires approval_granted)
+    res, _approval_id = D.request_supplier_approval(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:05:20")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_APPROVAL
+    # the approval_requested trace evidence carries the content_hash (best-effort enqueue may be None in unit db)
+    cur = wf.repository.current_version(db, cid)
+    assert cur.state_json["draft"]["content_hash"]

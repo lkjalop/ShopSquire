@@ -135,6 +135,9 @@ _CORE_MODULES = [
     # state/evidence — no product vocabulary.
     "src/app/services/fulfillment/repository.py",
     "src/app/services/fulfillment/workflow.py",
+    # supplier draft: template-slot fill + scatter-gather evidence, opaque item/supplier refs —
+    # no product vocabulary (real templates come from StoreProfile).
+    "src/app/services/fulfillment/draft.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
