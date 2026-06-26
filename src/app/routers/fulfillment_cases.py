@@ -224,6 +224,34 @@ def generate_options(case_id: str, body: OptionsBody = Body(default=OptionsBody(
         return _case_view(db, case_id, for_operator=False)  # buyer-facing
 
 
+# ── market replay (DEMO-only, operator) ──────────────────────────────────────
+@router.post("/replay/reset")
+def replay_reset(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    if not _demo_enabled():
+        raise HTTPException(status_code=403, detail="replay disabled")
+    from src.app.services import market_replay as mr
+    with db_session() as db:
+        return {"reset": mr.reset(db)}
+
+
+@router.post("/replay/advance")
+def replay_advance(day: int = Query(...), role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    if not _demo_enabled():
+        raise HTTPException(status_code=403, detail="replay disabled")
+    from src.app.services import market_replay as mr
+    with db_session() as db:
+        loaded = mr.load_days(db, up_to_day=day)
+        ran = mr.run(db)
+        return {"loaded": loaded, "analysis": ran, "state": mr.state(db)}
+
+
+@router.get("/replay/state")
+def replay_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    from src.app.services import market_replay as mr
+    with db_session() as db:
+        return mr.state(db)
+
+
 class SelectBody(BaseModel):
     uid: str
     option_id: str

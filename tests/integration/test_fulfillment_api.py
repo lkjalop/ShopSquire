@@ -59,3 +59,18 @@ def test_buyer_view_redacts_supplier_private_fields(monkeypatch):
 
 def test_unknown_case_404():
     assert client.get(f"{_BASE}/does-not-exist").status_code == 404
+
+
+def test_market_replay_gated_then_advances(monkeypatch):
+    # gated off by default
+    assert client.post("/api/v1/fulfillment/replay/advance", params={"day": 7}).status_code == 403
+    # on → load + analyze the synthetic curve; findings appear
+    monkeypatch.setenv("FULFILLMENT_DEMO_ENABLED", "1")
+    client.post("/api/v1/fulfillment/replay/reset")
+    r = client.post("/api/v1/fulfillment/replay/advance", params={"day": 7})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["state"]["label"] == "SYNTHETIC REPLAY"
+    types = {f["type"] for f in body["state"]["findings"]}
+    assert "demand_shift" in types or "inventory_demand_mismatch" in types
+    client.post("/api/v1/fulfillment/replay/reset")
