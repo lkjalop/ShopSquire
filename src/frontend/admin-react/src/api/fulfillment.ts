@@ -35,6 +35,13 @@ export const fcDraftQuote = (id: string, item_ref: string, quantity: number, est
 export const fcRequestApproval = (id: string) =>
   http<FulfillmentCaseView & { approval_id?: string }>(`${_fc(id)}/request-approval`, { method: 'POST' });
 export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
+// HUMAN edits the pending draft before approving — re-hashes (voids prior approval), claim-safety enforced.
+export const fcEditDraft = (id: string, subject: string, body: string) =>
+  _fcPost(`${_fc(id)}/edit-draft`, { subject, body });
+// bitemporal time-travel: the case as it was at instant `t`.
+export const fcCaseAsOf = (id: string, t: string) =>
+  http<{ case_id: string; as_of: string; state: string; state_json: Record<string, any> }>(
+    `${_fc(id)}/as-of?t=${encodeURIComponent(t)}`);
 export const fcDemoReply = (id: string, scenario: string, requested_qty: number) =>
   _fcPost(`${_fc(id)}/demo-reply`, { scenario, requested_qty });
 export const fcValidateQuote = (id: string) => _fcPost(`${_fc(id)}/validate-quote`);

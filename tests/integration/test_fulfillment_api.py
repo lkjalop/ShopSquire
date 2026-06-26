@@ -106,6 +106,16 @@ def test_market_refresh_and_state_run_the_real_pipeline():
     assert s.status_code == 200 and s.json()["label"] == "LIVE"
 
 
+def test_edit_draft_and_asof_routes_wired():
+    cid = _open()
+    # edit-draft from NEW has no draft → 409 (route exists + guards), not a 404 unrouted
+    r = client.post(f"{_BASE}/{cid}/edit-draft", json={"body": "x"})
+    assert r.status_code == 409
+    # as-of before the case existed → no version → 404
+    a = client.get(f"{_BASE}/{cid}/as-of", params={"t": "2000-01-01 00:00:00"})
+    assert a.status_code == 404
+
+
 def test_experiment_console_promote_observe_revert():
     # operator levers over the live-adaptation experiment: promote → live, then revert → not live
     p = client.post("/api/v1/fulfillment/market/experiment/promote", json={})

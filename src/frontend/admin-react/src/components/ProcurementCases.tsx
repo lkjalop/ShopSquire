@@ -14,8 +14,8 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcEconomics, fcExecutePO, fcGenerateOptions,
-  fcProposePO, fcRequestApproval, fcValidateQuote,
+  fcCaseAsOf, fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcEconomics, fcEditDraft, fcExecutePO,
+  fcGenerateOptions, fcProposePO, fcRequestApproval, fcValidateQuote,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
   type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
 } from '../api';
@@ -33,6 +33,10 @@ export function ProcurementCases() {
   const [journey, setJourney] = useState<JourneyEvent[]>([]);
   const [scenario, setScenario] = useState('full_quote');
   const [econ, setEcon] = useState<DealEconomics | null>(null);
+  const [editSubject, setEditSubject] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [asOfT, setAsOfT] = useState('');
+  const [asOf, setAsOf] = useState<{ as_of: string; state: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +45,7 @@ export function ProcurementCases() {
   }, []);
   const loadCase = useCallback((id: string) => {
     if (!id) return;
-    setEcon(null);  // economics is per-case — clear when switching
+    setEcon(null); setAsOf(null);  // per-case panels — clear when switching
     Promise.all([getFulfillmentCaseOp(id), getFulfillmentJourney(id)])
       .then(([v, j]) => { setView(v); setJourney(j); setError(null); })
       .catch((e) => setError(e.message));
@@ -55,6 +59,8 @@ export function ProcurementCases() {
   const inbound = (view?.state_json?.inbound || {}) as Record<string, any>;
   const po = (view?.state_json?.purchase_order || {}) as Record<string, any>;
   const state = view?.state || '';
+  // keep the editable draft fields in sync with the persisted draft (re-syncs after an edit re-hashes).
+  useEffect(() => { setEditSubject(draft.subject || ''); setEditBody(draft.body || ''); }, [draft.content_hash]);
   // GATE 2 send + PO approval are the two HUMAN-only stops — surface them as a badge.
   const humanGate = state === 'AWAITING_APPROVAL' || state === 'PROCUREMENT_APPROVAL_REQUIRED';
   // the deterministic sandbox tags every reply with a DEMO-MSG- ref / .example sender (never real).
@@ -178,8 +184,28 @@ export function ProcurementCases() {
               <details open>
                 <summary>Outbound draft (content hash {String(draft.content_hash).slice(0, 8)})</summary>
                 <div><strong>To:</strong> {draft.recipient_domain}</div>
-                <div><strong>Subject:</strong> {draft.subject}</div>
-                <pre style={{ whiteSpace: 'pre-wrap' }}>{draft.body}</pre>
+                {state === 'AWAITING_APPROVAL' ? (
+                  <div data-testid="op-edit-draft" style={{ display: 'grid', gap: 4, margin: '6px 0' }}>
+                    <input value={editSubject} onChange={(e) => setEditSubject(e.target.value)}
+                           data-testid="op-edit-subject" placeholder="Subject" />
+                    <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={6}
+                              data-testid="op-edit-body" placeholder="Body" />
+                    <div>
+                      <button disabled={busy} data-testid="op-edit-save"
+                              onClick={() => run(() => fcEditDraft(sel, editSubject, editBody))}>
+                        Save edit (re-hash → re-approve)
+                      </button>
+                      <small style={{ marginLeft: 8, color: '#6b7280' }}>
+                        editing voids the prior approval; price/PO leaks are rejected
+                      </small>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div><strong>Subject:</strong> {draft.subject}</div>
+                    <pre style={{ whiteSpace: 'pre-wrap' }}>{draft.body}</pre>
+                  </>
+                )}
                 {Array.isArray(draft.rationale) && (
                   <ul>{draft.rationale.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
                 )}
@@ -213,6 +239,22 @@ export function ProcurementCases() {
                   {po.total_amount_cents != null && <> · wholesale total {po.total_amount_cents}c</>}</div>
               </details>
             )}
+
+            <details data-testid="op-asof">
+              <summary>Time-travel (as-of)</summary>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0' }}>
+                <input value={asOfT} onChange={(e) => setAsOfT(e.target.value)} data-testid="op-asof-input"
+                       placeholder="2026-06-26 09:05:15" style={{ minWidth: 200 }} />
+                <button disabled={busy || !asOfT} data-testid="op-asof-btn"
+                        onClick={() => fcCaseAsOf(sel, asOfT)
+                          .then((v) => setAsOf({ as_of: v.as_of, state: v.state }))
+                          .catch((e: any) => setError(e?.message || 'as-of failed'))}>
+                  Reconstruct
+                </button>
+                {asOf && <span data-testid="op-asof-result">state at {asOf.as_of}: <strong>{asOf.state}</strong></span>}
+              </div>
+              <small style={{ color: '#6b7280' }}>the bitemporal record — the case exactly as it was at that instant</small>
+            </details>
 
             <details open>
               <summary>Journey ({journey.length})</summary>

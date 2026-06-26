@@ -129,3 +129,33 @@ def test_request_approval_advances_and_carries_hash(db):
     # the approval_requested trace evidence carries the content_hash (best-effort enqueue may be None in unit db)
     cur = wf.repository.current_version(db, cid)
     assert cur.state_json["draft"]["content_hash"]
+
+
+def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
+
+
+def _to_awaiting_approval(db):
+    cid = _committed_case(db)
+    D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6, rank_fn=_rank_ok,
+                       allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    D.request_supplier_approval(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:05:20")
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL
+    return cid
+
+
+def test_edit_draft_rehashes_and_voids_approval(db):
+    cid = _to_awaiting_approval(db)
+    before = wf.repository.current_version(db, cid).state_json["draft"]["content_hash"]
+    res, draft = D.edit_draft(db, case_id=cid, actor=HU(),
+                              body="Hello, please confirm availability.\n\nThis request does not "
+                                   "constitute a purchase order.\n\nRegards", now_iso="2026-06-26 09:05:30")
+    assert res.ok and wf.current_state(db, cid) == S.QUOTE_DRAFTED  # edit → back to DRAFTED (approval void)
+    assert draft["content_hash"] != before                          # new hash → the stale approval can't send
+
+
+def test_edit_draft_rejects_unsafe_body(db):
+    cid = _to_awaiting_approval(db)
+    res, draft = D.edit_draft(db, case_id=cid, actor=HU(), body="We will pay $1200 per unit.",
+                              now_iso="2026-06-26 09:05:30")  # price leak + no PO footer
+    assert res.ok is False and res.reason == "unsafe_edit" and draft is None
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL       # unchanged — unsafe edit refused

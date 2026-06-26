@@ -303,6 +303,34 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
     return res, draft
 
 
+def edit_draft(db, *, case_id: str, actor: Actor, subject: Optional[str] = None, body: Optional[str] = None,
+               tenant_id: str = "default", now_iso: Optional[str] = None, trace_id: Optional[str] = None):
+    """HUMAN edits the pending draft (subject/body) before approving. Recomputes the content_hash and
+    fires external_message_drafted (AWAITING_APPROVAL → QUOTE_DRAFTED), which VOIDS any prior approval —
+    the send gate will reject the stale hash. The claim-safety guard still applies, so a human edit
+    cannot introduce a price/commitment leak or drop the not-a-PO footer. Returns (TransitionResult,
+    draft-dict|None)."""
+    cur = workflow.repository.current_version(db, case_id, tenant_id)
+    draft = dict((cur.state_json.get("draft") if cur else None) or {})
+    if not draft:
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "no_draft",
+                                         http_status=409), None
+    new_subject = draft.get("subject", "") if subject is None else str(subject)
+    new_body = draft.get("body", "") if body is None else str(body)
+    if not _claim_safe(new_body):
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "unsafe_edit",
+                                         http_status=409), None
+    draft["subject"] = new_subject
+    draft["body"] = new_body
+    draft["content_hash"] = content_hash(new_subject, new_body)
+    res = workflow.transition(
+        db, case_id=case_id, event="external_message_drafted", actor=actor, reason_code="human_edited_draft",
+        confidence=float(draft.get("confidence") or 0.9),
+        evidence={"content_hash": draft["content_hash"], "edited_by": actor.id},
+        state_patch={"draft": draft}, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+    return res, (draft if res.ok else None)
+
+
 def request_supplier_approval(db, *, case_id: str, actor: Actor, tenant_id: str = "default",
                               now_iso: Optional[str] = None, trace_id: Optional[str] = None):
     """Fire approval_requested + enqueue a supplier_contact approval carrying the content_hash, recipient

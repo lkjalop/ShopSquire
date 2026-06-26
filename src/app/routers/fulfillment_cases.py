@@ -183,6 +183,22 @@ def draft_quote(case_id: str, body: DraftBody, role: str = Depends(require_role(
         return _case_view(db, case_id, for_operator=True)
 
 
+class EditDraftBody(BaseModel):
+    subject: Optional[str] = None
+    body: Optional[str] = None
+
+
+@router.post("/cases/{case_id}/edit-draft")
+def edit_draft(case_id: str, body: EditDraftBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """HUMAN edits the pending draft before approving — recomputes the hash (voids prior approval) and
+    re-runs the claim-safety guard. Rejects an unsafe edit (price/commitment leak)."""
+    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    with db_session() as db:
+        res, _draft = fdraft.edit_draft(db, case_id=case_id, actor=human, subject=body.subject, body=body.body)
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
 @router.post("/cases/{case_id}/request-approval")
 def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
