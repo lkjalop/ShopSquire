@@ -47,8 +47,14 @@ export function ProcurementCases() {
 
   const draft = (view?.state_json?.draft || {}) as Record<string, any>;
   const parsed = (view?.state_json?.parsed_quote || view?.state_json?.validated_quote || {}) as Record<string, any>;
+  const inbound = (view?.state_json?.inbound || {}) as Record<string, any>;
   const po = (view?.state_json?.purchase_order || {}) as Record<string, any>;
   const state = view?.state || '';
+  // GATE 2 send + PO approval are the two HUMAN-only stops — surface them as a badge.
+  const humanGate = state === 'AWAITING_APPROVAL' || state === 'PROCUREMENT_APPROVAL_REQUIRED';
+  // the deterministic sandbox tags every reply with a DEMO-MSG- ref / .example sender (never real).
+  const isDemoReply = String(inbound.provider_ref || '').startsWith('DEMO-')
+    || String(inbound.sender_domain || '').endsWith('.example');
 
   const run = async (fn: () => Promise<any>) => {
     setBusy(true); setError(null);
@@ -79,7 +85,15 @@ export function ProcurementCases() {
 
         {view && (
           <section style={{ flex: 1 }}>
-            <h3>{sel.slice(0, 8)} — <span data-testid="op-state">{state}</span></h3>
+            <h3>{sel.slice(0, 8)} — <span data-testid="op-state">{state}</span>
+              {humanGate && (
+                <span data-testid="op-human-gate"
+                      style={{ marginLeft: 8, padding: '2px 6px', background: '#fde68a', color: '#7c2d12',
+                               borderRadius: 4, fontSize: 12, fontWeight: 700 }}>
+                  HUMAN APPROVAL REQUIRED
+                </span>
+              )}
+            </h3>
             {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
 
             <div className="actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
@@ -108,6 +122,7 @@ export function ProcurementCases() {
                   </select>
                   <button disabled={busy} data-testid="op-demo-reply"
                           onClick={() => run(() => fcDemoReply(sel, scenario, 6))}>Trigger supplier reply</button>
+                  <span style={{ fontSize: 11, color: '#b45309', fontWeight: 700 }}>SANDBOX SUPPLIER</span>
                 </>
               )}
               {state === 'QUOTE_RECEIVED' && (
@@ -148,7 +163,15 @@ export function ProcurementCases() {
 
             {parsed.quoted_quantity != null && (
               <details open>
-                <summary>Parsed quote (confidence {parsed.confidence})</summary>
+                <summary>Parsed quote (confidence {parsed.confidence})
+                  {isDemoReply && (
+                    <span data-testid="op-demo-quote"
+                          style={{ marginLeft: 8, padding: '1px 5px', background: '#dbeafe', color: '#1e3a8a',
+                                   borderRadius: 4, fontSize: 11, fontWeight: 700 }}>
+                      DEMO QUOTE RESPONSE
+                    </span>
+                  )}
+                </summary>
                 <div>Qty {parsed.quoted_quantity} · unit {parsed.unit_amount_cents} · dispatch {parsed.dispatch_ready_at} · expires {parsed.quote_expires_at}</div>
                 {parsed.contradictory && <div style={{ color: 'orange' }}>⚠ contradictory quantity — review</div>}
                 {Array.isArray(parsed.evidence_spans) && (
