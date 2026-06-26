@@ -136,12 +136,14 @@ def cv_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from src.app.services.cv_provider import ManagedCVProvider
         from src.app.services.cv_triage_basic import BasicCVTriage
-        import asyncio
+        # run_async_safe instead of raw asyncio.run — robust if this worker fn is ever invoked under an
+        # already-running event loop (asyncio.run raises there). Same fix as parallel_agent_executor.
+        from src.app.services.async_safe import run_async_safe
         images = payload.get("images") or payload.get("image_b64s") or payload.get("image_data")
         if images:
             img = images[0] if isinstance(images, list) else images
-            labels, text, *_ = asyncio.run(ManagedCVProvider().get_labels_and_text(img))
-            res = asyncio.run(BasicCVTriage().analyze(labels, text)) or {}
+            labels, text, *_ = run_async_safe(ManagedCVProvider().get_labels_and_text(img))
+            res = run_async_safe(BasicCVTriage().analyze(labels, text)) or {}
             return {"cv": res, "labels": labels, "text": text}
     except Exception:
         return {"cv": {}}
