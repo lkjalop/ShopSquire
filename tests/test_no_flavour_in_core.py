@@ -158,8 +158,12 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/economics.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
+    # canonical identity + integration seam: product/variant/external_ref, attributes in JSON — no product vocab.
+    "src/app/services/catalog_entities.py",
     # Shopify→canonical adapter (platform edge): speaks Shopify field names, not a product vertical.
     "src/app/services/shopify_catalog_adapter.py",
+    # Magento→canonical adapter (platform edge): speaks Magento field names, not a product vertical.
+    "src/app/services/magento_catalog_adapter.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

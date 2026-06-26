@@ -80,6 +80,8 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     selection = st.get("selection") or {}
 
     su = vq.get("unit_amount_cents")
+    if su is None:
+        su = _catalog_wholesale(db, st, tenant_id)  # supplier-catalog fallback when no live quote
     qty = po.get("quantity")
     if qty is None:
         qty = sum(int(a.get("quantity") or 0) for a in (selection.get("allocation") or [])
@@ -112,6 +114,18 @@ def _catalog_retail(db, state_json: Dict[str, Any], tenant_id: str) -> Optional[
     if not sku:
         return None
     return commerce_catalog.retail_unit_cents(db, sku, tenant_id=tenant_id)
+
+
+def _catalog_wholesale(db, state_json: Dict[str, Any], tenant_id: str) -> Optional[int]:
+    """Wholesale fallback (no live quote): the cheapest approved supplier's cost for the case's sku.
+    Flag-gated so default behaviour (use the validated quote only) is unchanged."""
+    from src.app.services import commerce_catalog, supplier_catalog
+    if not commerce_catalog.catalog_enabled():
+        return None
+    sku = _case_sku(state_json)
+    if not sku:
+        return None
+    return supplier_catalog.cheapest_wholesale_cents(db, sku)
 
 
 def _selected_retail_unit(state_json: Dict[str, Any]) -> Optional[int]:

@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from src.app.services import catalog_entities as ce
 from src.app.services import commerce_catalog as cc
+
+PLATFORM = "shopify"
 
 
 def price_to_cents(price: Any) -> Optional[int]:
@@ -61,15 +64,32 @@ def ingest_shop_catalog(db, *, products: List[Dict[str, Any]],
     n_p = n_i = 0
     try:
         for product in products or []:
+            # record the product + variants in the canonical catalog + the platform mapping (the seam)
+            pid = str((product or {}).get("id") or "")
+            if pid:
+                ce.upsert_product(db, product_id=f"shopify:{pid}", title=str((product or {}).get("title") or ""),
+                                  tenant_id=tenant_id)
+                ce.upsert_external_ref(db, platform=PLATFORM, entity_type="product", external_id=pid,
+                                       entity_id=f"shopify:{pid}", tenant_id=tenant_id)
+            for v in (product or {}).get("variants") or []:
+                sku = str((v or {}).get("sku") or "").strip()
+                iid = str((v or {}).get("inventory_item_id") or "").strip()
+                if sku:
+                    ce.upsert_variant(db, sku=sku, product_id=f"shopify:{pid}" if pid else "",
+                                      tenant_id=tenant_id)
+                    if iid:  # so inventory_levels (keyed by inventory_item_id) resolve to a sku later
+                        ce.upsert_external_ref(db, platform=PLATFORM, entity_type="inventory_item",
+                                               external_id=iid, entity_id=sku, tenant_id=tenant_id)
             for row in variants_to_prices(product):
                 if cc.upsert_price(db, sku=row["sku"], list_cents=row["list_cents"], channel=channel,
                                    currency=currency, source="shopify", tenant_id=tenant_id):
                     n_p += 1
         if inventory_levels:
-            item_sku = inventory_item_to_sku(products or [])
+            item_sku = inventory_item_to_sku(products or [])   # in-memory fallback if not persisted
             for lvl in inventory_levels:
                 iid = str((lvl or {}).get("inventory_item_id") or "").strip()
-                sku = item_sku.get(iid)
+                sku = ce.resolve_external(db, platform=PLATFORM, entity_type="inventory_item",
+                                          external_id=iid, tenant_id=tenant_id) or item_sku.get(iid)
                 if not sku:
                     continue
                 loc = str((lvl or {}).get("location_id") or "default")

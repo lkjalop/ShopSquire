@@ -57,9 +57,13 @@ def BU(): return Actor(A.BUYER, "u1")
 def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
 
 
-def _to_selected(db):
+def _to_selected(db, *, wholesale_cents=90000):
+    """Walk to SELECTED. wholesale_cents=None omits the quoted wholesale (to test the catalog fallback)."""
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
                        now_iso="2026-06-26 09:00:00"); db.commit()
+    vq = {"quoted_quantity": 6, "estimated_delivery_at": "2026-07-08", "confidence": 0.96}
+    if wholesale_cents is not None:
+        vq["unit_amount_cents"] = wholesale_cents
     seq = [
         ("availability_assessed", AG(), {"availability": {"requested_qty": 10, "in_stock": 4,
                                                           "shortfall": 6, "item_ref": "LAP-021"}}),
@@ -71,9 +75,7 @@ def _to_selected(db):
         ("approval_granted", HU(), None),
         ("external_message_sent", HU(), None),
         ("external_message_received", Actor(A.EXTERNAL, "s"), None),
-        ("supplier_quote_validated", HU(),
-         {"validated_quote": {"quoted_quantity": 6, "estimated_delivery_at": "2026-07-08",
-                              "unit_amount_cents": 90000, "confidence": 0.96}}),  # wholesale 900.00
+        ("supplier_quote_validated", HU(), {"validated_quote": vq}),
     ]
     ts = 0
     for event, actor, patch in seq:
@@ -128,3 +130,16 @@ def test_from_case_ignores_catalog_when_flag_off(db, monkeypatch):
     cc.upsert_price(db, sku="LAP-021", list_cents=130000, source="test"); db.commit()  # present but ignored
     econ = E.from_case(db, cid)
     assert econ["retail_unit_cents"] == 120000  # option-derived (flag off → no catalog read)
+
+
+def test_from_case_wholesale_fallback_from_supplier_catalog(db, monkeypatch):
+    # no live quote wholesale → fall back to the cheapest approved supplier's cost (catalog flag on)
+    from src.app.services import commerce_catalog as cc
+    from src.app.services.supplier_catalog import seed_demo as seed_suppliers
+    monkeypatch.setenv("COMMERCE_CATALOG_ENABLED", "1")
+    cid = _to_selected(db, wholesale_cents=None)
+    seed_suppliers(db, skus=["LAP-021"])                              # cheapest = 1115.00 → 111500c
+    cc.upsert_price(db, sku="LAP-021", list_cents=200000, source="t"); db.commit()  # retail 2000.00
+    econ = E.from_case(db, cid, floor_margin_pct=0.10)
+    assert econ["supplier_unit_cost_cents"] == 111500  # from supplier catalog, not a quote
+    assert econ["retail_unit_cents"] == 200000

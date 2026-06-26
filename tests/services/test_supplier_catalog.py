@@ -6,7 +6,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.app.services.supplier_catalog import DEMO_SKUS, domain_for_supplier, ensure_tables, seed_demo
+from src.app.services.supplier_catalog import (
+    DEMO_SKUS,
+    cheapest_wholesale_cents,
+    domain_for_supplier,
+    ensure_tables,
+    seed_demo,
+)
 
 
 @pytest.fixture()
@@ -30,6 +36,12 @@ def test_domain_for_supplier_from_allowlist(db):
     seed_demo(db, skus=["LAP-021"])
     assert domain_for_supplier(db, "SUP-7") == "approved-supplier.example"
     assert domain_for_supplier(db, "nope") is None
+
+
+def test_cheapest_wholesale_cents_picks_lowest(db):
+    seed_demo(db, skus=["LAP-021"])  # SUP-7=1115.00, SUP-3=1180.00 → cheapest = 111500c
+    assert cheapest_wholesale_cents(db, "LAP-021") == 111500
+    assert cheapest_wholesale_cents(db, "no-such-sku") is None
 
 
 def test_ranking_query_shape_resolves_two_suppliers(db):

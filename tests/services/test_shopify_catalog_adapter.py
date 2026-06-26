@@ -70,3 +70,12 @@ def test_ingest_is_idempotent(db):
     sh.ingest_shop_catalog(db, products=_PRODUCTS, inventory_levels=_LEVELS)  # re-sync
     assert db.execute(text("SELECT COUNT(*) FROM price_book_entry")).scalar() == 2
     assert db.execute(text("SELECT COUNT(*) FROM inventory_level")).scalar() == 2
+
+
+def test_ingest_persists_external_ref_and_variants(db):
+    from src.app.services import catalog_entities as ce
+    sh.ingest_shop_catalog(db, products=_PRODUCTS, inventory_levels=_LEVELS)
+    # inventory_item_id → sku is now PERSISTED (robust across syncs), not just in-memory
+    assert ce.resolve_external(db, platform="shopify", entity_type="inventory_item",
+                               external_id="ii-1") == "LAP-021"
+    assert ce.variant_by_sku(db, "LAP-021")["product_id"] == "shopify:111"

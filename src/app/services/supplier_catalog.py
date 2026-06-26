@@ -120,3 +120,20 @@ def domain_for_supplier(db, supplier_id: str) -> Optional[str]:
         return row[0] if row else None
     except Exception:
         return None
+
+
+def cheapest_wholesale_cents(db, sku: str) -> Optional[int]:
+    """The lowest active-supplier wholesale for a sku, in CENTS — the economics fallback when there is
+    no live validated quote (suppliers.unit_cost is stored in dollars). None if no supplier carries it."""
+    if db is None or not sku:
+        return None
+    try:
+        row = db.execute(text(
+            "SELECT MIN(s.unit_cost) FROM suppliers s JOIN supplier_products sp ON sp.supplier_id = s.id "
+            "WHERE sp.sku = :k AND COALESCE(s.active,1)=1 AND s.unit_cost IS NOT NULL"),
+            {"k": str(sku)}).fetchone()
+        if not row or row[0] is None:
+            return None
+        return int(round(float(row[0]) * 100))
+    except Exception:
+        return None
