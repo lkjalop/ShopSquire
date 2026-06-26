@@ -124,6 +124,18 @@ _SOURCES = {
         lambda r: {"id": r[0], "status": r[1], "updated_at": r[2], "created_at": r[3]},
         from_return,
     ),
+    # competitor: a REAL source — joins the rival observation to OUR canonical price_book retail, so the
+    # detect_competitor_undercut detector fires on live data. No-op when either table is absent.
+    "competitor": (
+        "SELECT co.id, co.sku, pb.list_cents, co.competitor_price_cents, co.competitor, co.observed_at "
+        "FROM competitor_observation co LEFT JOIN price_book_entry pb "
+        "ON pb.sku = co.sku AND COALESCE(pb.tenant_id,'default') = COALESCE(co.tenant_id,'default') "
+        "AND pb.channel = 'default' AND pb.currency = 'AUD' "
+        "ORDER BY co.observed_at DESC LIMIT :lim",
+        lambda r: {"obs_id": r[0], "entity_ref": r[1], "our_price_cents": r[2],
+                   "competitor_price_cents": r[3], "competitor": r[4], "observed_at": r[5]},
+        from_competitor,
+    ),
 }
 
 

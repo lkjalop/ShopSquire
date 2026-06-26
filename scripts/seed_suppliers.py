@@ -9,7 +9,7 @@ Usage:  PYTHONPATH=. python scripts/seed_suppliers.py
 from __future__ import annotations
 
 from src.app.models.db import db_session
-from src.app.services import commerce_catalog
+from src.app.services import commerce_catalog, competitor_source
 from src.app.services.supplier_catalog import DEMO_SKUS, seed_demo
 
 
@@ -17,9 +17,11 @@ def main() -> None:
     with db_session() as db:
         counts = seed_demo(db, skus=DEMO_SKUS)
         cat = commerce_catalog.seed_demo(db)
+        comp = competitor_source.seed_demo(db)
     print(f"seeded suppliers={counts.get('suppliers')} products={counts.get('products')} "
           f"domains={counts.get('domains')} for skus={DEMO_SKUS}")
     print(f"seeded catalog prices={cat.get('prices')} inventory={cat.get('inventory')}")
+    print(f"seeded competitor observations={comp.get('observations')}")
 
 
 if __name__ == "__main__":
