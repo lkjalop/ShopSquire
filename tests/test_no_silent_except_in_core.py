@@ -52,6 +52,7 @@ _BASELINE = {
     "src/app/services/campaign_governance.py": 0,
     "src/app/services/experiments.py": 0,
     "src/app/services/experiment_eval.py": 0,
+    "src/app/services/experiment_console.py": 0,
     "src/app/services/experiment_ops.py": 2,
     "src/app/services/ranking_nudge.py": 0,
     "src/app/services/template_phrasing.py": 0,

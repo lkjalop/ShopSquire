@@ -300,6 +300,53 @@ def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]
         return mp.state(db)
 
 
+# ── ranking-experiment console (operator) — promote/observe/evaluate/revert the live-adaptation loop ──
+class ExperimentBody(BaseModel):
+    experiment_id: Optional[str] = None
+    min_samples: Optional[int] = None
+
+
+def _exp_id(body: Optional["ExperimentBody"]) -> str:
+    from src.app.services.experiment_console import DEFAULT_EXPERIMENT_ID
+    return (body.experiment_id if body and body.experiment_id else DEFAULT_EXPERIMENT_ID)
+
+
+@router.get("/market/experiment/state")
+def experiment_state(experiment_id: Optional[str] = Query(None),
+                     role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    from src.app.services import experiment_console as ec
+    with db_session() as db:
+        return ec.state(db, experiment_id=experiment_id or ec.DEFAULT_EXPERIMENT_ID)
+
+
+@router.post("/market/experiment/promote")
+def experiment_promote(body: ExperimentBody = Body(default=ExperimentBody()),
+                       role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Arm the ranking experiment (status→live). The nudge still needs RANKING_NUDGE_EXPERIMENT_ENABLED."""
+    from src.app.services import experiment_console as ec
+    with db_session() as db:
+        return ec.promote(db, experiment_id=_exp_id(body))
+
+
+@router.post("/market/experiment/evaluate")
+def experiment_evaluate(body: ExperimentBody = Body(default=ExperimentBody()),
+                        role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Run uplift → decide → auto-revert now (the rollback safety net, on demand)."""
+    from src.app.services import experiment_console as ec
+    with db_session() as db:
+        return ec.evaluate_now(db, experiment_id=_exp_id(body),
+                               min_samples=int(body.min_samples) if body and body.min_samples else 30)
+
+
+@router.post("/market/experiment/revert")
+def experiment_revert(body: ExperimentBody = Body(default=ExperimentBody()),
+                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """The manual revert lever — stop the adaptation globally."""
+    from src.app.services import experiment_console as ec
+    with db_session() as db:
+        return ec.revert(db, experiment_id=_exp_id(body))
+
+
 class SelectBody(BaseModel):
     uid: str
     option_id: str

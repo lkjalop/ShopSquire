@@ -106,6 +106,16 @@ def test_market_refresh_and_state_run_the_real_pipeline():
     assert s.status_code == 200 and s.json()["label"] == "LIVE"
 
 
+def test_experiment_console_promote_observe_revert():
+    # operator levers over the live-adaptation experiment: promote → live, then revert → not live
+    p = client.post("/api/v1/fulfillment/market/experiment/promote", json={})
+    assert p.status_code == 200 and p.json()["live"] is True
+    s = client.get("/api/v1/fulfillment/market/experiment/state")
+    assert s.status_code == 200 and s.json()["live"] is True
+    rev = client.post("/api/v1/fulfillment/market/experiment/revert", json={})
+    assert rev.status_code == 200 and rev.json()["live"] is False
+
+
 def test_market_replay_gated_then_advances(monkeypatch):
     # gated off by default
     assert client.post("/api/v1/fulfillment/replay/advance", params={"day": 7}).status_code == 403

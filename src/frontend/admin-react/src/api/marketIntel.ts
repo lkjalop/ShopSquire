@@ -19,3 +19,16 @@ export const replayAdvance = (day: number) =>
 export const marketState = () => http<ReplayState>(`/api/v1/fulfillment/market/state`);
 export const refreshMarket = () =>
   http<{ refreshed: any; state: ReplayState }>(`/api/v1/fulfillment/market/refresh`, { method: 'POST' });
+
+// Ranking-experiment console — promote/observe/evaluate/revert the live-adaptation loop (operator levers).
+export interface ExperimentState {
+  experiment_id: string; status: string; live: boolean;
+  assignments: Record<string, number>;
+  last_decision: string | null; last_uplift_pct: number | null; adaptation_killed: boolean;
+}
+const _exp = '/api/v1/fulfillment/market/experiment';
+export const experimentState = () => http<ExperimentState>(`${_exp}/state`);
+export const experimentPromote = () => http<ExperimentState>(`${_exp}/promote`, { method: 'POST', body: '{}' });
+export const experimentRevert = () => http<ExperimentState>(`${_exp}/revert`, { method: 'POST', body: '{}' });
+export const experimentEvaluate = (min_samples = 1) =>
+  http<any>(`${_exp}/evaluate`, { method: 'POST', body: JSON.stringify({ min_samples }) });

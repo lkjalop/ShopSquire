@@ -7,7 +7,11 @@
  * only the events are synthetic, and they're written under an isolated demo tenant.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { marketState, refreshMarket, replayAdvance, replayReset, replayState, type ReplayState } from '../api';
+import {
+  experimentEvaluate, experimentPromote, experimentRevert, experimentState,
+  marketState, refreshMarket, replayAdvance, replayReset, replayState,
+  type ExperimentState, type ReplayState,
+} from '../api';
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
 
@@ -29,6 +33,17 @@ export function MarketIntelligence() {
     setBusy(true); setError(null);
     try { const r = await refreshMarket(); setMode('live'); setSt(r.state); }
     catch (e: any) { setError(e?.message || 'live refresh failed'); }
+    finally { setBusy(false); }
+  };
+
+  // ── ranking-experiment console (the live-adaptation levers) ──
+  const [exp, setExp] = useState<ExperimentState | null>(null);
+  const loadExp = useCallback(() => { experimentState().then(setExp).catch(() => {}); }, []);
+  useEffect(() => { loadExp(); }, [loadExp]);
+  const runExp = async (fn: () => Promise<any>) => {
+    setBusy(true); setError(null);
+    try { await fn(); loadExp(); }
+    catch (e: any) { setError(e?.message || 'experiment action failed'); }
     finally { setBusy(false); }
   };
 
@@ -91,6 +106,33 @@ export function MarketIntelligence() {
           <li><em>no active findings — {mode === 'live' ? 'refresh live data' : 'advance the replay'}</em></li>
         )}
       </ul>
+
+      {/* Live-adaptation console: arm/observe/evaluate/revert the reversible ranking experiment.
+          Arming only flips status — the nudge still needs RANKING_NUDGE_EXPERIMENT_ENABLED to fire. */}
+      <section data-testid="mi-experiment" style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
+        <h4 style={{ margin: '0 0 6px' }}>Ranking experiment (live adaptation)</h4>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span data-testid="exp-status" style={{
+            background: exp?.live ? '#dcfce7' : '#f3f4f6', color: exp?.live ? '#166534' : '#374151',
+            padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+          }}>
+            {exp?.live ? 'LIVE' : (exp?.status || 'absent').toUpperCase()}
+          </span>
+          {exp && (
+            <small>control {exp.assignments?.control || 0} · treatment {exp.assignments?.treatment || 0}
+              {exp.last_decision ? ` · last: ${exp.last_decision} (${exp.last_uplift_pct ?? '–'}%)` : ''}
+              {exp.adaptation_killed ? ' · KILL-SWITCH ON' : ''}</small>
+          )}
+          <button disabled={busy} onClick={() => runExp(experimentPromote)} data-testid="exp-promote">Promote → live</button>
+          <button disabled={busy} onClick={() => runExp(() => experimentEvaluate(1))} data-testid="exp-evaluate">Evaluate now</button>
+          <button disabled={busy} onClick={() => runExp(experimentRevert)} data-testid="exp-revert"
+                  style={{ color: 'crimson' }}>Revert (kill)</button>
+        </div>
+        <small style={{ color: '#6b7280' }}>
+          Arming flips status only; the nudge fires for TREATMENT users behind the confidence/authz gate
+          when RANKING_NUDGE_EXPERIMENT_ENABLED is on. Evaluate runs uplift → decide → auto-revert on no-lift.
+        </small>
+      </section>
     </div>
   );
 }

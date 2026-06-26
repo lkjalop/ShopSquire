@@ -104,6 +104,9 @@ _CORE_MODULES = [
     # experiment evaluation runtime: per-variant uplift → decide → auto-revert; opaque metrics —
     # no product vocabulary.
     "src/app/services/experiment_eval.py",
+    # experiment operator console: promote/observe/evaluate/revert levers, opaque experiment/variant —
+    # no product vocabulary.
+    "src/app/services/experiment_console.py",
     # market intelligence agent: read-only context gatherer (recall + gated findings), opaque —
     # no product vocabulary.
     "src/app/services/market_intelligence_agent.py",
