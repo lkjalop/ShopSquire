@@ -153,8 +153,13 @@ def _default_market(db, item_ref, tenant_id):
 def _default_rank(db, item_ref, tenant_id):
     try:
         from src.app.services.inventory_agent import InventoryAgent
+        from src.app.services.supplier_catalog import domain_for_supplier
         best = InventoryAgent()._get_best_supplier(item_ref)  # type: ignore[attr-defined]
-        return [best] if best else []
+        if not best or not best.get("id"):
+            return []
+        # _get_best_supplier returns no domain; enrich from the allowlist (the approved-domain source).
+        domain = domain_for_supplier(db, str(best["id"]))
+        return [{**best, "domain": domain}] if domain else []
     except Exception:
         return []
 

@@ -149,6 +149,8 @@ _CORE_MODULES = [
     "src/app/services/recommend_fulfillment_stage.py",
     # market replay: deterministic synthetic signals → real M3, tenant-isolated — no product vocabulary.
     "src/app/services/market_replay.py",
+    # supplier catalog: suppliers/supplier_products schema + demo seed, opaque ids — no product vocabulary.
+    "src/app/services/supplier_catalog.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
