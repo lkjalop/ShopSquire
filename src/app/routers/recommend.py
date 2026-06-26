@@ -10568,23 +10568,15 @@ def suggest(
         demote_off_category=_demote_off_category, log=logger,
     )
 
-    # Availability/fulfilment verdict (Step 3b): when a bulk order_quantity was asked, assess
-    # "can we fulfil N of the primary pick by day D?" from stock + supplier lead-time.
-    # For B2B bulk orders with a shortfall, also produce a draft PO (human-gated: status
-    # 'awaiting_human_approval') so the admin can review and approve without extra clicks.
-    # assess_availability never raises, so no try/except is needed (keeps the silent-except ratchet).
-    _availability_line = ""
-    _order_qty = constraints.get("order_quantity")
-    if _order_qty and int(_order_qty) > 1:
-        from src.app.services.availability_agent import assess_availability, availability_summary_line
-        _avail_skus = [str(r.get("sku")) for r in (results or [])[:5] if isinstance(r, dict) and r.get("sku")]
-        if _avail_skus:
-            _is_b2b_bulk = int(_order_qty) >= 5
-            payload["availability"] = assess_availability(
-                _avail_skus, int(_order_qty), constraints.get("availability_horizon_days"),
-                draft_reorder=_is_b2b_bulk,
-            )
-            _availability_line = availability_summary_line(payload["availability"])
+    # Availability/fulfilment stage (extracted to recommend_fulfillment_stage): bulk availability verdict
+    # (sets payload['availability'] + returns the summary line) AND, when FULFILLMENT_CASES_ENABLED, opens
+    # a durable procurement case on a real bulk shortfall (advanced to GATE 1 — no supplier contacted).
+    # Procurement logic stays OUT of this monolith — this is the only fulfilment touchpoint here.
+    from src.app.services.recommend_fulfillment_stage import run_fulfillment_stage as _run_fulfillment_stage
+    _availability_line = _run_fulfillment_stage(
+        results=results, constraints=constraints, payload=payload, uid=uid, uid_hash=uid_hash,
+        trace_id=trace_id, flags=flags,
+    )
 
     assistant_message = None
     llm_summary_job_id = None

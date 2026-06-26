@@ -145,6 +145,8 @@ _CORE_MODULES = [
     # fulfilment options planner: together/split/substitute with tradeoffs, opaque allocation —
     # no product vocabulary.
     "src/app/services/fulfillment/options.py",
+    # recommend fulfilment stage: bulk availability + flag-gated case trigger, opaque — no product vocab.
+    "src/app/services/recommend_fulfillment_stage.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
