@@ -61,10 +61,12 @@ def _to_selected(db):
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
                        now_iso="2026-06-26 09:00:00"); db.commit()
     seq = [
-        ("availability_assessed", AG(), {"availability": {"requested_qty": 10, "in_stock": 4, "shortfall": 6}}),
+        ("availability_assessed", AG(), {"availability": {"requested_qty": 10, "in_stock": 4,
+                                                          "shortfall": 6, "item_ref": "LAP-021"}}),
         ("request_buyer_commitment", AG(), None),
         ("buyer_committed", BU(), None),
-        ("external_message_drafted", AG(), {"draft": {"content_hash": "H1", "commercial_scope": {"quantity": 6}}}),
+        ("external_message_drafted", AG(),
+         {"draft": {"content_hash": "H1", "commercial_scope": {"quantity": 6, "item_ref": "LAP-021"}}}),
         ("approval_requested", AG(), None),
         ("approval_granted", HU(), None),
         ("external_message_sent", HU(), None),
@@ -108,3 +110,21 @@ def test_from_case_retail_override(db):
     cid = _to_selected(db)
     econ = E.from_case(db, cid, retail_unit_cents=100000, floor_margin_pct=0.10)  # override retail to 1000.00
     assert econ["retail_unit_cents"] == 100000 and econ["supplier_unit_cost_cents"] == 90000
+
+
+def test_from_case_uses_price_book_when_catalog_enabled(db, monkeypatch):
+    from src.app.services import commerce_catalog as cc
+    monkeypatch.setenv("COMMERCE_CATALOG_ENABLED", "1")
+    cid = _to_selected(db)
+    cc.upsert_price(db, sku="LAP-021", list_cents=130000, source="test"); db.commit()  # canonical 1300.00
+    econ = E.from_case(db, cid, floor_margin_pct=0.10)
+    assert econ["retail_unit_cents"] == 130000  # the price_book JOIN, not the 1200.00 option
+
+
+def test_from_case_ignores_catalog_when_flag_off(db, monkeypatch):
+    from src.app.services import commerce_catalog as cc
+    monkeypatch.delenv("COMMERCE_CATALOG_ENABLED", raising=False)
+    cid = _to_selected(db)
+    cc.upsert_price(db, sku="LAP-021", list_cents=130000, source="test"); db.commit()  # present but ignored
+    econ = E.from_case(db, cid)
+    assert econ["retail_unit_cents"] == 120000  # option-derived (flag off → no catalog read)

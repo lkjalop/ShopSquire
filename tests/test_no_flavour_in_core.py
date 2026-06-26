@@ -156,6 +156,10 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/purchase_order.py",
     # deal economics: margin/discount-headroom/profit math, cents + ratios only — no product vocabulary.
     "src/app/services/fulfillment/economics.py",
+    # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
+    "src/app/services/commerce_catalog.py",
+    # Shopify→canonical adapter (platform edge): speaks Shopify field names, not a product vertical.
+    "src/app/services/shopify_catalog_adapter.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

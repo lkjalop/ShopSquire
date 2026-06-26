@@ -68,7 +68,9 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     """Derive the economics from a fulfilment case (operator-only). Inputs read off the case:
       • supplier wholesale  = validated_quote.unit_amount_cents
       • quantity            = purchase_order.quantity, else the selection's supplier-sourced units
-      • retail per unit      = the ``retail_unit_cents`` override, else the selected option's per-unit retail
+      • retail per unit      = ``retail_unit_cents`` override > the canonical price_book (when
+                              COMMERCE_CATALOG_ENABLED, keyed by the case's sku) > the selected option's
+                              per-unit retail
     Returns {} when the inputs aren't present yet (e.g. before a quote is validated). Best-effort."""
     from src.app.services.fulfillment import workflow
     cur = workflow.repository.current_version(db, case_id, tenant_id)
@@ -82,10 +84,34 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     if qty is None:
         qty = sum(int(a.get("quantity") or 0) for a in (selection.get("allocation") or [])
                   if a.get("source") in ("supplier", "substitute"))
-    ru = retail_unit_cents if retail_unit_cents is not None else _selected_retail_unit(st)
+    ru = retail_unit_cents
+    if ru is None:
+        ru = _catalog_retail(db, st, tenant_id)   # canonical price_book JOIN (flag-gated)
+    if ru is None:
+        ru = _selected_retail_unit(st)            # fallback: derive from the selected option
     econ = compute(supplier_unit_cost_cents=su, retail_unit_cents=ru, quantity=qty,
                    floor_margin_pct=floor_margin_pct)
     return econ.to_dict() if econ else {}
+
+
+def _case_sku(state_json: Dict[str, Any]) -> Optional[str]:
+    """The case's item id, wherever it was recorded (PO > draft scope > availability)."""
+    po = state_json.get("purchase_order") or {}
+    scope = (state_json.get("draft") or {}).get("commercial_scope") or {}
+    avail = state_json.get("availability") or {}
+    sku = po.get("item_ref") or scope.get("item_ref") or avail.get("item_ref")
+    return str(sku) if sku else None
+
+
+def _catalog_retail(db, state_json: Dict[str, Any], tenant_id: str) -> Optional[int]:
+    """Canonical retail from price_book_entry for the case's sku — only when the catalog flag is on."""
+    from src.app.services import commerce_catalog
+    if not commerce_catalog.catalog_enabled():
+        return None
+    sku = _case_sku(state_json)
+    if not sku:
+        return None
+    return commerce_catalog.retail_unit_cents(db, sku, tenant_id=tenant_id)
 
 
 def _selected_retail_unit(state_json: Dict[str, Any]) -> Optional[int]:
