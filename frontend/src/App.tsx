@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
+import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
@@ -417,6 +418,7 @@ export default function App() {
   const [displayProducts, setDisplayProducts] = useState<Product[]>([]);
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
+  const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
@@ -1384,6 +1386,7 @@ export default function App() {
         }
         const prods = (data.products || []) as Product[];
         setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
+        setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
         const respAssistant = data.assistant_message || '';
         const nextQuestions = Array.isArray(data.next_questions) ? data.next_questions : [];
         const normalizedNextQuestions = normalizeNextQuestions(nextQuestions);
@@ -1639,6 +1642,7 @@ export default function App() {
           </div>
         </div>
         <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
+        {fulfilmentCase && <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />}
         <ExternalResearchPanel items={externalResearch} />
       </main>
 

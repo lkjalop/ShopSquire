@@ -154,6 +154,52 @@ export async function getCart(uid: string) {
   return j;
 }
 
+// ── Fulfilment / procurement (buyer-facing; operator actions live in admin-react) ──
+export interface FulfillmentOption {
+  option_id: string;
+  option_type: string;
+  title: string;
+  estimated_delivery_at?: string | null;
+  total_units: number;
+  constraints_satisfied: { complete: boolean; deadline_met: boolean; within_budget: boolean };
+  tradeoffs: string[];
+}
+
+export async function getFulfillmentCase(caseId: string, view: 'buyer' | 'operator' = 'buyer') {
+  const u = new URL(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(caseId)}`), window.location.href);
+  u.searchParams.set('view', view);
+  const r = await fetch(u.toString(), { credentials: 'include', headers: authHeaders() });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `case_get_failed (${r.status})`);
+  return j;
+}
+
+export async function getFulfillmentJourney(caseId: string) {
+  const r = await fetch(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(caseId)}/journey`),
+    { credentials: 'include', headers: authHeaders() });
+  return (await safeJson(r)) || { journey: [] };
+}
+
+export async function commitFulfillmentCase(caseId: string, uid: string) {
+  const r = await fetch(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(caseId)}/commit`), {
+    method: 'POST', credentials: 'include', headers: authHeaders({}, true),
+    body: JSON.stringify({ uid: uid || 'demo-user' }),
+  });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `commit_failed (${r.status})`);
+  return j;
+}
+
+export async function selectFulfillmentOption(caseId: string, uid: string, optionId: string) {
+  const r = await fetch(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(caseId)}/select-option`), {
+    method: 'POST', credentials: 'include', headers: authHeaders({}, true),
+    body: JSON.stringify({ uid: uid || 'demo-user', option_id: optionId }),
+  });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `select_failed (${r.status})`);
+  return j;
+}
+
 export async function addCartItem(uid: string, sku: string, quantity = 1) {
   const r = await fetch(apiUrl('/api/v1/cart/items'), {
     method: 'POST',
