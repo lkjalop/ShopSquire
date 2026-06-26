@@ -38,6 +38,19 @@ def test_finding_types_map_to_typed_actions():
     assert actions[0].source_finding_type == "demand_shift"
 
 
+def test_objection_and_funnel_findings_propose_support_copy_review():
+    # David's deck Module 4: support objections + weak funnel points → a guidance/messaging review proposal
+    findings = [
+        MarketFinding("objection_cluster", "price", "critical", 0.9, "price raised 6x", {"theme": "price"}, "recent"),
+        MarketFinding("funnel_dropoff", "payment", "warn", 0.7, "70% abandon", {"stage": "payment"}, "recent"),
+    ]
+    by_type = {a.source_finding_type: a for a in sa.propose_from_findings(findings)}
+    assert by_type["objection_cluster"].action_type == sa.ACTION_REVISE_SUPPORT_COPY
+    assert by_type["funnel_dropoff"].action_type == sa.ACTION_REVISE_SUPPORT_COPY
+    assert by_type["objection_cluster"].direction == "review"  # log-only proposal through the gate
+    assert by_type["objection_cluster"].target_ref == "price" and by_type["funnel_dropoff"].target_ref == "payment"
+
+
 def test_direction_inferred_from_evidence():
     spike = sa.propose_from_findings([MarketFinding("demand_shift", "A", "warn", 0.7, "s", {"direction": "up"}, "d")])
     slowdown = sa.propose_from_findings([MarketFinding("demand_shift", "A", "warn", 0.7, "s", {"direction": "down"}, "d")])

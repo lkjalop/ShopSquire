@@ -31,11 +31,14 @@ ACTION_ADJUST_RANKING = "adjust_ranking"
 ACTION_SUPPRESS_LOW_STOCK = "suppress_low_stock"
 ACTION_REVISE_SUPPORT_COPY = "revise_support_copy"
 
-# finding_type → proposed action_type. Deterministic + opaque — no product knowledge.
+# finding_type → proposed action_type. Deterministic + opaque — no product knowledge. (David's deck,
+# Module 4 Decision Engine: support objections + weak funnel points → a guidance/messaging review.)
 _FINDING_TO_ACTION: Dict[str, str] = {
     "demand_shift": ACTION_ADJUST_RANKING,            # demand moved → propose re-ranking the entity
     "demand_forecast": ACTION_ADJUST_RANKING,         # PROJECTED demand move → same reversible nudge (gated)
     "conversion_anomaly": ACTION_REVISE_SUPPORT_COPY,  # conversions dropped → propose copy/messaging review
+    "objection_cluster": ACTION_REVISE_SUPPORT_COPY,   # recurring objection on a theme → propose guidance update
+    "funnel_dropoff": ACTION_REVISE_SUPPORT_COPY,      # a stage bleeding buyers → propose messaging review there
     "inventory_demand_mismatch": ACTION_SUPPRESS_LOW_STOCK,  # demand with no stock → propose demoting it
 }
 _SEVERITY_WEIGHT = {"info": 0.3, "warn": 0.7, "critical": 1.0}
