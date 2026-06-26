@@ -11,6 +11,12 @@ Detectors (v1, explainable):
   • conversion_anomaly       — daily conversion-rate (conversions/demand) DROP anomaly
   • inventory_demand_mismatch — recurring demand with zero result_count (catalog not meeting demand;
                                 a proxy until a real inventory adapter sharpens it)
+  • demand_forecast          — FORWARD-looking: project next-period demand (EWMA, the leg
+                                DemandForecaster falls back to) → flag a projected surge / shortfall
+  • seasonal_demand          — day-of-week pattern: a recurring weekday whose mean demand exceeds the
+                                overall daily mean (seasonality)
+  • competitor_undercut      — a competitor price below ours on the same entity (pricing-review signal)
+  • objection_cluster        — recurring support objections on the same theme (objection mining)
 
 Vertical-blind: finding_type/entity_ref/evidence are opaque to product vocabulary. Never raises.
 """
@@ -25,8 +31,13 @@ from sqlalchemy import text
 FINDING_DEMAND_SHIFT = "demand_shift"
 FINDING_CONVERSION_ANOMALY = "conversion_anomaly"
 FINDING_INVENTORY_MISMATCH = "inventory_demand_mismatch"
+FINDING_DEMAND_FORECAST = "demand_forecast"
+FINDING_SEASONAL_DEMAND = "seasonal_demand"
+FINDING_COMPETITOR_UNDERCUT = "competitor_undercut"
+FINDING_OBJECTION_CLUSTER = "objection_cluster"
 
 _MIN_POINTS = 4  # need enough history before an anomaly finding is actionable
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
 @dataclass(frozen=True)
@@ -142,6 +153,168 @@ def detect_inventory_demand_mismatch(signals, *, min_unmet: int = 3) -> List[Mar
     return out
 
 
+def _daily_demand(signals) -> Dict[str, int]:
+    """Bucket demand signals into a {YYYY-MM-DD: count} series (shared by the demand detectors)."""
+    by_day: Dict[str, int] = {}
+    for s in signals or []:
+        if (s or {}).get("signal_type") != "demand":
+            continue
+        d = _day(s.get("occurred_at"))
+        if d:
+            by_day[d] = by_day.get(d, 0) + 1
+    return by_day
+
+
+def _safe_float(x: Any) -> Optional[float]:
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def _safe_weekday(d: Any) -> Optional[int]:
+    from datetime import date as _date
+    try:
+        return _date.fromisoformat(str(d)).weekday()
+    except Exception:
+        return None
+
+
+def _ewma_forecast(series: List[float], *, alpha: float = 0.28):
+    """One-step-ahead EWMA projection — the dependency-free leg DemandForecaster itself falls back to.
+    Returns (prediction, method)."""
+    if not series:
+        return 0.0, "ewma_default"
+    x = float(series[0])
+    for v in series[1:]:
+        x = alpha * float(v) + (1.0 - alpha) * x
+    return max(0.0, x), "ewma"
+
+
+def detect_demand_forecast(signals, *, forecast_fn: Optional[Callable] = None, min_points: int = _MIN_POINTS,
+                           surge_ratio: float = 1.25, shortfall_ratio: float = 0.75) -> List[MarketFinding]:
+    """FORWARD-looking: project next-period demand from the daily series and flag a material projected
+    surge or shortfall. ``forecast_fn(series)->(pred, method)`` is injectable (default EWMA). Carries
+    direction in evidence so a downstream proposal boosts a projected surge / demotes a projected
+    shortfall (same contract as demand_shift)."""
+    fc = forecast_fn or _ewma_forecast
+    by_day = _daily_demand(signals)
+    days = sorted(by_day)
+    if len(days) < min_points:
+        return []
+    series = [float(by_day[d]) for d in days]
+    baseline = sum(series) / len(series)
+    if baseline <= 0:
+        return []
+    pred, method = fc(series)
+    ratio = pred / baseline
+    if ratio >= surge_ratio:
+        direction, sev = "spike", ("critical" if ratio >= surge_ratio * 1.6 else "warn")
+    elif ratio <= shortfall_ratio:
+        direction, sev = "slowdown", ("critical" if ratio <= shortfall_ratio * 0.6 else "warn")
+    else:
+        return []  # projection within the normal band → nothing to flag
+    return [MarketFinding(
+        FINDING_DEMAND_FORECAST, None, sev, round(min(1.0, abs(ratio - 1.0) / 0.5), 3),
+        f"Projected demand {direction}: ~{pred:.0f} next vs ~{baseline:.0f} baseline.",
+        {"projected": round(pred, 2), "baseline": round(baseline, 2), "direction": direction,
+         "ratio": round(ratio, 3), "method": method, "horizon": "next_period"},
+        "forecast",
+    )]
+
+
+def detect_seasonal_demand(signals, *, min_days: int = 7, min_occurrences: int = 2,
+                           min_ratio: float = 1.4) -> List[MarketFinding]:
+    """Day-of-week pattern: flag the recurring weekday whose mean demand materially exceeds the overall
+    daily mean. Needs >= min_days of history and the peak weekday observed >= min_occurrences times.
+    Vertical-blind (weekday is a calendar label, never product vocabulary)."""
+    by_day = _daily_demand(signals)
+    days = sorted(by_day)
+    if len(days) < min_days:
+        return []
+    per_wd: Dict[int, List[float]] = {}
+    for d in days:
+        wd = _safe_weekday(d)
+        if wd is not None:
+            per_wd.setdefault(wd, []).append(float(by_day[d]))
+    counts = [float(by_day[d]) for d in days]
+    overall = sum(counts) / len(counts)
+    cand = [(wd, sum(v) / len(v)) for wd, v in per_wd.items() if len(v) >= min_occurrences]
+    if overall <= 0 or not cand:
+        return []
+    peak_wd, peak_mean = max(cand, key=lambda x: x[1])
+    ratio = peak_mean / overall
+    if ratio < min_ratio:
+        return []
+    sev = "warn" if ratio >= min_ratio * 1.5 else "info"  # a pattern, not an incident
+    return [MarketFinding(
+        FINDING_SEASONAL_DEMAND, None, sev, round(min(1.0, ratio - 1.0), 3),
+        f"Demand peaks on {_WEEKDAYS[peak_wd]}: ~{peak_mean:.0f} vs ~{overall:.0f} overall.",
+        {"peak_weekday": _WEEKDAYS[peak_wd], "peak_mean": round(peak_mean, 2),
+         "overall_mean": round(overall, 2), "ratio": round(ratio, 3)},
+        "weekly",
+    )]
+
+
+def detect_competitor_undercut(signals, *, min_gap_pct: float = 0.05) -> List[MarketFinding]:
+    """A competitor price below ours by >= min_gap_pct on the SAME entity → a pricing-review finding,
+    using the latest observation per entity. payload: {entity_ref|sku, our_price_cents,
+    competitor_price_cents, competitor?}. Vertical-blind (entity_ref is opaque)."""
+    latest: Dict[str, Dict[str, Any]] = {}
+    for s in signals or []:
+        if (s or {}).get("signal_type") != "competitor":
+            continue
+        p = s.get("payload") or {}
+        ent = str(p.get("entity_ref") or p.get("sku") or "").strip()
+        if not ent:
+            continue
+        prev = latest.get(ent)
+        if prev is None or str(s.get("occurred_at") or "") >= str(prev.get("_occ") or ""):
+            latest[ent] = {**p, "_occ": s.get("occurred_at")}
+    out: List[MarketFinding] = []
+    for ent, p in sorted(latest.items()):
+        ours = _safe_float(p.get("our_price_cents"))
+        theirs = _safe_float(p.get("competitor_price_cents"))
+        if not ours or not theirs or ours <= 0 or theirs <= 0 or theirs >= ours:
+            continue
+        gap = (ours - theirs) / ours
+        if gap < min_gap_pct:
+            continue
+        out.append(MarketFinding(
+            FINDING_COMPETITOR_UNDERCUT, ent, "critical" if gap >= 0.15 else "warn",
+            round(min(1.0, gap / 0.3), 3),
+            f"Competitor undercut on '{ent}': {theirs:.0f}c vs our {ours:.0f}c ({gap * 100:.0f}% lower).",
+            {"our_price_cents": ours, "competitor_price_cents": theirs, "gap_pct": round(gap, 4),
+             "competitor": p.get("competitor")},
+            "recent",
+        ))
+    return out
+
+
+def detect_objection_cluster(signals, *, min_count: int = 3) -> List[MarketFinding]:
+    """Recurring support objections on the same theme → a finding (objection mining). payload:
+    {theme|reason|token}. Vertical-blind (theme is an opaque label)."""
+    by_theme: Dict[str, int] = {}
+    for s in signals or []:
+        if (s or {}).get("signal_type") != "support_objection":
+            continue
+        p = s.get("payload") or {}
+        theme = str(p.get("theme") or p.get("reason") or p.get("token") or "").strip().lower()
+        if theme:
+            by_theme[theme] = by_theme.get(theme, 0) + 1
+    out: List[MarketFinding] = []
+    for theme, n in sorted(by_theme.items(), key=lambda x: (-x[1], x[0])):
+        if n < min_count:
+            continue
+        out.append(MarketFinding(
+            FINDING_OBJECTION_CLUSTER, theme, "critical" if n >= min_count * 2 else "warn",
+            round(min(1.0, n / float(min_count * 3)), 3),
+            f"Recurring objection '{theme}': raised {n}x.",
+            {"theme": theme, "count": n}, "recent",
+        ))
+    return out
+
+
 def _safe(fn: Callable, *args, **kw) -> List[MarketFinding]:
     try:
         return fn(*args, **kw)
@@ -149,12 +322,17 @@ def _safe(fn: Callable, *args, **kw) -> List[MarketFinding]:
         return []  # one detector failing must not sink the rest
 
 
-def analyze(signals, *, anomaly_fn: Optional[Callable] = None) -> List[MarketFinding]:
+def analyze(signals, *, anomaly_fn: Optional[Callable] = None,
+            forecast_fn: Optional[Callable] = None) -> List[MarketFinding]:
     """Run every detector over a market_signal window. Never raises."""
     out: List[MarketFinding] = []
     out += _safe(detect_demand_shift, signals, anomaly_fn=anomaly_fn)
     out += _safe(detect_conversion_anomaly, signals, anomaly_fn=anomaly_fn)
     out += _safe(detect_inventory_demand_mismatch, signals)
+    out += _safe(detect_demand_forecast, signals, forecast_fn=forecast_fn)
+    out += _safe(detect_seasonal_demand, signals)
+    out += _safe(detect_competitor_undercut, signals)
+    out += _safe(detect_objection_cluster, signals)
     return out
 
 
@@ -181,12 +359,13 @@ def load_recent_signals(db, *, limit: int = 2000) -> List[Dict[str, Any]]:
     return out
 
 
-def run_analysis(db, *, limit: int = 2000, anomaly_fn: Optional[Callable] = None) -> List[MarketFinding]:
+def run_analysis(db, *, limit: int = 2000, anomaly_fn: Optional[Callable] = None,
+                 forecast_fn: Optional[Callable] = None) -> List[MarketFinding]:
     """Load recent market_signal rows + analyze them. The DB entry point for the BATCH task.
 
     NOTE: analysis runs the real statistical models (~1.6s) — batch-only, never the request path.
     The hot path reads PERSISTED findings via load_recent_findings()."""
-    return analyze(load_recent_signals(db, limit=limit), anomaly_fn=anomaly_fn)
+    return analyze(load_recent_signals(db, limit=limit), anomaly_fn=anomaly_fn, forecast_fn=forecast_fn)
 
 
 # ── findings persistence (batch writes, hot path reads) ──────────────────────

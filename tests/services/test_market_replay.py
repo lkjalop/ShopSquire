@@ -59,6 +59,19 @@ def test_advancing_days_changes_findings(db):
     assert "demand_shift" in late
 
 
+def test_heat_day_surfaces_competitor_and_objection_findings(db):
+    # before the heat day (≤5) no competitor/objection signals exist
+    mr.load_days(db, up_to_day=5)
+    mr.run(db)
+    early = {f["type"] for f in mr.state(db)["findings"]}
+    assert "competitor_undercut" not in early and "objection_cluster" not in early
+    # advance through the full curve → the rival undercut + objection cluster appear
+    mr.load_days(db, up_to_day=mr.TOTAL_DAYS)
+    mr.run(db)
+    late = {f["type"] for f in mr.state(db)["findings"]}
+    assert "competitor_undercut" in late and "objection_cluster" in late
+
+
 def test_reset_clears(db):
     mr.load_days(db, up_to_day=mr.TOTAL_DAYS)
     mr.run(db)

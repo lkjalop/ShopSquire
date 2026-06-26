@@ -9,9 +9,11 @@ from sqlalchemy.pool import StaticPool
 from src.app.services import attribution
 from src.app.services.market_signal_adapters import (
     backfill_from_db,
+    from_competitor,
     from_conversion,
     from_order,
     from_search,
+    from_support_objection,
 )
 
 
@@ -37,6 +39,26 @@ def test_mappers_reject_missing_id():
     assert from_order({"total_cents": 1}) is None
     assert from_conversion({"decision_id": "D"}) is None
     assert from_search({"query": "x"}) is None
+
+
+def test_from_competitor_maps_envelope():
+    sig = from_competitor({"obs_id": "C1", "entity_ref": "SKU-1", "our_price_cents": 150000,
+                           "competitor_price_cents": 124900, "competitor": "rival.example",
+                           "observed_at": "2026-06-25"})
+    assert sig and sig.signal_type == "competitor" and sig.source == "competitor_feed"
+    assert sig.payload["entity_ref"] == "SKU-1" and sig.trust_score == 0.6
+
+
+def test_from_support_objection_maps_envelope():
+    sig = from_support_objection({"obs_id": "B1", "theme": "Price", "raised_at": "2026-06-25"})
+    assert sig and sig.signal_type == "support_objection" and sig.source == "support_inbox"
+    assert sig.payload["theme"] == "Price" and sig.trust_score == 0.7
+
+
+def test_inline_mappers_reject_missing_fields():
+    assert from_competitor({"our_price_cents": 1}) is None           # no obs_id/entity
+    assert from_competitor({"obs_id": "C1"}) is None                 # no entity_ref
+    assert from_support_objection({"obs_id": "B1"}) is None          # no theme
 
 
 # ── backfill (idempotent) ────────────────────────────────────────────────────

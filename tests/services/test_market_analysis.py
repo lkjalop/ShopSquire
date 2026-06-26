@@ -13,15 +13,25 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from datetime import date, timedelta
+
 from src.app.services import market_analysis as ma
 from src.app.services.market_analysis import (
+    FINDING_COMPETITOR_UNDERCUT,
     FINDING_CONVERSION_ANOMALY,
+    FINDING_DEMAND_FORECAST,
     FINDING_DEMAND_SHIFT,
     FINDING_INVENTORY_MISMATCH,
+    FINDING_OBJECTION_CLUSTER,
+    FINDING_SEASONAL_DEMAND,
     analyze,
+    detect_competitor_undercut,
     detect_conversion_anomaly,
+    detect_demand_forecast,
     detect_demand_shift,
     detect_inventory_demand_mismatch,
+    detect_objection_cluster,
+    detect_seasonal_demand,
     run_analysis,
 )
 
@@ -115,10 +125,119 @@ def test_unmet_demand_below_threshold():
     assert detect_inventory_demand_mismatch(sigs, min_unmet=3) == []
 
 
+# ── demand forecast (forward-looking) ────────────────────────────────────────
+def _demand_days(pairs):
+    out = []
+    for day, n in pairs:
+        out += _demand(day, n)
+    return out
+
+
+def test_demand_forecast_projected_surge_boosts():
+    sigs = _demand_days([("2026-06-20", 5), ("2026-06-21", 5), ("2026-06-22", 5), ("2026-06-23", 5)])
+    found = detect_demand_forecast(sigs, forecast_fn=lambda s: (30.0, "test"))  # 30 vs ~5 baseline
+    assert len(found) == 1 and found[0].finding_type == FINDING_DEMAND_FORECAST
+    assert found[0].evidence["direction"] == "spike"
+    from src.app.services.shadow_actions import ACTION_ADJUST_RANKING, propose_from_findings
+    p = propose_from_findings(found)
+    assert p[0].action_type == ACTION_ADJUST_RANKING and p[0].direction == "boost"
+
+
+def test_demand_forecast_projected_shortfall_demotes():
+    sigs = _demand_days([("2026-06-20", 20), ("2026-06-21", 20), ("2026-06-22", 20), ("2026-06-23", 20)])
+    found = detect_demand_forecast(sigs, forecast_fn=lambda s: (2.0, "test"))  # 2 vs ~20 baseline
+    assert len(found) == 1 and found[0].evidence["direction"] == "slowdown"
+    from src.app.services.shadow_actions import propose_from_findings
+    assert propose_from_findings(found)[0].direction == "demote"
+
+
+def test_demand_forecast_within_band_is_silent():
+    sigs = _demand_days([("2026-06-20", 10), ("2026-06-21", 10), ("2026-06-22", 10), ("2026-06-23", 10)])
+    assert detect_demand_forecast(sigs, forecast_fn=lambda s: (10.0, "test")) == []  # ratio 1.0
+
+
+def test_demand_forecast_default_ewma_on_rising_series():
+    # low baseline then a sustained recent jump — what a one-step forecast is meant to catch (a smooth
+    # ramp would stay inside the band: EWMA lags, so the projection sits near the mean).
+    sigs = _demand_days([("2026-06-20", 3), ("2026-06-21", 3), ("2026-06-22", 3), ("2026-06-23", 3),
+                         ("2026-06-24", 3), ("2026-06-25", 3), ("2026-06-26", 30), ("2026-06-27", 30),
+                         ("2026-06-28", 30)])
+    found = detect_demand_forecast(sigs)  # default EWMA, no inject
+    assert found and found[0].evidence["method"] == "ewma" and found[0].evidence["direction"] == "spike"
+
+
+def test_demand_forecast_needs_min_history():
+    assert detect_demand_forecast(_demand("2026-06-24", 50), forecast_fn=lambda s: (99.0, "t")) == []
+
+
+# ── seasonal day-of-week ─────────────────────────────────────────────────────
+def test_seasonal_demand_peak_weekday():
+    # 14 consecutive days; the two Saturdays (idx 5, 12 from a Monday start) carry the spike
+    start = date(2026, 6, 15)  # Monday
+    pairs = []
+    for i in range(14):
+        d = (start + timedelta(days=i)).isoformat()
+        pairs.append((d, 20 if i in (5, 12) else 2))
+    found = detect_seasonal_demand(_demand_days(pairs))
+    assert len(found) == 1 and found[0].finding_type == FINDING_SEASONAL_DEMAND
+    assert found[0].evidence["peak_weekday"] == "Saturday" and found[0].evidence["ratio"] >= 1.4
+
+
+def test_seasonal_demand_needs_min_days():
+    pairs = [((date(2026, 6, 15) + timedelta(days=i)).isoformat(), 5) for i in range(5)]
+    assert detect_seasonal_demand(_demand_days(pairs)) == []  # < 7 days
+
+
+# ── competitor undercut ──────────────────────────────────────────────────────
+def _competitor(ent, ours, theirs, occ="2026-06-25T09:00:00"):
+    return [{"signal_type": "competitor", "source": "competitor_feed",
+             "payload": {"entity_ref": ent, "our_price_cents": ours, "competitor_price_cents": theirs,
+                         "competitor": "rival.example"}, "occurred_at": occ}]
+
+
+def test_competitor_undercut_flagged_critical():
+    found = detect_competitor_undercut(_competitor("SKU-1", 150000, 124900))  # ~17% under
+    assert len(found) == 1 and found[0].finding_type == FINDING_COMPETITOR_UNDERCUT
+    assert found[0].entity_ref == "SKU-1" and found[0].severity == "critical"
+
+
+def test_competitor_no_undercut_when_we_are_cheaper():
+    assert detect_competitor_undercut(_competitor("SKU-1", 100000, 110000)) == []
+
+
+def test_competitor_uses_latest_observation():
+    sigs = (_competitor("SKU-1", 150000, 149000, "2026-06-20T09:00:00")   # 0.7% — below threshold
+            + _competitor("SKU-1", 150000, 120000, "2026-06-25T09:00:00"))  # later: 20% under
+    found = detect_competitor_undercut(sigs)
+    assert len(found) == 1 and found[0].evidence["competitor_price_cents"] == 120000
+
+
+# ── objection clustering ─────────────────────────────────────────────────────
+def _objections(theme, n):
+    return [{"signal_type": "support_objection", "source": "support_inbox",
+             "payload": {"theme": theme}, "occurred_at": "2026-06-25T12:00:00"} for _ in range(n)]
+
+
+def test_objection_cluster_flagged():
+    found = detect_objection_cluster(_objections("price", 6) + _objections("delivery", 1))
+    assert len(found) == 1 and found[0].entity_ref == "price" and found[0].severity == "critical"
+
+
+def test_objection_below_threshold_silent():
+    assert detect_objection_cluster(_objections("price", 2)) == []
+
+
 # ── analyze() composes + never raises ────────────────────────────────────────
 def test_analyze_runs_all_and_is_safe():
     assert analyze([]) == []  # empty → no findings, no raise
     assert isinstance(analyze([{"bad": "row"}]), list)
+
+
+def test_analyze_composes_new_detectors():
+    sigs = (_demand_days([("2026-06-20", 5), ("2026-06-21", 5), ("2026-06-22", 5), ("2026-06-23", 5)])
+            + _competitor("SKU-1", 150000, 120000) + _objections("price", 6))
+    types = {f.finding_type for f in analyze(sigs, forecast_fn=lambda s: (30.0, "t"))}
+    assert {FINDING_DEMAND_FORECAST, FINDING_COMPETITOR_UNDERCUT, FINDING_OBJECTION_CLUSTER} <= types
 
 
 # ── DB entry point ───────────────────────────────────────────────────────────

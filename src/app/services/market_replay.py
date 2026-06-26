@@ -26,6 +26,14 @@ _CONV = [8, 8, 7, 8, 8, 6, 2]               # conversions per day — drops on d
 _RESULT_COUNT = [5, 5, 5, 5, 5, 0, 0]       # later days return no results → inventory mismatch
 TOTAL_DAYS = len(_DATES)
 
+# As the market heats up (day 6+) a rival undercuts us and objections cluster — so the operator view
+# also shows competitor_undercut + objection_cluster + the forward demand_forecast, not just the
+# backward anomalies. Ingested once (idempotent via dedup), tenant-scoped like everything else.
+_HEAT_DAY = 6
+_COMPETITOR = {"entity_ref": REPLAY_ITEM, "our_price_cents": 150000,
+               "competitor_price_cents": 124900, "competitor": "rival-store.example"}  # ~17% under → critical
+_OBJECTIONS = (("price", 6), ("delivery_time", 3))   # price cluster → critical, delivery → warn
+
 
 def _det_anomaly(series: List[float], domain: str):
     """Deterministic: flag the last point anomalous when it deviates >50% from the rest's mean."""
@@ -82,6 +90,22 @@ def load_days(db, *, up_to_day: int, tenant: str = REPLAY_TENANT) -> Dict[str, i
                                occurred_at=f"{date}T11:00:00", dedup_fields=["event_id"], tenant_id=tenant)
             if ms.ingest(db, sig):
                 n += 1
+    if upto >= _HEAT_DAY:  # competitor + objection signals once the market heats up
+        heat_date = _DATES[_HEAT_DAY - 1]
+        csig = ms.normalize(signal_type="competitor", source="competitor_feed",
+                            payload={"event_id": "cmp-1", **_COMPETITOR},
+                            occurred_at=f"{heat_date}T09:00:00", dedup_fields=["event_id"], tenant_id=tenant)
+        if ms.ingest(db, csig):
+            n += 1
+        k = 0
+        for theme, cnt in _OBJECTIONS:
+            for _ in range(cnt):
+                osig = ms.normalize(signal_type="support_objection", source="support_inbox",
+                                    payload={"event_id": f"obj-{k}", "theme": theme},
+                                    occurred_at=f"{heat_date}T12:00:00", dedup_fields=["event_id"], tenant_id=tenant)
+                if ms.ingest(db, osig):
+                    n += 1
+                k += 1
     try:
         db.commit()
     except Exception:

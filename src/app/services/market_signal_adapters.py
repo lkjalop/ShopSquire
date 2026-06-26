@@ -66,6 +66,40 @@ def from_search(row: Dict[str, Any]) -> Optional[MarketSignal]:
     )
 
 
+# ── INLINE producers (no backfill source table yet) — call at the write site / a future feed adapter.
+# Kept out of _SOURCES because there is no canonical competitor-price / objection-capture table to scan;
+# the detectors (market_analysis.detect_competitor_undercut / detect_objection_cluster) consume these
+# the moment a producer ingests them. Trust is below behavioural sources — an external/derived claim.
+def from_competitor(row: Dict[str, Any]) -> Optional[MarketSignal]:
+    """A competitor price observation → competitor signal. row: {obs_id, entity_ref|sku, our_price_cents,
+    competitor_price_cents, competitor?, observed_at?}."""
+    oid = str((row.get("obs_id") or row.get("id")) or "").strip()
+    ent = str((row.get("entity_ref") or row.get("sku")) or "").strip()
+    if not oid or not ent:
+        return None
+    return normalize(
+        signal_type="competitor", source="competitor_feed",
+        payload={"obs_id": oid, "entity_ref": ent, "our_price_cents": row.get("our_price_cents"),
+                 "competitor_price_cents": row.get("competitor_price_cents"),
+                 "competitor": row.get("competitor")},
+        occurred_at=row.get("observed_at"), trust_score=0.6, dedup_fields=["obs_id"],
+    )
+
+
+def from_support_objection(row: Dict[str, Any]) -> Optional[MarketSignal]:
+    """A support objection (chat/ticket/review) → support_objection signal. row: {obs_id, theme,
+    entity_ref?, raised_at?}. ``theme`` is an opaque cluster label (price / delivery_time / ...)."""
+    oid = str((row.get("obs_id") or row.get("id")) or "").strip()
+    theme = str(row.get("theme") or row.get("reason") or "").strip()
+    if not oid or not theme:
+        return None
+    return normalize(
+        signal_type="support_objection", source="support_inbox",
+        payload={"obs_id": oid, "theme": theme, "entity_ref": row.get("entity_ref")},
+        occurred_at=row.get("raised_at"), trust_score=0.7, dedup_fields=["obs_id"],
+    )
+
+
 # name -> (sql, row->dict mapper, dict->MarketSignal mapper)
 _SOURCES = {
     "orders": (

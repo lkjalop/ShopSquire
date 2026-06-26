@@ -34,6 +34,7 @@ ACTION_REVISE_SUPPORT_COPY = "revise_support_copy"
 # finding_type → proposed action_type. Deterministic + opaque — no product knowledge.
 _FINDING_TO_ACTION: Dict[str, str] = {
     "demand_shift": ACTION_ADJUST_RANKING,            # demand moved → propose re-ranking the entity
+    "demand_forecast": ACTION_ADJUST_RANKING,         # PROJECTED demand move → same reversible nudge (gated)
     "conversion_anomaly": ACTION_REVISE_SUPPORT_COPY,  # conversions dropped → propose copy/messaging review
     "inventory_demand_mismatch": ACTION_SUPPRESS_LOW_STOCK,  # demand with no stock → propose demoting it
 }
