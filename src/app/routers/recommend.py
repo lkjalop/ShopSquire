@@ -2469,6 +2469,7 @@ from src.app.services.recommend_intent_router import (  # noqa: E402
     rule_intent_summary as _rule_intent_summary,
     summaries_differ as _summaries_differ,
     resolve_intent_routing as _resolve_intent_routing_stage,
+    run_inventory_fastpath as _run_inventory_fastpath,
     IntentRoutingResult as _IntentRoutingResult,
 )
 
@@ -4489,30 +4490,13 @@ def suggest(
     # Injection attempts are caught here and returned as safe refusals.
     # Skip when query is off-domain so the off_domain_request status is returned
     # correctly by the normal pipeline (not intercepted here).
-    try:
-        from src.app.services.inventory_query_service import handle_inventory_intent
-        _inv_skip = _query_signals_off_domain(query) or _query_signals_unsupported_intent(query)
-        _inv_response = None if _inv_skip else handle_inventory_intent(query=query, uid=uid)
-        if _inv_response is not None:
-            return _with_trace(
-                {
-                    "recommendations": [],
-                    "nqe": None,
-                    "answer": _inv_response.get("answer"),
-                    "inventory": {
-                        "sku": _inv_response.get("sku"),
-                        "name": _inv_response.get("name"),
-                        "stock_level": _inv_response.get("stock_level"),
-                        "rule_id": _inv_response.get("rule_id"),
-                    },
-                    "source": _inv_response.get("source"),
-                    "injection_blocked": bool(_inv_response.get("injection_blocked")),
-                    "timing": {"route_ms": int((time.perf_counter() - route_t0) * 1000)},
-                },
-                trace_id,
-            )
-    except Exception as _e_inv_fastpath:  # observability boundary: never raises
-        _record_partial_failure("inventory_fast_path", _e_inv_fastpath, trace_id=trace_id)
+    # Inventory stock-level fast-path (extracted to recommend_intent_router.run_inventory_fastpath).
+    _inv_fastpath = _run_inventory_fastpath(
+        query=query, uid=uid, trace_id=trace_id, route_t0=route_t0,
+        off_domain_fn=_query_signals_off_domain, unsupported_fn=_query_signals_unsupported_intent,
+        with_trace=_with_trace, record_failure=_record_partial_failure)
+    if _inv_fastpath is not None:
+        return _inv_fastpath
 
     # MAESTRO boundary check for the Orchestrator agent at recommend ingress.
     # In "block" mode (MAESTRO_ENFORCEMENT_MODE=block), a critical/high violation

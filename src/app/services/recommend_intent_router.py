@@ -310,3 +310,55 @@ def _build_fallback_meta(
             },
         },
     }
+
+
+def run_inventory_fastpath(
+    *,
+    query: Optional[str],
+    uid: Optional[str],
+    trace_id: Optional[str],
+    route_t0: float,
+    off_domain_fn: Callable[[Optional[str]], bool],
+    unsupported_fn: Callable[[Optional[str]], bool],
+    with_trace: Callable[[Dict[str, Any], Optional[str]], Dict[str, Any]],
+    handle_fn: Optional[Callable[..., Optional[Dict[str, Any]]]] = None,
+    record_failure: Optional[Callable[..., Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Inventory stock-level fast-path — intercept stock queries BEFORE the full LLM pipeline. Stock
+    counts come from the DB only (the LLM never generates them); injection attempts return a safe
+    refusal. Returns the traced /suggest response to return early, or None to fall through to the full
+    pipeline (off-domain / unsupported-intent queries always fall through). Never raises.
+
+    Extracted verbatim from suggest() — the module-level helpers + handler are injected so the stage is
+    testable in isolation and there is no circular import back into the router.
+    """
+    try:
+        handle = handle_fn
+        if handle is None:
+            from src.app.services.inventory_query_service import handle_inventory_intent as handle
+        if off_domain_fn(query) or unsupported_fn(query):
+            return None
+        inv = handle(query=query, uid=uid)
+        if inv is None:
+            return None
+        return with_trace(
+            {
+                "recommendations": [],
+                "nqe": None,
+                "answer": inv.get("answer"),
+                "inventory": {
+                    "sku": inv.get("sku"),
+                    "name": inv.get("name"),
+                    "stock_level": inv.get("stock_level"),
+                    "rule_id": inv.get("rule_id"),
+                },
+                "source": inv.get("source"),
+                "injection_blocked": bool(inv.get("injection_blocked")),
+                "timing": {"route_ms": int((time.perf_counter() - route_t0) * 1000)},
+            },
+            trace_id,
+        )
+    except Exception as exc:  # observability boundary: never raises
+        if record_failure is not None:
+            record_failure("inventory_fast_path", exc, trace_id=trace_id)
+        return None
