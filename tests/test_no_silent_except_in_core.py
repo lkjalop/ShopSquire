@@ -60,6 +60,8 @@ _BASELINE = {
     "src/app/services/hippograph_feedback.py": 0,
     "src/app/services/adaptive_action_gate.py": 0,
     "src/app/services/fulfillment/domain.py": 0,
+    "src/app/services/fulfillment/repository.py": 0,
+    "src/app/services/fulfillment/workflow.py": 0,
 }
 
 

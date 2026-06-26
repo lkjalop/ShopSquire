@@ -131,6 +131,10 @@ _CORE_MODULES = [
     # fulfilment domain: bounded-autonomy state machine + actor guards, opaque states/events —
     # no product vocabulary, no channel detail.
     "src/app/services/fulfillment/domain.py",
+    # fulfilment persistence + workflow: bitemporal case versions + the transition chokepoint, opaque
+    # state/evidence — no product vocabulary.
+    "src/app/services/fulfillment/repository.py",
+    "src/app/services/fulfillment/workflow.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).
