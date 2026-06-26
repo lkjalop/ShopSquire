@@ -80,6 +80,17 @@ def get_case(case_id: str, view: str = Query("operator")) -> Dict[str, Any]:
         return _case_view(db, case_id, for_operator=(view != "buyer"))
 
 
+@router.get("/cases/by-trace/{trace_id}")
+def get_case_by_trace(trace_id: str, view: str = Query("buyer")) -> Dict[str, Any]:
+    """Resolve the procurement case opened from a decision trace_id — the link that lets the buyer's
+    DecisionTrace surface the fulfilment journey for the same turn. 404 when no case was opened."""
+    with db_session() as db:
+        cid = fwf.repository.case_id_by_trace(db, trace_id)
+        if not cid:
+            raise HTTPException(status_code=404, detail="no case for trace")
+        return {"trace_id": trace_id, **_case_view(db, cid, for_operator=(view != "buyer"))}
+
+
 @router.get("/cases/{case_id}/journey")
 def get_journey(case_id: str) -> Dict[str, Any]:
     with db_session() as db:

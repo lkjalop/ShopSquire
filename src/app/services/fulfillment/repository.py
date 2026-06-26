@@ -303,3 +303,20 @@ def list_cases(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 100) -> List
         return []
     return [{"case_id": r[0], "buyer_uid_hash": r[1], "status": r[2], "requested_by": r[3],
              "source_trace_id": r[4], "updated_at": r[5]} for r in rows]
+
+
+def case_id_by_trace(db, trace_id: str, tenant_id: str = DEFAULT_TENANT) -> Optional[str]:
+    """The most recent case opened from a given decision trace_id (the link between the agent trace and
+    the procurement journey). None if none. Best-effort."""
+    if db is None or not trace_id:
+        return None
+    try:
+        ensure_tables(db)
+        row = db.execute(
+            text("SELECT id FROM fulfillment_case WHERE tenant_id=:t AND source_trace_id=:s "
+                 "ORDER BY updated_at DESC LIMIT 1"),
+            {"t": _tid(tenant_id), "s": str(trace_id)},
+        ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None

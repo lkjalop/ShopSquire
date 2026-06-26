@@ -83,6 +83,18 @@ def test_economics_endpoint_operator_and_empty_before_quote():
     assert r.status_code == 200 and r.json()["economics"] == {}
 
 
+def test_by_trace_links_case_to_decision_trace():
+    # a case opened with a trace_id is resolvable by that trace (the DecisionTrace ↔ journey link)
+    r = client.post(_BASE, json={"uid": "u1", "trace_id": "T-LINK-42"})
+    cid = r.json()["case_id"]
+    r2 = client.get(f"{_BASE}/by-trace/T-LINK-42")
+    assert r2.status_code == 200 and r2.json()["case_id"] == cid and r2.json()["trace_id"] == "T-LINK-42"
+
+
+def test_by_trace_404_when_no_case():
+    assert client.get(f"{_BASE}/by-trace/no-such-trace-xyz").status_code == 404
+
+
 def test_market_replay_gated_then_advances(monkeypatch):
     # gated off by default
     assert client.post("/api/v1/fulfillment/replay/advance", params={"day": 7}).status_code == 403

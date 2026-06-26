@@ -180,6 +180,16 @@ export async function getFulfillmentJourney(caseId: string) {
   return (await safeJson(r)) || { journey: [] };
 }
 
+// Resolve the procurement case opened from a decision trace_id (the DecisionTrace ↔ journey link).
+// Returns { case_id, ... } or null when no case was opened for this turn (404).
+export async function getFulfillmentCaseByTrace(traceId: string): Promise<{ case_id: string } | null> {
+  const r = await fetch(apiUrl(`/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(traceId)}`),
+    { credentials: 'include', headers: authHeaders() });
+  if (r.status === 404) return null;
+  const j = await safeJson(r);
+  return (r.ok && j && j.case_id) ? j : null;
+}
+
 export async function commitFulfillmentCase(caseId: string, uid: string) {
   const r = await fetch(apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(caseId)}/commit`), {
     method: 'POST', credentials: 'include', headers: authHeaders({}, true),

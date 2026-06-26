@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import styles from './DecisionTrace.module.css';
 import { apiUrl, wsUrl, getApiBase, safeJson } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
+import FulfilmentTraceLink from './FulfilmentTraceLink';
 
 type TraceEvent = {
   id?: string;
@@ -1302,6 +1303,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                   No decision trace yet. Run a query (chat) or submit/analyze a CV case to generate a trace id.
                 </div>
               )}
+              {/* Links this decision to the procurement journey it opened (renders only when one exists) */}
+              <FulfilmentTraceLink traceId={effectiveTraceId || undefined} />
               {activeTab === 'events' && (
                 <>
                   <div className={styles.eventFilterRow}>
