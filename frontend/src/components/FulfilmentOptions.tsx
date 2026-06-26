@@ -18,6 +18,7 @@ import {
   selectFulfillmentOption,
   type FulfillmentOption,
 } from '../lib/api';
+import FulfilmentJourney from './FulfilmentJourney';
 
 export interface FulfilmentCaseSummary {
   case_id: string;
@@ -43,6 +44,7 @@ export default function FulfilmentOptions({ caseSummary, uid, pollMs = 0 }: Prop
   const [chosen, setChosen] = useState<string>('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>('');
+  const [showJourney, setShowJourney] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -86,9 +88,14 @@ export default function FulfilmentOptions({ caseSummary, uid, pollMs = 0 }: Prop
         <strong>Procurement</strong>{' '}
         <span data-testid="fc-status">{state.replace(/_/g, ' ').toLowerCase()}</span>
         <span className="fc-case-ref"> · {caseId.slice(0, 8)}</span>
+        <button className="fc-journey-toggle" data-testid="fc-journey-toggle"
+                onClick={() => setShowJourney((s) => !s)}>
+          {showJourney ? 'Hide journey' : 'View journey'}
+        </button>
       </header>
 
       {error && <p role="alert" data-testid="fc-error">{error}</p>}
+      {showJourney && <FulfilmentJourney caseId={caseId} />}
 
       {state === 'AWAITING_BUYER_COMMITMENT' && (
         <div data-testid="fc-commit">
