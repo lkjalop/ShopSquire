@@ -98,10 +98,12 @@ Key design choices (and *why*):
 - **Standards to speak (interoperability):** **GS1 GTIN** (global product id), **schema.org/Product**, **Google Merchant feed** spec, **GDSN** for supplier master data. Storing `gtin` on product/variant makes cross-platform matching deterministic.
 
 ### What to build next (recommended order)
-1. `inventory_level` + `price_book_entry` tables (alembic, idempotent, drift-tested — same pattern as `supplier_catalog`). Flag-gated reads.
-2. `external_ref` + one real adapter (Shopify products+inventory → canonical) behind a flag.
-3. Re-point `economics.from_case` at `supplier_offer ⋈ price_book_entry` once both exist (the calc is unchanged).
-4. Sink `market_signal` to a warehouse table/export for the forecasting detectors (Track B) when volume warrants — *not before*.
+1. ✅ **DONE** (`6890a9e`) `price_book_entry` + `inventory_level` (`services/commerce_catalog.py`, alembic `20260626_commerce_catalog`, drift-tested, single head). Flag: `COMMERCE_CATALOG_ENABLED` (default-OFF).
+2. ✅ **DONE** (`6890a9e`) Shopify adapter (`services/shopify_catalog_adapter.py`) — products+inventory → canonical, idempotent. (`external_ref` table still **TODO** — the adapter currently maps `inventory_item_id → sku` in-memory; a persistent mapping table is the next hardening.)
+3. ✅ **DONE** (`6890a9e`) `economics.from_case` re-pointed: retail = override > price_book JOIN (flag-gated) > selected option. The calc is unchanged.
+4. ✅ **DONE** (`5995db2`) `product` + `variant` + `external_ref` (`services/catalog_entities.py`, alembic `20260626_catalog_entities`); Shopify adapter persists `external_ref`; a **Magento** adapter writes the same canonical tables (seam proven platform-blind); `supplier_catalog.cheapest_wholesale_cents` wholesale fallback wired into `economics.from_case`.
+5. ✅ **DONE** (`<this batch>`) inventory-source adapter (`services/inventory_source.py`) — `availability_agent` reads canonical `inventory_level` (per-sku overlay) when `COMMERCE_CATALOG_ENABLED`, so a real catalog shortfall drives the buyer procurement case.
+6. **TODO** Sink `market_signal` to a warehouse table/export for the forecasting detectors (Track B) when volume warrants — *not before*.
 
 ---
 

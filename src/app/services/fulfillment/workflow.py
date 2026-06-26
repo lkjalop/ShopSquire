@@ -141,13 +141,15 @@ def transition(
         if not vid:
             return TransitionResult(False, case_id, state.value, "persist_failed", http_status=409)
 
-        # 4. trace + commit
-        _emit_trace(trace_id=trace_id or cur.source_trace_id, event=event, actor=actor, case_id=case_id,
-                    evidence=evidence, reason_code=reason_code, valid_from=now_iso)
+        # 4. commit state first, then emit the cross-session trace.
+        # decision_log opens its own DB session; emitting while this write
+        # transaction is still open can deadlock SQLite demo/test runs.
         try:
             db.commit()
         except Exception:
             return TransitionResult(False, case_id, dst.value, "commit_failed", http_status=409)
+        _emit_trace(trace_id=trace_id or cur.source_trace_id, event=event, actor=actor, case_id=case_id,
+                    evidence=evidence, reason_code=reason_code, valid_from=now_iso)
         return TransitionResult(True, case_id, dst.value, "ok", version_id=vid)
     except Exception:
         return TransitionResult(False, case_id, None, "error", http_status=409)

@@ -249,15 +249,44 @@ def journey(db, case_id: str, tenant_id: str = DEFAULT_TENANT, limit: int = 200)
     try:
         ensure_tables(db)
         rows = db.execute(
-            text("SELECT state, event, actor_type, actor_id, reason_code, evidence_json, valid_from, "
-                 "valid_to FROM fulfillment_case_version WHERE case_id=:c AND tenant_id=:t "
-                 "ORDER BY system_from ASC LIMIT :lim"),
+            text("SELECT id, supersedes_version_id, state, event, actor_type, actor_id, reason_code, "
+                 "evidence_json, valid_from, valid_to, system_from FROM fulfillment_case_version "
+                 "WHERE case_id=:c AND tenant_id=:t ORDER BY system_from ASC, id ASC LIMIT :lim"),
             {"c": case_id, "t": _tid(tenant_id), "lim": int(limit)},
         ).fetchall()
     except Exception:
         return []
-    return [{"state": r[0], "event": r[1], "actor_type": r[2], "actor_id": r[3], "reason_code": r[4],
-             "evidence": _loads(r[5]), "valid_from": r[6], "valid_to": r[7]} for r in rows]
+    raw = [{
+        "id": r[0], "supersedes_version_id": r[1], "state": r[2], "event": r[3], "actor_type": r[4],
+        "actor_id": r[5], "reason_code": r[6], "evidence": _loads(r[7]), "valid_from": r[8],
+        "valid_to": r[9], "system_from": r[10],
+    } for r in rows]
+    by_prev: Dict[str, List[Dict[str, Any]]] = {}
+    roots: List[Dict[str, Any]] = []
+    for row in raw:
+        prev = row.get("supersedes_version_id")
+        if prev:
+            by_prev.setdefault(str(prev), []).append(row)
+        else:
+            roots.append(row)
+    for vals in by_prev.values():
+        vals.sort(key=lambda x: (str(x.get("system_from") or ""), str(x.get("id") or "")))
+    roots.sort(key=lambda x: (0 if x.get("event") == "case_opened" else 1,
+                              str(x.get("system_from") or ""), str(x.get("id") or "")))
+    ordered: List[Dict[str, Any]] = []
+    seen = set()
+    cur = roots[0] if roots else (raw[0] if raw else None)
+    while cur and cur.get("id") not in seen:
+        ordered.append(cur)
+        seen.add(cur.get("id"))
+        nxt = by_prev.get(str(cur.get("id")), [])
+        cur = nxt[0] if nxt else None
+    for row in raw:
+        if row.get("id") not in seen:
+            ordered.append(row)
+    return [{"state": r["state"], "event": r["event"], "actor_type": r["actor_type"],
+             "actor_id": r["actor_id"], "reason_code": r["reason_code"], "evidence": r["evidence"],
+             "valid_from": r["valid_from"], "valid_to": r["valid_to"]} for r in ordered]
 
 
 def list_cases(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 100) -> List[Dict[str, Any]]:

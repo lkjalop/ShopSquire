@@ -47,7 +47,8 @@ pytestmark = pytest.mark.skipif(not _ENABLED, reason="set GATE_PROCUREMENT=1 aga
 
 
 def _post(path, **kw):
-    r = _requests.post(f"{BACKEND}{path}", headers=_HDR, timeout=30, **kw)
+    url = path if str(path).startswith(("http://", "https://")) else f"{BACKEND}{path}"
+    r = _requests.post(url, headers=_HDR, timeout=30, **kw)
     r.raise_for_status()
     return r.json()
 
