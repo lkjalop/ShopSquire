@@ -153,6 +153,8 @@ _CORE_MODULES = [
     "src/app/services/market_pipeline.py",
     # competitor source: rival price observation table + seed, sku·cents only — no product vocabulary.
     "src/app/services/competitor_source.py",
+    # support-objection source: buyer-objection table + seed, opaque theme — no product vocabulary.
+    "src/app/services/support_objection_source.py",
     # supplier catalog: suppliers/supplier_products schema + demo seed, opaque ids — no product vocabulary.
     "src/app/services/supplier_catalog.py",
     # PO finalization: propose/approve/create/complete via the workflow chokepoint, opaque refs —

@@ -136,6 +136,13 @@ _SOURCES = {
                    "competitor_price_cents": r[3], "competitor": r[4], "observed_at": r[5]},
         from_competitor,
     ),
+    # support objections: a REAL source — recurring buyer objections on a theme feed
+    # detect_objection_cluster. No-op when the table is absent.
+    "support_objection": (
+        "SELECT id, theme, entity_ref, raised_at FROM support_objection ORDER BY raised_at DESC LIMIT :lim",
+        lambda r: {"obs_id": r[0], "theme": r[1], "entity_ref": r[2], "raised_at": r[3]},
+        from_support_objection,
+    ),
 }
 
 

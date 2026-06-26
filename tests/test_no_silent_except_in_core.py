@@ -78,6 +78,7 @@ _BASELINE = {
     "src/app/services/market_replay.py": 0,
     "src/app/services/market_pipeline.py": 0,
     "src/app/services/competitor_source.py": 0,
+    "src/app/services/support_objection_source.py": 0,
     "src/app/services/supplier_catalog.py": 0,
     "src/app/services/async_safe.py": 0,
 }
