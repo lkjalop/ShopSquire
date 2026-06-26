@@ -145,6 +145,8 @@ _CORE_MODULES = [
     # no product vocabulary.
     "src/app/services/fulfillment/external_comms.py",
     "src/app/services/fulfillment/sandbox_supplier.py",
+    # supplier-email transport seam: sandbox/SMTP provider interface, opaque message fields — no product vocab.
+    "src/app/services/fulfillment/transport.py",
     # fulfilment options planner: together/split/substitute with tradeoffs, opaque allocation —
     # no product vocabulary.
     "src/app/services/fulfillment/options.py",
