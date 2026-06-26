@@ -9997,6 +9997,10 @@ def suggest(
             constraints["order_quantity"] = int(_qplan.quantity)
         if _qplan.availability_horizon_days:
             constraints["availability_horizon_days"] = int(_qplan.availability_horizon_days)
+        # availability intent ("do you have X?") — lets the fulfilment stage open a procurement case for
+        # a SINGLE out-of-stock item (flag-gated), not just bulk orders.
+        if getattr(_qplan, "intent", "") == "availability" or _qplan.availability_horizon_days:
+            constraints["availability_intent"] = True
         results, _plan_drops = _apply_query_plan_filters(results, _qplan)
         # Constraint honesty: surface exact-match status + a relaxation offer when hard constraints
         # could not all be met (instead of silently presenting constraint-violating products).

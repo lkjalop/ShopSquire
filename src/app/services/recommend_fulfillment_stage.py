@@ -37,34 +37,44 @@ def run_fulfillment_stage(
     """Compute bulk availability (sets payload['availability']) and, when enabled, open a procurement
     case on a real shortfall. Returns the availability summary line (or '')."""
     order_qty = constraints.get("order_quantity")
-    if not (order_qty and int(order_qty) > 1):
+    is_bulk = bool(order_qty and int(order_qty) > 1)
+    # single-item availability ("do you have X?"): assess qty 1 so a fully out-of-stock item can route to
+    # procurement (flag-gated default-OFF). Distinct from bulk — never drafts a reorder, only a case.
+    single_item = (not is_bulk) and _flag(flags, "FULFILLMENT_SINGLE_ITEM_OOS") \
+        and bool(constraints.get("availability_intent"))
+    if not (is_bulk or single_item):
         return ""
     from src.app.services.availability_agent import assess_availability, availability_summary_line
     avail_skus = [str(r.get("sku")) for r in (results or [])[:5] if isinstance(r, dict) and r.get("sku")]
     if not avail_skus:
         return ""
-    is_b2b_bulk = int(order_qty) >= 5
+    qty = int(order_qty) if is_bulk else 1
+    is_b2b_bulk = is_bulk and qty >= 5
     payload["availability"] = assess_availability(
-        avail_skus, int(order_qty), constraints.get("availability_horizon_days"), draft_reorder=is_b2b_bulk)
+        avail_skus, qty, constraints.get("availability_horizon_days"), draft_reorder=is_b2b_bulk)
     line = availability_summary_line(payload["availability"])
-    _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=int(order_qty),
-                     uid=uid, uid_hash=uid_hash, trace_id=trace_id, flags=flags)
+    _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
+                     uid=uid, uid_hash=uid_hash, trace_id=trace_id, flags=flags, single_item=single_item)
     return line
 
 
-def _maybe_open_case(*, payload, avail, order_qty, uid, uid_hash, trace_id, flags) -> None:
-    """Open a fulfilment_case at GATE 1 on a real bulk shortfall (flag-gated, best-effort)."""
+def _maybe_open_case(*, payload, avail, order_qty, uid, uid_hash, trace_id, flags, single_item=False) -> None:
+    """Open a fulfilment_case at GATE 1 on a real shortfall (flag-gated, best-effort). Two entry points:
+    a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True)."""
     if not _flag(flags, "FULFILLMENT_CASES_ENABLED"):
         return
     try:
         threshold = int((flags or {}).get("FULFILLMENT_BULK_THRESHOLD") or 5)
     except Exception:
         threshold = 5
-    if order_qty < threshold:
-        return
     shortfall = int((avail or {}).get("shortfall") or 0)
     if shortfall <= 0:
         return  # no shortfall → nothing to procure
+    in_stock = int((avail or {}).get("in_stock") or 0)
+    bulk_ok = order_qty >= threshold
+    single_ok = single_item and in_stock == 0  # a single item we have NONE of → offer to source it
+    if not (bulk_ok or single_ok):
+        return
     try:
         from src.app.models.db import db_session
         from src.app.services.fulfillment import workflow as fwf

@@ -63,3 +63,37 @@ def test_flag_on_but_no_shortfall_opens_no_case():
 def test_flag_on_below_threshold_opens_no_case():
     payload, _ = _run(flags={"FULFILLMENT_CASES_ENABLED": True, "FULFILLMENT_BULK_THRESHOLD": 50}, qty=10)
     assert "fulfillment_case" not in payload  # 10 < 50 threshold
+
+
+# ── single-item out-of-stock ("do you have X?" → "no, we can source it") ──────
+def test_single_item_oos_opens_case(monkeypatch):
+    monkeypatch.setattr("src.app.services.availability_agent.assess_availability",
+                        lambda skus, qty, horizon, draft_reorder=False: {
+                            "applicable": True, "sku": skus[0], "requested_qty": qty,
+                            "in_stock": 0, "shortfall": qty})  # fully out of stock
+    payload = {}
+    stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}], constraints={"availability_intent": True},
+                                payload=payload, uid="u1", trace_id="T1",
+                                flags={"FULFILLMENT_CASES_ENABLED": True, "FULFILLMENT_SINGLE_ITEM_OOS": True})
+    fc = payload.get("fulfillment_case")
+    assert fc and fc["status"] == "awaiting_buyer_commitment" and fc["shortfall"] == 1
+
+
+def test_single_item_oos_disabled_by_default():
+    # availability intent present, but the single-item flag is OFF → no availability, no case (parity)
+    payload = {}
+    line = stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}], constraints={"availability_intent": True},
+                                       payload=payload, flags={"FULFILLMENT_CASES_ENABLED": True})
+    assert line == "" and "availability" not in payload and "fulfillment_case" not in payload
+
+
+def test_single_item_in_stock_opens_no_case(monkeypatch):
+    monkeypatch.setattr("src.app.services.availability_agent.assess_availability",
+                        lambda skus, qty, horizon, draft_reorder=False: {
+                            "applicable": True, "sku": skus[0], "requested_qty": qty,
+                            "in_stock": 3, "shortfall": 0})  # we have it
+    payload = {}
+    stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}], constraints={"availability_intent": True},
+                                payload=payload,
+                                flags={"FULFILLMENT_CASES_ENABLED": True, "FULFILLMENT_SINGLE_ITEM_OOS": True})
+    assert "fulfillment_case" not in payload  # in stock → no procurement

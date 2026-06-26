@@ -59,8 +59,9 @@ if (-not (Test-Path $FlagsBak)) { Copy-Item $FlagsPath $FlagsBak -Force }
 $flags = Get-Content $FlagsPath -Raw | ConvertFrom-Json
 $flags | Add-Member -NotePropertyName "FULFILLMENT_CASES_ENABLED"  -NotePropertyValue $true          -Force
 $flags | Add-Member -NotePropertyName "FULFILLMENT_BULK_THRESHOLD" -NotePropertyValue $BulkThreshold -Force
+$flags | Add-Member -NotePropertyName "FULFILLMENT_SINGLE_ITEM_OOS" -NotePropertyValue $true         -Force
 $flags | ConvertTo-Json -Depth 50 | Set-Content $FlagsPath -Encoding utf8
-Write-Host ("  FULFILLMENT_CASES_ENABLED=true  FULFILLMENT_BULK_THRESHOLD={0}  (backup: {1})" -f $BulkThreshold, $FlagsBak)
+Write-Host ("  FULFILLMENT_CASES_ENABLED=true  FULFILLMENT_BULK_THRESHOLD={0}  FULFILLMENT_SINGLE_ITEM_OOS=true  (backup: {1})" -f $BulkThreshold, $FlagsBak)
 
 # 2. process env (the os.getenv flags; child processes inherit these) ----------
 Write-Step "Setting process env"
