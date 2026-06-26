@@ -19,6 +19,7 @@ import { Playbooks } from './components/Playbooks';
 import { MerchantBIPro } from './components/MerchantBIPro';
 import { EscalationsConsole } from './components/EscalationsConsole';
 import { ProcurementCases } from './components/ProcurementCases';
+import { MarketIntelligence } from './components/MarketIntelligence';
 import { EmailXdr } from './components/EmailXdr';
 import { SupplyChainSim } from './components/SupplyChainSim';
 import { AgentIntelligence } from './components/AgentIntelligence';
@@ -126,7 +127,7 @@ export default function App() {
 
         <div className="nav-section">Merchant</div>
         <div className="nav">
-          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'procurement', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
+          {['merchant-bi', 'overview', 'decisions', 'security', 'maestro', 'email-xdr', 'cv-incidents', 'inventory-sync', 'email-incidents', 'escalations', 'playbooks', 'rules', 'approvals', 'procurement', 'market-intel', 'orders', 'analytics', 'grafana', 'incidents', 'compliance', 'grc', 'agent-intelligence'].map((key) => {
             const locked = (key === 'compliance' && !canOwner) || (key === 'rules' && !(canOwner || canDeveloper)) || (key === 'grc' && !(canOwner || canDeveloper));
             return (
               <button
@@ -229,6 +230,7 @@ export default function App() {
             {active === 'playbooks' && 'Playbook Editor'}
             {active === 'approvals' && 'Human Approvals'}
             {active === 'procurement' && 'Procurement Control Room'}
+            {active === 'market-intel' && 'Market Intelligence (Synthetic Replay)'}
             {active === 'grafana' && 'Grafana Observability'}
             {active === 'escalations' && 'Human Escalations Console'}
             {active === 'owner' && 'Owner Console'}
@@ -251,6 +253,7 @@ export default function App() {
             {active === 'playbooks' && 'Validate, dry-run, publish, rollback, and audit playbook changes.'}
             {active === 'approvals' && 'Review and approve high-stakes proposals.'}
             {active === 'procurement' && 'Auditable buyer→supplier procurement: draft, approve+send (GATE 2), supplier reply, validate, options — every step bitemporally traced.'}
+            {active === 'market-intel' && 'Advance a synthetic 7-day market replay through the REAL ingestion→analysis→finding path (isolated demo tenant).'}
             {active === 'orders' && 'Manage order lifecycle for refunds, cancellations, and returns.'}
             {active === 'analytics' && 'Time-series performance across orders, decisions, and security.'}
             {active === 'grafana' && 'Full Grafana observability suite with drill-down dashboards.'}
@@ -283,6 +286,7 @@ export default function App() {
         {active === 'rules' && <RulesAdmin role={role} />}
         {active === 'approvals' && <Approvals role={role} />}
         {active === 'procurement' && <ProcurementCases />}
+        {active === 'market-intel' && <MarketIntelligence />}
         {active === 'orders' && <Orders role={role} />}
         {active === 'analytics' && <Analytics role={role} />}
         {active === 'grafana' && <GrafanaDashboards role={role} />}

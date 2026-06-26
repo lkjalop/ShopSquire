@@ -564,6 +564,17 @@ export const fcDemoReply = (id: string, scenario: string, requested_qty: number)
 export const fcValidateQuote = (id: string) => _fcPost(`${_fc(id)}/validate-quote`);
 export const fcGenerateOptions = (id: string, body?: any) => _fcPost(`${_fc(id)}/options`, body || {});
 
+// market replay (SYNTHETIC) — drives the real M3 path for the operator's Market Intelligence view
+export interface ReplayFinding { type: string; severity: string; summary: string; entity_ref?: string | null; }
+export interface ReplayState {
+  signals: number; active_findings: number; findings: ReplayFinding[];
+  series?: { demand: number[]; conversion: number[]; dates: string[] }; label?: string;
+}
+export const replayState = () => http<ReplayState>(`/api/v1/fulfillment/replay/state`);
+export const replayReset = () => http<any>(`/api/v1/fulfillment/replay/reset`, { method: 'POST' });
+export const replayAdvance = (day: number) =>
+  http<{ state: ReplayState }>(`/api/v1/fulfillment/replay/advance?day=${day}`, { method: 'POST' });
+
 export async function approveApproval(id: string): Promise<void> {
   await http(`/api/v1/approvals/${encodeURIComponent(id)}/approve`, { method: 'POST' });
 }
