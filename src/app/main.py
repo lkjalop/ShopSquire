@@ -39,6 +39,7 @@ from src.app.routers.cv import router as cv_router
 from src.app.routers.recruiting import router as recruiting_router
 from src.app.routers.scoring import router as scoring_router
 from src.app.routers.approvals import router as approvals_router
+from src.app.routers.fulfillment_cases import router as fulfillment_cases_router
 from src.app.routers.recommend import router as recommend_router
 from src.app.routers.products_compare import router as products_router
 from src.app.routers.orchestrator_api import router as orchestrator_router
@@ -1694,6 +1695,7 @@ def create_app() -> FastAPI:
         except Exception:
             pass
     app.include_router(approvals_router)
+    app.include_router(fulfillment_cases_router)
     # Tickets router for approval workflow
     try:
         app.include_router(tickets_module.router)
