@@ -336,16 +336,18 @@ def analyze(signals, *, anomaly_fn: Optional[Callable] = None,
     return out
 
 
-def load_recent_signals(db, *, limit: int = 2000) -> List[Dict[str, Any]]:
-    """Read recent market_signal rows into the dict shape the detectors expect. Best-effort."""
+def load_recent_signals(db, *, limit: int = 2000, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Read recent market_signal rows into the dict shape the detectors expect. When ``tenant_id`` is
+    given, only that tenant's signals are read (keeps a real run free of replay-demo data). Best-effort."""
     if db is None:
         return []
     try:
-        rows = db.execute(
-            text("SELECT signal_type, source, payload_json, occurred_at FROM market_signal "
-                 "ORDER BY occurred_at DESC LIMIT :lim"),
-            {"lim": int(limit)},
-        ).fetchall()
+        sql = "SELECT signal_type, source, payload_json, occurred_at FROM market_signal "
+        params: Dict[str, Any] = {"lim": int(limit)}
+        if tenant_id is not None:
+            sql += "WHERE COALESCE(tenant_id,'default') = :t "
+            params["t"] = str(tenant_id)
+        rows = db.execute(text(sql + "ORDER BY occurred_at DESC LIMIT :lim"), params).fetchall()
     except Exception:
         return []
     out: List[Dict[str, Any]] = []
@@ -360,12 +362,14 @@ def load_recent_signals(db, *, limit: int = 2000) -> List[Dict[str, Any]]:
 
 
 def run_analysis(db, *, limit: int = 2000, anomaly_fn: Optional[Callable] = None,
-                 forecast_fn: Optional[Callable] = None) -> List[MarketFinding]:
-    """Load recent market_signal rows + analyze them. The DB entry point for the BATCH task.
+                 forecast_fn: Optional[Callable] = None, tenant_id: Optional[str] = None) -> List[MarketFinding]:
+    """Load recent market_signal rows + analyze them. The DB entry point for the BATCH task. Pass
+    ``tenant_id`` to analyze only that tenant's signals (a real run excludes replay-demo).
 
     NOTE: analysis runs the real statistical models (~1.6s) — batch-only, never the request path.
     The hot path reads PERSISTED findings via load_recent_findings()."""
-    return analyze(load_recent_signals(db, limit=limit), anomaly_fn=anomaly_fn, forecast_fn=forecast_fn)
+    return analyze(load_recent_signals(db, limit=limit, tenant_id=tenant_id),
+                   anomaly_fn=anomaly_fn, forecast_fn=forecast_fn)
 
 
 # ── findings persistence (batch writes, hot path reads) ──────────────────────

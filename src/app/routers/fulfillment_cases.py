@@ -281,6 +281,25 @@ def replay_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]
         return mr.state(db)
 
 
+# ── REAL market pipeline (operator) — live ingestion → analysis → findings, not synthetic replay ──
+@router.post("/market/refresh")
+def market_refresh(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Run the REAL pipeline now (default tenant): backfill orders/conversion/search/returns → analyze →
+    persist. Operator-triggered so the demo shows live findings without waiting for the beat schedule."""
+    from src.app.services import market_pipeline as mp
+    with db_session() as db:
+        out = mp.run_pipeline(db, tenant_id="default")
+        return {"refreshed": out, "state": mp.state(db)}
+
+
+@router.get("/market/state")
+def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """The REAL (default-tenant) findings — the live counterpart to /replay/state."""
+    from src.app.services import market_pipeline as mp
+    with db_session() as db:
+        return mp.state(db)
+
+
 class SelectBody(BaseModel):
     uid: str
     option_id: str

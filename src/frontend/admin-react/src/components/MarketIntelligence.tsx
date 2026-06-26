@@ -7,7 +7,7 @@
  * only the events are synthetic, and they're written under an isolated demo tenant.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { replayAdvance, replayReset, replayState, type ReplayState } from '../api';
+import { marketState, refreshMarket, replayAdvance, replayReset, replayState, type ReplayState } from '../api';
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
 
@@ -17,10 +17,20 @@ export function MarketIntelligence() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [mode, setMode] = useState<'replay' | 'live'>('replay');
+
   const load = useCallback(() => {
-    replayState().then(setSt).catch((e) => setError(e.message));
-  }, []);
+    const fn = mode === 'live' ? marketState : replayState;
+    fn().then(setSt).catch((e) => setError(e.message));
+  }, [mode]);
   useEffect(() => { load(); }, [load]);
+
+  const refreshLive = async () => {
+    setBusy(true); setError(null);
+    try { const r = await refreshMarket(); setMode('live'); setSt(r.state); }
+    catch (e: any) { setError(e?.message || 'live refresh failed'); }
+    finally { setBusy(false); }
+  };
 
   const run = async (fn: () => Promise<any>) => {
     setBusy(true); setError(null);
@@ -44,6 +54,9 @@ export function MarketIntelligence() {
           </select>
         </label>
         <button disabled={busy} onClick={() => run(() => replayAdvance(day))} data-testid="mi-advance">Advance</button>
+        <span style={{ borderLeft: '1px solid #ccc', height: 18, margin: '0 4px' }} />
+        <button disabled={busy} onClick={refreshLive} data-testid="mi-refresh-live"
+                title="Run the REAL pipeline on live data (default tenant)">Refresh live data</button>
       </div>
 
       {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
@@ -74,7 +87,9 @@ export function MarketIntelligence() {
             <code>{f.type}</code>{f.entity_ref ? ` (${f.entity_ref})` : ''} — {f.summary}
           </li>
         ))}
-        {(st?.findings || []).length === 0 && <li><em>no active findings — advance the replay</em></li>}
+        {(st?.findings || []).length === 0 && (
+          <li><em>no active findings — {mode === 'live' ? 'refresh live data' : 'advance the replay'}</em></li>
+        )}
       </ul>
     </div>
   );

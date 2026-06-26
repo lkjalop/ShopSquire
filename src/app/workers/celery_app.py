@@ -271,6 +271,16 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "args": (),
         }
 
+    # Market-intelligence pipeline — real ingestion → analysis → findings on a cadence (default-OFF).
+    market_pipeline_enabled = str(os.getenv("MARKET_PIPELINE_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    market_pipeline_min = max(1, int(os.getenv("MARKET_PIPELINE_INTERVAL_SEC", "1800"))) // 60
+    if market_pipeline_enabled:
+        beat_schedule["market-pipeline-refresh"] = {
+            "task": "src.app.tasks.market_analysis_tasks.run_market_pipeline",
+            "schedule": crontab(minute=f"*/{market_pipeline_min}"),
+            "args": (),
+        }
+
     # Auth token expiry cleanup — prune expired session_tokens + refresh_tokens daily.
     # Without this, both tables grow unboundedly and auth query latency degrades over months.
     beat_schedule["auth-token-prune"] = {

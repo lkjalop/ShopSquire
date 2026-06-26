@@ -95,6 +95,17 @@ def test_by_trace_404_when_no_case():
     assert client.get(f"{_BASE}/by-trace/no-such-trace-xyz").status_code == 404
 
 
+def test_market_refresh_and_state_run_the_real_pipeline():
+    # operator-triggered REAL pipeline (default tenant) — returns 200 + a LIVE state (counts may be 0
+    # when the source tables are empty; the point is the wiring + tenant label).
+    r = client.post("/api/v1/fulfillment/market/refresh")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "refreshed" in body and body["state"]["label"] == "LIVE"
+    s = client.get("/api/v1/fulfillment/market/state")
+    assert s.status_code == 200 and s.json()["label"] == "LIVE"
+
+
 def test_market_replay_gated_then_advances(monkeypatch):
     # gated off by default
     assert client.post("/api/v1/fulfillment/replay/advance", params={"day": 7}).status_code == 403

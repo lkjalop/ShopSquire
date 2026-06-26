@@ -149,6 +149,8 @@ _CORE_MODULES = [
     "src/app/services/recommend_fulfillment_stage.py",
     # market replay: deterministic synthetic signals → real M3, tenant-isolated — no product vocabulary.
     "src/app/services/market_replay.py",
+    # market pipeline: real ingestion→analysis→findings (default tenant), opaque signals — no product vocab.
+    "src/app/services/market_pipeline.py",
     # supplier catalog: suppliers/supplier_products schema + demo seed, opaque ids — no product vocabulary.
     "src/app/services/supplier_catalog.py",
     # PO finalization: propose/approve/create/complete via the workflow chokepoint, opaque refs —

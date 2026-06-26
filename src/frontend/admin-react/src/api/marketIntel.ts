@@ -14,3 +14,8 @@ export const replayState = () => http<ReplayState>(`/api/v1/fulfillment/replay/s
 export const replayReset = () => http<any>(`/api/v1/fulfillment/replay/reset`, { method: 'POST' });
 export const replayAdvance = (day: number) =>
   http<{ state: ReplayState }>(`/api/v1/fulfillment/replay/advance?day=${day}`, { method: 'POST' });
+
+// REAL pipeline (default tenant) — live ingestion → analysis → findings, the counterpart to replay.
+export const marketState = () => http<ReplayState>(`/api/v1/fulfillment/market/state`);
+export const refreshMarket = () =>
+  http<{ refreshed: any; state: ReplayState }>(`/api/v1/fulfillment/market/refresh`, { method: 'POST' });

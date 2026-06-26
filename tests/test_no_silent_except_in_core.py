@@ -76,6 +76,7 @@ _BASELINE = {
     "src/app/services/magento_catalog_adapter.py": 0,
     "src/app/services/recommend_fulfillment_stage.py": 0,
     "src/app/services/market_replay.py": 0,
+    "src/app/services/market_pipeline.py": 0,
     "src/app/services/supplier_catalog.py": 0,
     "src/app/services/async_safe.py": 0,
 }

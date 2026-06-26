@@ -36,3 +36,26 @@ def run_market_analysis() -> Dict[str, Any]:
     except Exception as exc:
         logger.warning("run_market_analysis failed: %s", exc)
         return {"error": f"{type(exc).__name__}: {exc}"}
+
+
+def _pipeline_enabled() -> bool:
+    return str(os.getenv("MARKET_PIPELINE_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+@celery_app.task(name="src.app.tasks.market_analysis_tasks.run_market_pipeline")
+def run_market_pipeline() -> Dict[str, Any]:
+    """The REAL pipeline in one task: backfill real sources → analyze (default tenant) → persist.
+    Scheduled via beat (MARKET_PIPELINE_ENABLED) and triggerable on demand by the operator."""
+    if not _pipeline_enabled():
+        return {"skipped": "disabled"}
+    try:
+        limit = max(1, int(float(os.getenv("MARKET_PIPELINE_LIMIT", "2000") or 2000)))
+        from src.app.models.db import db_session
+        from src.app.services.market_pipeline import run_pipeline
+        with db_session() as db:
+            out = run_pipeline(db, tenant_id="default", limit=limit)
+        logger.info("run_market_pipeline %s", out)
+        return out
+    except Exception as exc:
+        logger.warning("run_market_pipeline failed: %s", exc)
+        return {"error": f"{type(exc).__name__}: {exc}"}
