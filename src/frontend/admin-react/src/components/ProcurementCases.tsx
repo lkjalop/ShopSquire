@@ -14,7 +14,8 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcDemoReply, fcDispatch, fcDraftQuote, fcGenerateOptions, fcRequestApproval, fcValidateQuote,
+  fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcExecutePO, fcGenerateOptions,
+  fcProposePO, fcRequestApproval, fcValidateQuote,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
   type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
 } from '../api';
@@ -46,6 +47,7 @@ export function ProcurementCases() {
 
   const draft = (view?.state_json?.draft || {}) as Record<string, any>;
   const parsed = (view?.state_json?.parsed_quote || view?.state_json?.validated_quote || {}) as Record<string, any>;
+  const po = (view?.state_json?.purchase_order || {}) as Record<string, any>;
   const state = view?.state || '';
 
   const run = async (fn: () => Promise<any>) => {
@@ -116,6 +118,20 @@ export function ProcurementCases() {
                 <button disabled={busy} data-testid="op-options"
                         onClick={() => run(() => fcGenerateOptions(sel))}>Generate options</button>
               )}
+              {state === 'SELECTED' && (
+                <button disabled={busy} data-testid="op-propose-po"
+                        onClick={() => run(() => fcProposePO(sel))}>Propose PO (agent)</button>
+              )}
+              {state === 'PROCUREMENT_APPROVAL_REQUIRED' && (
+                <button disabled={busy} data-testid="op-execute-po"
+                        onClick={() => run(() => fcExecutePO(sel, `po-${sel}`))}>
+                  Approve &amp; create PO (HUMAN)
+                </button>
+              )}
+              {(state === 'READY_TO_SHIP' || state === 'PARTIALLY_READY') && (
+                <button disabled={busy} data-testid="op-complete"
+                        onClick={() => run(() => fcCompleteCase(sel))}>Mark completed</button>
+              )}
             </div>
 
             {draft.subject && (
@@ -138,6 +154,15 @@ export function ProcurementCases() {
                 {Array.isArray(parsed.evidence_spans) && (
                   <ul>{parsed.evidence_spans.map((s: any, i: number) => <li key={i}>{s.field}: “{s.text}”</li>)}</ul>
                 )}
+              </details>
+            )}
+
+            {po.status && (
+              <details open>
+                <summary>Purchase order {po.po_ref ? `(${po.po_ref})` : '(proposed)'}</summary>
+                {po.sandbox && <div style={{ color: '#b45309' }}>SANDBOX SUPPLIER — no real PO transmitted</div>}
+                <div>Status <strong>{po.status}</strong> · qty {po.quantity}
+                  {po.total_amount_cents != null && <> · wholesale total {po.total_amount_cents}c</>}</div>
               </details>
             )}
 

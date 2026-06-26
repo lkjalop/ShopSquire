@@ -66,6 +66,7 @@ _BASELINE = {
     "src/app/services/fulfillment/external_comms.py": 0,
     "src/app/services/fulfillment/sandbox_supplier.py": 0,
     "src/app/services/fulfillment/options.py": 0,
+    "src/app/services/fulfillment/purchase_order.py": 0,
     "src/app/services/recommend_fulfillment_stage.py": 0,
     "src/app/services/market_replay.py": 0,
     "src/app/services/supplier_catalog.py": 0,

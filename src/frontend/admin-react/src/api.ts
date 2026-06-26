@@ -563,6 +563,11 @@ export const fcDemoReply = (id: string, scenario: string, requested_qty: number)
   _fcPost(`${_fc(id)}/demo-reply`, { scenario, requested_qty });
 export const fcValidateQuote = (id: string) => _fcPost(`${_fc(id)}/validate-quote`);
 export const fcGenerateOptions = (id: string, body?: any) => _fcPost(`${_fc(id)}/options`, body || {});
+// PO finalization — agent proposes, human approves+creates (idempotent, SANDBOX), then completes.
+export const fcProposePO = (id: string) => _fcPost(`${_fc(id)}/propose-po`);
+export const fcExecutePO = (id: string, idempotency_key?: string) =>
+  _fcPost(`${_fc(id)}/execute-po`, { idempotency_key });
+export const fcCompleteCase = (id: string) => _fcPost(`${_fc(id)}/complete`);
 
 // market replay (SYNTHETIC) — drives the real M3 path for the operator's Market Intelligence view
 export interface ReplayFinding { type: string; severity: string; summary: string; entity_ref?: string | null; }

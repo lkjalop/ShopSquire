@@ -61,6 +61,21 @@ def test_unknown_case_404():
     assert client.get(f"{_BASE}/does-not-exist").status_code == 404
 
 
+def test_po_endpoints_wired_and_guard_illegal_state():
+    # propose/execute/complete are registered and surface the workflow's transition guard (409 from NEW,
+    # not a 404 unrouted) — the happy-path advance itself is proven by the service-level journey test.
+    cid = _open()
+    for ep, payload in (("propose-po", None), ("execute-po", {}), ("complete", None)):
+        r = client.post(f"{_BASE}/{cid}/{ep}", json=payload)
+        assert r.status_code == 409, (ep, r.status_code, r.text)
+
+
+def test_po_endpoints_on_unknown_case_404():
+    assert client.post(f"{_BASE}/nope/propose-po").status_code == 404
+    assert client.post(f"{_BASE}/nope/execute-po", json={}).status_code == 404
+    assert client.post(f"{_BASE}/nope/complete").status_code == 404
+
+
 def test_market_replay_gated_then_advances(monkeypatch):
     # gated off by default
     assert client.post("/api/v1/fulfillment/replay/advance", params={"day": 7}).status_code == 403

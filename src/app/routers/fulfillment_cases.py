@@ -19,6 +19,7 @@ from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, require_role
 from src.app.services.fulfillment import draft as fdraft
 from src.app.services.fulfillment import external_comms as fec
 from src.app.services.fulfillment import options as fopt
+from src.app.services.fulfillment import purchase_order as fpo
 from src.app.services.fulfillment import sandbox_supplier as fsb
 from src.app.services.fulfillment import workflow as fwf
 from src.app.services.fulfillment.domain import Actor, ActorType
@@ -57,6 +58,10 @@ def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
         if isinstance(vq, dict):  # strip wholesale unit cost from the buyer projection
             state_json["validated_quote"] = {k: v for k, v in vq.items()
                                              if k not in ("unit_amount_cents", "evidence_spans")}
+        po = state_json.get("purchase_order")
+        if isinstance(po, dict):  # buyer sees the confirmation (ref/status/qty), not wholesale or supplier
+            state_json["purchase_order"] = {k: v for k, v in po.items()
+                                            if k not in ("unit_amount_cents", "total_amount_cents", "supplier_ref")}
     return {"case_id": case_id, "state": cur.state, "state_json": state_json,
             "source_trace_id": cur.source_trace_id}
 
@@ -264,3 +269,40 @@ def select_option(case_id: str, body: SelectBody) -> Dict[str, Any]:
         res = fopt.select_option(db, case_id=case_id, actor=Actor(ActorType.BUYER, body.uid), option_id=body.option_id)
         _raise_if_failed(res)
         return _case_view(db, case_id, for_operator=False)
+
+
+# ── PO finalization: AGENT proposes, HUMAN approves+creates, then completes ─────
+@router.post("/cases/{case_id}/propose-po")
+def propose_po(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """AGENT drafts the PO from the buyer's selection (SELECTED → PROCUREMENT_APPROVAL_REQUIRED).
+    No value is committed — this only stages the PO for the human's approval."""
+    with db_session() as db:
+        _raise_if_failed(fpo.propose(db, case_id=case_id, actor=_agent()))
+        return _case_view(db, case_id, for_operator=True)
+
+
+class ExecutePOBody(BaseModel):
+    idempotency_key: Optional[str] = None  # a double-clicked execute creates exactly one PO
+    today: Optional[str] = None            # for as-of/expiry checks; defaults to server date
+
+
+@router.post("/cases/{case_id}/execute-po")
+def execute_po(case_id: str, body: ExecutePOBody = Body(default=ExecutePOBody()),
+               role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """HUMAN approves AND creates the PO (APPROVAL_REQUIRED → IN_PROGRESS → READY_TO_SHIP). Refused if
+    the quote expired or the PO exceeds the approved scope. SANDBOX: records a PO ref, transmits nothing."""
+    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    with db_session() as db:
+        res = fpo.execute(db, case_id=case_id, actor=human, idempotency_key=body.idempotency_key,
+                          today=body.today)
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
+@router.post("/cases/{case_id}/complete")
+def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """HUMAN marks the order COMPLETED (READY_TO_SHIP → COMPLETED) — the journey's final act."""
+    with db_session() as db:
+        res = fpo.complete(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role))
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)

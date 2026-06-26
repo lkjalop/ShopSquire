@@ -35,7 +35,12 @@ interface Props {
 
 interface CaseView {
   state: string;
-  state_json: { options?: FulfillmentOption[]; selection?: { option_id: string }; availability?: any };
+  state_json: {
+    options?: FulfillmentOption[];
+    selection?: { option_id: string };
+    availability?: any;
+    purchase_order?: { po_ref?: string; status?: string; quantity?: number };
+  };
 }
 
 export default function FulfilmentOptions({ caseSummary, uid, pollMs = 0 }: Props) {
@@ -135,6 +140,15 @@ export default function FulfilmentOptions({ caseSummary, uid, pollMs = 0 }: Prop
       {(state === 'SELECTED' || state === 'PROCUREMENT_APPROVAL_REQUIRED') && (
         <p data-testid="fc-selected">
           Your choice is recorded{selectedId ? '' : ''}. A final purchase-order approval completes the order.
+        </p>
+      )}
+
+      {(state === 'READY_TO_SHIP' || state === 'PARTIALLY_READY' || state === 'COMPLETED') && (
+        <p data-testid="fc-confirmed">
+          {state === 'COMPLETED' ? 'Order confirmed' : 'Order approved — preparing to ship'}
+          {view?.state_json?.purchase_order?.po_ref
+            ? ` · reference ${view.state_json.purchase_order.po_ref}`
+            : ''}.
         </p>
       )}
     </section>

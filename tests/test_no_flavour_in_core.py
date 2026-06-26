@@ -151,6 +151,9 @@ _CORE_MODULES = [
     "src/app/services/market_replay.py",
     # supplier catalog: suppliers/supplier_products schema + demo seed, opaque ids — no product vocabulary.
     "src/app/services/supplier_catalog.py",
+    # PO finalization: propose/approve/create/complete via the workflow chokepoint, opaque refs —
+    # no product vocabulary.
+    "src/app/services/fulfillment/purchase_order.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

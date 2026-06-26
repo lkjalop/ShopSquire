@@ -66,4 +66,15 @@ describe('FulfilmentOptions', () => {
     render(<FulfilmentOptions caseSummary={CASE} uid="u1" />);
     expect(await screen.findByTestId('fc-error')).toHaveTextContent('boom');
   });
+
+  it('shows the final order confirmation with the PO reference once completed', async () => {
+    (api.getFulfillmentCase as any).mockResolvedValue({
+      state: 'COMPLETED',
+      state_json: { purchase_order: { po_ref: 'PO-AB12CD34EF', status: 'created', quantity: 6 } },
+    });
+    render(<FulfilmentOptions caseSummary={{ ...CASE, status: 'COMPLETED' }} uid="u1" />);
+    const confirmed = await screen.findByTestId('fc-confirmed');
+    expect(confirmed).toHaveTextContent(/order confirmed/i);
+    expect(confirmed).toHaveTextContent(/PO-AB12CD34EF/);
+  });
 });
