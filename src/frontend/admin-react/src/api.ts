@@ -569,6 +569,17 @@ export const fcExecutePO = (id: string, idempotency_key?: string) =>
   _fcPost(`${_fc(id)}/execute-po`, { idempotency_key });
 export const fcCompleteCase = (id: string) => _fcPost(`${_fc(id)}/complete`);
 
+// OPERATOR-only deal economics (margin / buyer-discount headroom / profit). Never buyer-facing.
+export interface DealEconomics {
+  quantity: number; supplier_unit_cost_cents: number; retail_unit_cents: number;
+  supplier_cost_cents: number; retail_cents: number; gross_profit_cents: number; margin_pct: number;
+  floor_margin_pct: number; max_buyer_discount_cents: number; max_buyer_discount_pct: number;
+  profit_after_max_discount_cents: number; clears_floor: boolean;
+}
+export const fcEconomics = (id: string) =>
+  http<{ case_id: string; economics: DealEconomics | Record<string, never> }>(`${_fc(id)}/economics`)
+    .then((d) => d.economics);
+
 // market replay (SYNTHETIC) — drives the real M3 path for the operator's Market Intelligence view
 export interface ReplayFinding { type: string; severity: string; summary: string; entity_ref?: string | null; }
 export interface ReplayState {

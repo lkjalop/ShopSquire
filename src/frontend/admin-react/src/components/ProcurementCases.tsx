@@ -14,11 +14,14 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcExecutePO, fcGenerateOptions,
+  fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcEconomics, fcExecutePO, fcGenerateOptions,
   fcProposePO, fcRequestApproval, fcValidateQuote,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
-  type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
+  type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
 } from '../api';
+
+const dollars = (c?: number) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`);
+const pct = (r?: number) => (r == null ? '—' : `${(r * 100).toFixed(1)}%`);
 
 const SCENARIOS = ['full_quote', 'partial_availability', 'late_delivery', 'substitute_offer',
   'expired_quote', 'untrusted_sender', 'contradictory_quantity'];
@@ -29,6 +32,7 @@ export function ProcurementCases() {
   const [view, setView] = useState<FulfillmentCaseView | null>(null);
   const [journey, setJourney] = useState<JourneyEvent[]>([]);
   const [scenario, setScenario] = useState('full_quote');
+  const [econ, setEcon] = useState<DealEconomics | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +41,7 @@ export function ProcurementCases() {
   }, []);
   const loadCase = useCallback((id: string) => {
     if (!id) return;
+    setEcon(null);  // economics is per-case — clear when switching
     Promise.all([getFulfillmentCaseOp(id), getFulfillmentJourney(id)])
       .then(([v, j]) => { setView(v); setJourney(j); setError(null); })
       .catch((e) => setError(e.message));
@@ -147,7 +152,27 @@ export function ProcurementCases() {
                 <button disabled={busy} data-testid="op-complete"
                         onClick={() => run(() => fcCompleteCase(sel))}>Mark completed</button>
               )}
+              {['SELECTED', 'PROCUREMENT_APPROVAL_REQUIRED', 'PROCUREMENT_IN_PROGRESS', 'READY_TO_SHIP',
+                'PARTIALLY_READY', 'COMPLETED'].includes(state) && (
+                <button disabled={busy} data-testid="op-economics"
+                        onClick={() => fcEconomics(sel)
+                          .then((e) => setEcon((e as DealEconomics)?.margin_pct != null ? (e as DealEconomics) : null))
+                          .catch((er: any) => setError(er?.message || 'economics failed'))}>
+                  Deal economics
+                </button>
+              )}
             </div>
+
+            {econ && (
+              <details open data-testid="op-economics-panel">
+                <summary>Deal economics (operator-only) — margin {pct(econ.margin_pct)}</summary>
+                <div>Supplier charges us {dollars(econ.supplier_cost_cents)} ({dollars(econ.supplier_unit_cost_cents)}/unit × {econ.quantity})</div>
+                <div>We list at {dollars(econ.retail_cents)} → gross profit <strong>{dollars(econ.gross_profit_cents)}</strong> ({pct(econ.margin_pct)})</div>
+                <div>Buyer discount headroom: up to <strong>{dollars(econ.max_buyer_discount_cents)}</strong> ({pct(econ.max_buyer_discount_pct)}) and still clear the {pct(econ.floor_margin_pct)} floor</div>
+                <div>Profit if we give the full discount: {dollars(econ.profit_after_max_discount_cents)}</div>
+                {!econ.clears_floor && <div style={{ color: 'crimson' }}>⚠ list margin is below the floor — no discount headroom</div>}
+              </details>
+            )}
 
             {draft.subject && (
               <details open>

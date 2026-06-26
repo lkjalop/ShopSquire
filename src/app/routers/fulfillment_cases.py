@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from src.app.models.db import db_session
 from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, require_role
 from src.app.services.fulfillment import draft as fdraft
+from src.app.services.fulfillment import economics as feco
 from src.app.services.fulfillment import external_comms as fec
 from src.app.services.fulfillment import options as fopt
 from src.app.services.fulfillment import purchase_order as fpo
@@ -92,6 +93,18 @@ def get_as_of(case_id: str, t: str = Query(...)) -> Dict[str, Any]:
         if v is None:
             raise HTTPException(status_code=404, detail="no version at that time")
         return {"case_id": case_id, "as_of": t, "state": v.state, "state_json": v.state_json}
+
+
+@router.get("/cases/{case_id}/economics")
+def get_economics(case_id: str, retail_unit_cents: Optional[int] = Query(None),
+                  floor_margin_pct: float = Query(0.10),
+                  role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """OPERATOR-only deal economics: what the supplier charges us, our margin, how much discount we can
+    hand the buyer while still clearing the floor, and the resulting profit. NEVER buyer-facing."""
+    with db_session() as db:
+        econ = feco.from_case(db, case_id, retail_unit_cents=retail_unit_cents,
+                              floor_margin_pct=floor_margin_pct)
+        return {"case_id": case_id, "economics": econ}
 
 
 # ── commands ──────────────────────────────────────────────────────────────────

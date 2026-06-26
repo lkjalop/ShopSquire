@@ -154,6 +154,8 @@ _CORE_MODULES = [
     # PO finalization: propose/approve/create/complete via the workflow chokepoint, opaque refs —
     # no product vocabulary.
     "src/app/services/fulfillment/purchase_order.py",
+    # deal economics: margin/discount-headroom/profit math, cents + ratios only — no product vocabulary.
+    "src/app/services/fulfillment/economics.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

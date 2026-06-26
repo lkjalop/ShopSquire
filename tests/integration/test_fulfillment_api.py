@@ -76,6 +76,13 @@ def test_po_endpoints_on_unknown_case_404():
     assert client.post(f"{_BASE}/nope/complete").status_code == 404
 
 
+def test_economics_endpoint_operator_and_empty_before_quote():
+    # operator route is wired and returns 200; with no validated quote yet it invents nothing → {}
+    cid = _open()
+    r = client.get(f"{_BASE}/{cid}/economics")
+    assert r.status_code == 200 and r.json()["economics"] == {}
+
+
 def test_market_replay_gated_then_advances(monkeypatch):
     # gated off by default
     assert client.post("/api/v1/fulfillment/replay/advance", params={"day": 7}).status_code == 403
