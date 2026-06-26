@@ -138,6 +138,10 @@ _CORE_MODULES = [
     # supplier draft: template-slot fill + scatter-gather evidence, opaque item/supplier refs —
     # no product vocabulary (real templates come from StoreProfile).
     "src/app/services/fulfillment/draft.py",
+    # external comms boundary + deterministic sandbox: send/receive/parse/validate, opaque refs —
+    # no product vocabulary.
+    "src/app/services/fulfillment/external_comms.py",
+    "src/app/services/fulfillment/sandbox_supplier.py",
 ]
 
 # Unambiguous electronics/laptop flavour literals (brand models, GPU prefixes, display).

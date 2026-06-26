@@ -63,6 +63,8 @@ _BASELINE = {
     "src/app/services/fulfillment/repository.py": 0,
     "src/app/services/fulfillment/workflow.py": 0,
     "src/app/services/fulfillment/draft.py": 0,
+    "src/app/services/fulfillment/external_comms.py": 0,
+    "src/app/services/fulfillment/sandbox_supplier.py": 0,
 }
 
 

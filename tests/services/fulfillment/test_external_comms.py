@@ -1,0 +1,136 @@
+"""Step 4 — governed send/receive: stale-approval block, quarantine, strict parse, expiry hard-reject."""
+from __future__ import annotations
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from src.app.services.fulfillment import external_comms as ec
+from src.app.services.fulfillment import sandbox_supplier as sb
+from src.app.services.fulfillment import workflow as wf
+from src.app.services.fulfillment.domain import Actor, ActorType as A, FulfillmentState as S
+
+
+@pytest.fixture()
+def db():
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool, future=True)
+    s = sessionmaker(bind=eng, future=True)()
+    try:
+        yield s
+    finally:
+        s.close()
+
+
+def AG(): return Actor(A.AGENT, "Procurement_Agent")
+def BU(): return Actor(A.BUYER, "u1")
+def HU(): return Actor(A.HUMAN_OPERATOR, "owner-01")
+
+_DRAFT = {"content_hash": "H1", "recipient_domain": "approved-supplier.example",
+          "commercial_scope": {"item_ref": "SKU-1", "quantity": 6}}
+
+
+def _to_approved(db):
+    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
+                       now_iso="2026-06-26 09:00:00"); db.commit()
+    wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
+                  state_patch={"availability": {"shortfall": 6, "requested_qty": 10}}, now_iso="2026-06-26 09:00:01")
+    wf.transition(db, case_id=cid, event="request_buyer_commitment", actor=AG(), now_iso="2026-06-26 09:00:02")
+    wf.transition(db, case_id=cid, event="buyer_committed", actor=BU(), now_iso="2026-06-26 09:05:00")
+    wf.transition(db, case_id=cid, event="external_message_drafted", actor=AG(),
+                  state_patch={"draft": dict(_DRAFT)}, now_iso="2026-06-26 09:05:10")
+    wf.transition(db, case_id=cid, event="approval_requested", actor=AG(), now_iso="2026-06-26 09:05:15")
+    wf.transition(db, case_id=cid, event="approval_granted", actor=HU(), now_iso="2026-06-26 09:10:00")
+    assert wf.current_state(db, cid) == S.APPROVED_TO_SEND
+    return cid
+
+
+def _to_sent(db):
+    cid = _to_approved(db)
+    assert ec.send_approved(db, case_id=cid, actor=HU(), approval_content_hash="H1",
+                            now_iso="2026-06-26 09:10:05").ok
+    return cid
+
+
+# ── send (hash-checked) ──────────────────────────────────────────────────────
+def test_send_with_matching_hash_sends(db):
+    cid = _to_approved(db)
+    r = ec.send_approved(db, case_id=cid, actor=HU(), approval_content_hash="H1", now_iso="2026-06-26 09:10:05")
+    assert r.ok and wf.current_state(db, cid) == S.QUOTE_SENT
+
+
+def test_send_with_stale_approval_is_blocked(db):
+    cid = _to_approved(db)
+    # the approval was for hash H1 but the current draft is H1 — simulate an approval that no longer matches
+    r = ec.send_approved(db, case_id=cid, actor=HU(), approval_content_hash="H2-OLD", now_iso="2026-06-26 09:10:05")
+    assert r.ok is False and r.reason == "stale_approval" and r.http_status == 409
+    assert wf.current_state(db, cid) == S.APPROVED_TO_SEND  # NOT sent
+
+
+# ── receive (correlate + quarantine) ─────────────────────────────────────────
+def test_trusted_reply_is_received(db):
+    cid = _to_sent(db)
+    reply = sb.generate_reply(case_ref=cid, scenario="full_quote", requested_qty=6)
+    r = ec.receive_reply(db, case_id=cid, raw_body=reply["body"], sender_domain=reply["sender_domain"],
+                         provider_ref=reply["provider_ref"], trusted_fn=lambda d: d == sb.TRUSTED_DOMAIN,
+                         now_iso="2026-06-26 09:26:00")
+    assert r.ok and wf.current_state(db, cid) == S.QUOTE_RECEIVED
+
+
+def test_untrusted_sender_is_quarantined(db):
+    cid = _to_sent(db)
+    reply = sb.generate_reply(case_ref=cid, scenario="untrusted_sender", requested_qty=6)
+    r = ec.receive_reply(db, case_id=cid, raw_body=reply["body"], sender_domain=reply["sender_domain"],
+                         trusted_fn=lambda d: d == sb.TRUSTED_DOMAIN, now_iso="2026-06-26 09:26:00")
+    assert r.ok and wf.current_state(db, cid) == S.SUPPLIER_RESPONSE_QUARANTINED
+
+
+# ── parse (strict schema + evidence spans) ───────────────────────────────────
+def test_parse_full_quote_extracts_fields_with_spans():
+    reply = sb.generate_reply(case_ref="FC-1", scenario="full_quote", requested_qty=6, unit_amount_cents=111500)
+    pq = ec.parse_quote(reply["body"], {"quantity": 6})
+    assert pq["quoted_quantity"] == 6 and pq["unit_amount_cents"] == 111500
+    assert pq["dispatch_ready_at"] == "2026-07-03" and pq["quote_expires_at"] == "2026-07-15"
+    assert pq["confidence"] >= 0.9 and not pq["contradictory"]
+    fields = {s["field"] for s in pq["evidence_spans"]}
+    assert {"quoted_quantity", "unit_amount", "dispatch_ready_at", "quote_expires_at"} <= fields
+
+
+def test_parse_contradictory_quantity_lowers_confidence():
+    reply = sb.generate_reply(case_ref="FC-1", scenario="contradictory_quantity", requested_qty=6)
+    pq = ec.parse_quote(reply["body"], {"quantity": 6})
+    assert pq["contradictory"] is True and pq["confidence"] < 0.9
+
+
+def test_record_parsed_stores_quote(db):
+    cid = _to_sent(db)
+    reply = sb.generate_reply(case_ref=cid, scenario="full_quote", requested_qty=6)
+    ec.receive_reply(db, case_id=cid, raw_body=reply["body"], sender_domain=reply["sender_domain"],
+                     trusted_fn=lambda d: True, now_iso="2026-06-26 09:26:00")
+    r = ec.record_parsed(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:26:10")
+    assert r.ok and wf.current_state(db, cid) == S.QUOTE_RECEIVED
+    cur = wf.repository.current_version(db, cid)
+    assert cur.state_json["parsed_quote"]["quoted_quantity"] == 6
+
+
+# ── validate (human; expired hard-reject) ────────────────────────────────────
+def test_validate_unexpired_quote_advances(db):
+    cid = _to_sent(db)
+    reply = sb.generate_reply(case_ref=cid, scenario="full_quote", requested_qty=6)
+    ec.receive_reply(db, case_id=cid, raw_body=reply["body"], sender_domain=reply["sender_domain"],
+                     trusted_fn=lambda d: True, now_iso="2026-06-26 09:26:00")
+    ec.record_parsed(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:26:10")
+    r = ec.validate_quote(db, case_id=cid, actor=HU(), today="2026-06-27", now_iso="2026-06-27 09:00:00")
+    assert r.ok and wf.current_state(db, cid) == S.QUOTE_VALIDATED
+    assert wf.repository.current_version(db, cid).state_json["validated_quote"]["validation"]["in_scope"] is True
+
+
+def test_validate_expired_quote_is_hard_rejected(db):
+    cid = _to_sent(db)
+    reply = sb.generate_reply(case_ref=cid, scenario="expired_quote", requested_qty=6)  # valid until 2026-06-20
+    ec.receive_reply(db, case_id=cid, raw_body=reply["body"], sender_domain=reply["sender_domain"],
+                     trusted_fn=lambda d: True, now_iso="2026-06-26 09:26:00")
+    ec.record_parsed(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:26:10")
+    # even though a human is validating, an expired quote routes to quote_expired
+    r = ec.validate_quote(db, case_id=cid, actor=HU(), today="2026-06-27", now_iso="2026-06-27 09:00:00")
+    assert r.ok and wf.current_state(db, cid) == S.QUOTE_EXPIRED
