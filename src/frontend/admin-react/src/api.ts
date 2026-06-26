@@ -1,16 +1,12 @@
-export type DecisionRow = {
-  id: string;
-  agent_name: string;
-  valid_from?: string;
-  valid_to?: string | null;
-  system_from?: string;
-  system_to?: string | null;
-  input_data?: any;
-  proposed_action?: any;
-  policy_version?: string;
-  approval_required?: boolean;
-  execution_status?: string;
-};
+// Operator admin API. The shared client + the decisions/fulfillment/marketIntel domains live in
+// ./api/*; this file is the BARREL (re-exports them) plus the remaining admin/BI/security endpoints.
+// (admin bulk extraction into ./api/admin.ts is a mechanical follow-up — it's off the procurement path.)
+import { http, httpResponse, apiBase } from './api/client';
+
+export * from './api/client';        // setClientApiKey, clearClientApiKey, http, httpResponse, apiBase
+export * from './api/decisions';     // Decision* types + decision query/trace/lifecycle
+export * from './api/fulfillment';   // fulfilment cases + PO + economics
+export * from './api/marketIntel';   // replay (market-intelligence)
 
 export type ApprovalItem = {
   id: string;
@@ -20,112 +16,6 @@ export type ApprovalItem = {
   status: 'pending' | 'approved' | 'rejected';
   created_at?: string;
 };
-
-const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
-const API_KEY_ENV = (import.meta.env.VITE_API_KEY as string) || '';
-let VOLATILE_API_KEY = '';
-const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-function getCsrfToken(): string {
-  if (typeof document === 'undefined') return '';
-  const entry = document.cookie
-    .split(';')
-    .map((c) => c.trim())
-    .find((c) => c.startsWith('ss_csrf='));
-  return entry ? entry.slice('ss_csrf='.length) : '';
-}
-
-function getApiKey(): string {
-  return API_KEY_ENV || VOLATILE_API_KEY || '';
-}
-
-export function setClientApiKey(key: string) {
-  VOLATILE_API_KEY = String(key || '').trim();
-}
-
-export function clearClientApiKey() {
-  VOLATILE_API_KEY = '';
-}
-
-async function http<T>(path: string, opts?: RequestInit): Promise<T> {
-  const url = `${API_BASE.replace(/\/$/, '')}${path}`;
-  const method = String(opts?.method || 'GET').toUpperCase();
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (opts?.headers) {
-    if (opts.headers instanceof Headers) {
-      opts.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-    } else if (Array.isArray(opts.headers)) {
-      opts.headers.forEach(([key, value]) => {
-        headers[key] = value;
-      });
-    } else {
-      Object.assign(headers, opts.headers as Record<string, string>);
-    }
-  }
-  const key = getApiKey();
-  if (key) headers['x-api-key'] = key;
-  if (STATE_CHANGING.has(method)) {
-    const csrf = getCsrfToken();
-    if (csrf) headers['X-CSRF-Token'] = csrf;
-  }
-  const r = await fetch(url, { ...opts, headers, credentials: 'include' });
-  if (!r.ok) {
-    let detail = '';
-    try {
-      const body = await r.json();
-      detail = body?.detail ? String(body.detail) : (body?.error ? String(body.error) : '');
-    } catch {
-      detail = '';
-    }
-    const err: any = new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ''}`);
-    err.status = r.status;
-    err.detail = detail;
-    throw err;
-  }
-  return r.json();
-}
-
-async function httpResponse(path: string, opts?: RequestInit): Promise<Response> {
-  const url = `${API_BASE.replace(/\/$/, '')}${path}`;
-  const method = String(opts?.method || 'GET').toUpperCase();
-  const headers: Record<string, string> = {};
-  if (opts?.headers) {
-    if (opts.headers instanceof Headers) {
-      opts.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-    } else if (Array.isArray(opts.headers)) {
-      opts.headers.forEach(([key, value]) => {
-        headers[key] = value;
-      });
-    } else {
-      Object.assign(headers, opts.headers as Record<string, string>);
-    }
-  }
-  const key = getApiKey();
-  if (key) headers['x-api-key'] = key;
-  if (STATE_CHANGING.has(method)) {
-    const csrf = getCsrfToken();
-    if (csrf) headers['X-CSRF-Token'] = csrf;
-  }
-  const r = await fetch(url, { ...opts, headers, credentials: 'include' });
-  if (!r.ok) {
-    let detail = '';
-    try {
-      const body = await r.json();
-      detail = body?.detail ? String(body.detail) : (body?.error ? String(body.error) : '');
-    } catch {
-      detail = '';
-    }
-    const err: any = new Error(`${r.status} ${r.statusText}${detail ? `: ${detail}` : ''}`);
-    err.status = r.status;
-    err.detail = detail;
-    throw err;
-  }
-  return r;
-}
 
 export async function setApiKeyCookie(apiKey: string): Promise<{ ok: boolean }> {
   return http(`/api/v1/auth/api-key-cookie`, {
@@ -434,95 +324,6 @@ export async function updateOrderStatus(orderId: string, status: string): Promis
   });
 }
 
-export async function fetchDecisions(): Promise<DecisionRow[]> {
-  const data = await http<{ results: DecisionRow[] }>(`/api/v1/decisions/query`);
-  return data.results || [];
-}
-
-
-export async function fetchDecisionsFiltered(params: { agent?: string }): Promise<DecisionRow[]> {
-  const q = new URLSearchParams();
-  if (params.agent) q.set('agent_name', params.agent);
-  const data = await http<{ results: DecisionRow[] }>(`/api/v1/decisions/query?${q.toString()}`);
-  return data.results || [];
-}
-
-export type DecisionTraceEvent = {
-  id: string;
-  seq?: number | null;
-  trace_id?: string;
-  event_type?: string;
-  source_type?: string | null;
-  source_id?: string | null;
-  target_type?: string | null;
-  target_id?: string | null;
-  payload?: any;
-  created_at?: string;
-};
-
-export type DecisionTraceQuery = {
-  decision_id: string;
-  timestamp?: string;
-  input_query?: string | null;
-  intent_analysis?: any;
-  agent_chain?: any[];
-  rag_context?: any;
-  evidence?: any;
-  recommendation?: any;
-  policy_gates?: any;
-  bitemporal?: any;
-  model_selection?: any;
-  events?: DecisionTraceEvent[];
-};
-
-export type DecisionCausalGraph = {
-  trace_id: string;
-  nodes: Array<{
-    id: string;
-    event_type?: string;
-    source_type?: string;
-    source_id?: string;
-    target_type?: string;
-    target_id?: string;
-    created_at?: string;
-  }>;
-  edges: Array<{ from: string; to: string; type?: string }>;
-};
-
-export async function fetchDecisionTraceQuery(traceId: string): Promise<DecisionTraceQuery> {
-  return http(`/api/v1/decisions/${encodeURIComponent(traceId)}/query?include_events=true`);
-}
-
-export async function fetchDecisionSession(sessionId: string): Promise<{ session_id: string; count: number; decisions: any[] }> {
-  return http(`/api/v1/decisions/session/${encodeURIComponent(sessionId)}`);
-}
-
-export async function fetchDecisionCausal(traceId: string): Promise<DecisionCausalGraph> {
-  return http(`/api/v1/decisions/trace/${encodeURIComponent(traceId)}/causal`);
-}
-
-export async function fetchInterleavingSummary(traceId: string): Promise<{ summary: any }> {
-  return http(`/api/v1/admin/interleaving/${encodeURIComponent(traceId)}/summary`);
-}
-
-export async function approveDecision(decisionId: string, approvedBy: string): Promise<void> {
-  await http(`/api/v1/decisions/${encodeURIComponent(decisionId)}/approve?approved_by=${encodeURIComponent(approvedBy)}`, { method: 'POST' });
-}
-
-export async function rejectDecision(decisionId: string, rejectedBy: string, reason?: string): Promise<void> {
-  const q = new URLSearchParams();
-  q.set('rejected_by', rejectedBy);
-  if (reason) q.set('reason', reason);
-  await http(`/api/v1/decisions/${encodeURIComponent(decisionId)}/reject?${q.toString()}`, { method: 'POST' });
-}
-
-export async function reopenDecision(decisionId: string, actor: string, comment?: string): Promise<void> {
-  const q = new URLSearchParams();
-  q.set('actor', actor);
-  if (comment) q.set('comment', comment);
-  await http(`/api/v1/decisions/${encodeURIComponent(decisionId)}/reopen?${q.toString()}`, { method: 'POST' });
-}
-
 export async function fetchFlags(): Promise<Record<string, any>> {
   return http(`/api/v1/admin/flags`);
 }
@@ -531,65 +332,6 @@ export async function fetchApprovals(): Promise<ApprovalItem[]> {
   const data = await http<{ pending: ApprovalItem[] }>(`/api/v1/approvals/pending`);
   return data.pending || [];
 }
-
-// ── Fulfilment / procurement (operator control room) ──────────────────────────
-export interface FulfillmentCaseRow {
-  case_id: string; buyer_uid_hash?: string | null; status: string;
-  requested_by?: string | null; source_trace_id?: string | null; updated_at?: string | null;
-}
-export interface FulfillmentCaseView {
-  case_id: string; state: string; state_json: Record<string, any>; source_trace_id?: string | null;
-}
-export interface JourneyEvent {
-  state: string; event: string; actor_type: string; actor_id: string;
-  reason_code?: string; evidence?: any; valid_from?: string; valid_to?: string | null;
-}
-
-const _fc = (id: string) => `/api/v1/fulfillment/cases/${encodeURIComponent(id)}`;
-const _fcPost = (path: string, body?: any) =>
-  http<FulfillmentCaseView>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
-
-export const listFulfillmentCases = () =>
-  http<{ cases: FulfillmentCaseRow[] }>(`/api/v1/fulfillment/cases`).then((d) => d.cases || []);
-export const getFulfillmentCaseOp = (id: string) => http<FulfillmentCaseView>(_fc(id));
-export const getFulfillmentJourney = (id: string) =>
-  http<{ journey: JourneyEvent[] }>(`${_fc(id)}/journey`).then((d) => d.journey || []);
-export const fcDraftQuote = (id: string, item_ref: string, quantity: number, estimated_value_cents = 0) =>
-  _fcPost(`${_fc(id)}/draft-quote`, { item_ref, quantity, estimated_value_cents });
-export const fcRequestApproval = (id: string) =>
-  http<FulfillmentCaseView & { approval_id?: string }>(`${_fc(id)}/request-approval`, { method: 'POST' });
-export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
-export const fcDemoReply = (id: string, scenario: string, requested_qty: number) =>
-  _fcPost(`${_fc(id)}/demo-reply`, { scenario, requested_qty });
-export const fcValidateQuote = (id: string) => _fcPost(`${_fc(id)}/validate-quote`);
-export const fcGenerateOptions = (id: string, body?: any) => _fcPost(`${_fc(id)}/options`, body || {});
-// PO finalization — agent proposes, human approves+creates (idempotent, SANDBOX), then completes.
-export const fcProposePO = (id: string) => _fcPost(`${_fc(id)}/propose-po`);
-export const fcExecutePO = (id: string, idempotency_key?: string) =>
-  _fcPost(`${_fc(id)}/execute-po`, { idempotency_key });
-export const fcCompleteCase = (id: string) => _fcPost(`${_fc(id)}/complete`);
-
-// OPERATOR-only deal economics (margin / buyer-discount headroom / profit). Never buyer-facing.
-export interface DealEconomics {
-  quantity: number; supplier_unit_cost_cents: number; retail_unit_cents: number;
-  supplier_cost_cents: number; retail_cents: number; gross_profit_cents: number; margin_pct: number;
-  floor_margin_pct: number; max_buyer_discount_cents: number; max_buyer_discount_pct: number;
-  profit_after_max_discount_cents: number; clears_floor: boolean;
-}
-export const fcEconomics = (id: string) =>
-  http<{ case_id: string; economics: DealEconomics | Record<string, never> }>(`${_fc(id)}/economics`)
-    .then((d) => d.economics);
-
-// market replay (SYNTHETIC) — drives the real M3 path for the operator's Market Intelligence view
-export interface ReplayFinding { type: string; severity: string; summary: string; entity_ref?: string | null; }
-export interface ReplayState {
-  signals: number; active_findings: number; findings: ReplayFinding[];
-  series?: { demand: number[]; conversion: number[]; dates: string[] }; label?: string;
-}
-export const replayState = () => http<ReplayState>(`/api/v1/fulfillment/replay/state`);
-export const replayReset = () => http<any>(`/api/v1/fulfillment/replay/reset`, { method: 'POST' });
-export const replayAdvance = (day: number) =>
-  http<{ state: ReplayState }>(`/api/v1/fulfillment/replay/advance?day=${day}`, { method: 'POST' });
 
 export async function approveApproval(id: string): Promise<void> {
   await http(`/api/v1/approvals/${encodeURIComponent(id)}/approve`, { method: 'POST' });
@@ -1365,11 +1107,11 @@ export async function fetchSCSwarm(jobId: string): Promise<SCSwarmJob> {
 }
 
 export function streamSCScenario(id: string): EventSource {
-  const url = `${API_BASE.replace(/\/$/, '')}/api/v1/admin/supply-chain-sim/run/${encodeURIComponent(id)}/stream`;
+  const url = `${apiBase()}/api/v1/admin/supply-chain-sim/run/${encodeURIComponent(id)}/stream`;
   return new EventSource(url, { withCredentials: true });
 }
 
 export function streamSCAll(): EventSource {
-  const url = `${API_BASE.replace(/\/$/, '')}/api/v1/admin/supply-chain-sim/run-all/stream`;
+  const url = `${apiBase()}/api/v1/admin/supply-chain-sim/run-all/stream`;
   return new EventSource(url, { withCredentials: true });
 }
