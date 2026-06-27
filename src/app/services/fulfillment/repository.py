@@ -107,6 +107,13 @@ def _loads(s: Any) -> Dict[str, Any]:
         return {}
 
 
+def _to_int(v: Any) -> Optional[int]:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None  # observable: callers treat None as "no parseable quantity"
+
+
 def create_case(db, *, initial_state: str, buyer_uid_hash: Optional[str], source_trace_id: Optional[str],
                 requested_by: str, tenant_id: str = DEFAULT_TENANT, now_iso: Optional[str] = None,
                 state_json: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -299,15 +306,12 @@ def _scope_from_state(state_json_text: Any) -> Dict[str, Any]:
     scope = (state.get("draft") or {}).get("commercial_scope") if isinstance(state.get("draft"), dict) else {}
     scope = scope if isinstance(scope, dict) else {}
     item_ref = str(avail.get("item_ref") or scope.get("item_ref") or "").strip() or None
-    qty = avail.get("requested_qty") or avail.get("shortfall") or scope.get("quantity")
     out: Dict[str, Any] = {}
     if item_ref:
         out["item_ref"] = item_ref
-    try:
-        if qty is not None:
-            out["quantity"] = int(qty)
-    except (TypeError, ValueError):
-        pass
+    qty = _to_int(avail.get("requested_qty") or avail.get("shortfall") or scope.get("quantity"))
+    if qty is not None:
+        out["quantity"] = qty
     return out
 
 
