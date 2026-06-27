@@ -269,6 +269,22 @@ def gpu_tier(candidate: Dict[str, Any] | None) -> str:
 _DISCRETE_TIERS = ("entry", "mid", "high")
 
 
+def matches_use_case_markers(text: str, marker_key: str, *, kind: str = "soft",
+                             profile_id: Optional[str] = None) -> bool:
+    """Single source of the business/gaming use-case VOCABULARY, read from the active profile
+    (use_case_soft_markers / use_case_exclusion_markers). Both ranking paths — the fast-path use_case_fit
+    and recommendations.py's rerank — call this so the literal marker strings live in ONE place (the
+    profile) and cannot drift between the two scorers. Best-effort; False if the slot/marker is absent."""
+    slot = "use_case_soft_markers" if kind == "soft" else "use_case_exclusion_markers"
+    try:
+        from src.app.platform.store_profile import profile_slot
+        markers = (profile_slot(slot, profile_id=profile_id, default={}) or {}).get(marker_key) or []
+    except Exception:
+        markers = []
+    t = (text or "").lower()
+    return any(str(m).lower() in t for m in markers)
+
+
 def use_case_fit(
     candidate: Dict[str, Any] | None,
     query: str | None,

@@ -75,3 +75,21 @@ def test_work_and_office_aliases_score_like_business():
     # office_finance isn't a KB alias, so it still demotes gaming (branch) but without the KB exclusion.
     of_score, of_reasons = _score(svc, _GAMING, use_case="office_finance")
     assert of_score < 0 and "use_case_not_business_gaming" in of_reasons
+
+
+def test_both_ranking_paths_agree_gaming_below_business():
+    # consolidation guard: the rerank path (recommendations._use_case_score) and the fast-path adapter
+    # (recommend_candidate_classify.use_case_fit) must AGREE — gaming ranks below business/productivity for
+    # a work query — because both now read the SAME profile vocabulary. Pins them so they can't drift.
+    from src.app.services.recommend_candidate_classify import use_case_fit
+    svc = _svc()
+    # rerank path
+    g_rerank, _ = _score(svc, _GAMING)
+    p_rerank, _ = _score(svc, _PRODUCTIVITY)
+    assert p_rerank > g_rerank
+    # adapter path (office query)
+    g_fit = use_case_fit(_GAMING, "20 laptops for work", profile_id="electronics")
+    p_fit = use_case_fit(_PRODUCTIVITY, "20 laptops for work", profile_id="electronics")
+    assert (35 + p_fit["score_adjustment"]) > (35 + g_fit["score_adjustment"])
+    # same direction on both paths
+    assert (p_rerank > g_rerank) and (p_fit["score_adjustment"] > g_fit["score_adjustment"])

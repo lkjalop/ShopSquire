@@ -677,14 +677,16 @@ class RecommendationService:
             # Corporate / work fleet: business-class build and productivity-grade machines win; the consumer
             # gaming aesthetic is demoted here AND via the KB consumer_gaming_aesthetic exclusion below — so
             # "work laptops" don't surface the gaming SKUs even when both sit in the same price band.
-            if any(k in text for k in ("thinkpad", "latitude", "elitebook", "probook", "xps")):
+            # Business/gaming vocabulary is sourced from the active profile (single source shared with the
+            # fast-path use_case_fit) so the two ranking paths can't drift. Weights stay local to this rerank.
+            from src.app.services.recommend_candidate_classify import matches_use_case_markers as _mkr
+            if _mkr(text, "business_class", kind="soft"):
                 score += 1.2
                 reasons.append("use_case_business_line")
-            if any(k in text for k in ('"use_case": "productivity"', '"use_case": "premium"', '"use_case": "business"')):
+            if _mkr(text, "productivity_grade", kind="soft"):
                 score += 1.0
                 reasons.append("use_case_business_class")
-            if ('"gaming_style": true' in text or '"use_case": "gaming"' in text
-                    or any(k in text for k in ("gaming laptop", "nitro", "tuf gaming", "omen", "predator", " rog "))):
+            if _mkr(text, "consumer_gaming_aesthetic", kind="exclusion"):
                 score -= 1.5
                 reasons.append("use_case_not_business_gaming")
             if any(k in text for k in ("light", "ultrabook", "air")):
@@ -741,11 +743,11 @@ class RecommendationService:
                         except Exception:
                             pass
                 elif _rule == "consumer_gaming_aesthetic":
-                    # Match REAL gaming signals — not the bare substring "gaming", which also appears in the
+                    # Single source: the profile's consumer_gaming_aesthetic markers (shared with use_case_fit).
+                    # Matches REAL gaming signals — not the bare substring "gaming", which also appears in the
                     # `gaming_style` specs key on EVERY product (that false-match penalised non-gaming too).
-                    if ('"gaming_style": true' in text or '"use_case": "gaming"' in text
-                            or "gaming laptop" in text
-                            or any(k in text for k in ("omen", "nitro", "tuf gaming", "predator", " rog "))):
+                    from src.app.services.recommend_candidate_classify import matches_use_case_markers as _mkr
+                    if _mkr(text, "consumer_gaming_aesthetic", kind="exclusion"):
                         score += _excl_w
                         reasons.append(f"kb_exclusion:{_rule}")
         except Exception:
