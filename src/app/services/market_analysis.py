@@ -19,6 +19,7 @@ Detectors (v1, explainable):
   • objection_cluster        — recurring support objections on the same theme (objection mining)
   • segment_shift            — Phase 4: a segment whose demand SHARE shifted vs baseline (re-targeting)
   • channel_performance      — Phase 4: a channel under/over-performing vs the cross-channel mean
+  • bundle_opportunity       — Phase 4: a frequently co-purchased SKU pair (bundle candidate)
 
 Vertical-blind: finding_type/entity_ref/evidence are opaque to product vocabulary. Never raises.
 """
@@ -40,6 +41,7 @@ FINDING_OBJECTION_CLUSTER = "objection_cluster"
 FINDING_FUNNEL_DROPOFF = "funnel_dropoff"
 FINDING_SEGMENT_SHIFT = "segment_shift"  # Phase 4: WHO is buying is shifting (re-targeting signal)
 FINDING_CHANNEL_PERFORMANCE = "channel_performance"  # Phase 4: a channel under/over-performing vs the mean
+FINDING_BUNDLE_OPPORTUNITY = "bundle_opportunity"    # Phase 4: a frequently co-purchased pair → bundle
 
 _MIN_POINTS = 4  # need enough history before an anomaly finding is actionable
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -456,6 +458,36 @@ def detect_channel_performance(signals, *, min_volume: int = 20, min_rate_gap: f
     return out
 
 
+def detect_bundle_opportunity(signals, *, min_co_occurrence: int = 3, top_k: int = 5) -> List[MarketFinding]:
+    """Phase 4 — co-purchase mining. Counts product PAIRS that appear together in the same order and flags
+    pairs co-occurring >= min_co_occurrence times: a bundle opportunity. Reads ``order`` signals whose
+    payload carries an ``items`` list of opaque SKU labels (vertical-blind); deterministic + explainable.
+    Shadow-only: a finding, never an action. Returns the top_k strongest pairs."""
+    from itertools import combinations
+    pairs: Dict[tuple, int] = {}
+    for s in signals or []:
+        if (s or {}).get("signal_type") != "order":
+            continue
+        items = ((s or {}).get("payload") or {}).get("items")
+        if not isinstance(items, list):
+            continue
+        skus = sorted({str(i).strip() for i in items if str(i).strip()})
+        for a, b in combinations(skus, 2):
+            pairs[(a, b)] = pairs.get((a, b), 0) + 1
+    flagged = [(p, n) for p, n in pairs.items() if n >= min_co_occurrence]
+    if not flagged:
+        return []
+    flagged.sort(key=lambda kv: (-kv[1], kv[0]))
+    out: List[MarketFinding] = []
+    for (a, b), n in flagged[:top_k]:
+        out.append(MarketFinding(
+            FINDING_BUNDLE_OPPORTUNITY, f"{a}+{b}", "info", round(min(1.0, n / 10.0), 3),
+            f"Bundle opportunity: '{a}' + '{b}' co-purchased {n} times.",
+            {"pair": [a, b], "co_occurrence": n, "direction": "bundle"}, "recent",
+        ))
+    return out
+
+
 def _safe(fn: Callable, *args, **kw) -> List[MarketFinding]:
     try:
         return fn(*args, **kw)
@@ -477,6 +509,7 @@ def analyze(signals, *, anomaly_fn: Optional[Callable] = None,
     out += _safe(detect_funnel_dropoff, signals)
     out += _safe(detect_segment_shift, signals)
     out += _safe(detect_channel_performance, signals)
+    out += _safe(detect_bundle_opportunity, signals)
     return out
 
 

@@ -138,3 +138,12 @@ def test_channel_performance_maps_to_prioritize_channel_with_direction():
     assert props["paid"].action_type == sa.ACTION_PRIORITIZE_CHANNEL and props["paid"].direction == "boost"
     assert props["email"].direction == "demote"
     assert all(p.status == "proposed" and p.params.get("requires_experiment") for p in props.values())
+
+
+def test_bundle_opportunity_maps_to_propose_bundle():
+    from src.app.services.market_analysis import MarketFinding
+    f = MarketFinding("bundle_opportunity", "A+B", "info", 0.4, "A + B co-purchased",
+                      {"pair": ["A", "B"], "co_occurrence": 4, "direction": "bundle"})
+    p = sa.propose_from_findings([f])[0]
+    assert p.action_type == sa.ACTION_PROPOSE_BUNDLE and p.direction == "review"
+    assert p.status == "proposed" and p.params.get("requires_experiment")

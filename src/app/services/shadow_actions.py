@@ -32,6 +32,7 @@ ACTION_SUPPRESS_LOW_STOCK = "suppress_low_stock"
 ACTION_REVISE_SUPPORT_COPY = "revise_support_copy"
 ACTION_REVISE_SEGMENT_TARGETING = "revise_segment_targeting"  # Phase 4: re-target toward/away a segment
 ACTION_PRIORITIZE_CHANNEL = "prioritize_channel"             # Phase 4: lean into / away from a channel
+ACTION_PROPOSE_BUNDLE = "propose_bundle"                     # Phase 4: offer a co-purchased pair as a bundle
 
 # finding_type → proposed action_type. Deterministic + opaque — no product knowledge. (David's deck,
 # Module 4 Decision Engine: support objections + weak funnel points → a guidance/messaging review.)
@@ -44,6 +45,7 @@ _FINDING_TO_ACTION: Dict[str, str] = {
     "inventory_demand_mismatch": ACTION_SUPPRESS_LOW_STOCK,  # demand with no stock → propose demoting it
     "segment_shift": ACTION_REVISE_SEGMENT_TARGETING,  # WHO is buying shifted → propose a targeting review
     "channel_performance": ACTION_PRIORITIZE_CHANNEL,  # a channel under/over-performs → propose re-prioritising
+    "bundle_opportunity": ACTION_PROPOSE_BUNDLE,       # a co-purchased pair → propose offering it as a bundle
 }
 _SEVERITY_WEIGHT = {"info": 0.3, "warn": 0.7, "critical": 1.0}
 

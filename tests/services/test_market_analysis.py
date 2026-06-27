@@ -352,3 +352,31 @@ def test_channel_performance_in_analyze():
     sigs = (_ch_signal("demand", "email", 30) + _ch_signal("conversion", "email", 3)
             + _ch_signal("demand", "paid", 30) + _ch_signal("conversion", "paid", 12))
     assert any(f.finding_type == "channel_performance" for f in ma.analyze(sigs))
+
+
+def _order(items):
+    return {"signal_type": "order", "source": "orders", "payload": {"items": items},
+            "occurred_at": "2026-06-27T10:00:00"}
+
+
+def test_detect_bundle_opportunity_flags_frequent_pairs():
+    sigs = ([_order(["LAP-0001", "MOU-1"]) for _ in range(4)]       # co=4 → flagged
+            + [_order(["LAP-0001", "BAG-1"]) for _ in range(2)]      # co=2 → below threshold
+            + [_order(["GAM-0002"])])                                # single item → no pair
+    fs = ma.detect_bundle_opportunity(sigs)
+    refs = {f.entity_ref for f in fs}
+    assert "LAP-0001+MOU-1" in refs
+    assert "BAG-1" not in " ".join(refs)  # the co=2 pair is not flagged
+    assert all(f.finding_type == "bundle_opportunity" for f in fs)
+
+
+def test_detect_bundle_opportunity_quiet_below_threshold():
+    assert ma.detect_bundle_opportunity([_order(["A", "B"])]) == []          # co=1
+    assert ma.detect_bundle_opportunity([_order(["A"])] * 5) == []           # no pairs
+    assert ma.detect_bundle_opportunity([{"signal_type": "demand", "source": "s",
+                                          "payload": {}, "occurred_at": "x"}]) == []  # wrong type
+
+
+def test_bundle_opportunity_in_analyze():
+    sigs = [_order(["LAP-0001", "MOU-1"]) for _ in range(3)]
+    assert any(f.finding_type == "bundle_opportunity" for f in ma.analyze(sigs))
