@@ -15,6 +15,15 @@ import LoginModal from './components/LoginModal';
 import AdminDashboard from './components/AdminDashboard';
 import { productShortLabel } from './lib/productDisplay';
 import { csrfHeaders } from './lib/csrf';
+import { detectPII } from './lib/pii';
+import {
+  detectCVIssueType,
+  detectPanelMode,
+  isCartUpsellIntentQuery,
+  isComplaintIntent,
+  isShoppingIntentQuery,
+  type RightPanelMode,
+} from './lib/queryIntent';
 import {
   clearStoredAuthIdentity,
   clearStoredRole,
@@ -44,7 +53,6 @@ export type Product = {
   stock_urgency?: string;
   cart_eligible?: boolean;
 };
-type RightPanelMode = 'none' | 'grid' | 'list' | 'compare' | 'cv' | 'cart' | 'faq' | 'security' | 'visual_search' | 'image_context';
 type NqeInteraction = {
   questionId: string;
   questionText: string;
@@ -186,10 +194,6 @@ function formatPrice(p: any): string {
   return v > 0 ? formatAUD(v) : '—';
 }
 
-function isShoppingIntentQuery(query: string): boolean {
-  const q = String(query || '').toLowerCase();
-  return /laptop|computer|price|under|below|above|budget|cheap|affordable|\$|show|find|search|gaming|macbook|dell|hp|asus|lenovo|msi|university|student|study/.test(q);
-}
 
 function laneForProduct(p: Product): DeviceLane {
   const name = String(p.name || '').toLowerCase();
@@ -280,117 +284,6 @@ function useProducts() {
 }
 
 // PII Detection - Luhn algorithm for credit card validation
-function luhnCheck(num: string): boolean {
-  let sum = 0;
-  let alt = false;
-  for (let i = num.length - 1; i >= 0; i--) {
-    let n = parseInt(num[i], 10);
-    if (alt) {
-      n *= 2;
-      if (n > 9) n -= 9;
-    }
-    sum += n;
-    alt = !alt;
-  }
-  return sum % 10 === 0;
-}
-
-type PIIMatch = { type: string; advice: string } | null;
-
-function detectPII(text: string): PIIMatch {
-  // Credit card pattern (13-19 digits with optional spaces/dashes)
-  const cardMatch = text.match(/\b(?:\d[ -]*?){13,19}\b/);
-  if (cardMatch) {
-    const digits = cardMatch[0].replace(/\D/g, '');
-    if (digits.length >= 13 && digits.length <= 19) {
-      // If it's a real-looking PAN (passes Luhn), block immediately.
-      if (luhnCheck(digits)) {
-        return {
-          type: 'credit card number',
-          advice: 'Never share payment card details in chat. Use our secure checkout instead.'
-        };
-      }
-
-      // Demo/real-world: users often paste fake/test numbers that fail Luhn.
-      // If strong card context is present (keywords or expiry), treat as PCI anyway.
-      const hasCardHint = /\b(card|credit|debit|visa|mastercard|amex|american\s+express|discover)\b/i.test(text);
-      const hasCvvHint = /\b(cvv|cvc|security\s*code|card\s*verification)\b/i.test(text);
-      const hasExpiry = /\b(0[1-9]|1[0-2])\s*[/\-]\s*(\d{2}|\d{4})\b/.test(text);
-      if (hasCardHint || hasCvvHint || hasExpiry) {
-        return {
-          type: 'payment card details',
-          advice: 'Never share card numbers, expiry dates, or CVV in chat. Use secure checkout instead.'
-        };
-      }
-    }
-  }
-
-  // SSN pattern
-  if (/\b\d{3}-\d{2}-\d{4}\b/.test(text)) {
-    return {
-      type: 'Social Security Number',
-      advice: 'SSNs should never be shared online. We will never ask for this information.'
-    };
-  }
-
-  // Email in certain contexts (offering personal email)
-  if (/\b(my email is|email me at|contact me at)\b/i.test(text) && /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/.test(text)) {
-    return {
-      type: 'email address',
-      advice: 'For account inquiries, please use the Account section. We protect your privacy.'
-    };
-  }
-
-  // Bank account numbers (8-17 digits preceded by keywords)
-  if (/\b(account|routing|bank).{0,20}\d{8,17}\b/i.test(text)) {
-    return {
-      type: 'bank account information',
-      advice: 'Never share banking details in chat. Contact our support team securely if needed.'
-    };
-  }
-
-  return null;
-}
-
-function detectPanelMode(query: string): RightPanelMode {
-  const q = query.toLowerCase();
-  const shoppingIntent = isShoppingIntentQuery(q);
-  // Compare triggers
-  if (/compare|vs|versus|difference|which is better|pros.?cons|side.?by.?side|head.?to.?head/.test(q)) return 'compare';
-  // Detailed/specs triggers
-  if (/specs|specification|details|detailed|features|info|information|describe|tell me about|breakdown/.test(q)) return 'list';
-  // CV/return triggers (when images attached - handled separately)
-  if (/return|complaint|damaged|broken|defective|refund|issue|problem/.test(q)) return 'cv';
-  // FAQ triggers
-  if (/faq|how do i|what is|shipping|warranty|policy|support/.test(q) && !shoppingIntent) return 'faq';
-  // Product search (default when products mentioned)
-  if (shoppingIntent) return 'grid';
-  return 'none';
-}
-
-function isCartUpsellIntentQuery(query: string): boolean {
-  const q = query.toLowerCase();
-  return /add[\s-]?on|accessor(y|ies)|what else should i buy|what else should i get|compatible|bundle|extra \$?\d+|spend .* extra|upsell/i.test(q);
-}
-
-function detectCVIssueType(query: string): string {
-  const q = query.toLowerCase();
-  if (/warranty|under warranty|warranty claim|warranty repair|warranty coverage/.test(q)) return 'warranty';
-  if (/return|send back|ship back/.test(q)) return 'return';
-  return 'refund';
-}
-
-function isComplaintIntent(query: string): boolean {
-  const q = query.toLowerCase();
-  const action = /return|refund|complaint/.test(q);
-  const damage = /damaged|broken|defective|issue|problem/.test(q);
-  const evidence = /photo|picture|image|upload|evidence/.test(q);
-  const policyOnly = /policy|eligibility|warranty|how do i|steps|process/.test(q);
-  if (damage && (action || evidence)) return true;
-  if (action && !policyOnly) return true;
-  return false;
-}
-
 // SVG Icons
 const ChatIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={styles.fabIcon}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
 const CloseIcon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20"><path d="M18 6L6 18M6 6l12 12"/></svg>;
