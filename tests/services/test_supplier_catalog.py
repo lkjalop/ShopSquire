@@ -92,6 +92,53 @@ def test_ensure_supplier_coverage_is_idempotent(db):
     assert again == {"suppliers": 0, "products": 0, "domains": 0}
 
 
+def test_register_or_backfill_vendor_fills_missing_contact():
+    # item-2 fix: an existing vendor row WITHOUT a contact email must get it backfilled (not skipped),
+    # else the draft keeps resolving the bare domain. Must NOT create a duplicate insert.
+    from src.app.services.supplier_catalog import _register_or_backfill_vendor
+    calls = {}
+    def lookup(*, tenant_id, domain):
+        return {"contact_email": ""}  # exists, contact missing
+    def register(**k):
+        calls["register"] = k; return {"ok": True}
+    def backfill(*, tenant_id, domain, contact_email):
+        calls["backfill"] = (domain, contact_email); return True
+    assert _register_or_backfill_vendor(lookup, register, backfill,
+                                        tenant_id="default", name="X", domain="d.example",
+                                        email="e@d.example") is True
+    assert calls.get("backfill") == ("d.example", "e@d.example")
+    assert "register" not in calls  # existing row → backfill, never a duplicate insert
+
+
+def test_register_or_backfill_vendor_registers_when_absent():
+    from src.app.services.supplier_catalog import _register_or_backfill_vendor
+    seen = {}
+    def lookup(*, tenant_id, domain):
+        return None  # absent
+    def register(**k):
+        seen["reg"] = k; return {"ok": True}
+    def backfill(**k):
+        seen["bf"] = k; return True
+    assert _register_or_backfill_vendor(lookup, register, backfill,
+                                        tenant_id="default", name="X", domain="d.example",
+                                        email="e@d.example") is True
+    assert seen.get("reg", {}).get("contact_email") == "e@d.example"
+    assert "bf" not in seen
+
+
+def test_register_or_backfill_vendor_noop_when_complete():
+    from src.app.services.supplier_catalog import _register_or_backfill_vendor
+    def lookup(*, tenant_id, domain):
+        return {"contact_email": "already@d.example"}
+    def register(**k):
+        raise AssertionError("must not register a duplicate")
+    def backfill(**k):
+        raise AssertionError("must not overwrite an existing contact")
+    assert _register_or_backfill_vendor(lookup, register, backfill,
+                                        tenant_id="default", name="X", domain="d.example",
+                                        email="e@d.example") is False
+
+
 def test_seed_demo_supplier_history_records_prior_dealings():
     # the demo-data fix: seed prior-dealings history so the draft evidence shows "N observations, last
     # invoice $X" instead of an empty supplier history. Idempotent on re-run.

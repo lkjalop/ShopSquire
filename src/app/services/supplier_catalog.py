@@ -172,10 +172,16 @@ _DEMO_VENDOR_CONTACTS = [
 ]
 
 
-def _register_vendor_if_absent(lookup, register, *, tenant_id, name, domain, email) -> bool:
+def _register_or_backfill_vendor(lookup, register, backfill, *, tenant_id, name, domain, email) -> bool:
+    """Ensure the demo vendor exists WITH a contact email. If the row exists but its contact is missing
+    (registered earlier without one), backfill it — otherwise the draft keeps resolving the bare domain.
+    Returns True when something changed (registered or backfilled)."""
     try:
-        if lookup(tenant_id=tenant_id, domain=domain):
-            return False
+        existing = lookup(tenant_id=tenant_id, domain=domain)
+        if existing:
+            if not str(existing.get("contact_email") or "").strip():
+                return bool(backfill(tenant_id=tenant_id, domain=domain, contact_email=email))
+            return False  # already complete
         res = register(tenant_id=tenant_id, legal_name=name, verified_domain=domain,
                        contact_email=email, risk_tier="low") or {}
         return bool(res.get("ok", True))
@@ -184,16 +190,20 @@ def _register_vendor_if_absent(lookup, register, *, tenant_id, name, domain, ema
 
 
 def seed_demo_vendor_contacts(*, tenant_id: str = "default") -> int:
-    """Register the demo suppliers as KYV vendors with a verified contact email (idempotent). Returns the
-    count newly registered. After this, the draft's recipient_email resolves to the contact email instead
-    of the bare domain (the live-packet polish fix)."""
+    """Register the demo suppliers as KYV vendors with a verified contact email (idempotent), and backfill
+    the contact on any matching vendor that was registered earlier WITHOUT one. Returns the count of vendors
+    created-or-backfilled. After this, the draft's recipient_email resolves to the contact email instead of
+    the bare domain (the live-packet polish fix)."""
     try:
-        from src.app.security.kyv_registry import lookup_vendor_by_domain, register_vendor
+        from src.app.security.kyv_registry import (
+            lookup_vendor_by_domain, register_vendor, set_vendor_contact_email,
+        )
     except Exception:
         return 0
     return sum(1 for name, domain, email in _DEMO_VENDOR_CONTACTS
-               if _register_vendor_if_absent(lookup_vendor_by_domain, register_vendor,
-                                             tenant_id=tenant_id, name=name, domain=domain, email=email))
+               if _register_or_backfill_vendor(lookup_vendor_by_domain, register_vendor,
+                                               set_vendor_contact_email,
+                                               tenant_id=tenant_id, name=name, domain=domain, email=email))
 
 
 # A short prior-dealings history per demo supplier domain, as (days_ago, invoice_amount_dollars). The

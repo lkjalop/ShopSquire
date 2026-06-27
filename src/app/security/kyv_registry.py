@@ -332,6 +332,34 @@ def update_vendor_status(
         return False
 
 
+def set_vendor_contact_email(*, tenant_id: str, domain: str, contact_email: str) -> bool:
+    """Backfill the contact email for an existing vendor (matched by verified_domain) when it is missing.
+    Returns True if a row was updated. Idempotent and non-destructive: it only fills a NULL/empty contact,
+    never overwrites one already set. This is what lets a vendor registered earlier WITHOUT a contact email
+    resolve a real recipient address instead of the bare domain."""
+    if not (tenant_id and domain and contact_email):
+        return False
+    _ensure_table()
+    try:
+        with db_session() as db:
+            res = db.execute(
+                text(
+                    """
+                    UPDATE kyv_vendors
+                    SET contact_email = :email, updated_at = CURRENT_TIMESTAMP
+                    WHERE tenant_id = :tenant_id AND verified_domain = :domain
+                      AND (contact_email IS NULL OR contact_email = '')
+                    """
+                ),
+                {"email": contact_email, "tenant_id": tenant_id, "domain": str(domain).strip().lower()},
+            )
+            db.commit()
+            return (getattr(res, "rowcount", 0) or 0) > 0
+    except Exception as exc:
+        logger.warning("vendor contact backfill failed: %s", exc)
+        return False
+
+
 def list_vendors_needing_review(*, tenant_id: str) -> List[Dict[str, Any]]:
     """Return vendors whose last_review_at is older than the configured interval."""
     _ensure_table()
