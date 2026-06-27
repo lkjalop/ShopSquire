@@ -44,6 +44,28 @@ def test_procurement_failure_state_enqueues_governed_exception(db, monkeypatch):
     assert all(c.get("terminal_outcome") != "committed" for c in calls)
 
 
+def test_every_failure_state_resolves_to_a_modelled_disposition():
+    """Completeness RATCHET: every procurement FAILURE_STATE must map to a MODELLED terminal resolution,
+    not the fail-closed-to-governance fallback. The workflow enqueues `dst.value.lower()`, so each failure
+    state's lower-cased value must be a TERMINAL_RESOLUTIONS key. If a new failure state is added without a
+    resolution, this fails (instead of silently leaning on the unknown fallback at runtime)."""
+    from src.app.services.exception_resolver import TERMINAL_RESOLUTIONS, resolve_terminal
+    from src.app.services.fulfillment.domain import FAILURE_STATES
+
+    missing = [s.value for s in FAILURE_STATES if s.value.lower() not in TERMINAL_RESOLUTIONS]
+    assert not missing, f"FAILURE_STATES with no TERMINAL_RESOLUTIONS entry: {missing}"
+    for s in FAILURE_STATES:
+        res = resolve_terminal(s.value.lower())
+        # a modelled outcome must NOT land on the unknown→governance fallback note
+        assert "unknown terminal" not in res.note, f"{s.value} hit the fail-closed fallback"
+
+
+def test_unmodelled_terminal_fails_closed_to_governance():
+    from src.app.services.exception_resolver import DISP_GOVERNANCE, resolve_terminal
+    res = resolve_terminal("a_brand_new_unmapped_outcome")
+    assert res.resolution_status == DISP_GOVERNANCE and not res.autonomous
+
+
 def test_market_pipeline_error_enqueues_market_exception(monkeypatch):
     calls = []
     import src.app.services.exception_resolver as er
