@@ -364,6 +364,9 @@ def _reset_store_profile_cache():
             ("src.app.services.product_classifier", "reset_cache"),
             ("src.app.services.product_claim_guard", "reset_vocab_cache"),
             ("src.app.services.query_decomposer", "reset_cache"),
+            # send-cage prohibited-claim profile-extension cache (fulfillment/draft) — clear so a
+            # profile swap can't leak one vertical's prohibited patterns into the next test.
+            ("src.app.services.fulfillment.draft", "reset_prohibited_cache"),
             # Catalog-brands cache: forces a FRESH read of the real catalog each test, covering
             # the row-count stamp's blind spot (count-equal mutations, e.g. insert-A + delete-B).
             # Non-masking: it reveals the true catalog, never hides cross-test state (this stale

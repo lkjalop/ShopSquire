@@ -17,6 +17,13 @@
   "known_brands": ["msi","asus","lenovo","dell","hp","acer","razer","apple","macbook","gigabyte","alienware","samsung","microsoft","surface","lg","sony","intel","amd","nvidia","toshiba"],
   "_nqe_brand_detect_comment": "Laptop MAKERS only (for NQE brand-preference detection) — deliberately excludes component makers (intel/amd/nvidia) that appear in known_brands for claim-guard but must not be read as a buyer's brand choice. Matches the list excised from nqe.py.",
   "nqe_brand_detect": ["lenovo","dell","hp","asus","acer","apple","microsoft","samsung","razer","msi","lg"],
+  "_prohibited_claim_patterns_comment": "Send-cage EXTENSION (fulfillment/draft.claim_safety_reason). These regexes ADD to the hardcoded governance floor (we-guarantee / order-confirmed / price-match / PO-confirmed) — they can only TIGHTEN the cage, never weaken it. Electronics-specific over-promises a procurement RFQ must never assert (counterfeit/grey-market/condition claims). A malformed pattern is skipped fail-safe; the floor always applies.",
+  "prohibited_claim_patterns": [
+    "\\bbrand[- ]?new sealed\\b",
+    "\\b100%\\s+(genuine|authentic|original)\\b",
+    "\\b(factory|carrier)[- ]?unlocked\\b",
+    "\\bno[- ]?questions[- ]?asked\\b"
+  ],
   "_manufacturers_comment": "3-AXIS brand identity (separates manufacturer / product line / from product TYPE which lives in product_type_rules). 'lines' are the sub-brands / product ranges (ThinkPad, XPS, ROG); 'aliases' are manufacturer-name tokens. brand_label_patterns (image->manufacturer) and the brand alias index are DERIVED from this single source (store_profile.brand_label_patterns / product_line_index) so the three scattered brand dicts in recommend.py collapse to one. A vertical fills the same three axes with its own flavour.",
   "manufacturers": {
     "apple":     {"lines": ["macbook","imac","mac mini","mac pro"], "aliases": ["apple"]},

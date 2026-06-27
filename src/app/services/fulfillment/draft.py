@@ -61,6 +61,45 @@ _URL_RE = re.compile(r"https?://|www\.|\bbit\.ly\b", re.IGNORECASE)
 # any email address in the body that is NOT on the resolved supplier domain = a redirect/CC injection.
 _EMAIL_RE = re.compile(r"\b[\w.+-]+@([\w-]+\.[\w.-]+)\b")
 
+# Profile EXTENSION of the prohibited-claim floor: a vertical may ADD prohibited patterns via the
+# `prohibited_claim_patterns` slot (a list of regex strings — e.g. counterfeit/grey-market over-promises
+# specific to that vertical). The hardcoded _PROHIBITED_CLAIM_RE floor ALWAYS applies, so the profile can
+# only TIGHTEN the send-cage, never weaken it. A malformed profile regex is skipped (fail-safe: it must
+# never crash or disable the cage). Compiled patterns are cached per profile_id; reset_prohibited_cache()
+# clears it between profile swaps (wired into the test profile-cache reset).
+_PROHIBITED_PROFILE_CACHE: Dict[str, List["re.Pattern[str]"]] = {}
+
+
+def _safe_compile(pattern: str) -> Optional["re.Pattern[str]"]:
+    """Compile a profile-supplied regex, or return None if it is malformed (fail-safe: a bad pattern is
+    dropped, never crashes the send-cage). Returning None keeps the handler observable (no silent swallow)."""
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return None
+
+
+def _profile_prohibited_patterns(profile_id: Optional[str] = None) -> List["re.Pattern[str]"]:
+    key = str(profile_id or "")
+    cached = _PROHIBITED_PROFILE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    raw: Any = []
+    try:
+        from src.app.platform.store_profile import profile_slot
+        raw = profile_slot("prohibited_claim_patterns", profile_id=profile_id, default=[]) or []
+    except Exception:
+        raw = []
+    items = raw if isinstance(raw, (list, tuple)) else []
+    compiled = [pat for pat in (_safe_compile(str(p)) for p in items) if pat is not None]
+    _PROHIBITED_PROFILE_CACHE[key] = compiled
+    return compiled
+
+
+def reset_prohibited_cache() -> None:
+    """Test hook — clear the compiled profile-extension cache so a profile swap is honoured next read."""
+    _PROHIBITED_PROFILE_CACHE.clear()
+
 
 def claim_safety_reason(body: str, *, recipient_domain: Optional[str] = None) -> Optional[str]:
     """The reason a body is UNSAFE to send, or None if safe. Single source of the send-cage policy; used by
@@ -74,6 +113,9 @@ def claim_safety_reason(body: str, *, recipient_domain: Optional[str] = None) ->
         return "price_or_currency_leak"
     if _PROHIBITED_CLAIM_RE.search(b):
         return "unsupported_or_binding_claim"
+    for _pat in _profile_prohibited_patterns():  # vertical EXTENSIONS to the floor (additive only)
+        if _pat.search(b):
+            return "unsupported_or_binding_claim"
     if _URL_RE.search(b):
         return "contains_url"
     if recipient_domain:
