@@ -97,6 +97,23 @@ def get_journey(case_id: str) -> Dict[str, Any]:
         return {"case_id": case_id, "journey": fwf.journey(db, case_id)}
 
 
+@router.get("/cases/{case_id}/okf")
+def case_okf(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Export the case as an OKF (Open Knowledge Format) document — a portable, vendor-neutral
+    "why-the-agent-decided-this" artifact (markdown + YAML frontmatter) any agent/auditor can read."""
+    from src.app.services.fulfillment import okf_export
+    with db_session() as db:
+        cur = fwf.repository.current_version(db, case_id)
+        if cur is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        jr = fwf.journey(db, case_id)
+        ts = str(jr[-1].get("valid_from")) if jr else ""
+        md = okf_export.case_to_okf(case_id=case_id, state=cur.state, state_json=cur.state_json,
+                                    journey=jr, timestamp=ts)
+        return {"case_id": case_id, "type": "ProcurementCase",
+                "filename": f"procurement-{case_id[:8]}.md", "okf": md}
+
+
 @router.get("/cases/{case_id}/as-of")
 def get_as_of(case_id: str, t: str = Query(...)) -> Dict[str, Any]:
     with db_session() as db:

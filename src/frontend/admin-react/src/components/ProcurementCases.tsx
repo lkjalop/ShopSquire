@@ -12,7 +12,7 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcCaseAsOf, fcEconomics, fcEditDraft,
+  fcCaseAsOf, fcCaseOkf, fcEconomics, fcEditDraft,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
   type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
 } from '../api';
@@ -84,6 +84,15 @@ export function ProcurementCases() {
   const onReconstruct = () => fcCaseAsOf(sel, asOfT)
     .then((v) => setAsOf({ as_of: v.as_of, state: v.state }))
     .catch((e: any) => setError(e?.message || 'as-of failed'));
+  const onExportOkf = () => fcCaseOkf(sel)
+    .then((d) => {
+      const blob = new Blob([d.okf], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = d.filename || `procurement-${sel.slice(0, 8)}.md`;
+      a.click(); URL.revokeObjectURL(url);
+    })
+    .catch((e: any) => setError(e?.message || 'okf export failed'));
 
   return (
     <div className="procurement-cases" data-testid="procurement-cases">
@@ -136,7 +145,7 @@ export function ProcurementCases() {
             <QuotePacket parsed={parsed} po={po} isDemoReply={isDemoReply} />
 
             <CaseJourney journey={journey} asOfT={asOfT} setAsOfT={setAsOfT} asOf={asOf}
-                         onReconstruct={onReconstruct} busy={busy} />
+                         onReconstruct={onReconstruct} busy={busy} onExportOkf={onExportOkf} />
           </section>
         )}
       </div>

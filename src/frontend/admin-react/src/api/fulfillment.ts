@@ -36,6 +36,9 @@ export const fcDraftQuote = (id: string, item_ref: string, quantity: number, est
 export const fcRequestApproval = (id: string) =>
   http<FulfillmentCaseView & { approval_id?: string }>(`${_fc(id)}/request-approval`, { method: 'POST' });
 export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
+// Export the case as an OKF (Open Knowledge Format) document — a portable audit artifact.
+export const fcCaseOkf = (id: string) =>
+  http<{ case_id: string; type: string; filename: string; okf: string }>(`${_fc(id)}/okf`);
 // RFI: HUMAN asks the resolved supplier a scoped clarification before approving the RFQ (claim-safe).
 export const fcRequestInfo = (id: string, question: string) => _fcPost(`${_fc(id)}/request-info`, { question });
 // record the supplier's RFI reply → back to the approval gate.

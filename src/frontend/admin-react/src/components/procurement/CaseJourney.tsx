@@ -3,16 +3,25 @@
 import React from 'react';
 import type { JourneyEvent } from '../../api';
 
-export function CaseJourney({ journey, asOfT, setAsOfT, asOf, onReconstruct, busy }: {
+export function CaseJourney({ journey, asOfT, setAsOfT, asOf, onReconstruct, busy, onExportOkf }: {
   journey: JourneyEvent[];
   asOfT: string;
   setAsOfT: (v: string) => void;
   asOf: { as_of: string; state: string } | null;
   onReconstruct: () => void;
   busy: boolean;
+  onExportOkf?: () => void;
 }) {
   return (
     <>
+      {onExportOkf && (
+        <div style={{ margin: '4px 0' }}>
+          <button disabled={busy} data-testid="op-export-okf" onClick={onExportOkf}
+                  title="Export this case + decision trace as an OKF (Open Knowledge Format) audit artifact">
+            Export OKF (audit artifact)
+          </button>
+        </div>
+      )}
       <details data-testid="op-asof">
         <summary>Time-travel (as-of)</summary>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0' }}>
