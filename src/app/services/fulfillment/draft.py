@@ -119,6 +119,12 @@ def _claim_safe(body: str, *, recipient_domain: Optional[str] = None) -> bool:
     return claim_safety_reason(body, recipient_domain=recipient_domain) is None
 
 
+def _supplier_polish_enabled() -> bool:
+    """Flag for the caged LLM tone-polish (default OFF — the deterministic template ships safely without it)."""
+    import os
+    return str(os.getenv("SUPPLIER_DRAFT_LLM_POLISH", "")).strip().lower() in ("1", "true", "yes", "on")
+
+
 # ── scatter-gather evidence (read-only; independent sources) ──────────────────
 def gather_evidence(
     db,
@@ -414,6 +420,12 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
     Returns (TransitionResult, SupplierDraft|None). If no approved supplier, fires no_approved_supplier."""
     cur = workflow.repository.current_version(db, case_id, tenant_id)
     case_state = cur.state_json if cur else {}
+    # Flag-gated caged LLM tone-polish (default OFF). build_draft re-validates the rewrite through the
+    # broadened claim-safety gate + deterministic fallback, so enabling this can only improve tone, never
+    # weaken safety. An explicitly-injected llm_fn (tests) is respected as-is.
+    if "llm_fn" not in draft_kw and _supplier_polish_enabled():
+        from src.app.services.fulfillment.supplier_polish import polish_supplier_draft
+        draft_kw["llm_fn"] = polish_supplier_draft
     draft = build_draft(db, item_ref=item_ref, quantity=quantity, case_ref=case_id,
                         estimated_value_cents=estimated_value_cents, case_state=case_state,
                         tenant_id=tenant_id, **draft_kw)
