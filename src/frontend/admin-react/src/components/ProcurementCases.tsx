@@ -12,14 +12,16 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcCaseAsOf, fcCaseOkf, fcEconomics, fcEditDraft,
+  fcCaseAsOf, fcCaseOkf, fcEconomics, fcEditDraft, fcSupplierCandidates,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
   type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
+  type SupplierCandidate,
 } from '../api';
 import ActionBar from './procurement/ActionBar';
 import CaseJourney from './procurement/CaseJourney';
 import CaseQueue from './procurement/CaseQueue';
 import QuotePacket from './procurement/QuotePacket';
+import SupplierCandidates from './procurement/SupplierCandidates';
 import SupplierDraftPacket from './procurement/SupplierDraftPacket';
 
 const dollars = (c?: number) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`);
@@ -36,6 +38,7 @@ export function ProcurementCases() {
   const [editBody, setEditBody] = useState('');
   const [asOfT, setAsOfT] = useState('');
   const [asOf, setAsOf] = useState<{ as_of: string; state: string } | null>(null);
+  const [candidates, setCandidates] = useState<SupplierCandidate[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,10 +47,12 @@ export function ProcurementCases() {
   }, []);
   const loadCase = useCallback((id: string) => {
     if (!id) return;
-    setEcon(null); setAsOf(null);  // per-case panels — clear when switching
+    setEcon(null); setAsOf(null); setCandidates([]);  // per-case panels — clear when switching
     Promise.all([getFulfillmentCaseOp(id), getFulfillmentJourney(id)])
       .then(([v, j]) => { setView(v); setJourney(j); setError(null); })
       .catch((e) => setError(e.message));
+    // supplier shortlist (read-only review prefill) — best-effort, never blocks the case view
+    fcSupplierCandidates(id).then((r) => setCandidates(r.candidates || [])).catch(() => setCandidates([]));
   }, []);
 
   useEffect(() => { loadList(); }, [loadList]);
@@ -119,6 +124,11 @@ export function ProcurementCases() {
                 (<code>scripts/seed_suppliers.py</code>, or add a trusted domain) before contacting the buyer —
                 the draft cannot be generated until coverage exists.
               </div>
+            )}
+
+            {/* Supplier shortlist (read-only review prefill) — most useful before/at drafting. */}
+            {(state === 'COMMITTED' || state === 'NO_APPROVED_SUPPLIER' || state === 'QUOTE_DRAFTED') && (
+              <SupplierCandidates candidates={candidates} />
             )}
 
             <ActionBar sel={sel} state={state} busy={busy} draftItemRef={draftItemRef} draftQty={draftQty}

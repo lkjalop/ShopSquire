@@ -39,6 +39,16 @@ export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(i
 // Export the case as an OKF (Open Knowledge Format) document — a portable audit artifact.
 export const fcCaseOkf = (id: string) =>
   http<{ case_id: string; type: string; filename: string; okf: string }>(`${_fc(id)}/okf`);
+// Ranked, confidence-scored, provenance-tagged approved-supplier shortlist (read-only review prefill).
+export interface SupplierCandidate {
+  supplier_id: string; legal_name: string; contact_email?: string | null; domain: string;
+  risk_tier: string; on_time_rate: number; reliability: number; lead_time_days?: number | null;
+  rank_score?: number | null; prior_dealings: number; last_invoice_cents?: number | null;
+  last_seen_at?: string | null; confidence: number; flags: string[]; recommended: boolean;
+  provenance: Record<string, string>;
+}
+export const fcSupplierCandidates = (id: string) =>
+  http<{ case_id: string; item_ref: string; candidates: SupplierCandidate[] }>(`${_fc(id)}/supplier-candidates`);
 // RFI: HUMAN asks the resolved supplier a scoped clarification before approving the RFQ (claim-safe).
 export const fcRequestInfo = (id: string, question: string) => _fcPost(`${_fc(id)}/request-info`, { question });
 // record the supplier's RFI reply → back to the approval gate.
