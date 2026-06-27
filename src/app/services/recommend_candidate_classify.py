@@ -298,7 +298,8 @@ def use_case_fit(
 
     c = candidate or {}
     tier = gpu_tier(c)
-    result: Dict[str, Any] = {"use_case": None, "meets": True, "tier": tier, "reasons": [], "gaps": []}
+    result: Dict[str, Any] = {"use_case": None, "meets": True, "tier": tier, "reasons": [], "gaps": [],
+                              "soft_reasons": [], "exclusions": [], "score_adjustment": 0.0}
     q = str(query or "").lower()
     if not q:
         return result
@@ -354,4 +355,34 @@ def use_case_fit(
     result["meets"] = meets
     if meets:
         result["reasons"].insert(0, f"{resolved}_use_case_match")
+
+    # Soft signals + exclusions (B2B/fleet ranking). Hard floors above decide `meets`; these are the
+    # softer "business-class vs consumer-gaming" preferences. The marker VOCABULARY lives in the profile
+    # (use_case_soft_markers / use_case_exclusion_markers / use_case_fit_weights), so the core scorer only
+    # applies the numeric score_adjustment and stays vertical-agnostic.
+    soft_keys = reqs.get("soft") or []
+    excl_keys = reqs.get("excludes") or []
+    if soft_keys or excl_keys:
+        try:
+            soft_markers = profile_slot("use_case_soft_markers", profile_id=profile_id, default={}) or {}
+            excl_markers = profile_slot("use_case_exclusion_markers", profile_id=profile_id, default={}) or {}
+            weights = profile_slot("use_case_fit_weights", profile_id=profile_id, default={}) or {}
+        except Exception:
+            soft_markers, excl_markers, weights = {}, {}, {}
+        try:
+            haystack = f"{str(c.get('name') or '').lower()} {json.dumps(specs, ensure_ascii=False).lower()}"
+        except Exception:
+            haystack = str(c.get("name") or "").lower()
+        soft_w = float(weights.get("soft", 6.0))
+        excl_w = float(weights.get("exclusion", -22.0))
+        adj = 0.0
+        for k in soft_keys:
+            if any(str(m).lower() in haystack for m in (soft_markers.get(k) or [])):
+                result["soft_reasons"].append(k)
+                adj += soft_w
+        for k in excl_keys:
+            if any(str(m).lower() in haystack for m in (excl_markers.get(k) or [])):
+                result["exclusions"].append(k)
+                adj += excl_w
+        result["score_adjustment"] = adj
     return result

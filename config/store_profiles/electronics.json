@@ -75,9 +75,19 @@
     "programming":   {"spec_floors": {"ram_gb_min": 16}},
     "study":         {"nqe_question": "ask_university_subject"},
     "high_school":   {"nqe_question": "ask_high_school_activity"},
-    "business":      {"nqe_question": "ask_corporate_work_type"},
-    "office":        {}
+    "business":      {"nqe_question": "ask_corporate_work_type", "excludes": ["consumer_gaming_aesthetic"], "soft": ["business_class", "productivity_grade"]},
+    "office":        {"excludes": ["consumer_gaming_aesthetic"], "soft": ["business_class", "productivity_grade"]}
   },
+
+  "_use_case_fit_markers_comment": "Soft/exclusion vocabulary for use_case_fit (B2B/fleet ranking). Markers are matched as lowercase substrings against the candidate's name + specs JSON. score_adjustment = (soft weight x matched soft signals) + (exclusion weight x matched exclusions). The vocabulary lives HERE (profile), so the core scorer only applies the returned number and stays vertical-agnostic.",
+  "use_case_soft_markers": {
+    "business_class": ["thinkpad", "latitude", "elitebook", "probook"],
+    "productivity_grade": ["\"use_case\": \"productivity\"", "\"use_case\": \"premium\"", "\"use_case\": \"business\""]
+  },
+  "use_case_exclusion_markers": {
+    "consumer_gaming_aesthetic": ["\"gaming_style\": true", "\"use_case\": \"gaming\"", "gaming laptop", "nitro", "tuf gaming", "omen", "predator", "rog "]
+  },
+  "use_case_fit_weights": {"soft": 6.0, "exclusion": -22.0},
 
   "_nqe_question_packs_comment": "Domain-specific NQE clarifying questions (excised from nqe.py hardcoded packs). Each entry is keyed by question id and contains: text, goal, evidence_needed, source, options. NQE reads these from the active profile; non-electronics verticals supply their own domain questions.",
   "nqe_question_packs": {
@@ -178,7 +188,7 @@
     "ml_ai": "\\b(machine learning|deep learning|ai training|train\\w* (a )?model|llm|cuda|tensor|pytorch|data science)\\b",
     "cad_3d": "\\b(cad|autocad|solidworks|revit|3d model\\w*|blender|rendering|engineering student)\\b",
     "photo": "\\b(photo edit\\w*|photoshop|lightroom|raw photo)\\b",
-    "office": "\\b(office work|office laptop|office staff|for staff|our staff|company staff|staff laptops?|excel|spreadsheet|word processing|email|business|corporate|enterprise|professional|work laptop|for work|productivity)\\b",
+    "office": "\\b(office work|office laptop|office staff|for staff|our staff|company staff|staff laptops?|excel|spreadsheet|word processing|email|business|corporate|enterprise|professional|work laptops?|for work|productivity)\\b",
     "study": "\\b(student|university|uni|college|study|school work|note ?taking)\\b"
   },
   "portable_pattern": "\\b(portable|lightweight|light ?weight|thin and light|ultrabook|ultra ?portable|travel|carry around|commut\\w*)\\b",

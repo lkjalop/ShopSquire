@@ -951,6 +951,12 @@ def _fast_path_product_score(
                 score -= 14.0
     elif fit.get("tier") in ("entry", "mid", "high"):
         score += 8.0
+    # Soft/exclusion adjustment from the adapter (B2B/fleet: business-class boost, consumer-gaming demote).
+    # Profile-driven number; core stays agnostic. Keeps "work laptops" off the gaming SKUs even when both
+    # MEET (a use-case with no hard floor, e.g. office, otherwise scores every laptop identically at +35).
+    _fit_adj = fit.get("score_adjustment")
+    if _fit_adj:
+        score += float(_fit_adj)
     for brand in safe_hints.get("brand_hints") or []:
         if brand and brand in haystack:
             score += 22.0
