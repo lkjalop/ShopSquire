@@ -102,6 +102,15 @@ export function ProcurementCases() {
               )}
             </h3>
             {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
+            {state === 'NO_APPROVED_SUPPLIER' && (
+              <div data-testid="op-no-supplier-banner" role="alert"
+                   style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #f87171',
+                            background: '#fef2f2', color: '#991b1b' }}>
+                <strong>No approved supplier for this SKU.</strong> Seed or approve a supplier
+                (<code>scripts/seed_suppliers.py</code>, or add a trusted domain) before contacting the buyer —
+                the draft cannot be generated until coverage exists.
+              </div>
+            )}
 
             <ActionBar sel={sel} state={state} busy={busy} draftItemRef={draftItemRef} draftQty={draftQty}
                        draftChanged={draftChanged} draftHash={draft.content_hash} scenario={scenario}
