@@ -80,7 +80,8 @@ def seed_demo(db, *, skus: Optional[List[str]] = None, commit: bool = True) -> D
     if db is None:
         return {}
     ensure_tables(db)
-    skus = skus or DEMO_SKUS
+    if skus is None:  # None → demo default; an explicit [] means "register suppliers/domains only"
+        skus = DEMO_SKUS
     n_sup = n_prod = n_dom = 0
     import uuid
     for s in _DEMO_SUPPLIERS:
@@ -108,6 +109,30 @@ def seed_demo(db, *, skus: Optional[List[str]] = None, commit: bool = True) -> D
         except Exception:
             return {"suppliers": n_sup, "products": n_prod, "domains": n_dom}
     return {"suppliers": n_sup, "products": n_prod, "domains": n_dom}
+
+
+def all_catalog_skus(db) -> List[str]:
+    """Every ACTIVE catalog SKU — the set the recommender can surface. Supplier coverage tracks this so
+    whatever SKU is recommended resolves an approved supplier (instead of a hardcoded shortlist that the
+    recommender's real SKUs fall outside of → NO_APPROVED_SUPPLIER). Best-effort; [] if no products table."""
+    if db is None:
+        return []
+    try:
+        rows = db.execute(text(
+            "SELECT sku FROM products WHERE COALESCE(active,1)=1 AND sku IS NOT NULL AND sku <> ''"
+        )).fetchall()
+        return sorted({str(r[0]) for r in rows if r and r[0]})
+    except Exception:
+        return []
+
+
+def ensure_supplier_coverage(db, *, commit: bool = True) -> Dict[str, int]:
+    """Idempotently ensure every active catalog SKU (plus the demo SKUs the e2e fixtures use) has at least
+    one approved supplier — coverage follows the catalog, so the procurement draft path no longer dead-ends
+    at NO_APPROVED_SUPPLIER for a SKU the recommender actually chose. Self-healing: adds only the missing
+    supplier_products rows. Returns {suppliers, products, domains} counts inserted."""
+    skus = sorted(set(DEMO_SKUS) | set(all_catalog_skus(db)))
+    return seed_demo(db, skus=skus, commit=commit)
 
 
 def domain_for_supplier(db, supplier_id: str) -> Optional[str]:

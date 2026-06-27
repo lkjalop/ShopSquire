@@ -275,6 +275,20 @@ def create_app() -> FastAPI:
                             # for stale local demo DBs without putting vertical logic in core scoring.
                             from scripts.seed_gaming_laptops import ensure_gaming_catalog
                             ensure_gaming_catalog(db)
+                        # Supplier coverage tracks the catalog (profile-agnostic) so a recommended SKU
+                        # resolves an approved supplier instead of dead-ending at NO_APPROVED_SUPPLIER.
+                        raw_suppliers_seed = os.getenv("AUTO_SEED_SUPPLIERS_ON_START")
+                        suppliers_seed_enabled = (
+                            str(raw_suppliers_seed).strip().lower() in ("1", "true", "yes", "on")
+                            if raw_suppliers_seed is not None else local_default
+                        )
+                        if suppliers_seed_enabled:
+                            from src.app.services.supplier_catalog import (
+                                ensure_supplier_coverage,
+                                seed_demo_vendor_contacts,
+                            )
+                            ensure_supplier_coverage(db, commit=False)  # commits with the outer db.commit()
+                            seed_demo_vendor_contacts()  # kyv_vendors manage their own session
                     except Exception:
                         pass
                     db.commit()

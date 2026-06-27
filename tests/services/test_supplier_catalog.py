@@ -8,8 +8,10 @@ from sqlalchemy.pool import StaticPool
 
 from src.app.services.supplier_catalog import (
     DEMO_SKUS,
+    all_catalog_skus,
     cheapest_wholesale_cents,
     domain_for_supplier,
+    ensure_supplier_coverage,
     ensure_tables,
     seed_demo,
 )
@@ -61,6 +63,33 @@ def test_ranking_query_shape_resolves_two_suppliers(db):
                            "JOIN supplier_products sp ON sp.supplier_id = s.id WHERE sp.sku = :k"),
                       {"k": "LAP-021"}).fetchall()
     assert {r[0] for r in rows} == {"SUP-7", "SUP-3"}
+
+
+def _seed_products(db, skus):
+    db.execute(text("CREATE TABLE IF NOT EXISTS products (sku TEXT PRIMARY KEY, active INTEGER DEFAULT 1)"))
+    for sku in skus:
+        db.execute(text("INSERT INTO products (sku, active) VALUES (:k, 1)"), {"k": sku})
+    db.commit()
+
+
+def test_ensure_supplier_coverage_tracks_the_catalog(db):
+    # the NO_APPROVED_SUPPLIER fix: coverage must follow the catalog, not a hardcoded shortlist. A SKU the
+    # recommender actually returns (GAM-0002) is NOT in DEMO_SKUS, yet must resolve an approved supplier.
+    _seed_products(db, ["GAM-0002", "LAP-0021"])
+    assert "GAM-0002" in all_catalog_skus(db)
+    ensure_supplier_coverage(db)
+    # the exact join inventory_agent._get_best_supplier runs now returns the seeded suppliers for GAM-0002
+    rows = db.execute(text("SELECT s.id FROM suppliers s JOIN supplier_products sp ON sp.supplier_id = s.id "
+                           "WHERE sp.sku = :k"), {"k": "GAM-0002"}).fetchall()
+    assert {r[0] for r in rows} == {"SUP-7", "SUP-3"}
+    assert cheapest_wholesale_cents(db, "GAM-0002") == 111500  # economics fallback resolves too
+
+
+def test_ensure_supplier_coverage_is_idempotent(db):
+    _seed_products(db, ["GAM-0002"])
+    ensure_supplier_coverage(db)
+    again = ensure_supplier_coverage(db)  # re-run inserts nothing
+    assert again == {"suppliers": 0, "products": 0, "domains": 0}
 
 
 def test_default_draft_path_resolves_seeded_supplier():

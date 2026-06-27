@@ -10,19 +10,21 @@ from __future__ import annotations
 
 from src.app.models.db import db_session
 from src.app.services import commerce_catalog, competitor_source, funnel_source, support_objection_source
-from src.app.services.supplier_catalog import DEMO_SKUS, seed_demo, seed_demo_vendor_contacts
+from src.app.services.supplier_catalog import ensure_supplier_coverage, seed_demo_vendor_contacts
 
 
 def main() -> None:
     with db_session() as db:
-        counts = seed_demo(db, skus=DEMO_SKUS)
+        # Coverage follows the catalog: every active SKU the recommender can surface (GAM-*/LAP-*) gets an
+        # approved supplier, so the procurement draft path never dead-ends at NO_APPROVED_SUPPLIER.
+        counts = ensure_supplier_coverage(db)
         cat = commerce_catalog.seed_demo(db)
         comp = competitor_source.seed_demo(db)
         obj = support_objection_source.seed_demo(db)
         fun = funnel_source.seed_demo(db)
     vendors = seed_demo_vendor_contacts()  # kyv_vendors manage their own session
     print(f"seeded suppliers={counts.get('suppliers')} products={counts.get('products')} "
-          f"domains={counts.get('domains')} for skus={DEMO_SKUS}")
+          f"domains={counts.get('domains')} (coverage tracks the live catalog)")
     print(f"seeded catalog prices={cat.get('prices')} inventory={cat.get('inventory')}")
     print(f"seeded competitor observations={comp.get('observations')} "
           f"support objections={obj.get('observations')} funnel events={fun.get('events')}")
