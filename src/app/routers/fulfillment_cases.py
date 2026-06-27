@@ -223,16 +223,18 @@ def request_info(case_id: str, body: RfiBody, role: str = Depends(require_role(_
 
 
 class RfiReplyBody(BaseModel):
-    answer: str   # the supplier's clarification reply (recorded; returns the case to the approval gate)
+    answer: str   # the supplier's clarification reply (returns the case to the approval gate)
 
 
 @router.post("/cases/{case_id}/supplier-info")
 def supplier_info(case_id: str, body: RfiReplyBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
-    """Record the supplier's RFI reply (AWAITING_SUPPLIER_INFO → AWAITING_APPROVAL). Operator-recorded for
-    the demo; an inbound poller would fire the same transition as an EXTERNAL actor."""
-    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    """Inbound RFI reply (AWAITING_SUPPLIER_INFO → AWAITING_APPROVAL). Fired as an EXTERNAL actor and
+    trust-verified against the case's resolved supplier domain (an untrusted sender → 409), so the demo
+    reply is attributed exactly as a real inbound poller would attribute it — not operator manual entry."""
     with db_session() as db:
-        res, _resp = fdraft.record_supplier_info(db, case_id=case_id, actor=human, answer=body.answer)
+        cur = fwf.repository.current_version(db, case_id)
+        sender_domain = str(((cur.state_json.get("rfi") if cur else None) or {}).get("recipient_domain") or "")
+        res = fec.receive_supplier_info(db, case_id=case_id, raw_body=body.answer, sender_domain=sender_domain)
         _raise_if_failed(res)
         return _case_view(db, case_id, for_operator=True)
 

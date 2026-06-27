@@ -277,3 +277,50 @@ def test_record_supplier_info_returns_to_approval_gate(db):
                                        now_iso="2026-06-26 09:10:00")
     assert res.ok and wf.current_state(db, cid) == S.AWAITING_APPROVAL
     assert resp == {"answer": "7 days, MOQ 1."}
+
+
+# ── RFI actually transmits (transport seam) + inbound reply is EXTERNAL + trust-verified ──
+class _FailTransport:
+    def send(self, *, to, subject, body, idempotency_key=""):
+        class _R:
+            status = "failed"
+            provider_ref = ""
+            detail = "smtp_boom"
+        return _R()
+
+
+def test_request_supplier_info_records_transport_send(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time and MOQ?",
+                                       now_iso="2026-06-26 09:06:00")
+    assert res.ok and rfi["status"] == "sent" and rfi["provider_ref"].startswith("DEMO-OUT-")
+    assert wf.current_state(db, cid) == S.AWAITING_SUPPLIER_INFO
+
+
+def test_request_supplier_info_send_failure_keeps_state(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?",
+                                       transport=_FailTransport(), now_iso="2026-06-26 09:06:00")
+    assert res.ok is False and res.reason == "rfi_send_failed" and rfi is None
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL  # no transmit → no transition
+
+
+def test_receive_supplier_info_external_trusted_advances(db):
+    from src.app.services.fulfillment import external_comms as EC
+    cid = _to_awaiting_approval_with_supplier(db)
+    D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?", now_iso="2026-06-26 09:06:00")
+    res = EC.receive_supplier_info(db, case_id=cid, raw_body="Lead time 7 days, MOQ 1.",
+                                   sender_domain="approved-supplier.example", provider_ref="IN-1",
+                                   trusted_fn=lambda d: d == "approved-supplier.example",
+                                   now_iso="2026-06-26 09:10:00")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_APPROVAL
+
+
+def test_receive_supplier_info_untrusted_sender_rejected(db):
+    from src.app.services.fulfillment import external_comms as EC
+    cid = _to_awaiting_approval_with_supplier(db)
+    D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?", now_iso="2026-06-26 09:06:00")
+    res = EC.receive_supplier_info(db, case_id=cid, raw_body="evil", sender_domain="attacker.example",
+                                   trusted_fn=lambda d: False, now_iso="2026-06-26 09:10:00")
+    assert res.ok is False and res.reason == "untrusted_sender"
+    assert wf.current_state(db, cid) == S.AWAITING_SUPPLIER_INFO  # no state change on untrusted inbound

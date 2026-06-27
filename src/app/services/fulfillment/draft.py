@@ -466,13 +466,15 @@ RFI_TEMPLATE: Dict[str, str] = {
 }
 
 
-def request_supplier_info(db, *, case_id: str, actor: Actor, question: str, tenant_id: str = "default",
-                          now_iso: Optional[str] = None, trace_id: Optional[str] = None):
+def request_supplier_info(db, *, case_id: str, actor: Actor, question: str, transport: Optional[Any] = None,
+                          tenant_id: str = "default", now_iso: Optional[str] = None,
+                          trace_id: Optional[str] = None):
     """HUMAN sends a scoped RFI (clarification) to the ALREADY-resolved supplier before approving the RFQ —
     the recoverable path for a ``needs_info`` send-gate. Same cage as the RFQ: recipient from the draft's
-    allowlisted domain (never free text), claim-safe body (no price/PO leak), content_hash pinned, fired
-    through the workflow chokepoint (AWAITING_APPROVAL → AWAITING_SUPPLIER_INFO). Returns (TransitionResult,
-    rfi-dict|None)."""
+    allowlisted domain (never free text), claim-safe body (no price/PO leak), content_hash pinned, and
+    actually TRANSMITTED through the transport seam (SANDBOX by default; SMTP at deploy) before the
+    workflow transition fires (AWAITING_APPROVAL → AWAITING_SUPPLIER_INFO). A real transport failure
+    records NO send and leaves the case unchanged. Returns (TransitionResult, rfi-dict|None)."""
     cur = workflow.repository.current_version(db, case_id, tenant_id)
     draft = (cur.state_json.get("draft") if cur else None) or {}
     domain = str(draft.get("recipient_domain") or "")
@@ -490,12 +492,23 @@ def request_supplier_info(db, *, case_id: str, actor: Actor, question: str, tena
     if not _claim_safe(body):  # a human question that leaks a price/PO is refused (same guard as the RFQ)
         return workflow.TransitionResult(False, case_id, cur.state if cur else None, "unsafe_rfi",
                                          http_status=409), None
-    rfi = {"subject": subject, "body": body, "content_hash": content_hash(subject, body),
-           "recipient_domain": domain, "recipient_email": draft.get("recipient_email"), "question": q}
+    chash = content_hash(subject, body)
+    recipient = str(draft.get("recipient_email") or domain)
+    # Transmit through the transport seam (mirrors send_approved). Sandbox returns a DEMO-OUT- ref.
+    from src.app.services.fulfillment.transport import get_transport
+    tx = transport or get_transport()
+    sent = tx.send(to=recipient, subject=subject, body=body, idempotency_key=chash)
+    if getattr(sent, "status", "failed") != "sent":
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "rfi_send_failed",
+                                         http_status=502), None
+    rfi = {"subject": subject, "body": body, "content_hash": chash, "recipient_domain": domain,
+           "recipient_email": draft.get("recipient_email"), "recipient": recipient, "question": q,
+           "provider_ref": sent.provider_ref, "status": "sent", "transport": getattr(sent, "detail", "")}
     res = workflow.transition(
         db, case_id=case_id, event="supplier_info_requested", actor=actor,
-        reason_code="supplier_clarification_requested",
-        evidence={"content_hash": rfi["content_hash"], "recipient_domain": domain, "question": q},
+        reason_code="supplier_clarification_sent",
+        evidence={"content_hash": chash, "recipient_domain": domain, "recipient": recipient,
+                  "provider_ref": sent.provider_ref, "question": q},
         state_patch={"rfi": rfi}, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
     return res, (rfi if res.ok else None)
 

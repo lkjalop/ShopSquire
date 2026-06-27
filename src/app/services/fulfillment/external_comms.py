@@ -97,6 +97,30 @@ def receive_reply(db, *, case_id: str, raw_body: str, sender_domain: str, provid
         tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
 
 
+# ── RFI inbound (supplier's clarification reply, EXTERNAL + trust-verified) ───
+def receive_supplier_info(db, *, case_id: str, raw_body: str, sender_domain: str,
+                          provider_ref: Optional[str] = None, tenant_id: str = "default",
+                          now_iso: Optional[str] = None, trace_id: Optional[str] = None,
+                          trusted_fn=None) -> workflow.TransitionResult:
+    """Inbound RFI reply from the supplier: verify the sender is on the trusted allowlist, then fire
+    supplier_info_received as an EXTERNAL actor (AWAITING_SUPPLIER_INFO → AWAITING_APPROVAL). An untrusted
+    sender is REJECTED with no state change (the operator can investigate) — symmetry with receive_reply's
+    quarantine on the RFQ path. This is the real inbound path; the operator-recorded record_supplier_info
+    is the manual fallback."""
+    trusted = (trusted_fn or _default_trusted)(sender_domain)
+    if not trusted:
+        cur = workflow.repository.current_version(db, case_id, tenant_id)
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "untrusted_sender",
+                                         http_status=409)
+    ans = str(raw_body or "").strip()
+    return workflow.transition(
+        db, case_id=case_id, event="supplier_info_received", actor=Actor(ActorType.EXTERNAL, sender_domain),
+        reason_code="correlated_rfi_reply",
+        evidence={"sender_domain": sender_domain, "provider_ref": provider_ref, "answer_chars": len(ans)},
+        state_patch={"rfi_response": {"answer": ans, "sender_domain": sender_domain, "provider_ref": provider_ref}},
+        tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+
+
 # ── parse (strict schema + evidence spans) ────────────────────────────────────
 def parse_quote(raw_body: str, commercial_scope: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Deterministic strict-schema parse. The RAW body stays authoritative; each field carries an
