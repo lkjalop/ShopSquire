@@ -17,6 +17,7 @@ Detectors (v1, explainable):
                                 overall daily mean (seasonality)
   • competitor_undercut      — a competitor price below ours on the same entity (pricing-review signal)
   • objection_cluster        — recurring support objections on the same theme (objection mining)
+  • segment_shift            — Phase 4: a segment whose demand SHARE shifted vs baseline (re-targeting)
 
 Vertical-blind: finding_type/entity_ref/evidence are opaque to product vocabulary. Never raises.
 """
@@ -36,6 +37,7 @@ FINDING_SEASONAL_DEMAND = "seasonal_demand"
 FINDING_COMPETITOR_UNDERCUT = "competitor_undercut"
 FINDING_OBJECTION_CLUSTER = "objection_cluster"
 FINDING_FUNNEL_DROPOFF = "funnel_dropoff"
+FINDING_SEGMENT_SHIFT = "segment_shift"  # Phase 4: WHO is buying is shifting (re-targeting signal)
 
 _MIN_POINTS = 4  # need enough history before an anomaly finding is actionable
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -354,6 +356,61 @@ def detect_funnel_dropoff(signals, *, min_rate: float = 0.5, min_volume: int = 1
     return out
 
 
+def detect_segment_shift(signals, *, min_points: int = _MIN_POINTS, min_total: int = 20,
+                         min_abs_shift: float = 0.15) -> List[MarketFinding]:
+    """Phase 4 — segment mix shift. Buckets demand SHARE by segment over the window and flags a segment
+    whose latest-day share deviates from its earlier-days baseline share by >= min_abs_shift: a shift in
+    WHO is buying (a re-targeting signal). ``segment`` is an OPAQUE payload label (vertical-blind); the
+    detector is explainable + deterministic (no LLM). Shadow-only: it yields a finding, never an action.
+
+    Guards: needs >= min_points days and >= min_total demand signals carrying a segment, so a thin or
+    segment-less stream produces nothing (no spurious re-targeting on noise)."""
+    by_day_seg: Dict[str, Dict[str, int]] = {}
+    for s in signals or []:
+        if (s or {}).get("signal_type") != "demand":
+            continue
+        d = _day(s.get("occurred_at"))
+        seg = str((s.get("payload") or {}).get("segment") or "").strip().lower()
+        if not d or not seg:
+            continue
+        bucket = by_day_seg.setdefault(d, {})
+        bucket[seg] = bucket.get(seg, 0) + 1
+    days = sorted(by_day_seg)
+    if len(days) < min_points:
+        return []
+    segments = sorted({seg for day in by_day_seg.values() for seg in day})
+    totals = {seg: sum(by_day_seg[d].get(seg, 0) for d in days) for seg in segments}
+    if sum(totals.values()) < min_total:
+        return []
+    earlier, latest_day = days[:-1], days[-1]
+    latest_total = sum(by_day_seg[latest_day].values()) or 1
+
+    def _baseline_share(seg: str) -> float:
+        num = sum(by_day_seg[d].get(seg, 0) for d in earlier)
+        den = sum(sum(by_day_seg[d].values()) for d in earlier)
+        return (num / den) if den else 0.0
+
+    out: List[MarketFinding] = []
+    for seg in segments:
+        base_share = _baseline_share(seg)
+        latest_share = by_day_seg[latest_day].get(seg, 0) / latest_total
+        shift = latest_share - base_share
+        if abs(shift) < min_abs_shift:
+            continue
+        direction = "rising" if shift > 0 else "falling"
+        severity = "critical" if abs(shift) >= 0.30 else "warn"
+        out.append(MarketFinding(
+            FINDING_SEGMENT_SHIFT, seg, severity, round(min(1.0, abs(shift) / 0.5), 3),
+            f"Segment '{seg}' demand share {direction}: {latest_share * 100:.0f}% latest vs "
+            f"~{base_share * 100:.0f}% baseline.",
+            {"segment": seg, "latest_share": round(latest_share, 4), "baseline_share": round(base_share, 4),
+             "shift": round(shift, 4), "direction": direction, "segment_total": totals[seg]},
+            "daily",
+        ))
+    out.sort(key=lambda f: -f.confidence)
+    return out
+
+
 def _safe(fn: Callable, *args, **kw) -> List[MarketFinding]:
     try:
         return fn(*args, **kw)
@@ -373,6 +430,7 @@ def analyze(signals, *, anomaly_fn: Optional[Callable] = None,
     out += _safe(detect_competitor_undercut, signals)
     out += _safe(detect_objection_cluster, signals)
     out += _safe(detect_funnel_dropoff, signals)
+    out += _safe(detect_segment_shift, signals)
     return out
 
 

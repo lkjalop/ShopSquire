@@ -286,3 +286,41 @@ def test_run_analysis_reads_market_signal():
     findings = run_analysis(db, anomaly_fn=_flag_last_outlier)
     assert any(f.finding_type == FINDING_DEMAND_SHIFT for f in findings)
     db.close()
+
+
+def _seg_signal(day, segment, n):
+    return [{"signal_type": "demand", "source": "search_events", "payload": {"segment": segment},
+             "occurred_at": f"{day}T10:00:00"} for _ in range(n)]
+
+
+def test_detect_segment_shift_flags_a_rising_and_falling_segment():
+    # baseline (3 days): smb ~60%, enterprise ~40%. Latest day: enterprise surges → both flagged.
+    sigs = []
+    for day in ("2026-06-24", "2026-06-25", "2026-06-26"):
+        sigs += _seg_signal(day, "smb", 6) + _seg_signal(day, "enterprise", 4)
+    sigs += _seg_signal("2026-06-27", "smb", 2) + _seg_signal("2026-06-27", "enterprise", 12)
+    findings = ma.detect_segment_shift(sigs)
+    by_seg = {f.entity_ref: f for f in findings}
+    assert by_seg["enterprise"].evidence["direction"] == "rising"
+    assert by_seg["smb"].evidence["direction"] == "falling"
+    assert all(f.finding_type == "segment_shift" for f in findings)
+    assert by_seg["enterprise"].severity == "critical"  # >= 0.30 abs shift
+
+
+def test_detect_segment_shift_quiet_on_stable_or_segmentless_streams():
+    stable = []
+    for day in ("2026-06-24", "2026-06-25", "2026-06-26", "2026-06-27"):
+        stable += _seg_signal(day, "smb", 6) + _seg_signal(day, "enterprise", 4)
+    assert ma.detect_segment_shift(stable) == []                      # stable shares → nothing
+    noseg = [{"signal_type": "demand", "source": "s", "payload": {}, "occurred_at": "2026-06-24T10:00:00"}] * 40
+    assert ma.detect_segment_shift(noseg) == []                       # no segment label → nothing
+    thin = _seg_signal("2026-06-24", "smb", 40)
+    assert ma.detect_segment_shift(thin) == []                        # < min_points days → nothing
+
+
+def test_segment_shift_is_in_analyze():
+    sigs = []
+    for day in ("2026-06-24", "2026-06-25", "2026-06-26"):
+        sigs += _seg_signal(day, "smb", 6) + _seg_signal(day, "enterprise", 4)
+    sigs += _seg_signal("2026-06-27", "smb", 2) + _seg_signal("2026-06-27", "enterprise", 12)
+    assert any(f.finding_type == "segment_shift" for f in ma.analyze(sigs))

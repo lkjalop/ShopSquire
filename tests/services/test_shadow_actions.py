@@ -112,3 +112,17 @@ def test_task_registered_and_default_off():
     assert "src.app.tasks.shadow_action_tasks" in (celery_app.conf.imports or ())
     assert _enabled() is False
     assert generate_shadow_actions.run() == {"skipped": "disabled"}
+
+
+def test_segment_shift_maps_to_targeting_review_with_direction():
+    from src.app.services.market_analysis import MarketFinding
+    rising = MarketFinding("segment_shift", "enterprise", "critical", 0.9, "enterprise rising",
+                           {"direction": "rising", "shift": 0.45})
+    falling = MarketFinding("segment_shift", "smb", "warn", 0.6, "smb falling",
+                            {"direction": "falling", "shift": -0.45})
+    props = {p.target_ref: p for p in sa.propose_from_findings([rising, falling])}
+    assert props["enterprise"].action_type == sa.ACTION_REVISE_SEGMENT_TARGETING
+    assert props["enterprise"].direction == "boost"      # lean toward the rising segment
+    assert props["smb"].direction == "demote"            # away from the falling one
+    # shadow-only invariant: never executed; promotion goes through the experiment gate
+    assert all(p.status == "proposed" and p.params.get("requires_experiment") for p in props.values())

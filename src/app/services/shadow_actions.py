@@ -30,6 +30,7 @@ DEFAULT_TENANT = "default"
 ACTION_ADJUST_RANKING = "adjust_ranking"
 ACTION_SUPPRESS_LOW_STOCK = "suppress_low_stock"
 ACTION_REVISE_SUPPORT_COPY = "revise_support_copy"
+ACTION_REVISE_SEGMENT_TARGETING = "revise_segment_targeting"  # Phase 4: re-target toward/away a segment
 
 # finding_type → proposed action_type. Deterministic + opaque — no product knowledge. (David's deck,
 # Module 4 Decision Engine: support objections + weak funnel points → a guidance/messaging review.)
@@ -40,6 +41,7 @@ _FINDING_TO_ACTION: Dict[str, str] = {
     "objection_cluster": ACTION_REVISE_SUPPORT_COPY,   # recurring objection on a theme → propose guidance update
     "funnel_dropoff": ACTION_REVISE_SUPPORT_COPY,      # a stage bleeding buyers → propose messaging review there
     "inventory_demand_mismatch": ACTION_SUPPRESS_LOW_STOCK,  # demand with no stock → propose demoting it
+    "segment_shift": ACTION_REVISE_SEGMENT_TARGETING,  # WHO is buying shifted → propose a targeting review
 }
 _SEVERITY_WEIGHT = {"info": 0.3, "warn": 0.7, "critical": 1.0}
 
@@ -75,6 +77,14 @@ def _direction_for(action_type: str, evidence: Dict[str, Any]) -> str:
         if d in ("down", "slowdown", "drop", "decline"):
             return "demote"
         return "boost"
+    if action_type == ACTION_REVISE_SEGMENT_TARGETING:
+        # lean TOWARD a rising segment (boost), AWAY from a falling one (demote); else a neutral review.
+        d = str((evidence or {}).get("direction") or "").lower()
+        if d in ("rising", "up", "growth"):
+            return "boost"
+        if d in ("falling", "down", "decline"):
+            return "demote"
+        return "review"
     return "review"
 
 
