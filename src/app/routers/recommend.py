@@ -10726,70 +10726,20 @@ def suggest(
     payload["narration_model"] = _narration_model_tel
     payload["narration_mode"] = _narration_mode_tel
     payload["claim_guard_result"] = _claim_guard_result
-    # Escalation policy (deterministic, no added latency): fold the risk/complexity signals into one
-    # human-in-the-loop decision and surface it. All inputs are read via non-raising dict/getattr
-    # access and assess_escalation/decompose never raise, so this needs NO try/except (keeps the
-    # recommend.py silent-except ratchet intact). For B2B/bulk + risk this flags human review.
+    # Escalation / human-in-the-loop decoration (deterministic, no added latency) — extracted to
+    # recommend_escalation_stage. Folds risk/complexity/order/B2B signals into one decision surfaced on
+    # payload (b2b_assessment, escalation_assessment, and the review envelope + incident on review/human).
+    # The injected assessors never raise → the stage carries no try/except (silent-except ratchet intact).
+    from src.app.services.b2b_intent import assess_b2b_intent as _assess_b2b
+    from src.app.services.recommend_escalation_stage import decorate_escalation as _decorate_escalation
     from src.app.services.escalation_policy import assess_escalation as _assess_esc
     from src.app.services.query_decomposer import decompose as _dq_esc
-    _esc_cstat = constraints.get("constraint_status") if isinstance(constraints.get("constraint_status"), dict) else {}
-    _esc_qty = constraints.get("order_quantity")
-    _esc_qty = int(_esc_qty) if isinstance(_esc_qty, int) else 1
-    _esc_risk = (analysis.get("details") or {}).get("risk_adj") if isinstance(analysis, dict) else None
-    _esc_risk = float(_esc_risk) if isinstance(_esc_risk, (int, float)) else 0.0
-    if _esc_risk > 1.0:
-        _esc_risk = min(1.0, _esc_risk / 100.0)
-    _esc_value = 0
-    if isinstance(results, list) and results and isinstance(results[0], dict):
-        _esc_p0 = results[0].get("price_cents")
-        _esc_value = int(_esc_p0) * _esc_qty if isinstance(_esc_p0, int) else 0
-    _esc_horizon = constraints.get("availability_horizon_days")
-    _esc_rush = bool(isinstance(_esc_horizon, int) and 0 < _esc_horizon <= 7)
-    # Intent-aware B2B: quantity is a SIGNAL, not a gate. assess_b2b_intent combines it with the
-    # query's business language → consumer / b2b / ambiguous_bulk / anomalous. Anomalous (absurd
-    # count: error, prompt attack, or a deal too large to auto-quote) escalates HARD to a human;
-    # ambiguous-bulk gets B2B treatment so it's clarified/reviewed. Surfaced for pricing
-    # (discount_eligible) + the escalation room. assess_b2b_intent never raises → no try/except.
-    from src.app.services.b2b_intent import assess_b2b_intent as _assess_b2b
-    _b2b = _assess_b2b(query, quantity=_esc_qty)
-    payload["b2b_assessment"] = _b2b.to_dict()
-    _esc_anom = (_b2b.verdict == "anomalous")
-    _esc_decision = _assess_esc(
-        decomposition_confidence=getattr(_dq_esc(query), "decomposition_confidence", 1.0),
-        irreversible_action=_esc_anom,  # an absurd-quantity request is consequential, not a browse
-        order_quantity=_esc_qty,
-        order_value_cents=_esc_value,
-        fraud_score=max(_esc_risk, 0.75 if _esc_anom else 0.0),  # anomalous → hard human escalation
-        constraint_conflict=(_esc_cstat.get("exact_match") is False),
-        claim_guard_rejected=(_claim_guard_result == "fell_back_to_deterministic"),
-        b2b=_b2b.wants_procurement_questions,  # b2b OR ambiguous-bulk → B2B review treatment
-        rush_delivery=_esc_rush,  # account/email/billing red flags are checkout-time (not at suggest)
-        review_requested=(_b2b.verdict == "ambiguous_bulk"),
+    _decorate_escalation(
+        payload, constraints=constraints, analysis=analysis, results=results, query=query,
+        claim_guard_result=_claim_guard_result, trace_id=trace_id, uid=uid,
+        assess_escalation=_assess_esc, decompose=_dq_esc, assess_b2b_intent=_assess_b2b,
+        auto_create_incident=_auto_create_incident_for_review,
     )
-    payload["escalation_assessment"] = _esc_decision.to_dict()
-    # B2B escalation -> human room: when the bounded decision requires a human, surface a review
-    # envelope and reuse the existing (flag-gated) incident creator so the escalation room/admin can
-    # act, with a direct-contact affordance for B2B deals. All non-raising calls -> no new try/except.
-    if _esc_decision.band in {"review", "human_required"}:
-        payload["needs_human_review"] = True
-        _esc_env = payload.get("escalation") if isinstance(payload.get("escalation"), dict) else {}
-        if not _esc_env.get("route"):
-            payload["escalation"] = {
-                "route": "human_review",
-                "reason": (_esc_decision.reasons[0] if _esc_decision.reasons else "ai_flagged_human_review"),
-                "reasons": list(_esc_decision.reasons),
-                "talk_to_client": _esc_decision.talk_to_client,
-                "band": _esc_decision.band,
-                "blocking": _esc_decision.band == "human_required",
-                "approval_required": bool(payload.get("approval_id"))
-                or _esc_decision.band == "human_required",
-            }
-        _auto_create_incident_for_review(
-            payload=payload, trace_id=trace_id, uid=uid, query=query,
-            severity=("high" if _esc_decision.band == "human_required" else "warn"),
-            source="recommend_escalation",
-            extra_context={"escalation_assessment": _esc_decision.to_dict()},
-        )
     # ── Message decoration (extracted to recommend_message_decorator) ──
     from src.app.services.recommend_message_decorator import (
         apply_budget_advice as _apply_budget_advice,
