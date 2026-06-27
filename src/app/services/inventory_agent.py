@@ -686,6 +686,47 @@ class InventoryAgent:
             pass
         return {"id": None, "unit_cost": 0.0, "lead_time": 7}
 
+    def _rank_suppliers(self, sku: str, top_n: int = 3) -> List[Dict[str, Any]]:
+        """Read-only top-N approved suppliers for a SKU, scored with the same weights as
+        _get_best_supplier (no audit write — this is a review PREVIEW, not the draft path). Returns [] when
+        no supplier carries the SKU. Used by the supplier-contact candidates agent."""
+        try:
+            with db_session() as db:
+                rows = db.execute(
+                    text("SELECT s.id, s.unit_cost, s.lead_time_days, COALESCE(s.moq,0), "
+                         "COALESCE(s.on_time_rate,0), COALESCE(s.reliability_score,0), "
+                         "COALESCE(s.recent_sla_breaches,0), COALESCE(s.late_deliveries_30d,0) "
+                         "FROM suppliers s JOIN supplier_products sp ON sp.supplier_id=s.id "
+                         "WHERE sp.sku=:sku AND COALESCE(s.active,1)=1"),
+                    {"sku": str(sku)},
+                ).fetchall()
+        except Exception:
+            return []
+        if not rows:
+            return []
+        costs = [float(r[1] or 0.0) for r in rows]
+        leads = [int(r[2] or 7) for r in rows]
+        moqs = [int(r[3] or 0) for r in rows]
+        min_cost, max_cost = min(costs), max(costs)
+        min_lead, max_lead = min(leads), max(leads)
+        min_moq, max_moq = min(moqs), max(moqs)
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            cost, lead, moq = float(r[1] or 0.0), int(r[2] or 7), int(r[3] or 0)
+            on_time, rel = float(r[4] or 0.0), float(r[5] or 0.0)
+            sla, late = int(r[6] or 0), int(r[7] or 0)
+            nc = 1.0 if max_cost == min_cost else (cost - min_cost) / (max_cost - min_cost)
+            nl = 1.0 if max_lead == min_lead else (lead - min_lead) / (max_lead - min_lead)
+            nm = 0.0 if max_moq == min_moq else (moq - min_moq) / (max_moq - min_moq)
+            pen = min(1.0, 0.15 * sla + 0.05 * late)
+            score = (0.4 * (1.0 - nc) + 0.25 * (1.0 - nl) + 0.2 * max(0.0, min(1.0, on_time))
+                     + 0.1 * max(0.0, min(1.0, rel)) + 0.05 * (1.0 - nm) - 0.15 * pen)
+            out.append({"id": r[0], "unit_cost": cost, "lead_time": lead, "moq": moq,
+                        "on_time_rate": on_time, "reliability": rel, "recent_sla_breaches": sla,
+                        "late_deliveries_30d": late, "score": round(score, 4)})
+        out.sort(key=lambda c: -c["score"])
+        return out[: max(1, int(top_n))]
+
     def _persist_supplier_score_audit(self, sku: str, supplier_id: str, score: float, payload: Dict[str, Any]) -> None:
         try:
             with db_session() as db:

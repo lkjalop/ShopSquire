@@ -97,6 +97,24 @@ def get_journey(case_id: str) -> Dict[str, Any]:
         return {"case_id": case_id, "journey": fwf.journey(db, case_id)}
 
 
+@router.get("/cases/{case_id}/supplier-candidates")
+def supplier_candidates(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Ranked, confidence-scored, provenance-tagged APPROVED-supplier shortlist for the case's SKU — a
+    read-only prefill so the operator can review + pick the recipient faster/safer before drafting. Contacts
+    are resolved server-side from the allowlist/KYV (never buyer text); this never sends."""
+    from src.app.services.fulfillment.supplier_contacts import supplier_contact_candidates
+    with db_session() as db:
+        cur = fwf.repository.current_version(db, case_id)
+        if cur is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        sj = cur.state_json if isinstance(cur.state_json, dict) else {}
+        avail = sj.get("availability") if isinstance(sj.get("availability"), dict) else {}
+        scope = (sj.get("draft") or {}).get("commercial_scope") if isinstance(sj.get("draft"), dict) else {}
+        item_ref = str(avail.get("item_ref") or (scope or {}).get("item_ref") or "").strip()
+        cands = supplier_contact_candidates(db, item_ref=item_ref) if item_ref else []
+        return {"case_id": case_id, "item_ref": item_ref, "candidates": cands}
+
+
 @router.get("/cases/{case_id}/okf")
 def case_okf(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Export the case as an OKF (Open Knowledge Format) document — a portable, vendor-neutral
