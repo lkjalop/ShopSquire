@@ -48,6 +48,40 @@ DEFAULT_TEMPLATE: Dict[str, str] = {
 _NOT_A_PO = "this request does not constitute a purchase order"
 # claim-safety: any currency/price-like token in the body is a leak (we ask the supplier to quote).
 _PRICE_RE = re.compile(r"[$€£¥]\s?\d|\b\d+(?:\.\d{1,2})?\s?(?:usd|aud|eur|gbp|dollars?)\b", re.IGNORECASE)
+# unsupported / binding / manipulative commercial claims (deck: "no manipulative or deceptive claims",
+# "no unsupported product promises"). Governance vocabulary, not product flavour — a default the profile
+# may later extend. Critical once an LLM can rewrite the body: the model must not invent a guarantee/PO.
+_PROHIBITED_CLAIM_RE = re.compile(
+    r"\b(we guarantee|guaranteed|we promise|we commit\b|legally binding|we agree to pay|"
+    r"best price guaranteed|lowest price|price match|exclusive deal|we will pay|"
+    r"purchase order (is )?(confirmed|attached|enclosed|issued)|this (is|confirms) (a|our) purchase order|"
+    r"order (is )?confirmed|payment (is )?guaranteed)\b", re.IGNORECASE)
+# a URL in an outbound supplier email is an exfiltration / phishing vector if an LLM injected it.
+_URL_RE = re.compile(r"https?://|www\.|\bbit\.ly\b", re.IGNORECASE)
+# any email address in the body that is NOT on the resolved supplier domain = a redirect/CC injection.
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@([\w-]+\.[\w.-]+)\b")
+
+
+def claim_safety_reason(body: str, *, recipient_domain: Optional[str] = None) -> Optional[str]:
+    """The reason a body is UNSAFE to send, or None if safe. Single source of the send-cage policy; used by
+    _claim_safe and surfaced for observability. Hardened for LLM-rewritten bodies: rejects price/PO leaks,
+    a missing not-a-PO footer, unsupported/binding claims, URLs, and any foreign email address (a
+    redirect/CC injection — the recipient is resolved from the allowlist, never from the body)."""
+    b = body or ""
+    if _NOT_A_PO not in b.lower():
+        return "missing_not_a_po_footer"
+    if _PRICE_RE.search(b):
+        return "price_or_currency_leak"
+    if _PROHIBITED_CLAIM_RE.search(b):
+        return "unsupported_or_binding_claim"
+    if _URL_RE.search(b):
+        return "contains_url"
+    if recipient_domain:
+        rd = str(recipient_domain).strip().lower()
+        for m in _EMAIL_RE.finditer(b):
+            if m.group(1).strip().lower() != rd:
+                return "foreign_email_address"
+    return None
 
 
 @dataclass(frozen=True)
@@ -81,8 +115,8 @@ def content_hash(subject: str, body: str) -> str:
     return hashlib.sha256(f"{subject}\n{body}".encode("utf-8")).hexdigest()[:32]
 
 
-def _claim_safe(body: str) -> bool:
-    return (_NOT_A_PO in (body or "").lower()) and (_PRICE_RE.search(body or "") is None)
+def _claim_safe(body: str, *, recipient_domain: Optional[str] = None) -> bool:
+    return claim_safety_reason(body, recipient_domain=recipient_domain) is None
 
 
 # ── scatter-gather evidence (read-only; independent sources) ──────────────────
@@ -276,8 +310,8 @@ def draft_send_gate(draft: Dict[str, Any], *, min_confidence: float = 0.6) -> Di
     needs: List[str] = []
     if not str(d.get("recipient_email") or d.get("recipient_domain") or "").strip():
         blocking.append("no_recipient")
-    if not _claim_safe(str(d.get("body") or "")):
-        blocking.append("claim_unsafe")  # price/PO leak or missing not-a-PO footer
+    if not _claim_safe(str(d.get("body") or ""), recipient_domain=d.get("recipient_domain")):
+        blocking.append("claim_unsafe")  # price/PO/URL/foreign-recipient leak or missing not-a-PO footer
     scope = d.get("commercial_scope") or {}
     if not str(scope.get("item_ref") or "").strip() or int(scope.get("quantity") or 0) <= 0:
         needs.append("missing_commercial_scope")
@@ -338,13 +372,16 @@ def build_draft(
     subject = str(tmpl.get("subject", DEFAULT_TEMPLATE["subject"])).format(**slots)
     body = str(tmpl.get("body", DEFAULT_TEMPLATE["body"])).format(**slots)
 
-    # optional LLM polish — but ONLY accepted if it stays claim-safe; else keep the deterministic fill.
+    # optional LLM polish — AI proposes, the cage authorizes: the rewrite is ACCEPTED ONLY if it passes the
+    # (now broadened) claim-safety gate against the RESOLVED domain; any prompt-injected price/PO/URL/foreign
+    # recipient → discard the LLM output, keep the deterministic fill. _safe_one bounds exceptions; llm_fn
+    # must bound its own network timeout (no silent hang).
     if llm_fn is not None:
         cand = _safe_one(lambda: llm_fn(subject=subject, body=body, slots=slots)) or {}
         c_body = str(cand.get("body") or body)
-        if _claim_safe(c_body):
+        if _claim_safe(c_body, recipient_domain=domain):
             subject, body = str(cand.get("subject") or subject), c_body
-    if not _claim_safe(body):
+    if not _claim_safe(body, recipient_domain=domain):
         return None  # refuse to draft an unsafe body (price/commitment leak or missing PO disclaimer)
 
     rationale = [
@@ -412,7 +449,7 @@ def edit_draft(db, *, case_id: str, actor: Actor, subject: Optional[str] = None,
                                          http_status=409), None
     new_subject = draft.get("subject", "") if subject is None else str(subject)
     new_body = draft.get("body", "") if body is None else str(body)
-    if not _claim_safe(new_body):
+    if not _claim_safe(new_body, recipient_domain=draft.get("recipient_domain")):
         return workflow.TransitionResult(False, case_id, cur.state if cur else None, "unsafe_edit",
                                          http_status=409), None
     draft["subject"] = new_subject
@@ -489,7 +526,7 @@ def request_supplier_info(db, *, case_id: str, actor: Actor, question: str, tran
     supplier_name = _resolve_supplier_name(db, domain, tenant_id) or str(draft.get("recipient_ref") or "Supplier")
     subject = RFI_TEMPLATE["subject"].format(item_ref=item_ref, case_ref=case_id)
     body = RFI_TEMPLATE["body"].format(supplier_name=supplier_name, question=q)
-    if not _claim_safe(body):  # a human question that leaks a price/PO is refused (same guard as the RFQ)
+    if not _claim_safe(body, recipient_domain=domain):  # a price/PO/URL/foreign-recipient leak is refused
         return workflow.TransitionResult(False, case_id, cur.state if cur else None, "unsafe_rfi",
                                          http_status=409), None
     chash = content_hash(subject, body)

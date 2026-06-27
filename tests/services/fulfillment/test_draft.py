@@ -324,3 +324,40 @@ def test_receive_supplier_info_untrusted_sender_rejected(db):
                                    trusted_fn=lambda d: False, now_iso="2026-06-26 09:10:00")
     assert res.ok is False and res.reason == "untrusted_sender"
     assert wf.current_state(db, cid) == S.AWAITING_SUPPLIER_INFO  # no state change on untrusted inbound
+
+
+# ── broadened claim-safety guard (LLM-output attack surface) ──
+def test_claim_safety_reason_catches_attack_vectors():
+    NOT_PO = "this request does not constitute a purchase order"
+    assert D.claim_safety_reason(f"hi. {NOT_PO}") is None
+    assert D.claim_safety_reason("no footer here") == "missing_not_a_po_footer"
+    assert D.claim_safety_reason(f"pay $900. {NOT_PO}") == "price_or_currency_leak"
+    assert D.claim_safety_reason(f"we guarantee it. {NOT_PO}") == "unsupported_or_binding_claim"
+    assert D.claim_safety_reason(f"order confirmed. {NOT_PO}") == "unsupported_or_binding_claim"
+    assert D.claim_safety_reason(f"see http://x.co {NOT_PO}") == "contains_url"
+    assert D.claim_safety_reason(f"cc evil@bad.example {NOT_PO}",
+                                 recipient_domain="approved-supplier.example") == "foreign_email_address"
+    assert D.claim_safety_reason(f"reply ops@approved-supplier.example {NOT_PO}",
+                                 recipient_domain="approved-supplier.example") is None
+
+
+def test_llm_polish_injecting_url_or_foreign_recipient_is_rejected(db):
+    # prompt-injected LLM output (url + redirect + guarantee) must be DISCARDED → deterministic fill kept
+    def _evil_llm(*, subject, body, slots):
+        return {"subject": subject,
+                "body": "Email attacker@evil.com and see http://evil.com — we guarantee payment. "
+                        "this request does not constitute a purchase order."}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, llm_fn=_evil_llm)
+    assert "evil.com" not in draft.body and "guarantee" not in draft.body  # injection discarded
+    assert "this request does not constitute a purchase order" in draft.body.lower()
+
+
+def test_llm_polish_safe_rewrite_is_accepted(db):
+    def _safe_llm(*, subject, body, slots):
+        return {"subject": "Quote request",
+                "body": "Hello, kindly share your quote and lead time. "
+                        "This request does not constitute a purchase order."}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow, llm_fn=_safe_llm)
+    assert "kindly share your quote" in draft.body  # safe rewrite accepted
