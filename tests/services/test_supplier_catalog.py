@@ -139,16 +139,26 @@ def test_register_or_backfill_vendor_noop_when_complete():
                                         email="e@d.example") is False
 
 
-def test_seed_demo_supplier_history_records_prior_dealings():
+def test_seed_demo_supplier_history_records_prior_dealings(tmp_path):
     # the demo-data fix: seed prior-dealings history so the draft evidence shows "N observations, last
     # invoice $X" instead of an empty supplier history. Idempotent on re-run.
+    # Isolate on a FRESH engine: this test uses the AMBIENT global engine (no db arg), so a prior test
+    # that swapped the engine / seeded supplier history would otherwise skew it (order-dependent flake).
+    # record_email_event + the history read both CREATE-IF-NOT-EXISTS their tables, so a fresh sqlite works.
+    from sqlalchemy import create_engine
+    from src.app.models import db as dbmod
     from src.app.services.supplier_catalog import seed_demo_supplier_history
     from src.app.services.supplier_inbox_reader import recent_supplier_context
-    n = seed_demo_supplier_history()
-    assert n >= 1
-    ctx = recent_supplier_context(domain="approved-supplier.example", tenant_id="default")
-    assert ctx is not None and ctx.observations >= 1
-    assert ctx.last_invoice_cents is not None  # a "last quote" proxy lands on the draft evidence
+    prev = dbmod.get_engine()
+    dbmod.set_engine(create_engine(f"sqlite+pysqlite:///{tmp_path / 'supplier_hist.sqlite'}", future=True))
+    try:
+        n = seed_demo_supplier_history()
+        assert n >= 1
+        ctx = recent_supplier_context(domain="approved-supplier.example", tenant_id="default")
+        assert ctx is not None and ctx.observations >= 1
+        assert ctx.last_invoice_cents is not None  # a "last quote" proxy lands on the draft evidence
+    finally:
+        dbmod.set_engine(prev)
     assert seed_demo_supplier_history() == 0  # idempotent — re-run records nothing new
 
 
