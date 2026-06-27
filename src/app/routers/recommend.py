@@ -10839,144 +10839,18 @@ def suggest(
             "source": _id_source,
             "confidence": _id_result.get("confidence"),
         }
-    try:
-        payload = _apply_image_security_response_fields(
-            payload,
-            analysis_details=analysis.get("details") or {},
-            severity=severity,
-            image_reupload_reasons=image_reupload_reasons,
-            image_cv_signals_parsed=image_cv_signals_parsed,
-        )
-        _image_untrusted = bool(image_reupload_reasons)
-        _security_route = "visual_sanitized" if _image_untrusted else "allow"
-        _security_summary = (
-            "Image flagged; using text-only fallback until a clean product photo is uploaded."
-            if _image_untrusted
-            else None
-        )
-        if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
-            _issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
-            _warranty = _infer_account_warranty_status(uid)
-            results = []
-            payload["results"] = []
-            assistant_message = (
-                "This looks like a damaged device. I can help with repair, warranty, or return steps. "
-                + (
-                    "I found account order history to review next."
-                    if str(_warranty.get("status") or "").strip().lower() == "found"
-                    else "Upload a receipt or order reference if you have one."
-                )
-            )
-            payload["right_panel"] = {
-                "mode": "support",
-                "show_tiers": False,
-                "summary": f"Support flow active for {(_issue or 'device issue').replace('_', ' ')}.",
-                "image_untrusted": _image_untrusted,
-                "image_degraded_mode": _image_untrusted,
-                "security_route": _security_route,
-                "security_summary": _security_summary,
-                "support_cards": [
-                    {
-                        "id": "warranty_status",
-                        "title": "Warranty/Coverage",
-                        "status": _warranty.get("status") or "unknown",
-                        "message": _warranty.get("message") or "Sign in and provide order details to verify coverage.",
-                        "order_ref": _warranty.get("order_ref"),
-                    },
-                    {
-                        "id": "repair_return",
-                        "title": "Repair / Return Path",
-                        "status": "review",
-                        "message": "Upload clear device and receipt photos to determine repair, return, or in-store diagnostics.",
-                    },
-                    {
-                        "id": "escalation",
-                        "title": "Escalation",
-                        "status": "available",
-                        "message": "Escalate to human support if automated checks remain inconclusive.",
-                    },
-                ],
-                "faq_playbooks": [
-                    {
-                        "id": "faq_bsod",
-                        "title": "Blue Screen quick checks",
-                        "steps": ["Boot safe mode", "Rollback latest drivers", "Collect Event Viewer logs"],
-                    },
-                    {
-                        "id": "faq_cracked_screen",
-                        "title": "Physical damage claims",
-                        "steps": ["Capture damage close-up", "Capture serial/label", "Attach receipt or order reference"],
-                    },
-                ],
-                "parallel_agents": [
-                    "CV_Triage_Agent",
-                    "OCR_QR_Agent",
-                    "Device_Match_Agent",
-                    "Warranty_Agent",
-                    "Support_Playbook_Agent",
-                    "Security_Observer_Agent",
-                ],
-            }
-        else:
-            _rt = payload.get("recommendation_tiers") if isinstance(payload.get("recommendation_tiers"), dict) else {}
-            payload["right_panel"] = {
-                "mode": "shopping",
-                "show_tiers": bool(_rt.get("show_split")),
-                "budget_status": str((payload.get("budget_viability") or {}).get("status") or "unknown"),
-                "image_untrusted": _image_untrusted,
-                "image_degraded_mode": _image_untrusted,
-                "security_route": _security_route,
-                "security_summary": _security_summary,
-                "lower_tier": {
-                    "title": "Minimum / budget-fit",
-                    "items": (_rt.get("minimum") or [])[:4],
-                    "explanation": _rt.get("minimum_explanation"),
-                },
-                "higher_tier": {
-                    "title": "Recommended / performance-fit",
-                    "items": (_rt.get("recommended") or [])[:4],
-                    "explanation": _rt.get("recommended_explanation"),
-                },
-            }
-        _trace_for_ui_event = decision_id or trace_id
-        if _trace_for_ui_event:
-            try:
-                _safe_right_panel = json.loads(json.dumps(payload.get("right_panel"), ensure_ascii=False, default=str))
-            except Exception:
-                _safe_right_panel = {"mode": str((payload.get("right_panel") or {}).get("mode") or "")}
-            log_trace_event(
-                trace_id=_trace_for_ui_event,
-                event_type="recommendation_result",
-                source_type="agent",
-                source_id="Product_Ranking_Agent",
-                target_type="ui",
-                target_id="right_panel",
-                payload={
-                    "products_summary": [
-                        {
-                            "sku": str(p.get("sku") or ""),
-                            "name": str(p.get("name") or ""),
-                            "score_norm": float(p.get("score_norm")) if isinstance(p.get("score_norm"), (int, float)) else p.get("score_norm"),
-                            "reasons": [str(x) for x in ((p.get("reasons") or (p.get("factors") or {}).get("positive") or [])[:3])],
-                            "reason_codes": (p.get("reason_codes") or [])[:3],
-                            "price": float(p.get("price")) if isinstance(p.get("price"), (int, float)) else p.get("price"),
-                        }
-                        for p in (results or [])[:8]
-                        if isinstance(p, dict)
-                    ],
-                    "right_panel_contract": _safe_right_panel,
-                    "intent_snapshot": {
-                        "persona": constraints.get("buyer_persona"),
-                        "use_case_key": (payload.get("use_case_analysis") or {}).get("use_case_key"),
-                        "budget_min": constraints.get("budget_min"),
-                        "budget_max": constraints.get("budget_max"),
-                        "intent": (nlp or {}).get("intent"),
-                        "source": "recommend.final_payload",
-                    },
-                },
-            )
-    except Exception:
-        pass
+    # Right-panel assembly (support/shopping contract + image-security fields + UI trace event), extracted
+    # to recommend_rightpanel_stage. The stage owns the try/except: pass and returns the current
+    # (payload, results, assistant_message) so partial-failure semantics are identical to the inline block.
+    from src.app.services.recommend_rightpanel_stage import assemble_right_panel as _assemble_right_panel
+    payload, results, assistant_message = _assemble_right_panel(
+        payload, results=results, assistant_message=assistant_message,
+        analysis=analysis, severity=severity, image_reupload_reasons=image_reupload_reasons,
+        image_cv_signals_parsed=image_cv_signals_parsed, turn_intent=turn_intent,
+        constraints=constraints, uid=uid, decision_id=decision_id, trace_id=trace_id, nlp=nlp,
+        apply_image_security_fields=_apply_image_security_response_fields,
+        infer_warranty=_infer_account_warranty_status, trace_fn=log_trace_event,
+    )
     if not results:
         try:
             fallback_alternatives = []
