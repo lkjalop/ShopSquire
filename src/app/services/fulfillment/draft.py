@@ -68,6 +68,8 @@ class SupplierDraft:
     evidence: List[Dict[str, Any]]
     commercial_scope: Dict[str, Any]   # {item_ref, quantity, estimated_value_cents} — never a unit cost
 
+    recipient_email: Optional[str] = None
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -269,12 +271,21 @@ def build_draft(
         f"supplier: {supplier_reason}",
         f"recipient resolved from allowlist ({domain}), not buyer input",
     ] + [f"{e.source}: {e.summary}" for e in evidence]
+    recipient_email = None
+    for e in evidence:
+        if e.source != "supplier_history":
+            continue
+        candidate = str((e.payload or {}).get("contact_email") or "").strip()
+        if candidate and candidate.lower().endswith(f"@{domain.lower()}"):
+            recipient_email = candidate
+            break
     return SupplierDraft(
         recipient_ref=recipient_ref, recipient_domain=domain, subject=subject, body=body,
         content_hash=content_hash(subject, body), confidence=_confidence(reliability, evidence),
         rationale=rationale, evidence=[asdict(e) for e in evidence],
         commercial_scope={"item_ref": item_ref, "quantity": int(quantity),
                           "estimated_value_cents": int(estimated_value_cents)},
+        recipient_email=recipient_email,
     )
 
 

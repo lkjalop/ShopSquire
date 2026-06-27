@@ -56,7 +56,8 @@ def send_approved(db, *, case_id: str, actor: Actor, approval_content_hash: Opti
         return workflow.TransitionResult(False, case_id, cur.state, "stale_approval", http_status=409)
     from src.app.services.fulfillment.transport import get_transport
     tx = transport or get_transport()
-    sent = tx.send(to=str(draft.get("recipient_domain") or ""), subject=str(draft.get("subject") or ""),
+    recipient = str(draft.get("recipient_email") or draft.get("recipient_domain") or "")
+    sent = tx.send(to=recipient, subject=str(draft.get("subject") or ""),
                    body=str(draft.get("body") or ""), idempotency_key=str(draft.get("content_hash") or ""))
     if getattr(sent, "status", "failed") != "sent":
         # the real transport did not transmit → do NOT record a send; the case stays APPROVED_TO_SEND.
@@ -66,9 +67,10 @@ def send_approved(db, *, case_id: str, actor: Actor, approval_content_hash: Opti
         db, case_id=case_id, event="external_message_sent", actor=actor,
         reason_code="human_approved_send",
         evidence={"content_hash": draft.get("content_hash"), "provider_ref": provider_ref,
-                  "recipient_domain": draft.get("recipient_domain"), "transport": getattr(sent, "detail", "")},
+                  "recipient": recipient, "recipient_domain": draft.get("recipient_domain"),
+                  "transport": getattr(sent, "detail", "")},
         state_patch={"outbound": {"provider_ref": provider_ref, "recipient_domain": draft.get("recipient_domain"),
-                                  "content_hash": draft.get("content_hash"), "status": "sent",
+                                  "recipient": recipient, "content_hash": draft.get("content_hash"), "status": "sent",
                                   "transport": getattr(sent, "detail", "")}},
         tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
 

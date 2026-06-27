@@ -62,6 +62,24 @@ def test_draft_adds_supplier_history_evidence_when_known():
     assert "1180" in hist[0].summary
 
 
+def test_draft_carries_verified_recipient_email_from_supplier_context():
+    from src.app.services.fulfillment.draft import build_draft
+    rank = lambda db, item, tenant: [{"id": "SUP-7", "domain": "approved-supplier.example", "reliability": 0.9}]
+    allow = lambda domain: domain == "approved-supplier.example"
+    inbox = lambda domain, tenant: {
+        "summary": "verified supplier contact",
+        "domain": domain,
+        "contact_email": "orders@approved-supplier.example",
+    }
+
+    draft = build_draft(None, item_ref="LAP-021", quantity=6, case_ref="FC-1",
+                        rank_fn=rank, allowlist_fn=allow, inbox_fn=inbox)
+
+    assert draft is not None
+    assert draft.recipient_domain == "approved-supplier.example"
+    assert draft.recipient_email == "orders@approved-supplier.example"
+
+
 def test_draft_adds_no_history_when_none():
     from src.app.services.fulfillment.draft import gather_evidence
     ev = gather_evidence(None, item_ref="LAP-021", recipient_domain="approved-supplier.example",

@@ -137,3 +137,35 @@ def cheapest_wholesale_cents(db, sku: str) -> Optional[int]:
         return int(round(float(row[0]) * 100))
     except Exception:
         return None
+
+
+# Verified vendor contacts for the demo suppliers — so a draft resolves a CONTACT EMAIL (not just the
+# domain) via Supplier_Inbox_Reader → kyv_vendors.contact_email. Each must be on its own approved domain.
+_DEMO_VENDOR_CONTACTS = [
+    ("TechData Procurement", "approved-supplier.example", "orders@approved-supplier.example"),
+    ("BulkParts Co", "bulk-parts.example", "sales@bulk-parts.example"),
+]
+
+
+def _register_vendor_if_absent(lookup, register, *, tenant_id, name, domain, email) -> bool:
+    try:
+        if lookup(tenant_id=tenant_id, domain=domain):
+            return False
+        res = register(tenant_id=tenant_id, legal_name=name, verified_domain=domain,
+                       contact_email=email, risk_tier="low") or {}
+        return bool(res.get("ok", True))
+    except Exception:
+        return False  # best-effort seed — observable return, never a silent swallow
+
+
+def seed_demo_vendor_contacts(*, tenant_id: str = "default") -> int:
+    """Register the demo suppliers as KYV vendors with a verified contact email (idempotent). Returns the
+    count newly registered. After this, the draft's recipient_email resolves to the contact email instead
+    of the bare domain (the live-packet polish fix)."""
+    try:
+        from src.app.security.kyv_registry import lookup_vendor_by_domain, register_vendor
+    except Exception:
+        return 0
+    return sum(1 for name, domain, email in _DEMO_VENDOR_CONTACTS
+               if _register_vendor_if_absent(lookup_vendor_by_domain, register_vendor,
+                                             tenant_id=tenant_id, name=name, domain=domain, email=email))

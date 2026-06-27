@@ -44,6 +44,16 @@ def test_cheapest_wholesale_cents_picks_lowest(db):
     assert cheapest_wholesale_cents(db, "no-such-sku") is None
 
 
+def test_seed_demo_vendor_contacts_registers_verified_email():
+    # the live-packet fix: seed a KYV vendor so the draft resolves a CONTACT EMAIL, not the bare domain
+    from src.app.security.kyv_registry import lookup_vendor_by_domain
+    from src.app.services.supplier_catalog import seed_demo_vendor_contacts
+    seed_demo_vendor_contacts()
+    v = lookup_vendor_by_domain(tenant_id="default", domain="approved-supplier.example")
+    assert v and v.get("contact_email") == "orders@approved-supplier.example"
+    assert seed_demo_vendor_contacts() == 0  # idempotent — re-run registers nothing new
+
+
 def test_ranking_query_shape_resolves_two_suppliers(db):
     # the exact join inventory_agent._get_best_supplier runs must return the seeded suppliers
     seed_demo(db, skus=["LAP-021"])
