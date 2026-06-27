@@ -295,9 +295,14 @@ def _ensure_minimal_sqlite_tables(bind):
                     "  id TEXT PRIMARY KEY, decision_id TEXT, tenant_id TEXT, action TEXT,\n"
                     "  value_cents INT, decision TEXT, rule_id TEXT, reason TEXT,\n"
                     "  authority TEXT, context TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)",
+                    # Canonical schema shared by the authz engine, the resolver, and domain enqueues
+                    # (market-intel/procurement). MUST carry terminal_outcome + resolved_outcome — the
+                    # prior schema (domain/kind/payload/outcome) silently broke the authz enqueue.
                     "CREATE TABLE IF NOT EXISTS exception_queue (\n"
-                    "  id TEXT PRIMARY KEY, tenant_id TEXT, domain TEXT, kind TEXT,\n"
-                    "  payload TEXT, outcome TEXT, status TEXT DEFAULT 'open',\n"
+                    "  id TEXT PRIMARY KEY, tenant_id TEXT, domain TEXT, ref_id TEXT,\n"
+                    "  trace_id TEXT, action TEXT, requester TEXT, terminal_outcome TEXT,\n"
+                    "  reason TEXT, subject_id TEXT, value_usd REAL, residual TEXT, payload TEXT,\n"
+                    "  status TEXT DEFAULT 'open', resolved_outcome TEXT,\n"
                     "  created_at TEXT DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT)",
                     "CREATE TABLE IF NOT EXISTS retry_tracking (\n"
                     "  id TEXT PRIMARY KEY, ref_id TEXT, operation TEXT, attempts INT DEFAULT 0,\n"

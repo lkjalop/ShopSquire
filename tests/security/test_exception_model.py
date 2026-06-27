@@ -136,3 +136,39 @@ def test_resolver_is_idempotent(sqlite_db):
     second = resolve_open_exceptions()  # nothing left open
     assert first["scanned"] == 1
     assert second["scanned"] == 0
+
+
+# ── domain enqueue (market-intel / procurement) reaches a governed disposition ──
+def test_enqueue_exception_is_resolvable(sqlite_db):
+    from src.app.services.exception_resolver import enqueue_exception
+    ok = enqueue_exception(domain="procurement", terminal_outcome="no_approved_supplier", ref_id="fc-1")
+    assert ok is True
+    summary = resolve_open_exceptions()
+    assert summary["scanned"] == 1 and summary["resolved"] == 1  # autonomously resolved, not stuck open
+
+
+def test_new_domain_terminals_all_have_a_resolution_and_stay_autonomous():
+    for t in ("no_approved_supplier", "quote_parse_failed", "supplier_response_quarantined",
+              "recipient_blocked", "stale_signal", "pipeline_error", "buyer_declined"):
+        r = resolve_terminal(t)
+        assert r.resolution_status in ("resolved", "retry_scheduled"), f"{t} fell through to governance"
+    # doctrine intact: escalate_governance is still the ONLY non-autonomous terminal
+    non_auto = {k for k, v in TERMINAL_RESOLUTIONS.items() if not v.autonomous}
+    assert non_auto == {"escalate_governance"}
+
+
+def test_ensure_exception_table_repairs_legacy_schema():
+    # a table created with the OLD db.py schema (no terminal_outcome/resolved_outcome) must be repaired
+    from sqlalchemy import create_engine, text as _t
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from src.app.services.exception_resolver import ensure_exception_table
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    with eng.begin() as c:
+        c.exec_driver_sql("CREATE TABLE exception_queue (id TEXT PRIMARY KEY, tenant_id TEXT, domain TEXT, "
+                          "kind TEXT, payload TEXT, outcome TEXT, status TEXT, created_at TEXT, resolved_at TEXT)")
+    s = sessionmaker(bind=eng)()
+    ensure_exception_table(s)
+    cols = {r[1] for r in s.execute(_t("PRAGMA table_info(exception_queue)")).fetchall()}
+    s.close()
+    assert {"terminal_outcome", "resolved_outcome", "ref_id"} <= cols

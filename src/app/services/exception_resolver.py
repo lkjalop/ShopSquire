@@ -49,7 +49,74 @@ TERMINAL_RESOLUTIONS: Dict[str, ExceptionResolution] = {
     "safe_pause":                ExceptionResolution(True,  DISP_RESOLVED,   "paused safely; re-evaluated on next signal"),
     "defer_retry":               ExceptionResolution(True,  DISP_RETRY,      "deferred for bounded automatic retry"),
     "escalate_governance":       ExceptionResolution(False, DISP_GOVERNANCE, "routed to GOVERNANCE (allowed non-runtime boundary)"),
+    # ── procurement terminal failures (fulfillment FAILURE_STATES) — domain-blind outcome labels ──
+    "no_approved_supplier":        ExceptionResolution(True, DISP_RESOLVED, "paused: no approved supplier; re-evaluated when coverage is added"),
+    "recipient_blocked":           ExceptionResolution(True, DISP_RESOLVED, "blocked recipient rejected per allowlist policy"),
+    "quote_expired":               ExceptionResolution(True, DISP_RESOLVED, "expired quote: paused; re-request on next cycle"),
+    "quote_parse_failed":          ExceptionResolution(True, DISP_RETRY,    "unparseable supplier reply: deferred for re-parse"),
+    "supplier_response_quarantined": ExceptionResolution(True, DISP_RESOLVED, "untrusted supplier reply quarantined; observer notified"),
+    "delivery_constraint_unmet":   ExceptionResolution(True, DISP_RESOLVED, "delivery constraint unmet: paused for re-options"),
+    "policy_blocked":              ExceptionResolution(True, DISP_RESOLVED, "blocked per policy; requester informed"),
+    "buyer_declined":              ExceptionResolution(True, DISP_RESOLVED, "buyer declined; case closed safely"),
+    # ── market-intel terminal failures ──
+    "stale_signal":                ExceptionResolution(True, DISP_RESOLVED, "stale market signal quarantined"),
+    "low_confidence_finding":      ExceptionResolution(True, DISP_RESOLVED, "below-confidence finding: no action (safe pause)"),
+    "pipeline_error":              ExceptionResolution(True, DISP_RETRY,    "market pipeline error: deferred for bounded retry"),
 }
+
+# Canonical exception_queue columns (the schema the resolver + authz + the test agree on). enqueue_exception
+# and ensure_exception_table own this so a domain (market/procurement) can queue without knowing the schema.
+_EXC_COLUMNS = (
+    ("id", "TEXT"), ("tenant_id", "TEXT"), ("domain", "TEXT"), ("ref_id", "TEXT"),
+    ("trace_id", "TEXT"), ("action", "TEXT"), ("requester", "TEXT"),
+    ("terminal_outcome", "TEXT"), ("reason", "TEXT"), ("subject_id", "TEXT"),
+    ("value_usd", "REAL"), ("residual", "TEXT"), ("payload", "TEXT"),
+    ("status", "TEXT"), ("resolved_outcome", "TEXT"),
+    ("created_at", "TEXT"), ("resolved_at", "TEXT"),
+)
+
+
+def ensure_exception_table(db) -> None:
+    """Create exception_queue with the canonical schema IF absent, and idempotently ADD any missing
+    canonical column to a pre-existing (possibly divergent) table. This REPAIRS the legacy db.py schema
+    that lacked terminal_outcome/resolved_outcome — without it the authz + domain enqueues silently fail."""
+    from sqlalchemy import text as _t
+    cols = ", ".join(f"{n} {ty}" for n, ty in _EXC_COLUMNS)
+    db.execute(_t(f"CREATE TABLE IF NOT EXISTS exception_queue ({cols})"))
+    try:
+        from sqlalchemy import inspect as _inspect
+        have = {c["name"] for c in _inspect(db.connection()).get_columns("exception_queue")}
+    except Exception:
+        return  # introspection unavailable → the CREATE above already has every column on a fresh table
+    for name, ty in _EXC_COLUMNS:
+        if name not in have:
+            db.execute(_t(f"ALTER TABLE exception_queue ADD COLUMN {name} {ty}"))
+
+
+def enqueue_exception(*, domain: str, terminal_outcome: str, ref_id=None, reason=None,
+                      tenant_id: str = "default", trace_id=None) -> bool:
+    """Queue one exception for the resolver — the domain-agnostic writer market-intel + procurement use so
+    a terminal failure reaches a governed disposition instead of being silently swallowed. Best-effort;
+    returns True on write. Never raises."""
+    try:
+        import uuid as _uuid
+        from sqlalchemy import text as _t
+        from src.app.models.db import db_session
+        from src.app.security.authorization_engine import _now_iso
+        with db_session() as db:
+            ensure_exception_table(db)
+            db.execute(
+                _t("INSERT INTO exception_queue (id, tenant_id, domain, ref_id, terminal_outcome, reason, "
+                   "status, created_at) VALUES (:id,:tn,:dm,:rf,:to,:rs,'open',:ts)"),
+                {"id": str(_uuid.uuid4()), "tn": str(tenant_id or "default"), "dm": str(domain or ""),
+                 "rf": (str(ref_id) if ref_id is not None else None), "to": str(terminal_outcome or ""),
+                 "rs": (str(reason) if reason is not None else None), "ts": _now_iso()},
+            )
+            db.commit()
+        return True
+    except Exception as exc:
+        _log.debug("enqueue_exception failed (%s/%s): %r", domain, terminal_outcome, exc)
+        return False
 
 
 def resolve_terminal(outcome: str) -> ExceptionResolution:
@@ -72,6 +139,7 @@ def resolve_open_exceptions(limit: int = 200) -> Dict[str, int]:
         from src.app.models.db import db_session
         from src.app.security.authorization_engine import _now_iso
         with db_session() as db:
+            ensure_exception_table(db)  # repair the schema (adds terminal_outcome/resolved_outcome if legacy)
             rows = db.execute(
                 text(
                     "SELECT id, terminal_outcome FROM exception_queue "
