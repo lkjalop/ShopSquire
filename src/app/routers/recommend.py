@@ -6923,51 +6923,17 @@ def suggest(
     # level the catalog can confirm. A VLM/OCR-guessed brand the catalog can't
     # fulfil is DROPPED (not asserted), and the residual lowers identity confidence
     # so the existing NQE `ask_image_model` clarifying question fires. Env-gated.
-    if incoming_image_payload and str(os.getenv("GROUNDING_LADDER_ENABLED", "1")).strip().lower() in ("1", "true", "yes"):
-        try:
-            from src.app.services.grounding_ladder import resolve_grounded_identity, get_catalog_brands
-            _gl_src = str(locals().get("_id_source") or "")
-            _grounded = resolve_grounded_identity(
-                query=query,
-                text_identity=_id_result if _gl_src == "text_heuristic" else None,
-                vision_identity=_id_result if _gl_src in ("vision_image", "vision_brand_rescue") else None,
-                image_bytes=locals().get("_image_blob"),
-                catalog_brands=get_catalog_brands(db),
-                budget_max=float(constraints.get("budget_max")) if constraints.get("budget_max") else None,
-                trace_id=trace_id,
-            )
-            # Grounding gate: drop an ungrounded/conflicted brand rather than assert it.
-            if constraints.get("brand") and not _grounded.brand:
-                _dropped = constraints.pop("brand", None)
-                constraints.pop("_request_brand_hint", None)
-                if isinstance(constraints.get("brands"), list):
-                    _kept = [b for b in constraints["brands"] if str(b).strip().lower() != str(_dropped).strip().lower()]
-                    constraints["brands"] = _kept or None
-                    if not constraints["brands"]:
-                        constraints.pop("brands", None)
-                strict_image_brand_hint = None
-                log_trace_event(
-                    trace_id, "grounding_ladder_brand_dropped", "agent", "Product_Identity_Agent",
-                    "system", None, {"dropped_brand": _dropped, "tier": _grounded.tier_name, "reason": "ungrounded_or_conflict"},
-                )
-            # Identity confidence now reflects the grounded tier (drives NQE residual).
-            image_identity_confidence = float(_grounded.confidence)
-            constraints["_grounded_tier"] = _grounded.tier_name
-            constraints["_identity_confidence_label"] = _grounded.confidence_label
-            if _grounded.residual_question:
-                constraints["_identity_residual_question"] = _grounded.residual_question
-            log_trace_event(
-                trace_id, "grounding_ladder", "agent", "Product_Identity_Agent",
-                "system", None, _grounded.to_dict(),
-            )
-        except Exception as _gl_exc:
-            # P1: never swallow a grounding failure silently — it degrades brand grounding
-            # (the ASUS-class bug) invisibly. Record it against the trace, then continue.
-            log_trace_event(
-                trace_id, "stage_partial_failure", "system", "image_grounding", "system", None,
-                {"stage": "image_grounding", "error": f"{type(_gl_exc).__name__}: {_gl_exc}",
-                 "severity": "warn", "degraded": True},
-            )
+    # Grounding ladder extracted to recommend_grounding_stage; behaviour-preserving (mutates constraints
+    # in place, returns the grounded confidence + brand hint). id_result/image_blob are passed via
+    # locals().get so an absent _id_result reproduces the inline NameError→skip exactly.
+    from src.app.services.recommend_grounding_stage import run_grounding_ladder as _run_grounding_ladder
+    _gl_enabled = str(os.getenv("GROUNDING_LADDER_ENABLED", "1")).strip().lower() in ("1", "true", "yes")
+    image_identity_confidence, strict_image_brand_hint = _run_grounding_ladder(
+        query=query, constraints=constraints, incoming_image_payload=incoming_image_payload,
+        id_source=locals().get("_id_source"), id_result=locals().get("_id_result"),
+        image_blob=locals().get("_image_blob"), image_identity_confidence=image_identity_confidence,
+        strict_image_brand_hint=strict_image_brand_hint, db=db, trace_id=trace_id,
+        trace_fn=log_trace_event, enabled=_gl_enabled)
     if incoming_image_payload and image_identity_confidence < 0.45:
         image_reupload_reasons.append("identity_confidence_low")
     if incoming_image_payload and bool(catalog_relevance.get("off_domain")):
