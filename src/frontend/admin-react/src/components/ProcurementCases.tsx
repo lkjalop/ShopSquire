@@ -1,30 +1,29 @@
 /**
- * ProcurementCases — the operator control room for auditable procurement.
+ * ProcurementCases — the operator control room for auditable procurement (orchestrator).
  *
- * Composes the existing fulfilment API: list cases, open one, walk its journey, and drive the
- * operator/agent actions. Each button maps to ONE backend transition (the workflow enforces the
- * actor + the two gates), so the operator can only do what the case's state permits:
- *   COMMITTED            → Draft quote (agent) → Request approval (agent)
- *   AWAITING_APPROVAL    → Approve & send (HUMAN, GATE 2 — hash-checked)
- *   QUOTE_SENT           → Trigger supplier reply (DEMO) → parse
- *   QUOTE_RECEIVED       → Validate quote (HUMAN; expired hard-rejects)
- *   QUOTE_VALIDATED      → Generate options (agent)
- * The exact pending email + its content-hash, the parsed quote with evidence spans, and the full
- * bitemporal journey are all inspectable here.
+ * Owns the case state + handlers and composes the extracted pieces:
+ *   procurement/CaseQueue          — searchable/filterable case queue
+ *   procurement/ActionBar          — the state-driven workflow buttons (one button = one transition)
+ *   procurement/SupplierDraftPacket — the supplier-email approval packet (recipient/scope/gate/evidence/edit)
+ *   procurement/QuotePacket        — parsed quote + the resulting PO
+ *   procurement/CaseJourney        — bitemporal time-travel (as-of) + the transition journey
+ * The two gates (buyer commitment, human send) are enforced by the backend workflow; this UI only offers
+ * what the case's state permits and surfaces the bitemporal trace.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcCaseAsOf, fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcEconomics, fcEditDraft, fcExecutePO,
-  fcGenerateOptions, fcProposePO, fcRequestApproval, fcValidateQuote,
+  fcCaseAsOf, fcEconomics, fcEditDraft,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
   type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
 } from '../api';
+import ActionBar from './procurement/ActionBar';
+import CaseJourney from './procurement/CaseJourney';
+import CaseQueue from './procurement/CaseQueue';
+import QuotePacket from './procurement/QuotePacket';
+import SupplierDraftPacket from './procurement/SupplierDraftPacket';
 
 const dollars = (c?: number) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`);
 const pct = (r?: number) => (r == null ? '—' : `${(r * 100).toFixed(1)}%`);
-
-const SCENARIOS = ['full_quote', 'partial_availability', 'late_delivery', 'substitute_offer',
-  'expired_quote', 'untrusted_sender', 'contradictory_quantity'];
 
 export function ProcurementCases() {
   const [cases, setCases] = useState<FulfillmentCaseRow[]>([]);
@@ -58,12 +57,17 @@ export function ProcurementCases() {
   const parsed = (view?.state_json?.parsed_quote || view?.state_json?.validated_quote || {}) as Record<string, any>;
   const inbound = (view?.state_json?.inbound || {}) as Record<string, any>;
   const po = (view?.state_json?.purchase_order || {}) as Record<string, any>;
+  const availability = (view?.state_json?.availability || {}) as Record<string, any>;
   const state = view?.state || '';
+  const draftChanged = Boolean(draft.subject || draft.body)
+    && (editSubject !== String(draft.subject || '') || editBody !== String(draft.body || ''));
+  const draftEvidence = Array.isArray(draft.evidence) ? draft.evidence : [];
+  const recipientDisplay = draft.recipient_email || draft.recipient_domain || 'not resolved';
+  const draftItemRef = String(draft.commercial_scope?.item_ref || availability.item_ref || '').trim();
+  const draftQty = Number(draft.commercial_scope?.quantity || availability.shortfall || availability.requested_qty || 0);
   // keep the editable draft fields in sync with the persisted draft (re-syncs after an edit re-hashes).
   useEffect(() => { setEditSubject(draft.subject || ''); setEditBody(draft.body || ''); }, [draft.content_hash]);
-  // GATE 2 send + PO approval are the two HUMAN-only stops — surface them as a badge.
   const humanGate = state === 'AWAITING_APPROVAL' || state === 'PROCUREMENT_APPROVAL_REQUIRED';
-  // the deterministic sandbox tags every reply with a DEMO-MSG- ref / .example sender (never real).
   const isDemoReply = String(inbound.provider_ref || '').startsWith('DEMO-')
     || String(inbound.sender_domain || '').endsWith('.example');
 
@@ -74,25 +78,17 @@ export function ProcurementCases() {
     finally { setBusy(false); }
   };
 
+  const onEconomics = () => fcEconomics(sel)
+    .then((e) => setEcon((e as DealEconomics)?.margin_pct != null ? (e as DealEconomics) : null))
+    .catch((er: any) => setError(er?.message || 'economics failed'));
+  const onReconstruct = () => fcCaseAsOf(sel, asOfT)
+    .then((v) => setAsOf({ as_of: v.as_of, state: v.state }))
+    .catch((e: any) => setError(e?.message || 'as-of failed'));
+
   return (
     <div className="procurement-cases" data-testid="procurement-cases">
       <div style={{ display: 'flex', gap: 16 }}>
-        <aside style={{ minWidth: 280 }}>
-          <h3>Procurement Cases <button onClick={loadList}>↻</button></h3>
-          <table>
-            <thead><tr><th>Case</th><th>Status</th></tr></thead>
-            <tbody>
-              {cases.map((c) => (
-                <tr key={c.case_id} onClick={() => setSel(c.case_id)}
-                    style={{ cursor: 'pointer', fontWeight: c.case_id === sel ? 700 : 400 }}>
-                  <td>{c.case_id.slice(0, 8)}</td>
-                  <td>{c.status?.replace(/_/g, ' ').toLowerCase()}</td>
-                </tr>
-              ))}
-              {cases.length === 0 && <tr><td colSpan={2}><em>no cases</em></td></tr>}
-            </tbody>
-          </table>
-        </aside>
+        <CaseQueue cases={cases} sel={sel} onSelect={setSel} onRefresh={loadList} />
 
         {view && (
           <section style={{ flex: 1 }}>
@@ -107,67 +103,9 @@ export function ProcurementCases() {
             </h3>
             {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
 
-            <div className="actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
-              {state === 'COMMITTED' && (
-                <>
-                  <button disabled={busy} data-testid="op-draft"
-                          onClick={() => run(() => fcDraftQuote(sel, draft.commercial_scope?.item_ref || 'SKU-1', 6))}>
-                    Draft quote (agent)
-                  </button>
-                </>
-              )}
-              {state === 'QUOTE_DRAFTED' && (
-                <button disabled={busy} data-testid="op-request-approval"
-                        onClick={() => run(() => fcRequestApproval(sel))}>Request approval</button>
-              )}
-              {(state === 'AWAITING_APPROVAL' || state === 'APPROVED_TO_SEND') && (
-                <button disabled={busy} data-testid="op-dispatch"
-                        onClick={() => run(() => fcDispatch(sel, draft.content_hash || ''))}>
-                  Approve &amp; send (GATE 2)
-                </button>
-              )}
-              {state === 'QUOTE_SENT' && (
-                <>
-                  <select value={scenario} onChange={(e) => setScenario(e.target.value)} data-testid="op-scenario">
-                    {SCENARIOS.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <button disabled={busy} data-testid="op-demo-reply"
-                          onClick={() => run(() => fcDemoReply(sel, scenario, 6))}>Trigger supplier reply</button>
-                  <span style={{ fontSize: 11, color: '#b45309', fontWeight: 700 }}>SANDBOX SUPPLIER</span>
-                </>
-              )}
-              {state === 'QUOTE_RECEIVED' && (
-                <button disabled={busy} data-testid="op-validate"
-                        onClick={() => run(() => fcValidateQuote(sel))}>Validate quote</button>
-              )}
-              {state === 'QUOTE_VALIDATED' && (
-                <button disabled={busy} data-testid="op-options"
-                        onClick={() => run(() => fcGenerateOptions(sel))}>Generate options</button>
-              )}
-              {state === 'SELECTED' && (
-                <button disabled={busy} data-testid="op-propose-po"
-                        onClick={() => run(() => fcProposePO(sel))}>Propose PO (agent)</button>
-              )}
-              {state === 'PROCUREMENT_APPROVAL_REQUIRED' && (
-                <button disabled={busy} data-testid="op-execute-po"
-                        onClick={() => run(() => fcExecutePO(sel, `po-${sel}`))}>
-                  Approve &amp; create PO (HUMAN)
-                </button>
-              )}
-              {(state === 'READY_TO_SHIP' || state === 'PARTIALLY_READY') && (
-                <button disabled={busy} data-testid="op-complete"
-                        onClick={() => run(() => fcCompleteCase(sel))}>Mark completed</button>
-              )}
-              {['SELECTED', 'PROCUREMENT_APPROVAL_REQUIRED', 'PROCUREMENT_IN_PROGRESS', 'READY_TO_SHIP',
-                'PARTIALLY_READY', 'COMPLETED'].includes(state) && (
-                <button disabled={busy} data-testid="op-economics"
-                        onClick={() => fcEconomics(sel)
-                          .then((e) => setEcon((e as DealEconomics)?.margin_pct != null ? (e as DealEconomics) : null))
-                          .catch((er: any) => setError(er?.message || 'economics failed'))}>
-                  Deal economics
-                </button>
-              )}
-            </div>
+            <ActionBar sel={sel} state={state} busy={busy} draftItemRef={draftItemRef} draftQty={draftQty}
+                       draftChanged={draftChanged} draftHash={draft.content_hash} scenario={scenario}
+                       setScenario={setScenario} run={run} onEconomics={onEconomics} />
 
             {econ && (
               <details open data-testid="op-economics-panel">
@@ -180,93 +118,16 @@ export function ProcurementCases() {
               </details>
             )}
 
-            {draft.subject && (
-              <details open>
-                <summary>Outbound draft (content hash {String(draft.content_hash).slice(0, 8)})</summary>
-                <div><strong>To:</strong> {draft.recipient_domain}</div>
-                {state === 'AWAITING_APPROVAL' ? (
-                  <div data-testid="op-edit-draft" style={{ display: 'grid', gap: 4, margin: '6px 0' }}>
-                    <input value={editSubject} onChange={(e) => setEditSubject(e.target.value)}
-                           data-testid="op-edit-subject" placeholder="Subject" />
-                    <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={6}
-                              data-testid="op-edit-body" placeholder="Body" />
-                    <div>
-                      <button disabled={busy} data-testid="op-edit-save"
-                              onClick={() => run(() => fcEditDraft(sel, editSubject, editBody))}>
-                        Save edit (re-hash → re-approve)
-                      </button>
-                      <small style={{ marginLeft: 8, color: '#6b7280' }}>
-                        editing voids the prior approval; price/PO leaks are rejected
-                      </small>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div><strong>Subject:</strong> {draft.subject}</div>
-                    <pre style={{ whiteSpace: 'pre-wrap' }}>{draft.body}</pre>
-                  </>
-                )}
-                {Array.isArray(draft.rationale) && (
-                  <ul>{draft.rationale.map((r: string, i: number) => <li key={i}>{r}</li>)}</ul>
-                )}
-              </details>
-            )}
+            <SupplierDraftPacket draft={draft} state={state} recipientDisplay={recipientDisplay}
+                                 draftEvidence={draftEvidence} draftChanged={draftChanged}
+                                 editSubject={editSubject} setEditSubject={setEditSubject}
+                                 editBody={editBody} setEditBody={setEditBody} busy={busy}
+                                 onSaveEdit={() => run(() => fcEditDraft(sel, editSubject, editBody))} />
 
-            {parsed.quoted_quantity != null && (
-              <details open>
-                <summary>Parsed quote (confidence {parsed.confidence})
-                  {isDemoReply && (
-                    <span data-testid="op-demo-quote"
-                          style={{ marginLeft: 8, padding: '1px 5px', background: '#dbeafe', color: '#1e3a8a',
-                                   borderRadius: 4, fontSize: 11, fontWeight: 700 }}>
-                      DEMO QUOTE RESPONSE
-                    </span>
-                  )}
-                </summary>
-                <div>Qty {parsed.quoted_quantity} · unit {parsed.unit_amount_cents} · dispatch {parsed.dispatch_ready_at} · expires {parsed.quote_expires_at}</div>
-                {parsed.contradictory && <div style={{ color: 'orange' }}>⚠ contradictory quantity — review</div>}
-                {Array.isArray(parsed.evidence_spans) && (
-                  <ul>{parsed.evidence_spans.map((s: any, i: number) => <li key={i}>{s.field}: “{s.text}”</li>)}</ul>
-                )}
-              </details>
-            )}
+            <QuotePacket parsed={parsed} po={po} isDemoReply={isDemoReply} />
 
-            {po.status && (
-              <details open>
-                <summary>Purchase order {po.po_ref ? `(${po.po_ref})` : '(proposed)'}</summary>
-                {po.sandbox && <div style={{ color: '#b45309' }}>SANDBOX SUPPLIER — no real PO transmitted</div>}
-                <div>Status <strong>{po.status}</strong> · qty {po.quantity}
-                  {po.total_amount_cents != null && <> · wholesale total {po.total_amount_cents}c</>}</div>
-              </details>
-            )}
-
-            <details data-testid="op-asof">
-              <summary>Time-travel (as-of)</summary>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0' }}>
-                <input value={asOfT} onChange={(e) => setAsOfT(e.target.value)} data-testid="op-asof-input"
-                       placeholder="2026-06-26 09:05:15" style={{ minWidth: 200 }} />
-                <button disabled={busy || !asOfT} data-testid="op-asof-btn"
-                        onClick={() => fcCaseAsOf(sel, asOfT)
-                          .then((v) => setAsOf({ as_of: v.as_of, state: v.state }))
-                          .catch((e: any) => setError(e?.message || 'as-of failed'))}>
-                  Reconstruct
-                </button>
-                {asOf && <span data-testid="op-asof-result">state at {asOf.as_of}: <strong>{asOf.state}</strong></span>}
-              </div>
-              <small style={{ color: '#6b7280' }}>the bitemporal record — the case exactly as it was at that instant</small>
-            </details>
-
-            <details open>
-              <summary>Journey ({journey.length})</summary>
-              <ol>
-                {journey.map((e, i) => (
-                  <li key={i}>
-                    <code>{e.event}</code> → <strong>{e.state}</strong> by {e.actor_type}
-                    {e.reason_code ? ` (${e.reason_code})` : ''} <small>{e.valid_from}</small>
-                  </li>
-                ))}
-              </ol>
-            </details>
+            <CaseJourney journey={journey} asOfT={asOfT} setAsOfT={setAsOfT} asOf={asOf}
+                         onReconstruct={onReconstruct} busy={busy} />
           </section>
         )}
       </div>
