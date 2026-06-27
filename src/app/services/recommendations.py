@@ -672,13 +672,27 @@ class RecommendationService:
             if storage is not None and storage >= 512:
                 score += 0.8
                 reasons.append("use_case_storage_512")
-        elif use_case in ("business", "office_general", "office_executive", "business_professional"):
+        elif use_case in ("business", "office_general", "office_executive", "business_professional",
+                          "office_finance", "corporate", "office"):
+            # Corporate / work fleet: business-class build and productivity-grade machines win; the consumer
+            # gaming aesthetic is demoted here AND via the KB consumer_gaming_aesthetic exclusion below — so
+            # "work laptops" don't surface the gaming SKUs even when both sit in the same price band.
             if any(k in text for k in ("thinkpad", "latitude", "elitebook", "probook", "xps")):
                 score += 1.2
                 reasons.append("use_case_business_line")
+            if any(k in text for k in ('"use_case": "productivity"', '"use_case": "premium"', '"use_case": "business"')):
+                score += 1.0
+                reasons.append("use_case_business_class")
+            if ('"gaming_style": true' in text or '"use_case": "gaming"' in text
+                    or any(k in text for k in ("gaming laptop", "nitro", "tuf gaming", "omen", "predator", " rog "))):
+                score -= 1.5
+                reasons.append("use_case_not_business_gaming")
             if any(k in text for k in ("light", "ultrabook", "air")):
-                score += 0.6
+                score += 0.4
                 reasons.append("use_case_portable")
+            if ram is not None and ram >= 16:
+                score += 0.6
+                reasons.append("use_case_ram_16")
         elif use_case in ("student", "university_general", "note_taking_student", "law_student", "medical_student"):
             if price_cents is not None:
                 if price_cents <= 90000:
@@ -690,22 +704,19 @@ class RecommendationService:
             if any(k in text for k in ("light", "ultrabook", "2-in-1", "convertible")):
                 score += 0.6
                 reasons.append("use_case_student_portable")
-        elif use_case in ("office_finance",):
-            if ram is not None and ram >= 16:
-                score += 1.2
-                reasons.append("use_case_ram_16")
-            if cpu_high:
-                score += 0.8
-                reasons.append("use_case_cpu_high")
         elif use_case == "mobile":
             if any(k in text for k in ("thin", "light", "ultrabook", "air")):
                 score += 1.0
                 reasons.append("use_case_portable")
 
-        # KB exclusion penalties — fires for any use_case defined in use_case_kb.json
+        # KB exclusion penalties — fires for any use_case defined in use_case_kb.json. Resolve the
+        # inferred tag through the KB aliases first (e.g. "business"/"work"/"office" → "corporate"), so a
+        # legacy tag still lands on its canonical KB entry and the exclusion rules apply.
         try:
             _kb = _load_use_case_kb()
-            _uc_entry: dict = (_kb.get("use_cases") or {}).get(use_case, {})
+            _use_cases: dict = _kb.get("use_cases") or {}
+            _uc_key = use_case if use_case in _use_cases else (_kb.get("use_case_aliases") or {}).get(use_case, use_case)
+            _uc_entry: dict = _use_cases.get(_uc_key, {})
             _excl_rules: list = _uc_entry.get("exclusion_rules") or []
             _excl_w = float(
                 ((_kb.get("soft_requirement_weights") or {}).get("exclusion_violation") or -2.0)
@@ -730,7 +741,11 @@ class RecommendationService:
                         except Exception:
                             pass
                 elif _rule == "consumer_gaming_aesthetic":
-                    if any(k in text for k in ("gaming", "omen", "nitro", "tuf", "predator", "lol")):
+                    # Match REAL gaming signals — not the bare substring "gaming", which also appears in the
+                    # `gaming_style` specs key on EVERY product (that false-match penalised non-gaming too).
+                    if ('"gaming_style": true' in text or '"use_case": "gaming"' in text
+                            or "gaming laptop" in text
+                            or any(k in text for k in ("omen", "nitro", "tuf gaming", "predator", " rog "))):
                         score += _excl_w
                         reasons.append(f"kb_exclusion:{_rule}")
         except Exception:
