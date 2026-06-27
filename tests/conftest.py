@@ -1,12 +1,51 @@
 import os
 import sys
 import asyncio
+import faulthandler
 import tempfile
 import uuid
 import threading
 from pathlib import Path
 
 import pytest
+
+
+# ---------------------------------------------------------------------------
+# Per-test hang backstop (pytest-timeout is not installed in this venv)
+# ---------------------------------------------------------------------------
+# Converts a GENUINE hang into a bounded, diagnosable hard-stop: if a single
+# test's call phase runs longer than PYTEST_PER_TEST_TIMEOUT_SEC, a watchdog
+# thread dumps every thread's stack to the REAL stderr (flushed) and exits the
+# process — so CI fails fast with a stack instead of hanging forever. The
+# default (180s) is far above any real test here (the slowest app-building
+# integration tests are ~10-20s each), so it never trips legitimate work; set
+# to 0 to disable.
+_PER_TEST_TIMEOUT_SEC = float(os.environ.get("PYTEST_PER_TEST_TIMEOUT_SEC", "180") or 0)
+
+
+def _hang_backstop_fire(test_id: str) -> None:
+    err = sys.__stderr__ or sys.stderr  # the REAL stderr, not pytest's capture buffer
+    try:
+        err.write(f"\n[HANG-BACKSTOP] test exceeded {_PER_TEST_TIMEOUT_SEC:.0f}s — aborting: {test_id}\n")
+        err.flush()
+        faulthandler.dump_traceback(file=err)
+        err.flush()
+    finally:
+        os._exit(1)  # hard stop: a hung test must not hang the whole CI run
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    timer = None
+    if _PER_TEST_TIMEOUT_SEC > 0:
+        timer = threading.Timer(_PER_TEST_TIMEOUT_SEC, _hang_backstop_fire, args=(item.nodeid,))
+        timer.daemon = True
+        timer.start()
+    try:
+        yield
+    finally:
+        if timer is not None:
+            timer.cancel()
 
 
 # ---------------------------------------------------------------------------
