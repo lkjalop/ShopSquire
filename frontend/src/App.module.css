@@ -572,6 +572,10 @@ body {
   background: var(--card);
 }
 
+.procurementPanelSlot {
+  margin-bottom: 12px;
+}
+
 .rightHeader {
   display: flex;
   align-items: center;

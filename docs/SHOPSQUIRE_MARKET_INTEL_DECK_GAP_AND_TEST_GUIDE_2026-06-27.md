@@ -85,7 +85,7 @@ pytest tests/test_no_flavour_in_core.py tests/test_no_silent_except_in_core.py
 | Step | Click (data-testid) | Assert |
 |---|---|---|
 | 1 | **Reset** (`mi-reset`) | label `mi-label` = `SYNTHETIC REPLAY`, `mi-signals` = 0, `mi-findings-count` = 0 |
-| 2 | day = **5** (`mi-day`) → **Advance** (`mi-advance`) | findings appear but **NOT** `demand_shift` yet (days 1–5 are calm) |
+| 2 | day = **5** (`mi-day`) → **Advance** (`mi-advance`) | calm baseline remains visible: no active findings and **NOT** `demand_shift` yet |
 | 3 | day = **7** → **Advance** | `mi-findings` now includes **demand_shift · conversion_anomaly · inventory_demand_mismatch · competitor_undercut · objection_cluster** — this is the **delta progression** (findings *change* as days advance) |
 | 4 | **Refresh live data** (`mi-refresh-live`) | label flips to **`LIVE`**; `mi-findings` shows the REAL (default-tenant) findings from seeded competitor/objection/funnel data (deterministic) |
 | 5 | **Ranking experiment** panel (`mi-experiment`): **Promote → live** (`exp-promote`) | `exp-status` badge = **LIVE** |
@@ -111,13 +111,13 @@ Delta progression = *the findings change as the world changes*, and the system m
 
 1. Operator `:3001`, set `ss_owner_key`, open **Market Intelligence**.
 2. `mi-reset` → assert `SYNTHETIC REPLAY`, 0 signals.
-3. `mi-day`=5, `mi-advance` → assert findings present, **no** `demand_shift`.
+3. `mi-day`=5, `mi-advance` → assert calm baseline/no active findings, **no** `demand_shift`.
 4. `mi-day`=7, `mi-advance` → assert findings include `demand_shift`, `competitor_undercut`, `objection_cluster` (screenshot — the delta).
 5. `mi-refresh-live` → assert label `LIVE` (screenshot — real vs synthetic).
 6. `exp-promote` → assert `exp-status` LIVE; `exp-evaluate` → assert a decision shows; `exp-revert` → assert not-LIVE.
 7. (procurement cross-check) **Procurement** tab → run the buyer→supplier journey (see the live-demo runbook) to show the auditable-procurement track is intact.
 
-**Buyer test prompt** (`:5173`, exercises the recommend path + procurement trigger): `"I need 10 gaming laptops for an esports lab, $1800 each within two weeks"` → assert recommendations + the procurement panel (GATE-1 commit). For market-intel specifically, the buyer side is indirect (signals are ingested from search/orders); the **operator** tab is where the market-intel demo lives.
+**Buyer test prompt** (`:5173`, exercises the recommend path + procurement trigger): `"I need 20 gaming laptops for an esports lab, $1800 each within two weeks"` → assert recommendations + the procurement panel (GATE-1 commit). Current seeded stock has the top gaming SKU at 14 units, so quantity 20 creates a real 6-unit shortfall; quantity 10 is truthfully in stock. For market-intel specifically, the buyer side is indirect (signals are ingested from search/orders); the **operator** tab is where the market-intel demo lives.
 
 **What to surface / fix if a click fails:** 401 → set `ss_owner_key`; empty live findings → `MARKET_PIPELINE_ENABLED` + run `seed_suppliers.py` (seeds competitor/objection/funnel) + `COMMERCE_CATALOG_ENABLED` (competitor undercut needs price_book); experiment never LIVE → `RANKING_NUDGE_EXPERIMENT_ENABLED`; replay disabled → `FULFILLMENT_DEMO_ENABLED`.
 

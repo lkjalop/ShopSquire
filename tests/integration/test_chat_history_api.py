@@ -47,6 +47,42 @@ class _FakeAsyncClient:
         )
 
 
+class _FakeProcurementAsyncClient(_FakeAsyncClient):
+    async def get(self, url, params=None, headers=None):
+        return _FakeResp(
+            {
+                "results": [
+                    {
+                        "sku": "GAM-0003",
+                        "name": "Lenovo LOQ 15IRH8",
+                        "price_cents": 119900,
+                        "specs": {"ram_gb": 16, "gpu": "RTX 4060"},
+                        "factors": {"positive": ["+in_stock", "+within_budget"]},
+                        "score_norm": 99.0,
+                    }
+                ],
+                "assistant_message": "On availability: 14 in stock now; the other 6 in ~7 days.",
+                "decision_trace_id": "trace-procurement-1",
+                "availability": {
+                    "applicable": True,
+                    "sku": "GAM-0003",
+                    "requested_qty": 20,
+                    "in_stock": 14,
+                    "shortfall": 6,
+                    "allocation": [{"sku": "GAM-0003", "from_stock": 14, "from_reorder": 6}],
+                },
+                "fulfillment_case": {
+                    "case_id": "fc-procurement-1",
+                    "status": "awaiting_buyer_commitment",
+                    "item_ref": "GAM-0003",
+                    "shortfall": 6,
+                },
+                "next_questions": [],
+            },
+            status_code=200,
+        )
+
+
 def test_chat_query_persists_messages_and_history_reads(monkeypatch):
     from src.app.routers import chat as chat_router
 
@@ -106,3 +142,26 @@ def test_chat_query_applies_copywriting_when_requested(monkeypatch):
     assert bool(copy_meta.get("applied")) is True
     assert copy_meta.get("profile_id") == "premium"
     assert copy_meta.get("cpu_cost") == "low"
+
+
+def test_chat_query_preserves_buyer_safe_procurement_projection(monkeypatch):
+    from src.app.routers import chat as chat_router
+
+    monkeypatch.setattr(chat_router.httpx, "AsyncClient", _FakeProcurementAsyncClient)
+    app = create_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/v1/chat/query",
+        json={"uid": "u-chat-procurement-1", "query": "I need 20 gaming laptops within two weeks"},
+        headers={"x-api-key": "local-merchant-key"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["availability"]["shortfall"] == 6
+    assert body["fulfillment_case"] == {
+        "case_id": "fc-procurement-1",
+        "status": "awaiting_buyer_commitment",
+        "item_ref": "GAM-0003",
+        "shortfall": 6,
+    }

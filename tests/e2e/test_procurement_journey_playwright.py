@@ -99,9 +99,11 @@ def test_buyer_storefront_renders_procurement_check():
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(FRONTEND, timeout=20000)
+        page.get_by_role("button", name="Ask Me!").click()
         page.get_by_placeholder("Type your message...").fill(
-            "I need 10 laptops for a design team under $1500 each within two weeks")
+            "I need 20 gaming laptops for an esports lab, $1800 each within two weeks")
         page.keyboard.press("Enter")
         # the fulfilment block renders when the response carries a case (FULFILLMENT_CASES_ENABLED)
-        page.wait_for_selector("[data-testid='fulfilment-options'], [data-testid='product-grid']", timeout=20000)
+        page.wait_for_selector("[data-testid='fulfilment-options']", timeout=30000)
+        assert "awaiting buyer commitment" in page.locator("[data-testid='fc-status']").inner_text().lower()
         browser.close()

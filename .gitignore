@@ -21,6 +21,10 @@ tmp/
 runs/**
 !runs/docker_pytest_results.json
 
+# admin-react runtime working dirs (logs + the runtime-copied feature_flags, NOT source)
+src/frontend/admin-react/runs/
+src/frontend/admin-react/config/feature_flags.json
+
 # Local dumps, logs, and DB volumes (do not commit)
 dump/
 logs/
