@@ -67,6 +67,7 @@ type ChatMessage = {
   nqeSelection?: NqeInteraction;         // set on user msgs triggered by NQE option click
   nqeSelectionApplied?: Record<string, any>;  // echoed back from backend on assistant msgs
   agentStepsReadable?: string[];         // human-readable agent step summaries from ResponseNormalizer
+  narrationJobId?: string;               // async-narration handoff: poll /narration/{id} → replace content
 };
 type PendingImageContext = {
   labels: string[];
@@ -825,7 +826,8 @@ export default function App() {
     stt.toggle();
   };
 
-  const hasRightPanel = rightPanelMode !== 'none';
+  const hasProcurementPanel = Boolean(fulfilmentCase);
+  const hasRightPanel = rightPanelMode !== 'none' || hasProcurementPanel;
   const latestAssistantQuestions = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -1388,6 +1390,10 @@ export default function App() {
         setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
         setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
         const respAssistant = data.assistant_message || '';
+        // Async-narration handoff: recommend returned the deterministic answer now + a job id for the
+        // richer LLM prose. We tag the assistant message and poll it in to replace the text in place.
+        const narrationJobId = (typeof data.llm_summary_job_id === 'string' && data.llm_summary_job_id)
+          ? data.llm_summary_job_id : null;
         const nextQuestions = Array.isArray(data.next_questions) ? data.next_questions : [];
         const normalizedNextQuestions = normalizeNextQuestions(nextQuestions);
         const isDisambiguation = data.disambiguation === true;
@@ -1472,6 +1478,7 @@ export default function App() {
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else {
@@ -1492,8 +1499,41 @@ export default function App() {
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
+        }
+        // Async narration: poll the richer LLM prose and replace the tagged message in place. Best-effort
+        // — on timeout/error we keep the deterministic grounded answer already shown.
+        if (narrationJobId) {
+          const _poll = (() => {
+            let tries = 0;
+            const tick = async () => {
+              tries += 1;
+              try {
+                const nr = await fetch(apiUrl(`/api/v1/recommend/narration/${encodeURIComponent(narrationJobId)}`), {
+                  credentials: 'include', headers: apiHeaders,
+                });
+                const nd = await safeJson(nr);
+                const status = nd && nd.status;
+                const prose = (nd && typeof nd.assistant_message === 'string') ? nd.assistant_message.trim() : '';
+                if (status === 'done' && prose) {
+                  const polished = _stripTechnicalTokens(prose);
+                  setMessages(prev => prev.map(m =>
+                    m.narrationJobId === narrationJobId
+                      ? { ...m, content: polished, narrationJobId: undefined }
+                      : m));
+                  return;
+                }
+                if (status === 'error' || tries >= 12) return;  // give up; keep the deterministic answer
+              } catch {
+                if (tries >= 12) return;
+              }
+              setTimeout(tick, 1250);  // ~15s total budget
+            };
+            setTimeout(tick, 1250);
+          });
+          _poll();
         }
       }
     } catch (e: any) {
@@ -1642,7 +1682,7 @@ export default function App() {
           </div>
         </div>
         <ProductGrid products={displayProducts.length > 0 ? filteredDisplayProducts : products} onAdd={addToCart} viewMode="grid" />
-        {fulfilmentCase && <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />}
+        {!chatOpen && fulfilmentCase && <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />}
         <ExternalResearchPanel items={externalResearch} />
       </main>
 
@@ -1864,7 +1904,9 @@ export default function App() {
                       </button>
                     )}
                     <span>
-                      {rightPanelMode === 'compare'
+                      {rightPanelMode === 'none' && fulfilmentCase
+                        ? 'Procurement'
+                        : rightPanelMode === 'compare'
                         ? 'Comparison'
                         : rightPanelMode === 'list'
                           ? 'Detailed Specs'
@@ -1881,10 +1923,12 @@ export default function App() {
                                 : `Found ${filteredDisplayProducts.length} products`}
                     </span>
                   </div>
-                  <div className={styles.viewToggle}>
-                    <button className={viewMode === 'grid' ? styles.active : ''} onClick={() => setViewMode('grid')}><GridIcon /></button>
-                    <button className={viewMode === 'list' ? styles.active : ''} onClick={() => setViewMode('list')}><ListIcon /></button>
-                  </div>
+                  {rightPanelMode !== 'none' && (
+                    <div className={styles.viewToggle}>
+                      <button className={viewMode === 'grid' ? styles.active : ''} onClick={() => setViewMode('grid')}><GridIcon /></button>
+                      <button className={viewMode === 'list' ? styles.active : ''} onClick={() => setViewMode('list')}><ListIcon /></button>
+                    </div>
+                  )}
                 </div>
                 {readinessOpen && (
                   <div className={styles.readinessPanel}>
@@ -1938,6 +1982,11 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {fulfilmentCase && (
+                    <div className={styles.procurementPanelSlot}>
+                      <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />
+                    </div>
+                  )}
                   {rightPanelContract?.image_untrusted && (
                     <div className={styles.tierBlock}>
                       <div className={styles.tierTitle}>

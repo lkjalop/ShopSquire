@@ -1741,7 +1741,13 @@ async def chat_query(
             headers["x-api-key"] = fwd_key
         except Exception:
             headers["x-api-key"] = "local-merchant-key"
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        # Bound the storefront upstream wait (was 120s — a silent hang). Narration is async, so recommend
+        # returns fast; a hung upstream now fails in ~25s (→ 502, caught below) instead of blocking 2 min.
+        try:
+            _upstream_timeout = float(os.getenv("CHAT_UPSTREAM_TIMEOUT_SEC", "25") or 25)
+        except (TypeError, ValueError):
+            _upstream_timeout = 25.0
+        async with httpx.AsyncClient(timeout=_upstream_timeout) as client:
             r = await client.get(url, params=params, headers=headers)
             data = {}
             try:
@@ -2299,10 +2305,24 @@ async def chat_query(
         "complexity": complexity_result,
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,
+        # Async narration handoff: when recommend ran in async/skip mode it returns the deterministic
+        # grounded answer now + a job id for the richer LLM prose. Forward both so the storefront can
+        # poll /api/v1/recommend/narration/{job_id} and replace the message in place (no blocking wait).
+        "llm_summary_job_id": data.get("llm_summary_job_id"),
+        "summary_pending": bool(data.get("summary_pending") or data.get("llm_summary_job_id")),
         "voice_used": bool(voice_transcript),
         "budget_viability": budget_viability,
         "use_case_analysis": use_case_analysis,
         "buyer_persona": data.get("buyer_persona"),
+        # Buyer-safe procurement projection from /recommend/suggest. The recommend
+        # layer owns case creation/redaction; chat must preserve it so the storefront
+        # can render the commitment gate instead of hiding a real shortfall.
+        "availability": data.get("availability") if isinstance(data.get("availability"), dict) else None,
+        "fulfillment_case": (
+            data.get("fulfillment_case")
+            if isinstance(data.get("fulfillment_case"), dict) and data.get("fulfillment_case", {}).get("case_id")
+            else None
+        ),
         "right_panel": _right_panel_contract,
         "copywriting": copy_meta,
         "image_untrusted": bool(image_security_posture.get("image_untrusted")),
