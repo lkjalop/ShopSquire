@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from src.app.models.db import db_session
 from src.app.services import commerce_catalog, competitor_source, funnel_source, support_objection_source
-from src.app.services.supplier_catalog import ensure_supplier_coverage, seed_demo_vendor_contacts
+from src.app.services.supplier_catalog import (
+    ensure_supplier_coverage,
+    seed_demo_supplier_history,
+    seed_demo_vendor_contacts,
+)
 
 
 def main() -> None:
@@ -23,8 +27,10 @@ def main() -> None:
         obj = support_objection_source.seed_demo(db)
         fun = funnel_source.seed_demo(db)
     vendors = seed_demo_vendor_contacts()  # kyv_vendors manage their own session
+    history = seed_demo_supplier_history()  # supplier_baseline_events — prior-dealings context
     print(f"seeded suppliers={counts.get('suppliers')} products={counts.get('products')} "
           f"domains={counts.get('domains')} (coverage tracks the live catalog)")
+    print(f"seeded supplier history events={history}")
     print(f"seeded catalog prices={cat.get('prices')} inventory={cat.get('inventory')}")
     print(f"seeded competitor observations={comp.get('observations')} "
           f"support objections={obj.get('observations')} funnel events={fun.get('events')}")

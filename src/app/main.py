@@ -285,10 +285,12 @@ def create_app() -> FastAPI:
                         if suppliers_seed_enabled:
                             from src.app.services.supplier_catalog import (
                                 ensure_supplier_coverage,
+                                seed_demo_supplier_history,
                                 seed_demo_vendor_contacts,
                             )
                             ensure_supplier_coverage(db, commit=False)  # commits with the outer db.commit()
                             seed_demo_vendor_contacts()  # kyv_vendors manage their own session
+                            seed_demo_supplier_history()  # supplier_baseline_events — prior-dealings context
                     except Exception:
                         pass
                     db.commit()

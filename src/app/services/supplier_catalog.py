@@ -194,3 +194,46 @@ def seed_demo_vendor_contacts(*, tenant_id: str = "default") -> int:
     return sum(1 for name, domain, email in _DEMO_VENDOR_CONTACTS
                if _register_vendor_if_absent(lookup_vendor_by_domain, register_vendor,
                                              tenant_id=tenant_id, name=name, domain=domain, email=email))
+
+
+# A short prior-dealings history per demo supplier domain, as (days_ago, invoice_amount_dollars). The
+# draft's evidence packet reads this (Supplier_Inbox_Reader) to show "N prior dealings, last invoice $X" —
+# the "how we usually deal with them" context the operator sees before approving a send.
+_DEMO_SUPPLIER_HISTORY = [
+    ("approved-supplier.example", [(58, 6690.0), (33, 5575.0), (9, 7805.0)]),
+    ("bulk-parts.example", [(47, 5900.0), (15, 7080.0)]),
+]
+
+
+def _seed_history_if_absent(record, recent_ctx, *, tenant_id, domain, events, now) -> int:
+    try:
+        ctx = recent_ctx(domain=domain, tenant_id=tenant_id)
+        if ctx and ctx.observations:
+            return 0  # already seeded — never duplicate history rows
+        from datetime import timedelta
+        n = 0
+        for days_ago, amount in events:
+            record(tenant_id=tenant_id, sender_domain=domain,
+                   event_datetime=(now - timedelta(days=days_ago)).isoformat(),
+                   invoice_amount=amount, attachment_count=1)
+            n += 1
+        return n
+    except Exception:
+        return 0  # best-effort seed — observable return, never a silent swallow
+
+
+def seed_demo_supplier_history(*, tenant_id: str = "default") -> int:
+    """Seed a few historical supplier email events (send-time + invoice amount) for the demo supplier
+    domains, so the draft's evidence packet shows real prior-dealings context ("N observations, last
+    invoice $X") instead of an empty history. Idempotent: a domain that already has events is skipped.
+    Returns the count of events inserted."""
+    try:
+        from datetime import datetime, timezone
+        from src.app.security.supplier_baseline import record_email_event
+        from src.app.services.supplier_inbox_reader import recent_supplier_context
+    except Exception:
+        return 0
+    now = datetime.now(timezone.utc)
+    return sum(_seed_history_if_absent(record_email_event, recent_supplier_context,
+                                       tenant_id=tenant_id, domain=domain, events=events, now=now)
+               for domain, events in _DEMO_SUPPLIER_HISTORY)

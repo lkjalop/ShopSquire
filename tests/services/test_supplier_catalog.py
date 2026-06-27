@@ -92,6 +92,19 @@ def test_ensure_supplier_coverage_is_idempotent(db):
     assert again == {"suppliers": 0, "products": 0, "domains": 0}
 
 
+def test_seed_demo_supplier_history_records_prior_dealings():
+    # the demo-data fix: seed prior-dealings history so the draft evidence shows "N observations, last
+    # invoice $X" instead of an empty supplier history. Idempotent on re-run.
+    from src.app.services.supplier_catalog import seed_demo_supplier_history
+    from src.app.services.supplier_inbox_reader import recent_supplier_context
+    n = seed_demo_supplier_history()
+    assert n >= 1
+    ctx = recent_supplier_context(domain="approved-supplier.example", tenant_id="default")
+    assert ctx is not None and ctx.observations >= 1
+    assert ctx.last_invoice_cents is not None  # a "last quote" proxy lands on the draft evidence
+    assert seed_demo_supplier_history() == 0  # idempotent — re-run records nothing new
+
+
 def test_default_draft_path_resolves_seeded_supplier():
     """Integration: with the catalog seeded in the APP db, build_draft's DEFAULT path (no injected
     rank/allowlist fns) resolves the winning approved supplier — the live happy-path is unblocked."""
