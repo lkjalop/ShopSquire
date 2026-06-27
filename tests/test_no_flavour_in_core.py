@@ -160,6 +160,9 @@ _CORE_MODULES = [
     # inventory + bulk-shortfall handoff: stock eval → Sales approval/escalation, sku/stock/qty + opaque
     # agent-role labels only — no product vocabulary. Extracted from recommend.suggest.
     "src/app/services/recommend_inventory_handoff_stage.py",
+    # recommendation choice-lanes: group candidates into profile-defined lanes (markers/exclusions are
+    # opaque substrings from the profile; the core only matches + groups) — no product vocabulary.
+    "src/app/services/recommend_choice_lanes.py",
     # storefront-emphasis lever (David Phase 3): gated right-panel messaging variant for treatment users.
     # The only flavour (the variant copy) lives in the StoreProfile slot — the gate/canary/apply is opaque.
     "src/app/services/recommend_emphasis_stage.py",

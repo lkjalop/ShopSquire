@@ -10657,6 +10657,8 @@ def suggest(
     # to recommend_rightpanel_stage. The stage owns the try/except: pass and returns the current
     # (payload, results, assistant_message) so partial-failure semantics are identical to the inline block.
     from src.app.services.recommend_rightpanel_stage import assemble_right_panel as _assemble_right_panel
+    from src.app.platform.store_profile import profile_slot as _lanes_profile_slot
+    from src.app.services.recommend_choice_lanes import assign_device_lanes as _assign_device_lanes
     payload, results, assistant_message = _assemble_right_panel(
         payload, results=results, assistant_message=assistant_message,
         analysis=analysis, severity=severity, image_reupload_reasons=image_reupload_reasons,
@@ -10664,6 +10666,8 @@ def suggest(
         constraints=constraints, uid=uid, decision_id=decision_id, trace_id=trace_id, nlp=nlp,
         apply_image_security_fields=_apply_image_security_response_fields,
         infer_warranty=_infer_account_warranty_status, trace_fn=log_trace_event,
+        device_lanes_fn=lambda prods, use_case=None: _assign_device_lanes(
+            prods, profile_fn=_lanes_profile_slot, use_case=use_case),
     )
     # Phase-3 storefront-emphasis lever (flag-gated, experiment-gated, reversible, measured). No-op unless
     # STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED + a live experiment + TREATMENT + the adaptive gate ALLOWs, so

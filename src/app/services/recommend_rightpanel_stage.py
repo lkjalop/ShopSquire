@@ -33,6 +33,7 @@ def assemble_right_panel(
     apply_image_security_fields: Callable[..., Dict[str, Any]],
     infer_warranty: Callable[[Any], Dict[str, Any]],
     trace_fn: Callable[..., Any],
+    device_lanes_fn: Optional[Callable[..., Any]] = None,
 ) -> Tuple[Dict[str, Any], Any, Any]:
     """Assemble payload['right_panel'] (+ image-security fields + the UI trace event). Returns the current
     (payload, results, assistant_message) — payload is also mutated in place. Never raises."""
@@ -135,6 +136,15 @@ def assemble_right_panel(
                     "explanation": _rt.get("recommended_explanation"),
                 },
             }
+            # Backend choice-lanes: group the ranked results into profile-defined lanes (Windows Business /
+            # MacBook / Surface / Chromebook / Budget / Gaming-chassis) on EVIDENCE, so the frontend renders
+            # demarcated options instead of guessing. device_lanes_fn never raises (returns [] on error).
+            if device_lanes_fn is not None:
+                _uc = ((payload.get("use_case_analysis") or {}).get("use_case_key")
+                       or constraints.get("use_case"))
+                _lanes = device_lanes_fn(results or [], use_case=_uc)
+                if _lanes:
+                    payload["right_panel"]["device_lanes"] = _lanes
         _trace_for_ui_event = decision_id or trace_id
         if _trace_for_ui_event:
             try:

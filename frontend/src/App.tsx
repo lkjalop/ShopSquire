@@ -111,6 +111,23 @@ type RightPanelContract = {
   // Phase-3 storefront-emphasis lever: a gated, profile-sourced messaging line for treatment users.
   // Present only when the experiment is live + the subject is treatment + the action gate allowed.
   emphasis?: { text?: string; variant?: string; key?: string; applied?: boolean; experiment_id?: string };
+  // Backend-driven choice lanes (recommend_choice_lanes): evidence-grouped options. When present the UI
+  // renders THESE instead of the frontend heuristic. A work query marks office lanes primary and a gaming
+  // chassis non_primary, so gaming never appears as a primary work pick.
+  device_lanes?: BackendDeviceLane[];
+};
+type BackendDeviceLane = {
+  key: string;
+  title: string;
+  explanation?: string;
+  metrics?: string[];
+  primary?: boolean;
+  non_primary?: boolean;
+  count?: number;
+  price_min?: number | null;
+  price_max?: number | null;
+  skus?: string[];
+  products?: { sku: string; name: string; price?: number | null; why?: string[] }[];
 };
 
 const IMAGE_FAST_TRIAGE_TIMEOUT_MS = 3000;
@@ -1926,7 +1943,56 @@ export default function App() {
                     </div>
                   )}
 
-                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode) && filteredDisplayProducts.length > 0 && (
+                  {/* BACKEND choice-lanes (evidence-driven) — render these when present; map each lane's
+                      skus to the full product cards. Falls back to the frontend heuristic lanes below. */}
+                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && filteredDisplayProducts.length > 0
+                    && Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0 && (
+                    <div className={styles.deviceLanePanel} data-testid="backend-device-lanes">
+                      {rightPanelContract!.device_lanes!.map((lane) => {
+                        const bySku = new Map(filteredDisplayProducts.map((p) => [p.sku, p]));
+                        const items = (lane.skus || []).map((s) => bySku.get(s)).filter(Boolean) as Product[];
+                        if (!items.length) return null;
+                        return (
+                          <section key={`blane-${lane.key}`} className={styles.deviceLaneBlock}
+                                   data-testid="device-lane" data-lane={lane.key} data-primary={lane.primary ? '1' : '0'}>
+                            <div className={styles.deviceLaneHeader}>
+                              <div className={styles.deviceLaneTitle}>
+                                {lane.title}
+                                {lane.non_primary && (
+                                  <span data-testid="lane-non-primary"
+                                        style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: '1px 6px',
+                                                 borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
+                                    not a primary pick
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className={styles.deviceLaneCarousel}>
+                              {items.slice(0, 3).map((p) => (
+                                <article key={`blane-card-${lane.key}-${p.sku}`} className={styles.deviceLaneCard}>
+                                  {p.image_url ? (
+                                    <img src={p.image_url} alt={p.name} className={styles.deviceLaneImg} />
+                                  ) : (
+                                    <div className={styles.deviceLaneImgPlaceholder}>No image</div>
+                                  )}
+                                  <div className={styles.deviceLaneName}>{p.name}</div>
+                                  <div className={styles.deviceLanePrice}>{formatPrice(p)}</div>
+                                  <button className={styles.deviceLaneAdd} onClick={() => addToCart(p.sku)}>Add</button>
+                                </article>
+                              ))}
+                            </div>
+                            {lane.explanation && <div className={styles.deviceLaneSummary}>{lane.explanation}</div>}
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Heuristic lane fallback — only when the backend provided no device_lanes. */}
+                  {(['grid', 'list', 'compare'] as RightPanelMode[]).includes(rightPanelMode)
+                    && filteredDisplayProducts.length > 0
+                    && !(Array.isArray(rightPanelContract?.device_lanes) && rightPanelContract!.device_lanes!.length > 0) && (
                     <div className={styles.deviceLanePanel}>
                       {(['windows', 'macbook', 'tablet_chromebook'] as DeviceLane[]).map((lane) => {
                         const items = laneBuckets[lane] || [];

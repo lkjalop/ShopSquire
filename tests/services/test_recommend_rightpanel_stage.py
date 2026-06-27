@@ -48,6 +48,25 @@ def test_support_branch_clears_results_and_sets_message():
     assert rp["support_cards"][0]["status"] == "found"   # warranty status threaded through
 
 
+def test_device_lanes_fn_is_attached_to_shopping_panel():
+    # the injected lane scorer's output lands on right_panel.device_lanes (shopping branch only)
+    def _lanes(prods, use_case=None):
+        return [{"key": "biz", "title": "Business", "primary": use_case == "office", "skus": [p["sku"] for p in prods]}]
+    p, _, _ = assemble_right_panel(
+        {"recommendation_tiers": {}}, results=[{"sku": "A"}], assistant_message="m", analysis={"details": {}},
+        severity=None, image_reupload_reasons=None, image_cv_signals_parsed=None, turn_intent="SHOPPING",
+        constraints={"use_case": "office"}, uid="u", decision_id=None, trace_id=None, nlp={},
+        apply_image_security_fields=_passthru_security, infer_warranty=_warranty_found,
+        trace_fn=lambda **k: None, device_lanes_fn=_lanes)
+    lanes = p["right_panel"].get("device_lanes")
+    assert lanes and lanes[0]["key"] == "biz" and lanes[0]["primary"] is True and lanes[0]["skus"] == ["A"]
+
+
+def test_no_device_lanes_fn_leaves_panel_unchanged():
+    p, _, _ = _call({"recommendation_tiers": {}}, results=[{"sku": "A"}])  # no device_lanes_fn injected
+    assert "device_lanes" not in p["right_panel"]
+
+
 def test_image_untrusted_marks_security_route():
     p, _, _ = _call({"recommendation_tiers": {}}, image_reupload_reasons=["adversarial"])
     assert p["right_panel"]["image_untrusted"] is True
