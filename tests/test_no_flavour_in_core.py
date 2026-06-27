@@ -141,6 +141,9 @@ _CORE_MODULES = [
     # supplier draft: template-slot fill + scatter-gather evidence, opaque item/supplier refs —
     # no product vocabulary (real templates come from StoreProfile).
     "src/app/services/fulfillment/draft.py",
+    # competitive RFQ fan-out + quote comparator: caged draft per top-N supplier + price/lead/reliability
+    # ranking, cents·days·ratios only — no product vocabulary.
+    "src/app/services/fulfillment/rfq_fanout.py",
     # external comms boundary + deterministic sandbox: send/receive/parse/validate, opaque refs —
     # no product vocabulary.
     "src/app/services/fulfillment/external_comms.py",

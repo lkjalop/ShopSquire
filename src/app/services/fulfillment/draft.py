@@ -277,18 +277,36 @@ def _default_allowlist(domain: str) -> bool:
         return False
 
 
+def ranked_approved_suppliers(db, *, item_ref: str, top_n: int = 3, rank_fn: Optional[Callable] = None,
+                              allowlist_fn: Optional[Callable] = None, tenant_id: str = "default"):
+    """Top-N APPROVED suppliers whose domain is on the allowlist, ranked. Each entry is
+    (recipient_ref, recipient_domain, reliability, reason). Shared by select_supplier (top-1) and the
+    competitive RFQ fan-out (top-N), so both resolve recipients the SAME way (allowlist only, never buyer
+    input). Returns [] when none qualifies."""
+    rank = rank_fn or _default_rank
+    allow = allowlist_fn or _default_allowlist
+    out = []
+    for cand in (rank(db, item_ref, tenant_id) or []):
+        domain = str(cand.get("domain") or cand.get("supplier_domain") or "")
+        if domain and allow(domain):
+            out.append((str(cand.get("id") or cand.get("supplier_id") or "supplier"), domain,
+                        float(cand.get("reliability") or cand.get("on_time_rate") or 0.0),
+                        f"approved supplier (reliability {cand.get('reliability') or cand.get('on_time_rate')})"))
+            if len(out) >= max(1, int(top_n)):
+                break
+    return out
+
+
 def select_supplier(db, *, item_ref: str, rank_fn: Optional[Callable] = None,
                     allowlist_fn: Optional[Callable] = None, tenant_id: str = "default"):
     """Pick the top-ranked APPROVED supplier whose domain is on the allowlist. Returns
     (recipient_ref, recipient_domain, reliability, reason) or (None, ...) when none qualifies."""
-    rank = rank_fn or _default_rank
-    allow = allowlist_fn or _default_allowlist
-    for cand in (rank(db, item_ref, tenant_id) or []):
-        domain = str(cand.get("domain") or cand.get("supplier_domain") or "")
-        if domain and allow(domain):
-            return (str(cand.get("id") or cand.get("supplier_id") or "supplier"), domain,
-                    float(cand.get("reliability") or cand.get("on_time_rate") or 0.0),
-                    f"top approved supplier (reliability {cand.get('reliability') or cand.get('on_time_rate')})")
+    top = ranked_approved_suppliers(db, item_ref=item_ref, top_n=1, rank_fn=rank_fn,
+                                    allowlist_fn=allowlist_fn, tenant_id=tenant_id)
+    if top:
+        recipient_ref, domain, reliability, _reason = top[0]
+        return (recipient_ref, domain, reliability,
+                f"top approved supplier (reliability {reliability})")
     return (None, "", 0.0, "no approved supplier on the allowlist")
 
 
@@ -400,11 +418,19 @@ def build_draft(
     benchmark_fn: Optional[Callable] = None,
     inbox_fn: Optional[Callable] = None,
     llm_fn: Optional[Callable] = None,
+    supplier_override: Optional[tuple] = None,
     tenant_id: str = "default",
 ) -> Optional[SupplierDraft]:
-    """Build the exact supplier draft (no send). Returns None when no approved supplier qualifies."""
-    recipient_ref, domain, reliability, supplier_reason = select_supplier(
-        db, item_ref=item_ref, rank_fn=rank_fn, allowlist_fn=allowlist_fn, tenant_id=tenant_id)
+    """Build the exact supplier draft (no send). Returns None when no approved supplier qualifies.
+
+    ``supplier_override`` = (recipient_ref, domain, reliability, reason) bypasses select_supplier so the
+    RFQ fan-out can draft for a SPECIFIC top-N supplier. It is still trusted only via the resolved domain
+    (the caller resolves it from the allowlist, never buyer input), so the send-cage is unchanged."""
+    if supplier_override is not None:
+        recipient_ref, domain, reliability, supplier_reason = supplier_override
+    else:
+        recipient_ref, domain, reliability, supplier_reason = select_supplier(
+            db, item_ref=item_ref, rank_fn=rank_fn, allowlist_fn=allowlist_fn, tenant_id=tenant_id)
     if not recipient_ref:
         return None  # → caller fires no_approved_supplier
 

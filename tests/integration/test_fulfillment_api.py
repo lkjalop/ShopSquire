@@ -83,6 +83,33 @@ def test_economics_endpoint_operator_and_empty_before_quote():
     assert r.status_code == 200 and r.json()["economics"] == {}
 
 
+def test_rfq_fanout_endpoint_wired_and_shaped():
+    # operator route registered; with no seeded approved suppliers in the test DB it returns 0 drafts
+    # (never 404/unrouted) and the documented shape.
+    cid = _open()
+    client.post(f"{_BASE}/{cid}/assess", json={"requested_qty": 10, "in_stock": 4, "item_ref": "SKU-1"})
+    client.post(f"{_BASE}/{cid}/commit", json={"uid": "u1"})
+    r = client.get(f"{_BASE}/{cid}/rfq-fanout", params={"top_n": 3})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["item_ref"] == "SKU-1" and body["top_n"] == 3 and isinstance(body["drafts"], list)
+    assert client.get(f"{_BASE}/nope/rfq-fanout").status_code == 404
+
+
+def test_compare_quotes_endpoint_ranks_and_recommends():
+    cid = _open()
+    quotes = [
+        {"supplier_ref": "A", "unit_price_cents": 120000, "lead_time_days": 10, "reliability": 0.95},
+        {"supplier_ref": "B", "unit_price_cents": 100000, "lead_time_days": 20, "reliability": 0.80},
+        {"supplier_ref": "C", "unit_price_cents": 110000, "lead_time_days": 7, "reliability": 0.90},
+    ]
+    r = client.post(f"{_BASE}/{cid}/compare-quotes", json={"quotes": quotes})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["considered"] == 3 and body["recommended"]["supplier_ref"] == "C"
+    assert client.post(f"{_BASE}/nope/compare-quotes", json={"quotes": quotes}).status_code == 404
+
+
 def test_by_trace_links_case_to_decision_trace():
     # a case opened with a trace_id is resolvable by that trace (the DecisionTrace ↔ journey link)
     r = client.post(_BASE, json={"uid": "u1", "trace_id": "T-LINK-42"})

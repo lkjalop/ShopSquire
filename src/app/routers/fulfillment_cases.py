@@ -115,6 +115,47 @@ def supplier_candidates(case_id: str, role: str = Depends(require_role(_OPERATOR
         return {"case_id": case_id, "item_ref": item_ref, "candidates": cands}
 
 
+@router.get("/cases/{case_id}/rfq-fanout")
+def rfq_fanout(case_id: str, top_n: int = Query(default=3, ge=1, le=8),
+               role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Competitive RFQ preview: a FULLY-CAGED supplier draft for each of the top-N approved suppliers for
+    the case's SKU (same claim-safety/evidence/gate as the single draft). Read-only preview — it never
+    sends; the operator still approves each send through GATE 2. Recipients come from the allowlist."""
+    from src.app.services.fulfillment.rfq_fanout import build_rfq_fanout, fanout_preview
+    with db_session() as db:
+        cur = fwf.repository.current_version(db, case_id)
+        if cur is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        sj = cur.state_json if isinstance(cur.state_json, dict) else {}
+        avail = sj.get("availability") if isinstance(sj.get("availability"), dict) else {}
+        scope = (sj.get("draft") or {}).get("commercial_scope") if isinstance(sj.get("draft"), dict) else {}
+        item_ref = str(avail.get("item_ref") or (scope or {}).get("item_ref") or "").strip()
+        qty = int((scope or {}).get("quantity") or avail.get("shortfall") or avail.get("requested_qty") or 0)
+        if not item_ref:
+            return {"case_id": case_id, "item_ref": "", "top_n": top_n, "quantity": qty, "drafts": []}
+        drafts = build_rfq_fanout(db, item_ref=item_ref, quantity=qty, case_ref=case_id, top_n=int(top_n))
+        return {"case_id": case_id, "item_ref": item_ref, "top_n": int(top_n), "quantity": qty,
+                "count": len(drafts), "drafts": fanout_preview(drafts)}
+
+
+class CompareQuotesBody(BaseModel):
+    quotes: list[Dict[str, Any]] = []
+    weights: Optional[Dict[str, float]] = None
+
+
+@router.post("/cases/{case_id}/compare-quotes")
+def compare_quotes_endpoint(case_id: str, body: CompareQuotesBody,
+                            role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Rank competing supplier quotes by a vertical-blind composite (price · lead time · reliability) and
+    recommend the best. Operator decision-support only; selecting + sending still go through the gates."""
+    from src.app.services.fulfillment.rfq_fanout import compare_quotes
+    with db_session() as db:
+        if fwf.repository.current_version(db, case_id) is None:
+            raise HTTPException(status_code=404, detail="case not found")
+    result = compare_quotes(body.quotes or [], weights=body.weights)
+    return {"case_id": case_id, **result}
+
+
 @router.get("/cases/{case_id}/okf")
 def case_okf(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Export the case as an OKF (Open Knowledge Format) document — a portable, vendor-neutral
