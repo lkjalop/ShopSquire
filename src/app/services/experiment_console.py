@@ -83,6 +83,13 @@ def evaluate_now(db, *, experiment_id: str = DEFAULT_EXPERIMENT_ID, min_samples:
     try:
         from src.app.services.experiment_eval import evaluate_experiment
         out = evaluate_experiment(db, experiment_id, min_samples=int(min_samples))
+        # Module 2/6 close-the-loop: persist the terminal outcome so "did the change work?" is answerable
+        # and any future execution is measurable/reversible. Best-effort — never breaks the evaluation.
+        from src.app.services import market_outcome
+        market_outcome.record_outcome(
+            db, decision_ref=experiment_id, decision=out.get("decision"), uplift_pct=out.get("uplift_pct"),
+            significant=out.get("significant"), n_control=out.get("n_control"),
+            n_treatment=out.get("n_treatment"), reverted=bool(out.get("reverted")), source="experiment")
         db.commit()
         return out
     except Exception as exc:
