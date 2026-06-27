@@ -318,7 +318,7 @@ def patch_requests_egress_guard(guard: EgressDomainGuard | None = None) -> None:
         requests.sessions.Session.send = _patched_send  # type: ignore[method-assign]
         _patched_requests = True
         _log.info(
-            "Egress allowlist active for requests â€” %d approved domains (strict=%s, log_only=%s)",
+            "Egress allowlist active for requests - %d approved domains (strict=%s, log_only=%s)",
             len(g._allowed),
             g._strict,
             g._log_only,

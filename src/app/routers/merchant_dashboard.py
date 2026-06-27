@@ -2561,7 +2561,7 @@ def merchant_email_lab(request: Request):
             sections.push(findingGroupHtml('Detection Artifact Patterns', grouped.detection_artifact_patterns || structured.filter(f => String((f||{}).finding_group||'') === 'detection_artifact_patterns'), 'muted'));
             sections.push(findingGroupHtml('Unconfirmed Higher-Order Hypotheses', grouped.unconfirmed_higher_order_hypotheses || structured.filter(f => String((f||{}).finding_group||'') === 'unconfirmed_higher_order_hypotheses'), 'warn'));
             const suppressedFrameworkRows = Array.isArray(sa.suppressed_framework_rows) ? sa.suppressed_framework_rows : [];
-            sections.push(`<div class="evidence-block"><div class="section-label">Framework Mappings</div>${complianceSummaryHtml(sa, businessOutcome)}${suppressedFrameworkRows.length ? `<details style="margin-top:8px;"><summary>Suppressed framework rows pending evidence</summary><div style="margin-top:8px;">${listHtml(suppressedFrameworkRows.slice(0,8).map(row => `${row.framework || 'Framework'} ${row.control_or_tag || row.control || '-'} â€¢ ${row.suppressed_reason || 'suppressed'}`))}</div></details>` : ''}</div>`);
+            sections.push(`<div class="evidence-block"><div class="section-label">Framework Mappings</div>${complianceSummaryHtml(sa, businessOutcome)}${suppressedFrameworkRows.length ? `<details style="margin-top:8px;"><summary>Suppressed framework rows pending evidence</summary><div style="margin-top:8px;">${listHtml(suppressedFrameworkRows.slice(0,8).map(row => `${row.framework || 'Framework'} ${row.control_or_tag || row.control || '-'} • ${row.suppressed_reason || 'suppressed'}`))}</div></details>` : ''}</div>`);
             const byAgent = {};
             for(const finding of structured){
               const agent = String((finding || {}).agent_origin || '').trim();
@@ -3090,7 +3090,7 @@ def merchant_email_lab(request: Request):
               return `<div class="attachment-row">
                 <div><strong>Baseline:</strong> ${escHtml(item.baseline_file || '-')}</div>
                 <div><strong>Compare:</strong> ${escHtml(item.candidate_file || '-')}</div>
-                <div class="small" style="margin-top:6px;"><strong>Text similarity:</strong> ${escHtml(String(item.text_similarity ?? '-'))} Â· <strong>Visual drift:</strong> ${escHtml(String(item.mean_pixel_diff ?? '-'))} Â· <strong>Drift box:</strong> ${escHtml(bbox)}</div>
+                <div class="small" style="margin-top:6px;"><strong>Text similarity:</strong> ${escHtml(String(item.text_similarity ?? '-'))} · <strong>Visual drift:</strong> ${escHtml(String(item.mean_pixel_diff ?? '-'))} · <strong>Drift box:</strong> ${escHtml(bbox)}</div>
                 <div class="small" style="margin-top:6px;">${listHtml([
                   Array.isArray(item.differences) && item.differences.length ? `Differences: ${item.differences.join(' ')}` : 'No major structural differences were detected.',
                   item.baseline_urls && item.baseline_urls.length ? `Baseline URLs: ${item.baseline_urls.join(', ')}` : null,
