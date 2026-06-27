@@ -324,3 +324,31 @@ def test_segment_shift_is_in_analyze():
         sigs += _seg_signal(day, "smb", 6) + _seg_signal(day, "enterprise", 4)
     sigs += _seg_signal("2026-06-27", "smb", 2) + _seg_signal("2026-06-27", "enterprise", 12)
     assert any(f.finding_type == "segment_shift" for f in ma.analyze(sigs))
+
+
+def _ch_signal(st, channel, n):
+    return [{"signal_type": st, "source": "s", "payload": {"channel": channel},
+             "occurred_at": "2026-06-27T10:00:00"} for _ in range(n)]
+
+
+def test_detect_channel_performance_flags_over_and_under():
+    sigs = (_ch_signal("demand", "email", 30) + _ch_signal("conversion", "email", 3)      # 10%
+            + _ch_signal("demand", "paid", 30) + _ch_signal("conversion", "paid", 12)      # 40%
+            + _ch_signal("demand", "organic", 30) + _ch_signal("conversion", "organic", 6))  # 20% (near mean)
+    by = {f.entity_ref: f for f in ma.detect_channel_performance(sigs)}
+    assert by["paid"].evidence["direction"] == "overperforming"
+    assert by["email"].evidence["direction"] == "underperforming" and by["email"].severity == "critical"
+    assert "organic" not in by  # within the gap threshold → not flagged
+    assert all(f.finding_type == "channel_performance" for f in by.values())
+
+
+def test_detect_channel_performance_quiet_on_thin_or_single_channel():
+    assert ma.detect_channel_performance(_ch_signal("demand", "email", 40)) == []   # 1 channel → nothing
+    thin = _ch_signal("demand", "email", 5) + _ch_signal("demand", "paid", 5)        # below min_volume
+    assert ma.detect_channel_performance(thin) == []
+
+
+def test_channel_performance_in_analyze():
+    sigs = (_ch_signal("demand", "email", 30) + _ch_signal("conversion", "email", 3)
+            + _ch_signal("demand", "paid", 30) + _ch_signal("conversion", "paid", 12))
+    assert any(f.finding_type == "channel_performance" for f in ma.analyze(sigs))

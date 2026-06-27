@@ -126,3 +126,15 @@ def test_segment_shift_maps_to_targeting_review_with_direction():
     assert props["smb"].direction == "demote"            # away from the falling one
     # shadow-only invariant: never executed; promotion goes through the experiment gate
     assert all(p.status == "proposed" and p.params.get("requires_experiment") for p in props.values())
+
+
+def test_channel_performance_maps_to_prioritize_channel_with_direction():
+    from src.app.services.market_analysis import MarketFinding
+    over = MarketFinding("channel_performance", "paid", "warn", 0.7, "paid overperforming",
+                         {"direction": "overperforming"})
+    under = MarketFinding("channel_performance", "email", "critical", 0.6, "email underperforming",
+                          {"direction": "underperforming"})
+    props = {p.target_ref: p for p in sa.propose_from_findings([over, under])}
+    assert props["paid"].action_type == sa.ACTION_PRIORITIZE_CHANNEL and props["paid"].direction == "boost"
+    assert props["email"].direction == "demote"
+    assert all(p.status == "proposed" and p.params.get("requires_experiment") for p in props.values())

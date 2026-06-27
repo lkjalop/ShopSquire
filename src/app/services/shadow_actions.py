@@ -31,6 +31,7 @@ ACTION_ADJUST_RANKING = "adjust_ranking"
 ACTION_SUPPRESS_LOW_STOCK = "suppress_low_stock"
 ACTION_REVISE_SUPPORT_COPY = "revise_support_copy"
 ACTION_REVISE_SEGMENT_TARGETING = "revise_segment_targeting"  # Phase 4: re-target toward/away a segment
+ACTION_PRIORITIZE_CHANNEL = "prioritize_channel"             # Phase 4: lean into / away from a channel
 
 # finding_type → proposed action_type. Deterministic + opaque — no product knowledge. (David's deck,
 # Module 4 Decision Engine: support objections + weak funnel points → a guidance/messaging review.)
@@ -42,6 +43,7 @@ _FINDING_TO_ACTION: Dict[str, str] = {
     "funnel_dropoff": ACTION_REVISE_SUPPORT_COPY,      # a stage bleeding buyers → propose messaging review there
     "inventory_demand_mismatch": ACTION_SUPPRESS_LOW_STOCK,  # demand with no stock → propose demoting it
     "segment_shift": ACTION_REVISE_SEGMENT_TARGETING,  # WHO is buying shifted → propose a targeting review
+    "channel_performance": ACTION_PRIORITIZE_CHANNEL,  # a channel under/over-performs → propose re-prioritising
 }
 _SEVERITY_WEIGHT = {"info": 0.3, "warn": 0.7, "critical": 1.0}
 
@@ -83,6 +85,14 @@ def _direction_for(action_type: str, evidence: Dict[str, Any]) -> str:
         if d in ("rising", "up", "growth"):
             return "boost"
         if d in ("falling", "down", "decline"):
+            return "demote"
+        return "review"
+    if action_type == ACTION_PRIORITIZE_CHANNEL:
+        # lean INTO an overperforming channel (boost), AWAY from an underperforming one (demote).
+        d = str((evidence or {}).get("direction") or "").lower()
+        if d in ("overperforming", "up", "rising"):
+            return "boost"
+        if d in ("underperforming", "down", "falling"):
             return "demote"
         return "review"
     return "review"

@@ -18,6 +18,7 @@ Detectors (v1, explainable):
   • competitor_undercut      — a competitor price below ours on the same entity (pricing-review signal)
   • objection_cluster        — recurring support objections on the same theme (objection mining)
   • segment_shift            — Phase 4: a segment whose demand SHARE shifted vs baseline (re-targeting)
+  • channel_performance      — Phase 4: a channel under/over-performing vs the cross-channel mean
 
 Vertical-blind: finding_type/entity_ref/evidence are opaque to product vocabulary. Never raises.
 """
@@ -38,6 +39,7 @@ FINDING_COMPETITOR_UNDERCUT = "competitor_undercut"
 FINDING_OBJECTION_CLUSTER = "objection_cluster"
 FINDING_FUNNEL_DROPOFF = "funnel_dropoff"
 FINDING_SEGMENT_SHIFT = "segment_shift"  # Phase 4: WHO is buying is shifting (re-targeting signal)
+FINDING_CHANNEL_PERFORMANCE = "channel_performance"  # Phase 4: a channel under/over-performing vs the mean
 
 _MIN_POINTS = 4  # need enough history before an anomaly finding is actionable
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -411,6 +413,49 @@ def detect_segment_shift(signals, *, min_points: int = _MIN_POINTS, min_total: i
     return out
 
 
+def detect_channel_performance(signals, *, min_volume: int = 20, min_rate_gap: float = 0.30) -> List[MarketFinding]:
+    """Phase 4 — per-channel conversion performance. For each channel with >= min_volume demand, computes
+    conversion rate (conversions/demand) and flags a channel whose rate deviates from the cross-channel mean
+    by >= min_rate_gap (relative): an under/over-performing channel — a channel-prioritization signal.
+    ``channel`` is an OPAQUE payload label (vertical-blind); explainable + deterministic (no LLM).
+    Shadow-only: a finding, never an action.
+
+    Guards: needs >= 2 channels each clearing min_volume, so a thin or single-channel stream is quiet."""
+    conv: Dict[str, int] = {}
+    demand: Dict[str, int] = {}
+    for s in signals or []:
+        st = (s or {}).get("signal_type")
+        ch = str(((s or {}).get("payload") or {}).get("channel") or "").strip().lower()
+        if not ch:
+            continue
+        if st == "conversion":
+            conv[ch] = conv.get(ch, 0) + 1
+        elif st == "demand":
+            demand[ch] = demand.get(ch, 0) + 1
+    channels = [c for c in demand if demand[c] >= min_volume]
+    if len(channels) < 2:
+        return []
+    rates = {c: conv.get(c, 0) / demand[c] for c in channels}
+    mean = sum(rates.values()) / len(rates)
+    if mean <= 0:
+        return []
+    out: List[MarketFinding] = []
+    for c in sorted(channels):
+        gap = (rates[c] - mean) / mean
+        if abs(gap) < min_rate_gap:
+            continue
+        direction = "overperforming" if gap > 0 else "underperforming"
+        severity = "critical" if (gap < 0 and abs(gap) >= 0.5) else "warn"
+        out.append(MarketFinding(
+            FINDING_CHANNEL_PERFORMANCE, c, severity, round(min(1.0, abs(gap)), 3),
+            f"Channel '{c}' {direction}: {rates[c] * 100:.1f}% conversion vs {mean * 100:.1f}% mean.",
+            {"channel": c, "rate": round(rates[c], 4), "mean_rate": round(mean, 4), "gap": round(gap, 4),
+             "direction": direction, "demand": demand[c]}, "recent",
+        ))
+    out.sort(key=lambda f: -f.confidence)
+    return out
+
+
 def _safe(fn: Callable, *args, **kw) -> List[MarketFinding]:
     try:
         return fn(*args, **kw)
@@ -431,6 +476,7 @@ def analyze(signals, *, anomaly_fn: Optional[Callable] = None,
     out += _safe(detect_objection_cluster, signals)
     out += _safe(detect_funnel_dropoff, signals)
     out += _safe(detect_segment_shift, signals)
+    out += _safe(detect_channel_performance, signals)
     return out
 
 
