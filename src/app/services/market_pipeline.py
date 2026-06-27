@@ -32,8 +32,21 @@ def run_pipeline(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 2000, min_
         findings = run_analysis(db, limit=limit, anomaly_fn=anomaly_fn, forecast_fn=forecast_fn,
                                 tenant_id=tenant_id)
         persisted = persist_findings(db, findings, tenant_id=tenant_id, expire_unobserved=expire_unobserved)
+        # Module-2 warehouse sink: roll raw signals into the durable depth aggregate (cheap, writes a
+        # SEPARATE rollup table — never touches signals/findings) + optional retention pruning, env-gated
+        # (MARKET_SIGNAL_RETENTION_DAYS, default 0 = never prune; we never silently delete in test/demo).
+        warehouse = {"rolled_up": 0, "pruned": 0}
+        try:
+            import os as _os
+            from src.app.services.market_warehouse import sink_and_retain
+            _ret = int(_os.getenv("MARKET_SIGNAL_RETENTION_DAYS", "0") or 0)
+            warehouse = sink_and_retain(db, tenant_id=tenant_id, retention_days=(_ret or None))
+        except Exception as exc:  # observable — the sink is best-effort, the pipeline result still stands
+            import logging
+            logging.getLogger(__name__).warning("market_pipeline warehouse sink failed: %s", exc)
         result = {"ingested": int(sum(int(v or 0) for v in ingested.values())),
-                  "ingested_by_source": ingested, "findings": len(findings), "persisted": int(persisted or 0)}
+                  "ingested_by_source": ingested, "findings": len(findings), "persisted": int(persisted or 0),
+                  "rolled_up": int(warehouse.get("rolled_up", 0)), "pruned": int(warehouse.get("pruned", 0))}
         if commit:
             try:
                 db.commit()
@@ -63,11 +76,17 @@ def state(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 50) -> Dict[str, 
         except Exception:
             sig_n = 0
         findings = load_recent_findings(db, limit=limit, tenant_id=tenant_id)
+        # warehouse DEPTH (M2): trend buckets from the durable rollup — survives raw-signal retention, so
+        # the operator sees history even after old raw signals are pruned. query_depth never raises ([] on error).
+        from src.app.services.market_warehouse import query_depth
+        depth = query_depth(db, tenant_id=tenant_id, days=30)
         return {
             "signals": int(sig_n),
             "active_findings": len(findings),
             "findings": [{"type": f.finding_type, "severity": f.severity, "summary": f.summary,
                           "entity_ref": f.entity_ref} for f in findings],
+            "depth_buckets": len(depth),
+            "depth": depth[:limit],
             "label": "LIVE",
         }
     except Exception:

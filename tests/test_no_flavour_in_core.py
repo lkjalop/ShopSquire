@@ -167,6 +167,9 @@ _CORE_MODULES = [
     "src/app/services/market_replay.py",
     # market pipeline: real ingestion→analysis→findings (default tenant), opaque signals — no product vocab.
     "src/app/services/market_pipeline.py",
+    # market warehouse sink (M2 depth + retention): daily (type,source) rollup + prune + depth query;
+    # tenant·day·signal_type·source·counts·trust only — no product vocabulary.
+    "src/app/services/market_warehouse.py",
     # competitor source: rival price observation table + seed, sku·cents only — no product vocabulary.
     "src/app/services/competitor_source.py",
     # support-objection source: buyer-objection table + seed, opaque theme — no product vocabulary.
