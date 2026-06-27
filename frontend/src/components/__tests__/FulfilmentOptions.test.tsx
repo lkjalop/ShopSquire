@@ -31,6 +31,18 @@ describe('FulfilmentOptions', () => {
     await waitFor(() => expect(api.commitFulfillmentCase).toHaveBeenCalledWith('fc-12345678', 'u1'));
   });
 
+  it('GATE 1: shows the "why procurement" trace summary from availability', async () => {
+    (api.getFulfillmentCase as any).mockResolvedValue({
+      state: 'AWAITING_BUYER_COMMITMENT',
+      state_json: { availability: { requested_qty: 20, in_stock: 14, shortfall: 6 } },
+    });
+    render(<FulfilmentOptions caseSummary={CASE} uid="u1" />);
+    const why = await screen.findByTestId('fc-why');
+    expect(why).toHaveTextContent(/Inventory checked: 14 of 20 in stock/i);
+    expect(why).toHaveTextContent(/Shortfall found: 6 unit/i);
+    expect(why).toHaveTextContent(/No supplier contacted yet/i);
+  });
+
   it('renders options with tradeoffs + a deadline flag, and selects the chosen one', async () => {
     (api.getFulfillmentCase as any).mockResolvedValue({
       state: 'OPTIONS_READY',

@@ -71,6 +71,10 @@ export default function FulfilmentOptions({ caseSummary, uid, pollMs = 0 }: Prop
   const state = view?.state || caseSummary.status || 'NEW';
   const options = view?.state_json?.options || [];
   const selectedId = view?.state_json?.selection?.option_id;
+  const avail = (view?.state_json?.availability || {}) as { requested_qty?: number; in_stock?: number; shortfall?: number };
+  const requestedQty = avail.requested_qty;
+  const inStock = avail.in_stock;
+  const shortfall = avail.shortfall ?? caseSummary.shortfall ?? 0;
 
   const onCommit = async () => {
     setBusy(true);
@@ -104,8 +108,15 @@ export default function FulfilmentOptions({ caseSummary, uid, pollMs = 0 }: Prop
 
       {state === 'AWAITING_BUYER_COMMITMENT' && (
         <div data-testid="fc-commit">
+          {/* Why procurement is needed — the buyer-facing trace summary (no supplier contacted yet). */}
+          <ol data-testid="fc-why" className="fc-why">
+            <li>Inventory checked{requestedQty != null && inStock != null ? `: ${inStock} of ${requestedQty} in stock` : ''}.</li>
+            <li>Shortfall found: <strong>{shortfall}</strong> unit(s) need sourcing.</li>
+            <li>Your confirmation is required before we contact any supplier.</li>
+            <li>No supplier contacted yet.</li>
+          </ol>
           <p>
-            {caseSummary.shortfall ?? 0} unit(s) need sourcing from an approved supplier. We will only
+            {shortfall} unit(s) need sourcing from an approved supplier. We will only
             contact a supplier after you confirm — nothing is ordered and no delivery is promised yet.
           </p>
           <button disabled={busy} onClick={onCommit} data-testid="fc-commit-btn">
