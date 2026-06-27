@@ -26,8 +26,12 @@ _BASELINE = {
     # the monster — the bulk of the legacy debt; shrinks as suggest() stages are extracted
     # and critical-path swallows are converted to safe_stage / record_partial_failure. 2026-06-24:
     # tightened 226→190 (true current count) after converting the security-emit + 2 memory-writeback
-    # swallows to observable record_partial_failure (error-budget Tier 1).
-    "src/app/routers/recommend.py": 190,
+    # swallows to observable record_partial_failure (error-budget Tier 1). 2026-06-27: 190→183 after
+    # extracting the inventory + bulk-shortfall handoff block to recommend_inventory_handoff_stage.
+    "src/app/routers/recommend.py": 183,
+    # inventory + bulk-shortfall handoff (extracted): the 4 swallows are best-effort trace/telemetry
+    # guards moved verbatim; locked so no NEW silent swallow can land in the extracted stage.
+    "src/app/services/recommend_inventory_handoff_stage.py": 4,
     # safe_stage's two inner guards (payload-merge + the trace sink) ARE the recorder — the one
     # place silence is legitimate.
     "src/app/services/safe_stage.py": 2,

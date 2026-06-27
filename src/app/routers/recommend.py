@@ -9060,118 +9060,16 @@ def suggest(
             except Exception:
                 pass
 
-        # Inventory agent evaluation WITH quantity check for bulk orders
+        # Inventory agent evaluation WITH quantity check for bulk orders — extracted to
+        # recommend_inventory_handoff_stage (the stage owns the nested try/except: pass; non-blocking).
+        # Side-effecting collaborators are injected so the stage stays vertical-blind + unit-testable.
         requested_qty = constraints.get("quantity") or 1
-        insufficient_stock_skus = []
-        inv_shortage_approval_id = None
-        try:
-            from src.app.services.inventory_agent import InventoryAgent
-            logging.info("recommend.suggest: running inventory checks for up to 8 candidates")
-            inv = InventoryAgent()
-            inv_evals = []
-            for c in (candidates or [])[:8]:
-                stock = int(c.get("stock") or 0)
-                ctx = {"stock": stock}
-                sku_val = c.get("sku") or ""
-                try:
-                    res = inv.evaluate_stock_rule(sku_val, ctx)
-                    res["available_qty"] = stock
-                    res["requested_qty"] = requested_qty
-                    res["can_fulfill"] = stock >= requested_qty
-                    inv_evals.append({"sku": sku_val, **res})
-                    # Track insufficient stock for bulk orders
-                    if requested_qty > 1 and stock < requested_qty:
-                        insufficient_stock_skus.append({"sku": sku_val, "available": stock, "requested": requested_qty})
-                except Exception:
-                    inv_evals.append({"sku": sku_val, "rule_id": None, "action": "eval_failed", "escalate": False, "can_fulfill": False})
-            if inv_evals:
-                try:
-                    log_trace_event(
-                        trace_id=trace_id,
-                        event_type="inventory_check",
-                        source_type="agent",
-                        source_id="Inventory_Agent",
-                        target_type="system",
-                        target_id=None,
-                        payload={
-                            "evaluations": inv_evals,
-                            "requested_qty": requested_qty,
-                            "insufficient_stock_count": len(insufficient_stock_skus),
-                            "insufficient_stock_skus": insufficient_stock_skus[:5],  # Limit payload size
-                        },
-                    )
-                except Exception:
-                    pass
-                # If bulk order cannot be fulfilled, propose a human handoff to Sales
-                try:
-                    if insufficient_stock_skus:
-                        try:
-                            inv_shortage_approval_id = enqueue_approval(
-                                "inventory",
-                                {
-                                    "uid": uid,
-                                    "query": query,
-                                    "requested_qty": requested_qty,
-                                    "insufficient_stock": insufficient_stock_skus[:10],
-                                },
-                                reason="insufficient_stock_bulk",
-                                created_by=role,
-                            )
-                        except Exception:
-                            inv_shortage_approval_id = None
-                        _emit_agent_handoff(
-                            redis_client=redis,
-                            from_agent="Inventory_Agent",
-                            to_agent="Sales_Agent",
-                            reason="insufficient_stock_bulk",
-                            context={
-                                "uid": uid,
-                                "query": query,
-                                "requested_qty": requested_qty,
-                                "approval_id": inv_shortage_approval_id,
-                                "insufficient_stock": insufficient_stock_skus[:10],
-                            },
-                            trace_id=trace_id,
-                        )
-                        # Emit explicit handoff event for trace consumers/tests
-                        try:
-                            log_trace_event(
-                                trace_id=trace_id,
-                                event_type="handoff_requested",
-                                source_type="agent",
-                                source_id="Inventory_Agent",
-                                target_type="agent",
-                                target_id="Sales_Agent",
-                                payload={
-                                    "reason": "insufficient_stock_bulk",
-                                    "requested_qty": requested_qty,
-                                    "insufficient_stock": insufficient_stock_skus[:5],
-                                    "approval_id": inv_shortage_approval_id,
-                                    "tags": ["inventory_insufficient_stock", "approval_required"],
-                                },
-                            )
-                        except Exception:
-                            pass
-                        log_trace_event(
-                            trace_id=trace_id,
-                            event_type="human_escalation",
-                            source_type="agent",
-                            source_id="Inventory_Agent",
-                            target_type="human",
-                            target_id="Sales",
-                            payload={
-                                "reason": "insufficient_stock_bulk",
-                                "requested_qty": requested_qty,
-                                "insufficient_stock": insufficient_stock_skus[:5],
-                                "approval_id": inv_shortage_approval_id,
-                                "tags": ["inventory_insufficient_stock", "approval_required"],
-                            },
-                        )
-                except Exception:
-                    pass
-        except Exception:
-            # Non-blocking: recommendation flow continues even if inventory evaluation fails
-            pass
+        from src.app.services.recommend_inventory_handoff_stage import evaluate_inventory_handoff as _eval_inv_handoff
+        insufficient_stock_skus, inv_shortage_approval_id = _eval_inv_handoff(
+            candidates, requested_qty=requested_qty, trace_id=trace_id, uid=uid, query=query, role=role,
+            redis_client=redis, trace_fn=log_trace_event, enqueue_approval_fn=enqueue_approval,
+            emit_handoff_fn=_emit_agent_handoff,
+        )
 
         if not candidates and os.getenv("TEST_USE_FALLBACK_PRODUCTS", "0").lower() in ("1", "true", "yes"):
             candidates = [
