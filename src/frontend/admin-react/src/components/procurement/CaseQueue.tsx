@@ -56,6 +56,7 @@ export function CaseQueue({ cases, sel, onSelect, onRefresh }: {
         && (!term
           || c.case_id.toLowerCase().includes(term)
           || (c.status || '').toLowerCase().includes(term)
+          || (c.item_ref || '').toLowerCase().includes(term)
           || (c.requested_by || '').toLowerCase().includes(term)
           || (c.source_trace_id || '').toLowerCase().includes(term)))
       // newest-first explicitly (don't rely on server order surviving the filter)
@@ -65,7 +66,7 @@ export function CaseQueue({ cases, sel, onSelect, onRefresh }: {
   const blockedCount = useMemo(() => cases.filter((c) => isBlocked(c.status || '')).length, [cases]);
 
   return (
-    <aside data-testid="op-queue" style={{ minWidth: 280 }}>
+    <aside data-testid="op-queue" style={{ minWidth: 360 }}>
       <h3 style={{ marginBottom: 6 }}>Procurement queue <button onClick={onRefresh} title="Refresh">↻</button></h3>
       <input data-testid="op-queue-search" value={q} onChange={(e) => setQ(e.target.value)}
              placeholder="search case · status · buyer · trace" style={{ width: '100%', marginBottom: 6 }} />
@@ -86,7 +87,7 @@ export function CaseQueue({ cases, sel, onSelect, onRefresh }: {
         </div>
       )}
       <table>
-        <thead><tr><th>Case</th><th>Status</th><th>Updated</th></tr></thead>
+        <thead><tr><th>Case</th><th>SKU</th><th>Qty</th><th>Status</th><th>Updated</th></tr></thead>
         <tbody>
           {filtered.map((c) => {
             const blocked = isBlocked(c.status || '');
@@ -95,6 +96,8 @@ export function CaseQueue({ cases, sel, onSelect, onRefresh }: {
                   style={{ cursor: 'pointer', fontWeight: c.case_id === sel ? 700 : 400,
                            background: c.case_id === sel ? '#eef2ff' : undefined }}>
                 <td>{c.case_id.slice(0, 8)}</td>
+                <td data-testid="op-queue-row-sku" style={{ fontSize: 12 }}>{c.item_ref || '—'}</td>
+                <td data-testid="op-queue-row-qty" style={{ fontSize: 12, textAlign: 'right' }}>{c.quantity ?? '—'}</td>
                 <td>
                   {c.status?.replace(/_/g, ' ').toLowerCase()}
                   {blocked && (
@@ -108,7 +111,7 @@ export function CaseQueue({ cases, sel, onSelect, onRefresh }: {
             );
           })}
           {filtered.length === 0 && (
-            <tr><td colSpan={3}><em>{cases.length ? 'no matches' : 'no cases'}</em></td></tr>
+            <tr><td colSpan={5}><em>{cases.length ? 'no matches' : 'no cases'}</em></td></tr>
           )}
         </tbody>
       </table>

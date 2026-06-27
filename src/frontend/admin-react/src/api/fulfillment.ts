@@ -5,6 +5,7 @@ import { http } from './client';
 export interface FulfillmentCaseRow {
   case_id: string; buyer_uid_hash?: string | null; status: string;
   requested_by?: string | null; source_trace_id?: string | null; updated_at?: string | null;
+  item_ref?: string | null; quantity?: number | null;
 }
 export interface FulfillmentCaseView {
   case_id: string; state: string; state_json: Record<string, any>; source_trace_id?: string | null;

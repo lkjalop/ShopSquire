@@ -289,20 +289,54 @@ def journey(db, case_id: str, tenant_id: str = DEFAULT_TENANT, limit: int = 200)
              "valid_from": r["valid_from"], "valid_to": r["valid_to"]} for r in ordered]
 
 
+def _scope_from_state(state_json_text: Any) -> Dict[str, Any]:
+    """Pull the operator-useful SKU + quantity out of a case version's state_json (best-effort). Looks at
+    the assessed availability first, then the draft's commercial scope. {} when nothing is parseable."""
+    state = _loads(state_json_text) if isinstance(state_json_text, str) else (state_json_text or {})
+    if not isinstance(state, dict):
+        return {}
+    avail = state.get("availability") if isinstance(state.get("availability"), dict) else {}
+    scope = (state.get("draft") or {}).get("commercial_scope") if isinstance(state.get("draft"), dict) else {}
+    scope = scope if isinstance(scope, dict) else {}
+    item_ref = str(avail.get("item_ref") or scope.get("item_ref") or "").strip() or None
+    qty = avail.get("requested_qty") or avail.get("shortfall") or scope.get("quantity")
+    out: Dict[str, Any] = {}
+    if item_ref:
+        out["item_ref"] = item_ref
+    try:
+        if qty is not None:
+            out["quantity"] = int(qty)
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
 def list_cases(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 100) -> List[Dict[str, Any]]:
     if db is None:
         return []
     try:
         ensure_tables(db)
+        # LEFT JOIN the OPEN version (valid_to IS NULL) so the queue can show SKU + qty without an N+1.
+        # SCD-2 keeps exactly one open version per case; a per-case dedup below guards against anomalies.
         rows = db.execute(
-            text("SELECT id, buyer_uid_hash, status, requested_by, source_trace_id, updated_at "
-                 "FROM fulfillment_case WHERE tenant_id=:t ORDER BY updated_at DESC LIMIT :lim"),
+            text("SELECT c.id, c.buyer_uid_hash, c.status, c.requested_by, c.source_trace_id, c.updated_at, "
+                 "v.state_json FROM fulfillment_case c "
+                 "LEFT JOIN fulfillment_case_version v "
+                 "  ON v.case_id = c.id AND v.tenant_id = c.tenant_id AND v.valid_to IS NULL "
+                 "WHERE c.tenant_id=:t ORDER BY c.updated_at DESC LIMIT :lim"),
             {"t": _tid(tenant_id), "lim": int(limit)},
         ).fetchall()
     except Exception:
         return []
-    return [{"case_id": r[0], "buyer_uid_hash": r[1], "status": r[2], "requested_by": r[3],
-             "source_trace_id": r[4], "updated_at": r[5]} for r in rows]
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for r in rows:
+        if r[0] in seen:  # guard against a duplicate open version JOINing twice
+            continue
+        seen.add(r[0])
+        out.append({"case_id": r[0], "buyer_uid_hash": r[1], "status": r[2], "requested_by": r[3],
+                    "source_trace_id": r[4], "updated_at": r[5], **_scope_from_state(r[6])})
+    return out
 
 
 def case_id_by_trace(db, trace_id: str, tenant_id: str = DEFAULT_TENANT) -> Optional[str]:

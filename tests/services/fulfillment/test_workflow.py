@@ -153,3 +153,18 @@ def test_state_json_accumulates_across_transitions(db):
 def test_unknown_case_is_not_found(db):
     r = wf.transition(db, case_id="nope", event="availability_assessed", actor=AG())
     assert r.ok is False and r.reason == "not_found" and r.http_status == 404
+
+
+def test_list_cases_enriches_sku_and_qty_from_open_version(db):
+    # the queue columns: list_cases LEFT JOINs the OPEN version's state_json and surfaces SKU + qty.
+    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="recommend",
+                       now_iso="2026-06-26 09:00:00"); db.commit()
+    wf.transition(db, case_id=cid, event="availability_assessed", actor=AG(),
+                  state_patch={"availability": {"item_ref": "GAM-0002", "requested_qty": 7,
+                                                "in_stock": 0, "shortfall": 7}},
+                  now_iso="2026-06-26 09:00:01")
+    rows = repo.list_cases(db)
+    row = next(r for r in rows if r["case_id"] == cid)
+    assert row["item_ref"] == "GAM-0002" and row["quantity"] == 7
+    # one row per case (no duplicate from the open-version JOIN)
+    assert sum(1 for r in rows if r["case_id"] == cid) == 1
