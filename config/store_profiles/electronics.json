@@ -89,6 +89,13 @@
   },
   "use_case_fit_weights": {"soft": 6.0, "exclusion": -22.0},
 
+  "_storefront_emphasis_comment": "Phase-3 storefront-emphasis variants (David Module 4/5). DATA copy only — never free-form LLM. The experiment-gated, reversible lever picks one per TREATMENT subject; control gets none. Vertical-flavoured strings live HERE (profile), the core lever stays vertical-blind.",
+  "storefront_emphasis_variants": {
+    "value": "Great value picks — performance per dollar, matched to your budget.",
+    "urgency": "Popular right now and moving fast — secure your pick before stock shifts.",
+    "features": "Spec-forward picks — the capabilities that matter for your use-case, up front."
+  },
+
   "_nqe_question_packs_comment": "Domain-specific NQE clarifying questions (excised from nqe.py hardcoded packs). Each entry is keyed by question id and contains: text, goal, evidence_needed, source, options. NQE reads these from the active profile; non-electronics verticals supply their own domain questions.",
   "nqe_question_packs": {
     "ask_b2b_procurement": {

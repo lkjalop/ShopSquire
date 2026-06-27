@@ -100,6 +100,9 @@ type RightPanelContract = {
   lower_tier?: PanelTier;
   higher_tier?: PanelTier;
   anchor_sections?: AnchorSection[];
+  // Phase-3 storefront-emphasis lever: a gated, profile-sourced messaging line for treatment users.
+  // Present only when the experiment is live + the subject is treatment + the action gate allowed.
+  emphasis?: { text?: string; variant?: string; key?: string; applied?: boolean; experiment_id?: string };
 };
 
 const IMAGE_FAST_TRIAGE_TIMEOUT_MS = 3000;
@@ -1982,6 +1985,19 @@ export default function App() {
                   </div>
                 )}
                 <div className={styles.rightBody}>
+                  {rightPanelContract?.emphasis?.applied && rightPanelContract.emphasis.text && (
+                    <div
+                      data-testid="right-panel-emphasis"
+                      data-variant={rightPanelContract.emphasis.key || rightPanelContract.emphasis.variant}
+                      style={{
+                        margin: '0 0 10px', padding: '8px 12px', borderRadius: 8,
+                        border: '1px solid rgba(37,99,235,0.25)', background: 'rgba(37,99,235,0.06)',
+                        color: '#1d4ed8', fontSize: 13, fontWeight: 600,
+                      }}
+                    >
+                      {rightPanelContract.emphasis.text}
+                    </div>
+                  )}
                   {fulfilmentCase && (
                     <div className={styles.procurementPanelSlot}>
                       <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />

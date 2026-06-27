@@ -154,6 +154,9 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/options.py",
     # recommend fulfilment stage: bulk availability + flag-gated case trigger, opaque — no product vocab.
     "src/app/services/recommend_fulfillment_stage.py",
+    # storefront-emphasis lever (David Phase 3): gated right-panel messaging variant for treatment users.
+    # The only flavour (the variant copy) lives in the StoreProfile slot — the gate/canary/apply is opaque.
+    "src/app/services/recommend_emphasis_stage.py",
     # market replay: deterministic synthetic signals → real M3, tenant-isolated — no product vocabulary.
     "src/app/services/market_replay.py",
     # market pipeline: real ingestion→analysis→findings (default tenant), opaque signals — no product vocab.

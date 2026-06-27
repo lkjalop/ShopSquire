@@ -10767,6 +10767,14 @@ def suggest(
         apply_image_security_fields=_apply_image_security_response_fields,
         infer_warranty=_infer_account_warranty_status, trace_fn=log_trace_event,
     )
+    # Phase-3 storefront-emphasis lever (flag-gated, experiment-gated, reversible, measured). No-op unless
+    # STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED + a live experiment + TREATMENT + the adaptive gate ALLOWs, so
+    # default behaviour is byte-identical. Profile-sourced copy (no LLM). Mutates payload['right_panel'].
+    from src.app.platform.store_profile import profile_slot as _emphasis_profile_slot
+    from src.app.services.recommend_emphasis_stage import apply_storefront_emphasis as _apply_emphasis
+    _apply_emphasis(payload, flags=flags, simulate=simulate, uid_hash=uid_hash, uid=uid,
+                    trace_id=trace_id, decision_id=decision_id, profile_fn=_emphasis_profile_slot,
+                    trace_fn=log_trace_event)
     if not results:
         try:
             fallback_alternatives = []
