@@ -38,6 +38,7 @@ DEFAULT_TEMPLATE: Dict[str, str] = {
         "{supplier_context}"
         "Please confirm availability and provide a quote for {item_ref}, quantity {quantity}, "
         "required by {needed_by}.\n\n"
+        "{requirements_block}"
         "{urgency_note}\n\n"
         "Please reply to this address with your unit price, lead time, and how long the quote is valid.\n\n"
         "This request does not constitute a purchase order.\n\n"
@@ -226,6 +227,39 @@ def _supplier_context_note(evidence: List[DraftEvidence]) -> str:
     return ""
 
 
+def _requirements_block(case_state: Optional[Dict[str, Any]]) -> str:
+    """Render the buyer's stated requirements (way-1) as claim-safe RFQ bullets so the supplier knows what
+    to quote against. BUDGET is deliberately excluded — it is internal-only and must never anchor supplier
+    pricing. Returns '' when the case carries no requirements (graceful no-op)."""
+    reqs = (case_state or {}).get("requirements") if isinstance(case_state, dict) else None
+    if not isinstance(reqs, dict):
+        return ""
+    bullets: List[str] = []
+    uc = str(reqs.get("use_case") or "").strip()
+    if uc:
+        bullets.append(f"Intended use: {uc}")
+    specs = reqs.get("specs")
+    if isinstance(specs, list) and specs:
+        bullets.append("Required specs: " + ", ".join(str(s) for s in specs[:6]))
+    days = reqs.get("needed_within_days")
+    if days:
+        bullets.append(f"Needed within: {int(days)} days")
+    if not bullets:
+        return ""
+    return "Key requirements:\n" + "\n".join(f"- {b}" for b in bullets) + "\n\n"
+
+
+def _resolve_supplier_name(db, domain: str, tenant_id: str) -> Optional[str]:
+    """A human-friendly supplier name for the greeting (the kyv legal/trading name), resolved from the
+    already-approved domain. Falls back to None so the caller keeps the supplier ref. Never raises."""
+    try:
+        from src.app.security.kyv_registry import lookup_vendor_by_domain
+        v = lookup_vendor_by_domain(tenant_id=tenant_id, domain=domain) or {}
+        return (str(v.get("legal_name") or v.get("trading_name") or "").strip()) or None
+    except Exception:
+        return None
+
+
 def draft_send_gate(draft: Dict[str, Any], *, min_confidence: float = 0.6) -> Dict[str, Any]:
     """Deterministic pre-send policy gate — answers "should this draft be sent to the supplier at all?",
     independent of and PRIOR to the human send gate (GATE 2). Returns
@@ -296,9 +330,11 @@ def build_draft(
                                hippograph_fn=hippograph_fn, market_fn=market_fn, benchmark_fn=benchmark_fn,
                                inbox_fn=inbox_fn, tenant_id=tenant_id)
     tmpl = template or DEFAULT_TEMPLATE
+    supplier_name = _resolve_supplier_name(db, domain, tenant_id) or recipient_ref
     slots = {"item_ref": item_ref, "quantity": quantity, "case_ref": case_ref,
-             "supplier_name": recipient_ref, "needed_by": needed_by, "urgency_note": _urgency_note(evidence),
-             "supplier_context": _supplier_context_note(evidence)}
+             "supplier_name": supplier_name, "needed_by": needed_by, "urgency_note": _urgency_note(evidence),
+             "supplier_context": _supplier_context_note(evidence),
+             "requirements_block": _requirements_block(case_state)}
     subject = str(tmpl.get("subject", DEFAULT_TEMPLATE["subject"])).format(**slots)
     body = str(tmpl.get("body", DEFAULT_TEMPLATE["body"])).format(**slots)
 

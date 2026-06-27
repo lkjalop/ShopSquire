@@ -97,3 +97,16 @@ def test_single_item_in_stock_opens_no_case(monkeypatch):
                                 payload=payload,
                                 flags={"FULFILLMENT_CASES_ENABLED": True, "FULFILLMENT_SINGLE_ITEM_OOS": True})
     assert "fulfillment_case" not in payload  # in stock → no procurement
+
+
+def test_buyer_requirements_captures_constraints_and_keeps_budget_internal():
+    # way-1: the buyer's stated constraints are captured on the case for the supplier RFQ. Budget is
+    # persisted but flagged internal — the RFQ renderer must never put it in the supplier body.
+    from src.app.services.recommend_fulfillment_stage import _buyer_requirements
+    r = _buyer_requirements({"use_case": "office", "specs": ["16gb ram", "ssd"],
+                             "budget_min": 1300, "budget_max": 1500, "availability_horizon_days": 14})
+    assert r["use_case"] == "office"
+    assert r["specs"] == ["16gb ram", "ssd"]
+    assert r["needed_within_days"] == 14
+    assert r["budget"] == {"min": 1300, "max": 1500}
+    assert _buyer_requirements({}) == {}  # nothing stated → no requirements

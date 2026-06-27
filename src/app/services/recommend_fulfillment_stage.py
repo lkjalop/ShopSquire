@@ -24,6 +24,13 @@ def _flag(flags: Optional[Dict[str, Any]], key: str) -> bool:
     return str(v).strip().lower() in ("1", "true", "yes", "on") if v is not None else False
 
 
+def _safe_int(v: Any) -> Optional[int]:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None  # observable: callers treat None as "not stated"
+
+
 def run_fulfillment_stage(
     *,
     results: List[Dict[str, Any]],
@@ -54,11 +61,32 @@ def run_fulfillment_stage(
         avail_skus, qty, constraints.get("availability_horizon_days"), draft_reorder=is_b2b_bulk)
     line = availability_summary_line(payload["availability"])
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
-                     uid=uid, uid_hash=uid_hash, trace_id=trace_id, flags=flags, single_item=single_item)
+                     constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
+                     flags=flags, single_item=single_item)
     return line
 
 
-def _maybe_open_case(*, payload, avail, order_qty, uid, uid_hash, trace_id, flags, single_item=False) -> None:
+def _buyer_requirements(constraints: Dict[str, Any]) -> Dict[str, Any]:
+    """The buyer's stated requirements, captured on the case so the supplier RFQ can cite them (way-1).
+    Budget is kept INTERNAL (operator-only) — it is persisted for the operator but the RFQ renderer never
+    puts it in the supplier body (no price anchoring). Vertical-blind: opaque use_case/spec tokens only."""
+    reqs: Dict[str, Any] = {}
+    uc = str(constraints.get("use_case") or "").strip()
+    if uc:
+        reqs["use_case"] = uc
+    specs = constraints.get("specs")
+    if isinstance(specs, list) and specs:
+        reqs["specs"] = [str(s) for s in specs if str(s).strip()][:6]
+    horizon = _safe_int(constraints.get("availability_horizon_days"))
+    if horizon is not None:
+        reqs["needed_within_days"] = horizon
+    bmin, bmax = constraints.get("budget_min"), constraints.get("budget_max")
+    if bmin is not None or bmax is not None:
+        reqs["budget"] = {"min": bmin, "max": bmax}  # INTERNAL ONLY — never rendered into the supplier RFQ
+    return reqs
+
+
+def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False) -> None:
     """Open a fulfilment_case at GATE 1 on a real shortfall (flag-gated, best-effort). Two entry points:
     a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True)."""
     if not _flag(flags, "FULFILLMENT_CASES_ENABLED"):
@@ -86,11 +114,14 @@ def _maybe_open_case(*, payload, avail, order_qty, uid, uid_hash, trace_id, flag
                                 requested_by="recommend")
             if not cid:
                 return
+            _patch = {"availability": {"requested_qty": order_qty,
+                                       "in_stock": int((avail or {}).get("in_stock") or 0),
+                                       "shortfall": shortfall, "item_ref": item_ref}}
+            _reqs = _buyer_requirements(constraints or {})
+            if _reqs:
+                _patch["requirements"] = _reqs  # way-1: buyer constraints → cited in the supplier RFQ
             fwf.transition(db, case_id=cid, event="availability_assessed", actor=agent,
-                           reason_code="bulk_shortfall", trace_id=trace_id,
-                           state_patch={"availability": {"requested_qty": order_qty,
-                                        "in_stock": int((avail or {}).get("in_stock") or 0),
-                                        "shortfall": shortfall, "item_ref": item_ref}})
+                           reason_code="bulk_shortfall", trace_id=trace_id, state_patch=_patch)
             fwf.transition(db, case_id=cid, event="request_buyer_commitment", actor=agent, trace_id=trace_id)
             # no db.commit() here — workflow.transition is the single transaction owner (it commits each
             # applied transition, incl. the case row created in the same session). A trailing commit here

@@ -212,3 +212,32 @@ def test_draft_and_record_attaches_advisory_send_gate(db):
     cur = wf.repository.current_version(db, cid)
     gate = (cur.state_json.get("draft") or {}).get("send_gate") or {}
     assert gate.get("decision") in ("allow", "needs_info", "block")
+
+
+# ── way-1: buyer requirements cited in the RFQ (budget stays internal) ──
+def test_requirements_block_renders_buyer_constraints_excluding_budget(db):
+    cs = {"availability": {"shortfall": 6, "requested_qty": 10},
+          "requirements": {"use_case": "office", "specs": ["16gb ram", "512gb ssd"],
+                           "needed_within_days": 14, "budget": {"min": 1300, "max": 1500}}}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    body = draft.body.lower()
+    assert "key requirements" in body and "intended use: office" in body
+    assert "16gb ram" in body and "needed within: 14 days" in body
+    # budget is internal-only — it must never anchor supplier pricing
+    assert "1300" not in draft.body and "1500" not in draft.body and "budget" not in body
+    assert "this request does not constitute a purchase order" in body  # cage intact
+
+
+def test_no_requirements_block_when_case_has_none(db):
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "key requirements" not in draft.body.lower()
+
+
+def test_supplier_greeting_uses_legal_name_when_resolvable(db, monkeypatch):
+    monkeypatch.setattr("src.app.security.kyv_registry.lookup_vendor_by_domain",
+                        lambda *, tenant_id, domain: {"legal_name": "TechData Procurement"})
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "hello techdata procurement" in draft.body.lower()  # not "hello sup-7"
