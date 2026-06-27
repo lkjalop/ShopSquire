@@ -49,6 +49,7 @@ class FulfillmentState(str, Enum):
     COMMITTED = "COMMITTED"
     QUOTE_DRAFTED = "QUOTE_DRAFTED"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    AWAITING_SUPPLIER_INFO = "AWAITING_SUPPLIER_INFO"   # RFI: human asked the supplier a clarification
     APPROVED_TO_SEND = "APPROVED_TO_SEND"
     QUOTE_SENT = "QUOTE_SENT"
     QUOTE_RECEIVED = "QUOTE_RECEIVED"
@@ -124,6 +125,15 @@ TRANSITIONS: Tuple[Transition, ...] = (
     # ── editing a pending draft voids the prior approval (back to DRAFTED) ──
     Transition("external_message_drafted", _S.AWAITING_APPROVAL, _S.QUOTE_DRAFTED, frozenset({_A.AGENT, _A.HUMAN_OPERATOR}),
                requires_evidence=True, note="edit → new version + new hash → prior approval void"),
+
+    # ── RFI: the human asks the supplier a scoped clarification BEFORE approving the RFQ. HUMAN-fired
+    #    (an external contact), claim-safe + content-hashed like the RFQ. Returns to the approval gate. ──
+    Transition("supplier_info_requested", _S.AWAITING_APPROVAL, _S.AWAITING_SUPPLIER_INFO,
+               frozenset({_A.HUMAN_OPERATOR}), requires_evidence=True,
+               note="HUMAN sends a scoped RFI to the resolved supplier (consumes a needs_info send-gate)"),
+    Transition("supplier_info_received", _S.AWAITING_SUPPLIER_INFO, _S.AWAITING_APPROVAL,
+               frozenset({_A.EXTERNAL, _A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True,
+               note="supplier clarification recorded → back to the approval gate with the answer on file"),
 
     # ── GATE 2a: human approval, then human-fired send ──
     Transition("approval_granted", _S.AWAITING_APPROVAL, _S.APPROVED_TO_SEND, frozenset({_A.HUMAN_OPERATOR}),

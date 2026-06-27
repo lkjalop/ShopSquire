@@ -207,6 +207,36 @@ def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR)))
         return {**_case_view(db, case_id, for_operator=True), "approval_id": approval_id}
 
 
+class RfiBody(BaseModel):
+    question: str   # the scoped clarification the HUMAN wants to ask the supplier (claim-safe — no price)
+
+
+@router.post("/cases/{case_id}/request-info")
+def request_info(case_id: str, body: RfiBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """RFI: the HUMAN sends a scoped clarification to the resolved supplier before approving the RFQ — the
+    recoverable path for a needs_info send-gate. Same cage (allowlisted recipient, claim-safe, hash-pinned)."""
+    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    with db_session() as db:
+        res, _rfi = fdraft.request_supplier_info(db, case_id=case_id, actor=human, question=body.question)
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
+class RfiReplyBody(BaseModel):
+    answer: str   # the supplier's clarification reply (recorded; returns the case to the approval gate)
+
+
+@router.post("/cases/{case_id}/supplier-info")
+def supplier_info(case_id: str, body: RfiReplyBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Record the supplier's RFI reply (AWAITING_SUPPLIER_INFO → AWAITING_APPROVAL). Operator-recorded for
+    the demo; an inbound poller would fire the same transition as an EXTERNAL actor."""
+    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    with db_session() as db:
+        res, _resp = fdraft.record_supplier_info(db, case_id=case_id, actor=human, answer=body.answer)
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
 class DispatchBody(BaseModel):
     content_hash: str   # the hash of the message the human APPROVED (an edit since then → stale_approval)
 

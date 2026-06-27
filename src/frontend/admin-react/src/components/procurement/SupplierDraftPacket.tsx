@@ -25,6 +25,20 @@ export function SupplierDraftPacket({
   return (
     <details open data-testid="op-supplier-draft">
       <summary>Supplier email approval packet - hash {shortHash(draft.content_hash)}</summary>
+      {draft.send_gate?.decision && (
+        <div data-testid="op-send-gate" style={{
+          margin: '6px 0', padding: '4px 8px', borderRadius: 6, fontSize: 12, fontWeight: 700,
+          background: draft.send_gate.decision === 'allow' ? '#dcfce7'
+            : draft.send_gate.decision === 'needs_info' ? '#fef3c7' : '#fee2e2',
+          color: draft.send_gate.decision === 'allow' ? '#166534'
+            : draft.send_gate.decision === 'needs_info' ? '#92400e' : '#991b1b',
+        }}>
+          Pre-send gate: {String(draft.send_gate.decision).replace('_', ' ').toUpperCase()}
+          {(draft.send_gate.blocking?.length || draft.send_gate.reasons?.length)
+            ? ` — ${[...(draft.send_gate.blocking || []), ...(draft.send_gate.reasons || [])].join(', ')}` : ''}
+          {draft.send_gate.decision === 'needs_info' && ' · use "Ask supplier for info (RFI)"'}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, margin: '8px 0' }}>
         <div style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}>
           <strong>Recipient</strong>

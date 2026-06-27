@@ -451,3 +451,67 @@ def request_supplier_approval(db, *, case_id: str, actor: Actor, tenant_id: str 
         except Exception:
             approval_id = None
     return res, approval_id
+
+
+# ── RFI: human-fired supplier clarification (consumes a needs_info send-gate) ──
+RFI_TEMPLATE: Dict[str, str] = {
+    "subject": "Clarification request — {item_ref} — {case_ref}",
+    "body": (
+        "Hello {supplier_name},\n\n"
+        "Before we proceed, could you please clarify the following:\n"
+        "{question}\n\n"
+        "This request does not constitute a purchase order.\n\n"
+        "Regards,\nProcurement"
+    ),
+}
+
+
+def request_supplier_info(db, *, case_id: str, actor: Actor, question: str, tenant_id: str = "default",
+                          now_iso: Optional[str] = None, trace_id: Optional[str] = None):
+    """HUMAN sends a scoped RFI (clarification) to the ALREADY-resolved supplier before approving the RFQ —
+    the recoverable path for a ``needs_info`` send-gate. Same cage as the RFQ: recipient from the draft's
+    allowlisted domain (never free text), claim-safe body (no price/PO leak), content_hash pinned, fired
+    through the workflow chokepoint (AWAITING_APPROVAL → AWAITING_SUPPLIER_INFO). Returns (TransitionResult,
+    rfi-dict|None)."""
+    cur = workflow.repository.current_version(db, case_id, tenant_id)
+    draft = (cur.state_json.get("draft") if cur else None) or {}
+    domain = str(draft.get("recipient_domain") or "")
+    if not domain:
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "no_recipient",
+                                         http_status=409), None
+    q = str(question or "").strip()
+    if not q:
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "empty_question",
+                                         http_status=400), None
+    item_ref = str((draft.get("commercial_scope") or {}).get("item_ref") or "the requested item")
+    supplier_name = _resolve_supplier_name(db, domain, tenant_id) or str(draft.get("recipient_ref") or "Supplier")
+    subject = RFI_TEMPLATE["subject"].format(item_ref=item_ref, case_ref=case_id)
+    body = RFI_TEMPLATE["body"].format(supplier_name=supplier_name, question=q)
+    if not _claim_safe(body):  # a human question that leaks a price/PO is refused (same guard as the RFQ)
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "unsafe_rfi",
+                                         http_status=409), None
+    rfi = {"subject": subject, "body": body, "content_hash": content_hash(subject, body),
+           "recipient_domain": domain, "recipient_email": draft.get("recipient_email"), "question": q}
+    res = workflow.transition(
+        db, case_id=case_id, event="supplier_info_requested", actor=actor,
+        reason_code="supplier_clarification_requested",
+        evidence={"content_hash": rfi["content_hash"], "recipient_domain": domain, "question": q},
+        state_patch={"rfi": rfi}, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+    return res, (rfi if res.ok else None)
+
+
+def record_supplier_info(db, *, case_id: str, actor: Actor, answer: str, tenant_id: str = "default",
+                         now_iso: Optional[str] = None, trace_id: Optional[str] = None):
+    """Record the supplier's clarification reply (AWAITING_SUPPLIER_INFO → AWAITING_APPROVAL) so the human
+    can approve the RFQ with the answer on file. Returns (TransitionResult, rfi_response-dict|None)."""
+    ans = str(answer or "").strip()
+    if not ans:
+        cur = workflow.repository.current_version(db, case_id, tenant_id)
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "empty_answer",
+                                         http_status=400), None
+    rfi_response = {"answer": ans}
+    res = workflow.transition(
+        db, case_id=case_id, event="supplier_info_received", actor=actor,
+        reason_code="supplier_info_received", evidence={"answer_chars": len(ans)},
+        state_patch={"rfi_response": rfi_response}, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+    return res, (rfi_response if res.ok else None)

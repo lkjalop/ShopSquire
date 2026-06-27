@@ -241,3 +241,39 @@ def test_supplier_greeting_uses_legal_name_when_resolvable(db, monkeypatch):
     draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
                           rank_fn=_rank_ok, allowlist_fn=_allow)
     assert "hello techdata procurement" in draft.body.lower()  # not "hello sup-7"
+
+
+# ── RFI: human-fired supplier clarification (consumes a needs_info send-gate) ──
+def _to_awaiting_approval_with_supplier(db):
+    cid = _committed_case(db)
+    D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                       rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    D.request_supplier_approval(db, case_id=cid, actor=AG(), now_iso="2026-06-26 09:05:20")
+    return cid
+
+
+def test_request_supplier_info_sends_claim_safe_rfi_and_advances(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(),
+                                       question="What is your lead time and MOQ for this quantity?",
+                                       now_iso="2026-06-26 09:06:00")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_SUPPLIER_INFO
+    assert "this request does not constitute a purchase order" in rfi["body"].lower()
+    assert rfi["recipient_domain"] == "approved-supplier.example" and rfi["content_hash"]
+
+
+def test_request_supplier_info_rejects_price_leak(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    res, rfi = D.request_supplier_info(db, case_id=cid, actor=HU(), question="We'll pay $900 each, ok?",
+                                       now_iso="2026-06-26 09:06:00")
+    assert res.ok is False and res.reason == "unsafe_rfi" and rfi is None
+    assert wf.current_state(db, cid) == S.AWAITING_APPROVAL  # unchanged — unsafe RFI refused
+
+
+def test_record_supplier_info_returns_to_approval_gate(db):
+    cid = _to_awaiting_approval_with_supplier(db)
+    D.request_supplier_info(db, case_id=cid, actor=HU(), question="Lead time?", now_iso="2026-06-26 09:06:00")
+    res, resp = D.record_supplier_info(db, case_id=cid, actor=HU(), answer="7 days, MOQ 1.",
+                                       now_iso="2026-06-26 09:10:00")
+    assert res.ok and wf.current_state(db, cid) == S.AWAITING_APPROVAL
+    assert resp == {"answer": "7 days, MOQ 1."}

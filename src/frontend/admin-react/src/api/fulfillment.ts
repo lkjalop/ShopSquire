@@ -36,6 +36,10 @@ export const fcDraftQuote = (id: string, item_ref: string, quantity: number, est
 export const fcRequestApproval = (id: string) =>
   http<FulfillmentCaseView & { approval_id?: string }>(`${_fc(id)}/request-approval`, { method: 'POST' });
 export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
+// RFI: HUMAN asks the resolved supplier a scoped clarification before approving the RFQ (claim-safe).
+export const fcRequestInfo = (id: string, question: string) => _fcPost(`${_fc(id)}/request-info`, { question });
+// record the supplier's RFI reply → back to the approval gate.
+export const fcSupplierInfo = (id: string, answer: string) => _fcPost(`${_fc(id)}/supplier-info`, { answer });
 // HUMAN edits the pending draft before approving — re-hashes (voids prior approval), claim-safety enforced.
 export const fcEditDraft = (id: string, subject: string, body: string) =>
   _fcPost(`${_fc(id)}/edit-draft`, { subject, body });

@@ -4,7 +4,7 @@
 import React from 'react';
 import {
   fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcExecutePO, fcGenerateOptions,
-  fcProposePO, fcRequestApproval, fcValidateQuote,
+  fcProposePO, fcRequestApproval, fcRequestInfo, fcSupplierInfo, fcValidateQuote,
 } from '../../api';
 
 const SCENARIOS = ['full_quote', 'partial_availability', 'late_delivery', 'substitute_offer',
@@ -50,6 +50,30 @@ export function ActionBar({
                 onClick={() => run(() => fcDispatch(sel, draftHash || ''))}>
           Approve exact draft &amp; send (GATE 2)
         </button>
+      )}
+      {state === 'AWAITING_APPROVAL' && (
+        <button disabled={busy} data-testid="op-request-info"
+                title="Ask the supplier a scoped clarification before approving the RFQ (claim-safe, no prices)"
+                onClick={() => {
+                  const q = window.prompt('What do you need to ask the supplier? (no prices)');
+                  if (q && q.trim()) run(() => fcRequestInfo(sel, q.trim()));
+                }}>
+          Ask supplier for info (RFI)
+        </button>
+      )}
+      {state === 'AWAITING_SUPPLIER_INFO' && (
+        <>
+          <span data-testid="op-awaiting-info" style={{ fontSize: 12, color: '#b45309', fontWeight: 700 }}>
+            RFI SENT — awaiting supplier reply
+          </span>
+          <button disabled={busy} data-testid="op-supplier-info"
+                  onClick={() => {
+                    const a = window.prompt("Record the supplier's reply:");
+                    if (a && a.trim()) run(() => fcSupplierInfo(sel, a.trim()));
+                  }}>
+            Record supplier reply
+          </button>
+        </>
       )}
       {state === 'QUOTE_SENT' && (
         <>
