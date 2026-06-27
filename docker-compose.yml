@@ -35,6 +35,15 @@ services:
       # "warn"   → log + emit warning, continue execution (recommended for demo/staging)
       # "block"  → raise MaestroViolationError for critical/high violations (production)
       MAESTRO_ENFORCEMENT_MODE: "warn"
+      # Recommendation latency lever — LLM narration was measured at ~85-91% of route latency, so the
+      # blocking narration call is what pushes complex queries to 10-13s. Env wins over the
+      # config/feature_flags.json value ("blocking").
+      #   async    → return the deterministic grounded answer immediately (<5s warm) AND compute the LLM
+      #              prose out-of-band (GET /api/v1/recommend/narration/{job_id}). Demo-friendly default.
+      #   skip     → deterministic grounded answer only; no prose computed (no wasted background work).
+      #   blocking → wait for the LLM prose, capped at RECOMMEND_NARRATION_TIMEOUT_SEC then fall back.
+      RECOMMEND_NARRATION_MODE: "${RECOMMEND_NARRATION_MODE:-async}"
+      RECOMMEND_NARRATION_TIMEOUT_SEC: "${RECOMMEND_NARRATION_TIMEOUT_SEC:-6}"
       # Shipping label providers — set API keys to enable real label generation.
       # Without keys the provider returns a structured error (no crash).
       # AUSPOST_API_KEY: ""          # AusPost eParcel — developers.auspost.com.au
