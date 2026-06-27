@@ -31,10 +31,17 @@ export function MarketIntelligence() {
 
   const refreshLive = async () => {
     setBusy(true); setError(null);
-    try { const r = await refreshMarket(); setMode('live'); setSt(r.state); }
-    catch (e: any) { setError(e?.message || 'live refresh failed'); }
+    try {
+      const r = await refreshMarket();
+      setMode('live');
+      // prefer the freshly-computed state from the pipeline run; fall back to a state read.
+      setSt(r?.state ?? (await marketState()));
+    } catch (e: any) { setError(e?.message || 'live refresh failed'); }
     finally { setBusy(false); }
   };
+  // switch the VIEW between the synthetic replay and the live pipeline without re-running anything;
+  // the load effect fetches the right endpoint for the new mode.
+  const switchMode = (m: 'replay' | 'live') => { if (m !== mode) { setSt(null); setMode(m); } };
 
   // ── ranking-experiment console (the live-adaptation levers) ──
   const [exp, setExp] = useState<ExperimentState | null>(null);
@@ -55,23 +62,47 @@ export function MarketIntelligence() {
   };
 
   const series = st?.series;
+  const live = mode === 'live';
+  // the displayed source is driven by the active MODE (not just the last payload's label), so the
+  // switch is unmistakable even before the next fetch lands.
+  const sourceLabel = live ? (st?.label || 'LIVE') : (st?.label || 'SYNTHETIC REPLAY');
   return (
     <div className="market-intelligence" data-testid="market-intelligence">
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <strong>Market Intelligence</strong>
-        <span style={{ background: '#eee', padding: '2px 6px', borderRadius: 4 }} data-testid="mi-label">
-          {st?.label || 'SYNTHETIC REPLAY'}
+        {/* color-coded, mode-driven source chip — green LIVE vs amber SYNTHETIC REPLAY */}
+        <span data-testid="mi-label" style={{
+          background: live ? '#dcfce7' : '#fef3c7', color: live ? '#166534' : '#92400e',
+          padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+        }}>● {sourceLabel}</span>
+
+        {/* explicit view toggle: switch what you're looking at without re-running anything */}
+        <span style={{ display: 'inline-flex', border: '1px solid #d1d5db', borderRadius: 6, overflow: 'hidden' }}>
+          <button disabled={busy} data-testid="mi-mode-replay" onClick={() => switchMode('replay')}
+                  style={{ border: 'none', padding: '3px 8px', cursor: 'pointer',
+                           background: live ? '#fff' : '#fde68a', fontWeight: live ? 400 : 700 }}>Synthetic replay</button>
+          <button disabled={busy} data-testid="mi-mode-live" onClick={() => switchMode('live')}
+                  style={{ border: 'none', borderLeft: '1px solid #d1d5db', padding: '3px 8px', cursor: 'pointer',
+                           background: live ? '#bbf7d0' : '#fff', fontWeight: live ? 700 : 400 }}>Live</button>
         </span>
-        <button disabled={busy} onClick={() => run(replayReset)} data-testid="mi-reset">Reset</button>
-        <label>Advance to day{' '}
-          <select value={day} onChange={(e) => setDay(Number(e.target.value))} data-testid="mi-day">
-            {[1, 2, 3, 4, 5, 6, 7].map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </label>
-        <button disabled={busy} onClick={() => run(() => replayAdvance(day))} data-testid="mi-advance">Advance</button>
+
+        {/* replay-only controls — hidden in live mode so the two sources can't be silently mixed */}
+        {!live && (
+          <>
+            <button disabled={busy} onClick={() => run(replayReset)} data-testid="mi-reset">Reset</button>
+            <label>Advance to day{' '}
+              <select value={day} onChange={(e) => setDay(Number(e.target.value))} data-testid="mi-day">
+                {[1, 2, 3, 4, 5, 6, 7].map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </label>
+            <button disabled={busy} onClick={() => run(() => replayAdvance(day))} data-testid="mi-advance">Advance</button>
+          </>
+        )}
         <span style={{ borderLeft: '1px solid #ccc', height: 18, margin: '0 4px' }} />
         <button disabled={busy} onClick={refreshLive} data-testid="mi-refresh-live"
-                title="Run the REAL pipeline on live data (default tenant)">Refresh live data</button>
+                title="Run the REAL pipeline on live data (default tenant), then show LIVE findings">
+          {live ? 'Re-run live pipeline' : 'Refresh live data'}
+        </button>
       </div>
 
       {error && <p role="alert" style={{ color: 'crimson' }}>{error}</p>}
