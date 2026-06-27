@@ -12,15 +12,16 @@
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  fcCaseAsOf, fcCaseOkf, fcEconomics, fcEditDraft, fcSupplierCandidates,
+  fcCaseAsOf, fcCaseOkf, fcCompareQuotes, fcEconomics, fcEditDraft, fcRfqFanout, fcSupplierCandidates,
   getFulfillmentCaseOp, getFulfillmentJourney, listFulfillmentCases,
   type DealEconomics, type FulfillmentCaseRow, type FulfillmentCaseView, type JourneyEvent,
-  type SupplierCandidate,
+  type RfqFanoutDraft, type SupplierCandidate,
 } from '../api';
 import ActionBar from './procurement/ActionBar';
 import CaseJourney from './procurement/CaseJourney';
 import CaseQueue from './procurement/CaseQueue';
 import QuotePacket from './procurement/QuotePacket';
+import RfqFanout from './procurement/RfqFanout';
 import SupplierCandidates from './procurement/SupplierCandidates';
 import SupplierDraftPacket from './procurement/SupplierDraftPacket';
 
@@ -39,6 +40,7 @@ export function ProcurementCases() {
   const [asOfT, setAsOfT] = useState('');
   const [asOf, setAsOf] = useState<{ as_of: string; state: string } | null>(null);
   const [candidates, setCandidates] = useState<SupplierCandidate[]>([]);
+  const [fanout, setFanout] = useState<RfqFanoutDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,12 +49,14 @@ export function ProcurementCases() {
   }, []);
   const loadCase = useCallback((id: string) => {
     if (!id) return;
-    setEcon(null); setAsOf(null); setCandidates([]);  // per-case panels — clear when switching
+    setEcon(null); setAsOf(null); setCandidates([]); setFanout([]);  // per-case panels — clear when switching
     Promise.all([getFulfillmentCaseOp(id), getFulfillmentJourney(id)])
       .then(([v, j]) => { setView(v); setJourney(j); setError(null); })
       .catch((e) => setError(e.message));
     // supplier shortlist (read-only review prefill) — best-effort, never blocks the case view
     fcSupplierCandidates(id).then((r) => setCandidates(r.candidates || [])).catch(() => setCandidates([]));
+    // competitive RFQ fan-out preview (caged drafts per top-N supplier) — best-effort, never sends
+    fcRfqFanout(id).then((r) => setFanout(r.drafts || [])).catch(() => setFanout([]));
   }, []);
 
   useEffect(() => { loadList(); }, [loadList]);
@@ -129,6 +133,11 @@ export function ProcurementCases() {
             {/* Supplier shortlist (read-only review prefill) — most useful before/at drafting. */}
             {(state === 'COMMITTED' || state === 'NO_APPROVED_SUPPLIER' || state === 'QUOTE_DRAFTED') && (
               <SupplierCandidates candidates={candidates} />
+            )}
+
+            {/* Competitive RFQ (multi-supplier): caged draft preview per top-N supplier + quote compare. */}
+            {(state === 'COMMITTED' || state === 'QUOTE_DRAFTED') && fanout.length > 0 && (
+              <RfqFanout drafts={fanout} onCompare={(quotes) => fcCompareQuotes(sel, quotes)} />
             )}
 
             <ActionBar sel={sel} state={state} busy={busy} draftItemRef={draftItemRef} draftQty={draftQty}

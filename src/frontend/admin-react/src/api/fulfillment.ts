@@ -49,6 +49,26 @@ export interface SupplierCandidate {
 }
 export const fcSupplierCandidates = (id: string) =>
   http<{ case_id: string; item_ref: string; candidates: SupplierCandidate[] }>(`${_fc(id)}/supplier-candidates`);
+// Competitive RFQ fan-out (Phase 1): a caged draft preview per top-N approved supplier (never sends).
+export interface RfqFanoutDraft {
+  recipient_ref: string; recipient_domain: string; recipient_email?: string | null;
+  subject: string; body: string; confidence: number; content_hash: string;
+  send_gate: { decision?: string; reasons?: string[]; [k: string]: any };
+}
+export const fcRfqFanout = (id: string, topN = 3) =>
+  http<{ case_id: string; item_ref: string; top_n: number; quantity: number; count: number; drafts: RfqFanoutDraft[] }>(
+    `${_fc(id)}/rfq-fanout?top_n=${encodeURIComponent(String(topN))}`);
+// Quote comparison: rank competing supplier quotes by a vertical-blind composite (price·lead·reliability).
+export interface QuoteInput {
+  supplier_ref?: string; recipient_domain?: string; unit_price_cents: number;
+  lead_time_days?: number | null; reliability?: number | null; quantity?: number | null; valid_until?: string | null;
+}
+export interface RankedQuote extends QuoteInput {
+  scores: { price: number; lead_time: number; reliability: number }; composite: number; reasons: string[];
+}
+export const fcCompareQuotes = (id: string, quotes: QuoteInput[], weights?: Record<string, number>) =>
+  http<{ case_id: string; ranked: RankedQuote[]; recommended: RankedQuote | null; considered: number; excluded: number }>(
+    `${_fc(id)}/compare-quotes`, { method: 'POST', body: JSON.stringify({ quotes, weights }) });
 // RFI: HUMAN asks the resolved supplier a scoped clarification before approving the RFQ (claim-safe).
 export const fcRequestInfo = (id: string, question: string) => _fcPost(`${_fc(id)}/request-info`, { question });
 // record the supplier's RFI reply → back to the approval gate.
