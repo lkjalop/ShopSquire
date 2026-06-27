@@ -607,6 +607,27 @@ class RecommendationService:
             "text": text,
         }
 
+    # Maps this rerank scorer's use-case names onto the active profile's use_cases keys, so the spec-floor
+    # thresholds below come from the SAME source use_case_fit reads (single source of truth, no drift).
+    _PROFILE_USE_CASE_ALIAS = {
+        "content_creation": "video_editing", "content_creator": "video_editing",
+        "software_development": "programming",
+        "ai_ml_workstation": "ml_ai", "ai_engineering": "ml_ai", "ml_training": "ml_ai", "data_science": "ml_ai",
+    }
+
+    def _profile_spec_floor(self, use_case: str, key: str, default: int) -> int:
+        """Read a spec floor (e.g. refresh_hz_min, ram_gb_min) for ``use_case`` from the active store
+        profile's use_cases — the SAME source the fast-path adapter (use_case_fit) reads — so the two
+        ranking paths can't drift on thresholds. Falls back to ``default`` if absent/unreadable."""
+        try:
+            from src.app.platform.store_profile import profile_slot
+            ucs = profile_slot("use_cases", default={}) or {}
+            pk = self._PROFILE_USE_CASE_ALIAS.get(use_case, use_case)
+            v = ((ucs.get(pk) or {}).get("spec_floors") or {}).get(key)
+            return int(v) if v is not None else int(default)
+        except Exception:
+            return int(default)
+
     def _use_case_score(self, use_case: str, features: Dict[str, Any], price_cents: int | None) -> Tuple[float, List[str]]:
         score = 0.0
         reasons: List[str] = []
@@ -624,6 +645,8 @@ class RecommendationService:
             else:
                 score -= 1.0
                 reasons.append("use_case_no_gpu")
+            # NOT the profile meets-floor (ml_ai ram_gb_min=16, enforced by use_case_fit): this is a
+            # graduated 32GB BONUS tier unique to the rerank gradient, intentionally above the floor.
             if ram is not None and ram >= 32:
                 score += 2.0
                 reasons.append("use_case_ram_32")
@@ -647,7 +670,7 @@ class RecommendationService:
             if _hz_m:
                 try:
                     _hz = int(_hz_m.group(1))
-                    if _hz >= 144:
+                    if _hz >= self._profile_spec_floor("gaming", "refresh_hz_min", 144):
                         score += 1.0
                         reasons.append("use_case_144hz")
                     elif _hz < 60:
@@ -659,14 +682,14 @@ class RecommendationService:
             if gpu:
                 score += 1.5
                 reasons.append("use_case_gpu")
-            if ram is not None and ram >= 16:
+            if ram is not None and ram >= self._profile_spec_floor(use_case, "ram_gb_min", 16):
                 score += 1.0
                 reasons.append("use_case_ram_16")
             if oled:
                 score += 0.8
                 reasons.append("use_case_oled")
         elif use_case == "software_development":
-            if ram is not None and ram >= 16:
+            if ram is not None and ram >= self._profile_spec_floor(use_case, "ram_gb_min", 16):
                 score += 1.0
                 reasons.append("use_case_ram_16")
             if storage is not None and storage >= 512:
