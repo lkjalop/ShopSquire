@@ -159,3 +159,56 @@ def test_edit_draft_rejects_unsafe_body(db):
                               now_iso="2026-06-26 09:05:30")  # price leak + no PO footer
     assert res.ok is False and res.reason == "unsafe_edit" and draft is None
     assert wf.current_state(db, cid) == S.AWAITING_APPROVAL       # unchanged — unsafe edit refused
+
+
+# ── supplier-expectation personalisation (deterministic, before any LLM polish) ──
+def test_supplier_context_personalises_when_prior_history(db):
+    # a supplier we've dealt with before gets a claim-safe relationship line; a new one does not.
+    with_hist = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                              rank_fn=_rank_ok, allowlist_fn=_allow,
+                              inbox_fn=lambda domain, t: {"observations": 3, "summary": "3 prior orders"})
+    assert "continued partnership" in with_hist.body.lower()
+    no_hist = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                            rank_fn=_rank_ok, allowlist_fn=_allow, inbox_fn=lambda domain, t: None)
+    assert "continued partnership" not in no_hist.body.lower()
+    # personalisation never breaks the cage
+    assert "this request does not constitute a purchase order" in with_hist.body.lower()
+
+
+# ── deterministic pre-send gate (governance, prior to the human GATE 2) ──
+def _gate_draft(**over):
+    base = {"recipient_email": "orders@approved-supplier.example", "recipient_domain": "approved-supplier.example",
+            "body": "Hello. This request does not constitute a purchase order.", "confidence": 0.8,
+            "commercial_scope": {"item_ref": "SKU-1", "quantity": 6}, "evidence": [{"evidence_id": "E1"}]}
+    base.update(over)
+    return base
+
+
+def test_send_gate_allows_complete_safe_draft():
+    g = D.draft_send_gate(_gate_draft())
+    assert g["decision"] == "allow" and not g["blocking"] and not g["reasons"]
+
+
+def test_send_gate_blocks_no_recipient_and_claim_leak():
+    assert D.draft_send_gate(_gate_draft(recipient_email="", recipient_domain=""))["decision"] == "block"
+    leak = D.draft_send_gate(_gate_draft(body="We will pay $900 each."))  # price leak + no PO footer
+    assert leak["decision"] == "block" and "claim_unsafe" in leak["blocking"]
+
+
+def test_send_gate_needs_info_when_incomplete():
+    assert "missing_commercial_scope" in D.draft_send_gate(
+        _gate_draft(commercial_scope={"item_ref": "", "quantity": 0}))["reasons"]
+    assert "low_confidence" in D.draft_send_gate(_gate_draft(confidence=0.2))["reasons"]
+    assert "no_evidence" in D.draft_send_gate(_gate_draft(evidence=[]))["reasons"]
+    # needs_info, not block — it's recoverable by getting more info (incl. a supplier RFI)
+    assert D.draft_send_gate(_gate_draft(confidence=0.2))["decision"] == "needs_info"
+
+
+def test_draft_and_record_attaches_advisory_send_gate(db):
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert res.ok and draft is not None
+    cur = wf.repository.current_version(db, cid)
+    gate = (cur.state_json.get("draft") or {}).get("send_gate") or {}
+    assert gate.get("decision") in ("allow", "needs_info", "block")

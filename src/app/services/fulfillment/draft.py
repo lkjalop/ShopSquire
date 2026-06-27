@@ -35,9 +35,11 @@ DEFAULT_TEMPLATE: Dict[str, str] = {
     "subject": "Availability and quote request — {item_ref} x {quantity} — {case_ref}",
     "body": (
         "Hello {supplier_name},\n\n"
+        "{supplier_context}"
         "Please confirm availability and provide a quote for {item_ref}, quantity {quantity}, "
         "required by {needed_by}.\n\n"
         "{urgency_note}\n\n"
+        "Please reply to this address with your unit price, lead time, and how long the quote is valid.\n\n"
         "This request does not constitute a purchase order.\n\n"
         "Regards,\nProcurement"
     ),
@@ -215,6 +217,47 @@ def _urgency_note(evidence: List[DraftEvidence]) -> str:
     return "A firm dispatch date would be appreciated."
 
 
+def _supplier_context_note(evidence: List[DraftEvidence]) -> str:
+    """A short, claim-safe relationship line drawn from prior dealings — personalises the ask to a supplier
+    we have history with. Qualitative ONLY (no amounts), so no internal pricing leaks into the body."""
+    for e in evidence:
+        if e.source == "supplier_history" and int((e.payload or {}).get("observations") or 0) > 0:
+            return "Thank you for your continued partnership. "
+    return ""
+
+
+def draft_send_gate(draft: Dict[str, Any], *, min_confidence: float = 0.6) -> Dict[str, Any]:
+    """Deterministic pre-send policy gate — answers "should this draft be sent to the supplier at all?",
+    independent of and PRIOR to the human send gate (GATE 2). Returns
+    {decision: allow|block|needs_info, blocking: [...], reasons: [...]}:
+
+      • block      → a hard safety failure (no resolved recipient, or a price/PO leak). Never sendable.
+      • needs_info → structurally incomplete (missing commercial scope, low confidence, no evidence) — get
+                     more information (from the buyer/case, or via a scoped supplier RFI) before sending.
+      • allow      → safe + complete enough to put in front of the human approver (GATE 2 still applies).
+
+    Pure function over the draft dict (no I/O); safe to compute anywhere and surface to the operator."""
+    d = draft or {}
+    blocking: List[str] = []
+    needs: List[str] = []
+    if not str(d.get("recipient_email") or d.get("recipient_domain") or "").strip():
+        blocking.append("no_recipient")
+    if not _claim_safe(str(d.get("body") or "")):
+        blocking.append("claim_unsafe")  # price/PO leak or missing not-a-PO footer
+    scope = d.get("commercial_scope") or {}
+    if not str(scope.get("item_ref") or "").strip() or int(scope.get("quantity") or 0) <= 0:
+        needs.append("missing_commercial_scope")
+    try:
+        if float(d.get("confidence") or 0.0) < float(min_confidence):
+            needs.append("low_confidence")
+    except (TypeError, ValueError):
+        needs.append("low_confidence")
+    if not (d.get("evidence") or []):
+        needs.append("no_evidence")
+    decision = "block" if blocking else ("needs_info" if needs else "allow")
+    return {"decision": decision, "blocking": blocking, "reasons": needs}
+
+
 def _confidence(reliability: float, evidence: List[DraftEvidence]) -> float:
     base = 0.55 + min(0.3, reliability * 0.3)
     if any(e.source == "market_intel" for e in evidence):
@@ -254,7 +297,8 @@ def build_draft(
                                inbox_fn=inbox_fn, tenant_id=tenant_id)
     tmpl = template or DEFAULT_TEMPLATE
     slots = {"item_ref": item_ref, "quantity": quantity, "case_ref": case_ref,
-             "supplier_name": recipient_ref, "needed_by": needed_by, "urgency_note": _urgency_note(evidence)}
+             "supplier_name": recipient_ref, "needed_by": needed_by, "urgency_note": _urgency_note(evidence),
+             "supplier_context": _supplier_context_note(evidence)}
     subject = str(tmpl.get("subject", DEFAULT_TEMPLATE["subject"])).format(**slots)
     body = str(tmpl.get("body", DEFAULT_TEMPLATE["body"])).format(**slots)
 
@@ -305,12 +349,16 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
                                   reason_code="no_approved_supplier_on_allowlist", tenant_id=tenant_id,
                                   now_iso=now_iso, trace_id=trace_id)
         return res, None
+    # Advisory pre-send gate (deterministic; PRIOR to the human GATE 2) attached to the persisted draft so
+    # the operator sees allow / needs_info / block before approving. Does not change the transition.
+    draft_dict = draft.to_dict()
+    draft_dict["send_gate"] = draft_send_gate(draft_dict)
     res = workflow.transition(
         db, case_id=case_id, event="external_message_drafted", actor=actor,
         reason_code="supplier_quote_drafted", confidence=draft.confidence,
         evidence={"content_hash": draft.content_hash, "recipient_domain": draft.recipient_domain,
                   "rationale": draft.rationale, "evidence_ids": [e["evidence_id"] for e in draft.evidence]},
-        state_patch={"draft": draft.to_dict()}, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+        state_patch={"draft": draft_dict}, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
     return res, draft
 
 
