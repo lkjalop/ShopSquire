@@ -41,7 +41,12 @@ def run_pipeline(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 2000, min_
                 import logging
                 logging.getLogger(__name__).warning("market_pipeline commit failed: %s", exc)
         return result
-    except Exception:
+    except Exception as exc:
+        # Step 10: a pipeline failure must reach a governed disposition, not vanish. enqueue_exception is
+        # non-raising (best-effort), so this stays a safe fallback that still returns the zero-result shape.
+        from src.app.services.exception_resolver import enqueue_exception
+        enqueue_exception(domain="market", terminal_outcome="pipeline_error", reason=str(exc)[:200],
+                          tenant_id=tenant_id)
         return {"ingested": 0, "ingested_by_source": {}, "findings": 0, "persisted": 0}
 
 

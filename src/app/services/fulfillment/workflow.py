@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from src.app.services.fulfillment import domain, repository
-from src.app.services.fulfillment.domain import Actor, FulfillmentState
+from src.app.services.fulfillment.domain import Actor, FAILURE_STATES, FulfillmentState
 
 # confidence-gated events → the adaptive-action gate's action type
 _GATE_ACTION = {
@@ -150,6 +150,12 @@ def transition(
             return TransitionResult(False, case_id, dst.value, "commit_failed", http_status=409)
         _emit_trace(trace_id=trace_id or cur.source_trace_id, event=event, actor=actor, case_id=case_id,
                     evidence=evidence, reason_code=reason_code, valid_from=now_iso)
+        if dst in FAILURE_STATES:
+            # Step 10: route a terminal procurement failure into the governed exception queue so it reaches
+            # a disposition instead of being a silent dead-end. enqueue_exception is non-raising (best-effort).
+            from src.app.services.exception_resolver import enqueue_exception
+            enqueue_exception(domain="procurement", terminal_outcome=dst.value.lower(), ref_id=case_id,
+                              reason=reason_code, tenant_id=tenant_id, trace_id=trace_id or cur.source_trace_id)
         return TransitionResult(True, case_id, dst.value, "ok", version_id=vid)
     except Exception:
         return TransitionResult(False, case_id, None, "error", http_status=409)
