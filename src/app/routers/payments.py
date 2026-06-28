@@ -4,7 +4,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
-from typing import Dict
+from typing import Any, Dict
 from sqlalchemy import text
 
 from src.app.config import get_settings, load_feature_flags
@@ -85,6 +85,13 @@ def _idempotent(path: str, key: str | None) -> bool:
                 return False
 
 
+def _stripe_key_live(key: Any) -> bool:
+    """True only for a REAL Stripe secret key — not the sk_test_xxx demo placeholder. Single source of
+    truth shared by the rollout reporter and the checkout gate so readiness can't over-claim."""
+    k = str(key or "")
+    return bool(k.startswith("sk_") and k != "sk_test_xxx")
+
+
 @router.get("/providers/rollout")
 def providers_rollout_status(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
@@ -96,8 +103,10 @@ def providers_rollout_status(
         {
             "provider": "stripe",
             "enabled": bool((caps.get("stripe") or caps.get("payments") or {}).get("enabled", True)),
-            "real_integration_ready": bool(settings.stripe_api_key and str(settings.stripe_api_key).startswith("sk_")),
-            "rollout_stage": "ga" if bool(settings.stripe_api_key and str(settings.stripe_api_key).startswith("sk_")) else "disabled",
+            # honest readiness: a placeholder key (sk_test_xxx) is NOT a real integration — mirror the
+            # checkout's stripe_live gate so this never reports "ga" on the demo placeholder.
+            "real_integration_ready": _stripe_key_live(settings.stripe_api_key),
+            "rollout_stage": "ga" if _stripe_key_live(settings.stripe_api_key) else "disabled",
         },
         {
             "provider": "paypal",
