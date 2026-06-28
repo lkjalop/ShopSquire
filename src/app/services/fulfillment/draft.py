@@ -21,6 +21,7 @@ StoreProfile); core only fills opaque slots.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -148,6 +149,7 @@ class SupplierDraft:
     commercial_scope: Dict[str, Any]   # {item_ref, quantity, estimated_value_cents} — never a unit cost
 
     recipient_email: Optional[str] = None
+    completeness: Optional[Dict[str, Any]] = None  # {complete: bool, reason: str|None} — RFQ field coverage
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -401,6 +403,120 @@ def _confidence(reliability: float, evidence: List[DraftEvidence]) -> float:
     return round(min(1.0, base), 3)
 
 
+class _SafeDict(dict):
+    def __missing__(self, key):  # tolerate a template slot we didn't populate (no KeyError on .format)
+        return ""
+
+
+def _safe_format(template: str, slots: Dict[str, Any]) -> str:
+    try:
+        return str(template).format_map(_SafeDict(slots))
+    except Exception:
+        return str(template)
+
+
+def _sku_description(db, item_ref: str, tenant_id: str = "default") -> str:
+    """Full line-item description for the RFQ (product name + key specs) so the supplier knows the EXACT
+    unit, not a bare SKU code. Vertical-blind: the spec dimensions come from the active StoreProfile (the
+    same slot narration uses), never hardcoded here — and price is NEVER included (cage). Falls back to the
+    item_ref when the catalog has no matching row."""
+    try:
+        from sqlalchemy import text as _t
+        row = db.execute(_t("SELECT name, specs FROM products WHERE sku = :s AND COALESCE(active,1)=1 LIMIT 1"),
+                         {"s": str(item_ref)}).fetchone()
+        if not row:
+            return str(item_ref)
+        name = str(row[0] or item_ref)
+        specs = row[1]
+        if isinstance(specs, str):
+            try:
+                specs = json.loads(specs)
+            except Exception:
+                specs = {}
+        specs = specs if isinstance(specs, dict) else {}
+        parts: List[str] = []
+        try:
+            from src.app.services.narration_tradeoff import _format_dimension, spec_dimensions
+            for dim in spec_dimensions():
+                line = _format_dimension(dim, specs)  # "Label: val{unit}" — no price, profile-defined keys
+                if line:
+                    parts.append(line)
+        except Exception:
+            parts = []
+        desc = name if not parts else f"{name} — " + " | ".join(parts)
+        return f"{desc} [{item_ref}]"
+    except Exception:
+        return str(item_ref)
+
+
+# a slot left at one of these vague placeholders is NOT a real value — it counts as missing for completeness
+# (the whole point of WS-B is to stop sending an RFQ that says "the stated deadline" with no actual date).
+_VAGUE_SLOT_VALUES = {"the stated deadline"}
+
+
+def rfq_completeness_reason(slots: Dict[str, Any], required_fields: Optional[List[str]] = None) -> Optional[str]:
+    """The reason an RFQ draft is INCOMPLETE (a missing/placeholder required field), or None if complete.
+    Used for the operator badge and (WS-C) as a gate before autonomous send — an incomplete RFQ must not
+    auto-send. A field set to a vague placeholder (e.g. 'the stated deadline') counts as missing."""
+    required = required_fields or ["sku_description", "deadline_date", "ship_to", "quantity"]
+    missing = []
+    for f in required:
+        v = str(slots.get(f) or "").strip()
+        if not v or v.lower() in _VAGUE_SLOT_VALUES:
+            missing.append(f)
+    return ("missing_rfq_fields:" + ",".join(missing)) if missing else None
+
+
+def _rfq_term_slots(profile_fn: Optional[Callable]) -> Dict[str, Any]:
+    """Commercial-term DATA from the active StoreProfile (quote-validity / warranty / payment / ship-to).
+    Core stays vertical-blind — the phrasing lives in the profile."""
+    def _p(key, default):
+        try:
+            return (profile_fn(key, default=default) if profile_fn else default)
+        except Exception:
+            return default
+    return {
+        "quote_validity_days": _p("rfq_quote_validity_days", 14),
+        "warranty_preference": str(_p("rfq_warranty_preference", "") or ""),
+        "payment_terms_ask": str(_p("rfq_payment_terms_ask", "") or ""),
+        "ship_to_region": str(_p("rfq_ship_to_region", "") or ""),
+        "bulk_threshold": int(_p("rfq_bulk_threshold", 5) or 5),
+    }
+
+
+def _build_rfq_slots(db, *, item_ref: str, quantity: int, case_ref: str, case_state: Optional[Dict[str, Any]],
+                     supplier_name: str, needed_by: str, evidence: List["DraftEvidence"],
+                     profile_fn: Optional[Callable], tenant_id: str) -> Dict[str, Any]:
+    """Build the superset slot dict for BOTH the rich supplier_rfq template and the legacy DEFAULT_TEMPLATE.
+    Deterministic: catalog (SKU desc) + case (deadline/qty) + profile (terms). No price, no commitment."""
+    terms = _rfq_term_slots(profile_fn)
+    reqs = (case_state or {}).get("requirements") if isinstance(case_state, dict) else {}
+    reqs = reqs if isinstance(reqs, dict) else {}
+    # real deadline: case needed_by (a date) > the needed_by arg (if not the vague default) > derived
+    deadline = str(reqs.get("needed_by") or "").strip()
+    if not deadline and needed_by and needed_by != "the stated deadline":
+        deadline = str(needed_by)
+    if not deadline:
+        days = reqs.get("needed_within_days")
+        deadline = (f"within {int(days)} days" if days else "the stated deadline")
+    ship_to = str(reqs.get("ship_to") or terms["ship_to_region"] or "").strip()
+    bulk = int(quantity or 0) >= terms["bulk_threshold"]
+    sku_desc = _sku_description(db, item_ref, tenant_id)
+    return {
+        # legacy DEFAULT_TEMPLATE slots
+        "item_ref": item_ref, "quantity": quantity, "case_ref": case_ref, "supplier_name": supplier_name,
+        "needed_by": deadline, "urgency_note": _urgency_note(evidence),
+        "supplier_context": _supplier_context_note(evidence), "requirements_block": _requirements_block(case_state),
+        # rich supplier_rfq slots
+        "sku_description": sku_desc, "deadline_date": deadline, "ship_to": ship_to,
+        "ship_to_line": (f"- Ship to: {ship_to}\n" if ship_to else ""),
+        "quote_validity_days": terms["quote_validity_days"],
+        "warranty_line": (f"- {terms['warranty_preference']}\n" if terms["warranty_preference"] else ""),
+        "payment_terms_line": (f"- {terms['payment_terms_ask']}\n" if terms["payment_terms_ask"] else ""),
+        "volume_discount_ask": (f", including your best volume/tier pricing for {quantity} units" if bulk else ""),
+    }
+
+
 def build_draft(
     db,
     *,
@@ -437,14 +553,25 @@ def build_draft(
     evidence = gather_evidence(db, item_ref=item_ref, case_state=case_state, recipient_domain=domain,
                                hippograph_fn=hippograph_fn, market_fn=market_fn, benchmark_fn=benchmark_fn,
                                inbox_fn=inbox_fn, tenant_id=tenant_id)
-    tmpl = template or DEFAULT_TEMPLATE
+    # active StoreProfile supplies the RFQ template + commercial-term DATA — core stays vertical-blind.
+    def _profile_fn(key, default=None):
+        try:
+            from src.app.platform.store_profile import profile_slot
+            return profile_slot(key, default=default)
+        except Exception:
+            return default
+
     supplier_name = _resolve_supplier_name(db, domain, tenant_id) or recipient_ref
-    slots = {"item_ref": item_ref, "quantity": quantity, "case_ref": case_ref,
-             "supplier_name": supplier_name, "needed_by": needed_by, "urgency_note": _urgency_note(evidence),
-             "supplier_context": _supplier_context_note(evidence),
-             "requirements_block": _requirements_block(case_state)}
-    subject = str(tmpl.get("subject", DEFAULT_TEMPLATE["subject"])).format(**slots)
-    body = str(tmpl.get("body", DEFAULT_TEMPLATE["body"])).format(**slots)
+    slots = _build_rfq_slots(db, item_ref=item_ref, quantity=quantity, case_ref=case_ref,
+                             case_state=case_state, supplier_name=supplier_name, needed_by=needed_by,
+                             evidence=evidence, profile_fn=_profile_fn, tenant_id=tenant_id)
+    # template precedence: caller-injected > profile supplier_rfq > built-in default. _safe_format tolerates
+    # a slot the chosen template doesn't reference (the two templates have different slot shapes).
+    tmpl = template or _profile_fn("supplier_rfq", default=None) or DEFAULT_TEMPLATE
+    if not isinstance(tmpl, dict):
+        tmpl = DEFAULT_TEMPLATE
+    subject = _safe_format(tmpl.get("subject", DEFAULT_TEMPLATE["subject"]), slots)
+    body = _safe_format(tmpl.get("body", DEFAULT_TEMPLATE["body"]), slots)
 
     # optional LLM polish — AI proposes, the cage authorizes: the rewrite is ACCEPTED ONLY if it passes the
     # (now broadened) claim-safety gate against the RESOLVED domain; any prompt-injected price/PO/URL/foreign
@@ -470,13 +597,17 @@ def build_draft(
         if candidate and candidate.lower().endswith(f"@{domain.lower()}"):
             recipient_email = candidate
             break
+    required = _profile_fn("rfq_required_fields", default=None) or \
+        ["sku_description", "deadline_date", "ship_to", "quantity"]
+    comp_reason = rfq_completeness_reason(slots, required)
+    completeness = {"complete": comp_reason is None, "reason": comp_reason, "required_fields": list(required)}
     return SupplierDraft(
         recipient_ref=recipient_ref, recipient_domain=domain, subject=subject, body=body,
         content_hash=content_hash(subject, body), confidence=_confidence(reliability, evidence),
         rationale=rationale, evidence=[asdict(e) for e in evidence],
         commercial_scope={"item_ref": item_ref, "quantity": int(quantity),
                           "estimated_value_cents": int(estimated_value_cents)},
-        recipient_email=recipient_email,
+        recipient_email=recipient_email, completeness=completeness,
     )
 
 

@@ -1382,6 +1382,18 @@
     }
   },
 
+  "_supplier_rfq_comment": "Structured RFQ template + commercial-term DATA (fulfillment/draft). The body has the not-a-PO footer + no price/commitment (the send-cage enforces this). Line-slots (ship_to_line/warranty_line/payment_terms_line/volume_discount_ask) are full lines or empty, built deterministically from case+catalog+these slots. rfq_required_fields drives the completeness check.",
+  "supplier_rfq": {
+    "subject": "RFQ — {sku_description} x {quantity} (ref {case_ref})",
+    "body": "Hello {supplier_name},\n\n{supplier_context}We would like to request a quote for the following:\n\n- Item: {sku_description}\n- Quantity: {quantity}\n- Required by: {deadline_date}\n{ship_to_line}\n{requirements_block}Please include in your reply:\n- Unit price{volume_discount_ask}\n- Lead time to dispatch\n{warranty_line}{payment_terms_line}- How long the quote is valid (we require at least {quote_validity_days} days)\n\n{urgency_note}\n\nThis request does not constitute a purchase order.\n\nRegards,\nProcurement"
+  },
+  "rfq_quote_validity_days": 14,
+  "rfq_warranty_preference": "Required warranty/support: 3-year next-business-day onsite preferred",
+  "rfq_payment_terms_ask": "Your payment terms and minimum order quantity",
+  "rfq_ship_to_region": "Australia — metro",
+  "rfq_bulk_threshold": 5,
+  "rfq_required_fields": ["sku_description", "deadline_date", "ship_to", "quantity"],
+
   "cv_returns_pack": "electronics",
   "narration_spec_dimensions": [{"label":"GPU","variants":[{"key":"gpu_model"},{"key":"gpu_vram_gb","unit":"GB VRAM"}]},{"label":"Display","variants":[{"key":"refresh_hz","unit":"Hz"}]},{"label":"RAM","variants":[{"key":"ram_gb","unit":"GB"}]},{"label":"SSD","variants":[{"key":"storage_gb","unit":"GB"}]},{"label":"CPU","variants":[{"key":"cpu_model"}]}]
 }

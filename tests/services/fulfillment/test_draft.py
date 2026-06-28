@@ -7,6 +7,9 @@ whole thing flows through the workflow chokepoint (confidence-gated, bitemporal,
 """
 from __future__ import annotations
 
+import json
+import re
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -361,3 +364,79 @@ def test_llm_polish_safe_rewrite_is_accepted(db):
     draft = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
                           rank_fn=_rank_ok, allowlist_fn=_allow, llm_fn=_safe_llm)
     assert "kindly share your quote" in draft.body  # safe rewrite accepted
+
+
+# ── WS-B: the RFQ is REAL & COMPLETE (full SKU description + concrete terms), still inside the cage ──
+def _seed_product(db, sku="SKU-1", name="Dell Latitude 5550", price_cents=180000, specs=None):
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products "
+                  "(sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    # keys match the electronics profile's narration_spec_dimensions (cpu_model/ram_gb/storage_gb/...)
+    db.execute(_t("INSERT INTO products VALUES (:k,:n,:p,:s,1)"),
+               {"k": sku, "n": name, "p": price_cents,
+                "s": json.dumps(specs or {"cpu_model": "Core i7", "ram_gb": 16, "storage_gb": 512,
+                                          "refresh_hz": 120, "gpu_model": "RTX 4060"})})
+    db.commit()
+
+
+def test_rfq_renders_full_sku_description_deadline_shipto_and_terms(db):
+    _seed_product(db)
+    cs = {"requirements": {"use_case": "office", "specs": ["16gb ram"], "needed_by": "2026-07-15",
+                           "ship_to": "Sydney NSW 2000", "needed_within_days": 14,
+                           "budget": {"min": 1300, "max": 1500}}}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=15, case_ref="FC-9", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow, hippograph_fn=_hippo)
+    body = draft.body.lower()
+    assert "dell latitude 5550" in body                    # the FULL product name, not a bare SKU code
+    assert "core i7" in body and "512gb" in body and "16gb" in body  # profile-driven specs id the exact unit
+    assert "2026-07-15" in draft.body                       # a concrete deadline DATE, not "the stated deadline"
+    assert "sydney nsw 2000" in body                        # ship-to present
+    assert "volume/tier pricing for 15 units" in body      # bulk discount ask (qty 15 >= threshold 5)
+    assert "next-business-day" in body                      # warranty preference line
+    assert "payment terms" in body                          # payment-terms ask
+    assert "quote is valid" in body and "14 days" in body   # quote-validity ask
+    # cage intact: no price/currency leak, budget stays internal, not-a-PO footer present
+    assert re.search(r"[$€£¥]\s?\d", draft.body) is None
+    assert "1300" not in draft.body and "1500" not in draft.body and "budget" not in body
+    assert "this request does not constitute a purchase order" in body
+    assert draft.completeness and draft.completeness["complete"] is True
+
+
+def test_rfq_volume_discount_only_at_or_above_bulk_threshold(db):
+    _seed_product(db)
+    cs = {"requirements": {"use_case": "office", "needed_by": "2026-07-15", "ship_to": "AU"}}
+    small = D.build_draft(db, item_ref="SKU-1", quantity=2, case_ref="FC-1", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    bulk = D.build_draft(db, item_ref="SKU-1", quantity=10, case_ref="FC-1", case_state=cs,
+                         rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "volume/tier pricing" not in small.body          # qty 2 < threshold → no bulk ask
+    assert "volume/tier pricing for 10 units" in bulk.body  # qty 10 >= threshold → bulk ask
+
+
+def test_rfq_completeness_flags_vague_deadline_but_passes_with_real_date(db):
+    _seed_product(db)
+    vague = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                          case_state={"requirements": {"use_case": "office"}},
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert vague.completeness["complete"] is False
+    assert "deadline_date" in vague.completeness["reason"]
+    real = D.build_draft(db, item_ref="SKU-1", quantity=6, case_ref="FC-1",
+                         case_state={"requirements": {"needed_by": "2026-08-01", "ship_to": "AU"}},
+                         rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert real.completeness["complete"] is True and real.completeness["reason"] is None
+
+
+def test_sku_description_falls_back_to_item_ref_when_not_in_catalog(db):
+    # no products row → the line item shows the bare ref (never crashes), and it's flagged complete-able
+    draft = D.build_draft(db, item_ref="SKU-NOPE", quantity=6, case_ref="FC-1",
+                          case_state={"requirements": {"needed_by": "2026-08-01", "ship_to": "AU"}},
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert "sku-nope" in draft.body.lower() and "dell" not in draft.body.lower()
+
+
+def test_rfq_completeness_reason_unit():
+    ok = {"sku_description": "x", "deadline_date": "2026-01-01", "ship_to": "AU", "quantity": 5}
+    assert D.rfq_completeness_reason(ok) is None
+    vague = dict(ok, deadline_date="the stated deadline")
+    assert D.rfq_completeness_reason(vague) == "missing_rfq_fields:deadline_date"
+    assert D.rfq_completeness_reason({}).startswith("missing_rfq_fields:")

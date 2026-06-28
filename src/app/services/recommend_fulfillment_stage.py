@@ -80,6 +80,20 @@ def _buyer_requirements(constraints: Dict[str, Any]) -> Dict[str, Any]:
     horizon = _safe_int(constraints.get("availability_horizon_days"))
     if horizon is not None:
         reqs["needed_within_days"] = horizon
+    # concrete deadline DATE for the RFQ (today + horizon, or an explicit needed_by) — replaces the vague
+    # "the stated deadline" placeholder so the supplier draft is complete and actionable.
+    needed_by = str(constraints.get("needed_by") or "").strip()
+    if not needed_by and horizon is not None:
+        try:
+            from datetime import date, timedelta
+            needed_by = (date.today() + timedelta(days=int(horizon))).isoformat()
+        except Exception:
+            needed_by = ""
+    if needed_by:
+        reqs["needed_by"] = needed_by
+    ship_to = str(constraints.get("ship_to") or constraints.get("region") or "").strip()
+    if ship_to:
+        reqs["ship_to"] = ship_to  # else the RFQ falls back to the profile's configured ship-to region
     bmin, bmax = constraints.get("budget_min"), constraints.get("budget_max")
     if bmin is not None or bmax is not None:
         reqs["budget"] = {"min": bmin, "max": bmax}  # INTERNAL ONLY — never rendered into the supplier RFQ
