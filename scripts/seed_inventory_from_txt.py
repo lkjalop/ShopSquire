@@ -217,6 +217,26 @@ def parse_inventory(text: str) -> List[Dict[str, Any]]:
     return products
 
 
+def _write_svgs(products: List[Dict[str, Any]]) -> int:
+    """Write a placeholder SVG per seeded SKU so the storefront cards aren't 'No image'. Reuses the
+    seed_gaming_laptops generator; idempotent (skips existing). static/images is baked into the Docker image."""
+    try:
+        from scripts.seed_gaming_laptops import _svg_for_name
+    except Exception:
+        return 0
+    d = Path("static/images")
+    d.mkdir(parents=True, exist_ok=True)
+    made = 0
+    for p in products:
+        if p.get("price_cents") is None:
+            continue
+        f = d / f"{p['sku']}.svg"
+        if not f.exists():
+            f.write_text(_svg_for_name(p["name"]), encoding="utf-8")
+            made += 1
+    return made
+
+
 def seed(db, products: List[Dict[str, Any]]) -> Dict[str, int]:
     from sqlalchemy import text as _t
     inserted = 0
@@ -241,7 +261,7 @@ def seed(db, products: List[Dict[str, Any]]) -> Dict[str, int]:
                           "VALUES (:id, :pid, :st, 'default', :ua)"),
                        {"id": str(uuid.uuid4()), "pid": pid, "st": 8 + (i % 15), "ua": datetime.utcnow()})
     db.commit()
-    return {"inserted": inserted, "total_parsed": len(products)}
+    return {"inserted": inserted, "total_parsed": len(products), "svgs_written": _write_svgs(products)}
 
 
 def main() -> None:
