@@ -30,6 +30,13 @@ def db():
         s.close()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_flag_file(monkeypatch):
+    # tests drive enable/kill via env (monkeypatch); neutralise the on-disk feature_flags.json so a
+    # suite-wide pollution of KILL_SWITCH/FULFILLMENT_AUTONOMOUS_RFQ can't make these flaky.
+    monkeypatch.setattr(A, "_flag_file_value", lambda key: None)
+
+
 def AG(): return Actor(AT.AGENT, "Procurement_Agent")
 def BU(): return Actor(AT.BUYER, "u1")
 
@@ -173,3 +180,34 @@ def test_rate_limited_escalates(db, monkeypatch):
     dec = _send(db, cid)
     assert dec.action == "escalated" and dec.reason == "rate_limited"
     assert wf.current_state(db, cid) == S.AWAITING_APPROVAL
+
+
+# ── WS-D: observability — active-autonomy decisions are audited; flag-off is not ──
+def test_escalation_is_audited_when_active(db, monkeypatch):
+    monkeypatch.setenv("FULFILLMENT_AUTONOMOUS_RFQ", "1")
+    cid = _case_awaiting_approval(db)
+    _send(db, cid, confidence=0.5)  # low_confidence → escalate
+    rows = gate.load_recent_audit(db, action_type="supplier_rfq_send")
+    assert any(r["decision"] == "escalate" and r["reason"] == "low_confidence" and r["target"] == cid
+               for r in rows)
+
+
+def test_flag_off_is_not_audited(db, monkeypatch):
+    monkeypatch.delenv("FULFILLMENT_AUTONOMOUS_RFQ", raising=False)
+    cid = _case_awaiting_approval(db)
+    _send(db, cid)
+    assert gate.load_recent_audit(db, action_type="supplier_rfq_send") == []  # no noise while OFF
+
+
+def test_enable_and_kill_via_flag_file(db, monkeypatch):
+    # autonomy can be enabled AND killed at runtime via feature_flags.json (no env, no redeploy)
+    monkeypatch.delenv("FULFILLMENT_AUTONOMOUS_RFQ", raising=False)
+    monkeypatch.setattr(A, "_flag_file_value",
+                        lambda key: True if key == "FULFILLMENT_AUTONOMOUS_RFQ" else None)
+    assert A.is_enabled() is True and A.is_killed() is False
+    monkeypatch.setattr(A, "_flag_file_value", lambda key: key in
+                        ("FULFILLMENT_AUTONOMOUS_RFQ", "FULFILLMENT_AUTONOMOUS_KILL_SWITCH"))
+    assert A.is_killed() is True
+    cid = _case_awaiting_approval(db)
+    dec = _send(db, cid)
+    assert dec.action == "escalated" and dec.reason == "killed"  # the flag-file kill switch stops the send

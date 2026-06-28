@@ -74,6 +74,26 @@ def list_cases(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
         return {"cases": fwf.repository.list_cases(db)}
 
 
+@router.get("/autonomous/audit")
+def autonomous_audit(limit: int = Query(100, ge=1, le=1000),
+                     role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """WS-D observability: the autonomous-RFQ-send decision trail — what auto-sent (decision='allow') and
+    every escalation with its reason (decision='escalate') — plus the LIVE toggle state so the operator can
+    confirm autonomy is on/killed. This is the visibility that makes turning autonomy on responsible."""
+    from src.app.services.adaptive_action_gate import load_recent_audit
+    from src.app.services.fulfillment import autonomous_send as fauto
+    with db_session() as db:
+        rows = load_recent_audit(db, limit=limit, action_type="supplier_rfq_send")
+    sent = sum(1 for r in rows if r["decision"] == "allow")
+    escalated = sum(1 for r in rows if r["decision"] != "allow")
+    by_reason: Dict[str, int] = {}
+    for r in rows:
+        if r["decision"] != "allow":
+            by_reason[r["reason"] or "unknown"] = by_reason.get(r["reason"] or "unknown", 0) + 1
+    return {"rows": rows, "summary": {"sent": sent, "escalated": escalated, "by_reason": by_reason},
+            "enabled": fauto.is_enabled(), "killed": fauto.is_killed()}
+
+
 @router.get("/cases/{case_id}")
 def get_case(case_id: str, view: str = Query("operator")) -> Dict[str, Any]:
     with db_session() as db:

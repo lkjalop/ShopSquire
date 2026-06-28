@@ -33,8 +33,23 @@ export const getFulfillmentJourney = (id: string) =>
   http<{ journey: JourneyEvent[] }>(`${_fc(id)}/journey`).then((d) => d.journey || []);
 export const fcDraftQuote = (id: string, item_ref: string, quantity: number, estimated_value_cents = 0) =>
   _fcPost(`${_fc(id)}/draft-quote`, { item_ref, quantity, estimated_value_cents });
+// WS-C/D: request-approval also reports the autonomous-send outcome (OFF/escalated/sent + reason).
+export interface AutonomousSendOutcome { action: 'sent' | 'escalated' | 'send_failed'; reason: string; provider_ref?: string | null; }
 export const fcRequestApproval = (id: string) =>
-  http<FulfillmentCaseView & { approval_id?: string }>(`${_fc(id)}/request-approval`, { method: 'POST' });
+  http<FulfillmentCaseView & { approval_id?: string; autonomous_send?: AutonomousSendOutcome }>(
+    `${_fc(id)}/request-approval`, { method: 'POST' });
+// WS-D observability: the autonomous-RFQ-send decision trail + the live enabled/killed toggle state.
+export interface AutonomousAuditRow {
+  action_type: string; decision: 'allow' | 'escalate' | 'deny'; reason: string;
+  confidence: number; subject?: string | null; target?: string | null; created_at?: string | null;
+}
+export interface AutonomousAudit {
+  rows: AutonomousAuditRow[];
+  summary: { sent: number; escalated: number; by_reason: Record<string, number> };
+  enabled: boolean; killed: boolean;
+}
+export const fcAutonomousAudit = (limit = 100) =>
+  http<AutonomousAudit>(`/api/v1/fulfillment/autonomous/audit?limit=${encodeURIComponent(String(limit))}`);
 export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
 // Export the case as an OKF (Open Knowledge Format) document — a portable audit artifact.
 export const fcCaseOkf = (id: string) =>

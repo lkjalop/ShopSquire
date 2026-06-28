@@ -12,6 +12,8 @@
     }
   },
   "KILL_SWITCH": false,
+  "FULFILLMENT_AUTONOMOUS_RFQ": false,
+  "FULFILLMENT_AUTONOMOUS_KILL_SWITCH": false,
   "DECISION_LOG_WRITES_ENABLED": false,
   "DEGRADATION": {
     "enabled": true

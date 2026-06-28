@@ -155,17 +155,42 @@ def authorize(
     return decision
 
 
-def load_recent_audit(db, *, limit: int = 100, tenant_id: str = DEFAULT_TENANT) -> List[Dict[str, Any]]:
+def record_decision(db, *, action_type: str, decision: str, reason: str = "", confidence: float = 0.0,
+                    subject: Optional[str] = None, target: Optional[str] = None,
+                    tenant_id: str = DEFAULT_TENANT) -> bool:
+    """Write ONE audit row for a decision made OUTSIDE authorize() — e.g. an autonomous escalation that
+    never reached the gate (decision='escalate'). Best-effort; returns whether it persisted. This is the
+    only sanctioned way to record a non allow/deny decision so the audit view shows escalations + reasons."""
+    if db is None:
+        return False
+    try:
+        ensure_table(db)
+        db.execute(text("INSERT INTO adaptive_action_audit (id, tenant_id, action_type, decision, reason, "
+                        "confidence, subject, target) VALUES (:i,:t,:at,:d,:r,:c,:s,:tg)"),
+                   {"i": str(uuid.uuid4()), "t": str(tenant_id).strip() or DEFAULT_TENANT,
+                    "at": str(action_type or ""), "d": str(decision), "r": str(reason or ""),
+                    "c": float(confidence or 0.0), "s": subject, "tg": target})
+        db.commit()
+        return True
+    except Exception:
+        return False
+
+
+def load_recent_audit(db, *, limit: int = 100, tenant_id: str = DEFAULT_TENANT,
+                      action_type: Optional[str] = None) -> List[Dict[str, Any]]:
     if db is None:
         return []
     try:
         ensure_table(db)
-        rows = db.execute(
-            text("SELECT action_type, decision, reason, confidence, subject, target FROM adaptive_action_audit "
-                 "WHERE COALESCE(tenant_id,'default')=:t ORDER BY created_at DESC LIMIT :lim"),
-            {"lim": int(limit), "t": str(tenant_id).strip() or DEFAULT_TENANT},
-        ).fetchall()
+        sql = ("SELECT action_type, decision, reason, confidence, subject, target, created_at "
+               "FROM adaptive_action_audit WHERE COALESCE(tenant_id,'default')=:t")
+        params: Dict[str, Any] = {"lim": int(limit), "t": str(tenant_id).strip() or DEFAULT_TENANT}
+        if action_type:
+            sql += " AND action_type=:at"
+            params["at"] = str(action_type)
+        sql += " ORDER BY created_at DESC LIMIT :lim"
+        rows = db.execute(text(sql), params).fetchall()
     except Exception:
         return []
     return [{"action_type": r[0], "decision": r[1], "reason": r[2], "confidence": float(r[3] or 0.0),
-             "subject": r[4], "target": r[5]} for r in rows]
+             "subject": r[4], "target": r[5], "created_at": r[6]} for r in rows]

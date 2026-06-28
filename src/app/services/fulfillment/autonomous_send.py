@@ -48,11 +48,42 @@ class SendDecision:
         return self.action == "sent"
 
 
+def _truthy(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    return v is not None and str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _flag(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
-    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+    return _truthy(raw)
+
+
+def _flag_file_value(key: str):
+    """Read one key from feature_flags.json (the governed runtime-toggle surface — flip it via the
+    dual-control POST /api/v1/admin/flags, no redeploy). Best-effort; None on any error."""
+    try:
+        import json
+        from src.app.config import get_settings
+        with open(get_settings().feature_flags_path, "r", encoding="utf-8") as f:
+            return json.load(f).get(key)
+    except Exception:
+        return None
+
+
+def is_enabled() -> bool:
+    """Autonomy is ON if the env flag OR the feature-flag file says so (either can enable; OFF by default)."""
+    return _flag("FULFILLMENT_AUTONOMOUS_RFQ") or _truthy(_flag_file_value("FULFILLMENT_AUTONOMOUS_RFQ"))
+
+
+def is_killed() -> bool:
+    """Fail-SAFE kill: ANY kill source stops autonomy — the dedicated switch (env or flag file), the global
+    adaptation kill switch, or the feature-flag file's top-level KILL_SWITCH."""
+    return (_flag("FULFILLMENT_AUTONOMOUS_KILL_SWITCH") or _flag("ADAPTATION_KILL_SWITCH")
+            or _truthy(_flag_file_value("FULFILLMENT_AUTONOMOUS_KILL_SWITCH"))
+            or _truthy(_flag_file_value("KILL_SWITCH")))
 
 
 def _num(name: str, default: float) -> float:
@@ -123,14 +154,24 @@ def maybe_autonomous_send(
     trace_id: Optional[str] = None,
 ) -> SendDecision:
     """Decide + (when authorized) perform an autonomous RFQ send. Operates on a case already at
-    AWAITING_APPROVAL. Returns a SendDecision; escalate leaves the case untouched for the human."""
+    AWAITING_APPROVAL. Returns a SendDecision; escalate leaves the case untouched for the human.
+
+    When autonomy is ACTIVE, every escalation is recorded to the durable audit (decision='escalate' +
+    reason) so the operator can SEE why autonomy held back; the send path is audited by the action-gate as
+    decision='allow'. flag_off is NOT audited (it would write a row on every request while autonomy is off)."""
+    # autonomy disabled → not a decision worth auditing; hand straight back to the human.
+    if not is_enabled():
+        return SendDecision("escalated", "flag_off")
+
     def escalate(reason: str) -> SendDecision:
+        from src.app.services.adaptive_action_gate import record_decision
+        record_decision(db, action_type="supplier_rfq_send", decision="escalate", reason=reason,
+                        confidence=float(confidence or 0.0) if isinstance(confidence, (int, float)) else 0.0,
+                        subject=getattr(actor, "id", None), target=case_id, tenant_id=tenant_id)
         return SendDecision("escalated", reason)
 
     try:
-        if not _flag("FULFILLMENT_AUTONOMOUS_RFQ"):
-            return escalate("flag_off")
-        if _flag("FULFILLMENT_AUTONOMOUS_KILL_SWITCH") or _flag("ADAPTATION_KILL_SWITCH"):
+        if is_killed():
             return escalate("killed")
 
         cur = workflow.repository.current_version(db, case_id, tenant_id)
