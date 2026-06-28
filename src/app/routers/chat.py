@@ -2347,6 +2347,11 @@ async def chat_query(
             if isinstance(data.get("fulfillment_case"), dict) and data.get("fulfillment_case", {}).get("case_id")
             else None
         ),
+        # Buyer-facing bulk alternatives (partial/transfer/substitute/source/reduce) for an unmet bulk
+        # request — pre-commitment, no order placed. Preserve so the right panel can offer real choices.
+        "fulfillment_options": (
+            data.get("fulfillment_options") if isinstance(data.get("fulfillment_options"), list) else None
+        ),
         "right_panel": _right_panel_contract,
         "copywriting": copy_meta,
         "image_untrusted": bool(image_security_posture.get("image_untrusted")),
