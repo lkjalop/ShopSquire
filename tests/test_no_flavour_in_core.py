@@ -39,6 +39,9 @@ _CORE_MODULES = [
     # multi-location availability + transfer feasibility: per-(sku,location) stock + transfer plan,
     # pure qty/location math — no product vocabulary.
     "src/app/services/multi_location_availability.py",
+    # substitute generator: same-category in-budget alternatives ranked by PROFILE attributes (opaque
+    # category/brand/specs DATA columns), no hardcoded product specs.
+    "src/app/services/substitute_generator.py",
     # inventory query service: injection-guarded direct stock lookups, opaque sku/qty — no product vocab.
     "src/app/services/inventory_query_service.py",
     # negation/exclusion response filter: matches excluded terms against product DATA, no literals.
