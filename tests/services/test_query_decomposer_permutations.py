@@ -35,6 +35,18 @@ def test_number_word_quantities(q, expected):
     assert _extract_quantity(q) == expected
 
 
+# ── "<N> in/within <M> days" — N is the bulk quantity, the horizon is not (the screenshot bug) ──
+@pytest.mark.parametrize("q,expected", [
+    ("what about laptops for work around 1800 to 2100? i need about 30 in 10 days?", 30),
+    ("30 in 10 days", 30),
+    ("i need 50 within 2 weeks", 50),
+    ("i need it within 10 days", None),   # no leading count → not a quantity
+    ("delivery in 4 weeks", None),        # horizon only
+])
+def test_quantity_from_delivery_horizon(q, expected):
+    assert _extract_quantity(q) == expected
+
+
 @pytest.mark.parametrize("q,expected_days", [
     ("deliver in fourteen days", 14), ("in two weeks", 14), ("within three days", 3),
     ("in 4 weeks", 28), ("by ten days", 10),

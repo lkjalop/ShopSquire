@@ -487,6 +487,14 @@ def _extract_quantity(q: str) -> Optional[int]:
                 break  # time/currency/filler immediately after the number → not a quantity
             if (w.endswith("s") and len(w) >= 3) or w in ("units", "pcs", "pieces"):
                 return n
+    # Fallback: "<N> in/within/by <M> days/weeks/months" — N units needed within a delivery horizon
+    # ("i need about 30 in 10 days"). The leading number is the quantity; the horizon is NOT a quantity.
+    # Still vertical-blind: pure number + a generic time horizon, no product vocabulary.
+    m2 = re.search(r"\b(\d{1,4})\s+(?:in|within|by|over\s+the\s+next)\s+\d{1,3}\s*(?:days?|weeks?|months?)\b", ql)
+    if m2:
+        n = _token_to_int(m2.group(1))
+        if n is not None and 1 < n <= 9999:
+            return n
     return None
 
 
