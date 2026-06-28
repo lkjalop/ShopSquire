@@ -43,10 +43,11 @@ export interface AutonomousAuditRow {
   action_type: string; decision: 'allow' | 'escalate' | 'deny'; reason: string;
   confidence: number; subject?: string | null; target?: string | null; created_at?: string | null;
 }
+export interface TransportHealth { mode: 'sandbox' | 'smtp'; configured: boolean; missing: string[]; transmits: boolean; }
 export interface AutonomousAudit {
   rows: AutonomousAuditRow[];
   summary: { sent: number; escalated: number; by_reason: Record<string, number> };
-  enabled: boolean; killed: boolean;
+  enabled: boolean; killed: boolean; transport: TransportHealth;
 }
 export const fcAutonomousAudit = (limit = 100) =>
   http<AutonomousAudit>(`/api/v1/fulfillment/autonomous/audit?limit=${encodeURIComponent(String(limit))}`);

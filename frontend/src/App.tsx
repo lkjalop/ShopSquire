@@ -1298,8 +1298,22 @@ export default function App() {
             body: JSON.stringify(chatPayload),
           });
           data = await safeJson(r);
+          // Replay protection (409): a duplicate of the previous turn was held back. Show a calm retry
+          // hint instead of the generic "Backend unavailable" panel (the detail is an object, not a string).
+          const replayDetail = data && (data.detail?.message ?? data.detail);
+          if (r.status === 409 && replayDetail === 'chat_replay_detected') {
+            const waitS = Number(data?.detail?.retry_after_seconds) || 5;
+            setMessages(prev => [...prev, {
+              role: 'assistant',
+              content: `That looked like a duplicate of your previous message, so I held off to avoid sending it twice. Please try again in about ${waitS}s.`,
+              timestamp: new Date(),
+            }]);
+            return;
+          }
           if (!r.ok || !data) {
-            throw new Error((data && data.detail) ? data.detail : `chat_query_failed (${r.status})`);
+            const detailStr = (data && typeof data.detail === 'string') ? data.detail
+              : (data && data.detail?.message) ? data.detail.message : `chat_query_failed (${r.status})`;
+            throw new Error(detailStr);
           }
         }
         const prods = (data.products || []) as Product[];

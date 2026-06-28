@@ -18,6 +18,7 @@ import {
   type RfqFanoutDraft, type SupplierCandidate,
 } from '../api';
 import ActionBar from './procurement/ActionBar';
+import AutonomyAudit from './procurement/AutonomyAudit';
 import CaseJourney from './procurement/CaseJourney';
 import CaseQueue from './procurement/CaseQueue';
 import QuotePacket from './procurement/QuotePacket';
@@ -105,6 +106,7 @@ export function ProcurementCases() {
 
   return (
     <div className="procurement-cases" data-testid="procurement-cases">
+      <AutonomyAudit />
       <div style={{ display: 'flex', gap: 16 }}>
         <CaseQueue cases={cases} sel={sel} onSelect={setSel} onRefresh={loadList} />
 
