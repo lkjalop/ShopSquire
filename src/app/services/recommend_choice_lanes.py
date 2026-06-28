@@ -118,3 +118,30 @@ def assign_device_lanes(
     # primary lanes first (most relevant to the query), then by the configured priority order already baked in
     out.sort(key=lambda l: (0 if l["primary"] else (2 if l["non_primary"] else 1)))
     return out
+
+
+def fleet_advisory(lanes: List[Dict[str, Any]], *, use_case: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Procurement-truth signal for a use-case with a primary expectation (e.g. a work/office query). If the
+    results carry NO primary-fit lane with products but DO carry a non-primary lane (e.g. only gaming
+    chassis), advise sourcing/procurement instead of presenting the specialty options as the answer.
+    Returns None when coverage is fine or there is no use-case context. Vertical-blind (reads only the
+    primary/non_primary/count flags the lanes already carry)."""
+    if not use_case or not lanes:
+        return None
+    primary = [l for l in lanes if l.get("primary") and l.get("count")]
+    non_primary = [l for l in lanes if l.get("non_primary") and l.get("count")]
+    if not primary and non_primary:
+        return {
+            "coverage": "none",
+            "message": ("No primary-fit options for this use-case in the current results. Recommend "
+                        "sourcing/procurement of suitable units rather than presenting the specialty "
+                        "options shown as primary picks."),
+            "non_primary_lanes": [str(l.get("key")) for l in non_primary],
+            "suggest_procurement": True,
+        }
+    if primary and non_primary:
+        return {"coverage": "partial",
+                "message": "Primary-fit options found; specialty options are listed separately and are "
+                           "not recommended as primary picks.",
+                "suggest_procurement": False}
+    return None

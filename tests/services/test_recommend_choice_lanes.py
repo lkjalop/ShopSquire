@@ -9,7 +9,7 @@ import os
 os.environ.setdefault("STORE_PROFILE_ID", "electronics")
 
 from src.app.platform.store_profile import profile_slot  # noqa: E402
-from src.app.services.recommend_choice_lanes import assign_device_lanes  # noqa: E402
+from src.app.services.recommend_choice_lanes import assign_device_lanes, fleet_advisory  # noqa: E402
 
 _FAKE_LANES = [
     {"key": "biz", "title": "Business", "markers": ["thinkpad", "latitude"], "exclusions": ["gaming"],
@@ -95,3 +95,42 @@ def test_real_electronics_profile_work_query_demarcates_lanes():
     assert g["skus"] == ["KT1"] and g["primary"] is False and g["non_primary"] is True
     primary_skus = [s for l in lanes if l["primary"] for s in l["skus"]]
     assert "KT1" not in primary_skus
+
+
+# ── procurement-truth: fleet_advisory ───────────────────────────────────────────
+def test_fleet_advisory_advises_procurement_when_only_gaming_for_work():
+    # a work query whose only in-budget options are gaming → advise sourcing, not selling gaming
+    prods = [{"sku": "KT1", "name": "MSI Katana 15 Gaming Laptop", "specs": {"gaming_style": True, "use_case": "gaming"}}]
+    lanes = assign_device_lanes(prods, profile_fn=profile_slot, use_case="office")
+    adv = fleet_advisory(lanes, use_case="office")
+    assert adv and adv["coverage"] == "none" and adv["suggest_procurement"] is True
+    assert "gaming_chassis" in adv["non_primary_lanes"]
+
+
+def test_fleet_advisory_partial_when_business_and_gaming_present():
+    prods = [
+        {"sku": "TP1", "name": "Lenovo ThinkPad T14 (vPro)", "specs": {"use_case": "business"}},
+        {"sku": "KT1", "name": "MSI Katana 15 Gaming Laptop", "specs": {"gaming_style": True}},
+    ]
+    lanes = assign_device_lanes(prods, profile_fn=profile_slot, use_case="office")
+    adv = fleet_advisory(lanes, use_case="office")
+    assert adv and adv["coverage"] == "partial" and adv["suggest_procurement"] is False
+
+
+def test_fleet_advisory_none_when_clean_fleet_or_no_use_case():
+    prods = [{"sku": "TP1", "name": "Lenovo ThinkPad T14", "specs": {"use_case": "business"}}]
+    lanes = assign_device_lanes(prods, profile_fn=profile_slot, use_case="office")
+    assert fleet_advisory(lanes, use_case="office") is None      # clean fleet → no advisory
+    assert fleet_advisory(lanes, use_case=None) is None          # no use-case context → no advisory
+
+
+def test_office_fleet_metric_boosts_a_managed_business_laptop():
+    # Part A: a vPro/TPM/docking business laptop scores HIGHER than a plain one for an office query
+    # (the office_fleet soft group fires in addition to business_class). use_case_fit is the live scorer.
+    from src.app.services.recommend_candidate_classify import use_case_fit
+    managed = {"sku": "M", "name": "Lenovo ThinkPad T14 vPro", "specs": {"use_case": "business", "tpm": True, "docking": "thunderbolt dock"}}
+    plain = {"sku": "P", "name": "Lenovo ThinkPad E14", "specs": {"use_case": "business"}}
+    fm = use_case_fit(managed, "10 laptops for work", profile_id="electronics")
+    fp = use_case_fit(plain, "10 laptops for work", profile_id="electronics")
+    assert fm["score_adjustment"] > fp["score_adjustment"]
+    assert "office_fleet" in fm.get("soft_reasons", [])

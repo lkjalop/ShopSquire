@@ -67,6 +67,17 @@ def test_no_device_lanes_fn_leaves_panel_unchanged():
     assert "device_lanes" not in p["right_panel"]
 
 
+def test_fleet_advisory_fn_attached_when_lanes_present():
+    p, _, _ = assemble_right_panel(
+        {"recommendation_tiers": {}}, results=[{"sku": "A"}], assistant_message="m", analysis={"details": {}},
+        severity=None, image_reupload_reasons=None, image_cv_signals_parsed=None, turn_intent="SHOPPING",
+        constraints={"use_case": "office"}, uid="u", decision_id=None, trace_id=None, nlp={},
+        apply_image_security_fields=_passthru_security, infer_warranty=_warranty_found, trace_fn=lambda **k: None,
+        device_lanes_fn=lambda prods, use_case=None: [{"key": "gaming_chassis", "non_primary": True, "count": 1, "skus": ["A"]}],
+        fleet_advisory_fn=lambda lanes, use_case=None: {"coverage": "none", "suggest_procurement": True})
+    assert p["right_panel"]["fleet_advisory"]["coverage"] == "none"
+
+
 def test_image_untrusted_marks_security_route():
     p, _, _ = _call({"recommendation_tiers": {}}, image_reupload_reasons=["adversarial"])
     assert p["right_panel"]["image_untrusted"] is True

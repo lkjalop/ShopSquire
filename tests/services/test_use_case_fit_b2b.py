@@ -41,6 +41,17 @@ def test_office_query_demotes_gaming_below_business():
     assert (35 + b["score_adjustment"]) > (35 + p["score_adjustment"]) > (35 + g["score_adjustment"])
 
 
+def test_office_fleet_metrics_boost_a_managed_business_laptop():
+    # stronger office metrics: a vPro/TPM/docking machine outranks a plain business laptop for a work query
+    # (the office_fleet soft group stacks on business_class/productivity_grade). Profile-driven; core agnostic.
+    managed = {"name": "Lenovo ThinkPad T14 vPro", "specs": {"use_case": "business", "tpm": True, "docking": "thunderbolt dock", "ram_gb": 16}}
+    plain = {"name": "Lenovo ThinkPad E14", "specs": {"use_case": "business", "ram_gb": 16}}
+    q = "10 laptops for work 1300-1500"
+    fm, fp = _fit(managed, q), _fit(plain, q)
+    assert "office_fleet" in fm["soft_reasons"] and "office_fleet" not in fp["soft_reasons"]
+    assert fm["score_adjustment"] > fp["score_adjustment"]
+
+
 def test_gaming_query_does_not_demote_gaming():
     # the exclusion is office-only; a genuine gaming query must NOT carry the consumer-gaming penalty.
     g = _fit(_GAMING, "best gaming laptop for esports")

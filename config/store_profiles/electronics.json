@@ -82,14 +82,15 @@
     "programming":   {"spec_floors": {"ram_gb_min": 16}},
     "study":         {"nqe_question": "ask_university_subject"},
     "high_school":   {"nqe_question": "ask_high_school_activity"},
-    "business":      {"nqe_question": "ask_corporate_work_type", "excludes": ["consumer_gaming_aesthetic"], "soft": ["business_class", "productivity_grade"]},
-    "office":        {"excludes": ["consumer_gaming_aesthetic"], "soft": ["business_class", "productivity_grade"]}
+    "business":      {"nqe_question": "ask_corporate_work_type", "excludes": ["consumer_gaming_aesthetic"], "soft": ["business_class", "productivity_grade", "office_fleet"]},
+    "office":        {"excludes": ["consumer_gaming_aesthetic"], "soft": ["business_class", "productivity_grade", "office_fleet"]}
   },
 
   "_use_case_fit_markers_comment": "Soft/exclusion vocabulary for use_case_fit (B2B/fleet ranking). Markers are matched as lowercase substrings against the candidate's name + specs JSON. score_adjustment = (soft weight x matched soft signals) + (exclusion weight x matched exclusions). The vocabulary lives HERE (profile), so the core scorer only applies the returned number and stays vertical-agnostic.",
   "use_case_soft_markers": {
     "business_class": ["thinkpad", "latitude", "elitebook", "probook", "xps"],
-    "productivity_grade": ["\"use_case\": \"productivity\"", "\"use_case\": \"premium\"", "\"use_case\": \"business\""]
+    "productivity_grade": ["\"use_case\": \"productivity\"", "\"use_case\": \"premium\"", "\"use_case\": \"business\""],
+    "office_fleet": ["vpro", "\"vpro\"", "tpm", "\"tpm\"", "docking", "thunderbolt dock", "wwan", "smartcard", "spill-resistant", "mil-spec", "mil-std", "manageability", "fleet imaging", "next business day", "onsite warranty"]
   },
   "use_case_exclusion_markers": {
     "consumer_gaming_aesthetic": ["\"gaming_style\": true", "\"use_case\": \"gaming\"", "gaming laptop", "nitro", "tuf gaming", "omen", "predator", "rog "]

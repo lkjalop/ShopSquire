@@ -34,6 +34,7 @@ def assemble_right_panel(
     infer_warranty: Callable[[Any], Dict[str, Any]],
     trace_fn: Callable[..., Any],
     device_lanes_fn: Optional[Callable[..., Any]] = None,
+    fleet_advisory_fn: Optional[Callable[..., Any]] = None,
 ) -> Tuple[Dict[str, Any], Any, Any]:
     """Assemble payload['right_panel'] (+ image-security fields + the UI trace event). Returns the current
     (payload, results, assistant_message) — payload is also mutated in place. Never raises."""
@@ -145,6 +146,12 @@ def assemble_right_panel(
                 _lanes = device_lanes_fn(results or [], use_case=_uc)
                 if _lanes:
                     payload["right_panel"]["device_lanes"] = _lanes
+                    # procurement-truth: if a work/office query has no primary-fit lane (only specialty/
+                    # gaming chassis), advise sourcing instead of selling the specialty options.
+                    if fleet_advisory_fn is not None:
+                        _adv = fleet_advisory_fn(_lanes, use_case=_uc)
+                        if _adv:
+                            payload["right_panel"]["fleet_advisory"] = _adv
         _trace_for_ui_event = decision_id or trace_id
         if _trace_for_ui_event:
             try:

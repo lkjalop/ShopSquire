@@ -115,6 +115,9 @@ type RightPanelContract = {
   // renders THESE instead of the frontend heuristic. A work query marks office lanes primary and a gaming
   // chassis non_primary, so gaming never appears as a primary work pick.
   device_lanes?: BackendDeviceLane[];
+  // Procurement-truth advisory: when a work query has no primary-fit options (only specialty/gaming),
+  // the backend advises sourcing rather than presenting gaming as the answer.
+  fleet_advisory?: { coverage?: string; message?: string; suggest_procurement?: boolean; non_primary_lanes?: string[] };
 };
 type BackendDeviceLane = {
   key: string;
@@ -1940,6 +1943,15 @@ export default function App() {
                           {section?.summary && <div className={styles.tierExplain}>{section.summary}</div>}
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Procurement-truth advisory: a work query with no clean fleet match → recommend sourcing. */}
+                  {rightPanelContract?.fleet_advisory?.suggest_procurement && rightPanelContract.fleet_advisory.message && (
+                    <div data-testid="fleet-advisory" role="alert"
+                         style={{ margin: '8px 0', padding: '8px 12px', borderRadius: 8,
+                                  border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 13 }}>
+                      <strong>No clean work-fleet match.</strong> {rightPanelContract.fleet_advisory.message}
                     </div>
                   )}
 
