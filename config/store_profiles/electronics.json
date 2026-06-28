@@ -112,7 +112,7 @@
   "_recommendation_lanes_comment": "Backend choice-lanes (recommend_choice_lanes). DATA only — markers/exclusions are opaque substrings matched against a candidate's name+specs+features; the core just groups. A candidate joins the highest-priority lane whose marker matches and whose exclusions don't. `primary_for` lists the use-cases for which the lane is a PRIMARY pick; `non_primary` lanes (gaming chassis) are never primary, so a work query never surfaces gaming as a top office pick.",
   "recommendation_lanes": [
     {"key": "windows_business", "title": "Windows Business",
-     "markers": ["thinkpad", "latitude", "elitebook", "probook", "vpro", "\"vpro\"", "tpm", "business laptop", "\"use_case\": \"business\"", "\"use_case\": \"productivity\""],
+     "markers": ["thinkpad", "latitude", "elitebook", "probook", "\"vpro\"", "vpro", "\"tpm\": true", "business laptop"],
      "exclusions": ["\"gaming_style\": true", "\"use_case\": \"gaming\"", "gaming laptop", "legion", "rog ", "omen", "predator", "nitro", "tuf gaming", "alienware", "katana", "raider", "stealth", "titan"],
      "explain": "Business-class Windows laptops: manageability (vPro/TPM), docking, warranty and fleet imaging.",
      "metrics": ["warranty", "manageability", "tpm_vpro", "docking", "battery", "weight"],
