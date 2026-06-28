@@ -436,7 +436,7 @@ async def analyze(
             # slow model task). Per-task budgets keep the security-critical detector
             # independent of the LLM's availability.
             # Override with CV_ANALYZE_TIMEOUT_SEC (heavy tasks) / CV_QR_TIMEOUT_SEC.
-            _cv_analyze_timeout = float((os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "15").strip() or "15")
+            _cv_analyze_timeout = float((os.getenv("CV_ANALYZE_TIMEOUT_SEC") or "8").strip() or "15")
             _cv_qr_timeout = float((os.getenv("CV_QR_TIMEOUT_SEC") or "6").strip() or "6")
 
             async def _bounded(coro, timeout, default, name):
