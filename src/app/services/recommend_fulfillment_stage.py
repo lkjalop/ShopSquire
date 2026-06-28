@@ -38,8 +38,10 @@ def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payloa
         return
     try:
         from src.app.services.decision_log import log_trace_event
+        # durable=True so the procurement-journey / market-intel / alternatives steps PERSIST and show in
+        # the Decision Trace Events tab (not just the live stream) — the blank-trace annotation.
         log_trace_event(trace_id=trace_id, event_type=event_type, source_type="agent", source_id=source_id,
-                        target_type="system", target_id=None, payload=payload_obj, durable=False)
+                        target_type="system", target_id=None, payload=payload_obj, durable=True)
     except Exception as exc:
         record_partial_failure("trace_emit", exc, trace_id=trace_id)
 
