@@ -165,6 +165,8 @@ _CORE_MODULES = [
     "src/app/services/recommend_choice_lanes.py",
     # per-pick narration evidence: typed *_fit metrics from candidate data + profile markers — no vocab.
     "src/app/services/recommend_evidence.py",
+    # budget-band ranking truth: in/stretch/over/under + dominating over-budget penalty, cents/ratio only.
+    "src/app/services/recommend_budget_band.py",
     # storefront-emphasis lever (David Phase 3): gated right-panel messaging variant for treatment users.
     # The only flavour (the variant copy) lives in the StoreProfile slot — the gate/canary/apply is opaque.
     "src/app/services/recommend_emphasis_stage.py",

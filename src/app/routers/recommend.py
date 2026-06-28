@@ -974,10 +974,15 @@ def _fast_path_product_score(
         score += 8.0
     if budget_max is not None and price <= float(budget_max):
         score += 10.0
-    if budget_min is not None and price < float(budget_min):
-        score -= min(18.0, (float(budget_min) - price) / 100.0)
-    if budget_max is not None and price > float(budget_max):
-        score -= min(20.0, (price - float(budget_max)) / 100.0)
+    # Budget-band truth: an over-budget unit is DEMOTED with a dominating penalty so no use-case/brand
+    # score can lift it above an in-budget one (the $4.5k-for-$1,900 trust bug). 'stretch'/'under' are
+    # mild; 'in' is neutral. Single source of truth in recommend_budget_band.
+    try:
+        from src.app.services.recommend_budget_band import band_status, budget_rank_penalty
+        score += budget_rank_penalty(band_status(price_cents, budget_min, budget_max))
+    except Exception:
+        if budget_max is not None and price > float(budget_max):
+            score -= min(20.0, (price - float(budget_max)) / 100.0)
     try:
         if int(row.get("stock") or 0) > 0:
             score += 6.0
