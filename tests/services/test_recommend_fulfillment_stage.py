@@ -110,3 +110,21 @@ def test_buyer_requirements_captures_constraints_and_keeps_budget_internal():
     assert r["needed_within_days"] == 14
     assert r["budget"] == {"min": 1300, "max": 1500}
     assert _buyer_requirements({}) == {}  # nothing stated → no requirements
+
+
+def test_network_breakdown_merged_onto_availability(monkeypatch):
+    # multi-location view (per-location stock + transfer plan) is merged onto payload['availability'].
+    monkeypatch.setattr(
+        "src.app.services.multi_location_availability.assess_network_availability",
+        lambda db, skus, qty, preferred_location=None, **kw: {
+            "applicable": True, "total_in_network": 17, "by_location": {"sydney": 5, "melbourne": 12},
+            "preferred_location": preferred_location, "preferred_qty": 5,
+            "transfer_plan": [{"from_location": "melbourne", "qty": 5}],
+            "fillable_from_network": True, "shortfall": 0})
+    payload = {}
+    stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}],
+                                constraints={"order_quantity": 10, "ship_to": "sydney"},
+                                payload=payload, uid="u1", trace_id="T1", flags={})
+    net = payload["availability"]["network"]
+    assert net["total_in_network"] == 17 and net["preferred_location"] == "sydney"
+    assert net["transfer_plan"] == [{"from_location": "melbourne", "qty": 5}]

@@ -36,6 +36,11 @@ _CORE_MODULES = [
     "src/app/services/narration_tradeoff.py",
     # availability/fulfilment: stock + lead-time orchestration, vertical-blind (no product literals).
     "src/app/services/availability_agent.py",
+    # multi-location availability + transfer feasibility: per-(sku,location) stock + transfer plan,
+    # pure qty/location math — no product vocabulary.
+    "src/app/services/multi_location_availability.py",
+    # inventory query service: injection-guarded direct stock lookups, opaque sku/qty — no product vocab.
+    "src/app/services/inventory_query_service.py",
     # negation/exclusion response filter: matches excluded terms against product DATA, no literals.
     "src/app/services/negation_filter.py",
     # escalation policy: risk/complexity → human-in-the-loop decision, vertical-blind signal math.

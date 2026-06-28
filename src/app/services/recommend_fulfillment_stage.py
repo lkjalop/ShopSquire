@@ -31,6 +31,19 @@ def _safe_int(v: Any) -> Optional[int]:
         return None  # observable: callers treat None as "not stated"
 
 
+def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payload_obj: Dict[str, Any]) -> None:
+    """Emit one decision-trace agent step (best-effort) so the bulk-procurement journey is visible in the
+    Decision Trace. Dormant for non-bulk turns. Never raises into the recommend flow."""
+    if not trace_id:
+        return
+    try:
+        from src.app.services.decision_log import log_trace_event
+        log_trace_event(trace_id=trace_id, event_type=event_type, source_type="agent", source_id=source_id,
+                        target_type="system", target_id=None, payload=payload_obj, durable=False)
+    except Exception as exc:
+        record_partial_failure("trace_emit", exc, trace_id=trace_id)
+
+
 def run_fulfillment_stage(
     *,
     results: List[Dict[str, Any]],
@@ -60,6 +73,30 @@ def run_fulfillment_stage(
     payload["availability"] = assess_availability(
         avail_skus, qty, constraints.get("availability_horizon_days"), draft_reorder=is_b2b_bulk)
     line = availability_summary_line(payload["availability"])
+    # multi-location view: per-location stock + a transfer plan to cover the buyer's preferred-location gap
+    # BEFORE any supplier reorder. Merged onto the availability payload (aggregate fields preserved).
+    try:
+        from src.app.models.db import db_session
+        from src.app.services.multi_location_availability import assess_network_availability
+        preferred = str(constraints.get("ship_to") or constraints.get("preferred_location") or "").strip() or None
+        with db_session() as _db:
+            net = assess_network_availability(_db, avail_skus, qty, preferred_location=preferred)
+        if isinstance(net, dict) and net.get("applicable"):
+            payload["availability"]["network"] = {
+                "total_in_network": net.get("total_in_network"), "by_location": net.get("by_location"),
+                "preferred_location": net.get("preferred_location"), "preferred_qty": net.get("preferred_qty"),
+                "transfer_plan": net.get("transfer_plan"), "fillable_from_network": net.get("fillable_from_network"),
+                "shortfall": net.get("shortfall"),
+            }
+    except Exception as exc:
+        record_partial_failure("network_availability", exc, trace_id=trace_id)
+    # decision-trace: the bulk availability assessment is a visible agent step (fires for any bulk query,
+    # even before procurement cases are enabled) → fixes the blank-trace "market intelligence" gap.
+    if is_bulk:
+        _av = payload.get("availability") or {}
+        _emit_trace(trace_id, "bulk_availability_assessed", "Market_Intelligence_Agent",
+                    {"sku": _av.get("sku"), "order_qty": qty, "in_stock": _av.get("in_stock"),
+                     "shortfall": _av.get("shortfall"), "network": _av.get("network")})
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
                      flags=flags, single_item=single_item)
@@ -128,9 +165,12 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
                                 requested_by="recommend")
             if not cid:
                 return
-            _patch = {"availability": {"requested_qty": order_qty,
-                                       "in_stock": int((avail or {}).get("in_stock") or 0),
-                                       "shortfall": shortfall, "item_ref": item_ref}}
+            _avail_patch = {"requested_qty": order_qty,
+                            "in_stock": int((avail or {}).get("in_stock") or 0),
+                            "shortfall": shortfall, "item_ref": item_ref}
+            if isinstance((avail or {}).get("network"), dict):
+                _avail_patch["network"] = avail["network"]  # per-location + transfer plan → on the case
+            _patch = {"availability": _avail_patch}
             _reqs = _buyer_requirements(constraints or {})
             if _reqs:
                 _patch["requirements"] = _reqs  # way-1: buyer constraints → cited in the supplier RFQ
@@ -143,5 +183,10 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
         # buyer-safe summary only (no supplier-private data ever in the recommend payload)
         payload["fulfillment_case"] = {"case_id": cid, "status": "awaiting_buyer_commitment",
                                        "item_ref": item_ref, "shortfall": shortfall}
+        # decision-trace: the procurement journey has begun (GATE 1 — buyer commitment pending).
+        _net = (avail or {}).get("network") or {}
+        _emit_trace(trace_id, "procurement_case_opened", "Procurement_Agent",
+                    {"case_id": cid, "item_ref": item_ref, "order_qty": order_qty, "shortfall": shortfall,
+                     "status": "awaiting_buyer_commitment", "transfer_plan": _net.get("transfer_plan")})
     except Exception as exc:
         record_partial_failure("fulfillment_case_open", exc, trace_id=trace_id)
