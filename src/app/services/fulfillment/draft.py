@@ -619,6 +619,12 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
     Returns (TransitionResult, SupplierDraft|None). If no approved supplier, fires no_approved_supplier."""
     cur = workflow.repository.current_version(db, case_id, tenant_id)
     case_state = cur.state_json if cur else {}
+    # Phase 3: when qualification is required, no RFQ may be drafted until a human has verified the buyer is
+    # serious (FULFILLMENT_REQUIRE_QUALIFICATION). The buyer-clarification happens in the escalation room.
+    from src.app.services.fulfillment.buyer_qualification import qualification_required, is_qualified
+    if qualification_required() and not is_qualified(case_state):
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None,
+                                         "buyer_not_qualified", http_status=409), None
     # Flag-gated caged LLM tone-polish (default OFF). build_draft re-validates the rewrite through the
     # broadened claim-safety gate + deterministic fallback, so enabling this can only improve tone, never
     # weaken safety. An explicitly-injected llm_fn (tests) is respected as-is.

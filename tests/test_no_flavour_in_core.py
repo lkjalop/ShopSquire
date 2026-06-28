@@ -161,6 +161,9 @@ _CORE_MODULES = [
     # WS-C autonomous RFQ send: flag-gated safe-first policy gate (allowlist+KYV / claim-safe / complete /
     # confidence / value·qty caps / rate-limit / action-gate), pure policy — no product vocabulary.
     "src/app/services/fulfillment/autonomous_send.py",
+    # Phase 3 buyer qualification: human-verified intent gate before supplier contact, opaque case/room
+    # refs + a status flag — no product vocabulary.
+    "src/app/services/fulfillment/buyer_qualification.py",
     "src/app/services/fulfillment/sandbox_supplier.py",
     # supplier-email transport seam: sandbox/SMTP provider interface, opaque message fields — no product vocab.
     "src/app/services/fulfillment/transport.py",

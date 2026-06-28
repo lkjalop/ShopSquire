@@ -325,6 +325,49 @@ def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR)))
                                     "provider_ref": auto.provider_ref}}
 
 
+# ── Phase 3: buyer qualification (human ↔ buyer) BEFORE any supplier contact ──
+@router.post("/cases/{case_id}/start-qualification")
+def start_qualification(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Open a buyer-clarification room (escalation room) seeded with the case context and mark the case
+    awaiting qualification — the human confirms the buyer is serious before any supplier is contacted."""
+    from src.app.routers.escalation_room import create_incident_record
+    from src.app.services.fulfillment import buyer_qualification as fbq
+    with db_session() as db:
+        cur = fwf.repository.current_version(db, case_id)
+        if cur is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        av = (cur.state_json.get("availability") or {}) if isinstance(cur.state_json, dict) else {}
+        room = create_incident_record(
+            case_id=case_id, trace_id=cur.source_trace_id, reason="buyer_qualification",
+            context={"kind": "buyer_qualification", "item_ref": av.get("item_ref"),
+                     "requested_qty": av.get("requested_qty"), "shortfall": av.get("shortfall")},
+            created_by=role, title="Buyer qualification: confirm bulk intent")
+        res = fbq.request_qualification(db, case_id=case_id, actor=_agent(),
+                                        room_ref=(room or {}).get("incident_id"))
+        _raise_if_failed(res)
+        return {**_case_view(db, case_id, for_operator=True), "qualification_room": room}
+
+
+class QualifyBody(BaseModel):
+    qualified: bool
+    notes: Optional[str] = None
+
+
+@router.post("/cases/{case_id}/qualify")
+def qualify(case_id: str, body: QualifyBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """HUMAN records the qualification verdict after talking to the buyer: qualified → supplier contact is
+    permitted; not → the case ends (BUYER_DECLINED) and no supplier is ever contacted."""
+    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    from src.app.services.fulfillment import buyer_qualification as fbq
+    with db_session() as db:
+        cur = fwf.repository.current_version(db, case_id)
+        room_ref = ((cur.state_json.get("qualification") if cur else None) or {}).get("room_ref")
+        res = fbq.record_qualification(db, case_id=case_id, actor=human, qualified=body.qualified,
+                                       notes=body.notes, room_ref=room_ref)
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
 class RfiBody(BaseModel):
     question: str   # the scoped clarification the HUMAN wants to ask the supplier (claim-safe — no price)
 

@@ -114,6 +114,17 @@ TRANSITIONS: Tuple[Transition, ...] = (
     # ── agent prepares + drafts (internal only) — confidence-gated, post-commitment ──
     Transition("supplier_candidates_ranked", _S.COMMITTED, _S.COMMITTED, frozenset({_A.AGENT}),
                requires_evidence=True, note="internal supplier ranking — no external contact"),
+
+    # ── Phase 3: buyer qualification (human verifies the buyer is serious BEFORE any supplier contact).
+    #    Self-loops on COMMITTED so the verdict is recorded bitemporally; a draft can be gated on it
+    #    (FULFILLMENT_REQUIRE_QUALIFICATION). Disqualified ends the case (no supplier is ever contacted). ──
+    Transition("buyer_qualification_requested", _S.COMMITTED, _S.COMMITTED,
+               frozenset({_A.AGENT, _A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True,
+               note="open a buyer-clarification room to confirm intent before supplier contact"),
+    Transition("buyer_qualified", _S.COMMITTED, _S.COMMITTED, frozenset({_A.HUMAN_OPERATOR}),
+               requires_evidence=True, note="HUMAN verified the buyer is serious — supplier contact permitted"),
+    Transition("buyer_disqualified", _S.COMMITTED, _S.BUYER_DECLINED, frozenset({_A.HUMAN_OPERATOR}),
+               note="HUMAN found the buyer not serious → no supplier contact"),
     Transition("external_message_drafted", _S.COMMITTED, _S.QUOTE_DRAFTED, frozenset({_A.AGENT}),
                requires_confidence_gate=True, requires_evidence=True,
                note="DRAFT only (no send); recipient resolved from allowlist, never buyer text"),
