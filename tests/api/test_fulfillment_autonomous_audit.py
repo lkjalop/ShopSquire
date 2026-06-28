@@ -35,5 +35,6 @@ def test_autonomous_audit_endpoint_summarizes_and_reports_toggle_state():
     assert data["summary"]["escalated"] >= 2
     assert data["summary"]["by_reason"].get("low_confidence", 0) >= 1
     assert "enabled" in data and "killed" in data           # the live toggle state is surfaced
+    assert data["transport"]["mode"] in ("sandbox", "smtp")  # the deploy preflight is surfaced too
     assert data["rows"] and all(row["action_type"] == "supplier_rfq_send" for row in data["rows"])  # filtered
     assert any(row["decision"] == "escalate" and row["reason"] == "over_value_cap" for row in data["rows"])

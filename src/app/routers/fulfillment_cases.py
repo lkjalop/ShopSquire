@@ -82,6 +82,7 @@ def autonomous_audit(limit: int = Query(100, ge=1, le=1000),
     confirm autonomy is on/killed. This is the visibility that makes turning autonomy on responsible."""
     from src.app.services.adaptive_action_gate import load_recent_audit
     from src.app.services.fulfillment import autonomous_send as fauto
+    from src.app.services.fulfillment.transport import transport_health
     with db_session() as db:
         rows = load_recent_audit(db, limit=limit, action_type="supplier_rfq_send")
     sent = sum(1 for r in rows if r["decision"] == "allow")
@@ -91,7 +92,7 @@ def autonomous_audit(limit: int = Query(100, ge=1, le=1000),
         if r["decision"] != "allow":
             by_reason[r["reason"] or "unknown"] = by_reason.get(r["reason"] or "unknown", 0) + 1
     return {"rows": rows, "summary": {"sent": sent, "escalated": escalated, "by_reason": by_reason},
-            "enabled": fauto.is_enabled(), "killed": fauto.is_killed()}
+            "enabled": fauto.is_enabled(), "killed": fauto.is_killed(), "transport": transport_health()}
 
 
 @router.get("/cases/{case_id}")

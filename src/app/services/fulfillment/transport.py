@@ -19,7 +19,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 
 @dataclass(frozen=True)
@@ -96,3 +96,17 @@ def get_transport() -> SupplierTransport:
     if mode == "smtp":
         return SmtpTransport()
     return SandboxTransport()
+
+
+def transport_health() -> Dict[str, Any]:
+    """Preflight for the active supplier transport — so an operator can confirm REAL sending is wired
+    BEFORE enabling autonomy (enabling autonomous send while transport=smtp but SMTP_HOST/SENDER are unset
+    would make every send fail). sandbox is always 'configured' (it stages, never transmits). Reports the
+    missing env vars rather than the secrets themselves."""
+    mode = str(os.getenv("FULFILLMENT_SUPPLIER_TRANSPORT", "sandbox")).strip().lower()
+    if mode == "smtp":
+        required = (("SMTP_HOST", os.getenv("SMTP_HOST", "")), ("SMTP_SENDER", os.getenv("SMTP_SENDER", "")))
+        missing: List[str] = [k for k, v in required if not str(v).strip()]
+        return {"mode": "smtp", "configured": not missing, "missing": missing,
+                "transmits": True}
+    return {"mode": "sandbox", "configured": True, "missing": [], "transmits": False}
