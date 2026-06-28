@@ -97,6 +97,7 @@ def run_fulfillment_stage(
         _emit_trace(trace_id, "bulk_availability_assessed", "Market_Intelligence_Agent",
                     {"sku": _av.get("sku"), "order_qty": qty, "in_stock": _av.get("in_stock"),
                      "shortfall": _av.get("shortfall"), "network": _av.get("network")})
+        _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
                      flags=flags, single_item=single_item)
@@ -135,6 +136,37 @@ def _buyer_requirements(constraints: Dict[str, Any]) -> Dict[str, Any]:
     if bmin is not None or bmax is not None:
         reqs["budget"] = {"min": bmin, "max": bmax}  # INTERNAL ONLY — never rendered into the supplier RFQ
     return reqs
+
+
+def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
+    """Build the buyer-facing alternatives (partial / transfer / substitute / source-shortfall / reduce)
+    for an unmet bulk request and attach to payload['fulfillment_options'] for the 5173 right panel.
+    Best-effort; only gathers substitutes (a DB read) when there's actually a gap to fill."""
+    try:
+        net = (avail or {}).get("network") or {}
+        shortfall = int((avail or {}).get("shortfall") or 0)
+        if shortfall <= 0 and not net.get("transfer_plan"):
+            return  # fulfillable as-is at the preferred location → no alternatives needed
+        primary = str((avail or {}).get("sku") or "")
+        subs: List[Dict[str, Any]] = []
+        if primary:
+            from src.app.models.db import db_session
+            from src.app.services.substitute_generator import find_substitutes
+            with db_session() as _db:
+                subs = find_substitutes(_db, primary, use_case=(constraints or {}).get("use_case"),
+                                        budget_min=(constraints or {}).get("budget_min"),
+                                        budget_max=(constraints or {}).get("budget_max"), limit=3) or []
+        from src.app.services.bulk_alternatives import build_alternatives
+        alts = build_alternatives(sku=primary, requested_qty=qty,
+                                  in_stock=int((avail or {}).get("in_stock") or 0), shortfall=shortfall,
+                                  network=net, substitutes=subs,
+                                  horizon_days=_safe_int((constraints or {}).get("availability_horizon_days")))
+        if alts:
+            payload["fulfillment_options"] = alts
+            _emit_trace(trace_id, "alternatives_generated", "Alternatives_Agent",
+                        {"sku": primary, "count": len(alts), "types": [a["type"] for a in alts]})
+    except Exception as exc:
+        record_partial_failure("bulk_alternatives", exc, trace_id=trace_id)
 
 
 def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False) -> None:

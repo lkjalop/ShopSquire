@@ -42,6 +42,9 @@ _CORE_MODULES = [
     # substitute generator: same-category in-budget alternatives ranked by PROFILE attributes (opaque
     # category/brand/specs DATA columns), no hardcoded product specs.
     "src/app/services/substitute_generator.py",
+    # bulk alternatives assembler: orders buyer choices (partial/transfer/substitute/source/reduce) from
+    # gathered facts, pure shaping — opaque sku/location/qty, generic strings, no product vocabulary.
+    "src/app/services/bulk_alternatives.py",
     # inventory query service: injection-guarded direct stock lookups, opaque sku/qty — no product vocab.
     "src/app/services/inventory_query_service.py",
     # negation/exclusion response filter: matches excluded terms against product DATA, no literals.

@@ -128,3 +128,25 @@ def test_network_breakdown_merged_onto_availability(monkeypatch):
     net = payload["availability"]["network"]
     assert net["total_in_network"] == 17 and net["preferred_location"] == "sydney"
     assert net["transfer_plan"] == [{"from_location": "melbourne", "qty": 5}]
+
+
+def test_bulk_alternatives_attached_on_shortfall(monkeypatch):
+    # availability stub gives a shortfall; substitutes stubbed → payload['fulfillment_options'] built
+    monkeypatch.setattr(
+        "src.app.services.multi_location_availability.assess_network_availability",
+        lambda db, skus, qty, preferred_location=None, **kw: {
+            "applicable": True, "total_in_network": 4, "by_location": {"sydney": 4},
+            "preferred_location": preferred_location, "preferred_qty": 4, "transfer_plan": [],
+            "fillable_from_network": False, "shortfall": 6})
+    monkeypatch.setattr(
+        "src.app.services.substitute_generator.find_substitutes",
+        lambda db, sku, **kw: [{"sku": "ALT-A", "name": "Alt A", "tradeoff": "$50 more; 2/2 key specs",
+                                "price_cents": 155000, "spec_match": 2, "spec_total": 2}])
+    payload = {}
+    stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}],
+                                constraints={"order_quantity": 10, "availability_horizon_days": 10},
+                                payload=payload, uid="u1", trace_id="T1", flags={})
+    opts = payload.get("fulfillment_options") or []
+    types = {o["type"] for o in opts}
+    assert "source_shortfall" in types and "substitute" in types  # supplier path + the alternative
+    assert "fulfillment_case" not in payload  # flag off → still no case (alternatives are pre-commitment)
