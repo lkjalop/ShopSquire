@@ -36,6 +36,25 @@ def test_no_match_template_for_under_budget():
     assert "not currently in-catalog under $1,100".lower() in msg
 
 
+def test_budget_band_caps_at_buyer_ceiling_not_product_max():
+    # over-budget "performance-fit" lane items must NOT inflate the stated band (the $1,900 query that
+    # read "$1,199-$5,999"). The band ceiling is the buyer's cap; the floor is the cheapest in-budget unit.
+    out = apply_answer_quality(
+        query="i need about 15 laptops for heavy coding and content creation? any discount? budget is about 1900 each?",
+        assistant_message="I found 15 options that match your criteria.",
+        turn_intent="FILTER",
+        products=[{"price": 1199}, {"price": 1499}, {"price": 1899},
+                  {"price": 2899}, {"price": 4499}, {"price": 5999}],
+        image_cv_signals={},
+        has_image=False,
+        buyer_persona=None,
+        brand_name=None,
+    )
+    msg = str(out.get("assistant_message") or "")
+    assert "$1,199-$1,900" in msg          # capped at the buyer's ceiling
+    assert "5,999" not in msg and "4,499" not in msg and "2,899" not in msg  # no over-budget leak
+
+
 def test_cv_hard_block_still_answers_text_path():
     out = apply_answer_quality(
         query="what are my options and how soon can i get it sorted?",

@@ -166,10 +166,13 @@ def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_
     prices = [int(float(p.get("price") or 0)) for p in (products or []) if p.get("price") is not None]
     if prices and (lo_msg is None or hi_msg is None):
         lo_msg, hi_msg = min(prices), max(prices)
-    # Override with actual product price range + user budget ceiling
+    # The band must reflect the BUYER'S budget, not the raw product price range — over-budget
+    # "performance-fit" lane items must never inflate it (the $1,900 query that read "$1,199-$5,999").
+    # Floor = cheapest IN-BUDGET option; ceiling = the buyer's stated cap when they gave one.
     if prices:
-        lo_msg = min(prices)
-        hi_msg = q_hi if q_hi and q_hi > max(prices) else max(prices)
+        in_budget = [p for p in prices if (q_hi is None or p <= q_hi)]
+        lo_msg = min(in_budget) if in_budget else min(prices)
+        hi_msg = q_hi if q_hi is not None else max(prices)
     threshold = _extract_budget_threshold(query)
     direct = None
     if threshold is not None and hi_msg is not None:
