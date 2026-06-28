@@ -434,6 +434,21 @@ def test_sku_description_falls_back_to_item_ref_when_not_in_catalog(db):
     assert "sku-nope" in draft.body.lower() and "dell" not in draft.body.lower()
 
 
+def test_multi_location_evidence_surfaced_in_draft(db):
+    # Phase 4: per-location stock + transfer plan (gathered onto the case) appears as draft evidence so the
+    # operator sees "could we move stock instead?" before approving the RFQ.
+    cs = {"availability": {"shortfall": 38, "requested_qty": 50, "in_stock": 12,
+                           "network": {"total_in_network": 30, "by_location": {"sydney": 12, "melbourne": 18},
+                                       "transfer_plan": [{"from_location": "melbourne", "qty": 18}],
+                                       "shortfall": 20}},
+          "requirements": {"needed_by": "2026-08-01", "ship_to": "Sydney"}}
+    draft = D.build_draft(db, item_ref="SKU-1", quantity=50, case_ref="FC-1", case_state=cs,
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    loc = [e for e in draft.evidence if e["source"] == "multi_location"]
+    assert loc and "transfer 18" in loc[0]["summary"]
+    assert loc[0]["payload"]["transfer_plan"] == [{"from_location": "melbourne", "qty": 18}]
+
+
 def test_rfq_completeness_reason_unit():
     ok = {"sku_description": "x", "deadline_date": "2026-01-01", "ship_to": "AU", "quantity": 5}
     assert D.rfq_completeness_reason(ok) is None

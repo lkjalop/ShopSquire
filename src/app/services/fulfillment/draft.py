@@ -194,6 +194,21 @@ def gather_evidence(
                                 f"shortfall {avail.get('shortfall')} of {avail.get('requested_qty')}",
                                 payload={k: avail.get(k) for k in ("shortfall", "requested_qty", "in_stock")}))
 
+    # multi-location availability (Phase 1) — per-location stock + the transfer plan that can cover the
+    # preferred-location gap BEFORE sourcing externally. Already gathered onto the case; surfaced here so the
+    # operator sees "could we move stock instead?" before approving the RFQ. No new I/O.
+    net = avail.get("network") if isinstance(avail, dict) else None
+    if isinstance(net, dict) and (net.get("by_location") or net.get("transfer_plan")):
+        tp = [t for t in (net.get("transfer_plan") or []) if isinstance(t, dict)]
+        moved = sum(int(t.get("qty") or 0) for t in tp)
+        n_locs = len(net.get("by_location") or {})
+        summary = (f"network has {net.get('total_in_network')} across {n_locs} locations; "
+                   f"transfer {moved} to cover the preferred-location gap" if tp
+                   else f"network has {net.get('total_in_network')} across {n_locs} locations")
+        ev.append(DraftEvidence("multi_location", f"LOC-{uuid.uuid4().hex[:8]}", summary,
+                                payload={k: net.get(k) for k in ("total_in_network", "by_location",
+                                                                 "transfer_plan", "shortfall")}))
+
     # hippograph supplier reliability / related context (best-effort — a dead source never blocks)
     for ins in _safe_list(hippograph_fn or _default_hippograph, db, item_ref, tenant_id)[:2]:
         ev.append(DraftEvidence("hippograph", f"HIP-{uuid.uuid4().hex[:8]}",
