@@ -2881,9 +2881,20 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
                     or []
                 )
                 contrastive = str(item.get("contrastive_why") or "")
+                # price MUST ride along or the Top Recommendations cards render "—" while the same SKU shows
+                # a real price in the lanes below (the "missing price/Add" screenshot).
+                _pc = item.get("price_cents")
+                if _pc in (None, 0):
+                    try:
+                        _pc = int(round(float(item.get("price")) * 100)) if item.get("price") else None
+                    except (TypeError, ValueError):
+                        _pc = None
                 top_products.append({
                     "sku": str(item.get("sku") or ""),
                     "name": str(item.get("name") or ""),
+                    "price_cents": _pc,
+                    "price": item.get("price") if item.get("price") is not None else (
+                        round(_pc / 100, 2) if _pc else None),
                     "score_norm": item.get("score_norm"),
                     "reasons": [str(r) for r in reasons[:3]],
                     "contrastive_why": contrastive,
@@ -2895,11 +2906,10 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
                     or ""
                 )
                 match_basis = ["visual_identity", "brand_match"] if security_route else ["query_match", "budget_fit"]
-                summary = str(
-                    response.get("assistant_message")
-                    or response.get("message")
-                    or ""
-                )[:200] or None
+                # A concise, COMPLETE basis line — not a truncated dump of the chat message (which bled into
+                # the card and cut off mid-word, e.g. "…comparison? On"). The full prose stays in the chat.
+                summary = ("Matched to your image by brand and form factor." if security_route
+                           else "Matched to your query and budget.")
                 rp["anchor_sections"] = [{
                     "title": "Top Recommendations",
                     "match_basis": match_basis,

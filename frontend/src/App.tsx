@@ -746,6 +746,8 @@ export default function App() {
 
   const hasProcurementPanel = Boolean(fulfilmentCase);
   const hasRightPanel = rightPanelMode !== 'none' || hasProcurementPanel;
+  // latest assistant turn's questions — used to detect a receipt/verification ask (not rendered as a
+  // separate bottom bar anymore; NQE questions render inline in the message).
   const latestAssistantQuestions = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -1728,7 +1730,8 @@ export default function App() {
                       )}
                       {msg.nextQuestions && msg.nextQuestions.length > 0 && (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                          {msg.nextQuestions.map((nq) => (
+                          {/* cap at 2 so the turn asks focused questions, not a wall (was 3-4 + duplicated below) */}
+                          {msg.nextQuestions.slice(0, 2).map((nq) => (
                             <div key={nq.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
                               {nq.why_hint && (
                                 <button type="button" className={styles.hintBtn} title={nq.why_hint}>
@@ -1813,20 +1816,8 @@ export default function App() {
                   </button>
                   <button className={styles.sendBtn} onClick={() => handleSend()} disabled={isThinking || imageRoutingInFlight}><SendIcon /></button>
                 </div>
-                {latestAssistantQuestions.length > 0 && (
-                  <div className={styles.quickChipsRow}>
-                    {latestAssistantQuestions.map((nq) => (
-                      <button
-                        key={`footer-${nq.id}`}
-                        type="button"
-                        className={styles.quickChip}
-                        onClick={() => handleQuickAction(nq.text)}
-                      >
-                        {nq.text}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {/* NQE questions render inline in the assistant message (with option chips) — the old
+                    sticky bottom bar duplicated them ("looks messy"), so it was removed. */}
                 {receiptRequested && (
                   <div style={{ marginTop: 8, fontSize: 12, color: '#9a3412' }}>
                     Proof requested: use the paperclip to upload a receipt, order confirmation, or a photo of the serial number label.

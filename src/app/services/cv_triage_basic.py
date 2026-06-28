@@ -6,6 +6,45 @@ import re
 
 log = logging.getLogger(__name__)
 
+# Transitional fallback token sets (used only when the active StoreProfile lacks the slots). The real,
+# agnostic source is relevant_image_tokens / off_topic_image_tokens on the profile.
+_DEFAULT_RELEVANT_TOKENS = frozenset({
+    "laptop", "computer", "notebook", "pc", "desktop", "tablet", "phone", "smartphone", "keyboard",
+    "mouse", "monitor", "screen", "display", "gaming", "console", "camera", "lens", "headphone",
+    "headset", "earphone", "microphone", "router", "modem", "printer", "scanner", "electronics",
+    "device", "gadget", "charger", "cable", "usb", "ssd", "ram", "gpu", "cpu", "processor",
+    "motherboard", "battery", "rtx", "radeon", "intel", "amd", "msi", "asus", "dell", "lenovo",
+    "hp", "acer", "macbook", "imac", "iphone", "ipad",
+})
+_DEFAULT_OFFTOPIC_TOKENS = frozenset({
+    "apple", "banana", "orange", "fruit", "vegetable", "food", "snack", "produce", "tomato",
+    "potato", "grape", "berry", "meat", "bread", "drink", "beverage", "salad", "pizza",
+})
+
+
+def classify_image_relevance(labels, ocr_text: str = "", profile_id: Optional[str] = None) -> str:
+    """Profile-driven off-domain check → 'relevant' | 'off_topic'. Off-topic = off-topic tokens present and
+    NO relevant tokens; empty labels → relevant (benefit of the doubt). Agnostic: tokens come from the
+    active StoreProfile (relevant_image_tokens / off_topic_image_tokens). Never raises."""
+    labs = [str(x).lower() for x in (labels or []) if str(x).strip()]
+    try:
+        from src.app.platform.store_profile import get_store_profile
+        prof = get_store_profile(profile_id) if profile_id else get_store_profile()
+        _rel = prof.get("relevant_image_tokens")
+        _off = prof.get("off_topic_image_tokens")
+    except Exception:
+        _rel = _off = None
+    rel_tokens = frozenset(str(t).lower() for t in _rel) if isinstance(_rel, list) and _rel else _DEFAULT_RELEVANT_TOKENS
+    off_tokens = frozenset(str(t).lower() for t in _off) if isinstance(_off, list) and _off else _DEFAULT_OFFTOPIC_TOKENS
+    combined = (" ".join(labs) + " " + str(ocr_text or "")).lower()
+    is_relevant = bool(labs) and any(t in combined for t in rel_tokens)
+    is_offtopic = any(t in combined for t in off_tokens)
+    if is_offtopic and not is_relevant:
+        return "off_topic"
+    if is_relevant or not labs:
+        return "relevant"
+    return "off_topic"
+
 
 class BasicCVTriage:
     """

@@ -498,6 +498,15 @@ def _build_anchor_sections(
     sections: List[Dict[str, Any]] = []
     weights = _persona_rank_weights(use_case_key, buyer_persona)
     for idx, img in enumerate(imgs):
+        # Off-domain image (e.g. produce) → do NOT fabricate a "Best 3 matches for this image" product
+        # group; the separate off-domain banner explains it. Agnostic relevance check (profile tokens).
+        try:
+            from src.app.services.cv_triage_basic import classify_image_relevance
+            _labels = img.get("labels") if isinstance(img.get("labels"), list) else []
+            if classify_image_relevance(_labels, str(img.get("ocr_text") or "")) == "off_topic":
+                continue
+        except Exception:
+            pass
         anchor = _image_anchor_hint(img, idx)
         scored: List[tuple[float, Dict[str, Any]]] = []
         for p in products:
