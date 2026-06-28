@@ -144,6 +144,16 @@ TRANSITIONS: Tuple[Transition, ...] = (
                requires_evidence=True, note="GATE 2: HUMAN-only external send — no agent may fire this"),
     Transition("recipient_blocked", _S.APPROVED_TO_SEND, _S.RECIPIENT_BLOCKED, frozenset({_A.SYSTEM})),
 
+    # ── WS-C: flag-gated AUTONOMOUS RFQ path (an RFQ is non-binding — no price/PO). DISTINCT events from
+    #    the human GATE 2 so the human-only invariant above is untouched and the trace shows it was
+    #    autonomous. The agent may fire these ONLY after autonomous_send's guards pass; the approval step
+    #    is confidence-gated through the adaptive_action_gate (kill-switch + confidence + durable audit). ──
+    Transition("approval_granted_autonomous", _S.AWAITING_APPROVAL, _S.APPROVED_TO_SEND, frozenset({_A.AGENT}),
+               requires_evidence=True, requires_confidence_gate=True,
+               note="WS-C: autonomous approval — all autonomy guards passed; action-gate authorizes the send"),
+    Transition("external_message_sent_autonomous", _S.APPROVED_TO_SEND, _S.QUOTE_SENT, frozenset({_A.AGENT}),
+               requires_evidence=True, note="WS-C: autonomous send — recorded as autonomous, not human"),
+
     # ── inbound external response (a supplier system / poller) ──
     Transition("external_message_received", _S.QUOTE_SENT, _S.QUOTE_RECEIVED, frozenset({_A.EXTERNAL, _A.SYSTEM}),
                requires_evidence=True, note="correlated + domain-verified inbound reply"),

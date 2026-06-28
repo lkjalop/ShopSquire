@@ -25,6 +25,7 @@ from src.app.services.fulfillment.domain import Actor, FAILURE_STATES, Fulfillme
 _GATE_ACTION = {
     "external_message_drafted": "supplier_contact_draft",
     "fulfillment_options_generated": "fulfillment_options",
+    "approval_granted_autonomous": "supplier_rfq_send",  # WS-C: autonomous approval → action-gate authorizes
 }
 
 

@@ -97,6 +97,32 @@ def _default_trusted(domain: str) -> bool:
 
 
 # ── send (human, hash-checked) ────────────────────────────────────────────────
+def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], actor: Actor, event: str,
+                            reason_code: str, transport: Optional[Any], tenant_id: str,
+                            now_iso: Optional[str], trace_id: Optional[str]) -> workflow.TransitionResult:
+    """Shared transport + record for BOTH the human (external_message_sent) and the autonomous
+    (external_message_sent_autonomous) send. Sends via the transport seam (SANDBOX by default; SMTP at
+    deploy); a REAL transport failure returns send_failed and records NO send (the case stays
+    APPROVED_TO_SEND so it can be retried). The caller has already verified the draft is current."""
+    from src.app.services.fulfillment.transport import get_transport
+    tx = transport or get_transport()
+    recipient = str(draft.get("recipient_email") or draft.get("recipient_domain") or "")
+    sent = tx.send(to=recipient, subject=str(draft.get("subject") or ""),
+                   body=str(draft.get("body") or ""), idempotency_key=str(draft.get("content_hash") or ""))
+    if getattr(sent, "status", "failed") != "sent":
+        return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
+    provider_ref = sent.provider_ref
+    return workflow.transition(
+        db, case_id=case_id, event=event, actor=actor, reason_code=reason_code,
+        evidence={"content_hash": draft.get("content_hash"), "provider_ref": provider_ref,
+                  "recipient": recipient, "recipient_domain": draft.get("recipient_domain"),
+                  "transport": getattr(sent, "detail", "")},
+        state_patch={"outbound": {"provider_ref": provider_ref, "recipient_domain": draft.get("recipient_domain"),
+                                  "recipient": recipient, "content_hash": draft.get("content_hash"), "status": "sent",
+                                  "transport": getattr(sent, "detail", "")}},
+        tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+
+
 def send_approved(db, *, case_id: str, actor: Actor, approval_content_hash: Optional[str],
                   transport: Optional[Any] = None, tenant_id: str = "default", now_iso: Optional[str] = None,
                   trace_id: Optional[str] = None) -> workflow.TransitionResult:
@@ -110,25 +136,24 @@ def send_approved(db, *, case_id: str, actor: Actor, approval_content_hash: Opti
     if approval_content_hash != draft.get("content_hash"):
         # the draft was edited after approval → the approval is void; do NOT send.
         return workflow.TransitionResult(False, case_id, cur.state, "stale_approval", http_status=409)
-    from src.app.services.fulfillment.transport import get_transport
-    tx = transport or get_transport()
-    recipient = str(draft.get("recipient_email") or draft.get("recipient_domain") or "")
-    sent = tx.send(to=recipient, subject=str(draft.get("subject") or ""),
-                   body=str(draft.get("body") or ""), idempotency_key=str(draft.get("content_hash") or ""))
-    if getattr(sent, "status", "failed") != "sent":
-        # the real transport did not transmit → do NOT record a send; the case stays APPROVED_TO_SEND.
-        return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
-    provider_ref = sent.provider_ref
-    return workflow.transition(
-        db, case_id=case_id, event="external_message_sent", actor=actor,
-        reason_code="human_approved_send",
-        evidence={"content_hash": draft.get("content_hash"), "provider_ref": provider_ref,
-                  "recipient": recipient, "recipient_domain": draft.get("recipient_domain"),
-                  "transport": getattr(sent, "detail", "")},
-        state_patch={"outbound": {"provider_ref": provider_ref, "recipient_domain": draft.get("recipient_domain"),
-                                  "recipient": recipient, "content_hash": draft.get("content_hash"), "status": "sent",
-                                  "transport": getattr(sent, "detail", "")}},
-        tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+    return _transmit_current_draft(db, case_id=case_id, cur=cur, draft=draft, actor=actor,
+                                   event="external_message_sent", reason_code="human_approved_send",
+                                   transport=transport, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
+
+
+def send_autonomous(db, *, case_id: str, actor: Actor, transport: Optional[Any] = None,
+                    tenant_id: str = "default", now_iso: Optional[str] = None,
+                    trace_id: Optional[str] = None) -> workflow.TransitionResult:
+    """WS-C: AGENT fires external_message_sent_autonomous after autonomous_send's guards + the action-gate
+    approval. No stale-approval check is needed (the gate just authorized THIS exact draft in the same
+    call); the content_hash is still pinned on the outbound for the audit trail."""
+    cur = workflow.repository.current_version(db, case_id, tenant_id)
+    draft = (cur.state_json.get("draft") if cur else None) or {}
+    if not draft.get("content_hash"):
+        return workflow.TransitionResult(False, case_id, cur.state if cur else None, "no_draft", http_status=409)
+    return _transmit_current_draft(db, case_id=case_id, cur=cur, draft=draft, actor=actor,
+                                   event="external_message_sent_autonomous", reason_code="autonomous_rfq_send",
+                                   transport=transport, tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
 
 
 # ── receive (correlate + verify, else quarantine) ─────────────────────────────

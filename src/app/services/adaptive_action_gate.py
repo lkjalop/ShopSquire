@@ -40,6 +40,9 @@ ALLOWED_ACTION_TYPES = frozenset({
     # procurement: the confidence-gated "engage an external party" + "generate options" steps. Drafting
     # is authorized here (and still requires a human to SEND); low confidence routes to NQE/human.
     "supplier_contact_draft", "fulfillment_options",
+    # WS-C: flag-gated AUTONOMOUS RFQ send (an RFQ is non-binding — no price/PO). Authorized here only
+    # after autonomous_send's guards pass; the action-gate adds kill-switch + confidence + durable audit.
+    "supplier_rfq_send",
 })
 
 _DDL = """

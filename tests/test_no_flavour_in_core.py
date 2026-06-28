@@ -147,6 +147,9 @@ _CORE_MODULES = [
     # external comms boundary + deterministic sandbox: send/receive/parse/validate, opaque refs —
     # no product vocabulary.
     "src/app/services/fulfillment/external_comms.py",
+    # WS-C autonomous RFQ send: flag-gated safe-first policy gate (allowlist+KYV / claim-safe / complete /
+    # confidence / value·qty caps / rate-limit / action-gate), pure policy — no product vocabulary.
+    "src/app/services/fulfillment/autonomous_send.py",
     "src/app/services/fulfillment/sandbox_supplier.py",
     # supplier-email transport seam: sandbox/SMTP provider interface, opaque message fields — no product vocab.
     "src/app/services/fulfillment/transport.py",

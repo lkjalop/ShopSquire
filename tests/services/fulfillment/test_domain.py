@@ -63,9 +63,11 @@ def test_terminal_state_is_frozen():
 
 # ── confidence-gated transitions are flagged for the workflow ────────────────
 def test_engage_and_options_are_confidence_gated():
-    assert d.CONFIDENCE_GATED_EVENTS == frozenset({"external_message_drafted", "fulfillment_options_generated"})
+    assert d.CONFIDENCE_GATED_EVENTS == frozenset(
+        {"external_message_drafted", "fulfillment_options_generated", "approval_granted_autonomous"})
     assert d.requires_confidence_gate(S.COMMITTED, "external_message_drafted") is True
     assert d.requires_confidence_gate(S.QUOTE_VALIDATED, "fulfillment_options_generated") is True
+    assert d.requires_confidence_gate(S.AWAITING_APPROVAL, "approval_granted_autonomous") is True  # WS-C
     assert d.requires_confidence_gate(S.QUOTE_DRAFTED, "approval_requested") is False
 
 

@@ -275,12 +275,33 @@ def edit_draft(case_id: str, body: EditDraftBody, role: str = Depends(require_ro
         return _case_view(db, case_id, for_operator=True)
 
 
+def _attempt_autonomous_send(db, case_id: str):
+    """WS-C: once a case reaches AWAITING_APPROVAL, attempt a flag-gated autonomous RFQ send. SAFE-FIRST —
+    any failing guard (or autonomy OFF, the default) leaves the case at AWAITING_APPROVAL for the human.
+    Read the send parameters off the persisted draft; never raises into the endpoint."""
+    from src.app.services.fulfillment import autonomous_send as fauto
+    try:
+        cur = fwf.repository.current_version(db, case_id)
+        draft = (cur.state_json.get("draft") if cur else None) or {}
+        scope = draft.get("commercial_scope") or {}
+        return fauto.maybe_autonomous_send(
+            db, case_id=case_id, actor=_agent(), confidence=float(draft.get("confidence") or 0.0),
+            estimated_value_cents=int(scope.get("estimated_value_cents") or 0),
+            quantity=int(scope.get("quantity") or 0), recipient_domain=str(draft.get("recipient_domain") or ""),
+            allowlist_fn=fdraft._default_allowlist)
+    except Exception:
+        return fauto.SendDecision("escalated", "error_fail_closed")
+
+
 @router.post("/cases/{case_id}/request-approval")
 def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     with db_session() as db:
         res, approval_id = fdraft.request_supplier_approval(db, case_id=case_id, actor=_agent())
         _raise_if_failed(res)
-        return {**_case_view(db, case_id, for_operator=True), "approval_id": approval_id}
+        auto = _attempt_autonomous_send(db, case_id)
+        return {**_case_view(db, case_id, for_operator=True), "approval_id": approval_id,
+                "autonomous_send": {"action": auto.action, "reason": auto.reason,
+                                    "provider_ref": auto.provider_ref}}
 
 
 class RfiBody(BaseModel):
