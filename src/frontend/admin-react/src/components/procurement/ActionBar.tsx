@@ -4,7 +4,8 @@
 import React from 'react';
 import {
   fcCompleteCase, fcDemoReply, fcDispatch, fcDraftQuote, fcExecutePO, fcGenerateOptions,
-  fcProposePO, fcRequestApproval, fcRequestInfo, fcSupplierInfo, fcValidateQuote,
+  fcProposePO, fcQualify, fcRequestApproval, fcRequestInfo, fcStartQualification, fcSupplierInfo,
+  fcValidateQuote,
 } from '../../api';
 
 const SCENARIOS = ['full_quote', 'partial_availability', 'late_delivery', 'substitute_offer',
@@ -30,6 +31,22 @@ export function ActionBar({
     <div className="actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '8px 0' }}>
       {state === 'COMMITTED' && (
         <>
+          {/* Phase 3: qualify the buyer (open a clarification room, then record the verdict) BEFORE drafting */}
+          <button disabled={busy} data-testid="op-start-qualification"
+                  title="Open a buyer-clarification room (escalation room) to confirm the bulk request is serious"
+                  onClick={() => run(() => fcStartQualification(sel))}>
+            Contact buyer to qualify
+          </button>
+          <button disabled={busy} data-testid="op-qualify-yes"
+                  title="Record: buyer verified serious → supplier contact permitted"
+                  onClick={() => run(() => fcQualify(sel, true, 'verified serious'))}>
+            Mark qualified
+          </button>
+          <button disabled={busy} data-testid="op-qualify-no"
+                  title="Record: buyer not serious → case ends, no supplier contacted"
+                  onClick={() => run(() => fcQualify(sel, false, 'not serious'))}>
+            Not serious
+          </button>
           <button disabled={draftDisabled} data-testid="op-draft"
                   title={!draftItemRef || draftQty <= 0 ? 'Case is missing assessed item/shortfall evidence.' : `Draft for ${draftItemRef} x ${draftQty}`}
                   onClick={() => run(() => fcDraftQuote(sel, draftItemRef, draftQty))}>

@@ -33,6 +33,13 @@ export const getFulfillmentJourney = (id: string) =>
   http<{ journey: JourneyEvent[] }>(`${_fc(id)}/journey`).then((d) => d.journey || []);
 export const fcDraftQuote = (id: string, item_ref: string, quantity: number, estimated_value_cents = 0) =>
   _fcPost(`${_fc(id)}/draft-quote`, { item_ref, quantity, estimated_value_cents });
+// Phase 3: buyer qualification (human verifies intent before supplier contact).
+export interface QualificationRoom { ok?: boolean; incident_id?: string; buyer_token?: string; staff_token?: string; }
+export const fcStartQualification = (id: string) =>
+  http<FulfillmentCaseView & { qualification_room?: QualificationRoom }>(
+    `${_fc(id)}/start-qualification`, { method: 'POST' });
+export const fcQualify = (id: string, qualified: boolean, notes?: string) =>
+  _fcPost(`${_fc(id)}/qualify`, { qualified, notes });
 // WS-C/D: request-approval also reports the autonomous-send outcome (OFF/escalated/sent + reason).
 export interface AutonomousSendOutcome { action: 'sent' | 'escalated' | 'send_failed'; reason: string; provider_ref?: string | null; }
 export const fcRequestApproval = (id: string) =>

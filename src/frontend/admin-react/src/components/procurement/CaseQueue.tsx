@@ -8,8 +8,11 @@ const STATUS_CHIPS = ['needs action', 'all', 'awaiting buyer', 'needs approval',
 // States that require an operator to do something next (the default workbench view). Excludes terminal
 // states and states waiting on the buyer/supplier. NO_APPROVED_SUPPLIER is included — it needs a fix.
 function isNeedsAction(s: string): boolean {
-  return ['committed', 'quote_drafted', 'awaiting_approval', 'approved_to_send', 'quote_received',
-          'quote_validated', 'selected', 'procurement_approval_required', 'no_approved_supplier']
+  // awaiting_buyer_commitment is INCLUDED: a buyer-initiated bulk request lands here and the operator
+  // should see it in the default workbench (to qualify the buyer / draft), not have it hidden under a tab.
+  return ['awaiting_buyer_commitment', 'committed', 'quote_drafted', 'awaiting_approval', 'approved_to_send',
+          'quote_received', 'quote_validated', 'selected', 'procurement_approval_required',
+          'no_approved_supplier']
     .some((t) => s.includes(t));
 }
 
