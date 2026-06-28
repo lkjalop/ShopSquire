@@ -1691,7 +1691,16 @@ export default function App() {
                           ))}
                         </div>
                       )}
-                      {msg.content}
+                      {msg.role === 'assistant'
+                        ? String(msg.content || '').split(/\n\n+/).filter(Boolean).map((para, pi) => {
+                            const isWarn = /^\s*(⚠️|\[security\])/i.test(para);
+                            return (
+                              <div key={pi} className={isWarn ? styles.msgSecurity : styles.msgPara}>
+                                {para.trim()}
+                              </div>
+                            );
+                          })
+                        : msg.content}
                       {/* Voice badge */}
                       {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
                       {/* Complexity badge — dev-only hint, shown below message as dim metadata */}
