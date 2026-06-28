@@ -97,6 +97,22 @@ def build_pick_evidence(
                      "detail": "docking/Thunderbolt" if _hit(hay, _markers(marker_fn, "docking")) else "none stated"}
     ev["warranty"] = {"status": "extended" if _hit(hay, _markers(marker_fn, "warranty")) else "standard",
                       "detail": "onsite/NBD warranty markers" if _hit(hay, _markers(marker_fn, "warranty")) else "standard warranty"}
+    # procurement-relevant office signals (GPU matters little for normal corporate work; these matter more)
+    ev["camera"] = {"status": "conferencing" if _hit(hay, _markers(marker_fn, "camera")) else "basic",
+                    "detail": "1080p/IR webcam (Windows Hello)" if _hit(hay, _markers(marker_fn, "camera")) else "webcam not specified"}
+    ev["wifi"] = {"status": "wifi6plus" if _hit(hay, _markers(marker_fn, "wifi")) else "standard",
+                  "detail": "Wi-Fi 6/6E/7" if _hit(hay, _markers(marker_fn, "wifi")) else "Wi-Fi not specified"}
+    specs = product.get("specs") if isinstance(product.get("specs"), dict) else {}
+    _sg = specs.get("storage_gb")
+    try:
+        _sg = int(_sg) if _sg is not None else None
+    except (TypeError, ValueError):
+        _sg = None
+    if _sg is not None:
+        ev["storage"] = {"status": "ample" if _sg >= 512 else ("adequate" if _sg >= 256 else "small"),
+                         "detail": f"{_sg}GB SSD"}
+    else:
+        ev["storage"] = {"status": "unknown", "detail": "storage not specified"}
 
     # os_ecosystem — first matching os marker group wins; else "windows" default group, else unknown
     os_label = "unknown"
@@ -156,9 +172,10 @@ def render_evidence_block(answer_evidence: Dict[str, Any]) -> str:
     for p in picks[:4]:
         ev = p.get("evidence") or {}
         parts = []
-        for k in ("price_fit", "office_fit", "fleet_fit", "inventory_fit", "portability", "os_ecosystem"):
+        for k in ("price_fit", "office_fit", "fleet_fit", "inventory_fit", "portability",
+                  "camera", "wifi", "storage", "os_ecosystem"):
             cell = ev.get(k) or {}
-            if cell.get("status") and cell.get("status") not in ("unknown",):
+            if cell.get("status") and cell.get("status") not in ("unknown", "basic", "standard", "small"):
                 parts.append(f"{k}={cell['status']}")
         rp = (ev.get("risk_penalties") or {})
         if rp.get("status") == "present":

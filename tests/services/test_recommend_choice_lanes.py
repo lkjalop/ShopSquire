@@ -91,10 +91,23 @@ def test_real_electronics_profile_work_query_demarcates_lanes():
     assert by_key["chromebook"]["skus"] == ["CB1"]
     assert by_key["budget_consumer"]["skus"] == ["IN1"]
     # the gaming SKU is isolated to the non-primary lane — never a primary office pick
-    g = by_key["gaming_chassis"]
+    g = by_key["high_performance_gpu"]
     assert g["skus"] == ["KT1"] and g["primary"] is False and g["non_primary"] is True
     primary_skus = [s for l in lanes if l["primary"] for s in l["skus"]]
     assert "KT1" not in primary_skus
+
+
+def test_discrete_gpu_lane_is_PRIMARY_for_gpu_heavy_use_cases():
+    # domain truth: a discrete-GPU ("gaming") laptop IS a primary pick for AI/ML, content/video, 3D/CAD —
+    # only demoted for normal office work.
+    gpu_laptop = [{"sku": "KT1", "name": "MSI Katana 15 (RTX 4070)", "specs": {"gaming_style": True, "gpu": "GeForce RTX 4070"}}]
+    for uc in ("ml_ai", "content_creation", "video_editing", "cad_3d"):
+        lanes = {l["key"]: l for l in assign_device_lanes(gpu_laptop, profile_fn=profile_slot, use_case=uc)}
+        hp = lanes["high_performance_gpu"]
+        assert hp["primary"] is True and hp["non_primary"] is False, f"GPU laptop should be PRIMARY for {uc}"
+    # but for office it is demoted
+    office = {l["key"]: l for l in assign_device_lanes(gpu_laptop, profile_fn=profile_slot, use_case="office")}
+    assert office["high_performance_gpu"]["primary"] is False and office["high_performance_gpu"]["non_primary"] is True
 
 
 # ── procurement-truth: fleet_advisory ───────────────────────────────────────────
@@ -104,7 +117,14 @@ def test_fleet_advisory_advises_procurement_when_only_gaming_for_work():
     lanes = assign_device_lanes(prods, profile_fn=profile_slot, use_case="office")
     adv = fleet_advisory(lanes, use_case="office")
     assert adv and adv["coverage"] == "none" and adv["suggest_procurement"] is True
-    assert "gaming_chassis" in adv["non_primary_lanes"]
+    assert "high_performance_gpu" in adv["non_primary_lanes"]
+
+
+def test_no_procurement_advisory_for_gpu_query_with_gpu_laptop():
+    # a GPU-heavy query (ml_ai) with a GPU laptop is well-served — NO 'source business units' advisory
+    gpu_laptop = [{"sku": "KT1", "name": "MSI Katana 15 (RTX 4070)", "specs": {"gaming_style": True}}]
+    lanes = assign_device_lanes(gpu_laptop, profile_fn=profile_slot, use_case="ml_ai")
+    assert fleet_advisory(lanes, use_case="ml_ai") is None  # ml_ai isn't a 'work/office' fleet context
 
 
 def test_fleet_advisory_partial_when_business_and_gaming_present():

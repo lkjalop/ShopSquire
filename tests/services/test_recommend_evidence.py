@@ -56,6 +56,17 @@ def test_os_ecosystem_detected_from_profile_groups():
     assert cb["os_ecosystem"]["status"] == "ChromeOS"
 
 
+def test_office_procurement_metrics_camera_wifi_storage():
+    # for normal office work GPU matters little; webcam/Wi-Fi/storage are the procurement-relevant signals
+    p = {"sku": "TP", "name": "Lenovo ThinkPad T14 1080p webcam Wi-Fi 6E", "specs": {"storage_gb": 512}}
+    ev = build_pick_evidence(p, marker_fn=_marker)
+    assert ev["camera"]["status"] == "conferencing"
+    assert ev["wifi"]["status"] == "wifi6plus"
+    assert ev["storage"]["status"] == "ample" and "512GB" in ev["storage"]["detail"]
+    bare = build_pick_evidence({"sku": "X", "name": "Generic Laptop", "specs": {"storage_gb": 128}}, marker_fn=_marker)
+    assert bare["camera"]["status"] == "basic" and bare["wifi"]["status"] == "standard" and bare["storage"]["status"] == "small"
+
+
 def test_risk_penalties_from_factors_and_exclusions():
     ev = build_pick_evidence({"sku": "X", "factors": {"negative": ["-brand_mismatch"]}, "exclusions": ["consumer_gaming_aesthetic"]},
                              marker_fn=_marker)

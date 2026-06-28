@@ -90,7 +90,7 @@
   "use_case_soft_markers": {
     "business_class": ["thinkpad", "latitude", "elitebook", "probook", "xps"],
     "productivity_grade": ["\"use_case\": \"productivity\"", "\"use_case\": \"premium\"", "\"use_case\": \"business\""],
-    "office_fleet": ["vpro", "\"vpro\"", "tpm", "\"tpm\"", "docking", "thunderbolt dock", "wwan", "smartcard", "spill-resistant", "mil-spec", "mil-std", "manageability", "fleet imaging", "next business day", "onsite warranty"]
+    "office_fleet": ["vpro", "\"vpro\"", "tpm", "\"tpm\"", "docking", "thunderbolt dock", "wwan", "smartcard", "spill-resistant", "mil-spec", "mil-std", "manageability", "fleet imaging", "next business day", "onsite warranty", "1080p webcam", "fhd webcam", "ir camera", "windows hello", "wifi 6", "wifi 6e", "wi-fi 6"]
   },
   "_evidence_markers_comment": "Marker groups for per-pick narration evidence (recommend_evidence). DATA only — opaque substrings matched against a candidate's name+specs+features for the portability/docking/warranty/os_ecosystem metrics. The fleet/office metrics reuse use_case_soft_markers.",
   "evidence_markers": {
@@ -99,7 +99,10 @@
     "warranty": ["onsite warranty", "next business day", "nbd warranty", "3-year warranty", "3 year warranty", "accidental damage"],
     "os_windows": ["windows 11", "windows 10", "\"os\": \"windows\"", "win11", "win 11"],
     "os_macos": ["macbook", "macos", "mac os", "apple m1", "apple m2", "apple m3", "apple m4"],
-    "os_chromeos": ["chromebook", "chrome os", "chromeos"]
+    "os_chromeos": ["chromebook", "chrome os", "chromeos"],
+    "camera": ["1080p webcam", "fhd webcam", "ir camera", "windows hello", "1080p camera", "hd webcam"],
+    "wifi": ["wifi 6e", "wifi 6", "wi-fi 6", "wifi 7", "wi-fi 7", "intel ax2"],
+    "gpu_discrete": ["rtx", "geforce", "radeon rx", "\"gpu_discrete\": true", "discrete gpu"]
   },
   "use_case_exclusion_markers": {
     "consumer_gaming_aesthetic": ["\"gaming_style\": true", "\"use_case\": \"gaming\"", "gaming laptop", "nitro", "tuf gaming", "omen", "predator", "rog "]
@@ -138,12 +141,15 @@
      "explain": "Thin consumer laptops: lowest cost, but fewer business-management features.",
      "metrics": ["price", "weight", "battery"],
      "priority": 50, "primary_for": ["budget"]},
-    {"key": "gaming_chassis", "title": "Gaming chassis (not a primary work pick)",
-     "markers": ["\"gaming_style\": true", "\"use_case\": \"gaming\"", "gaming laptop", "legion", "rog ", "omen", "predator", "nitro", "tuf gaming", "alienware", "blade", "katana", "raider", "stealth", "titan", "aorus", "rtx", "geforce"],
+    {"key": "high_performance_gpu", "title": "High-performance (discrete GPU)",
+     "markers": ["\"gaming_style\": true", "\"use_case\": \"gaming\"", "gaming laptop", "legion", "rog ", "omen", "predator", "nitro", "tuf gaming", "alienware", "blade", "katana", "raider", "stealth", "titan", "aorus", "rtx", "geforce", "rtx 40", "rtx 50"],
      "exclusions": [],
-     "explain": "High-performance gaming chassis. Not recommended as a primary work/office device (thermals, battery, weight, aesthetics).",
-     "metrics": ["gpu", "performance"],
-     "priority": 90, "primary_for": ["gaming"], "non_primary": true}
+     "explain": "Powerful discrete-GPU laptops — the right pick for GPU-heavy work (AI/ML model training, content/video editing, 3D/CAD) and gaming. For normal office work they are a poor fit (thermals, battery, weight, webcam/conferencing), so they are demoted there.",
+     "metrics": ["gpu", "performance", "vram"],
+     "priority": 90,
+     "_primary_for_comment": "PRIMARY for gaming AND GPU-heavy use-cases; `specialty` demotes it to non-primary only for queries NOT in this list (e.g. office/corporate).",
+     "primary_for": ["gaming", "ml_ai", "ai_ml_workstation", "ai_engineering", "ml_training", "data_science", "content_creation", "content_creator", "video_editing", "creative", "cad_3d", "engineering"],
+     "specialty": true}
   ],
 
   "_storefront_emphasis_comment": "Phase-3 storefront-emphasis variants (David Module 4/5). DATA copy only — never free-form LLM. The experiment-gated, reversible lever picks one per TREATMENT subject; control gets none. Vertical-flavoured strings live HERE (profile), the core lever stays vertical-blind.",

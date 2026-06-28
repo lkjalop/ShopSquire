@@ -93,14 +93,21 @@ def assign_device_lanes(
             continue
         prices = [v for v in (_price(p) for p in items) if v is not None]
         primary_for = [str(x).strip().lower() for x in (lane.get("primary_for") or [])]
-        non_primary = bool(lane.get("non_primary"))
+        # A "specialty" lane (e.g. discrete-GPU / gaming chassis) is PRIMARY for the use-cases it's built
+        # for — gaming AND GPU-heavy work like AI/ML, content/video, 3D/CAD — and is demoted to non-primary
+        # ONLY when the query is something it doesn't serve (normal office work). So GPU laptops lead a
+        # creative/AI query but never a corporate-fleet one. `non_primary: true` is kept as back-compat for
+        # "always specialty". Non-specialty lanes are never force-demoted.
+        specialty = bool(lane.get("specialty") or lane.get("non_primary"))
+        is_primary = bool(uc and uc in primary_for)
+        is_non_primary = bool(specialty and not is_primary)
         out.append({
             "key": str(lane["key"]),
             "title": str(lane.get("title") or lane["key"]),
             "explanation": str(lane.get("explain") or ""),
             "metrics": [str(m) for m in (lane.get("metrics") or [])],
-            "primary": bool(uc and uc in primary_for and not non_primary),
-            "non_primary": non_primary,
+            "primary": is_primary,
+            "non_primary": is_non_primary,
             "count": len(items),
             "price_min": min(prices) if prices else None,
             "price_max": max(prices) if prices else None,
