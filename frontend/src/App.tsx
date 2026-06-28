@@ -2,6 +2,7 @@
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
+import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
@@ -336,6 +337,7 @@ export default function App() {
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
   const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
+  const [bulkAlternatives, setBulkAlternatives] = useState<BulkAlternativeOption[]>([]);
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
@@ -1319,6 +1321,7 @@ export default function App() {
         const prods = (data.products || []) as Product[];
         setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
         setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
+        setBulkAlternatives(Array.isArray(data.fulfillment_options) ? (data.fulfillment_options as BulkAlternativeOption[]) : []);
         const respAssistant = data.assistant_message || '';
         // Async-narration handoff: recommend returned the deterministic answer now + a job id for the
         // richer LLM prose. We tag the assistant message and poll it in to replace the text in place.
@@ -1932,6 +1935,11 @@ export default function App() {
                       }}
                     >
                       {rightPanelContract.emphasis.text}
+                    </div>
+                  )}
+                  {bulkAlternatives.length > 0 && (
+                    <div className={styles.procurementPanelSlot}>
+                      <BulkAlternatives options={bulkAlternatives} />
                     </div>
                   )}
                   {fulfilmentCase && (
