@@ -35,6 +35,7 @@ def prepare_narration(
     demote_off_category: Callable[[Any, Any], Any],
     build_brand_budget_answer: Callable[..., Any],
     query_plan: Any = None,
+    answer_evidence_fn: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> NarrationPrep:
     """Pre-narration setup: stamp price/brand metadata onto constraints, build the narration
     envelope (build_narration_inputs + apply_narration_inputs_to_constraints — note this REBINDS
@@ -57,6 +58,24 @@ def prepare_narration(
     # Off-category relevance guard: a primary-product query must not be led by a peripheral.
     results = demote_off_category(results, query)
     brand_budget_answer = build_brand_budget_answer(query, results, constraints)
+    # Per-pick metric evidence: attach `evidence` to each result (FE-facing) + a compact prompt block so
+    # the narrator grounds on price_fit/office_fit/fleet_fit/... instead of inventing suitability. The
+    # builder is injected (recommend_evidence) so this stays unit-testable; never raises.
+    if answer_evidence_fn is not None:
+        try:
+            import dataclasses as _dc
+            ans_ev = answer_evidence_fn(results, constraints) or {}
+            for pick in (ans_ev.get("picks") or []):
+                sku = str(pick.get("sku") or "")
+                for r in (results or []):
+                    if isinstance(r, dict) and str(r.get("sku") or "") == sku:
+                        r["evidence"] = pick.get("evidence")
+                        break
+            constraints["_answer_evidence"] = {k: ans_ev.get(k) for k in ("office_grade_count", "work_suitable", "use_case")}
+            from src.app.services.recommend_evidence import render_evidence_block as _reb
+            narration_inputs = _dc.replace(narration_inputs, pick_evidence_block=_reb(ans_ev))
+        except Exception:
+            pass
     return NarrationPrep(
         constraints=constraints,
         results=results,
@@ -328,6 +347,7 @@ class NarrationInputs:
     missing: List[str] = field(default_factory=list)
     assumptions: List[Dict[str, Any]] = field(default_factory=list)
     provenance: Dict[str, str] = field(default_factory=dict)
+    pick_evidence_block: str = ""  # compact per-pick metric evidence the narrator must ground on
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -341,6 +361,7 @@ class NarrationInputs:
             "missing": list(self.missing),
             "assumptions": list(self.assumptions),
             "provenance": dict(self.provenance),
+            "pick_evidence_block": self.pick_evidence_block,
         }
 
 
@@ -439,6 +460,9 @@ def build_narration_evidence_block(narration: NarrationInputs) -> str:
                 rendered.append(f"{item.get('field')}={item.get('value')} ({item.get('basis')})")
         if rendered:
             lines.append("- Overridable assumptions: " + "; ".join(rendered))
+    block = str(getattr(narration, "pick_evidence_block", "") or "").strip()
+    if block:
+        lines.append(block)  # per-pick metric evidence (price_fit/office_fit/fleet_fit/...) for grounded narration
     if len(lines) == 1:
         return ""
     return "\n".join(lines)

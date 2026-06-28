@@ -10442,6 +10442,15 @@ def suggest(
     # metadata, build the narration envelope (rebinds constraints), demote off-category, compute the
     # brand/budget answer — returned grouped so the route rebinds them together.
     from src.app.services.recommend_narration_stage import prepare_narration as _prepare_narration
+    from src.app.platform.store_profile import profile_slot as _ev_profile_slot
+    from src.app.services.recommend_evidence import summarize_answer_evidence as _summ_answer_evidence
+
+    def _ev_marker(group):  # resolve a marker group from the soft-marker slot, then the evidence-marker slot
+        sm = _ev_profile_slot("use_case_soft_markers", default={}) or {}
+        if group in sm:
+            return sm.get(group) or []
+        return (_ev_profile_slot("evidence_markers", default={}) or {}).get(group) or []
+
     _prep = _prepare_narration(
         query=query, query_effective=query_effective, constraints=constraints, results=results,
         filter_meta_price=filter_meta_price, strict_image_brand_hint=strict_image_brand_hint,
@@ -10449,6 +10458,9 @@ def suggest(
         demote_off_category=_demote_off_category,
         build_brand_budget_answer=_build_brand_budget_answer_v2,
         query_plan=_ranking_plan,
+        answer_evidence_fn=lambda res, cons: _summ_answer_evidence(
+            res, budget_min=(cons or {}).get("budget_min"), budget_max=(cons or {}).get("budget_max"),
+            use_case=(cons or {}).get("use_case"), marker_fn=_ev_marker),
     )
     constraints = _prep.constraints
     _ctx.constraints = constraints  # re-bind: apply_narration returns a NEW dict (Pass 5)
