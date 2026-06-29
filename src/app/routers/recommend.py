@@ -1469,6 +1469,7 @@ def _fast_path_catalog_recommendation(
     except Exception:
         pass
 
+    _reconcile_result_prices(results)
     return {
         "results": results,
         "products": results,
@@ -4232,6 +4233,29 @@ def _emit_inventory_brand_notice(
         return None, []
 
 
+
+
+def _reconcile_result_prices(results: Any) -> Any:
+    """price ↔ price_cents symmetry on the response items — cents is the source of truth. Mirrors chat.py's
+    reconcile so /recommend/suggest never emits a whole-dollar `price` (e.g. 180) that disagrees with
+    `price_cents` (17995) — the "$0"/rounding bug class. Best-effort; never raises into the response."""
+    if not isinstance(results, list):
+        return results
+    for it in results:
+        if not isinstance(it, dict):
+            continue
+        pc = it.get("price_cents")
+        if pc is not None:
+            try:
+                it["price"] = round(float(pc) / 100.0, 2)   # cents wins → derive price exactly
+            except (TypeError, ValueError):
+                pass
+        elif it.get("price") is not None:
+            try:
+                it["price_cents"] = int(round(float(it["price"]) * 100.0))
+            except (TypeError, ValueError):
+                pass
+    return results
 
 
 @router.get("/suggest")
@@ -10058,6 +10082,7 @@ def suggest(
         "premium": "friendly-short",
         "enterprise": "professional-short",
     }.get(tier, "neutral")
+    _reconcile_result_prices(results)
     payload = _with_trace({
         "results": results,
         "products": results,
