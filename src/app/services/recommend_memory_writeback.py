@@ -226,6 +226,24 @@ def _persist_turn_state_inner(inp: TurnPersistenceInput, hooks: TurnPersistenceH
     structured_state_out["last_followup_contract"] = inp.followup_contract
     structured_state_out["last_intent_execution_plan"] = inp.intent_execution_plan
 
+    # PROCUREMENT CONTINUITY: remember the buyer's last sourcing PREVIEW (lines + planned split +
+    # requirements — NO supplier identity, NO durable case) so the NEXT turn's narration/NQE can reference
+    # "your N-unit sourcing request" instead of a cold search. Overwritten each turn; TTL-expires with the
+    # session. This is the conversational-memory half of the fluid-procurement model.
+    _pay = inp.payload if isinstance(inp.payload, dict) else {}
+    _si = _pay.get("sourcing_intent") if isinstance(_pay.get("sourcing_intent"), dict) else None
+    _og = _pay.get("order_group") if isinstance(_pay.get("order_group"), dict) else None
+    if _si and _si.get("lines"):
+        _last_sourcing = {"mode": _si.get("mode"), "lines": _si.get("lines"),
+                          "planned_case_count": _si.get("planned_case_count"),
+                          "requirements": _si.get("requirements")}
+        kv_out["last_sourcing_intent"] = _last_sourcing
+        structured_state_out["last_sourcing_intent"] = dict(_last_sourcing)
+    elif _og and _og.get("lines"):
+        kv_out["last_sourcing_intent"] = {"mode": "order_group", "lines": _og.get("lines"),
+                                          "planned_case_count": _og.get("case_count")}
+        structured_state_out["last_sourcing_intent"] = dict(kv_out["last_sourcing_intent"])
+
     structured_state_out["nqe_asked_ids"] = list(
         kv_out.get("nqe_asked_ids") or structured_state_out.get("nqe_asked_ids") or []
     )

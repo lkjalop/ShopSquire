@@ -5708,6 +5708,23 @@ def suggest(
                 _conv_history_lines.append(f"{_cr}: {_cc}")
     conversation_history_text = "\n".join(_conv_history_lines) if _conv_history_lines else ""
 
+    # PROCUREMENT CONTINUITY: surface the buyer's last (unconfirmed) sourcing preview from session memory so
+    # narration/NQE can reference "your N-unit sourcing request" on a follow-up — instead of a cold search.
+    try:
+        _ls = structured_state.get("last_sourcing_intent") if isinstance(structured_state, dict) else None
+        if isinstance(_ls, dict) and isinstance(_ls.get("lines"), list) and _ls["lines"]:
+            _ls_units = sum(int(l.get("quantity") or 0) for l in _ls["lines"] if isinstance(l, dict))
+            _ls_items = ", ".join(f"{int(l.get('quantity') or 0)}x {l.get('item_ref')}"
+                                  for l in _ls["lines"][:6] if isinstance(l, dict) and l.get("item_ref"))
+            if _ls_items:
+                _sourcing_memo = (f"The buyer previously previewed a sourcing request ({_ls_units} units: "
+                                  f"{_ls_items}) that is not yet confirmed. If this turn refers to it "
+                                  f"('cheaper', 'change it', 'that order'), continue from that request.")
+                conversation_history_text = (f"{conversation_history_text}\n{_sourcing_memo}".strip()
+                                             if conversation_history_text else _sourcing_memo)
+    except Exception:
+        pass
+
     # Detect follow-up intent more broadly: if there are recent conversation
     # messages, any pronoun-like or short query likely refers to prior context.
     _has_conv_context = bool(recent_conv_messages)

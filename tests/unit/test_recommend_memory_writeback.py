@@ -175,6 +175,32 @@ class TestPersistTurnState:
         assert kv_saved["confirmed_slots"]["use_case"] == "creative"
         assert kv_saved["confirmed_slots"]["brands"] == ["Apple"]
 
+    def test_persists_sourcing_intent_for_continuity(self):
+        # Phase 1: the buyer's sourcing PREVIEW must be remembered in kv_state so the next turn can
+        # reference "your 15-laptop sourcing request" instead of a cold search.
+        mem = self._make_mem()
+        ctx = MagicMock()
+        hooks = TurnPersistenceHooks(mem=mem, suggest_ctx=ctx, log_trace_event=MagicMock(),
+                                     trace_meta_payload=lambda **kw: {})
+        inp = self._make_input(payload={"sourcing_intent": {
+            "mode": "deferred_to_cart",
+            "lines": [{"item_ref": "GAM-0002", "quantity": 15}, {"item_ref": "MON-1", "quantity": 10}],
+            "planned_case_count": 2, "requirements": {"needed_by": "2026-07-07"}}})
+        persist_turn_state(inp, hooks)
+        ls = mem.set_kv.call_args[0][1]["last_sourcing_intent"]
+        assert ls["mode"] == "deferred_to_cart" and ls["planned_case_count"] == 2
+        assert len(ls["lines"]) == 2 and ls["requirements"]["needed_by"] == "2026-07-07"
+        # also mirrored into structured_state for the LLM preamble read
+        assert mem.set_structured_state.call_args[0][1]["last_sourcing_intent"]["mode"] == "deferred_to_cart"
+
+    def test_no_sourcing_memory_when_payload_lacks_it(self):
+        mem = self._make_mem()
+        ctx = MagicMock()
+        hooks = TurnPersistenceHooks(mem=mem, suggest_ctx=ctx, log_trace_event=MagicMock(),
+                                     trace_meta_payload=lambda **kw: {})
+        persist_turn_state(self._make_input(payload={}), hooks)
+        assert "last_sourcing_intent" not in mem.set_kv.call_args[0][1]
+
     def test_never_raises(self):
         """persist_turn_state must never propagate exceptions (mirrors original try/except: pass)."""
         mem = MagicMock()
