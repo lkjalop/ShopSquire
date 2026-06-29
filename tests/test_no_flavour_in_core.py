@@ -220,6 +220,8 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/purchase_order.py",
     # deal economics: margin/discount-headroom/profit math, cents + ratios only — no product vocabulary.
     "src/app/services/fulfillment/economics.py",
+    # margin advisor (sell engine, rung A): verdict + proposed buyer discount, cents/ratios only — no vocab.
+    "src/app/services/fulfillment/margin_advisor.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.

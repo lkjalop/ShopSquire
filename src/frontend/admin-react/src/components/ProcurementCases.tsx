@@ -146,6 +146,32 @@ export function ProcurementCases() {
               <RfqFanout drafts={fanout} onCompare={(quotes) => fcCompareQuotes(sel, quotes)} />
             )}
 
+            {/* SELL ENGINE: margin verdict + discount headroom auto-surfaced AT the send-decision gate, so
+                the operator judges whether the reorder is worth it BEFORE approving the supplier send. */}
+            {view?.margin_advice?.available && (
+              <div data-testid="op-margin-advice"
+                   style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8,
+                            border: '1px solid ' + (view.margin_advice.verdict === 'below_floor' ? '#f87171'
+                              : view.margin_advice.verdict === 'thin' ? '#fcd34d' : '#86efac'),
+                            background: view.margin_advice.verdict === 'below_floor' ? '#fef2f2'
+                              : view.margin_advice.verdict === 'thin' ? '#fffbeb' : '#f0fdf4' }}>
+                <strong data-testid="op-margin-verdict">Margin: {view.margin_advice.verdict}</strong>
+                {' — '}list margin {pct(view.margin_advice.economics?.margin_pct)} vs floor {pct(view.margin_advice.economics?.floor_margin_pct)}.
+                {(view.margin_advice.recommended_buyer_discount_cents ?? 0) > 0 && (
+                  <div>You can offer the buyer up to <strong>{dollars(view.margin_advice.recommended_buyer_discount_cents)}</strong>
+                    {' '}and keep a safe margin (hard ceiling {dollars(view.margin_advice.max_buyer_discount_cents)}).</div>
+                )}
+                {view.margin_advice.supplier_last_invoice_cents != null && (
+                  <div style={{ color: '#6b7280', fontSize: 12 }}>Last invoiced from this supplier ~{dollars(view.margin_advice.supplier_last_invoice_cents)}.</div>
+                )}
+                {view.margin_warning && (
+                  <div data-testid="op-margin-warning" style={{ color: '#991b1b', fontWeight: 700, marginTop: 4 }}>
+                    ⚠ {view.margin_warning.message}
+                  </div>
+                )}
+              </div>
+            )}
+
             <ActionBar sel={sel} state={state} busy={busy} draftItemRef={draftItemRef} draftQty={draftQty}
                        draftChanged={draftChanged} draftHash={draft.content_hash} scenario={scenario}
                        setScenario={setScenario} run={run} onEconomics={onEconomics} />

@@ -94,7 +94,33 @@ def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
     msg = buyer_status_message(cur.state, cur.state_json)
     if msg:
         out["buyer_status"] = msg
+    # SELL ENGINE (operator, rung A): at the send-decision states, surface margin + discount headroom so the
+    # operator decides whether the reorder is worth it BEFORE approving the supplier send. Pure analysis;
+    # never blocks the transition (warn-by-default) — the human still commits (GATE 2). Best-effort.
+    if for_operator and cur.state in _SEND_DECISION_STATES:
+        try:
+            from src.app.services.fulfillment.margin_advisor import assess as _margin_assess
+            adv = _margin_assess(db, case_id)
+            if adv.get("available"):
+                out["margin_advice"] = adv
+                if adv.get("verdict") == "below_floor" and _margin_gate_mode() != "off":
+                    out["margin_warning"] = {
+                        "mode": _margin_gate_mode(),
+                        "message": "List margin is below the floor — confirm this reorder is worth it before sending.",
+                    }
+        except Exception:
+            pass
     return out
+
+
+# states at which the operator is deciding whether to send the supplier reorder — surface margin here.
+_SEND_DECISION_STATES = frozenset({"QUOTE_DRAFTED", "AWAITING_APPROVAL", "APPROVED_TO_SEND"})
+
+
+def _margin_gate_mode() -> str:
+    """Governable margin gate: 'warn' (default, informational), 'off' (suppress), or 'block' (the admin UI
+    requires an explicit override). Server never hard-blocks the human's send — informing is the control."""
+    return str(os.getenv("FULFILLMENT_MARGIN_GATE", "warn")).strip().lower() or "warn"
 
 
 # ── reads ─────────────────────────────────────────────────────────────────────
@@ -243,6 +269,20 @@ def get_economics(case_id: str, retail_unit_cents: Optional[int] = Query(None),
         econ = feco.from_case(db, case_id, retail_unit_cents=retail_unit_cents,
                               floor_margin_pct=floor_margin_pct)
         return {"case_id": case_id, "economics": econ}
+
+
+@router.get("/cases/{case_id}/margin-advice")
+def get_margin_advice(case_id: str, retail_unit_cents: Optional[int] = Query(None),
+                      floor_margin_pct: float = Query(0.10),
+                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """OPERATOR-only sell-engine advice (rung A): the margin verdict (healthy/thin/below_floor), the discount
+    we could offer the buyer to close while keeping a buffer above the floor, the hard discount ceiling, and
+    the historical supplier price. Pure analysis — proposing, never committing. Read it BEFORE approving the
+    supplier send to judge whether the reorder is worth it."""
+    from src.app.services.fulfillment.margin_advisor import assess as _margin_assess
+    with db_session() as db:
+        return {"case_id": case_id, **_margin_assess(db, case_id, retail_unit_cents=retail_unit_cents,
+                                                     floor_margin_pct=floor_margin_pct)}
 
 
 # ── commands ──────────────────────────────────────────────────────────────────

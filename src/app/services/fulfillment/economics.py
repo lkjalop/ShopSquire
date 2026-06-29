@@ -86,6 +86,13 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
     if qty is None:
         qty = sum(int(a.get("quantity") or 0) for a in (selection.get("allocation") or [])
                   if a.get("source") in ("supplier", "substitute"))
+    if not qty:
+        # PRE-SEND (at QUOTE_DRAFTED / AWAITING_APPROVAL there is no PO or selection yet): use the quantity
+        # the draft actually asks the supplier for (the shortfall being sourced) so margin is real AT the
+        # send-approval gate — the moment the operator decides whether the reorder is worth it.
+        scope = (st.get("draft") or {}).get("commercial_scope") or {}
+        avail = st.get("availability") or {}
+        qty = scope.get("quantity") or avail.get("shortfall") or avail.get("requested_qty")
     ru = retail_unit_cents
     if ru is None:
         ru = _catalog_retail(db, st, tenant_id)   # canonical price_book JOIN (flag-gated)

@@ -7,8 +7,16 @@ export interface FulfillmentCaseRow {
   requested_by?: string | null; source_trace_id?: string | null; updated_at?: string | null;
   item_ref?: string | null; quantity?: number | null;
 }
+export interface MarginAdvice {
+  available: boolean; verdict: 'healthy' | 'thin' | 'below_floor' | null;
+  economics?: Record<string, any>; max_buyer_discount_cents?: number;
+  recommended_buyer_discount_cents?: number; supplier_last_invoice_cents?: number | null;
+  rationale?: string[];
+}
 export interface FulfillmentCaseView {
   case_id: string; state: string; state_json: Record<string, any>; source_trace_id?: string | null;
+  margin_advice?: MarginAdvice;
+  margin_warning?: { mode: string; message: string };
 }
 export interface JourneyEvent {
   state: string; event: string; actor_type: string; actor_id: string;
