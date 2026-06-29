@@ -81,6 +81,12 @@ def run_fulfillment_stage(
         from src.app.models.db import db_session
         from src.app.services.multi_location_availability import assess_network_availability
         preferred = str(constraints.get("ship_to") or constraints.get("preferred_location") or "").strip() or None
+        if not preferred:  # buyer didn't name a location → their default store (profile), so the transfer
+            try:          # view can show "fulfil from the warehouse to your store" before sourcing externally
+                from src.app.platform.store_profile import profile_slot
+                preferred = str(profile_slot("default_fulfillment_location", default="") or "").strip() or None
+            except Exception:
+                preferred = None
         with db_session() as _db:
             net = assess_network_availability(_db, avail_skus, qty, preferred_location=preferred)
         if isinstance(net, dict) and net.get("applicable"):

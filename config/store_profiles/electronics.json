@@ -1393,6 +1393,8 @@
   "rfq_ship_to_region": "Australia — metro",
   "rfq_bulk_threshold": 5,
   "rfq_required_fields": ["sku_description", "deadline_date", "ship_to", "quantity"],
+  "_default_fulfillment_location_comment": "the buyer's default store (location_id) when they don't name one — drives the multi-location transfer view (fulfil from the warehouse to the buyer's store before sourcing externally). Must match a location_id seeded in inventory_level.",
+  "default_fulfillment_location": "sydney",
 
   "cv_returns_pack": "electronics",
   "narration_spec_dimensions": [{"label":"GPU","variants":[{"key":"gpu_model"},{"key":"gpu_vram_gb","unit":"GB VRAM"}]},{"label":"Display","variants":[{"key":"refresh_hz","unit":"Hz"}]},{"label":"RAM","variants":[{"key":"ram_gb","unit":"GB"}]},{"label":"SSD","variants":[{"key":"storage_gb","unit":"GB"}]},{"label":"CPU","variants":[{"key":"cpu_model"}]}]
