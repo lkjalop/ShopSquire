@@ -1288,6 +1288,10 @@ async def chat_query(
 
     # Replay protection: reject immediate duplicates from retries/replays.
     try:
+        # SKIP when invoked from the /chat/stream wrapper: chat_stream calls chat_query internally, so
+        # marking here would make the frontend's stream→/chat/query FALLBACK look like a duplicate (the
+        # 409 chat_replay_detected demo blocker). Only the terminal /chat/query enforces replay protection.
+        _skip_replay = bool((payload or {}).get("_internal_skip_replay"))
         replay_nonce = str(
             (payload or {}).get("nonce")
             or (payload or {}).get("message_id")
@@ -1320,11 +1324,11 @@ async def chat_query(
         replay_key = hashlib.sha256(replay_material.encode("utf-8")).hexdigest()
         replay_ttl = int(os.getenv("CHAT_REPLAY_TTL_SECONDS", "20") or 20)
         require_nonce = str(os.getenv("CHAT_REPLAY_REQUIRE_NONCE", "0")).strip().lower() in ("1", "true", "yes", "on")
-        if require_nonce and not replay_nonce:
+        if require_nonce and not replay_nonce and not _skip_replay:
             raise HTTPException(status_code=428, detail={"message": "nonce_required"})
         if replay_nonce:
             replay_ttl = max(replay_ttl, 120)
-        if not _chat_replay_mark_once(redis, replay_key=replay_key, ttl_seconds=replay_ttl):
+        if not _skip_replay and not _chat_replay_mark_once(redis, replay_key=replay_key, ttl_seconds=replay_ttl):
             raise HTTPException(
                 status_code=409,
                 detail={"message": "chat_replay_detected", "retry_after_seconds": replay_ttl},

@@ -52,9 +52,10 @@ async def chat_stream(
         yield _sse_event("thinking", {"trace_id": trace_id, "ts": time.time()})
 
         try:
-            # Delegate to the normal chat query handler
+            # Delegate to the normal chat query handler. Flag the call so it does NOT consume the replay
+            # token — otherwise the frontend's stream→/chat/query fallback 409s (chat_replay_detected).
             from src.app.routers.chat import chat_query
-            result = await chat_query(request, payload, redis, db, role)
+            result = await chat_query(request, {**payload, "_internal_skip_replay": True}, redis, db, role)
 
             # Emit intermediate signals from the result
             if isinstance(result, dict):
