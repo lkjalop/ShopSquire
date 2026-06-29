@@ -111,3 +111,19 @@ def test_create_grouped_cases_makes_one_case_per_supplier_group(db):
         cur = wf.repository.current_version(db, c["case_id"])
         assert cur.state == "AWAITING_BUYER_COMMITMENT"
         assert cur.state_json["order_group_id"] == out["order_group_id"]
+
+
+def test_recommend_stage_routes_mixed_query_to_grouped_cases(monkeypatch):
+    # the buyer-chat path: a mixed query → _maybe_multiline_order creates grouped cases + a buyer-safe summary
+    from src.app.services import recommend_fulfillment_stage as stage
+    monkeypatch.setattr(stage, "_maybe_multiline_order",
+                        lambda *, query, uid, uid_hash, trace_id, payload: (
+                            payload.__setitem__("order_group", {"case_count": 2, "lines": [1, 2]})
+                            or "split into 2 sourcing requests"))
+    payload = {}
+    line = stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}],
+                                       constraints={"order_quantity": 30}, payload=payload, uid="u1",
+                                       query="15 laptops + 10 monitors", flags={"FULFILLMENT_CASES_ENABLED": True})
+    assert "2 sourcing requests" in line                     # multi-line summary returned
+    assert payload["order_group"]["case_count"] == 2
+    assert "availability" not in payload                     # short-circuited the single-line path

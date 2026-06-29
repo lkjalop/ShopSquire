@@ -2365,6 +2365,10 @@ async def chat_query(
         "fulfillment_options": (
             data.get("fulfillment_options") if isinstance(data.get("fulfillment_options"), list) else None
         ),
+        # multi-line mixed order → grouped sourcing cases (buyer-safe summary; supplier identity stays server-side)
+        "order_group": (
+            data.get("order_group") if isinstance(data.get("order_group"), dict) else None
+        ),
         "right_panel": _right_panel_contract,
         "copywriting": copy_meta,
         "image_untrusted": bool(image_security_posture.get("image_untrusted")),

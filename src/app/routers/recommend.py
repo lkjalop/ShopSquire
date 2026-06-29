@@ -10448,7 +10448,7 @@ def suggest(
     from src.app.services.recommend_fulfillment_stage import run_fulfillment_stage as _run_fulfillment_stage
     _availability_line = _run_fulfillment_stage(
         results=results, constraints=constraints, payload=payload, uid=uid, uid_hash=uid_hash,
-        trace_id=trace_id, flags=flags,
+        trace_id=trace_id, flags=flags, query=query,
     )
 
     assistant_message = None

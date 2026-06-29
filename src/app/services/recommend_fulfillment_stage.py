@@ -55,9 +55,21 @@ def run_fulfillment_stage(
     uid_hash: Optional[str] = None,
     trace_id: Optional[str] = None,
     flags: Optional[Dict[str, Any]] = None,
+    query: Optional[str] = None,
 ) -> str:
     """Compute bulk availability (sets payload['availability']) and, when enabled, open a procurement
     case on a real shortfall. Returns the availability summary line (or '')."""
+    # Multi-line order: a MIXED buyer request ("15 laptops + 10 monitors + 5 headsets") → grouped cases
+    # (one per supplier) instead of a single bulk case. Flag-gated (same as single-case creation); a
+    # single-line query falls through to the normal path. Best-effort — never breaks the recommend reply.
+    if query and _flag(flags, "FULFILLMENT_CASES_ENABLED"):
+        try:
+            line = _maybe_multiline_order(query=query, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
+                                          payload=payload)
+            if line:
+                return line
+        except Exception as exc:
+            record_partial_failure("multiline_order", exc, trace_id=trace_id)
     order_qty = constraints.get("order_quantity")
     is_bulk = bool(order_qty and int(order_qty) > 1)
     # single-item availability ("do you have X?"): assess qty 1 so a fully out-of-stock item can route to
@@ -144,6 +156,36 @@ def _buyer_requirements(constraints: Dict[str, Any]) -> Dict[str, Any]:
     if bmin is not None or bmax is not None:
         reqs["budget"] = {"min": bmin, "max": bmax}  # INTERNAL ONLY — never rendered into the supplier RFQ
     return reqs
+
+
+def _maybe_multiline_order(*, query, uid, uid_hash, trace_id, payload) -> str:
+    """Detect a MIXED order in the buyer message and, if ≥2 resolvable lines, create grouped cases (one per
+    supplier). Returns a buyer-safe summary line, or '' when it's not a multi-line order. Buyer payload is
+    supplier-blind (the recipient is resolved server-side, never shown to the buyer)."""
+    from src.app.models.db import db_session
+    from src.app.services.fulfillment.order_split import (
+        create_grouped_cases, emit_split_trace, parse_order_lines, plan_order_split, resolve_line_skus)
+    parsed = parse_order_lines(query)
+    if len(parsed) < 2:
+        return ""  # not a mixed order → normal single-line path
+    with db_session() as db:
+        lines = resolve_line_skus(db, parsed)
+        if len(lines) < 2:
+            return ""
+        plan = plan_order_split(db, lines=lines)
+        emit_split_trace(trace_id, plan=plan)
+        created = create_grouped_cases(db, plan=plan, uid=uid, uid_hash=uid_hash, trace_id=trace_id)
+    # buyer-safe summary (no supplier identity): how the mixed order was split + the line items.
+    payload["order_group"] = {
+        "order_group_id": created.get("order_group_id"), "case_count": created.get("case_count"),
+        "lines": [{"item_ref": l["item_ref"], "quantity": l["requested_qty"]} for l in lines],
+        "cases": [{"case_id": c["case_id"], "item_count": len(c["lines"]),
+                   "total_quantity": c["total_quantity"]} for c in created.get("cases", [])],
+    }
+    n_units = sum(int(l["requested_qty"]) for l in lines)
+    return (f"Your mixed order ({len(lines)} item lines, {n_units} units) was split into "
+            f"{created.get('case_count')} sourcing request(s) — each is awaiting your confirmation before "
+            f"any supplier is contacted.")
 
 
 def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
