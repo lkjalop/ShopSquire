@@ -125,7 +125,8 @@ def test_from_case_uses_price_book_when_catalog_enabled(db, monkeypatch):
 
 def test_from_case_ignores_catalog_when_flag_off(db, monkeypatch):
     from src.app.services import commerce_catalog as cc
-    monkeypatch.delenv("COMMERCE_CATALOG_ENABLED", raising=False)
+    # control the gate directly (it now reads env OR feature_flags.json — don't depend on ambient config)
+    monkeypatch.setattr("src.app.services.commerce_catalog.catalog_enabled", lambda: False)
     cid = _to_selected(db)
     cc.upsert_price(db, sku="LAP-021", list_cents=130000, source="test"); db.commit()  # present but ignored
     econ = E.from_case(db, cid)

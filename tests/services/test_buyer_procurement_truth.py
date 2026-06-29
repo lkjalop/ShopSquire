@@ -53,7 +53,8 @@ def test_canonical_sufficient_stock_opens_no_case(monkeypatch):
 
 
 def test_flag_off_does_not_consult_canonical(monkeypatch):
-    monkeypatch.delenv("COMMERCE_CATALOG_ENABLED", raising=False)
+    # control the gate directly (it now reads env OR feature_flags.json — don't depend on ambient config)
+    monkeypatch.setattr("src.app.services.commerce_catalog.catalog_enabled", lambda: False)
     _seed_stock("LAP-021", 4)                       # present, but flag off → legacy source only
     payload = _run(10, {"FULFILLMENT_CASES_ENABLED": True})
     # legacy batch_stock_levels has no row for LAP-021 → 0 in stock → shortfall is the full order

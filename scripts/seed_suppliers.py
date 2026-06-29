@@ -23,6 +23,8 @@ def main() -> None:
         # approved supplier, so the procurement draft path never dead-ends at NO_APPROVED_SUPPLIER.
         counts = ensure_supplier_coverage(db)
         cat = commerce_catalog.seed_demo(db)
+        # per-(sku, location) stock so the multi-location / transfer alternative has real data to surface.
+        loc_rows = commerce_catalog.seed_demo_locations(db)
         comp = competitor_source.seed_demo(db)
         obj = support_objection_source.seed_demo(db)
         fun = funnel_source.seed_demo(db)
@@ -31,7 +33,8 @@ def main() -> None:
     print(f"seeded suppliers={counts.get('suppliers')} products={counts.get('products')} "
           f"domains={counts.get('domains')} (coverage tracks the live catalog)")
     print(f"seeded supplier history events={history}")
-    print(f"seeded catalog prices={cat.get('prices')} inventory={cat.get('inventory')}")
+    print(f"seeded catalog prices={cat.get('prices')} inventory={cat.get('inventory')} "
+          f"per-location rows={loc_rows}")
     print(f"seeded competitor observations={comp.get('observations')} "
           f"support objections={obj.get('observations')} funnel events={fun.get('events')}")
     print(f"seeded verified vendor contacts={vendors}")

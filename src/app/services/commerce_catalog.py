@@ -17,11 +17,14 @@ behaviour (retail derived from the buyer's selected option) is unchanged until t
 """
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
+
+logger = logging.getLogger("shopsquire.commerce_catalog")
 
 # DDL kept textually identical to alembic/versions/20260626_commerce_catalog.py (drift test enforces it).
 _PRICE_BOOK_DDL = """
@@ -61,7 +64,51 @@ DEFAULT_TENANT = "default"
 
 
 def catalog_enabled() -> bool:
-    return str(os.getenv("COMMERCE_CATALOG_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    """Canonical inventory_level is the system-of-record. Enabled via env OR feature_flags.json
+    (COMMERCE_CATALOG_ENABLED) — the flag lets the per-location stock drive availability without a redeploy."""
+    if str(os.getenv("COMMERCE_CATALOG_ENABLED", "")).strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    try:
+        import json as _json
+        from src.app.config import get_settings
+        with open(get_settings().feature_flags_path, "r", encoding="utf-8") as f:
+            return bool(_json.load(f).get("COMMERCE_CATALOG_ENABLED"))
+    except Exception:
+        return False
+
+
+# opaque location ids — preferred store first, then another store, then the bulk warehouse
+_DEMO_LOCATIONS = ("sydney", "melbourne", "warehouse")
+
+
+def seed_demo_locations(db, *, skus: Optional[List[str]] = None, tenant_id: str = DEFAULT_TENANT) -> int:
+    """Seed per-(sku, location) stock so the multi-location / transfer view has real data: a little in the
+    preferred store, more in another store + the warehouse. Deterministic per sku (stable demos); replaces
+    each sku's rows and zeroes any stale 'default'-location row so SUM(available) doesn't double-count.
+    Returns location rows written. Idempotent; best-effort."""
+    if db is None:
+        return 0
+    ensure_tables(db)
+    if skus is None:
+        try:
+            rows = db.execute(text("SELECT sku FROM products WHERE COALESCE(active,1)=1 AND sku IS NOT NULL "
+                                   "AND sku <> ''")).fetchall()
+            skus = sorted({str(r[0]) for r in rows if r and r[0]})
+        except Exception:
+            skus = []
+    n = 0
+    for sku in skus:
+        h = sum(ord(c) for c in str(sku))
+        dist = {"sydney": 3 + (h % 6), "melbourne": 8 + (h % 8), "warehouse": 20 + (h % 21)}
+        upsert_inventory(db, sku=sku, on_hand=0, location_id="default", tenant_id=tenant_id)  # zero stale row
+        for loc, qty in dist.items():
+            if upsert_inventory(db, sku=sku, on_hand=qty, location_id=loc, tenant_id=tenant_id):
+                n += 1
+    try:
+        db.commit()
+    except Exception as exc:
+        logger.debug("seed_demo_locations commit failed: %s", exc)
+    return n
 
 
 def ensure_tables(db) -> None:
