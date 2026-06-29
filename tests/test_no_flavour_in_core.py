@@ -213,6 +213,8 @@ _CORE_MODULES = [
     # supplier out-of-band write-bus: records a supplier contact (domain·kind·note) + fans out to open
     # cases. Opaque strings only — no product vocabulary.
     "src/app/services/fulfillment/supplier_events.py",
+    # procurement notifications: operator feed (kind·summary·ref opaque strings) — no product vocabulary.
+    "src/app/services/fulfillment/notifications.py",
     # PO finalization: propose/approve/create/complete via the workflow chokepoint, opaque refs —
     # no product vocabulary.
     "src/app/services/fulfillment/purchase_order.py",

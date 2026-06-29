@@ -381,7 +381,54 @@ def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
         else:
             result = materialize_cases_for_order(db, order_id=body.order_id, lines=resolved,
                                                  uid=body.uid, trace_id=body.trace_id)
+        _notify_from_confirm(db, result)
     return result
+
+
+def _notify_from_confirm(db, result: Dict[str, Any]) -> None:
+    """Emit an operator notification when a confirm/supersede actually changed something (best-effort)."""
+    try:
+        from src.app.services.fulfillment.notifications import notify
+        ref = result.get("order_group_id")
+        if result.get("status") == "superseded":
+            created = (result.get("created") or {}).get("case_count") or 0
+            notify(db, kind="order_superseded", ref=ref,
+                   summary=f"Order amended: retired {len(result.get('superseded') or [])} request(s), "
+                           f"created {created} new sourcing case(s).")
+        elif result.get("status") == "operator_required":
+            notify(db, kind="operator_required", ref=ref,
+                   summary="Buyer amended an order whose supplier was already contacted — operator action needed.")
+        elif result.get("amend_required"):
+            notify(db, kind="amend_required", ref=ref,
+                   summary="Buyer re-confirmed an order with different items — amendment pending.")
+        elif int(result.get("case_count") or 0) > 0 and not result.get("idempotent"):
+            notify(db, kind="cases_materialized", ref=ref,
+                   summary=f"New cart confirmation: {result.get('case_count')} sourcing case(s) created.")
+    except Exception:
+        pass
+
+
+class NotificationsSeenBody(BaseModel):
+    ids: Optional[list[str]] = None   # specific ids to mark seen; None → mark ALL unseen seen
+
+
+@router.get("/notifications")
+def get_notifications(unseen_only: bool = Query(default=False), limit: int = Query(default=50),
+                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """The operator notification feed (newest first) + the unseen badge count — polled by the admin queue."""
+    from src.app.services.fulfillment.notifications import list_notifications, unseen_count
+    with db_session() as db:
+        return {"notifications": list_notifications(db, unseen_only=unseen_only, limit=limit),
+                "unseen": unseen_count(db)}
+
+
+@router.post("/notifications/seen")
+def mark_notifications_seen(body: NotificationsSeenBody,
+                           role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Mark notifications seen (given ids, or ALL unseen when ids omitted)."""
+    from src.app.services.fulfillment.notifications import mark_seen
+    with db_session() as db:
+        return {"marked": mark_seen(db, ids=body.ids)}
 
 
 class SupplierEventBody(BaseModel):
@@ -396,10 +443,19 @@ def supplier_event(body: SupplierEventBody, role: str = Depends(require_role(_OP
     """Out-of-band supplier contact (operator records "supplier X phoned: lead time slipped / OOS / price
     changed"). Records it durably and FANS OUT a note to every open case for that supplier domain so the
     case journeys reflect reality. Never contacts anyone, never mutates an issued PO (a new fact is appended)."""
+    from src.app.services.fulfillment.notifications import notify
     from src.app.services.fulfillment.supplier_events import record_supplier_event
     with db_session() as db:
-        return record_supplier_event(db, supplier_domain=body.supplier_domain, kind=body.kind,
-                                      note=body.note, actor_id=str(role or "operator"))
+        out = record_supplier_event(db, supplier_domain=body.supplier_domain, kind=body.kind,
+                                    note=body.note, actor_id=str(role or "operator"))
+        if out.get("event_id"):
+            try:
+                notify(db, kind="supplier_oob", ref=out.get("domain"),
+                       summary=f"Supplier {out.get('domain')} reported {out.get('kind')} — "
+                               f"{len(out.get('affected_cases') or [])} open case(s) affected.")
+            except Exception:
+                pass
+        return out
 
 
 class CommitBody(BaseModel):

@@ -68,6 +68,17 @@ export interface FromOrderResult { order_group_id: string; case_count: number; c
 export const fcFromOrder = (query: string) =>
   http<FromOrderResult>(`/api/v1/fulfillment/cases/from-order`, { method: 'POST', body: JSON.stringify({ query }) });
 export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
+
+// Operator notification feed — new cart confirmations, amendments/supersessions, supplier out-of-band events.
+export interface ProcurementNotification {
+  id: string; kind: string; summary: string; ref?: string | null; created_at?: string; seen?: boolean;
+}
+export const fcNotifications = (unseenOnly = false, limit = 50) =>
+  http<{ notifications: ProcurementNotification[]; unseen: number }>(
+    `/api/v1/fulfillment/notifications?unseen_only=${unseenOnly ? 'true' : 'false'}&limit=${limit}`);
+export const fcMarkNotificationsSeen = (ids?: string[]) =>
+  http<{ marked: number }>(`/api/v1/fulfillment/notifications/seen`,
+    { method: 'POST', body: JSON.stringify(ids ? { ids } : {}) });
 // Export the case as an OKF (Open Knowledge Format) document — a portable audit artifact.
 export const fcCaseOkf = (id: string) =>
   http<{ case_id: string; type: string; filename: string; okf: string }>(`${_fc(id)}/okf`);

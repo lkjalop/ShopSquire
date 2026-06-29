@@ -20,6 +20,7 @@ import {
 import ActionBar from './procurement/ActionBar';
 import AutonomyAudit from './procurement/AutonomyAudit';
 import CreateFromOrder from './procurement/CreateFromOrder';
+import ProcurementNotifications from './procurement/ProcurementNotifications';
 import CaseJourney from './procurement/CaseJourney';
 import CaseQueue from './procurement/CaseQueue';
 import QuotePacket from './procurement/QuotePacket';
@@ -108,6 +109,7 @@ export function ProcurementCases() {
   return (
     <div className="procurement-cases" data-testid="procurement-cases">
       <AutonomyAudit />
+      <ProcurementNotifications onActivity={loadList} />
       <CreateFromOrder onCreated={loadList} />
       <div style={{ display: 'flex', gap: 16 }}>
         <CaseQueue cases={cases} sel={sel} onSelect={setSel} onRefresh={loadList} />
