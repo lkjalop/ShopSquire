@@ -30,6 +30,11 @@ router = APIRouter(prefix="/api/v1/fulfillment", tags=["fulfillment"])
 
 _OPERATOR = [ROLE_MERCHANT, ROLE_OWNER]
 
+# Anti-abuse: cap cart-confirmations per buyer per minute. Rapid confirm/amend churn is a
+# resource-exhaustion vector (each cycle resolves SKUs, plans routing, materializes/supersedes cases), so
+# this is a cost AND a security control. Default 20/min; 0 disables. Reuses the shared fixed-window limiter.
+_CONFIRM_RATE_PER_MIN = int(os.getenv("FULFILLMENT_CONFIRM_RATE_PER_MIN", "20") or 20)
+
 
 def _demo_enabled() -> bool:
     return str(os.getenv("FULFILLMENT_DEMO_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
@@ -334,6 +339,7 @@ class ConfirmCartBody(BaseModel):
     lines: Optional[list[SplitLineBody]] = None   # explicit resolved lines, OR
     query: Optional[str] = None                   # a raw mixed message to parse ("15 laptops + 10 monitors")
     trace_id: Optional[str] = None
+    supersede: bool = False                        # buyer amending a confirmed order → retire old cases + re-source
 
 
 @router.post("/cases/confirm-cart")
@@ -344,7 +350,12 @@ def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
     (each case waits at GATE 1). This is the buyer-facing twin of /cases/from-order; under
     FULFILLMENT_DEFER_TO_CART the recommend stage only PREVIEWED the split, so this is where intent becomes
     a durable case. Fully-in-stock lines are fulfilled from stock and create no case."""
-    from src.app.services.fulfillment.cart_commitment import materialize_cases_for_order
+    from src.app.security.rate_limit import consume_fixed_window_limit
+    from src.app.services.fulfillment.cart_commitment import materialize_cases_for_order, supersede_order
+    # anti-abuse: bound confirm/amend churn per buyer (cost + security control). Fail-open if the limiter
+    # backend is down (the limiter itself degrades gracefully); over-limit → 429.
+    if not consume_fixed_window_limit(key=f"confirm_cart:{body.uid}", limit=_CONFIRM_RATE_PER_MIN, window_sec=60):
+        raise HTTPException(status_code=429, detail="confirm_cart_rate_limited")
     raw_lines = ([x.model_dump() for x in body.lines] if body.lines
                  else fos.parse_order_lines(body.query or ""))
     if not raw_lines:
@@ -363,8 +374,13 @@ def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
         for l in resolved:
             if l.get("in_stock") in (None, 0):
                 l["in_stock"] = int(stock.get(str(l.get("item_ref")), 0))
-        result = materialize_cases_for_order(db, order_id=body.order_id, lines=resolved,
-                                             uid=body.uid, trace_id=body.trace_id)
+        # supersede=True → buyer is amending a confirmed order: retire the active pre-send cases + re-source.
+        if body.supersede:
+            result = supersede_order(db, order_id=body.order_id, lines=resolved, uid=body.uid,
+                                     trace_id=body.trace_id)
+        else:
+            result = materialize_cases_for_order(db, order_id=body.order_id, lines=resolved,
+                                                 uid=body.uid, trace_id=body.trace_id)
     return result
 
 

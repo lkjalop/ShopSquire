@@ -27,10 +27,10 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
   const lines = intent.lines || [];
   const totalUnits = lines.reduce((n, l) => n + (Number(l.quantity) || 0), 0);
 
-  const onConfirm = async () => {
+  const run = async (supersede: boolean) => {
     setBusy(true); setError('');
     try {
-      const r = await confirmCartSourcing(uid, orderId, lines, traceId);
+      const r = await confirmCartSourcing(uid, orderId, lines, traceId, supersede);
       setResult(r);
       onConfirmed?.(r);
     } catch (e: any) {
@@ -39,6 +39,8 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
       setBusy(false);
     }
   };
+  const onConfirm = () => run(false);
+  const onSupersede = () => run(true);
 
   return (
     <section data-testid="sourcing-intent" className="fulfilment-options" aria-label="Sourcing preview">
@@ -69,16 +71,37 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
         </button>
       )}
 
+      {/* amendment after a confirmed order: offer the deliberate supersede action (retire old + re-source) */}
       {result && result.amend_required && (
-        <p data-testid="si-amend" role="status">
-          This order was already confirmed with different items, so an amendment is required before
-          re-sourcing. (The original request is unchanged — nothing was duplicated.)
+        <div data-testid="si-amend">
+          <p role="status">
+            This order was already confirmed with different items. Nothing was duplicated. You can supersede
+            the earlier request and re-source the new items.
+          </p>
+          <button disabled={busy} onClick={onSupersede} data-testid="si-supersede-btn">
+            {busy ? 'Updating…' : 'Supersede & re-source'}
+          </button>
+        </div>
+      )}
+
+      {/* supersede outcome */}
+      {result && result.status === 'superseded' && (
+        <p data-testid="si-superseded" role="status">
+          Updated — retired {result.superseded?.length ?? 0} earlier request(s) and created
+          {' '}{result.created?.case_count ?? 0} new one(s). No supplier was contacted.
+        </p>
+      )}
+      {result && result.status === 'operator_required' && (
+        <p data-testid="si-operator" role="status">
+          A supplier has already been contacted for the earlier request, so our team will handle this
+          change directly. Nothing was duplicated.
         </p>
       )}
 
-      {result && !result.amend_required && (
+      {/* first-confirm outcome (materialize) */}
+      {result && !result.amend_required && result.status == null && (
         <p data-testid="si-created" role="status">
-          {result.case_count > 0
+          {(result.case_count ?? 0) > 0
             ? `Created ${result.case_count} sourcing request(s)${result.idempotent ? ' (already confirmed earlier)' : ''} — the procurement team has been notified. No supplier has been contacted yet.`
             : 'Everything is available from stock — no sourcing was needed.'}
         </p>

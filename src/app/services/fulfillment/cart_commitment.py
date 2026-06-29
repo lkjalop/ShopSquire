@@ -40,19 +40,75 @@ def _already_materialized(db, order_group_id: str, tenant_id: str = "default") -
     if db is None or not order_group_id:
         return []
     try:
+        from src.app.services.fulfillment.domain import TERMINAL_STATES
         from src.app.services.fulfillment.repository import ensure_tables
         ensure_tables(db)
         # state_json is JSON TEXT; match the order_group_id value loosely so JSON separator spacing never
-        # breaks the probe. Only the OPEN (valid_to IS NULL) version of each case counts.
-        pat = f'%"order_group_id"%{order_group_id}%'
+        # breaks the probe. Only the OPEN (valid_to IS NULL) and ACTIVE (non-terminal) version counts — so a
+        # SUPERSEDED/declined case from a prior amendment does not block re-materialization of the new lines.
+        terminal = [s.value for s in TERMINAL_STATES]
+        placeholders = ", ".join(f":st{i}" for i in range(len(terminal)))
+        params: Dict[str, Any] = {"t": str(tenant_id or "default"), "p": f'%"order_group_id"%{order_group_id}%'}
+        params.update({f"st{i}": v for i, v in enumerate(terminal)})
         rows = db.execute(text(
             "SELECT DISTINCT case_id FROM fulfillment_case_version "
-            "WHERE tenant_id=:t AND valid_to IS NULL AND state_json LIKE :p"),
-            {"t": str(tenant_id or "default"), "p": pat}).fetchall()
+            f"WHERE tenant_id=:t AND valid_to IS NULL AND state_json LIKE :p AND state NOT IN ({placeholders})"),
+            params).fetchall()
         return [str(r[0]) for r in (rows or []) if r and r[0]]
     except Exception as exc:
         logger.debug("_already_materialized probe failed for %s: %s", order_group_id, exc)
         return []
+
+
+# Pre-send states from which a case may be auto-superseded (no supplier contacted yet). Past the send gate
+# (QUOTE_SENT+), supersession is the operator-driven post-send protocol — never auto-fired here.
+_SUPERSEDABLE_STATES = frozenset({"AVAILABILITY_ASSESSED", "AWAITING_BUYER_COMMITMENT", "COMMITTED",
+                                  "QUOTE_DRAFTED", "AWAITING_APPROVAL"})
+
+
+def supersede_order(db, *, order_id: str, lines: List[Dict[str, Any]], uid: Optional[str] = None,
+                    uid_hash: Optional[str] = None, trace_id: Optional[str] = None,
+                    tenant_id: str = "default", now_iso: Optional[str] = None) -> Dict[str, Any]:
+    """The buyer changed their mind AFTER confirming: supersede the active pre-send cases for this order and
+    re-materialize from the new lines (same order_group_id; the probe ignores superseded cases). Cases past
+    the send gate CANNOT be auto-superseded — that is the operator-driven post-send protocol — so if any
+    active case is not in a pre-send state we STOP and report it instead of superseding around it. Returns
+    {order_group_id, superseded:[case_id], operator_required:[{case_id,state}], created, status}."""
+    from src.app.services.fulfillment import workflow as fwf
+    from src.app.services.fulfillment.domain import Actor, ActorType
+    from src.app.services.fulfillment.repository import current_version
+    group_id = order_group_id_for(order_id)
+    if not group_id or db is None:
+        return {"order_group_id": group_id, "superseded": [], "operator_required": [], "created": None,
+                "status": "noop"}
+
+    active = _already_materialized(db, group_id, tenant_id=tenant_id)
+    supersedable: List[str] = []
+    operator_required: List[Dict[str, Any]] = []
+    for cid in active:
+        cur = current_version(db, cid, tenant_id)
+        st = cur.state if cur else ""
+        if st in _SUPERSEDABLE_STATES:
+            supersedable.append(cid)
+        else:
+            operator_required.append({"case_id": cid, "state": st})
+    if operator_required:
+        # a supplier has likely been contacted for one of these — don't silently retire it
+        return {"order_group_id": group_id, "superseded": [], "operator_required": operator_required,
+                "created": None, "status": "operator_required"}
+
+    actor = Actor(ActorType.BUYER, uid or "buyer")
+    superseded: List[str] = []
+    for cid in supersedable:
+        res = fwf.transition(db, case_id=cid, event="case_superseded", actor=actor,
+                             reason_code="buyer_amended_order", trace_id=trace_id, now_iso=now_iso)
+        if getattr(res, "ok", False):
+            superseded.append(cid)
+
+    created = materialize_cases_for_order(db, order_id=order_id, lines=lines, uid=uid, uid_hash=uid_hash,
+                                          trace_id=trace_id, tenant_id=tenant_id, now_iso=now_iso)
+    return {"order_group_id": group_id, "superseded": superseded, "operator_required": [],
+            "created": created, "status": "superseded"}
 
 
 def _line_signature(pairs) -> frozenset:

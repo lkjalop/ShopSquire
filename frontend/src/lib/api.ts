@@ -195,18 +195,24 @@ export interface SourcingIntentLine { item_ref: string; quantity: number; shortf
 export interface SourcingIntent { mode?: string; lines: SourcingIntentLine[]; planned_case_count?: number; }
 export interface ConfirmCartResult {
   order_group_id: string | null;
-  case_count: number;
-  cases: Array<{ case_id: string; supplier_name?: string; total_quantity?: number }>;
+  case_count?: number;
+  cases?: Array<{ case_id: string; supplier_name?: string; total_quantity?: number }>;
   idempotent?: boolean;
   amend_required?: boolean;
   reason?: string;
+  // supersede (amend after confirm) result shape:
+  status?: 'superseded' | 'operator_required' | 'noop';
+  superseded?: string[];
+  operator_required?: Array<{ case_id: string; state: string }>;
+  created?: { case_count: number; cases?: Array<{ case_id: string }> } | null;
 }
 
 // GATE 1 at the buyer's cart-confirmation: materialize the previewed shortfall lines into durable
 // procurement cases, IDEMPOTENTLY keyed on order_id (re-clicking returns the same cases). No supplier
-// is contacted. Maps the preview's {item_ref, quantity} lines to the endpoint's {item_ref, requested_qty}.
+// is contacted. supersede=true → the buyer is amending a confirmed order: retire the old pre-send cases +
+// re-source. Maps the preview's {item_ref, quantity} lines to the endpoint's {item_ref, requested_qty}.
 export async function confirmCartSourcing(
-  uid: string, orderId: string, lines: SourcingIntentLine[], traceId?: string,
+  uid: string, orderId: string, lines: SourcingIntentLine[], traceId?: string, supersede = false,
 ): Promise<ConfirmCartResult> {
   const r = await fetch(apiUrl('/api/v1/fulfillment/cases/confirm-cart'), {
     method: 'POST', credentials: 'include', headers: authHeaders({}, true),
@@ -214,6 +220,7 @@ export async function confirmCartSourcing(
       uid: uid || 'demo-user',
       order_id: orderId,
       trace_id: traceId,
+      supersede,
       lines: (lines || []).map((l) => ({ item_ref: l.item_ref, requested_qty: l.quantity })),
     }),
   });

@@ -10,7 +10,8 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy import text
 
 from src.app.services.fulfillment import workflow as wf
-from src.app.services.fulfillment.cart_commitment import materialize_cases_for_order, order_group_id_for
+from src.app.services.fulfillment.cart_commitment import (
+    materialize_cases_for_order, order_group_id_for, supersede_order)
 from src.app.services.supplier_catalog import ensure_supplier_coverage
 
 
@@ -82,6 +83,33 @@ def test_reconfirm_with_changed_lines_is_amend_required_not_silent(db):
     # an IDENTICAL re-submit (same lines) is still a clean idempotent no-op (double-submit guard intact)
     r3 = materialize_cases_for_order(db, order_id="ORD-9", lines=first, uid="u1")
     assert r3["idempotent"] is True and not r3.get("amend_required")
+
+
+def test_supersede_order_retires_pre_send_cases_and_resources(db):
+    # the FULL mind-change-after-commit action: supersede the old pre-send case(s) + materialize the new
+    # lines (possibly a different supplier), and the probe then ignores the superseded case.
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    _seed_product(db, "MON-1", "LG monitor")
+    ensure_supplier_coverage(db)
+    r1 = materialize_cases_for_order(db, order_id="ORD-S", uid="u1",
+                                     lines=[{"item_ref": "GAM-0002", "requested_qty": 7, "in_stock": 0}])
+    old_case = r1["cases"][0]["case_id"]
+    assert wf.repository.current_version(db, old_case).state == "AWAITING_BUYER_COMMITMENT"
+
+    sup = supersede_order(db, order_id="ORD-S", uid="u1",
+                          lines=[{"item_ref": "MON-1", "requested_qty": 10, "in_stock": 0}])
+    assert sup["status"] == "superseded"
+    assert old_case in sup["superseded"]
+    assert sup["created"]["case_count"] == 1
+    new_case = sup["created"]["cases"][0]["case_id"]
+    assert new_case != old_case
+    assert wf.repository.current_version(db, old_case).state == "SUPERSEDED"          # old retired
+    assert wf.repository.current_version(db, new_case).state == "AWAITING_BUYER_COMMITMENT"  # new active
+
+    # re-confirming the NEW lines is now idempotent against the NEW case (superseded one is ignored)
+    r2 = materialize_cases_for_order(db, order_id="ORD-S", uid="u1",
+                                     lines=[{"item_ref": "MON-1", "requested_qty": 10, "in_stock": 0}])
+    assert r2["idempotent"] is True and {c["case_id"] for c in r2["cases"]} == {new_case}
 
 
 def test_materialize_skips_fully_in_stock_lines(db):

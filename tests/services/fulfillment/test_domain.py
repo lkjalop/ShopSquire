@@ -33,6 +33,19 @@ def test_quote_validation_and_po_are_human_only():
     assert ok is False and reason == "actor_not_permitted"
 
 
+# ── AMENDMENT: supersede is pre-send only (never retires a case a supplier was emailed about) ──
+def test_case_superseded_is_pre_send_only():
+    # the buyer may supersede a case before any supplier contact (GATE 1 / draft / approval states)…
+    for src in (S.AWAITING_BUYER_COMMITMENT, S.COMMITTED, S.QUOTE_DRAFTED, S.AWAITING_APPROVAL):
+        assert d.next_state(src, "case_superseded", _buyer()) == S.SUPERSEDED, f"{src} should supersede"
+    # …but NOT once it is approved-to-send or already sent (that is the operator post-send protocol)
+    assert d.next_state(S.APPROVED_TO_SEND, "case_superseded", _buyer()) is None
+    assert d.next_state(S.QUOTE_SENT, "case_superseded", _buyer()) is None
+    # SUPERSEDED is terminal — nothing fires from it
+    ok, reason = d.can_fire(S.SUPERSEDED, "case_superseded", _buyer())
+    assert ok is False and reason == "terminal_state"
+
+
 # ── GATE 1: buyer commitment is unbypassable ─────────────────────────────────
 def test_agent_cannot_engage_supplier_without_buyer_commitment():
     # from AVAILABILITY_ASSESSED the ONLY way forward is request_buyer_commitment → AWAITING → buyer_committed

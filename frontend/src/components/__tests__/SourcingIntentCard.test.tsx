@@ -34,20 +34,29 @@ describe('SourcingIntentCard', () => {
 
     fireEvent.click(screen.getByTestId('si-confirm-btn'));
     await waitFor(() => expect(screen.getByTestId('si-created')).toBeInTheDocument());
-    expect(api.confirmCartSourcing).toHaveBeenCalledWith('u1', 'trace-1', INTENT.lines, 'trace-1');
+    expect(api.confirmCartSourcing).toHaveBeenCalledWith('u1', 'trace-1', INTENT.lines, 'trace-1', false);
     expect(screen.getByTestId('si-created')).toHaveTextContent(/Created 2 sourcing request\(s\)/);
     expect(screen.getByTestId('si-created')).toHaveTextContent(/No supplier has been contacted yet/i);
   });
 
-  it('surfaces amend_required when the same order was confirmed with different items', async () => {
-    (api.confirmCartSourcing as any).mockResolvedValue({
-      order_group_id: 'order-trace-1', case_count: 1, cases: [{ case_id: 'a' }],
-      idempotent: false, amend_required: true, reason: 'order_lines_changed',
-    });
+  it('offers Supersede & re-source when the same order was confirmed with different items', async () => {
+    (api.confirmCartSourcing as any)
+      .mockResolvedValueOnce({  // first confirm → amend_required
+        order_group_id: 'order-trace-1', case_count: 1, cases: [{ case_id: 'a' }],
+        idempotent: false, amend_required: true, reason: 'order_lines_changed',
+      })
+      .mockResolvedValueOnce({  // supersede → retired old + created new
+        order_group_id: 'order-trace-1', status: 'superseded', superseded: ['a'],
+        created: { case_count: 1, cases: [{ case_id: 'b' }] },
+      });
     render(<SourcingIntentCard intent={INTENT} uid="u1" orderId="trace-1" />);
     fireEvent.click(screen.getByTestId('si-confirm-btn'));
-    await waitFor(() => expect(screen.getByTestId('si-amend')).toBeInTheDocument());
-    expect(screen.getByTestId('si-amend')).toHaveTextContent(/amendment is required/i);
+    const supersedeBtn = await screen.findByTestId('si-supersede-btn');
+
+    fireEvent.click(supersedeBtn);
+    await waitFor(() => expect(screen.getByTestId('si-superseded')).toBeInTheDocument());
+    expect(api.confirmCartSourcing).toHaveBeenLastCalledWith('u1', 'trace-1', INTENT.lines, undefined, true);
+    expect(screen.getByTestId('si-superseded')).toHaveTextContent(/retired 1 earlier request/i);
   });
 
   it('shows a calm error when confirm fails', async () => {

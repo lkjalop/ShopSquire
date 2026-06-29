@@ -70,6 +70,9 @@ class FulfillmentState(str, Enum):
     DELIVERY_CONSTRAINT_UNMET = "DELIVERY_CONSTRAINT_UNMET"
     POLICY_BLOCKED = "POLICY_BLOCKED"
     BUYER_DECLINED = "BUYER_DECLINED"
+    # terminal-NEUTRAL: the buyer amended this order before any supplier was contacted, so this version of
+    # the case is retired (a fresh case is materialized for the new lines). Not an error.
+    SUPERSEDED = "SUPERSEDED"
 
 
 FAILURE_STATES: FrozenSet[FulfillmentState] = frozenset({
@@ -78,7 +81,10 @@ FAILURE_STATES: FrozenSet[FulfillmentState] = frozenset({
     FulfillmentState.SUPPLIER_RESPONSE_QUARANTINED, FulfillmentState.DELIVERY_CONSTRAINT_UNMET,
     FulfillmentState.POLICY_BLOCKED, FulfillmentState.BUYER_DECLINED,
 })
-TERMINAL_STATES: FrozenSet[FulfillmentState] = FAILURE_STATES | {FulfillmentState.COMPLETED}
+# SUPERSEDED is terminal + inactive but NOT a failure (kept out of FAILURE_STATES so it isn't reported as
+# an error); TERMINAL_STATES makes it non-transitionable like COMPLETED.
+TERMINAL_STATES: FrozenSet[FulfillmentState] = FAILURE_STATES | {FulfillmentState.COMPLETED,
+                                                                 FulfillmentState.SUPERSEDED}
 
 # The CONSEQUENTIAL external action — sending to an external party. HUMAN-only by construction.
 EXTERNAL_SEND_EVENTS: FrozenSet[str] = frozenset({"external_message_sent"})
@@ -164,6 +170,21 @@ TRANSITIONS: Tuple[Transition, ...] = (
                note="WS-C: autonomous approval — all autonomy guards passed; action-gate authorizes the send"),
     Transition("external_message_sent_autonomous", _S.APPROVED_TO_SEND, _S.QUOTE_SENT, frozenset({_A.AGENT}),
                requires_evidence=True, note="WS-C: autonomous send — recorded as autonomous, not human"),
+
+    # ── AMENDMENT (buyer changes their mind BEFORE any supplier is contacted): supersede this version of
+    #    the case. Allowed ONLY from pre-send states (everything before external_message_sent) so it can
+    #    never retire a case a supplier has already been emailed about — that is the post-send supersession
+    #    protocol (operator-driven), deliberately NOT auto-fireable here. BUYER/SYSTEM/OPERATOR may fire. ──
+    Transition("case_superseded", _S.AVAILABILITY_ASSESSED, _S.SUPERSEDED,
+               frozenset({_A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), note="buyer amended order before commitment"),
+    Transition("case_superseded", _S.AWAITING_BUYER_COMMITMENT, _S.SUPERSEDED,
+               frozenset({_A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), note="buyer amended order before commitment"),
+    Transition("case_superseded", _S.COMMITTED, _S.SUPERSEDED,
+               frozenset({_A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), note="buyer amended order before supplier contact"),
+    Transition("case_superseded", _S.QUOTE_DRAFTED, _S.SUPERSEDED,
+               frozenset({_A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), note="buyer amended order; draft retired pre-send"),
+    Transition("case_superseded", _S.AWAITING_APPROVAL, _S.SUPERSEDED,
+               frozenset({_A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), note="buyer amended order; pending approval voided pre-send"),
 
     # ── inbound external response (a supplier system / poller) ──
     Transition("external_message_received", _S.QUOTE_SENT, _S.QUOTE_RECEIVED, frozenset({_A.EXTERNAL, _A.SYSTEM}),
