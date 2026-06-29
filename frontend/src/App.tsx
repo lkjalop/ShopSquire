@@ -2,12 +2,13 @@
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
+import SourcingIntentCard from './components/SourcingIntentCard';
 import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, clearCart } from './lib/api';
+import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, clearCart, type SourcingIntent } from './lib/api';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -337,6 +338,7 @@ export default function App() {
   // Safe-internet-search results (separate labeled source; never owned catalog items).
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
   const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
+  const [sourcingIntent, setSourcingIntent] = useState<SourcingIntent | null>(null);
   const [bulkAlternatives, setBulkAlternatives] = useState<BulkAlternativeOption[]>([]);
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
@@ -1323,6 +1325,11 @@ export default function App() {
         const prods = (data.products || []) as Product[];
         setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
         setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
+        // FLUID-procurement preview (FULFILLMENT_DEFER_TO_CART): a buyer-safe sourcing split with no durable
+        // case — the buyer confirms it (GATE 1) via SourcingIntentCard to materialize the cases.
+        setSourcingIntent(
+          data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines)
+            ? (data.sourcing_intent as SourcingIntent) : null);
         setBulkAlternatives(Array.isArray(data.fulfillment_options) ? (data.fulfillment_options as BulkAlternativeOption[]) : []);
         const respAssistant = data.assistant_message || '';
         // Async-narration handoff: recommend returned the deterministic answer now + a job id for the
@@ -1936,6 +1943,12 @@ export default function App() {
                   {fulfilmentCase && (
                     <div className={styles.procurementPanelSlot}>
                       <FulfilmentOptions caseSummary={fulfilmentCase} uid={uid} pollMs={4000} />
+                    </div>
+                  )}
+                  {!fulfilmentCase && sourcingIntent && (sourcingIntent.lines?.length ?? 0) > 0 && (
+                    <div className={styles.procurementPanelSlot}>
+                      <SourcingIntentCard intent={sourcingIntent} uid={uid}
+                                          orderId={traceId || `cart-${uid}`} traceId={traceId || undefined} />
                     </div>
                   )}
                   {rightPanelContract?.image_untrusted && (

@@ -1,0 +1,88 @@
+/**
+ * SourcingIntentCard — the buyer side of FLUID procurement (FULFILLMENT_DEFER_TO_CART).
+ *
+ * When a query needs sourcing, the backend returns a buyer-safe `sourcing_intent` PREVIEW (no durable case,
+ * no supplier contacted). This card makes that preview visible — "needs confirmation before sourcing" — and
+ * gives the buyer a single GATE-1 action: "Confirm sourcing from cart", which POSTs to
+ * /api/v1/fulfillment/cases/confirm-cart and materializes one durable case per supplier group, idempotently.
+ *
+ * Honest copy: nothing is ordered and no supplier is contacted until the buyer confirms. Supplier identity
+ * stays server-side (the preview never names a supplier).
+ */
+import { useState } from 'react';
+import { confirmCartSourcing, type ConfirmCartResult, type SourcingIntent } from '../lib/api';
+
+interface Props {
+  intent: SourcingIntent;
+  uid: string;
+  orderId: string;        // commitment reference / idempotency key (the turn's trace id is stable + fine)
+  traceId?: string;
+  onConfirmed?: (r: ConfirmCartResult) => void;
+}
+
+export default function SourcingIntentCard({ intent, uid, orderId, traceId, onConfirmed }: Props) {
+  const [result, setResult] = useState<ConfirmCartResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const lines = intent.lines || [];
+  const totalUnits = lines.reduce((n, l) => n + (Number(l.quantity) || 0), 0);
+
+  const onConfirm = async () => {
+    setBusy(true); setError('');
+    try {
+      const r = await confirmCartSourcing(uid, orderId, lines, traceId);
+      setResult(r);
+      onConfirmed?.(r);
+    } catch (e: any) {
+      setError(e?.message || 'could not confirm sourcing');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section data-testid="sourcing-intent" className="fulfilment-options" aria-label="Sourcing preview">
+      <header>
+        <strong>Sourcing preview</strong>{' '}
+        <span data-testid="si-status">needs confirmation before sourcing</span>
+      </header>
+
+      <ol className="fc-why" data-testid="si-lines">
+        {lines.map((l, i) => (
+          <li key={`${l.item_ref}-${i}`}>
+            {l.item_ref} — {l.quantity} unit(s)
+            {l.shortfall != null && l.shortfall !== l.quantity ? ` (${l.shortfall} to source)` : ''}
+          </li>
+        ))}
+      </ol>
+      <p>
+        Preview only — {lines.length} item line(s), {totalUnits} unit(s)
+        {intent.planned_case_count ? `, ~${intent.planned_case_count} supplier request(s)` : ''}.
+        Nothing is ordered and no supplier is contacted until you confirm.
+      </p>
+
+      {error && <p role="alert" data-testid="si-error">{error}</p>}
+
+      {!result && (
+        <button disabled={busy} onClick={onConfirm} data-testid="si-confirm-btn">
+          {busy ? 'Confirming…' : 'Confirm sourcing from cart'}
+        </button>
+      )}
+
+      {result && result.amend_required && (
+        <p data-testid="si-amend" role="status">
+          This order was already confirmed with different items, so an amendment is required before
+          re-sourcing. (The original request is unchanged — nothing was duplicated.)
+        </p>
+      )}
+
+      {result && !result.amend_required && (
+        <p data-testid="si-created" role="status">
+          {result.case_count > 0
+            ? `Created ${result.case_count} sourcing request(s)${result.idempotent ? ' (already confirmed earlier)' : ''} — the procurement team has been notified. No supplier has been contacted yet.`
+            : 'Everything is available from stock — no sourcing was needed.'}
+        </p>
+      )}
+    </section>
+  );
+}
