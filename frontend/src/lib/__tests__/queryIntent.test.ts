@@ -2,10 +2,45 @@ import { describe, expect, it } from 'vitest';
 import {
   detectCVIssueType,
   detectPanelMode,
+  hasDamageSignal,
   isCartUpsellIntentQuery,
   isComplaintIntent,
   isShoppingIntentQuery,
+  shouldRouteToComplaint,
 } from '../queryIntent';
+
+describe('shouldRouteToComplaint (chat-firing misroute guard)', () => {
+  const base = {
+    mode: 'grid' as const, complaintIntent: false, explicitComplaintIntent: false,
+    shoppingIntent: false, damageSignal: false, hasImages: false,
+    explicitVisualIntent: false, hasImageContext: false,
+  };
+  it('keeps a shopping query that merely mentions "return" on the recommendations path', () => {
+    // "i need 15 laptops, easy return?" → weak complaint word + shopping intent → NOT complaint (→ /chat)
+    expect(shouldRouteToComplaint({ ...base, shoppingIntent: true, complaintIntent: true,
+      explicitComplaintIntent: true })).toBe(false);
+  });
+  it('routes a genuine damage report to complaint even with product words', () => {
+    expect(shouldRouteToComplaint({ ...base, shoppingIntent: true, damageSignal: true })).toBe(true);
+  });
+  it('routes a non-shopping return request to complaint', () => {
+    expect(shouldRouteToComplaint({ ...base, complaintIntent: true })).toBe(true);
+  });
+  it('never routes image/visual turns here', () => {
+    expect(shouldRouteToComplaint({ ...base, damageSignal: true, hasImages: true })).toBe(false);
+    expect(shouldRouteToComplaint({ ...base, complaintIntent: true, explicitVisualIntent: true })).toBe(false);
+  });
+});
+
+describe('hasDamageSignal', () => {
+  it('detects post-purchase damage/defect words', () => {
+    expect(hasDamageSignal('my laptop arrived broken')).toBe(true);
+    expect(hasDamageSignal('the screen is cracked')).toBe(true);
+  });
+  it('is false for a pre-purchase return question', () => {
+    expect(hasDamageSignal('what is your return window before I buy 15 laptops')).toBe(false);
+  });
+});
 
 describe('isShoppingIntentQuery', () => {
   it('recognises product/budget/brand language', () => {

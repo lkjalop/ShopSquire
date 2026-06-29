@@ -21,9 +21,11 @@ import { detectPII } from './lib/pii';
 import {
   detectCVIssueType,
   detectPanelMode,
+  hasDamageSignal,
   isCartUpsellIntentQuery,
   isComplaintIntent,
   isShoppingIntentQuery,
+  shouldRouteToComplaint,
   type RightPanelMode,
 } from './lib/queryIntent';
 import {
@@ -1095,7 +1097,11 @@ export default function App() {
         }
       }
 
-      const routeToComplaint = (mode === 'cv' || complaintIntent || explicitComplaintIntent) && !explicitVisualIntent && !requestImageContext && !hasImages;
+      const routeToComplaint = shouldRouteToComplaint({
+        mode, complaintIntent, explicitComplaintIntent, shoppingIntent,
+        damageSignal: hasDamageSignal(q), hasImages,
+        explicitVisualIntent, hasImageContext: Boolean(requestImageContext),
+      });
       if (routeToComplaint) {
         const r = await fetch(apiUrl('/api/v1/orchestrate'), {
           method: 'POST',

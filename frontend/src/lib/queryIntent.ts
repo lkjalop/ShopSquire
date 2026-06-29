@@ -49,3 +49,25 @@ export function isComplaintIntent(query: string): boolean {
   if (action && !policyOnly) return true;
   return false;
 }
+
+// A genuine post-purchase damage/defect signal (not a pre-purchase "what's your return window?").
+export function hasDamageSignal(query: string): boolean {
+  return /\b(damaged|broken|defective|not working|stopped working|wrong item|faulty|cracked|dead on arrival|doa)\b/i
+    .test(String(query || ''));
+}
+
+// Decide whether a buyer turn goes to the COMPLAINT/return orchestrator instead of product recommendations.
+// The bug this fixes: a clear shopping query that merely mentions "return"/"refund" (a pre-purchase
+// question) was routed to the complaint path → no /chat request fired, no recommendations. Rule: a genuine
+// damage/defect signal always routes to complaint; otherwise a weak complaint word does NOT override a
+// shopping-intent query. Image/visual turns are handled elsewhere, so they never route here.
+export function shouldRouteToComplaint(opts: {
+  mode: RightPanelMode; complaintIntent: boolean; explicitComplaintIntent: boolean;
+  shoppingIntent: boolean; damageSignal: boolean; hasImages: boolean;
+  explicitVisualIntent: boolean; hasImageContext: boolean;
+}): boolean {
+  if (opts.hasImages || opts.explicitVisualIntent || opts.hasImageContext) return false;
+  if (opts.damageSignal) return true;  // real post-purchase issue → complaint, even with product words
+  const weak = opts.mode === 'cv' || opts.complaintIntent || opts.explicitComplaintIntent;
+  return weak && !opts.shoppingIntent;  // a weak complaint word must not hijack a shopping query
+}
