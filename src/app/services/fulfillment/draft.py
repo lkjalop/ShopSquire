@@ -563,16 +563,20 @@ def _build_rfq_slots(db, *, item_ref: str, quantity: int, case_ref: str, case_st
     ship_to = str(reqs.get("ship_to") or terms["ship_to_region"] or "").strip()
     bulk = int(quantity or 0) >= terms["bulk_threshold"]
     # multi-line (one supplier, several SKUs) → render a line-items block; else the single SKU description.
-    sku_desc = _line_items_block(db, lines, tenant_id) if lines else _sku_description(db, item_ref, tenant_id)
+    _multi = [l for l in (lines or []) if isinstance(l, dict) and (l.get("item_ref") or l.get("sku"))]
+    sku_desc = _line_items_block(db, _multi, tenant_id) if _multi else _sku_description(db, item_ref, tenant_id)
     if not sku_desc:  # lines provided but none usable → fall back to the primary item
         sku_desc = _sku_description(db, item_ref, tenant_id)
+        _multi = []
+    # a COMPACT label for the subject line (the full block with newlines must never go in a subject).
+    item_label = (f"{len(_multi)} items" if len(_multi) > 1 else item_ref)
     return {
         # legacy DEFAULT_TEMPLATE slots
         "item_ref": item_ref, "quantity": quantity, "case_ref": case_ref, "supplier_name": supplier_name,
         "needed_by": deadline, "urgency_note": _urgency_note(evidence),
         "supplier_context": _supplier_context_note(evidence), "requirements_block": _requirements_block(case_state),
         # rich supplier_rfq slots
-        "sku_description": sku_desc, "deadline_date": deadline, "ship_to": ship_to,
+        "sku_description": sku_desc, "item_label": item_label, "deadline_date": deadline, "ship_to": ship_to,
         "ship_to_line": (f"- Ship to: {ship_to}\n" if ship_to else ""),
         "quote_validity_days": terms["quote_validity_days"],
         "warranty_line": (f"- {terms['warranty_preference']}\n" if terms["warranty_preference"] else ""),
