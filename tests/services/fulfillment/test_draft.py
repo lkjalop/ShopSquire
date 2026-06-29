@@ -115,6 +115,30 @@ def test_draft_and_record_advances_to_quote_drafted_with_evidence(db):
     assert cur.state_json["draft"]["content_hash"] == draft.content_hash  # draft persisted on the case
 
 
+def test_draft_and_record_emits_supplier_selection_trace(db, monkeypatch):
+    events = []
+
+    def fake_log_trace_event(**kwargs):
+        events.append(kwargs)
+
+    monkeypatch.setattr("src.app.services.decision_log.log_trace_event", fake_log_trace_event)
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    estimated_value_cents=669000, rank_fn=_rank_ok, allowlist_fn=_allow,
+                                    hippograph_fn=_hippo, market_fn=_market, now_iso="2026-06-26 09:05:10")
+    assert res.ok and draft is not None
+    evt = next(e for e in events if e.get("source_id") == "Supplier_Selection_Agent")
+    assert evt["trace_id"] == "T1"
+    assert evt["event_type"] == "supplier_selected"
+    assert evt["target_id"] == cid
+    payload = evt["payload"]
+    assert payload["item_ref"] == "SKU-1"
+    assert payload["quantity"] == 6
+    assert payload["supplier_ref"] == "SUP-7"
+    assert payload["recipient_domain"] == "approved-supplier.example"
+    assert payload["content_hash"] == draft.content_hash
+
+
 def test_draft_and_record_fires_no_approved_supplier(db):
     cid = _committed_case(db)
     res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,

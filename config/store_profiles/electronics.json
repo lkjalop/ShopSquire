@@ -1395,6 +1395,15 @@
   "rfq_required_fields": ["sku_description", "deadline_date", "ship_to", "quantity"],
   "_default_fulfillment_location_comment": "the buyer's default store (location_id) when they don't name one — drives the multi-location transfer view (fulfil from the warehouse to the buyer's store before sourcing externally). Must match a location_id seeded in inventory_level.",
   "default_fulfillment_location": "sydney",
+  "_supplier_routing_comment": "demo seed-time routing: a product's sku-prefix/attribute tokens → eligible supplier_id(s). The RULES (vertical vocabulary) live here so core stays vertical-blind; first matching rule wins, else supplier_routing_default. Ranking still picks the winner among eligible suppliers.",
+  "supplier_routing_rules": [
+    {"supplier_id": "SUP-APPLE", "sku_prefixes": ["MAC-"], "tokens": ["macbook", "apple", "ipad"]},
+    {"supplier_id": "SUP-PERIPH", "sku_prefixes": ["AUD-", "MON-", "HDS-", "BAG-", "ACC-", "PERIPH-"], "tokens": ["monitor", "headset", "bag", "dock", "charger", "power_bank", "cable", "stylus", "card_reader", "audio_interface", "mouse"]},
+    {"supplier_id": "SUP-OFFICE", "sku_prefixes": ["NET-", "STO-", "PRN-", "HDD-"], "tokens": ["router", "printer", "hard_drive", "ssd", "storage"]},
+    {"supplier_id": "SUP-CREATOR", "sku_prefixes": ["GAM-", "RGAM-"], "tokens": ["gaming", "rtx", "creator"]},
+    {"supplier_id": "SUP-BIZ", "sku_prefixes": ["LAP-", "SYN-LAP-"], "tokens": ["laptop", "notebook"]}
+  ],
+  "supplier_routing_default": "SUP-BIZ",
 
   "cv_returns_pack": "electronics",
   "narration_spec_dimensions": [{"label":"GPU","variants":[{"key":"gpu_model"},{"key":"gpu_vram_gb","unit":"GB VRAM"}]},{"label":"Display","variants":[{"key":"refresh_hz","unit":"Hz"}]},{"label":"RAM","variants":[{"key":"ram_gb","unit":"GB"}]},{"label":"SSD","variants":[{"key":"storage_gb","unit":"GB"}]},{"label":"CPU","variants":[{"key":"cpu_model"}]}]

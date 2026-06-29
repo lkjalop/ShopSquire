@@ -19,12 +19,12 @@ from src.app.services.supplier_catalog import (
 
 def main() -> None:
     with db_session() as db:
-        # Coverage follows the catalog: every active SKU the recommender can surface (GAM-*/LAP-*) gets an
-        # approved supplier, so the procurement draft path never dead-ends at NO_APPROVED_SUPPLIER.
-        counts = ensure_supplier_coverage(db)
         cat = commerce_catalog.seed_demo(db)
         # per-(sku, location) stock so the multi-location / transfer alternative has real data to surface.
         loc_rows = commerce_catalog.seed_demo_locations(db)
+        # Coverage follows the catalog: every active SKU the recommender can surface (GAM-*/LAP-*) gets an
+        # approved supplier, so the procurement draft path never dead-ends at NO_APPROVED_SUPPLIER.
+        counts = ensure_supplier_coverage(db)
         comp = competitor_source.seed_demo(db)
         obj = support_objection_source.seed_demo(db)
         fun = funnel_source.seed_demo(db)

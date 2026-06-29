@@ -20,6 +20,7 @@ from src.app.services.fulfillment import draft as fdraft
 from src.app.services.fulfillment import economics as feco
 from src.app.services.fulfillment import external_comms as fec
 from src.app.services.fulfillment import options as fopt
+from src.app.services.fulfillment import order_split as fos
 from src.app.services.fulfillment import purchase_order as fpo
 from src.app.services.fulfillment import sandbox_supplier as fsb
 from src.app.services.fulfillment import workflow as fwf
@@ -32,6 +33,23 @@ _OPERATOR = [ROLE_MERCHANT, ROLE_OWNER]
 
 def _demo_enabled() -> bool:
     return str(os.getenv("FULFILLMENT_DEMO_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _truthy(v: Any) -> bool:
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _auto_draft_on_commit_enabled() -> bool:
+    """Internal-only RFQ draft after GATE 1. Does not send; GATE 2 remains human/autonomy-governed."""
+    raw = os.getenv("FULFILLMENT_AUTO_DRAFT_ON_COMMIT")
+    if raw is not None:
+        return _truthy(raw)
+    try:
+        from src.app.config import get_settings, load_feature_flags
+        flags = load_feature_flags(get_settings().feature_flags_path) or {}
+        return _truthy(flags.get("FULFILLMENT_AUTO_DRAFT_ON_COMMIT"))
+    except Exception:
+        return False
 
 
 def _agent() -> Actor:
@@ -257,6 +275,34 @@ def assess(case_id: str, body: AssessBody, role: str = Depends(require_role(_OPE
         return _case_view(db, case_id, for_operator=True)
 
 
+class SplitLineBody(BaseModel):
+    item_ref: str
+    requested_qty: int
+    in_stock: int = 0
+    line_id: Optional[str] = None
+
+
+class SplitPlanBody(BaseModel):
+    lines: list[SplitLineBody]
+    trace_id: Optional[str] = None
+
+
+@router.post("/split-plan")
+def split_plan(body: SplitPlanBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Plan a mixed buyer request into supplier-resolved sourcing groups.
+
+    Read-only: no supplier contact, no PO, no case creation. This is the safe bridge for requests such as
+    "15 laptops plus monitors/headsets" while the core RFQ case remains one commercial scope per case.
+    """
+    with db_session() as db:
+        plan = fos.plan_order_split(
+            db,
+            lines=[x.model_dump() for x in (body.lines or [])],
+        )
+        fos.emit_split_trace(body.trace_id, plan=plan)
+        return plan
+
+
 class CommitBody(BaseModel):
     uid: str
     email: Optional[str] = None   # optional buyer email → bounded-autonomy status reply (flag-gated)
@@ -270,6 +316,18 @@ def commit(case_id: str, body: CommitBody) -> Dict[str, Any]:
         res = fwf.transition(db, case_id=case_id, event="buyer_committed", actor=Actor(ActorType.BUYER, body.uid),
                              reason_code="buyer_commitment")
         _raise_if_failed(res)
+        if _auto_draft_on_commit_enabled():
+            try:
+                cur = fwf.repository.current_version(db, case_id)
+                sj = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
+                avail = sj.get("availability") if isinstance(sj.get("availability"), dict) else {}
+                item_ref = str(avail.get("item_ref") or "").strip()
+                qty = int(avail.get("shortfall") or avail.get("requested_qty") or 0)
+                if item_ref and qty > 0:
+                    fdraft.draft_and_record(db, case_id=case_id, actor=_agent(), item_ref=item_ref, quantity=qty,
+                                            estimated_value_cents=0, trace_id=(cur.source_trace_id if cur else None))
+            except Exception:
+                pass
         # bounded autonomy: auto-send the claim-safe "thanks, sourcing" status to the buyer (flag-gated;
         # no human approval needed because it makes no commitment). Best-effort.
         if body.email:

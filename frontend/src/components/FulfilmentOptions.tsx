@@ -125,6 +125,33 @@ export default function FulfilmentOptions({ caseSummary, uid, pollMs = 0 }: Prop
         </div>
       )}
 
+      {state === 'COMMITTED' && (
+        <div data-testid="fc-committed">
+          <p>
+            Sourcing confirmed. The procurement team is preparing the supplier request internally.
+            No supplier has been contacted yet, and nothing has been ordered.
+          </p>
+        </div>
+      )}
+
+      {(state === 'QUOTE_DRAFTED' || state === 'AWAITING_APPROVAL') && (
+        <div data-testid="fc-draft-review">
+          <p>
+            Supplier request drafted for human review. A supplier is only contacted after the
+            approval gate clears the exact draft.
+          </p>
+        </div>
+      )}
+
+      {state === 'AWAITING_SUPPLIER_INFO' && (
+        <div data-testid="fc-supplier-info">
+          <p>
+            A scoped supplier clarification is pending. We will update fulfilment options after the
+            reply is reviewed.
+          </p>
+        </div>
+      )}
+
       {state === 'OPTIONS_READY' && options.length > 0 && (
         <div data-testid="fc-options">
           <p>Supplier availability confirmed. Choose fulfilment:</p>

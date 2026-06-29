@@ -678,6 +678,67 @@ def build_draft(
 
 
 # ── wiring: record the draft via the workflow chokepoint ──────────────────────
+def _emit_supplier_selection_trace(
+    *,
+    trace_id: Optional[str],
+    case_id: str,
+    draft: SupplierDraft,
+    tenant_id: str = "default",
+) -> None:
+    """Expose supplier selection in Decision Trace. Best-effort only; procurement must not depend on trace I/O."""
+    if not trace_id:
+        return
+    scope = draft.commercial_scope or {}
+    item_ref = str(scope.get("item_ref") or "").strip()
+    terms: Dict[str, Any] = {}
+    try:
+        from src.app.models.db import db_session
+        from src.app.services.supplier_catalog import supplier_terms
+        with db_session() as _db:
+            terms = supplier_terms(_db, draft.recipient_ref, item_ref, tenant_id=tenant_id) if item_ref else {}
+    except Exception:
+        terms = {}
+    payload = {
+        "case_id": case_id,
+        "item_ref": item_ref,
+        "quantity": scope.get("quantity"),
+        "supplier_ref": draft.recipient_ref,
+        "recipient_domain": draft.recipient_domain,
+        "recipient_email": draft.recipient_email,
+        "content_hash": draft.content_hash,
+        "confidence": draft.confidence,
+        "supplier_terms": {
+            "moq": terms.get("moq"),
+            "min_order_value_cents": terms.get("min_order_value_cents"),
+            "lead_time_days": terms.get("lead_time_days"),
+            "region": terms.get("region"),
+            "on_time_rate": terms.get("on_time_rate"),
+            "contract_status": terms.get("contract_status"),
+            "price_breaks": terms.get("price_breaks") or [],
+        },
+        "rationale": list(draft.rationale or [])[:12],
+        "evidence": [
+            {
+                "source": e.get("source"),
+                "evidence_id": e.get("evidence_id"),
+                "summary": e.get("summary"),
+                "payload": e.get("payload") or {},
+            }
+            for e in (draft.evidence or [])
+            if isinstance(e, dict)
+            and e.get("source") in {"moq_risk", "price_break", "supplier_history", "inventory"}
+        ],
+        "idempotency_key": f"supplier-selection:{case_id}:{draft.content_hash}",
+    }
+    try:
+        from src.app.services.decision_log import log_trace_event
+        log_trace_event(trace_id=trace_id, event_type="supplier_selected", source_type="agent",
+                        source_id="Supplier_Selection_Agent", target_type="fulfillment_case",
+                        target_id=case_id, payload=payload, durable=True)
+    except Exception:
+        return
+
+
 def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity: int,
                      estimated_value_cents: int = 0, tenant_id: str = "default",
                      now_iso: Optional[str] = None, trace_id: Optional[str] = None, **draft_kw):
@@ -714,6 +775,8 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
     # the operator sees allow / needs_info / block before approving. Does not change the transition.
     draft_dict = draft.to_dict()
     draft_dict["send_gate"] = draft_send_gate(draft_dict)
+    trace_for_selection = trace_id or (cur.source_trace_id if cur else None)
+    _emit_supplier_selection_trace(trace_id=trace_for_selection, case_id=case_id, draft=draft, tenant_id=tenant_id)
     res = workflow.transition(
         db, case_id=case_id, event="external_message_drafted", actor=actor,
         reason_code="supplier_quote_drafted", confidence=draft.confidence,

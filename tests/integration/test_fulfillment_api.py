@@ -32,6 +32,31 @@ def test_open_assess_commit_flow_over_http():
     assert [e["event"] for e in j][:3] == ["case_opened", "availability_assessed", "request_buyer_commitment"]
 
 
+def test_commit_auto_drafts_internal_rfq_when_flag_enabled(monkeypatch):
+    monkeypatch.setenv("FULFILLMENT_AUTO_DRAFT_ON_COMMIT", "1")
+    from src.app.models.db import db_session
+    from src.app.services.supplier_catalog import ensure_supplier_coverage
+    with db_session() as db:
+        ensure_supplier_coverage(db)
+
+    cid = _open()
+    r = client.post(f"{_BASE}/{cid}/assess", json={"requested_qty": 10, "in_stock": 4, "item_ref": "GAM-0002"})
+    assert r.status_code == 200 and r.json()["state"] == "AWAITING_BUYER_COMMITMENT"
+    r = client.post(f"{_BASE}/{cid}/commit", json={"uid": "u1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["state"] == "QUOTE_DRAFTED"
+    assert "draft" not in body["state_json"]
+
+    r = client.get(f"{_BASE}/{cid}?view=operator")
+    assert r.status_code == 200
+    draft = r.json()["state_json"]["draft"]
+    assert draft["commercial_scope"]["item_ref"] == "GAM-0002"
+    assert draft["commercial_scope"]["quantity"] == 6
+    assert draft["recipient_domain"] == "creatorfleet.example"
+    assert draft["content_hash"]
+
+
 def test_illegal_command_returns_409():
     cid = _open()
     # cannot dispatch from NEW — the workflow rejects, the API surfaces 409

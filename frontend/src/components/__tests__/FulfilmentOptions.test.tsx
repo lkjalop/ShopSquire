@@ -43,6 +43,17 @@ describe('FulfilmentOptions', () => {
     expect(why).toHaveTextContent(/No supplier contacted yet/i);
   });
 
+  it('shows buyer-safe copy while the supplier draft is under human review', async () => {
+    (api.getFulfillmentCase as any).mockResolvedValue({
+      state: 'QUOTE_DRAFTED',
+      state_json: { availability: { requested_qty: 20, in_stock: 14, shortfall: 6 } },
+    });
+    render(<FulfilmentOptions caseSummary={{ ...CASE, status: 'QUOTE_DRAFTED' }} uid="u1" />);
+    const review = await screen.findByTestId('fc-draft-review');
+    expect(review).toHaveTextContent(/drafted for human review/i);
+    expect(review).toHaveTextContent(/only contacted after the approval gate/i);
+  });
+
   it('renders options with tradeoffs + a deadline flag, and selects the chosen one', async () => {
     (api.getFulfillmentCase as any).mockResolvedValue({
       state: 'OPTIONS_READY',

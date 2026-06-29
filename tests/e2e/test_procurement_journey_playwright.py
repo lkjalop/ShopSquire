@@ -61,10 +61,14 @@ def test_full_governed_procurement_journey_api():
     cid = _post("/api/v1/fulfillment/cases", json={"uid": "rec-buyer", "trace_id": "REC-1"})["case_id"]
     assess = _post(f"{_FC}/{cid}/assess", json={"requested_qty": 10, "in_stock": 4, "item_ref": "LAP-021"})
     assert assess["state"] == "AWAITING_BUYER_COMMITMENT"  # no supplier contacted yet
-    assert _post(f"{_FC}/{cid}/commit", json={"uid": "rec-buyer"})["state"] == "COMMITTED"
+    committed = _post(f"{_FC}/{cid}/commit", json={"uid": "rec-buyer"})
+    assert committed["state"] in ("COMMITTED", "QUOTE_DRAFTED")
 
     # agent drafts → request approval (needs a seeded approved supplier; otherwise NO_APPROVED_SUPPLIER)
-    drafted = _post(f"{_FC}/{cid}/draft-quote", json={"item_ref": "LAP-021", "quantity": 6})
+    if committed["state"] == "QUOTE_DRAFTED":
+        drafted = _requests.get(f"{_FC}/{cid}?view=operator", headers=_HDR, timeout=20).json()
+    else:
+        drafted = _post(f"{_FC}/{cid}/draft-quote", json={"item_ref": "LAP-021", "quantity": 6})
     if drafted["state"] == "NO_APPROVED_SUPPLIER":
         pytest.skip("no approved supplier seeded — seed trusted_supplier_domains for the full path")
     assert drafted["state"] == "QUOTE_DRAFTED"
@@ -97,13 +101,14 @@ def test_buyer_storefront_renders_procurement_check():
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
-        page = browser.new_page()
+        page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.goto(FRONTEND, timeout=20000)
         page.get_by_role("button", name="Ask Me!").click()
-        page.get_by_placeholder("Type your message...").fill(
-            "I need 20 gaming laptops for an esports lab, $1800 each within two weeks")
-        page.keyboard.press("Enter")
+        msg = page.get_by_placeholder("Type your message...")
+        msg.wait_for(timeout=10000)
+        msg.fill("I need 20 gaming laptops for an esports lab, $1800 each within two weeks")
+        msg.press("Enter")
         # the fulfilment block renders when the response carries a case (FULFILLMENT_CASES_ENABLED)
-        page.wait_for_selector("[data-testid='fulfilment-options']", timeout=30000)
+        page.wait_for_selector("[data-testid='fulfilment-options']", timeout=75000)
         assert "awaiting buyer commitment" in page.locator("[data-testid='fc-status']").inner_text().lower()
         browser.close()

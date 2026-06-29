@@ -573,7 +573,7 @@ class InventoryAgent:
                                    COALESCE(s.late_deliveries_30d, 0) as late_deliveries_30d
                             FROM suppliers s
                             JOIN supplier_products sp ON sp.supplier_id = s.id
-                            WHERE sp.sku = :sku
+                            WHERE sp.sku = :sku AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1
                             """
                         ),
                         {"sku": sku},
@@ -588,7 +588,7 @@ class InventoryAgent:
                                    0 as recent_sla_breaches, 0 as late_deliveries_30d
                             FROM suppliers s
                             JOIN supplier_products sp ON sp.supplier_id = s.id
-                            WHERE sp.sku = :sku
+                            WHERE sp.sku = :sku AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1
                             """
                         ),
                         {"sku": sku},
@@ -697,7 +697,7 @@ class InventoryAgent:
                          "COALESCE(s.on_time_rate,0), COALESCE(s.reliability_score,0), "
                          "COALESCE(s.recent_sla_breaches,0), COALESCE(s.late_deliveries_30d,0) "
                          "FROM suppliers s JOIN supplier_products sp ON sp.supplier_id=s.id "
-                         "WHERE sp.sku=:sku AND COALESCE(s.active,1)=1"),
+                         "WHERE sp.sku=:sku AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1"),
                     {"sku": str(sku)},
                 ).fetchall()
         except Exception:

@@ -78,7 +78,39 @@ _DEMO_SUPPLIERS = [
                "on_time_rate": 0.85, "contract_status": "spot",
                "price_breaks": [{"min_qty": 20, "discount_pct": 8}, {"min_qty": 50, "discount_pct": 15}]}},
 ]
-DEMO_SKUS = ["LAP-021", "GAM-1", "demo-sku"]
+DEMO_SKUS = ["LAP-021", "GAM-1", "GAM-0002", "demo-sku"]
+
+# Routed demo suppliers: these make procurement demos behave like a real multi-supplier catalog instead
+# of every SKU collapsing to the same generic supplier. ``seed_demo`` above is intentionally kept as the
+# small legacy fixture used by older tests; ``ensure_supplier_coverage`` uses these category/SKU routes.
+_ROUTED_DEMO_SUPPLIERS = [
+    {"id": "SUP-BIZ", "name": "Northbridge Business Systems", "domain": "northbridge-business.example",
+     "unit_cost": 1095.0, "lead_time_days": 6, "moq": 5, "on_time_rate": 0.95, "reliability_score": 0.91,
+     "terms": {"moq": 5, "min_order_value_cents": 300000, "lead_time_days": 6, "region": "AU-metro",
+               "on_time_rate": 0.95, "contract_status": "contracted",
+               "price_breaks": [{"min_qty": 20, "discount_pct": 4}, {"min_qty": 50, "discount_pct": 9}]}},
+    {"id": "SUP-CREATOR", "name": "CreatorFleet Wholesale", "domain": "creatorfleet.example",
+     "unit_cost": 1260.0, "lead_time_days": 7, "moq": 10, "on_time_rate": 0.93, "reliability_score": 0.90,
+     "terms": {"moq": 10, "min_order_value_cents": 700000, "lead_time_days": 7, "region": "AU",
+               "on_time_rate": 0.93, "contract_status": "preferred",
+               "price_breaks": [{"min_qty": 25, "discount_pct": 5}, {"min_qty": 50, "discount_pct": 11}]}},
+    {"id": "SUP-APPLE", "name": "Orchard Device Supply", "domain": "orchard-device.example",
+     "unit_cost": 1490.0, "lead_time_days": 9, "moq": 3, "on_time_rate": 0.91, "reliability_score": 0.88,
+     "terms": {"moq": 3, "min_order_value_cents": 500000, "lead_time_days": 9, "region": "AU-metro",
+               "on_time_rate": 0.91, "contract_status": "approved",
+               "price_breaks": [{"min_qty": 10, "discount_pct": 3}, {"min_qty": 25, "discount_pct": 6}]}},
+    {"id": "SUP-PERIPH", "name": "PeriLink Accessories", "domain": "perilink-accessories.example",
+     "unit_cost": 55.0, "lead_time_days": 4, "moq": 20, "on_time_rate": 0.97, "reliability_score": 0.93,
+     "terms": {"moq": 20, "min_order_value_cents": 100000, "lead_time_days": 4, "region": "AU-metro",
+               "on_time_rate": 0.97, "contract_status": "preferred",
+               "price_breaks": [{"min_qty": 50, "discount_pct": 8}, {"min_qty": 100, "discount_pct": 14}]}},
+    {"id": "SUP-OFFICE", "name": "Harbour Office Wholesale", "domain": "harbour-office.example",
+     "unit_cost": 180.0, "lead_time_days": 5, "moq": 5, "on_time_rate": 0.94, "reliability_score": 0.89,
+     "terms": {"moq": 5, "min_order_value_cents": 150000, "lead_time_days": 5, "region": "AU",
+               "on_time_rate": 0.94, "contract_status": "contracted",
+               "price_breaks": [{"min_qty": 20, "discount_pct": 6}, {"min_qty": 75, "discount_pct": 12}]}},
+]
+_ALL_DEMO_SUPPLIER_IDS = {s["id"] for s in (_DEMO_SUPPLIERS + _ROUTED_DEMO_SUPPLIERS)}
 
 
 def ensure_tables(db) -> None:
@@ -241,6 +273,130 @@ def seed_demo(db, *, skus: Optional[List[str]] = None, commit: bool = True) -> D
     return {"suppliers": n_sup, "products": n_prod, "domains": n_dom}
 
 
+def _seed_supplier_set(db, suppliers: List[Dict[str, Any]], supplier_skus: Dict[str, List[str]]) -> Dict[str, int]:
+    """Insert/update a supplier set and active rows for the exact SKUs each supplier should carry."""
+    if db is None:
+        return {}
+    ensure_tables(db)
+    import json as _json
+    import uuid
+    n_sup = n_prod = n_dom = 0
+    for s in suppliers:
+        if not _exists(db, "SELECT 1 FROM suppliers WHERE id=:i", {"i": s["id"]}):
+            db.execute(text("INSERT INTO suppliers (id, name, unit_cost, lead_time_days, moq, on_time_rate, "
+                            "reliability_score, recent_sla_breaches, late_deliveries_30d, active) "
+                            "VALUES (:id,:n,:c,:l,:m,:o,:r,0,0,1)"),
+                       {"id": s["id"], "n": s["name"], "c": s["unit_cost"], "l": s["lead_time_days"],
+                        "m": s["moq"], "o": s["on_time_rate"], "r": s["reliability_score"]})
+            n_sup += 1
+        else:
+            db.execute(text("UPDATE suppliers SET name=:n, unit_cost=:c, lead_time_days=:l, moq=:m, "
+                            "on_time_rate=:o, reliability_score=:r, active=1 WHERE id=:id"),
+                       {"id": s["id"], "n": s["name"], "c": s["unit_cost"], "l": s["lead_time_days"],
+                        "m": s["moq"], "o": s["on_time_rate"], "r": s["reliability_score"]})
+        if not _exists(db, "SELECT 1 FROM trusted_supplier_domains WHERE domain=:d", {"d": s["domain"]}):
+            db.execute(text("INSERT INTO trusted_supplier_domains (id, domain, supplier_id, added_by, active) "
+                            "VALUES (:i,:d,:s,'seed',1)"),
+                       {"i": str(uuid.uuid4()), "d": s["domain"], "s": s["id"]})
+            n_dom += 1
+        else:
+            db.execute(text("UPDATE trusted_supplier_domains SET supplier_id=:s, active=1 WHERE domain=:d"),
+                       {"d": s["domain"], "s": s["id"]})
+        _t = s.get("terms") or {}
+        _params = {"s": s["id"], "moq": _t.get("moq"), "mov": _t.get("min_order_value_cents"),
+                   "lt": _t.get("lead_time_days"), "rg": _t.get("region"), "ot": _t.get("on_time_rate"),
+                   "pb": _json.dumps(_t.get("price_breaks") or []), "cs": _t.get("contract_status")}
+        for sku in sorted(set(supplier_skus.get(str(s["id"]), []) or [])):
+            if not _exists(db, "SELECT 1 FROM supplier_products WHERE supplier_id=:s AND sku=:k",
+                           {"s": s["id"], "k": sku}):
+                db.execute(text(
+                    "INSERT INTO supplier_products (supplier_id, sku, moq, min_order_value_cents, "
+                    "lead_time_days, region, on_time_rate, price_breaks, contract_status, active) "
+                    "VALUES (:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"), {**_params, "k": sku})
+                n_prod += 1
+            else:
+                db.execute(text(
+                    "UPDATE supplier_products SET moq=:moq, min_order_value_cents=:mov, "
+                    "lead_time_days=:lt, region=:rg, on_time_rate=:ot, contract_status=:cs, "
+                    "price_breaks=:pb, active=1 WHERE supplier_id=:s AND sku=:k"),
+                    {**_params, "k": sku})
+    return {"suppliers": n_sup, "products": n_prod, "domains": n_dom}
+
+
+def _product_rows(db) -> List[Dict[str, Any]]:
+    """Active products with specs, if the catalog table is present."""
+    import json as _json
+    try:
+        rows = db.execute(text(
+            "SELECT sku, name, specs FROM products WHERE COALESCE(active,1)=1 "
+            "AND sku IS NOT NULL AND sku <> ''"
+        )).fetchall()
+    except Exception:
+        try:
+            rows = db.execute(text(
+                "SELECT sku FROM products WHERE COALESCE(active,1)=1 "
+                "AND sku IS NOT NULL AND sku <> ''"
+            )).fetchall()
+            return [{"sku": str(r[0]), "name": str(r[0]), "specs": {}} for r in rows if r and r[0]]
+        except Exception:
+            return [{"sku": s, "name": s, "specs": {}} for s in DEMO_SKUS]
+    out = []
+    for r in rows:
+        specs = r[2]
+        if isinstance(specs, str):
+            try:
+                specs = _json.loads(specs)
+            except Exception:
+                specs = {}
+        out.append({"sku": str(r[0]), "name": str(r[1] or r[0]), "specs": specs if isinstance(specs, dict) else {}})
+    return out
+
+
+def _routing_rules() -> "tuple[List[Dict[str, Any]], str]":
+    """The (rules, default_supplier_id) for seed-time supplier routing — from the StoreProfile so core
+    carries NO product vocabulary. Empty rules → callers fall back to the default (or base coverage)."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        rules = profile_slot("supplier_routing_rules", default=None) or []
+        default = str(profile_slot("supplier_routing_default", default="") or "")
+        return ([r for r in rules if isinstance(r, dict)], default) if isinstance(rules, list) else ([], default)
+    except Exception:
+        return ([], "")
+
+
+def _supplier_route_for_product(sku: str, name: str = "", specs: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Demo routing policy: product metadata decides eligible suppliers; ranking decides the winner. The
+    RULES (sku-prefix / attribute tokens → supplier) live in the StoreProfile (supplier_routing_rules), so
+    this stays vertical-blind — it only matches opaque data against the profile's rules. First match wins."""
+    specs = specs or {}
+    s = str(sku or "").upper()
+    n = str(name or "").lower()
+    category = str(specs.get("category") or specs.get("product_category") or specs.get("use_case") or "").lower()
+    tags = " ".join(str(t).lower() for t in (specs.get("tags") or []) if t is not None)
+    blob = f"{s.lower()} {n} {category} {tags}"
+    rules, default = _routing_rules()
+    for rule in rules:
+        sid = str(rule.get("supplier_id") or "")
+        if not sid:
+            continue
+        prefixes = tuple(str(p).upper() for p in (rule.get("sku_prefixes") or []))
+        tokens = [str(t).lower() for t in (rule.get("tokens") or [])]
+        if (prefixes and s.startswith(prefixes)) or any(t in blob for t in tokens):
+            return [sid]
+    return [default] if default else []
+
+
+def _deactivate_demo_coverage(db, skus: List[str]) -> None:
+    """Disable old demo over-coverage for the SKUs we are about to route; do not touch real suppliers."""
+    for sid in sorted(_ALL_DEMO_SUPPLIER_IDS):
+        for sku in skus:
+            try:
+                db.execute(text("UPDATE supplier_products SET active=0 WHERE supplier_id=:s AND sku=:k"),
+                           {"s": sid, "k": sku})
+            except Exception:
+                return
+
+
 def all_catalog_skus(db) -> List[str]:
     """Every ACTIVE catalog SKU — the set the recommender can surface. Supplier coverage tracks this so
     whatever SKU is recommended resolves an approved supplier (instead of a hardcoded shortlist that the
@@ -261,8 +417,32 @@ def ensure_supplier_coverage(db, *, commit: bool = True) -> Dict[str, int]:
     one approved supplier — coverage follows the catalog, so the procurement draft path no longer dead-ends
     at NO_APPROVED_SUPPLIER for a SKU the recommender actually chose. Self-healing: adds only the missing
     supplier_products rows. Returns {suppliers, products, domains} counts inserted."""
-    skus = sorted(set(DEMO_SKUS) | set(all_catalog_skus(db)))
-    return seed_demo(db, skus=skus, commit=commit)
+    if db is None:
+        return {}
+    ensure_tables(db)
+    legacy_counts = seed_demo(db, skus=[], commit=False)
+    rows = _product_rows(db)
+    by_sku = {r["sku"]: r for r in rows}
+    for sku in DEMO_SKUS:
+        by_sku.setdefault(sku, {"sku": sku, "name": sku, "specs": {}})
+    skus = sorted(by_sku)
+    _deactivate_demo_coverage(db, skus)
+    supplier_skus: Dict[str, List[str]] = {str(s["id"]): [] for s in _ROUTED_DEMO_SUPPLIERS}
+    for sku, row in by_sku.items():
+        for sid in _supplier_route_for_product(sku, row.get("name") or sku, row.get("specs") or {}):
+            supplier_skus.setdefault(sid, []).append(sku)
+    routed_counts = _seed_supplier_set(db, _ROUTED_DEMO_SUPPLIERS, supplier_skus)
+    counts = {
+        "suppliers": int(legacy_counts.get("suppliers") or 0) + int(routed_counts.get("suppliers") or 0),
+        "products": int(legacy_counts.get("products") or 0) + int(routed_counts.get("products") or 0),
+        "domains": int(legacy_counts.get("domains") or 0) + int(routed_counts.get("domains") or 0),
+    }
+    if commit:
+        try:
+            db.commit()
+        except Exception:
+            return counts
+    return counts
 
 
 def domain_for_supplier(db, supplier_id: str) -> Optional[str]:
@@ -285,7 +465,8 @@ def cheapest_wholesale_cents(db, sku: str) -> Optional[int]:
     try:
         row = db.execute(text(
             "SELECT MIN(s.unit_cost) FROM suppliers s JOIN supplier_products sp ON sp.supplier_id = s.id "
-            "WHERE sp.sku = :k AND COALESCE(s.active,1)=1 AND s.unit_cost IS NOT NULL"),
+            "WHERE sp.sku = :k AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1 "
+            "AND s.unit_cost IS NOT NULL"),
             {"k": str(sku)}).fetchone()
         if not row or row[0] is None:
             return None
@@ -299,6 +480,11 @@ def cheapest_wholesale_cents(db, sku: str) -> Optional[int]:
 _DEMO_VENDOR_CONTACTS = [
     ("TechData Procurement", "approved-supplier.example", "orders@approved-supplier.example"),
     ("BulkParts Co", "bulk-parts.example", "sales@bulk-parts.example"),
+    ("Northbridge Business Systems", "northbridge-business.example", "rfq@northbridge-business.example"),
+    ("CreatorFleet Wholesale", "creatorfleet.example", "quotes@creatorfleet.example"),
+    ("Orchard Device Supply", "orchard-device.example", "orders@orchard-device.example"),
+    ("PeriLink Accessories", "perilink-accessories.example", "sales@perilink-accessories.example"),
+    ("Harbour Office Wholesale", "harbour-office.example", "quotes@harbour-office.example"),
 ]
 
 
@@ -342,6 +528,11 @@ def seed_demo_vendor_contacts(*, tenant_id: str = "default") -> int:
 _DEMO_SUPPLIER_HISTORY = [
     ("approved-supplier.example", [(58, 6690.0), (33, 5575.0), (9, 7805.0)]),
     ("bulk-parts.example", [(47, 5900.0), (15, 7080.0)]),
+    ("northbridge-business.example", [(44, 12350.0), (18, 18620.0), (6, 21400.0)]),
+    ("creatorfleet.example", [(39, 22900.0), (21, 31100.0), (8, 44750.0)]),
+    ("orchard-device.example", [(52, 8300.0), (16, 15800.0)]),
+    ("perilink-accessories.example", [(31, 2400.0), (12, 3900.0), (4, 5200.0)]),
+    ("harbour-office.example", [(42, 4200.0), (19, 7600.0)]),
 ]
 
 
