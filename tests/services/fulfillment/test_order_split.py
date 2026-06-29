@@ -127,3 +127,36 @@ def test_recommend_stage_routes_mixed_query_to_grouped_cases(monkeypatch):
     assert "2 sourcing requests" in line                     # multi-line summary returned
     assert payload["order_group"]["case_count"] == 2
     assert "availability" not in payload                     # short-circuited the single-line path
+
+
+# ── Phase 1 (fluid-procurement): FULFILLMENT_DEFER_TO_CART previews, never materializes a durable case ──
+def test_defer_to_cart_uses_fluid_multiline_path_not_eager(monkeypatch):
+    # with the defer flag ON, a mixed query takes the read-only FLUID path (preview), NOT the eager path
+    # that creates durable cases — this is what kills the orphaned-case churn from browsing queries.
+    from src.app.services import recommend_fulfillment_stage as stage
+    called = {}
+    monkeypatch.setattr(stage, "_fluid_multiline_intent",
+                        lambda *, query, trace_id, payload: (called.__setitem__("fluid", True) or "preview only"))
+    monkeypatch.setattr(stage, "_maybe_multiline_order",
+                        lambda **k: (called.__setitem__("eager", True) or "EAGER"))
+    payload = {}
+    line = stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}], constraints={"order_quantity": 30},
+                                       payload=payload, uid="u1", query="15 laptops + 10 monitors",
+                                       flags={"FULFILLMENT_CASES_ENABLED": True, "FULFILLMENT_DEFER_TO_CART": True})
+    assert called.get("fluid") is True and "eager" not in called
+    assert line == "preview only"
+
+
+def test_defer_to_cart_single_bulk_sets_fluid_intent_no_case():
+    # a single bulk shortfall under defer mode → payload['sourcing_intent'] (preview), NO durable case opened
+    # (the defer branch returns before any DB/workflow access — verifiable without a DB).
+    from src.app.services import recommend_fulfillment_stage as stage
+    payload = {}
+    stage._maybe_open_case(payload=payload, avail={"sku": "GAM-1", "shortfall": 8, "in_stock": 2},
+                           order_qty=10, uid="u1", uid_hash=None, trace_id=None,
+                           flags={"FULFILLMENT_CASES_ENABLED": True}, defer=True)
+    si = payload.get("sourcing_intent")
+    assert si and si["mode"] == "deferred_to_cart"
+    assert si["lines"][0] == {"item_ref": "GAM-1", "quantity": 10, "shortfall": 8}
+    assert si["planned_case_count"] == 1
+    assert "fulfillment_case" not in payload                  # NOTHING durable was created

@@ -59,13 +59,20 @@ def run_fulfillment_stage(
 ) -> str:
     """Compute bulk availability (sets payload['availability']) and, when enabled, open a procurement
     case on a real shortfall. Returns the availability summary line (or '')."""
+    # FLUID-PROCUREMENT model (FULFILLMENT_DEFER_TO_CART): a buyer QUERY is a fluid intent, not a
+    # commitment. Until cart-confirmation we only PREVIEW the sourcing split (no durable case, no supplier
+    # contact) — the durable case materializes at order/cart confirmation (cart_commitment.py). This kills
+    # the orphaned-case churn (a new case per browsing query). Default OFF preserves the legacy eager path.
+    defer_to_cart = _flag(flags, "FULFILLMENT_DEFER_TO_CART")
     # Multi-line order: a MIXED buyer request ("15 laptops + 10 monitors + 5 headsets") → grouped cases
     # (one per supplier) instead of a single bulk case. Flag-gated (same as single-case creation); a
     # single-line query falls through to the normal path. Best-effort — never breaks the recommend reply.
     if query and _flag(flags, "FULFILLMENT_CASES_ENABLED"):
         try:
-            line = _maybe_multiline_order(query=query, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
-                                          payload=payload)
+            line = (_fluid_multiline_intent(query=query, trace_id=trace_id, payload=payload)
+                    if defer_to_cart else
+                    _maybe_multiline_order(query=query, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
+                                           payload=payload))
             if line:
                 return line
         except Exception as exc:
@@ -120,7 +127,7 @@ def run_fulfillment_stage(
         _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
-                     flags=flags, single_item=single_item)
+                     flags=flags, single_item=single_item, defer=defer_to_cart)
     return line
 
 
@@ -188,6 +195,35 @@ def _maybe_multiline_order(*, query, uid, uid_hash, trace_id, payload) -> str:
             f"any supplier is contacted.")
 
 
+def _fluid_multiline_intent(*, query, trace_id, payload) -> str:
+    """FLUID-mode counterpart to _maybe_multiline_order: PREVIEW the mixed-order split (read-only) WITHOUT
+    materializing any durable case. The buyer's intent stays fluid until cart-confirmation — nothing is
+    persisted, nothing is contacted. Sets payload['sourcing_intent'] (buyer-safe, no supplier identity) and
+    returns a summary line, or '' when it is not a mixed order. The durable cases are created at
+    cart-confirmation by cart_commitment.materialize_cases_for_order."""
+    from src.app.models.db import db_session
+    from src.app.services.fulfillment.order_split import (
+        emit_split_trace, parse_order_lines, plan_order_split, resolve_line_skus)
+    parsed = parse_order_lines(query)
+    if len(parsed) < 2:
+        return ""  # not a mixed order → normal single-line path
+    with db_session() as db:
+        lines = resolve_line_skus(db, parsed)
+        if len(lines) < 2:
+            return ""
+        plan = plan_order_split(db, lines=lines)  # read-only; no case created
+    emit_split_trace(trace_id, plan=plan)  # the split is a visible (read-only) preview step
+    payload["sourcing_intent"] = {
+        "mode": "deferred_to_cart",
+        "lines": [{"item_ref": l["item_ref"], "quantity": l["requested_qty"]} for l in lines],
+        "planned_case_count": int(plan.get("group_count") or 0),
+    }
+    n_units = sum(int(l["requested_qty"]) for l in lines)
+    return (f"Your mixed order ({len(lines)} item lines, {n_units} units) would be split into "
+            f"{plan.get('group_count')} sourcing request(s) when you confirm your cart — "
+            f"nothing is ordered or sent to a supplier yet.")
+
+
 def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
     """Build the buyer-facing alternatives (partial / transfer / substitute / source-shortfall / reduce)
     for an unmet bulk request and attach to payload['fulfillment_options'] for the 5173 right panel.
@@ -219,9 +255,12 @@ def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
         record_partial_failure("bulk_alternatives", exc, trace_id=trace_id)
 
 
-def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False) -> None:
+def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False) -> None:
     """Open a fulfilment_case at GATE 1 on a real shortfall (flag-gated, best-effort). Two entry points:
-    a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True)."""
+    a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True).
+    When ``defer`` (FULFILLMENT_DEFER_TO_CART), the intent stays FLUID: set payload['sourcing_intent']
+    (a buyer-safe preview) and emit a read-only trace, but DO NOT materialize a durable case — the case is
+    created at cart-confirmation (cart_commitment.materialize_cases_for_order)."""
     if not _flag(flags, "FULFILLMENT_CASES_ENABLED"):
         return
     try:
@@ -236,11 +275,21 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
     single_ok = single_item and in_stock == 0  # a single item we have NONE of → offer to source it
     if not (bulk_ok or single_ok):
         return
+    item_ref = str((avail or {}).get("sku") or "")
+    if defer:
+        # FLUID: preview the sourcing intent; the durable case is created at cart-confirmation, not here.
+        payload["sourcing_intent"] = {"mode": "deferred_to_cart",
+                                      "lines": [{"item_ref": item_ref, "quantity": order_qty,
+                                                 "shortfall": shortfall}],
+                                      "planned_case_count": 1 if item_ref else 0}
+        _emit_trace(trace_id, "sourcing_previewed", "Procurement_Agent",
+                    {"item_ref": item_ref, "order_qty": order_qty, "shortfall": shortfall,
+                     "mode": "deferred_to_cart"})
+        return
     try:
         from src.app.models.db import db_session
         from src.app.services.fulfillment import workflow as fwf
         from src.app.services.fulfillment.domain import Actor, ActorType
-        item_ref = str((avail or {}).get("sku") or "")
         agent = Actor(ActorType.AGENT, "Procurement_Agent")
         with db_session() as db:
             cid = fwf.open_case(db, buyer_uid_hash=(uid_hash or uid), source_trace_id=trace_id,

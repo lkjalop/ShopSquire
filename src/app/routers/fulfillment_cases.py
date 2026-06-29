@@ -328,6 +328,46 @@ def cases_from_order(body: FromOrderBody, role: str = Depends(require_role(_OPER
         return {"plan": plan, **created}
 
 
+class ConfirmCartBody(BaseModel):
+    uid: str
+    order_id: str                                 # commitment reference (cart/order id) — the idempotency key
+    lines: Optional[list[SplitLineBody]] = None   # explicit resolved lines, OR
+    query: Optional[str] = None                   # a raw mixed message to parse ("15 laptops + 10 monitors")
+    trace_id: Optional[str] = None
+
+
+@router.post("/cases/confirm-cart")
+def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
+    """GATE 1 at the CART-CONFIRMATION boundary (buyer action — no operator role): materialize the confirmed
+    cart's SHORTFALL lines into durable procurement cases (one per supplier group), IDEMPOTENTLY keyed on
+    order_id — a double-submitted confirm returns the SAME cases, never duplicates. No supplier is contacted
+    (each case waits at GATE 1). This is the buyer-facing twin of /cases/from-order; under
+    FULFILLMENT_DEFER_TO_CART the recommend stage only PREVIEWED the split, so this is where intent becomes
+    a durable case. Fully-in-stock lines are fulfilled from stock and create no case."""
+    from src.app.services.fulfillment.cart_commitment import materialize_cases_for_order
+    raw_lines = ([x.model_dump() for x in body.lines] if body.lines
+                 else fos.parse_order_lines(body.query or ""))
+    if not raw_lines:
+        raise HTTPException(status_code=422, detail="no_order_lines")
+    with db_session() as db:
+        resolved = fos.resolve_line_skus(db, raw_lines)
+        if not resolved:
+            raise HTTPException(status_code=422, detail="no_order_lines_resolved")
+        # stamp CURRENT stock per resolved SKU so shortfall is real (canonical batch read; best-effort —
+        # an unreadable stock level defaults to 0 → the line sources, never silently drops).
+        try:
+            from src.app.services.inventory_query_service import batch_stock_levels
+            stock = batch_stock_levels([str(l.get("item_ref")) for l in resolved if l.get("item_ref")])
+        except Exception:
+            stock = {}
+        for l in resolved:
+            if l.get("in_stock") in (None, 0):
+                l["in_stock"] = int(stock.get(str(l.get("item_ref")), 0))
+        result = materialize_cases_for_order(db, order_id=body.order_id, lines=resolved,
+                                             uid=body.uid, trace_id=body.trace_id)
+    return result
+
+
 class CommitBody(BaseModel):
     uid: str
     email: Optional[str] = None   # optional buyer email → bounded-autonomy status reply (flag-gated)

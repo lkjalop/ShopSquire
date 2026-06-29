@@ -2369,6 +2369,11 @@ async def chat_query(
         "order_group": (
             data.get("order_group") if isinstance(data.get("order_group"), dict) else None
         ),
+        # FLUID-procurement preview (FULFILLMENT_DEFER_TO_CART): the sourcing split is PREVIEWED here
+        # (no durable case); the durable case materializes at cart-confirmation. Buyer-safe (no supplier).
+        "sourcing_intent": (
+            data.get("sourcing_intent") if isinstance(data.get("sourcing_intent"), dict) else None
+        ),
         "right_panel": _right_panel_contract,
         "copywriting": copy_meta,
         "image_untrusted": bool(image_security_posture.get("image_untrusted")),
