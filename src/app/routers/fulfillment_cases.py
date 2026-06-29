@@ -63,8 +63,15 @@ def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
         if isinstance(po, dict):  # buyer sees the confirmation (ref/status/qty), not wholesale or supplier
             state_json["purchase_order"] = {k: v for k, v in po.items()
                                             if k not in ("unit_amount_cents", "total_amount_cents", "supplier_ref")}
-    return {"case_id": case_id, "state": cur.state, "state_json": state_json,
-            "source_trace_id": cur.source_trace_id}
+    # bounded-autonomy buyer status reply (claim-safe, no commitment) — surfaced so the buyer always
+    # knows where their bulk request stands as it progresses. Safe to show without human approval.
+    from src.app.services.fulfillment.buyer_reply import buyer_status_message
+    out: Dict[str, Any] = {"case_id": case_id, "state": cur.state, "state_json": state_json,
+                           "source_trace_id": cur.source_trace_id}
+    msg = buyer_status_message(cur.state, cur.state_json)
+    if msg:
+        out["buyer_status"] = msg
+    return out
 
 
 # ── reads ─────────────────────────────────────────────────────────────────────
