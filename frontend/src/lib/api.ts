@@ -192,7 +192,10 @@ export async function getFulfillmentCaseByTrace(traceId: string): Promise<{ case
 
 // ── Fluid procurement: the deferred sourcing PREVIEW + the cart-confirmation that materializes it ──
 export interface SourcingIntentLine { item_ref: string; quantity: number; shortfall?: number; }
-export interface SourcingIntent { mode?: string; lines: SourcingIntentLine[]; planned_case_count?: number; }
+export interface SourcingIntent {
+  mode?: string; lines: SourcingIntentLine[]; planned_case_count?: number;
+  requirements?: Record<string, any>;  // buyer deadline/use_case/ship_to → carried to the case at confirm
+}
 export interface ConfirmCartResult {
   order_group_id: string | null;
   case_count?: number;
@@ -213,6 +216,7 @@ export interface ConfirmCartResult {
 // re-source. Maps the preview's {item_ref, quantity} lines to the endpoint's {item_ref, requested_qty}.
 export async function confirmCartSourcing(
   uid: string, orderId: string, lines: SourcingIntentLine[], traceId?: string, supersede = false,
+  requirements?: Record<string, any>,
 ): Promise<ConfirmCartResult> {
   const r = await fetch(apiUrl('/api/v1/fulfillment/cases/confirm-cart'), {
     method: 'POST', credentials: 'include', headers: authHeaders({}, true),
@@ -221,6 +225,7 @@ export async function confirmCartSourcing(
       order_id: orderId,
       trace_id: traceId,
       supersede,
+      requirements: requirements || undefined,
       lines: (lines || []).map((l) => ({ item_ref: l.item_ref, requested_qty: l.quantity })),
     }),
   });

@@ -68,7 +68,8 @@ _SUPERSEDABLE_STATES = frozenset({"AVAILABILITY_ASSESSED", "AWAITING_BUYER_COMMI
 
 def supersede_order(db, *, order_id: str, lines: List[Dict[str, Any]], uid: Optional[str] = None,
                     uid_hash: Optional[str] = None, trace_id: Optional[str] = None,
-                    tenant_id: str = "default", now_iso: Optional[str] = None) -> Dict[str, Any]:
+                    tenant_id: str = "default", now_iso: Optional[str] = None,
+                    requirements: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The buyer changed their mind AFTER confirming: supersede the active pre-send cases for this order and
     re-materialize from the new lines (same order_group_id; the probe ignores superseded cases). Cases past
     the send gate CANNOT be auto-superseded — that is the operator-driven post-send protocol — so if any
@@ -106,7 +107,8 @@ def supersede_order(db, *, order_id: str, lines: List[Dict[str, Any]], uid: Opti
             superseded.append(cid)
 
     created = materialize_cases_for_order(db, order_id=order_id, lines=lines, uid=uid, uid_hash=uid_hash,
-                                          trace_id=trace_id, tenant_id=tenant_id, now_iso=now_iso)
+                                          trace_id=trace_id, tenant_id=tenant_id, now_iso=now_iso,
+                                          requirements=requirements)
     return {"order_group_id": group_id, "superseded": superseded, "operator_required": [],
             "created": created, "status": "superseded"}
 
@@ -170,7 +172,8 @@ def _materialized_signature(db, case_ids: List[str], tenant_id: str = "default")
 def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]],
                                 uid: Optional[str] = None, uid_hash: Optional[str] = None,
                                 trace_id: Optional[str] = None, tenant_id: str = "default",
-                                now_iso: Optional[str] = None) -> Dict[str, Any]:
+                                now_iso: Optional[str] = None,
+                                requirements: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """GATE 1 at the COMMITMENT boundary: turn a confirmed order's shortfall lines into durable procurement
     cases (one per supplier group), idempotently keyed on the order id.
 
@@ -211,6 +214,6 @@ def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]
 
     emit_split_trace(trace_id, plan=plan)
     created = create_grouped_cases(db, plan=plan, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
-                                   order_group_id=group_id, now_iso=now_iso)
+                                   order_group_id=group_id, now_iso=now_iso, requirements=requirements)
     created["idempotent"] = False
     return created

@@ -30,7 +30,7 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
   const run = async (supersede: boolean) => {
     setBusy(true); setError('');
     try {
-      const r = await confirmCartSourcing(uid, orderId, lines, traceId, supersede);
+      const r = await confirmCartSourcing(uid, orderId, lines, traceId, supersede, intent.requirements);
       setResult(r);
       onConfirmed?.(r);
     } catch (e: any) {

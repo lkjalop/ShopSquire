@@ -79,6 +79,15 @@ def test_parse_order_lines_extracts_count_and_noun():
     assert parse_order_lines("just one laptop please") == []  # no multi-quantity line
 
 
+def test_parse_order_lines_tolerates_adjectives_between_count_and_noun():
+    # the live gap: "20 gaming laptops + 20 headsets" dropped headsets because the adjective broke the
+    # count↔noun match → whole thing fell to the single-line path. Now both lines parse.
+    got = {l["phrase"]: l["quantity"] for l in parse_order_lines("20 gaming laptops + 20 headsets")}
+    assert got == {"laptops": 20, "headsets": 20}
+    got2 = {l["phrase"]: l["quantity"] for l in parse_order_lines("10 wireless mechanical keyboards + 5 monitors")}
+    assert got2.get("keyboards") == 10 and got2.get("monitors") == 5
+
+
 def test_resolve_line_skus_maps_phrase_to_catalog_sku(db):
     _seed_product(db, "LAP-9", "Dell Latitude business laptop")
     _seed_product(db, "MON-1", "LG UltraGear 34 inch monitor")
@@ -136,7 +145,7 @@ def test_defer_to_cart_uses_fluid_multiline_path_not_eager(monkeypatch):
     from src.app.services import recommend_fulfillment_stage as stage
     called = {}
     monkeypatch.setattr(stage, "_fluid_multiline_intent",
-                        lambda *, query, trace_id, payload: (called.__setitem__("fluid", True) or "preview only"))
+                        lambda *, query, constraints, trace_id, payload: (called.__setitem__("fluid", True) or "preview only"))
     monkeypatch.setattr(stage, "_maybe_multiline_order",
                         lambda **k: (called.__setitem__("eager", True) or "EAGER"))
     payload = {}

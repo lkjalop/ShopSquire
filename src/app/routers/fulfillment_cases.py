@@ -380,6 +380,7 @@ class ConfirmCartBody(BaseModel):
     query: Optional[str] = None                   # a raw mixed message to parse ("15 laptops + 10 monitors")
     trace_id: Optional[str] = None
     supersede: bool = False                        # buyer amending a confirmed order → retire old cases + re-source
+    requirements: Optional[Dict[str, Any]] = None  # buyer deadline/use_case/ship_to (from the preview) → onto the case
 
 
 @router.post("/cases/confirm-cart")
@@ -417,10 +418,11 @@ def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
         # supersede=True → buyer is amending a confirmed order: retire the active pre-send cases + re-source.
         if body.supersede:
             result = supersede_order(db, order_id=body.order_id, lines=resolved, uid=body.uid,
-                                     trace_id=body.trace_id)
+                                     trace_id=body.trace_id, requirements=body.requirements)
         else:
             result = materialize_cases_for_order(db, order_id=body.order_id, lines=resolved,
-                                                 uid=body.uid, trace_id=body.trace_id)
+                                                 uid=body.uid, trace_id=body.trace_id,
+                                                 requirements=body.requirements)
         _notify_from_confirm(db, result)
     return result
 

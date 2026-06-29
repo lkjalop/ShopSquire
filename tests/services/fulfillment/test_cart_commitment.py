@@ -132,6 +132,20 @@ def test_operator_supersede_then_late_reply_is_quarantined(db):
     assert res.ok is False and res.reason == "superseded_rfq"   # late quote for a retired RFQ → quarantined
 
 
+def test_materialize_threads_requirements_onto_the_case(db):
+    # Gap 3: the buyer's deadline/use_case must survive cart-confirmation and land on the case so the supplier
+    # RFQ carries a CONCRETE deadline (not the vague placeholder that blocks autonomous send).
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    ensure_supplier_coverage(db)
+    reqs = {"needed_by": "2026-07-07", "use_case": "gaming", "ship_to": "AU-metro"}
+    r = materialize_cases_for_order(db, order_id="ORD-R", uid="u1", requirements=reqs,
+                                    lines=[{"item_ref": "GAM-0002", "requested_qty": 7, "in_stock": 0}])
+    cid = r["cases"][0]["case_id"]
+    sj = wf.repository.current_version(db, cid).state_json
+    assert sj.get("requirements", {}).get("needed_by") == "2026-07-07"
+    assert sj["requirements"]["use_case"] == "gaming"
+
+
 def test_materialize_skips_fully_in_stock_lines(db):
     # a line we can fully fulfil from stock needs no sourcing → no case is created
     _seed_product(db, "MON-1", "LG monitor")

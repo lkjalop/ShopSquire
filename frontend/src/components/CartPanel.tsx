@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import styles from './CartPanel.module.css';
 import type { Product } from '../App';
-import { apiUrl, safeJson } from '../lib/api';
+import { apiUrl, safeJson, confirmCartSourcing } from '../lib/api';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 
 type CartItem = { sku: string; quantity: number; price_cents?: number; name?: string; specs?: Record<string, any> | null };
@@ -116,7 +116,10 @@ export default function CartPanel({
 
   const items = cart?.items || [];
   const bundle = cart?.bundle_savings;
-  const goToCheckout = () => {
+  const [sourcingNote, setSourcingNote] = useState<string | null>(null);
+  const [checkingSourcing, setCheckingSourcing] = useState(false);
+
+  const proceedToCheckout = () => {
     // Persist cart snapshot so the checkout page can show an order summary
     try {
       sessionStorage.setItem('shopsquire_checkout_cart', JSON.stringify(cart));
@@ -124,6 +127,27 @@ export default function CartPanel({
       // sessionStorage unavailable — continue anyway
     }
     window.location.href = '/ui/checkout';
+  };
+  // Bridge: at checkout, route any SHORT-STOCK cart lines to sourcing (GATE 1). In-stock lines create no
+  // case; idempotent on cart_id; rate-limited server-side; best-effort (never blocks checkout). When a
+  // sourcing request is created we pause so the buyer sees it, then they proceed to checkout for the rest.
+  const goToCheckout = async () => {
+    setCheckingSourcing(true);
+    try {
+      if (cart?.cart_id && items.length) {
+        const res = await confirmCartSourcing(uid, cart.cart_id,
+          items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })));
+        if ((res.case_count ?? 0) > 0) {
+          setSourcingNote(`${res.case_count} item group(s) are short on stock — a sourcing request was created (no supplier contacted yet). In-stock items can check out now.`);
+          setCheckingSourcing(false);
+          return;
+        }
+      }
+    } catch {
+      // sourcing is best-effort — fall through to normal checkout
+    }
+    setCheckingSourcing(false);
+    proceedToCheckout();
   };
   const openApprovalReview = () => {
     const approvalId = String(bundle?.approval_id || '').trim();
@@ -217,10 +241,23 @@ export default function CartPanel({
               <div className={styles.btnRow}>
                 <button className={styles.btn} onClick={() => onRefresh()}>Refresh</button>
                 <button className={styles.btn} onClick={() => onClear()}>Clear</button>
-                <button className={`${styles.btn} ${styles.btnPrimary}`} onClick={goToCheckout}>Checkout</button>
+                {sourcingNote
+                  ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-proceed"
+                            onClick={proceedToCheckout}>Continue to checkout</button>
+                  : <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-checkout"
+                            disabled={checkingSourcing} onClick={goToCheckout}>
+                      {checkingSourcing ? 'Checking stock…' : 'Checkout'}
+                    </button>}
               </div>
             </div>
           </div>
+          {sourcingNote && (
+            <div data-testid="cart-sourcing-note" role="status"
+                 style={{ margin: '8px 0', padding: '8px 10px', borderRadius: 8, border: '1px solid #fcd34d',
+                          background: '#fffbeb', fontSize: 13 }}>
+              {sourcingNote}
+            </div>
+          )}
         </>
       )}
 

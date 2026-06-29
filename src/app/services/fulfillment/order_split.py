@@ -18,8 +18,10 @@ logger = logging.getLogger("shopsquire.order_split")
 
 # connectors that separate order lines: "15 laptops + 10 monitors, and 5 headsets"
 _LINE_SEP = re.compile(r"\s*(?:,|\+|;|\band\b)\s*", re.IGNORECASE)
-# a line = a count (2..500, a bulk line) followed by a PLURAL noun; time/currency nouns are excluded.
-_QTY_NOUN = re.compile(r"\b(\d{1,4})\s+([a-z][a-z/\-]{2,}s)\b", re.IGNORECASE)
+# a line = a count (2..500, a bulk line) then up to TWO adjective words then a PLURAL noun, so "20 gaming
+# laptops" / "10 wireless mechanical keyboards" parse (the adjective no longer breaks the count↔noun link).
+# The plural noun is the LAST captured word; time/currency nouns are excluded. Vertical-blind.
+_QTY_NOUN = re.compile(r"\b(\d{1,4})\s+(?:[a-z][a-z/\-]{2,}\s+){0,2}([a-z][a-z/\-]{2,}s)\b", re.IGNORECASE)
 _NOT_PRODUCT_NOUNS = {"days", "weeks", "months", "years", "hours", "dollars", "units", "items",
                       "pieces", "pcs", "options", "results", "ones", "things"}
 
@@ -240,7 +242,8 @@ def emit_split_trace(trace_id: Optional[str], *, plan: Dict[str, Any]) -> None:
 
 def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
                          uid_hash: Optional[str] = None, trace_id: Optional[str] = None,
-                         order_group_id: Optional[str] = None, now_iso: Optional[str] = None) -> Dict[str, Any]:
+                         order_group_id: Optional[str] = None, now_iso: Optional[str] = None,
+                         requirements: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Turn a split plan into REAL cases — ONE procurement case per supplier group (the case carries the
     group's order_lines, so its RFQ lists every SKU). Reuses the single-case machinery + GATE 1 (each case
     waits at AWAITING_BUYER_COMMITMENT; no supplier is contacted). All cases share one order_group_id so the
@@ -268,6 +271,8 @@ def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
                                       "in_stock": max(0, total_qty - total_short), "item_ref": order_lines[0]["item_ref"]},
                      "order_group_id": group_id, "order_lines": order_lines,
                      "supplier_ref": g.get("supplier_ref"), "recipient_domain": g.get("recipient_domain")}
+            if requirements:
+                patch["requirements"] = requirements  # buyer deadline/use_case/ship_to → cited in the RFQ (concrete deadline)
             fwf.transition(db, case_id=cid, event="availability_assessed", actor=agent,
                            reason_code="multi_line_order", state_patch=patch, trace_id=trace_id, now_iso=now_iso)
             fwf.transition(db, case_id=cid, event="request_buyer_commitment", actor=agent,

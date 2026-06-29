@@ -2439,9 +2439,17 @@ async def chat_query(
                 _basis = f"I've based these recommendations on {recognized_image_label} and your text."
             else:
                 _basis = "I've based these recommendations on your text and the image's sanitized context."
+            # Only ALARM the buyer when there is a genuine threat indicator — a benign upload that merely
+            # tripped a soft posture check should not see "flagged by our security system" (the SOC breach
+            # assessment + WORM audit still fire regardless; this only tunes the buyer-facing tone).
+            _real_threat = (
+                bool(image_security_posture.get("needs_human_review"))
+                or bool(image_security_posture.get("chat_lockdown"))
+                or str(image_security_posture.get("route") or "allow").lower() not in ("allow", "")
+            )
             _warn_msg = (
-                "⚠️ Your uploaded image was flagged by our security system and logged for review. "
-                f"{_basis}"
+                f"⚠️ Your uploaded image was flagged by our security system and logged for review. {_basis}"
+                if _real_threat else _basis
             )
         if _ba and (_ba.get("ip_assessment") or {}).get("known_bad_actor"):
             _warn_msg = _warn_msg + " Note: this request originated from a network flagged as high-risk."

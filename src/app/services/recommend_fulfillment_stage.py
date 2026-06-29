@@ -69,7 +69,7 @@ def run_fulfillment_stage(
     # single-line query falls through to the normal path. Best-effort — never breaks the recommend reply.
     if query and _flag(flags, "FULFILLMENT_CASES_ENABLED"):
         try:
-            line = (_fluid_multiline_intent(query=query, trace_id=trace_id, payload=payload)
+            line = (_fluid_multiline_intent(query=query, constraints=constraints, trace_id=trace_id, payload=payload)
                     if defer_to_cart else
                     _maybe_multiline_order(query=query, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
                                            payload=payload))
@@ -195,12 +195,13 @@ def _maybe_multiline_order(*, query, uid, uid_hash, trace_id, payload) -> str:
             f"any supplier is contacted.")
 
 
-def _fluid_multiline_intent(*, query, trace_id, payload) -> str:
+def _fluid_multiline_intent(*, query, constraints, trace_id, payload) -> str:
     """FLUID-mode counterpart to _maybe_multiline_order: PREVIEW the mixed-order split (read-only) WITHOUT
     materializing any durable case. The buyer's intent stays fluid until cart-confirmation — nothing is
-    persisted, nothing is contacted. Sets payload['sourcing_intent'] (buyer-safe, no supplier identity) and
-    returns a summary line, or '' when it is not a mixed order. The durable cases are created at
-    cart-confirmation by cart_commitment.materialize_cases_for_order."""
+    persisted, nothing is contacted. Sets payload['sourcing_intent'] (buyer-safe, no supplier identity) —
+    INCLUDING the buyer's requirements (deadline/use_case/ship_to) so they survive to cart-confirmation and
+    land on the case (the supplier RFQ then carries a concrete deadline, not a vague placeholder). Returns a
+    summary line, or '' when it is not a mixed order. Cases are created at cart-confirmation."""
     from src.app.models.db import db_session
     from src.app.services.fulfillment.order_split import (
         emit_split_trace, parse_order_lines, plan_order_split, resolve_line_skus)
@@ -218,6 +219,9 @@ def _fluid_multiline_intent(*, query, trace_id, payload) -> str:
         "lines": [{"item_ref": l["item_ref"], "quantity": l["requested_qty"]} for l in lines],
         "planned_case_count": int(plan.get("group_count") or 0),
     }
+    _reqs = _buyer_requirements(constraints or {})
+    if _reqs:
+        payload["sourcing_intent"]["requirements"] = _reqs  # carried to confirm-cart → onto the case
     n_units = sum(int(l["requested_qty"]) for l in lines)
     return (f"Your mixed order ({len(lines)} item lines, {n_units} units) would be split into "
             f"{plan.get('group_count')} sourcing request(s) when you confirm your cart — "
@@ -282,6 +286,9 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
                                       "lines": [{"item_ref": item_ref, "quantity": order_qty,
                                                  "shortfall": shortfall}],
                                       "planned_case_count": 1 if item_ref else 0}
+        _reqs = _buyer_requirements(constraints or {})
+        if _reqs:
+            payload["sourcing_intent"]["requirements"] = _reqs  # deadline/use_case/ship_to → onto the case at confirm
         _emit_trace(trace_id, "sourcing_previewed", "Procurement_Agent",
                     {"item_ref": item_ref, "order_qty": order_qty, "shortfall": shortfall,
                      "mode": "deferred_to_cart"})

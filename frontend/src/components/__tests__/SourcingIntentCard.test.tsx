@@ -34,7 +34,7 @@ describe('SourcingIntentCard', () => {
 
     fireEvent.click(screen.getByTestId('si-confirm-btn'));
     await waitFor(() => expect(screen.getByTestId('si-created')).toBeInTheDocument());
-    expect(api.confirmCartSourcing).toHaveBeenCalledWith('u1', 'trace-1', INTENT.lines, 'trace-1', false);
+    expect(api.confirmCartSourcing).toHaveBeenCalledWith('u1', 'trace-1', INTENT.lines, 'trace-1', false, undefined);
     expect(screen.getByTestId('si-created')).toHaveTextContent(/Created 2 sourcing request\(s\)/);
     expect(screen.getByTestId('si-created')).toHaveTextContent(/No supplier has been contacted yet/i);
   });
@@ -55,8 +55,18 @@ describe('SourcingIntentCard', () => {
 
     fireEvent.click(supersedeBtn);
     await waitFor(() => expect(screen.getByTestId('si-superseded')).toBeInTheDocument());
-    expect(api.confirmCartSourcing).toHaveBeenLastCalledWith('u1', 'trace-1', INTENT.lines, undefined, true);
+    expect(api.confirmCartSourcing).toHaveBeenLastCalledWith('u1', 'trace-1', INTENT.lines, undefined, true, undefined);
     expect(screen.getByTestId('si-superseded')).toHaveTextContent(/retired 1 earlier request/i);
+  });
+
+  it('passes the buyer requirements (deadline/use_case) through to confirm-cart', async () => {
+    (api.confirmCartSourcing as any).mockResolvedValue({ order_group_id: 'o', case_count: 1, cases: [{ case_id: 'a' }] });
+    const withReqs = { ...INTENT, requirements: { needed_by: '2026-07-07', use_case: 'office' } };
+    render(<SourcingIntentCard intent={withReqs} uid="u1" orderId="trace-1" traceId="trace-1" />);
+    fireEvent.click(screen.getByTestId('si-confirm-btn'));
+    await waitFor(() => expect(api.confirmCartSourcing).toHaveBeenCalled());
+    expect(api.confirmCartSourcing).toHaveBeenCalledWith('u1', 'trace-1', withReqs.lines, 'trace-1', false,
+      { needed_by: '2026-07-07', use_case: 'office' });
   });
 
   it('shows a calm error when confirm fails', async () => {
