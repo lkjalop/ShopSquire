@@ -449,6 +449,18 @@ def test_multi_location_evidence_surfaced_in_draft(db):
     assert loc[0]["payload"]["transfer_plan"] == [{"from_location": "melbourne", "qty": 18}]
 
 
+def test_moq_risk_flagged_when_shortfall_below_supplier_moq(db):
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS suppliers (id TEXT, name TEXT, moq INT)"))
+    db.execute(_t("INSERT INTO suppliers VALUES ('SUP-7','TechData',5)")); db.commit()
+    # qty 2 < MOQ 5 → moq_risk evidence; qty 10 → none
+    small = D.build_draft(db, item_ref="SKU-1", quantity=2, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    big = D.build_draft(db, item_ref="SKU-1", quantity=10, case_ref="FC-1", rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert any(e["source"] == "moq_risk" for e in small.evidence)
+    assert "minimum order quantity (5)" in next(e["summary"] for e in small.evidence if e["source"] == "moq_risk")
+    assert not any(e["source"] == "moq_risk" for e in big.evidence)
+
+
 def test_rfq_completeness_reason_unit():
     ok = {"sku_description": "x", "deadline_date": "2026-01-01", "ship_to": "AU", "quantity": 5}
     assert D.rfq_completeness_reason(ok) is None
