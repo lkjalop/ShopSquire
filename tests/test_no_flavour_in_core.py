@@ -210,6 +210,9 @@ _CORE_MODULES = [
     # cart-commitment: GATE 1 materialization at the buyer's confirm — order_id idempotency + shortfall
     # arithmetic over opaque {item_ref, qty, in_stock} lines; routing/terms come from order_split. No vocab.
     "src/app/services/fulfillment/cart_commitment.py",
+    # supplier out-of-band write-bus: records a supplier contact (domain·kind·note) + fans out to open
+    # cases. Opaque strings only — no product vocabulary.
+    "src/app/services/fulfillment/supplier_events.py",
     # PO finalization: propose/approve/create/complete via the workflow chokepoint, opaque refs —
     # no product vocabulary.
     "src/app/services/fulfillment/purchase_order.py",

@@ -384,6 +384,24 @@ def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
     return result
 
 
+class SupplierEventBody(BaseModel):
+    supplier_domain: str
+    note: str
+    kind: str = "general"         # lead_time_change | price_change | out_of_stock | back_in_stock | contact_change | general
+    trace_id: Optional[str] = None
+
+
+@router.post("/supplier-events")
+def supplier_event(body: SupplierEventBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Out-of-band supplier contact (operator records "supplier X phoned: lead time slipped / OOS / price
+    changed"). Records it durably and FANS OUT a note to every open case for that supplier domain so the
+    case journeys reflect reality. Never contacts anyone, never mutates an issued PO (a new fact is appended)."""
+    from src.app.services.fulfillment.supplier_events import record_supplier_event
+    with db_session() as db:
+        return record_supplier_event(db, supplier_domain=body.supplier_domain, kind=body.kind,
+                                      note=body.note, actor_id=str(role or "operator"))
+
+
 class CommitBody(BaseModel):
     uid: str
     email: Optional[str] = None   # optional buyer email → bounded-autonomy status reply (flag-gated)
