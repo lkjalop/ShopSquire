@@ -4254,13 +4254,13 @@ def _reconcile_result_prices(results: Any) -> Any:
         if pc is not None:
             try:
                 it["price"] = round(float(pc) / 100.0, 2)   # cents wins → derive price exactly
-            except (TypeError, ValueError):
-                pass
+            except (TypeError, ValueError) as exc:
+                logger.debug("price reconcile (cents→price) skipped for %s: %s", it.get("sku"), exc)
         elif it.get("price") is not None:
             try:
                 it["price_cents"] = int(round(float(it["price"]) * 100.0))
-            except (TypeError, ValueError):
-                pass
+            except (TypeError, ValueError) as exc:
+                logger.debug("price reconcile (price→cents) skipped for %s: %s", it.get("sku"), exc)
     return results
 
 
@@ -5722,8 +5722,8 @@ def suggest(
                                   f"('cheaper', 'change it', 'that order'), continue from that request.")
                 conversation_history_text = (f"{conversation_history_text}\n{_sourcing_memo}".strip()
                                              if conversation_history_text else _sourcing_memo)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("sourcing-continuity memo skipped: %s", exc)
 
     # Detect follow-up intent more broadly: if there are recent conversation
     # messages, any pronoun-like or short query likely refers to prior context.
