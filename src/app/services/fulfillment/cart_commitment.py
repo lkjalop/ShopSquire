@@ -55,6 +55,31 @@ def _already_materialized(db, order_group_id: str, tenant_id: str = "default") -
         return []
 
 
+def _line_signature(pairs) -> frozenset:
+    """An order-independent signature of {item_ref → requested_qty} so a re-confirm can be told apart:
+    identical lines = a double-submit (idempotent); different lines = a real AMENDMENT (the buyer changed
+    their mind after committing) → supersession, not a silent no-op."""
+    sig = set()
+    for item_ref, qty in pairs:
+        ir = str(item_ref or "").strip()
+        if ir:
+            sig.add((ir, int(qty or 0)))
+    return frozenset(sig)
+
+
+def _materialized_signature(db, case_ids: List[str], tenant_id: str = "default") -> frozenset:
+    """The {item_ref → requested_qty} signature already on the materialized cases (read from each case's
+    stored order_lines), so it can be compared against an incoming confirm."""
+    from src.app.services.fulfillment.repository import current_version
+    pairs = []
+    for cid in case_ids:
+        cur = current_version(db, cid, tenant_id)
+        for ln in ((cur.state_json.get("order_lines") if cur and isinstance(cur.state_json, dict) else None) or []):
+            if isinstance(ln, dict):
+                pairs.append((ln.get("item_ref"), ln.get("quantity")))
+    return _line_signature(pairs)
+
+
 def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]],
                                 uid: Optional[str] = None, uid_hash: Optional[str] = None,
                                 trace_id: Optional[str] = None, tenant_id: str = "default",
@@ -70,15 +95,26 @@ def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]
     if not group_id or db is None:
         return {"order_group_id": group_id, "case_count": 0, "cases": [], "idempotent": False}
 
-    existing = _already_materialized(db, group_id, tenant_id=tenant_id)
-    if existing:
-        return {"order_group_id": group_id, "case_count": len(existing),
-                "cases": [{"case_id": c} for c in existing], "idempotent": True}
-
     resolved = resolve_line_skus(db, lines, tenant_id=tenant_id)
     # only the lines we cannot fill from stock need sourcing (requested > in_stock).
     sourcing = [l for l in resolved
                 if int(l.get("requested_qty") or 0) > int(l.get("in_stock") or 0)]
+
+    existing = _already_materialized(db, group_id, tenant_id=tenant_id)
+    if existing:
+        # this order already materialized — distinguish a double-submit from a real amendment.
+        incoming_sig = _line_signature((l.get("item_ref"), l.get("requested_qty")) for l in sourcing)
+        existing_sig = _materialized_signature(db, existing, tenant_id=tenant_id)
+        if incoming_sig == existing_sig:
+            return {"order_group_id": group_id, "case_count": len(existing),
+                    "cases": [{"case_id": c} for c in existing], "idempotent": True}
+        # the buyer changed their mind AFTER committing this order — the lines differ. Do NOT silently
+        # return the stale cases and do NOT duplicate; signal that supersession is required (Phase 4). The
+        # caller surfaces amend_required so the existing cases can be superseded under a deliberate action.
+        return {"order_group_id": group_id, "case_count": len(existing),
+                "cases": [{"case_id": c} for c in existing], "idempotent": False,
+                "amend_required": True, "reason": "order_lines_changed"}
+
     if not sourcing:
         return {"order_group_id": group_id, "case_count": 0, "cases": [], "idempotent": False}
 

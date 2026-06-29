@@ -485,9 +485,27 @@ def test_multi_line_draft_lists_every_line_item(db):
     assert draft is not None
     body = draft.body
     assert "LG 34" in body and "Sony Headset" in body          # both line items rendered
-    assert "(10 units)" in body and "(5 units)" in body
+    assert "10 units" in body and "5 units" in body            # no shortfall given → source the full order
     assert "this request does not constitute a purchase order" in body.lower()  # cage intact
     assert [l["item_ref"] for l in draft.commercial_scope["lines"]] == ["MON-1", "HDS-1"]
+
+
+def test_multi_line_draft_quotes_shortfall_not_full_order(db):
+    # the demo bug: subject "2 items x 28" but body listed "30 units" each (the buyer's order, not the
+    # shortfall). The RFQ must ask the supplier for the SHORTFALL (units to source) and show the ordered
+    # qty only for context — so per-line quantities are unambiguous and sum to the subject total.
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('MON-1','LG 34\" Monitor',60000,'{}',1)"))
+    db.execute(_t("INSERT INTO products VALUES ('HDS-1','Sony Headset',20000,'{}',1)")); db.commit()
+    draft = D.build_draft(db, item_ref="MON-1", quantity=28, case_ref="FC-ML2",
+                          lines=[{"item_ref": "MON-1", "quantity": 30, "shortfall": 14},
+                                 {"item_ref": "HDS-1", "quantity": 30, "shortfall": 14}],
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert draft is not None
+    body = draft.body
+    assert "14 units to source (of 30 ordered)" in body        # per-line shortfall, ordered qty for context
+    assert "30 units" not in body                              # never the ambiguous full-order qty as the ask
 
 
 def test_no_supplier_alternatives_offers_substitutes_not_dead_end(db):

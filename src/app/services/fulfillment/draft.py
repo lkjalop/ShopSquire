@@ -530,17 +530,25 @@ def _rfq_term_slots(profile_fn: Optional[Callable]) -> Dict[str, Any]:
 
 
 def _line_items_block(db, lines: List[Dict[str, Any]], tenant_id: str) -> str:
-    """A multi-line RFQ item block (one supplier, several SKUs) — each line's full description + qty. Empty
-    when there are no usable lines. Vertical-blind (reuses the profile-driven _sku_description)."""
+    """A multi-line RFQ item block (one supplier, several SKUs). Each line quotes the SHORTFALL — the units
+    we actually need to SOURCE (not the buyer's full order, part of which may ship from stock) — so the
+    per-line quantities sum to the subject's total and a supplier can't mistake the ask. When the buyer
+    ordered more than the shortfall, the ordered qty is shown for context. Empty when no usable lines.
+    Vertical-blind (reuses the profile-driven _sku_description)."""
     parts: List[str] = []
     for ln in (lines or []):
         if not isinstance(ln, dict):
             continue
         ir = str(ln.get("item_ref") or ln.get("sku") or "").strip()
-        q = int(ln.get("quantity") or ln.get("requested_qty") or ln.get("shortfall") or 0)
-        if not ir or q <= 0:
+        q_req = int(ln.get("quantity") or ln.get("requested_qty") or 0)
+        q_source = int(ln.get("shortfall") or 0) or q_req  # no explicit shortfall → source the full order
+        if not ir or q_source <= 0:
             continue
-        parts.append(f"  - {_sku_description(db, ir, tenant_id)} ({q} units)")
+        desc = _sku_description(db, ir, tenant_id)
+        if q_req and q_req != q_source:
+            parts.append(f"  - {desc} — {q_source} units to source (of {q_req} ordered)")
+        else:
+            parts.append(f"  - {desc} — {q_source} units")
     return ("the following items:\n" + "\n".join(parts)) if parts else ""
 
 

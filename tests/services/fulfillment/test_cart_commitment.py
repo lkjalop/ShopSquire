@@ -62,6 +62,28 @@ def test_materialize_creates_grouped_cases_then_is_idempotent(db):
     assert {c["case_id"] for c in r2["cases"]} == {c["case_id"] for c in r1["cases"]}
 
 
+def test_reconfirm_with_changed_lines_is_amend_required_not_silent(db):
+    # the mind-change-after-commit gap: same order_id, DIFFERENT lines → must NOT silently return the stale
+    # cases and must NOT duplicate — it signals amend_required (supersession) so Phase 4 can act on it.
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    _seed_product(db, "MON-1", "LG monitor")
+    ensure_supplier_coverage(db)
+    first = [{"item_ref": "GAM-0002", "requested_qty": 7, "in_stock": 0}]
+    r1 = materialize_cases_for_order(db, order_id="ORD-9", lines=first, uid="u1")
+    assert r1["case_count"] == 1 and r1["idempotent"] is False and not r1.get("amend_required")
+
+    # same order, now the buyer wants a DIFFERENT item/qty → amend_required, original cases untouched
+    changed = [{"item_ref": "MON-1", "requested_qty": 10, "in_stock": 0}]
+    r2 = materialize_cases_for_order(db, order_id="ORD-9", lines=changed, uid="u1")
+    assert r2["amend_required"] is True and r2["reason"] == "order_lines_changed"
+    assert r2["idempotent"] is False
+    assert {c["case_id"] for c in r2["cases"]} == {c["case_id"] for c in r1["cases"]}  # no new cases
+
+    # an IDENTICAL re-submit (same lines) is still a clean idempotent no-op (double-submit guard intact)
+    r3 = materialize_cases_for_order(db, order_id="ORD-9", lines=first, uid="u1")
+    assert r3["idempotent"] is True and not r3.get("amend_required")
+
+
 def test_materialize_skips_fully_in_stock_lines(db):
     # a line we can fully fulfil from stock needs no sourcing → no case is created
     _seed_product(db, "MON-1", "LG monitor")
