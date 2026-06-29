@@ -98,6 +98,8 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
         ru = _catalog_retail(db, st, tenant_id)   # canonical price_book JOIN (flag-gated)
     if ru is None:
         ru = _selected_retail_unit(st)            # fallback: derive from the selected option
+    if ru is None:
+        ru = _product_retail(db, _case_sku(st))   # last resort: the product catalog list price (always present)
     econ = compute(supplier_unit_cost_cents=su, retail_unit_cents=ru, quantity=qty,
                    floor_margin_pct=floor_margin_pct)
     return econ.to_dict() if econ else {}
@@ -121,6 +123,21 @@ def _catalog_retail(db, state_json: Dict[str, Any], tenant_id: str) -> Optional[
     if not sku:
         return None
     return commerce_catalog.retail_unit_cents(db, sku, tenant_id=tenant_id)
+
+
+def _product_retail(db, sku: Optional[str]) -> Optional[int]:
+    """The product catalog list price (cents) for a SKU — the always-present retail fallback when neither a
+    canonical price_book row nor a selected option supplies one, so margin is computable for any active
+    catalog SKU (fixes the demo 'insufficient_data'). Best-effort; None on any failure."""
+    if db is None or not sku:
+        return None
+    try:
+        from sqlalchemy import text
+        row = db.execute(text("SELECT price_cents FROM products WHERE sku=:s LIMIT 1"),
+                         {"s": str(sku)}).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+    except Exception:
+        return None
 
 
 def _catalog_wholesale(db, state_json: Dict[str, Any], tenant_id: str) -> Optional[int]:

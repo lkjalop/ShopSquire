@@ -102,6 +102,37 @@ def test_from_case_derives_wholesale_and_retail(db):
     assert econ["margin_pct"] == 0.25 and econ["max_buyer_discount_cents"] == 120000
 
 
+def test_from_case_retail_falls_back_to_product_catalog_price_pre_send(db, monkeypatch):
+    # the demo gap: no price_book row + no selected option/quote yet → margin must STILL compute at the
+    # send-approval gate, using the product catalog list price + the draft's shortfall quantity. Wholesale
+    # comes from the supplier catalog. Without this the live demo SKU returned 'insufficient_data'.
+    monkeypatch.setenv("COMMERCE_CATALOG_ENABLED", "1")
+    from sqlalchemy import text as _t
+    from src.app.services.supplier_catalog import seed_demo as seed_suppliers
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('LAP-021','Demo Laptop',200000,'{}',1)")); db.commit()
+    seed_suppliers(db, skus=["LAP-021"]); db.commit()  # supplier coverage → cheapest_wholesale_cents
+    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
+                       now_iso="2026-06-26 09:00:00"); db.commit()
+    for event, actor, patch, ts in [
+        ("availability_assessed", AG(), {"availability": {"requested_qty": 10, "in_stock": 4,
+                                                          "shortfall": 6, "item_ref": "LAP-021"}}, 1),
+        ("request_buyer_commitment", AG(), None, 2),
+        ("buyer_committed", BU(), None, 3),
+        ("external_message_drafted", AG(),
+         {"draft": {"content_hash": "H1", "commercial_scope": {"quantity": 6, "item_ref": "LAP-021"}}}, 4),
+        ("approval_requested", AG(), None, 5),
+    ]:
+        assert wf.transition(db, case_id=cid, event=event, actor=actor, state_patch=patch,
+                             now_iso=f"2026-06-26 09:0{ts}:00").ok, event
+    econ = E.from_case(db, cid, floor_margin_pct=0.10)
+    assert econ, "margin should compute pre-send from the product catalog price (demo gap)"
+    assert econ["retail_unit_cents"] == 200000          # ← product catalog list-price fallback
+    assert econ["quantity"] == 6                         # ← pre-send qty from the draft commercial scope
+    assert econ["supplier_unit_cost_cents"] > 0          # ← wholesale from the supplier catalog
+    assert econ["clears_floor"] is True                  # 2000 list vs ~1100 wholesale → healthy margin
+
+
 def test_from_case_empty_before_quote_validated(db):
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
                        now_iso="2026-06-26 09:00:00"); db.commit()
