@@ -201,18 +201,24 @@ def test_seed_demo_supplier_history_records_prior_dealings(tmp_path):
         dbmod.set_engine(prev)
 
 
-def test_default_draft_path_resolves_seeded_supplier():
-    """Integration: with the catalog seeded in the APP db, build_draft's DEFAULT path (no injected
-    rank/allowlist fns) resolves the winning approved supplier — the live happy-path is unblocked."""
+def test_default_draft_path_resolves_seeded_supplier(tmp_path):
+    """Integration: build_draft's DEFAULT path (no injected rank/allowlist fns) resolves the winning
+    approved supplier — the live happy-path is unblocked. Isolated on a FRESH engine (the resolvers open
+    their own db_session, so the ambient/polluted global engine would otherwise make this order-dependent)."""
+    from sqlalchemy import create_engine
+    from src.app.models import db as dbmod
     from src.app.models.db import db_session
     from src.app.services.fulfillment.draft import build_draft
-    with db_session() as db:
-        seed_demo(db, skus=["LAP-021"])
-    with db_session() as db:
-        draft = build_draft(db, item_ref="LAP-021", quantity=6, case_ref="FC-IT-1", estimated_value_cents=669000)
-    assert draft is not None, "default draft path still resolves NO supplier — seed/enrichment broken"
-    # resolves SOME approved supplier (the routed winner depends on the profile's supplier_routing_rules —
-    # LAP-* routes to the business supplier; don't couple the test to which demo supplier ranks first).
-    assert draft.recipient_domain and draft.recipient_domain.endswith(".example")
-    assert draft.content_hash and "purchase order" in draft.body.lower()
-    assert any("allowlist" in r for r in draft.rationale)
+    prev = dbmod.get_engine()
+    dbmod.set_engine(create_engine(f"sqlite+pysqlite:///{tmp_path / 'sc_draft.sqlite'}", future=True))
+    try:
+        with db_session() as db:
+            seed_demo(db, skus=["LAP-021"])
+        with db_session() as db:
+            draft = build_draft(db, item_ref="LAP-021", quantity=6, case_ref="FC-IT-1", estimated_value_cents=669000)
+        assert draft is not None, "default draft path still resolves NO supplier — seed/enrichment broken"
+        assert draft.recipient_domain == "approved-supplier.example"  # base SUP-7 wins on the clean engine
+        assert draft.content_hash and "purchase order" in draft.body.lower()
+        assert any("allowlist" in r for r in draft.rationale)
+    finally:
+        dbmod.set_engine(prev)
