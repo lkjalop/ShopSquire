@@ -261,6 +261,7 @@ def load_feature_flags(path: str) -> dict:
             "DYNAMIC_CONTEXT_PROVIDER_ENABLED": "DYNAMIC_CONTEXT_PROVIDER_ENABLED",
             "CAG_CONTEXT_ENABLED": "CAG_CONTEXT_ENABLED",
             "GRAPH_RAG_ENABLED": "GRAPH_RAG_ENABLED",
+            "FULFILLMENT_DEFER_TO_CART": "FULFILLMENT_DEFER_TO_CART",
         }
         for key, env_key in override_map.items():
             v = _env_bool(env_key)
