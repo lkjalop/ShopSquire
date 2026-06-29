@@ -259,6 +259,7 @@ def assess(case_id: str, body: AssessBody, role: str = Depends(require_role(_OPE
 
 class CommitBody(BaseModel):
     uid: str
+    email: Optional[str] = None   # optional buyer email → bounded-autonomy status reply (flag-gated)
 
 
 @router.post("/cases/{case_id}/commit")
@@ -269,7 +270,30 @@ def commit(case_id: str, body: CommitBody) -> Dict[str, Any]:
         res = fwf.transition(db, case_id=case_id, event="buyer_committed", actor=Actor(ActorType.BUYER, body.uid),
                              reason_code="buyer_commitment")
         _raise_if_failed(res)
+        # bounded autonomy: auto-send the claim-safe "thanks, sourcing" status to the buyer (flag-gated;
+        # no human approval needed because it makes no commitment). Best-effort.
+        if body.email:
+            from src.app.services.fulfillment.buyer_reply import send_buyer_status
+            try:
+                send_buyer_status(db, case_id, to_email=body.email)
+            except Exception:
+                pass
         return _case_view(db, case_id, for_operator=False)
+
+
+class NotifyBuyerBody(BaseModel):
+    to_email: str
+
+
+@router.post("/cases/{case_id}/notify-buyer")
+def notify_buyer(case_id: str, body: NotifyBuyerBody,
+                 role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Operator-triggered buyer status notification (claim-safe, commitment-free). force=True so it sends
+    even if the auto-reply flag is off — an explicit human action."""
+    from src.app.services.fulfillment.buyer_reply import send_buyer_status
+    with db_session() as db:
+        result = send_buyer_status(db, case_id, to_email=body.to_email, force=True)
+        return {**_case_view(db, case_id, for_operator=True), "buyer_notification": result}
 
 
 class DraftBody(BaseModel):
