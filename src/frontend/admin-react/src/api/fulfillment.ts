@@ -58,6 +58,15 @@ export interface AutonomousAudit {
 }
 export const fcAutonomousAudit = (limit = 100) =>
   http<AutonomousAudit>(`/api/v1/fulfillment/autonomous/audit?limit=${encodeURIComponent(String(limit))}`);
+
+// Multi-line order → grouped cases (one per supplier). "15 laptops + 10 monitors + 5 headsets".
+export interface OrderGroupCase {
+  case_id: string; supplier_ref?: string | null; supplier_name?: string | null;
+  recipient_domain?: string | null; lines: { item_ref: string; quantity: number }[]; total_quantity: number;
+}
+export interface FromOrderResult { order_group_id: string; case_count: number; cases: OrderGroupCase[]; plan?: any; }
+export const fcFromOrder = (query: string) =>
+  http<FromOrderResult>(`/api/v1/fulfillment/cases/from-order`, { method: 'POST', body: JSON.stringify({ query }) });
 export const fcDispatch = (id: string, content_hash: string) => _fcPost(`${_fc(id)}/dispatch`, { content_hash });
 // Export the case as an OKF (Open Knowledge Format) document — a portable audit artifact.
 export const fcCaseOkf = (id: string) =>
