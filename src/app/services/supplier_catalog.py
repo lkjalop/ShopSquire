@@ -211,17 +211,28 @@ def seed_demo(db, *, skus: Optional[List[str]] = None, commit: bool = True) -> D
             n_dom += 1
         _t = s.get("terms") or {}
         import json as _json
+        _params = {"s": s["id"], "moq": _t.get("moq"), "mov": _t.get("min_order_value_cents"),
+                   "lt": _t.get("lead_time_days"), "rg": _t.get("region"), "ot": _t.get("on_time_rate"),
+                   "pb": _json.dumps(_t.get("price_breaks") or []), "cs": _t.get("contract_status")}
         for sku in skus:
             if not _exists(db, "SELECT 1 FROM supplier_products WHERE supplier_id=:s AND sku=:k",
                            {"s": s["id"], "k": sku}):
                 db.execute(text(
                     "INSERT INTO supplier_products (supplier_id, sku, moq, min_order_value_cents, "
                     "lead_time_days, region, on_time_rate, price_breaks, contract_status, active) "
-                    "VALUES (:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"),
-                    {"s": s["id"], "k": sku, "moq": _t.get("moq"), "mov": _t.get("min_order_value_cents"),
-                     "lt": _t.get("lead_time_days"), "rg": _t.get("region"), "ot": _t.get("on_time_rate"),
-                     "pb": _json.dumps(_t.get("price_breaks") or []), "cs": _t.get("contract_status")})
+                    "VALUES (:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"), {**_params, "k": sku})
                 n_prod += 1
+            else:
+                # backfill commercial terms onto a pre-migration row (null terms) — COALESCE keeps any
+                # value already set, fills the gaps; idempotent so re-seeding is safe.
+                db.execute(text(
+                    "UPDATE supplier_products SET moq=COALESCE(moq,:moq), "
+                    "min_order_value_cents=COALESCE(min_order_value_cents,:mov), "
+                    "lead_time_days=COALESCE(lead_time_days,:lt), region=COALESCE(region,:rg), "
+                    "on_time_rate=COALESCE(on_time_rate,:ot), contract_status=COALESCE(contract_status,:cs), "
+                    "active=COALESCE(active,1), price_breaks=CASE WHEN price_breaks IS NULL OR "
+                    "price_breaks='' OR price_breaks='[]' THEN :pb ELSE price_breaks END "
+                    "WHERE supplier_id=:s AND sku=:k"), {**_params, "k": sku})
     if commit:
         try:
             db.commit()
