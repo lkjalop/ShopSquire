@@ -3725,12 +3725,18 @@ def _summarize_results(
                 from src.app.services.embedding_pipeline import EmbeddingPipeline
                 from src.app.services.vector_store import PgVectorStore
 
-                # Build a stable fingerprint: query + budget + use_case + top skus
+                # Build a stable fingerprint: query + budget + use_case + top skus + order_quantity. The
+                # order_quantity bucket matters: a BULK ask ("50 laptops") narrates sourcing where a single
+                # ask ("a laptop") does not — without it, embedding-similar queries could reuse the wrong
+                # (non-sourcing) prose even though the structured sourcing card is correct (prose↔card mismatch).
+                _oq = str(constraints.get("order_quantity") or "").strip()
+                _oq_bucket = "bulk" if (_oq.isdigit() and int(_oq) > 1) else "single"
                 _fp_parts = [
                     (query or "").lower().strip(),
                     str(constraints.get("budget_max") or ""),
                     str(constraints.get("use_case") or ""),
                     ",".join(str(r.get("sku") or "") for r in (results or [])[:3]),
+                    _oq_bucket,
                 ]
                 _cache_key = hashlib.md5("|".join(_fp_parts).encode()).hexdigest()
                 _store = PgVectorStore("query_cache")

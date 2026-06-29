@@ -42,33 +42,50 @@ def parse_order_lines(query: str) -> List[Dict[str, Any]]:
     return out
 
 
-def _find_sku_for_phrase(db, phrase: str) -> Optional[str]:
-    """A representative ACTIVE catalog SKU whose category/name matches the phrase (crude singularise). None
-    if nothing matches. Vertical-blind — matches opaque product DATA, no hardcoded categories."""
-    token = str(phrase or "").strip().lower().rstrip("s")
-    if not token or db is None:
-        return None
+def _load_active_products(db) -> List[Any]:
+    """Fetch the ACTIVE catalog (sku, name, specs) ONCE so phrase→SKU matching is in-memory — no N+1 full
+    scan per phrase. [] on any failure. Vertical-blind (opaque product DATA)."""
+    if db is None:
+        return []
     try:  # name + specs (the type word — "laptop"/"monitor" — is in the name); robust to a missing category col
-        rows = db.execute(text("SELECT sku, name, specs FROM products WHERE COALESCE(active,1)=1")).fetchall()
+        return list(db.execute(text("SELECT sku, name, specs FROM products WHERE COALESCE(active,1)=1")).fetchall())
     except Exception as exc:
-        logger.debug("_find_sku_for_phrase query failed: %s", exc)
+        logger.debug("_load_active_products query failed: %s", exc)
+        return []
+
+
+def _match_sku_for_phrase(rows: List[Any], phrase: str) -> Optional[str]:
+    """A representative SKU whose name/specs match the phrase (crude singularise), matched against PRE-FETCHED
+    rows — pure, no DB. None if nothing matches."""
+    token = str(phrase or "").strip().lower().rstrip("s")
+    if not token:
         return None
     for r in (rows or []):
         blob = f"{str(r[1] or '')} {str(r[2] or '')}".lower()
-        if token and token in blob:
+        if token in blob:
             return str(r[0])
     return None
 
 
+def _find_sku_for_phrase(db, phrase: str) -> Optional[str]:
+    """Single-phrase convenience (one catalog fetch). In LOOPS prefer _load_active_products once +
+    _match_sku_for_phrase per phrase (resolve_line_skus does this) to avoid the N+1."""
+    return _match_sku_for_phrase(_load_active_products(db), phrase)
+
+
 def resolve_line_skus(db, lines: List[Dict[str, Any]], *, tenant_id: str = "default") -> List[Dict[str, Any]]:
     """Map parsed {phrase, quantity} lines to {item_ref, requested_qty} using the catalog. Lines whose phrase
-    resolves to no SKU are dropped (the caller can surface them). Preserves explicit item_ref when present."""
+    resolves to no SKU are dropped (the caller can surface them). Preserves explicit item_ref when present.
+    The catalog is fetched AT MOST ONCE (lazy — only when a phrase actually needs resolving) — no N+1."""
     out: List[Dict[str, Any]] = []
     seen = set()
+    _rows: Optional[List[Any]] = None
     for ln in (lines or []):
         ir = str(ln.get("item_ref") or ln.get("sku") or "").strip()
         if not ir:
-            ir = _find_sku_for_phrase(db, str(ln.get("phrase") or "")) or ""
+            if _rows is None:
+                _rows = _load_active_products(db)  # one fetch, reused for every phrase
+            ir = _match_sku_for_phrase(_rows, str(ln.get("phrase") or "")) or ""
         qty = _int(ln.get("requested_qty", ln.get("quantity")))
         if not ir or qty <= 0 or ir in seen:
             continue
