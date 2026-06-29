@@ -112,6 +112,24 @@ def test_supersede_order_retires_pre_send_cases_and_resources(db):
     assert r2["idempotent"] is True and {c["case_id"] for c in r2["cases"]} == {new_case}
 
 
+def test_supersede_carries_requirements_forward_when_amend_omits_them(db):
+    # the live bug: after amendment the RFQ lost the concrete deadline. supersede_order must inherit the
+    # original requirements (deadline/use_case) when the amend confirm does not restate them.
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    _seed_product(db, "MON-1", "LG monitor")
+    ensure_supplier_coverage(db)
+    materialize_cases_for_order(db, order_id="ORD-RF", uid="u1",
+                                requirements={"needed_by": "2026-07-07", "use_case": "gaming"},
+                                lines=[{"item_ref": "GAM-0002", "requested_qty": 7, "in_stock": 0}])
+    # amend WITHOUT restating requirements (the API path the live test exercised)
+    sup = supersede_order(db, order_id="ORD-RF", uid="u1", requirements=None,
+                          lines=[{"item_ref": "MON-1", "requested_qty": 10, "in_stock": 0}])
+    new_case = sup["created"]["cases"][0]["case_id"]
+    sj = wf.repository.current_version(db, new_case).state_json
+    assert sj.get("requirements", {}).get("needed_by") == "2026-07-07"   # inherited, not lost
+    assert sj["requirements"]["use_case"] == "gaming"
+
+
 def test_operator_supersede_then_late_reply_is_quarantined(db):
     # post-send supersession safety: an operator retires a case, and a LATE supplier reply to that
     # superseded RFQ is quarantined (superseded_rfq) rather than processed as a live quote.

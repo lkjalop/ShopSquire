@@ -98,6 +98,17 @@ def supersede_order(db, *, order_id: str, lines: List[Dict[str, Any]], uid: Opti
         return {"order_group_id": group_id, "superseded": [], "operator_required": operator_required,
                 "created": None, "status": "operator_required"}
 
+    # CARRY FORWARD requirements (deadline/use_case/ship_to): if the amend confirm did NOT restate them,
+    # inherit from the superseded cases so the new RFQ keeps the CONCRETE deadline instead of regressing to
+    # the vague "the stated deadline" placeholder (the live amend-path bug). Read before superseding.
+    if not requirements:
+        for cid in supersedable:
+            cur = current_version(db, cid, tenant_id)
+            _r = cur.state_json.get("requirements") if cur and isinstance(cur.state_json, dict) else None
+            if isinstance(_r, dict) and _r:
+                requirements = _r
+                break
+
     actor = Actor(ActorType.BUYER, uid or "buyer")
     superseded: List[str] = []
     for cid in supersedable:

@@ -100,6 +100,18 @@ def from_case(db, case_id: str, *, retail_unit_cents: Optional[int] = None,
         ru = _selected_retail_unit(st)            # fallback: derive from the selected option
     if ru is None:
         ru = _product_retail(db, _case_sku(st))   # last resort: the product catalog list price (always present)
+    # DEMO-economics safeguard: a wholesale AT/ABOVE retail is a seed artifact (a fixed supplier unit_cost
+    # applied to a cheaper SKU) → it would imply selling at a loss and makes the positive-margin demo path
+    # impossible. Fall back to a realistic markup (DEMO_WHOLESALE_FRACTION, default 0.70 → ~30% margin).
+    # Genuinely thin-but-PROFITABLE SKUs (wholesale < retail) are untouched, so the below-floor gate still
+    # fires for real cases. No-op once a real validated quote sets the wholesale.
+    if isinstance(su, int) and isinstance(ru, int) and ru > 0 and su >= ru:
+        import os as _os
+        try:
+            _frac = float(_os.getenv("DEMO_WHOLESALE_FRACTION", "0.70") or 0.70)
+        except (TypeError, ValueError):
+            _frac = 0.70
+        su = int(round(ru * max(0.1, min(0.95, _frac))))
     econ = compute(supplier_unit_cost_cents=su, retail_unit_cents=ru, quantity=qty,
                    floor_margin_pct=floor_margin_pct)
     return econ.to_dict() if econ else {}

@@ -133,6 +133,31 @@ def test_from_case_retail_falls_back_to_product_catalog_price_pre_send(db, monke
     assert econ["clears_floor"] is True                  # 2000 list vs ~1100 wholesale → healthy margin
 
 
+def test_from_case_demo_safeguard_rescues_loss_making_seed(db, monkeypatch):
+    # the live bug: a cheap SKU ($629 retail) routed to a fixed-cost supplier ($1095 wholesale) showed
+    # below_floor (selling at a loss). The safeguard falls the wholesale back to a realistic markup so the
+    # positive-margin demo works; the override still fires only when wholesale >= retail.
+    monkeypatch.setenv("COMMERCE_CATALOG_ENABLED", "1")
+    from sqlalchemy import text as _t
+    from src.app.services.supplier_catalog import seed_demo as seed_suppliers
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('LAP-021','Budget Laptop',62900,'{}',1)")); db.commit()  # $629 retail
+    seed_suppliers(db, skus=["LAP-021"]); db.commit()  # supplier wholesale > $629 → would be a loss
+    cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1", now_iso="2026-06-26 09:00:00"); db.commit()
+    for event, actor, patch, ts in [
+        ("availability_assessed", AG(), {"availability": {"requested_qty": 10, "in_stock": 4, "shortfall": 6, "item_ref": "LAP-021"}}, 1),
+        ("request_buyer_commitment", AG(), None, 2),
+        ("buyer_committed", BU(), None, 3),
+        ("external_message_drafted", AG(), {"draft": {"content_hash": "H1", "commercial_scope": {"quantity": 6, "item_ref": "LAP-021"}}}, 4),
+        ("approval_requested", AG(), None, 5),
+    ]:
+        assert wf.transition(db, case_id=cid, event=event, actor=actor, state_patch=patch, now_iso=f"2026-06-26 09:0{ts}:00").ok, event
+    econ = E.from_case(db, cid, floor_margin_pct=0.10)
+    assert econ["retail_unit_cents"] == 62900
+    assert econ["supplier_unit_cost_cents"] == int(round(62900 * 0.70))   # safeguarded, not the $1095 loss
+    assert econ["clears_floor"] is True                                    # now a healthy ~30% margin demo
+
+
 def test_from_case_empty_before_quote_validated(db):
     cid = wf.open_case(db, buyer_uid_hash="u1", source_trace_id="T1", requested_by="u1",
                        now_iso="2026-06-26 09:00:00"); db.commit()
