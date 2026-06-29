@@ -83,6 +83,12 @@ DEMO_SKUS = ["LAP-021", "GAM-1", "GAM-0002", "demo-sku"]
 # Routed demo suppliers: these make procurement demos behave like a real multi-supplier catalog instead
 # of every SKU collapsing to the same generic supplier. ``seed_demo`` above is intentionally kept as the
 # small legacy fixture used by older tests; ``ensure_supplier_coverage`` uses these category/SKU routes.
+# DESIGN NOTE (why these RECORDS live in core but the ROUTING RULES do not): the product->supplier
+# vocabulary (brand/model/GPU tokens -> a supplier id) is electronics FLAVOUR and lives in the
+# StoreProfile (supplier_routing_rules) so core stays vertical-blind. These records are opaque demo DATA
+# (company names + .example domains -- not product vocabulary, so ratchet-clean) and feed the LIVE
+# self-healing ``ensure_supplier_coverage`` path that runs outside the seed script; keeping them here
+# keeps that path self-contained. Swap the vertical -> swap the profile's routing rules; records stay generic.
 _ROUTED_DEMO_SUPPLIERS = [
     {"id": "SUP-BIZ", "name": "Northbridge Business Systems", "domain": "northbridge-business.example",
      "unit_cost": 1095.0, "lead_time_days": 6, "moq": 5, "on_time_rate": 0.95, "reliability_score": 0.91,
@@ -387,7 +393,16 @@ def _supplier_route_for_product(sku: str, name: str = "", specs: Optional[Dict[s
 
 
 def _deactivate_demo_coverage(db, skus: List[str]) -> None:
-    """Disable old demo over-coverage for the SKUs we are about to route; do not touch real suppliers."""
+    """Disable old demo over-coverage for the SKUs we are about to route; do not touch real suppliers.
+
+    DESIGN NOTE (replace, NOT add-alongside — do not "un-deactivate" the base suppliers): routing
+    REPLACES coverage so each routed SKU resolves to exactly its category supplier. This is deliberate,
+    not vestigial. The demo's value is that the draft recipient varies by category (GAM→CreatorFleet,
+    MON→PeriLink); that only holds if the category supplier wins DETERMINISTICALLY. Leaving the base
+    suppliers (SUP-7 @ $1115 < SUP-CREATOR @ $1260) active would let price-ranking pick the base over the
+    category supplier → the draft silently goes to the wrong supplier and "who wins" becomes a function of
+    seeded prices. If a genuine multi-supplier shortlist is ever wanted, express it as an ORDERED routing
+    rule in the profile (primary first), not as base-supplier bleed-through."""
     for sid in sorted(_ALL_DEMO_SUPPLIER_IDS):
         for sku in skus:
             try:
