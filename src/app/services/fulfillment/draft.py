@@ -499,21 +499,6 @@ def no_supplier_alternatives(db, *, item_ref: str, quantity: int, case_state: Op
         return None
 
 
-def _supplier_moq(db, supplier_ref: str, tenant_id: str = "default") -> Optional[int]:
-    """The resolved supplier's minimum order quantity (suppliers.moq), or None when unknown. Opaque DB
-    read — vertical-blind. Used only to flag MOQ risk on the draft (never blocks)."""
-    try:
-        from sqlalchemy import text as _t
-        row = db.execute(_t("SELECT moq FROM suppliers WHERE id = :i LIMIT 1"),
-                         {"i": str(supplier_ref)}).fetchone()
-        if row and row[0] is not None:
-            m = int(row[0])
-            return m if m > 0 else None
-    except Exception:
-        return None
-    return None
-
-
 def rfq_completeness_reason(slots: Dict[str, Any], required_fields: Optional[List[str]] = None) -> Optional[str]:
     """The reason an RFQ draft is INCOMPLETE (a missing/placeholder required field), or None if complete.
     Used for the operator badge and (WS-C) as a gate before autonomous send — an incomplete RFQ must not
@@ -613,9 +598,15 @@ def build_draft(
     evidence = gather_evidence(db, item_ref=item_ref, case_state=case_state, recipient_domain=domain,
                                hippograph_fn=hippograph_fn, market_fn=market_fn, benchmark_fn=benchmark_fn,
                                inbox_fn=inbox_fn, tenant_id=tenant_id)
-    # MOQ risk: a tiny shortfall below the supplier's minimum order quantity may be declined / pushed back.
-    # Surface it so the operator sees the risk BEFORE sending (the "qty 2 RFQ" weakness) — non-blocking.
-    _moq = _supplier_moq(db, recipient_ref, tenant_id)
+    # Per-(supplier, SKU) commercial terms (WS-1): MOQ pre-check + volume price-break nudge. Both are
+    # non-blocking advisories surfaced on the draft so the operator sees the risk + the upsell BEFORE
+    # sending. Vertical-blind (qty / cents / % only).
+    try:
+        from src.app.services.supplier_catalog import price_break_advisory, supplier_terms
+        _terms = supplier_terms(db, recipient_ref, item_ref, tenant_id=tenant_id)
+    except Exception:
+        _terms = {}
+    _moq = _terms.get("moq")
     if _moq and int(quantity) < int(_moq):
         evidence.append(DraftEvidence(
             "moq_risk", f"MOQ-{uuid.uuid4().hex[:8]}",
@@ -623,6 +614,11 @@ def build_draft(
             f"decline or require a minimum order — consider fulfilling available stock now and sourcing "
             f"only if the MOQ is acceptable",
             payload={"requested_qty": int(quantity), "supplier_moq": int(_moq)}))
+    _pb = price_break_advisory(int(quantity), _terms) if _terms else None
+    if _pb:
+        evidence.append(DraftEvidence("price_break", f"PB-{uuid.uuid4().hex[:8]}", _pb,
+                                      payload={"requested_qty": int(quantity),
+                                               "price_breaks": _terms.get("price_breaks")}))
     # active StoreProfile supplies the RFQ template + commercial-term DATA — core stays vertical-blind.
     def _profile_fn(key, default=None):
         try:

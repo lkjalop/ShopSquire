@@ -11,9 +11,12 @@ supplier with it. Vertical-blind; best-effort; idempotent.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
+
+logger = logging.getLogger("shopsquire.supplier_catalog")
 
 _SUPPLIERS_DDL = """
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -37,6 +40,18 @@ CREATE TABLE IF NOT EXISTS supplier_products (
     PRIMARY KEY (supplier_id, sku)
 )
 """
+# Per-(supplier, SKU) commercial terms — richer than the supplier-level defaults. All optional/additive
+# (migrated in idempotently) and vertical-blind (cents / days / qty / opaque region & contract strings).
+_SUPPLIER_PRODUCTS_COLUMNS = (
+    ("moq", "INTEGER"),                    # minimum order quantity for THIS sku from THIS supplier
+    ("min_order_value_cents", "INTEGER"),  # minimum order VALUE (some suppliers gate on $ not qty)
+    ("lead_time_days", "INTEGER"),         # per-sku dispatch lead time
+    ("region", "TEXT"),                    # warehouse / serviceable region (faster/cheaper when local)
+    ("on_time_rate", "REAL"),              # per-sku reliability
+    ("price_breaks", "TEXT"),              # JSON: [{"min_qty": N, "discount_pct": P}] — volume tiers
+    ("contract_status", "TEXT"),           # 'preferred' | 'spot' | 'contracted' (opaque)
+    ("active", "INTEGER"),
+)
 # matches supplier_domain_guard's table exactly (the allowlist the send-gate + draft both read)
 _TRUSTED_DDL = """
 CREATE TABLE IF NOT EXISTS trusted_supplier_domains (
@@ -52,9 +67,16 @@ _INDEXES = (
 # Deterministic demo suppliers — SUP-7 is the clear winner (cheaper, faster, more reliable).
 _DEMO_SUPPLIERS = [
     {"id": "SUP-7", "name": "TechData Procurement", "domain": "approved-supplier.example",
-     "unit_cost": 1115.0, "lead_time_days": 7, "moq": 1, "on_time_rate": 0.96, "reliability_score": 0.92},
+     "unit_cost": 1115.0, "lead_time_days": 7, "moq": 1, "on_time_rate": 0.96, "reliability_score": 0.92,
+     # per-SKU commercial terms (the demo seed populates supplier_products with these)
+     "terms": {"moq": 1, "min_order_value_cents": 0, "lead_time_days": 7, "region": "AU-metro",
+               "on_time_rate": 0.96, "contract_status": "preferred",
+               "price_breaks": [{"min_qty": 25, "discount_pct": 5}, {"min_qty": 50, "discount_pct": 10}]}},
     {"id": "SUP-3", "name": "BulkParts Co", "domain": "bulk-parts.example",
-     "unit_cost": 1180.0, "lead_time_days": 12, "moq": 5, "on_time_rate": 0.85, "reliability_score": 0.80},
+     "unit_cost": 1180.0, "lead_time_days": 12, "moq": 5, "on_time_rate": 0.85, "reliability_score": 0.80,
+     "terms": {"moq": 5, "min_order_value_cents": 500000, "lead_time_days": 12, "region": "AU",
+               "on_time_rate": 0.85, "contract_status": "spot",
+               "price_breaks": [{"min_qty": 20, "discount_pct": 8}, {"min_qty": 50, "discount_pct": 15}]}},
 ]
 DEMO_SKUS = ["LAP-021", "GAM-1", "demo-sku"]
 
@@ -63,8 +85,98 @@ def ensure_tables(db) -> None:
     db.execute(text(_SUPPLIERS_DDL))
     db.execute(text(_SUPPLIER_PRODUCTS_DDL))
     db.execute(text(_TRUSTED_DDL))
+    _ensure_supplier_products_columns(db)
     for idx in _INDEXES:
         db.execute(text(idx))
+
+
+def _ensure_supplier_products_columns(db) -> None:
+    """Idempotently add the per-SKU commercial-terms columns (ALTER ADD COLUMN is additive in SQLite +
+    Postgres; we add only the ones missing). Best-effort — a failed add never breaks the read path."""
+    try:
+        existing = {str(r[1]) for r in db.execute(text("PRAGMA table_info(supplier_products)")).fetchall()}
+    except Exception:
+        # Non-SQLite (e.g. Postgres) — try information_schema; on any failure, skip (columns may already exist)
+        try:
+            existing = {str(r[0]) for r in db.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='supplier_products'"
+            )).fetchall()}
+        except Exception:
+            return
+    for col, typ in _SUPPLIER_PRODUCTS_COLUMNS:
+        if col not in existing:
+            try:
+                db.execute(text(f"ALTER TABLE supplier_products ADD COLUMN {col} {typ}"))
+            except Exception as exc:
+                logger.debug("supplier_products ADD COLUMN %s skipped: %s", col, exc)
+
+
+def supplier_terms(db, supplier_id: str, sku: str, *, tenant_id: str = "default") -> Dict[str, Any]:
+    """Merged commercial terms for (supplier, sku): per-SKU values (supplier_products) override the
+    supplier-level defaults (suppliers). Returns {moq, min_order_value_cents, lead_time_days, region,
+    on_time_rate, price_breaks: [...], contract_status}. Empty dict on any failure. Vertical-blind."""
+    import json as _json
+    out: Dict[str, Any] = {}
+    try:
+        srow = db.execute(text("SELECT moq, lead_time_days, on_time_rate FROM suppliers WHERE id=:i LIMIT 1"),
+                          {"i": str(supplier_id)}).fetchone()
+        if srow:
+            out["moq"] = int(srow[0]) if srow[0] is not None else None
+            out["lead_time_days"] = int(srow[1]) if srow[1] is not None else None
+            out["on_time_rate"] = float(srow[2]) if srow[2] is not None else None
+    except Exception:
+        # resilient to a minimal suppliers table (e.g. only id/name/moq) — moq is the key default
+        try:
+            srow = db.execute(text("SELECT moq FROM suppliers WHERE id=:i LIMIT 1"),
+                              {"i": str(supplier_id)}).fetchone()
+            if srow and srow[0] is not None:
+                out["moq"] = int(srow[0])
+        except Exception as exc:
+            logger.debug("supplier_terms suppliers lookup failed for %s: %s", supplier_id, exc)
+    try:
+        prow = db.execute(text(
+            "SELECT moq, min_order_value_cents, lead_time_days, region, on_time_rate, price_breaks, "
+            "contract_status FROM supplier_products WHERE supplier_id=:s AND sku=:k LIMIT 1"),
+            {"s": str(supplier_id), "k": str(sku)}).fetchone()
+    except Exception:
+        prow = None
+    if prow:
+        for i, key in enumerate(("moq", "min_order_value_cents", "lead_time_days", "region",
+                                 "on_time_rate", "price_breaks", "contract_status")):
+            v = prow[i]
+            if v is None:
+                continue
+            if key == "price_breaks":
+                try:
+                    out["price_breaks"] = _json.loads(v) if isinstance(v, str) else (v or [])
+                except Exception:
+                    out["price_breaks"] = []
+            elif key in ("moq", "min_order_value_cents", "lead_time_days"):
+                out[key] = int(v)
+            elif key == "on_time_rate":
+                out[key] = float(v)
+            else:
+                out[key] = v
+    out.setdefault("price_breaks", [])
+    return out
+
+
+def price_break_advisory(quantity: int, terms: Dict[str, Any]) -> Optional[str]:
+    """The next volume tier ABOVE the ordered quantity, if any — the "order a bit more, pay less" nudge.
+    Returns a buyer/operator-facing line or None. Pure; vertical-blind."""
+    try:
+        q = int(quantity or 0)
+        breaks = sorted(
+            [{"min_qty": int(b.get("min_qty")), "discount_pct": float(b.get("discount_pct"))}
+             for b in (terms or {}).get("price_breaks", []) if isinstance(b, dict) and b.get("min_qty")],
+            key=lambda b: b["min_qty"])
+    except Exception:
+        return None
+    nxt = next((b for b in breaks if b["min_qty"] > q), None)
+    if not nxt:
+        return None
+    return (f"Volume tier: ordering {nxt['min_qty']}+ units unlocks ~{nxt['discount_pct']:.0f}% off "
+            f"(you're ordering {q}).")
 
 
 def _exists(db, sql: str, params: Dict[str, Any]) -> bool:
@@ -97,11 +209,18 @@ def seed_demo(db, *, skus: Optional[List[str]] = None, commit: bool = True) -> D
                             "VALUES (:i,:d,:s,'seed',1)"),
                        {"i": str(uuid.uuid4()), "d": s["domain"], "s": s["id"]})
             n_dom += 1
+        _t = s.get("terms") or {}
+        import json as _json
         for sku in skus:
             if not _exists(db, "SELECT 1 FROM supplier_products WHERE supplier_id=:s AND sku=:k",
                            {"s": s["id"], "k": sku}):
-                db.execute(text("INSERT INTO supplier_products (supplier_id, sku) VALUES (:s,:k)"),
-                           {"s": s["id"], "k": sku})
+                db.execute(text(
+                    "INSERT INTO supplier_products (supplier_id, sku, moq, min_order_value_cents, "
+                    "lead_time_days, region, on_time_rate, price_breaks, contract_status, active) "
+                    "VALUES (:s,:k,:moq,:mov,:lt,:rg,:ot,:pb,:cs,1)"),
+                    {"s": s["id"], "k": sku, "moq": _t.get("moq"), "mov": _t.get("min_order_value_cents"),
+                     "lt": _t.get("lead_time_days"), "rg": _t.get("region"), "ot": _t.get("on_time_rate"),
+                     "pb": _json.dumps(_t.get("price_breaks") or []), "cs": _t.get("contract_status")})
                 n_prod += 1
     if commit:
         try:
