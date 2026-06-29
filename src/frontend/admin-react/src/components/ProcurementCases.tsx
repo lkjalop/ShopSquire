@@ -21,6 +21,7 @@ import ActionBar from './procurement/ActionBar';
 import AutonomyAudit from './procurement/AutonomyAudit';
 import CreateFromOrder from './procurement/CreateFromOrder';
 import ProcurementNotifications from './procurement/ProcurementNotifications';
+import { procurementActionMessage } from '../lib/actionError';
 import CaseJourney from './procurement/CaseJourney';
 import CaseQueue from './procurement/CaseQueue';
 import QuotePacket from './procurement/QuotePacket';
@@ -86,7 +87,13 @@ export function ProcurementCases() {
   const run = async (fn: () => Promise<any>) => {
     setBusy(true); setError(null);
     try { await fn(); loadCase(sel); loadList(); }
-    catch (e: any) { setError(e?.message || 'action failed'); }
+    catch (e: any) {
+      // a 409 (idempotent replay / state conflict) is benign — show a calm notice and refresh to the real
+      // current state instead of a scary raw error (the 409-replay UX).
+      const m = procurementActionMessage(e);
+      setError(m.message);
+      if (m.calm) { loadCase(sel); loadList(); }
+    }
     finally { setBusy(false); }
   };
 
