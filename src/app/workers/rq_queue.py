@@ -43,8 +43,9 @@ def _get_redis_connection() -> Optional["redis.Redis"]:
                 return None
             if not acl_user or not acl_pass:
                 return None
-            return redis.from_url(url, username=acl_user, password=acl_pass)  # type: ignore
-        return redis.from_url(url)  # type: ignore
+            return redis.from_url(url, username=acl_user, password=acl_pass,
+                                  socket_connect_timeout=0.5, socket_timeout=2.0)  # type: ignore
+        return redis.from_url(url, socket_connect_timeout=0.5, socket_timeout=2.0)  # type: ignore
     except Exception:
         return None
 

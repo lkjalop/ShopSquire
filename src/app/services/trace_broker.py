@@ -52,7 +52,9 @@ async def _redis() -> Any:
         return None
     try:
         url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        _REDIS_CLIENT = redis.from_url(url, decode_responses=True)
+        # fail-fast timeouts so an unreachable Redis never blocks the async broker (matches deps.py).
+        _REDIS_CLIENT = redis.from_url(url, decode_responses=True,
+                                       socket_connect_timeout=0.5, socket_timeout=2.0)
         return _REDIS_CLIENT
     except Exception:
         return None

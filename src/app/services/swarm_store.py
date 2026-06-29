@@ -9,7 +9,8 @@ import redis
 
 def _redis_client():
     url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-    return redis.from_url(url, decode_responses=True)
+    # fail-fast timeouts so an unreachable Redis never blocks the caller (matches deps.py).
+    return redis.from_url(url, decode_responses=True, socket_connect_timeout=0.5, socket_timeout=2.0)
 
 
 def set_job(job_id: str, payload: Dict[str, Any]) -> None:

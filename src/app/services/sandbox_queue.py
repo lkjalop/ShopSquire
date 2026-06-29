@@ -102,7 +102,7 @@ def queue_sandbox_detonation(
         import redis as _redis
 
         _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        _r = _redis.from_url(_redis_url, socket_timeout=2.0)
+        _r = _redis.from_url(_redis_url, socket_timeout=2.0, socket_connect_timeout=0.5)
         _r.xadd(_SANDBOX_STREAM_KEY, {"data": json.dumps(job, ensure_ascii=False, default=str)}, maxlen=5000)
         _log.info("sandbox_queue: redis stream entry added hypothesis=%s trace=%s", hypothesis, trace_id)
         return {"queued": True, "path": "redis_stream", "hypothesis": hypothesis, "trace_id": trace_id}

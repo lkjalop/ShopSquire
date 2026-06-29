@@ -21,11 +21,13 @@ def _get_redis_client():
     try:
         import redis
         url = str(os.getenv("REDIS_URL", "") or "").strip()
+        # fail-fast timeouts so an unreachable Redis never blocks (matches deps.py): connect 0.5s, op 2.0s.
+        _t = {"socket_connect_timeout": 0.5, "socket_timeout": 2.0}
         if not url:
             # default local
-            _REDIS_CLIENT = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True)
+            _REDIS_CLIENT = redis.Redis(host="127.0.0.1", port=6379, decode_responses=True, **_t)
         else:
-            _REDIS_CLIENT = redis.from_url(url, decode_responses=True)
+            _REDIS_CLIENT = redis.from_url(url, decode_responses=True, **_t)
         return _REDIS_CLIENT
     except Exception:
         return None
