@@ -218,8 +218,12 @@ export async function confirmCartSourcing(
   uid: string, orderId: string, lines: SourcingIntentLine[], traceId?: string, supersede = false,
   requirements?: Record<string, any>,
 ): Promise<ConfirmCartResult> {
+  // bound the request so the cart/checkout bridge can never hang on a slow/stuck backend (8s).
+  const _timeout = (typeof AbortSignal !== 'undefined' && (AbortSignal as any).timeout)
+    ? (AbortSignal as any).timeout(8000) : undefined;
   const r = await fetch(apiUrl('/api/v1/fulfillment/cases/confirm-cart'), {
     method: 'POST', credentials: 'include', headers: authHeaders({}, true),
+    signal: _timeout,
     body: JSON.stringify({
       uid: uid || 'demo-user',
       order_id: orderId,

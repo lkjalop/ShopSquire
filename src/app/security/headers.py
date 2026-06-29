@@ -11,6 +11,11 @@ class SecurityHeadersMiddleware:
         self.app = app
         self.enabled = str(os.getenv("SECURITY_HEADERS_ENABLED", "1")).lower() in ("1", "true", "yes")
         self.headers: Iterable[Tuple[bytes, bytes]] = self._build_headers()
+        # An API consumed by the browser SPA (incl. cross-origin in dev: :5173 → :8080) must allow
+        # cross-origin resource reads, else CORP:same-origin blocks the fetch/stream with
+        # ERR_BLOCKED_BY_RESPONSE.NotSameOrigin even when CORS allows it. CORS still gates WHO may read with
+        # credentials; CORP only gates the no-cors block. Non-API responses keep the strict same-origin.
+        self.corp_api = self._env("SECURITY_CORP_API", "cross-origin").encode("utf-8")
 
     @staticmethod
     def _env(name: str, default: str) -> str:
@@ -70,13 +75,19 @@ class SecurityHeadersMiddleware:
         if not self.enabled or scope.get("type") != "http":
             return await self.app(scope, receive, send)
 
+        is_api = str(scope.get("path") or "").startswith("/api/")
+
         async def send_wrapper(message):
             if message.get("type") == "http.response.start":
                 existing = {k.lower() for k, _ in message.get("headers", [])}
                 headers = list(message.get("headers", []))
                 for hk, hv in self.headers:
                     if hk not in existing:
-                        headers.append((hk, hv))
+                        # API responses are SPA-consumable cross-origin → relax only CORP for /api/*.
+                        if is_api and hk == b"cross-origin-resource-policy":
+                            headers.append((hk, self.corp_api))
+                        else:
+                            headers.append((hk, hv))
                 message["headers"] = headers
             await send(message)
 
