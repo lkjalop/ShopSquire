@@ -138,11 +138,14 @@ def fleet_advisory(lanes: List[Dict[str, Any]], *, use_case: Optional[str] = Non
     primary = [l for l in lanes if l.get("primary") and l.get("count")]
     non_primary = [l for l in lanes if l.get("non_primary") and l.get("count")]
     if not primary and non_primary:
+        # The options shown ARE viable to buy — they're just specialty/performance units, not a textbook
+        # fit for this use-case. Frame it coherently (offer to refine or source) instead of a flat "no
+        # match" that contradicts the recommendations on screen.
         return {
             "coverage": "none",
-            "message": ("No primary-fit options for this use-case in the current results. Recommend "
-                        "sourcing/procurement of suitable units rather than presenting the specialty "
-                        "options shown as primary picks."),
+            "message": ("The closest in-stock matches are performance/specialty units rather than a "
+                        "standard fit for this use-case. Tell me your exact use to refine — or, for a bulk "
+                        "order, I can source units to spec from an approved supplier."),
             "non_primary_lanes": [str(l.get("key")) for l in non_primary],
             "suggest_procurement": True,
         }

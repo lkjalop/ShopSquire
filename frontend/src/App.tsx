@@ -1973,7 +1973,7 @@ export default function App() {
                     <div data-testid="fleet-advisory" role="alert"
                          style={{ margin: '8px 0', padding: '8px 12px', borderRadius: 8,
                                   border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 13 }}>
-                      <strong>No clean work-fleet match.</strong> {rightPanelContract.fleet_advisory.message}
+                      <strong>Closest matches shown.</strong> {rightPanelContract.fleet_advisory.message}
                     </div>
                   )}
 
