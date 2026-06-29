@@ -111,6 +111,37 @@ def supersede_order(db, *, order_id: str, lines: List[Dict[str, Any]], uid: Opti
             "created": created, "status": "superseded"}
 
 
+def operator_supersede_case(db, *, case_id: str, actor_id: str = "operator",
+                            reason: str = "operator_amendment", trace_id: Optional[str] = None,
+                            tenant_id: str = "default", now_iso: Optional[str] = None) -> Dict[str, Any]:
+    """OPERATOR-driven supersession for a SINGLE case — including POST-SEND cases the buyer path can't touch
+    (a supplier was already emailed). Records the void draft content_hash so any late quote correlated to it
+    is quarantined (receive_reply), and flags cancellation_advised when a supplier was contacted (the
+    operator then sends the cancellation via the normal external-comms path). Returns
+    {ok, case_id, state, void_content_hash, cancellation_advised, reason}."""
+    from src.app.services.fulfillment import workflow as fwf
+    from src.app.services.fulfillment.domain import Actor, ActorType
+    from src.app.services.fulfillment.repository import current_version
+    if db is None or not case_id:
+        return {"ok": False, "case_id": case_id, "reason": "not_found"}
+    cur = current_version(db, case_id, tenant_id)
+    if not cur:
+        return {"ok": False, "case_id": case_id, "reason": "not_found"}
+    state = cur.state
+    void_hash = ((cur.state_json.get("draft") or {}).get("content_hash")
+                 if isinstance(cur.state_json, dict) else None)
+    cancellation_advised = state in ("QUOTE_SENT", "QUOTE_RECEIVED")
+    res = fwf.transition(
+        db, case_id=case_id, event="case_superseded", actor=Actor(ActorType.HUMAN_OPERATOR, actor_id),
+        reason_code=reason, trace_id=trace_id, now_iso=now_iso,
+        evidence={"void_content_hash": void_hash, "from_state": state},
+        state_patch={"superseded": {"void_content_hash": void_hash, "reason": reason,
+                                    "from_state": state, "cancellation_advised": cancellation_advised}})
+    return {"ok": getattr(res, "ok", False), "case_id": case_id, "state": getattr(res, "state", None),
+            "void_content_hash": void_hash, "cancellation_advised": cancellation_advised,
+            "reason": getattr(res, "reason", None)}
+
+
 def _line_signature(pairs) -> frozenset:
     """An order-independent signature of {item_ref → requested_qty} so a re-confirm can be told apart:
     identical lines = a double-submit (idempotent); different lines = a real AMENDMENT (the buyer changed

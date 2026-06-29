@@ -112,6 +112,26 @@ def test_supersede_order_retires_pre_send_cases_and_resources(db):
     assert r2["idempotent"] is True and {c["case_id"] for c in r2["cases"]} == {new_case}
 
 
+def test_operator_supersede_then_late_reply_is_quarantined(db):
+    # post-send supersession safety: an operator retires a case, and a LATE supplier reply to that
+    # superseded RFQ is quarantined (superseded_rfq) rather than processed as a live quote.
+    from src.app.services.fulfillment.cart_commitment import operator_supersede_case
+    from src.app.services.fulfillment.external_comms import receive_reply
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    ensure_supplier_coverage(db)
+    r1 = materialize_cases_for_order(db, order_id="OPS-1", uid="u1",
+                                     lines=[{"item_ref": "GAM-0002", "requested_qty": 7, "in_stock": 0}])
+    cid = r1["cases"][0]["case_id"]
+
+    out = operator_supersede_case(db, case_id=cid, reason="buyer_amended_order")
+    assert out["ok"] is True
+    assert wf.repository.current_version(db, cid).state == "SUPERSEDED"
+
+    res = receive_reply(db, case_id=cid, raw_body="quote: 7 units, lead 5 days",
+                        sender_domain="creatorfleet.example", trusted_fn=lambda d: True)
+    assert res.ok is False and res.reason == "superseded_rfq"   # late quote for a retired RFQ → quarantined
+
+
 def test_materialize_skips_fully_in_stock_lines(db):
     # a line we can fully fulfil from stock needs no sourcing → no case is created
     _seed_product(db, "MON-1", "LG monitor")

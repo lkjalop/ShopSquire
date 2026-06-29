@@ -160,7 +160,13 @@ def send_autonomous(db, *, case_id: str, actor: Actor, transport: Optional[Any] 
 def receive_reply(db, *, case_id: str, raw_body: str, sender_domain: str, provider_ref: Optional[str] = None,
                   tenant_id: str = "default", now_iso: Optional[str] = None, trace_id: Optional[str] = None,
                   trusted_fn=None) -> workflow.TransitionResult:
-    """Correlate an inbound reply to its case and verify the sender. Untrusted → quarantine."""
+    """Correlate an inbound reply to its case and verify the sender. Untrusted → quarantine. A reply to a
+    SUPERSEDED RFQ (the buyer amended / the operator retired it) is quarantined too — we never process a
+    quote for an order that no longer stands (the post-send supersession safety: bug "supplier replies to a
+    superseded RFQ")."""
+    cur = workflow.repository.current_version(db, case_id, tenant_id)
+    if cur and cur.state == "SUPERSEDED":
+        return workflow.TransitionResult(False, case_id, "SUPERSEDED", "superseded_rfq", http_status=409)
     trusted = (trusted_fn or _default_trusted)(sender_domain)
     if not trusted:
         return workflow.transition(

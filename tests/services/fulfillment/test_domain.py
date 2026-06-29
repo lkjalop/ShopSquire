@@ -46,6 +46,16 @@ def test_case_superseded_is_pre_send_only():
     assert ok is False and reason == "terminal_state"
 
 
+def test_post_send_supersede_is_operator_only():
+    # once a supplier was contacted (QUOTE_SENT/RECEIVED), only a HUMAN_OPERATOR may supersede — never the
+    # buyer/agent/system (retiring a live supplier RFQ is a deliberate human decision + a cancellation).
+    for src in (S.QUOTE_SENT, S.QUOTE_RECEIVED):
+        assert d.next_state(src, "case_superseded", _human()) == S.SUPERSEDED
+        for actor in (_buyer(), _agent(), _system()):
+            ok, reason = d.can_fire(src, "case_superseded", actor)
+            assert ok is False and reason == "actor_not_permitted", f"{actor.type} retired a SENT rfq!"
+
+
 # ── GATE 1: buyer commitment is unbypassable ─────────────────────────────────
 def test_agent_cannot_engage_supplier_without_buyer_commitment():
     # from AVAILABILITY_ASSESSED the ONLY way forward is request_buyer_commitment → AWAITING → buyer_committed

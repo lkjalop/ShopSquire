@@ -186,6 +186,15 @@ TRANSITIONS: Tuple[Transition, ...] = (
     Transition("case_superseded", _S.AWAITING_APPROVAL, _S.SUPERSEDED,
                frozenset({_A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), note="buyer amended order; pending approval voided pre-send"),
 
+    # ── POST-SEND supersession (a supplier WAS contacted): HUMAN_OPERATOR-only and deliberate. The operator
+    #    must also notify the supplier (a cancellation) and the void draft hash is recorded so any late quote
+    #    correlated to it is quarantined. Never agent/buyer/system — retiring a live supplier RFQ is a human
+    #    decision. From OPTIONS_READY etc. the case is already validated; supersede only the sent/received RFQ. ──
+    Transition("case_superseded", _S.QUOTE_SENT, _S.SUPERSEDED, frozenset({_A.HUMAN_OPERATOR}),
+               requires_evidence=True, note="operator retires a SENT RFQ (buyer amended) — supplier must be notified"),
+    Transition("case_superseded", _S.QUOTE_RECEIVED, _S.SUPERSEDED, frozenset({_A.HUMAN_OPERATOR}),
+               requires_evidence=True, note="operator retires the RFQ after a quote arrived (buyer amended)"),
+
     # ── inbound external response (a supplier system / poller) ──
     Transition("external_message_received", _S.QUOTE_SENT, _S.QUOTE_RECEIVED, frozenset({_A.EXTERNAL, _A.SYSTEM}),
                requires_evidence=True, note="correlated + domain-verified inbound reply"),

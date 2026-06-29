@@ -431,6 +431,31 @@ def mark_notifications_seen(body: NotificationsSeenBody,
         return {"marked": mark_seen(db, ids=body.ids)}
 
 
+class SupersedeCaseBody(BaseModel):
+    reason: str = "operator_amendment"
+
+
+@router.post("/cases/{case_id}/supersede")
+def supersede_case(case_id: str, body: SupersedeCaseBody,
+                   role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Operator retires a single case — including a POST-SEND one (a supplier was already emailed) that the
+    buyer's confirm-cart flagged operator_required. Records the void draft hash (late quotes for it are
+    quarantined) and flags cancellation_advised so the operator notifies the supplier."""
+    from src.app.services.fulfillment.cart_commitment import operator_supersede_case
+    from src.app.services.fulfillment.notifications import notify
+    with db_session() as db:
+        out = operator_supersede_case(db, case_id=case_id, actor_id=str(role or "operator"), reason=body.reason)
+        if not out.get("ok"):
+            raise HTTPException(status_code=409, detail=out.get("reason") or "supersede_failed")
+        try:
+            notify(db, kind="case_superseded", ref=case_id,
+                   summary=f"Case {case_id[:8]} superseded"
+                           + (" — notify the supplier of the cancellation." if out.get("cancellation_advised") else "."))
+        except Exception:
+            pass
+        return out
+
+
 class SupplierEventBody(BaseModel):
     supplier_domain: str
     note: str
