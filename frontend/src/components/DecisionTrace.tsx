@@ -244,7 +244,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'audit' | 'raw'>('events');
+  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'audit' | 'raw'>('events');
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -1285,6 +1285,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
               <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
               <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
               <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
+              <button className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => setActiveTab('procurement')}>Procurement</button>
               <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
                 setActiveTab('audit');
                 if (!auditTrail && traceIdText && !auditLoading) {
@@ -2934,6 +2935,53 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                       })}
                     </>
                   )}
+                </div>
+              )}
+
+              {activeTab === 'procurement' && (
+                <div className={styles.summaryPane}>
+                  {(() => {
+                    const src = events.length > 0 ? events : displayEvents;
+                    const procEvents = (src || []).filter((e) => {
+                      const sid = String((e as any).source_id || '');
+                      const et = String(e.event_type || '').toLowerCase();
+                      return ['Market_Intelligence_Agent', 'Procurement_Agent', 'Alternatives_Agent', 'Supplier_Selection_Agent'].includes(sid)
+                        || et.startsWith('bulk_') || et.startsWith('procurement_') || et.startsWith('alternatives_')
+                        || et.includes('availability') || et.includes('buyer_qualif') || et.includes('supplier');
+                    });
+                    if (procEvents.length === 0) {
+                      return <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>;
+                    }
+                    return (
+                      <table className={styles.table}>
+                        <thead><tr><th>Agent</th><th>Event</th><th>Detail</th></tr></thead>
+                        <tbody>
+                          {procEvents.map((e, i) => {
+                            const p: any = (e as any).payload || {};
+                            const tp = Array.isArray(p.transfer_plan) ? p.transfer_plan : [];
+                            const detail = [
+                              p.sku && `SKU ${p.sku}`,
+                              p.order_qty != null && `qty ${p.order_qty}`,
+                              p.in_stock != null && `in-stock ${p.in_stock}`,
+                              p.shortfall != null && `shortfall ${p.shortfall}`,
+                              tp.length > 0 && `transfer ${tp.map((t: any) => `${t.qty}@${t.from_location}`).join(', ')}`,
+                              p.status && `status ${p.status}`,
+                              Array.isArray(p.types) && p.types.length > 0 && `options: ${p.types.join(', ')}`,
+                              p.count != null && `${p.count} alternatives`,
+                              p.case_id && `case ${String(p.case_id).slice(0, 8)}`,
+                            ].filter(Boolean).join(' · ');
+                            return (
+                              <tr key={i}>
+                                <td>{(e as any).source_id || '—'}</td>
+                                <td>{e.event_type}</td>
+                                <td>{detail || getSummary(e)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
                 </div>
               )}
 
