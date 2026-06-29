@@ -303,6 +303,31 @@ def split_plan(body: SplitPlanBody, role: str = Depends(require_role(_OPERATOR))
         return plan
 
 
+class FromOrderBody(BaseModel):
+    query: Optional[str] = None                       # "15 laptops + 10 monitors + 5 headsets" (parsed)
+    lines: Optional[list[SplitLineBody]] = None       # OR explicit resolved lines
+    uid: Optional[str] = None
+    trace_id: Optional[str] = None
+
+
+@router.post("/cases/from-order")
+def cases_from_order(body: FromOrderBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Multi-line order → REAL cases: parse/resolve the buyer's mixed request into lines, plan the supplier
+    split, then create ONE procurement case per supplier group (each case at GATE 1 — no supplier contacted).
+    Accepts an explicit `lines` list or a raw `query` to parse. Returns the plan + the created cases."""
+    with db_session() as db:
+        if body.lines:
+            lines = fos.resolve_line_skus(db, [x.model_dump() for x in body.lines])
+        else:
+            lines = fos.resolve_line_skus(db, fos.parse_order_lines(body.query or ""))
+        if not lines:
+            raise HTTPException(status_code=422, detail="no_order_lines_resolved")
+        plan = fos.plan_order_split(db, lines=lines)
+        fos.emit_split_trace(body.trace_id, plan=plan)
+        created = fos.create_grouped_cases(db, plan=plan, uid=body.uid, trace_id=body.trace_id)
+        return {"plan": plan, **created}
+
+
 class CommitBody(BaseModel):
     uid: str
     email: Optional[str] = None   # optional buyer email → bounded-autonomy status reply (flag-gated)

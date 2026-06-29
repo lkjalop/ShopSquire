@@ -529,9 +529,25 @@ def _rfq_term_slots(profile_fn: Optional[Callable]) -> Dict[str, Any]:
     }
 
 
+def _line_items_block(db, lines: List[Dict[str, Any]], tenant_id: str) -> str:
+    """A multi-line RFQ item block (one supplier, several SKUs) — each line's full description + qty. Empty
+    when there are no usable lines. Vertical-blind (reuses the profile-driven _sku_description)."""
+    parts: List[str] = []
+    for ln in (lines or []):
+        if not isinstance(ln, dict):
+            continue
+        ir = str(ln.get("item_ref") or ln.get("sku") or "").strip()
+        q = int(ln.get("quantity") or ln.get("requested_qty") or ln.get("shortfall") or 0)
+        if not ir or q <= 0:
+            continue
+        parts.append(f"  - {_sku_description(db, ir, tenant_id)} ({q} units)")
+    return ("the following items:\n" + "\n".join(parts)) if parts else ""
+
+
 def _build_rfq_slots(db, *, item_ref: str, quantity: int, case_ref: str, case_state: Optional[Dict[str, Any]],
                      supplier_name: str, needed_by: str, evidence: List["DraftEvidence"],
-                     profile_fn: Optional[Callable], tenant_id: str) -> Dict[str, Any]:
+                     profile_fn: Optional[Callable], tenant_id: str,
+                     lines: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Build the superset slot dict for BOTH the rich supplier_rfq template and the legacy DEFAULT_TEMPLATE.
     Deterministic: catalog (SKU desc) + case (deadline/qty) + profile (terms). No price, no commitment."""
     terms = _rfq_term_slots(profile_fn)
@@ -546,7 +562,10 @@ def _build_rfq_slots(db, *, item_ref: str, quantity: int, case_ref: str, case_st
         deadline = (f"within {int(days)} days" if days else "the stated deadline")
     ship_to = str(reqs.get("ship_to") or terms["ship_to_region"] or "").strip()
     bulk = int(quantity or 0) >= terms["bulk_threshold"]
-    sku_desc = _sku_description(db, item_ref, tenant_id)
+    # multi-line (one supplier, several SKUs) → render a line-items block; else the single SKU description.
+    sku_desc = _line_items_block(db, lines, tenant_id) if lines else _sku_description(db, item_ref, tenant_id)
+    if not sku_desc:  # lines provided but none usable → fall back to the primary item
+        sku_desc = _sku_description(db, item_ref, tenant_id)
     return {
         # legacy DEFAULT_TEMPLATE slots
         "item_ref": item_ref, "quantity": quantity, "case_ref": case_ref, "supplier_name": supplier_name,
@@ -580,6 +599,7 @@ def build_draft(
     inbox_fn: Optional[Callable] = None,
     llm_fn: Optional[Callable] = None,
     supplier_override: Optional[tuple] = None,
+    lines: Optional[List[Dict[str, Any]]] = None,
     tenant_id: str = "default",
 ) -> Optional[SupplierDraft]:
     """Build the exact supplier draft (no send). Returns None when no approved supplier qualifies.
@@ -630,7 +650,7 @@ def build_draft(
     supplier_name = _resolve_supplier_name(db, domain, tenant_id) or recipient_ref
     slots = _build_rfq_slots(db, item_ref=item_ref, quantity=quantity, case_ref=case_ref,
                              case_state=case_state, supplier_name=supplier_name, needed_by=needed_by,
-                             evidence=evidence, profile_fn=_profile_fn, tenant_id=tenant_id)
+                             evidence=evidence, profile_fn=_profile_fn, tenant_id=tenant_id, lines=lines)
     # template precedence: caller-injected > profile supplier_rfq > built-in default. _safe_format tolerates
     # a slot the chosen template doesn't reference (the two templates have different slot shapes).
     tmpl = template or _profile_fn("supplier_rfq", default=None) or DEFAULT_TEMPLATE
@@ -672,7 +692,11 @@ def build_draft(
         content_hash=content_hash(subject, body), confidence=_confidence(reliability, evidence),
         rationale=rationale, evidence=[asdict(e) for e in evidence],
         commercial_scope={"item_ref": item_ref, "quantity": int(quantity),
-                          "estimated_value_cents": int(estimated_value_cents)},
+                          "estimated_value_cents": int(estimated_value_cents),
+                          **({"lines": [{"item_ref": str(l.get("item_ref") or l.get("sku") or ""),
+                                         "quantity": int(l.get("quantity") or l.get("requested_qty") or
+                                                          l.get("shortfall") or 0)}
+                                        for l in lines if isinstance(l, dict)]} if lines else {})},
         recipient_email=recipient_email, completeness=completeness,
     )
 
@@ -758,6 +782,12 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
     if "llm_fn" not in draft_kw and _supplier_polish_enabled():
         from src.app.services.fulfillment.supplier_polish import polish_supplier_draft
         draft_kw["llm_fn"] = polish_supplier_draft
+    # multi-line case (one supplier, several SKUs) → the RFQ lists every line. The lines are persisted on
+    # the case (order_lines) by the multi-line creation path; a single-line case has none (unchanged).
+    if "lines" not in draft_kw:
+        _ol = case_state.get("order_lines") if isinstance(case_state, dict) else None
+        if isinstance(_ol, list) and len(_ol) > 1:
+            draft_kw["lines"] = _ol
     draft = build_draft(db, item_ref=item_ref, quantity=quantity, case_ref=case_id,
                         estimated_value_cents=estimated_value_cents, case_state=case_state,
                         tenant_id=tenant_id, **draft_kw)

@@ -8,9 +8,72 @@ it never contacts a supplier and never creates a PO.
 """
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
+
+logger = logging.getLogger("shopsquire.order_split")
+
+# connectors that separate order lines: "15 laptops + 10 monitors, and 5 headsets"
+_LINE_SEP = re.compile(r"\s*(?:,|\+|;|\band\b)\s*", re.IGNORECASE)
+# a line = a count (2..500, a bulk line) followed by a PLURAL noun; time/currency nouns are excluded.
+_QTY_NOUN = re.compile(r"\b(\d{1,4})\s+([a-z][a-z/\-]{2,}s)\b", re.IGNORECASE)
+_NOT_PRODUCT_NOUNS = {"days", "weeks", "months", "years", "hours", "dollars", "units", "items",
+                      "pieces", "pcs", "options", "results", "ones", "things"}
+
+
+def parse_order_lines(query: str) -> List[Dict[str, Any]]:
+    """Extract a mixed order — "15 laptops + 10 monitors + 5 headsets" → [{phrase, quantity}] — by splitting
+    on connectors and reading a count + plural noun per segment. Agnostic: pure number + noun; the phrase is
+    mapped to a SKU downstream. Time/currency nouns are never read as a line. Empty when no lines parse."""
+    out: List[Dict[str, Any]] = []
+    for seg in _LINE_SEP.split(str(query or "").lower()):
+        m = _QTY_NOUN.search(seg)
+        if not m:
+            continue
+        qty = int(m.group(1))
+        noun = m.group(2).strip()
+        if 1 < qty <= 500 and noun not in _NOT_PRODUCT_NOUNS:
+            out.append({"phrase": noun, "quantity": qty})
+    return out
+
+
+def _find_sku_for_phrase(db, phrase: str) -> Optional[str]:
+    """A representative ACTIVE catalog SKU whose category/name matches the phrase (crude singularise). None
+    if nothing matches. Vertical-blind — matches opaque product DATA, no hardcoded categories."""
+    token = str(phrase or "").strip().lower().rstrip("s")
+    if not token or db is None:
+        return None
+    try:  # name + specs (the type word — "laptop"/"monitor" — is in the name); robust to a missing category col
+        rows = db.execute(text("SELECT sku, name, specs FROM products WHERE COALESCE(active,1)=1")).fetchall()
+    except Exception as exc:
+        logger.debug("_find_sku_for_phrase query failed: %s", exc)
+        return None
+    for r in (rows or []):
+        blob = f"{str(r[1] or '')} {str(r[2] or '')}".lower()
+        if token and token in blob:
+            return str(r[0])
+    return None
+
+
+def resolve_line_skus(db, lines: List[Dict[str, Any]], *, tenant_id: str = "default") -> List[Dict[str, Any]]:
+    """Map parsed {phrase, quantity} lines to {item_ref, requested_qty} using the catalog. Lines whose phrase
+    resolves to no SKU are dropped (the caller can surface them). Preserves explicit item_ref when present."""
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for ln in (lines or []):
+        ir = str(ln.get("item_ref") or ln.get("sku") or "").strip()
+        if not ir:
+            ir = _find_sku_for_phrase(db, str(ln.get("phrase") or "")) or ""
+        qty = _int(ln.get("requested_qty", ln.get("quantity")))
+        if not ir or qty <= 0 or ir in seen:
+            continue
+        seen.add(ir)
+        out.append({"item_ref": ir, "requested_qty": qty, "in_stock": _int(ln.get("in_stock")),
+                    "phrase": ln.get("phrase")})
+    return out
 
 
 def _int(v: Any, default: int = 0) -> int:
@@ -62,8 +125,8 @@ def _contact_for_domain(domain: str, *, tenant_id: str = "default") -> Optional[
         email = str(v.get("contact_email") or "").strip()
         if email and email.lower().endswith(f"@{domain.lower()}"):
             return email
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("contact lookup failed for %s: %s", domain, exc)
     return None
 
 
@@ -171,5 +234,51 @@ def emit_split_trace(trace_id: Optional[str], *, plan: Dict[str, Any]) -> None:
             },
             durable=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("emit_split_trace failed: %s", exc)
+
+
+def create_grouped_cases(db, *, plan: Dict[str, Any], uid: Optional[str] = None,
+                         uid_hash: Optional[str] = None, trace_id: Optional[str] = None,
+                         order_group_id: Optional[str] = None, now_iso: Optional[str] = None) -> Dict[str, Any]:
+    """Turn a split plan into REAL cases — ONE procurement case per supplier group (the case carries the
+    group's order_lines, so its RFQ lists every SKU). Reuses the single-case machinery + GATE 1 (each case
+    waits at AWAITING_BUYER_COMMITMENT; no supplier is contacted). All cases share one order_group_id so the
+    admin can show "create N cases across the buyer's mixed order". Best-effort per group; never raises."""
+    import uuid as _uuid
+    from src.app.services.fulfillment import workflow as fwf
+    from src.app.services.fulfillment.domain import Actor, ActorType
+    agent = Actor(ActorType.AGENT, "Procurement_Agent")
+    group_id = str(order_group_id or f"order-{_uuid.uuid4().hex[:10]}")
+    created: List[Dict[str, Any]] = []
+    for g in (plan.get("groups") or []):
+        lines = [l for l in (g.get("lines") or []) if isinstance(l, dict) and l.get("item_ref")]
+        if not lines:
+            continue
+        order_lines = [{"item_ref": str(l["item_ref"]), "quantity": _int(l.get("requested_qty")),
+                        "shortfall": _int(l.get("shortfall"))} for l in lines]
+        total_qty = sum(int(l["quantity"]) for l in order_lines)
+        total_short = sum(int(l["shortfall"]) for l in order_lines)
+        try:
+            cid = fwf.open_case(db, buyer_uid_hash=(uid_hash or uid), source_trace_id=trace_id,
+                                requested_by="recommend")
+            if not cid:
+                continue
+            patch = {"availability": {"requested_qty": total_qty, "shortfall": total_short,
+                                      "in_stock": max(0, total_qty - total_short), "item_ref": order_lines[0]["item_ref"]},
+                     "order_group_id": group_id, "order_lines": order_lines,
+                     "supplier_ref": g.get("supplier_ref"), "recipient_domain": g.get("recipient_domain")}
+            fwf.transition(db, case_id=cid, event="availability_assessed", actor=agent,
+                           reason_code="multi_line_order", state_patch=patch, trace_id=trace_id, now_iso=now_iso)
+            fwf.transition(db, case_id=cid, event="request_buyer_commitment", actor=agent,
+                           trace_id=trace_id, now_iso=now_iso)
+            created.append({"case_id": cid, "supplier_ref": g.get("supplier_ref"),
+                            "supplier_name": g.get("supplier_name"), "recipient_domain": g.get("recipient_domain"),
+                            "lines": order_lines, "total_quantity": total_qty})
+        except Exception as exc:
+            logger.debug("create_grouped_cases: group %s failed: %s", g.get("group_id"), exc)
+    try:
+        db.commit()
+    except Exception as exc:
+        logger.debug("create_grouped_cases commit failed: %s", exc)
+    return {"order_group_id": group_id, "case_count": len(created), "cases": created}

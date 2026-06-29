@@ -7,7 +7,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.app.services.fulfillment.order_split import plan_order_split
+from src.app.services.fulfillment import workflow as wf
+from src.app.services.fulfillment.order_split import (
+    create_grouped_cases, parse_order_lines, plan_order_split, resolve_line_skus,
+)
 from src.app.services.supplier_catalog import ensure_supplier_coverage
 
 
@@ -65,3 +68,46 @@ def test_plan_order_split_marks_missing_supplier_without_contacting_external_par
     assert plan["group_count"] == 0
     assert plan["lines"][0]["status"] == "no_approved_supplier"
     assert plan["lines"][0]["supplier_candidates"] == []
+
+
+# ── multi-line: parse → resolve → create one case per supplier group ──
+def test_parse_order_lines_extracts_count_and_noun():
+    out = parse_order_lines("i need 15 laptops + 10 monitors and 5 headsets in 10 days, budget about 1900 each")
+    got = {l["phrase"]: l["quantity"] for l in out}
+    assert got.get("laptops") == 15 and got.get("monitors") == 10 and got.get("headsets") == 5
+    assert "days" not in got and "each" not in got           # time/currency never a line
+    assert parse_order_lines("just one laptop please") == []  # no multi-quantity line
+
+
+def test_resolve_line_skus_maps_phrase_to_catalog_sku(db):
+    _seed_product(db, "LAP-9", "Dell Latitude business laptop")
+    _seed_product(db, "MON-1", "LG UltraGear 34 inch monitor")
+    db.commit()
+    resolved = resolve_line_skus(db, parse_order_lines("15 laptops + 10 monitors"))
+    by = {r["item_ref"]: r for r in resolved}
+    assert by["LAP-9"]["requested_qty"] == 15 and by["MON-1"]["requested_qty"] == 10
+
+
+def test_create_grouped_cases_makes_one_case_per_supplier_group(db):
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    _seed_product(db, "MON-1", "LG monitor")
+    _seed_product(db, "HDS-1", "Sony headset")
+    ensure_supplier_coverage(db)
+    plan = plan_order_split(db, lines=[
+        {"item_ref": "GAM-0002", "requested_qty": 7, "in_stock": 0},   # → SUP-CREATOR
+        {"item_ref": "MON-1", "requested_qty": 10, "in_stock": 0},      # → SUP-PERIPH
+        {"item_ref": "HDS-1", "requested_qty": 5, "in_stock": 0},       # → SUP-PERIPH (grouped)
+    ])
+    out = create_grouped_cases(db, plan=plan, uid="u1")
+    assert out["case_count"] == 2                                       # CreatorFleet + PeriLink
+    suppliers = {c["supplier_ref"]: c for c in out["cases"]}
+    assert "SUP-CREATOR" in suppliers and "SUP-PERIPH" in suppliers
+    peri = suppliers["SUP-PERIPH"]
+    assert {l["item_ref"] for l in peri["lines"]} == {"MON-1", "HDS-1"}  # both peripherals in ONE case
+    assert peri["total_quantity"] == 15
+    # every case shares the order group and waits at GATE 1 (no supplier contacted)
+    assert len({c["case_id"] for c in out["cases"]}) == 2
+    for c in out["cases"]:
+        cur = wf.repository.current_version(db, c["case_id"])
+        assert cur.state == "AWAITING_BUYER_COMMITMENT"
+        assert cur.state_json["order_group_id"] == out["order_group_id"]

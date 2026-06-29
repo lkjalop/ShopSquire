@@ -166,6 +166,9 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/buyer_qualification.py",
     # buyer status reply: claim-safe, commitment-free buyer-facing status per case state — no product vocab.
     "src/app/services/fulfillment/buyer_reply.py",
+    # multi-line order split: groups a mixed request by approved supplier + creates one case per group,
+    # opaque sku/qty/supplier — no product vocabulary.
+    "src/app/services/fulfillment/order_split.py",
     "src/app/services/fulfillment/sandbox_supplier.py",
     # supplier-email transport seam: sandbox/SMTP provider interface, opaque message fields — no product vocab.
     "src/app/services/fulfillment/transport.py",

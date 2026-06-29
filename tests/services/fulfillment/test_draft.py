@@ -473,6 +473,23 @@ def test_multi_location_evidence_surfaced_in_draft(db):
     assert loc[0]["payload"]["transfer_plan"] == [{"from_location": "melbourne", "qty": 18}]
 
 
+def test_multi_line_draft_lists_every_line_item(db):
+    # a multi-line case (one supplier, several SKUs) → the RFQ body lists each line + qty, total quantity.
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('MON-1','LG 34\" Monitor',60000,'{}',1)"))
+    db.execute(_t("INSERT INTO products VALUES ('HDS-1','Sony Headset',20000,'{}',1)")); db.commit()
+    draft = D.build_draft(db, item_ref="MON-1", quantity=15, case_ref="FC-ML",
+                          lines=[{"item_ref": "MON-1", "quantity": 10}, {"item_ref": "HDS-1", "quantity": 5}],
+                          rank_fn=_rank_ok, allowlist_fn=_allow)
+    assert draft is not None
+    body = draft.body
+    assert "LG 34" in body and "Sony Headset" in body          # both line items rendered
+    assert "(10 units)" in body and "(5 units)" in body
+    assert "this request does not constitute a purchase order" in body.lower()  # cage intact
+    assert [l["item_ref"] for l in draft.commercial_scope["lines"]] == ["MON-1", "HDS-1"]
+
+
 def test_no_supplier_alternatives_offers_substitutes_not_dead_end(db):
     # an item with NO approved supplier but a same-category substitute that does → offer the substitute
     from sqlalchemy import text as _t
