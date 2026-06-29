@@ -449,6 +449,21 @@ def test_multi_location_evidence_surfaced_in_draft(db):
     assert loc[0]["payload"]["transfer_plan"] == [{"from_location": "melbourne", "qty": 18}]
 
 
+def test_no_supplier_alternatives_offers_substitutes_not_dead_end(db):
+    # an item with NO approved supplier but a same-category substitute that does → offer the substitute
+    from sqlalchemy import text as _t
+    db.execute(_t("CREATE TABLE IF NOT EXISTS products (sku TEXT, name TEXT, price_cents INT, specs TEXT, "
+                  "category TEXT, brand TEXT, active INT)"))
+    db.execute(_t("INSERT INTO products VALUES ('SKU-NO','No Supplier Item',150000,'{}','laptop','Dell',1)"))
+    db.execute(_t("INSERT INTO products VALUES ('SKU-ALT','Alt With Coverage',155000,'{}','laptop','HP',1)"))
+    db.commit()
+    alts = D.no_supplier_alternatives(db, item_ref="SKU-NO", quantity=10,
+                                      case_state={"availability": {"in_stock": 3}, "requirements": {}})
+    assert alts and any(o["type"] == "substitute" and o["sku"] == "SKU-ALT" for o in alts)
+    assert any(o["type"] == "reduce_to_available" for o in alts)  # 3 in stock < 10 → take-available
+    assert not any(o["type"] == "source_shortfall" for o in alts)  # no supplier → don't offer sourcing
+
+
 def test_moq_risk_flagged_when_shortfall_below_supplier_moq(db):
     from sqlalchemy import text as _t
     db.execute(_t("CREATE TABLE IF NOT EXISTS suppliers (id TEXT, name TEXT, moq INT)"))

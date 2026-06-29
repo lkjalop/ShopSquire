@@ -469,6 +469,36 @@ def _sku_description(db, item_ref: str, tenant_id: str = "default") -> str:
 _VAGUE_SLOT_VALUES = {"the stated deadline"}
 
 
+def no_supplier_alternatives(db, *, item_ref: str, quantity: int, case_state: Optional[Dict[str, Any]],
+                             tenant_id: str = "default") -> Optional[List[Dict[str, Any]]]:
+    """Fulfilment alternatives when there's NO approved supplier for the SKU — so it isn't a dead-end.
+    Offers substitutes (that may have coverage) + take-available; NOT 'source from supplier' (there is
+    none). Best-effort; vertical-blind (substitutes ranked by the profile's attributes)."""
+    try:
+        avail = (case_state or {}).get("availability") or {}
+        reqs = (case_state or {}).get("requirements") or {}
+        budget = reqs.get("budget") or {}
+        in_stock = int(avail.get("in_stock") or 0)
+        from src.app.services.substitute_generator import find_substitutes
+        subs = find_substitutes(db, item_ref, use_case=reqs.get("use_case"), budget_min=budget.get("min"),
+                                budget_max=budget.get("max"), limit=3, tenant_id=tenant_id) or []
+        opts: List[Dict[str, Any]] = []
+        for s in subs:
+            if not s.get("sku"):
+                continue
+            opts.append({"option_id": f"substitute:{s['sku']}", "type": "substitute",
+                         "title": f"Switch to {s.get('name') or s['sku']}",
+                         "detail": str(s.get("tradeoff") or "a comparable alternative that may have supplier coverage"),
+                         "sku": s["sku"], "price_cents": s.get("price_cents")})
+        if 0 < in_stock < int(quantity or 0):
+            opts.append({"option_id": "reduce_to_available", "type": "reduce_to_available",
+                         "title": f"Take the {in_stock} available now",
+                         "detail": f"We can fulfil {in_stock} from stock now; the remainder has no approved supplier yet."})
+        return opts or None
+    except Exception:
+        return None
+
+
 def _supplier_moq(db, supplier_ref: str, tenant_id: str = "default") -> Optional[int]:
     """The resolved supplier's minimum order quantity (suppliers.moq), or None when unknown. Opaque DB
     read — vertical-blind. Used only to flag MOQ risk on the draft (never blocks)."""
@@ -675,9 +705,14 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
                         estimated_value_cents=estimated_value_cents, case_state=case_state,
                         tenant_id=tenant_id, **draft_kw)
     if draft is None:
+        # Not a dead-end: attach fulfilment alternatives (substitutes with coverage / take-available) so the
+        # buyer/operator has a next step instead of a blocked case.
+        _alts = no_supplier_alternatives(db, item_ref=item_ref, quantity=quantity, case_state=case_state,
+                                         tenant_id=tenant_id)
         res = workflow.transition(db, case_id=case_id, event="no_approved_supplier", actor=actor,
-                                  reason_code="no_approved_supplier_on_allowlist", tenant_id=tenant_id,
-                                  now_iso=now_iso, trace_id=trace_id)
+                                  reason_code="no_approved_supplier_on_allowlist",
+                                  state_patch=({"fulfillment_alternatives": _alts} if _alts else None),
+                                  tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
         return res, None
     # Advisory pre-send gate (deterministic; PRIOR to the human GATE 2) attached to the persisted draft so
     # the operator sees allow / needs_info / block before approving. Does not change the transition.
