@@ -93,6 +93,46 @@ def test_full_governed_procurement_journey_api():
     assert "external_message_sent" in events and "buyer_fulfillment_selected" in events
 
 
+def test_fluid_sourcing_journey_api():
+    """The FLUID procurement flow (the recent changes) through the real HTTP API on a live stack:
+    confirm-cart → grouped cases → amend_required → supersede (requirements carried forward) → operator
+    margin advice. Skips cleanly when the stack is down or the demo SKUs lack supplier coverage."""
+    if not _up():
+        pytest.skip("backend not reachable")
+    _CC = f"{_FC}/confirm-cart"
+    order_id = "REC-FLUID-1"
+
+    # 1) confirm a cart's shortfall → durable grouped sourcing case(s); requirements ride along
+    first = _post(_CC, json={"uid": "fluid-buyer", "order_id": order_id,
+                             "requirements": {"needed_by": "2026-07-15", "use_case": "office"},
+                             "lines": [{"item_ref": "LAP-021", "requested_qty": 7}]})
+    if not first.get("case_count"):
+        pytest.skip("LAP-021 fully in stock or no supplier coverage — seed ensure_supplier_coverage")
+    assert not first.get("amend_required")
+    old_case = first["cases"][0]["case_id"]
+
+    # 2) re-confirm the SAME order with DIFFERENT lines → amend_required (not duplicated, not silent)
+    amend = _post(_CC, json={"uid": "fluid-buyer", "order_id": order_id,
+                             "lines": [{"item_ref": "GAM-0002", "requested_qty": 10}]})
+    assert amend.get("amend_required") is True
+
+    # 3) supersede → the old pre-send case retires, a new case is materialized
+    sup = _post(_CC, json={"uid": "fluid-buyer", "order_id": order_id, "supersede": True,
+                           "lines": [{"item_ref": "GAM-0002", "requested_qty": 10}]})
+    assert sup.get("status") == "superseded" and old_case in (sup.get("superseded") or [])
+
+    # the old case is terminal (SUPERSEDED) — its journey records the supersession
+    j = _requests.get(f"{_FC}/{old_case}/journey", headers=_HDR, timeout=20).json()["journey"]
+    assert "case_superseded" in [e["event"] for e in j]
+
+    # 4) operator margin advice on the new active case is well-formed (verdict present; the safeguard
+    #    avoids a guaranteed-loss demo). Coverage-dependent — only assert when a new case was created.
+    new_cases = (sup.get("created") or {}).get("cases") or []
+    if new_cases:
+        adv = _requests.get(f"{_FC}/{new_cases[0]['case_id']}/margin-advice", headers=_HDR, timeout=20).json()
+        assert "verdict" in adv and "available" in adv
+
+
 @pytest.mark.skipif(not _have_pw, reason="playwright unavailable")
 def test_buyer_storefront_renders_procurement_check():
     """Browser half: the buyer sees the procurement check after a bulk request (UI smoke)."""
