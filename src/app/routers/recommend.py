@@ -76,6 +76,7 @@ from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.insider_threat_detector import check_session_context_integrity
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
 from src.app.policy.kill_switch import assert_autonomy_allowed
+from src.app.services.price_conversion import cents_to_dollars, dollars_to_cents
 import httpx
 from types import SimpleNamespace
 import logging
@@ -930,7 +931,7 @@ def _fast_path_product_score(
     haystack = f"{name} {spec_text}"
     q = str(query or "").lower()
     price_cents = int(row.get("price_cents") or 0)
-    price = price_cents / 100.0
+    price = cents_to_dollars(price_cents)
 
     score = 0.0
     if "laptop" in haystack or "notebook" in haystack:
@@ -1111,7 +1112,7 @@ def _fast_path_catalog_recommendation(
             use_case_fit=_fit,
         )
         item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
-        _price = int(item.get("price_cents") or 0) / 100.0
+        _price = cents_to_dollars(item.get("price_cents"))
         # Use-case reason codes (e.g. gaming_use_case_match, discrete_gpu) come from the
         # adapter and are emitted ONLY when the candidate actually meets the use-case.
         item["factors"] = {
@@ -1157,7 +1158,7 @@ def _fast_path_catalog_recommendation(
                 use_case_fit=_fb_fit,
             )
             item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
-            _fb_price = int(item.get("price_cents") or 0) / 100.0
+            _fb_price = cents_to_dollars(item.get("price_cents"))
             item["factors"] = {
                 "positive": list(filter(None, [
                     "price_fit" if (budget_max is not None and _fb_price <= float(budget_max)) else "query_match",
@@ -1438,7 +1439,7 @@ def _fast_path_catalog_recommendation(
                         "score_norm": p.get("score_norm"),
                         "reasons": (p.get("reasons") or [])[:3],
                         "reason_codes": (p.get("reason_codes") or [])[:3],
-                        "price": (float(p.get("price_cents") or 0.0) / 100.0),
+                        "price": cents_to_dollars(p.get("price_cents")),
                     }
                     for p in (results or [])
                     if isinstance(p, dict)
@@ -4253,12 +4254,12 @@ def _reconcile_result_prices(results: Any) -> Any:
         pc = it.get("price_cents")
         if pc is not None:
             try:
-                it["price"] = round(float(pc) / 100.0, 2)   # cents wins → derive price exactly
+                it["price"] = cents_to_dollars(pc, ndigits=2)   # cents wins → derive price exactly
             except (TypeError, ValueError) as exc:
                 logger.debug("price reconcile (cents→price) skipped for %s: %s", it.get("sku"), exc)
         elif it.get("price") is not None:
             try:
-                it["price_cents"] = int(round(float(it["price"]) * 100.0))
+                it["price_cents"] = dollars_to_cents(it["price"])
             except (TypeError, ValueError) as exc:
                 logger.debug("price reconcile (price→cents) skipped for %s: %s", it.get("sku"), exc)
     return results
@@ -8227,7 +8228,7 @@ def suggest(
                 price_cents = c.get("price_cents")
                 if price_cents is None:
                     continue
-                price = price_cents / 100.0
+                price = cents_to_dollars(price_cents)
                 if budget_min_val is not None and price < budget_min_val:
                     continue
                 if budget_max_val is not None and price > budget_max_val:
@@ -8650,7 +8651,7 @@ def suggest(
                                             "candidates_before": retrieved_count,
                                             "candidates_after": len(jump_alt),
                                             "fallback": "db_nearest_viable_band",
-                                            "nearest_price": round(float(nearest_c) / 100.0, 2),
+                                            "nearest_price": cents_to_dollars(nearest_c, ndigits=2),
                                             "nearest_direction": nearest_direction,
                                         }
                             except Exception:
@@ -9158,7 +9159,7 @@ def suggest(
             if budget_min_val is not None or budget_max_val is not None:
                 _f = []
                 for c in candidates:
-                    p = float(c.get("price_cents") or 0) / 100.0
+                    p = cents_to_dollars(c.get("price_cents"))
                     if budget_min_val is not None and p < budget_min_val:
                         continue
                     if budget_max_val is not None and p > budget_max_val:
@@ -11200,7 +11201,7 @@ def checkout_upsell(
                 "sku": r.get("sku"),
                 "name": r.get("name"),
                 "price_cents": r.get("price_cents"),
-                "price": (float(r.get("price_cents")) / 100.0) if isinstance(r.get("price_cents"), (int, float)) else r.get("price"),
+                "price": cents_to_dollars(r.get("price_cents")) if isinstance(r.get("price_cents"), (int, float)) else r.get("price"),
                 "reasons": (r.get("reasons") or [])[:3],
                 "reason_codes": (r.get("reason_codes") or [])[:5],
                 "reason_confidence": r.get("reason_confidence"),

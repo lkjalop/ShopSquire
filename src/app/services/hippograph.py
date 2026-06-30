@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.app.services.entity_resolution import resolve_brand, resolve_product, resolve_user
+from src.app.services.price_conversion import cents_to_dollars
 
 
 @dataclass
@@ -94,7 +95,7 @@ def project_graph(
             add_edge(s[0], d[0], 1.0)
 
     for c in (conversion_rows or []):
-        val = (float(c.get("value_cents") or 0) / 100.0) or 1.0
+        val = cents_to_dollars(c.get("value_cents")) or 1.0
         decision_id = str(c.get("decision_id") or "").strip()
         dn = f"decision:{decision_id}" if decision_id else None
         if dn:

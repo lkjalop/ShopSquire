@@ -23,6 +23,7 @@ from src.app.services.recommend_utils import (
     _result_price_dollars,
 )
 from src.app.services.recommend_image_hints import _SUPPORTED_IMAGE_BRAND_HINTS
+from src.app.services.price_conversion import cents_to_dollars
 from src.app.services.use_case_advisor import get_use_case_min_price_floor
 
 
@@ -151,7 +152,7 @@ def _build_minimum_recommended_tiers(
     priced: list[tuple[dict, float]] = []
     for r in rows:
         try:
-            p = float(r.get("price") or (float(r.get("price_cents") or 0.0) / 100.0))
+            p = float(r.get("price") or cents_to_dollars(r.get("price_cents")))
         except Exception:
             p = 0.0
         priced.append((r, p))
@@ -351,7 +352,7 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
         if _bmax > 0 and results:
             def _cp(r: dict) -> float:
                 try:
-                    return float((r or {}).get("price_cents") or 0) / 100.0
+                    return cents_to_dollars((r or {}).get("price_cents"))
                 except Exception:
                     return 0.0
             _prices = [_cp(r) for r in results if _cp(r) > 0]
@@ -404,8 +405,8 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
         if budget_max_generic and results:
             def _gp(row: dict) -> float:
                 try:
-                    c = float((row or {}).get("price_cents") or 0)
-                    return c / 100.0 if c > 0 else 0.0
+                    c = cents_to_dollars((row or {}).get("price_cents"))
+                    return c if c > 0 else 0.0
                 except Exception:
                     return 0.0
             valid_prices = [_gp(r) for r in results if _gp(r) > 0]
@@ -446,8 +447,8 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
         return ""
     def _row_price(row: dict) -> float:
         try:
-            cents = float((row or {}).get("price_cents") or 0)
-            return cents / 100.0 if cents > 0 else 0.0
+            cents = cents_to_dollars((row or {}).get("price_cents"))
+            return cents if cents > 0 else 0.0
         except Exception:
             return 0.0
 
@@ -547,8 +548,8 @@ def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: 
     if budget_max_generic and results:
         def _row_price(row: dict) -> float:
             try:
-                cents = float((row or {}).get("price_cents") or 0)
-                return cents / 100.0 if cents > 0 else 0.0
+                cents = cents_to_dollars((row or {}).get("price_cents"))
+                return cents if cents > 0 else 0.0
             except Exception:
                 return 0.0
         valid_prices = [_row_price(r) for r in results if _row_price(r) > 0]
@@ -703,7 +704,7 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
                 continue
             price_cents = (row or {}).get("price_cents")
             try:
-                price_text = f" (${int(round(float(price_cents or 0) / 100.0)):,})" if float(price_cents or 0) > 0 else ""
+                price_text = f" (${int(round(cents_to_dollars(price_cents))):,})" if float(price_cents or 0) > 0 else ""
             except Exception:
                 price_text = ""
             top_lines.append(f"{name}{price_text}")

@@ -29,6 +29,8 @@ import re
 from functools import lru_cache
 from typing import Any, Dict, List
 
+from src.app.services.price_conversion import cents_to_dollars
+
 
 def _manufacturer_specs() -> Dict[str, Dict[str, Any]]:
     from src.app.platform.store_profile import profile_slot
@@ -89,7 +91,7 @@ def _result_price_dollars(row: Dict[str, Any] | None) -> float | None:
         if isinstance(r.get("price_cents"), (int, float)):
             pc = float(r.get("price_cents"))
             if pc > 0:
-                return round(pc / 100.0, 2)
+                return cents_to_dollars(pc, ndigits=2)
     except Exception:
         pass
     return None

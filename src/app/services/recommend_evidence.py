@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Dict, List, Optional
 
+from src.app.services.price_conversion import cents_to_dollars
+
 _METRIC_KEYS = ("price_fit", "inventory_fit", "fleet_fit", "office_fit", "portability",
                 "docking", "warranty", "os_ecosystem", "risk_penalties")
 
@@ -31,7 +33,7 @@ def _price(p: Dict[str, Any]) -> Optional[float]:
     for k in ("price", "price_cents"):
         v = p.get(k)
         if isinstance(v, (int, float)) and v > 0:
-            return float(v) / 100.0 if k == "price_cents" else float(v)
+            return cents_to_dollars(v) if k == "price_cents" else float(v)
     return None
 
 

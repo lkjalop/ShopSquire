@@ -23,6 +23,8 @@ Pure functions, no I/O beyond a cached config read. Never raises.
 """
 from __future__ import annotations
 
+from src.app.services.price_conversion import cents_to_dollars
+
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -196,7 +198,7 @@ def annotate_product(item: Dict[str, Any]) -> Dict[str, Any]:
         price = item.get("price")
         if price is None and item.get("price_cents") is not None:
             try:
-                price = int(item["price_cents"]) / 100.0
+                price = cents_to_dollars(item["price_cents"])
             except Exception:
                 price = None
         anomaly = price_anomaly(price, ptype)

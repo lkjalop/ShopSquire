@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from src.app.services.price_conversion import cents_to_dollars
+
 
 def apply_stock_penalty(
     scored: List[Dict[str, Any]],
@@ -610,7 +612,7 @@ def build_contrastive_explanations(
             cand["product_id"] = cand.get("sku") or cand.get("product_id") or cand.get("id")
             if cand.get("price") is None and cand.get("price_cents") is not None:
                 try:
-                    cand["price"] = float(cand.get("price_cents")) / 100.0
+                    cand["price"] = cents_to_dollars(cand.get("price_cents"))
                 except Exception:
                     pass
             rank_inputs.append(cand)

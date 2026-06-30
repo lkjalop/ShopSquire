@@ -27,6 +27,7 @@ from src.app.services.decision_log import log_trace_event
 from src.app.services.copywriting import maybe_apply_copywriting
 from src.app.services.answer_quality import apply_answer_quality
 from src.app.services.response_normalizer import ResponseNormalizer
+from src.app.services.price_conversion import cents_to_dollars, dollars_to_cents
 from src.app.security.dread_scorer import compute_dread
 from src.app.security.framework_correlation import correlate_security_analysis
 from src.app.security.qr_legitimacy import derive_qr_legitimacy_details
@@ -1907,12 +1908,12 @@ async def chat_query(
         if price is None:
             try:
                 if price_cents is not None:
-                    price = float(price_cents) / 100.0
+                    price = cents_to_dollars(price_cents)
             except Exception:
                 price = None
         if price_cents is None and price is not None:
             try:
-                price_cents = int(round(float(price) * 100.0))
+                price_cents = dollars_to_cents(price)
             except Exception:
                 price_cents = None
         specs = item.get("specs") or {}

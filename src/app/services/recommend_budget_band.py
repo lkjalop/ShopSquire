@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from src.app.services.price_conversion import cents_to_dollars
+
 # tolerances: a price up to 10% over the ceiling is a "stretch" (shown, demoted); beyond is "over".
 _OVER_TOL = 0.10
 # a price below 40% of the floor is "under" (likely the wrong tier); mild demotion.
@@ -28,7 +30,7 @@ def band_status(price_cents: Optional[int], budget_min: Optional[float], budget_
     try:
         if not isinstance(price_cents, (int, float)) or price_cents <= 0:
             return "unknown"
-        price = float(price_cents) / 100.0
+        price = cents_to_dollars(price_cents)
         if budget_max is not None:
             bmax = float(budget_max)
             if price > bmax * (1.0 + over_tol):
