@@ -11,6 +11,7 @@ from sqlalchemy import text as sql_text
 
 from src.app.deps import security_sanitize
 from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.models.db import get_engine
 from src.app.observability.metrics import record_security_event
 
@@ -101,7 +102,7 @@ def log_agent_security_event(
     payload = {"agent_event": asdict(event)}
     sanitized = security_sanitize(payload)
     # Apply feature flags for persistence behavior
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     persist_content = bool(flags.get("SECURITY_EVENT_PERSIST_CONTENT", False))
     verdict_score = _to_verdict_score(event.confidence)
     record_security_event(

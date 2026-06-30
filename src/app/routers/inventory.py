@@ -4,6 +4,7 @@ from typing import Dict
 import time
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.deps import get_redis
 from src.app.services.degradation import cb_is_open, cb_record
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
@@ -15,7 +16,7 @@ router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
 
 @router.get("/health")
 def health(redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     assert_autonomy_allowed("inventory", flags=flags, source_id="Inventory_Autonomy_Governance_Agent")
     degradation_cfg = flags.get("DEGRADATION", {"enabled": True})
     now_ts = int(time.time())
@@ -33,7 +34,7 @@ def health(redis=Depends(get_redis), role: str = Depends(require_role([ROLE_MERC
 def monitor_inventory(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))):
     """Return current low-stock alerts detected by the InventoryAgent."""
     try:
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed("inventory", flags=flags, source_id="Inventory_Autonomy_Governance_Agent")
         from src.app.services.inventory_agent import InventoryAgent, ReorderRecommendation
         from src.app.observability.metrics import decisions_events_counter
@@ -57,7 +58,7 @@ def alerts(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))):
     Provided for parity with planned endpoint naming.
     """
     try:
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed("inventory", flags=flags, source_id="Inventory_Autonomy_Governance_Agent")
         from src.app.services.inventory_agent import InventoryAgent
         from src.app.observability.metrics import decisions_events_counter
@@ -92,7 +93,7 @@ class ReorderRequest(BaseModel):
 def reorder(req: ReorderRequest, request: Request, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))):
     """Execute a reorder recommendation (may require approval)."""
     try:
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed(
             "inventory",
             flags=flags,

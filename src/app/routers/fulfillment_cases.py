@@ -7,6 +7,7 @@ Role-scoped projection: an operator sees the full case; a buyer view is REDACTED
 wholesale price, no supplier identity). The demo-reply endpoint is DEMO-gated (default-OFF).
 """
 from __future__ import annotations
+from src.app.feature_flags import get_flags as _ff_get_flags
 
 import os
 from typing import Any, Dict, Optional
@@ -51,7 +52,7 @@ def _auto_draft_on_commit_enabled() -> bool:
         return _truthy(raw)
     try:
         from src.app.config import get_settings, load_feature_flags
-        flags = load_feature_flags(get_settings().feature_flags_path) or {}
+        flags = _ff_get_flags() or {}
         return _truthy(flags.get("FULFILLMENT_AUTO_DRAFT_ON_COMMIT"))
     except Exception:
         return False

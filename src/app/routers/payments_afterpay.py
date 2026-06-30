@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 
 from src.app.security.pci import contains_pci_data
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.observability.tracing import get_tracer
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.security.transaction_firewall import evaluate_transaction_firewall
@@ -24,7 +25,7 @@ def create_intent(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
     with tracer.start_as_current_span("afterpay.create_intent"):
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         cap = flags.get("CAPABILITIES", {}).get("afterpay", {"enabled": False})
         if not cap.get("enabled"):
             raise HTTPException(status_code=503, detail="Afterpay disabled by feature flags")

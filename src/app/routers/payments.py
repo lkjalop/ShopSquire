@@ -8,6 +8,7 @@ from typing import Any, Dict
 from sqlalchemy import text
 
 from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.observability.tracing import get_tracer
 from src.app.services.payments import StripeClient
 from src.app.models.db import db_session
@@ -96,7 +97,7 @@ def _stripe_key_live(key: Any) -> bool:
 def providers_rollout_status(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     caps = flags.get("CAPABILITIES", {}) if isinstance(flags.get("CAPABILITIES"), dict) else {}
     settings = get_settings()
     providers = [
@@ -153,7 +154,7 @@ def create_intent(
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
     with tracer.start_as_current_span("payments.create_intent"):
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed(
             "payments",
             flags=flags,

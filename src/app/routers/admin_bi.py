@@ -15,6 +15,7 @@ from prometheus_client import generate_latest
 from src.app.models.db import db_session
 from src.app.security.auth import require_role, ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER
 from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.schemas.ui_contracts import TransactionTimeseriesResponse
 from src.app.services.bi_intelligence import (
     margin_intelligence,
@@ -133,7 +134,7 @@ def _is_sqlite(dialect: str) -> bool:
 
 def _timescale_flags() -> Dict[str, Any]:
     try:
-        ff = load_feature_flags(get_settings().feature_flags_path) or {}
+        ff = _ff_get_flags() or {}
     except Exception:
         ff = {}
     cfg = ff.get("TIMESCALE", {}) if isinstance(ff.get("TIMESCALE"), dict) else {}

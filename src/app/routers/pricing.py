@@ -7,6 +7,7 @@ from src.app.security.firewall import TransactionFirewall
 from src.app.services.memory import Memory
 from src.app.services.orchestrator import Orchestrator
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 import time
 from src.app.observability.metrics import record_pricing_latency, record_cb_state, record_rate_limit_exceeded, record_token_budget_usage
 from src.app.observability.tracing import get_tracer
@@ -31,7 +32,7 @@ def suggest(uid: str, cart_total_cents: int, sku: str | None = None, idempotency
         span.set_attribute("pricing.uid_hash", hash_uid(uid))
         span.set_attribute("pricing.cart_total_cents", int(cart_total_cents or 0))
         span.set_attribute("pricing.has_sku", bool(sku))
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed(
             "pricing",
             flags=flags,

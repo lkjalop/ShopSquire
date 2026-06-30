@@ -4,12 +4,13 @@ import hashlib
 from typing import Any, Dict, List
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.services.ml_decision_gate import gate_decision, score_with_learned_model
 
 
 def _ff() -> Dict[str, Any]:
     try:
-        return load_feature_flags(get_settings().feature_flags_path) or {}
+        return _ff_get_flags() or {}
     except Exception:
         return {}
 

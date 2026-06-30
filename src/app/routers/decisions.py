@@ -6,6 +6,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import logging
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.models.db import db_session, get_engine, get_db
 from fastapi import Request, Depends
 from sqlalchemy import text, create_engine
@@ -458,7 +459,7 @@ def query_decisions(
 ) -> Dict:
     with tracer.start_as_current_span("decisions.query") as span:
         span.set_attribute("decisions.agent_name", agent_name or "any")
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             # Avoid DB access during local/tests
             raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
@@ -577,7 +578,7 @@ def query_decisions(
 def latest_decision(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])), db=Depends(get_db)) -> Dict:
     with tracer.start_as_current_span("decisions.latest") as span:
         span.set_attribute("decisions.uid_hash", hash_uid(uid))
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             return _graceful_latest_disabled(uid)
         target = hash_uid(uid)
@@ -614,7 +615,7 @@ def latest_summary(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, RO
     """
     with tracer.start_as_current_span("decisions.summary") as span:
         span.set_attribute("decisions.uid_hash", hash_uid(uid))
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         logger.debug("latest_summary flags=%s uid=%s", flags.get("DECISION_LOG_WRITES_ENABLED"), uid)
         if not _decision_reads_enabled(flags):
             logger.debug("decision reads disabled by feature flags or env; returning unavailable for uid=%s", uid)
@@ -689,7 +690,7 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
     except Exception:
         pass
 
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         from fastapi import Response
         return Response(content="event:meta\ndata: {\"available\": false}\n\n", media_type="text/event-stream")
@@ -1128,7 +1129,7 @@ def approve_decision(
 ) -> Dict:
     with tracer.start_as_current_span("decisions.approve") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # `db` is injected via Depends(get_db) to ensure the session is bound to
@@ -1188,7 +1189,7 @@ def reject_decision(
 ) -> Dict:
     with tracer.start_as_current_span("decisions.reject") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # `db` is injected via Depends(get_db)
@@ -1231,7 +1232,7 @@ def reject_decision(
 def reopen_decision(decision_id: str, actor: str, comment: str | None = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
     with tracer.start_as_current_span("decisions.reopen") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # For SQLite compatibility, prefer setting sentinel 'infinity' rather than NULL
@@ -1309,7 +1310,7 @@ def reopen_decision(decision_id: str, actor: str, comment: str | None = None, ro
 def extend_decision(decision_id: str, actor: str, extend_seconds: int, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER]))) -> Dict:
     with tracer.start_as_current_span("decisions.extend") as span:
         span.set_attribute("decisions.id", decision_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         if not _decision_reads_enabled(flags):
             raise HTTPException(status_code=501, detail="Decision lifecycle disabled in this environment")
         # `db` is injected via Depends(get_db)
@@ -1611,7 +1612,7 @@ def get_session_decisions(
     Falls back to scanning `input_data` JSON for a `session_id` key when the column is absent
     (schema not yet migrated), so the endpoint is safe against partial rollouts.
     """
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
 
@@ -1720,7 +1721,7 @@ def get_decision_trace(trace_id: str, role: str = Depends(require_role([ROLE_MER
     """
     with tracer.start_as_current_span("decisions.trace.get") as span:
         span.set_attribute("decisions.trace_id", trace_id)
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         from sqlalchemy import text as _text
 
         # User-facing trace-read endpoint: graceful payload when disabled.
@@ -1983,7 +1984,7 @@ async def explain_decision(trace_id: str, role: str = Depends(require_role([ROLE
     Uses available `decision_logs` record and trace events to construct a prompt
     and calls the lightweight LLM provider to summarize reasoning, risks, and key steps.
     """
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
     cached = _EXPLAIN_CACHE.get(trace_id)
@@ -2166,7 +2167,7 @@ def replay_decision(trace_id: str, role: str = Depends(require_role([ROLE_MERCHA
 
     Includes input data, model selection, and tool invocation events captured in the trace.
     """
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     if not _decision_reads_enabled(flags):
         raise HTTPException(status_code=501, detail="Decision reads disabled in this environment")
     try:

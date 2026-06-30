@@ -7,6 +7,7 @@ from typing import Any, Dict
 from fastapi import HTTPException
 
 from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.services.decision_log import log_trace_event
 
 
@@ -106,7 +107,7 @@ def evaluate_autonomy(
     flags: Dict[str, Any] | None = None,
     context: Dict[str, Any] | None = None,
 ) -> AutonomyVerdict:
-    cfg = flags or load_feature_flags(get_settings().feature_flags_path)
+    cfg = flags or _ff_get_flags()
     scope_key = str(scope or "global").strip().lower() or "global"
     autonomy = cfg.get("AUTONOMY") if isinstance(cfg.get("AUTONOMY"), dict) else {}
     scope_cfg = _scope_cfg(cfg, scope_key)

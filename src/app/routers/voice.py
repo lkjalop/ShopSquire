@@ -5,6 +5,7 @@ import uuid
 import time
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.services.voice_asr import WhisperLocalASRAdapter, decode_base64_audio
 from src.app.services.voice_tts import ElevenLabsTTSAdapter
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/api/v1/voice", tags=["voice"])
 
 @router.post("/asr")
 def asr(audio_base64: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     cap = flags.get("CAPABILITIES", {}).get("voice", {"asr": False, "tts": False})
     if not cap.get("asr"):
         raise HTTPException(status_code=503, detail="ASR disabled")
@@ -36,7 +37,7 @@ def asr(audio_base64: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE
 
 @router.post("/tts")
 def tts(text: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     cap = flags.get("CAPABILITIES", {}).get("voice", {"asr": False, "tts": False})
     if not cap.get("tts"):
         raise HTTPException(status_code=503, detail="TTS disabled")
@@ -61,7 +62,7 @@ async def voice_stream(ws: WebSocket):
     """
     await ws.accept()
     # Feature flags gate
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
     cap = flags.get("CAPABILITIES", {}).get("voice", {"asr": False, "tts": False})
     if not (cap.get("asr") and cap.get("tts")):
         await ws.send_text(json.dumps({"type": "error", "detail": "voice_disabled"}))

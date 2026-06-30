@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Literal
 import os
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.security.refund_window_guard import evaluate_refund_aggregate_window
 
 
@@ -50,7 +51,7 @@ def evaluate_policy_gate(context: Dict[str, Any]) -> PolicyGateResult:
 
     thresholds = {}
     try:
-        flags = load_feature_flags(get_settings().feature_flags_path) or {}
+        flags = _ff_get_flags() or {}
         thresholds = flags.get("POLICY_THRESHOLDS", {}) if isinstance(flags.get("POLICY_THRESHOLDS"), dict) else {}
     except Exception:
         thresholds = {}

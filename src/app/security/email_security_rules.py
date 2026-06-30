@@ -8,6 +8,7 @@ from urllib.parse import urlparse, parse_qs
 from typing import Any, Dict, List, Tuple
 
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.rules.tenant_config_store import TenantConfigStore
 try:
     from src.app.security.lolbin_behavioral_catalog import enrich_lolbin_indicators as _enrich_lolbin
@@ -81,7 +82,7 @@ _ENCODING_ANOMALY_PAT = re.compile(r"(?:Ã.|â.|ðŸ|ï¸|�)")
 
 def _get_thresholds(*, tenant_id: str | None = None) -> Dict[str, Any]:
     try:
-        thr = (load_feature_flags(get_settings().feature_flags_path) or {}).get("SECURITY_THRESHOLDS", {})
+        thr = (_ff_get_flags() or {}).get("SECURITY_THRESHOLDS", {})
     except Exception:
         thr = {}
     # Optional tenant-scoped override for allow/deny lists via TenantConfigStore.

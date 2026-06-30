@@ -13,6 +13,7 @@ import requests
 from sqlalchemy import text as sql_text
 
 from src.app.config import get_settings, load_feature_flags
+from src.app.feature_flags import get_flags as _ff_get_flags
 from src.app.models.db import db_session, get_db
 from src.app.security.auth import get_current_role, require_role, require_role_or_oidc, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from datetime import datetime, timedelta
@@ -3577,7 +3578,7 @@ def scoring_rollback(req: RollbackReq, role: str = Depends(require_role([ROLE_OW
 @router.get("/overview")
 def get_overview(role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     from src.app.config import load_feature_flags, get_settings
-    flags = load_feature_flags(get_settings().feature_flags_path)
+    flags = _ff_get_flags()
 
     data = {
         "revenue_today": 0,

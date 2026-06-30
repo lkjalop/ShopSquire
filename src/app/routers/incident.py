@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from src.app.security.pci import contains_pci_data
 from src.app.config import load_feature_flags, get_settings
+from src.app.feature_flags import get_flags as _ff_get_flags
 import json
 import os
 from src.app.observability.metrics import record_incident_alert, record_ticket
@@ -34,7 +35,7 @@ def _route_threshold(topic: str) -> str:
 def send_alert(topic: str, message: str, severity: Optional[str] = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("incident.alert") as span:
         span.set_attribute("incident.topic", topic or "unknown")
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed("incident", flags=flags, source_id="Incident_Autonomy_Governance_Agent", context={"topic": topic})
         if contains_pci_data(message):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
@@ -60,7 +61,7 @@ def send_alert(topic: str, message: str, severity: Optional[str] = None, role: s
 def create_ticket(topic: str, title: str, description: str, priority: Optional[str] = None, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("incident.ticket") as span:
         span.set_attribute("incident.topic", topic or "unknown")
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed("incident", flags=flags, source_id="Incident_Autonomy_Governance_Agent", context={"topic": topic})
         if contains_pci_data(description):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
@@ -84,7 +85,7 @@ def block_action(target: str, reason: str, severity: Optional[str] = None, role:
     """Hard-block endpoint for security incidents with real incident creation."""
     with tracer.start_as_current_span("incident.block") as span:
         span.set_attribute("incident.target", target or "unknown")
-        flags = load_feature_flags(get_settings().feature_flags_path)
+        flags = _ff_get_flags()
         assert_autonomy_allowed("incident", flags=flags, source_id="Incident_Autonomy_Governance_Agent", context={"target": target})
         if contains_pci_data(reason):
             raise HTTPException(status_code=400, detail="PCI-DSS sensitive data detected")
