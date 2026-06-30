@@ -84,6 +84,15 @@ def test_terminal_state_is_frozen():
     assert ok is False and reason == "terminal_state"
 
 
+def test_draft_is_editable_before_approval_request():
+    # an operator (or agent) can edit the draft straight from QUOTE_DRAFTED — no need to request approval first.
+    for actor in (_human(), _agent()):
+        assert d.can_fire(S.QUOTE_DRAFTED, "external_message_drafted", actor)[0] is True
+        assert d.next_state(S.QUOTE_DRAFTED, "external_message_drafted", actor) == S.QUOTE_DRAFTED  # self-loop
+    # the buyer still cannot touch the draft
+    assert d.can_fire(S.QUOTE_DRAFTED, "external_message_drafted", _buyer())[0] is False
+
+
 # ── confidence-gated transitions are flagged for the workflow ────────────────
 def test_engage_and_options_are_confidence_gated():
     assert d.CONFIDENCE_GATED_EVENTS == frozenset(

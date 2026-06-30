@@ -41,6 +41,34 @@ def test_no_order_quantity_returns_empty():
     assert "availability" not in payload
 
 
+def test_wants_sourcing_detects_reorder_language():
+    assert stage._wants_sourcing("reorder 50 gaming laptops from a supplier")
+    assert stage._wants_sourcing("please restock 30 monitors")
+    assert stage._wants_sourcing("procure 20 keyboards") and stage._wants_sourcing("bulk order 40 headsets")
+    assert not stage._wants_sourcing("show me 50 gaming laptops under $2000")  # plain shopping, not sourcing
+    assert not stage._wants_sourcing("")
+
+
+def test_force_sourcing_emits_preview_even_when_in_stock():
+    # 'reorder 50 from a supplier' but stock covers it (shortfall 0) → still emit the sourcing preview, sourcing
+    # the FULL requested qty (a B2B replenishment isn't gated on retail stock). Closes the unreliable-trigger bug.
+    payload = {}
+    stage._maybe_open_case(payload=payload, avail={"sku": "GAM-1", "shortfall": 0, "in_stock": 80},
+                           order_qty=50, uid="u1", uid_hash=None, trace_id=None,
+                           flags={"FULFILLMENT_CASES_ENABLED": True}, defer=True, force_sourcing=True)
+    si = payload.get("sourcing_intent")
+    assert si and si["mode"] == "deferred_to_cart"
+    assert si["lines"][0]["item_ref"] == "GAM-1" and si["lines"][0]["shortfall"] == 50  # source the full 50
+
+
+def test_in_stock_without_reorder_intent_emits_no_preview():
+    payload = {}
+    stage._maybe_open_case(payload=payload, avail={"sku": "GAM-1", "shortfall": 0, "in_stock": 80},
+                           order_qty=50, uid="u1", uid_hash=None, trace_id=None,
+                           flags={"FULFILLMENT_CASES_ENABLED": True}, defer=True, force_sourcing=False)
+    assert "sourcing_intent" not in payload   # in stock + no reorder intent → nothing to procure (parity)
+
+
 def test_pr_id_lands_on_the_sourcing_preview():
     # the deferred (fluid) preview must carry the stable PR id so an amendment re-confirms onto the SAME order.
     payload = {}

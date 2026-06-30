@@ -604,19 +604,16 @@ def create_app() -> FastAPI:
     # only included when APP_ENV is local/dev or CORS_ORIGINS explicitly lists them.
     try:
         origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+        origin_regex = None
         if not origins:
             _app_env = os.getenv("APP_ENV", "local").strip().lower()
             if _app_env in ("local", "dev", "development", "test"):
-                origins = [
-                    "http://localhost:5173",
-                    "http://127.0.0.1:5173",
-                    "http://localhost:5174",
-                    "http://127.0.0.1:5174",
-                    "http://localhost:3001",
-                    "http://127.0.0.1:3001",
-                    "http://localhost:8080",
-                    "http://127.0.0.1:8080",
-                ]
+                # DEV: allow ANY localhost/127.0.0.1 port so a demo on an alternate frontend port (5178, …)
+                # or backend port just works — no per-port CORS edit. allow_origin_regex echoes the specific
+                # origin, so it's compatible with allow_credentials (a wildcard '*' would not be). PROD still
+                # requires explicit CORS_ORIGINS below.
+                origin_regex = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+                origins = []
             else:
                 # Production: no wildcard fallback — require explicit CORS_ORIGINS
                 import logging as _logging
@@ -629,6 +626,7 @@ def create_app() -> FastAPI:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
+            allow_origin_regex=origin_regex,
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],

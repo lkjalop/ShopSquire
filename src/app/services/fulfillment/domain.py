@@ -151,6 +151,11 @@ TRANSITIONS: Tuple[Transition, ...] = (
     Transition("approval_requested", _S.QUOTE_DRAFTED, _S.AWAITING_APPROVAL, frozenset({_A.AGENT}),
                requires_evidence=True, note="queue the exact message + content hash for human review"),
 
+    # ── editing the draft BEFORE requesting approval (self-loop on DRAFTED) — the natural 'tweak the RFQ then
+    #    send for approval' step. New version + new content hash; nothing was approved yet, so nothing to void. ──
+    Transition("external_message_drafted", _S.QUOTE_DRAFTED, _S.QUOTE_DRAFTED, frozenset({_A.AGENT, _A.HUMAN_OPERATOR}),
+               requires_evidence=True, note="edit the draft pre-approval → new version + new hash"),
+
     # ── editing a pending draft voids the prior approval (back to DRAFTED) ──
     Transition("external_message_drafted", _S.AWAITING_APPROVAL, _S.QUOTE_DRAFTED, frozenset({_A.AGENT, _A.HUMAN_OPERATOR}),
                requires_evidence=True, note="edit → new version + new hash → prior approval void"),

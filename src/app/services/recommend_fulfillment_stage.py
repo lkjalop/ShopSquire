@@ -14,9 +14,23 @@ NO procurement workflow logic lives in recommend.py — only this stage call. Ve
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from src.app.services.safe_stage import record_partial_failure
+
+# Explicit "procure this from a supplier" language. A bulk request carrying this is a B2B REORDER intent — the
+# buyer wants to source from a supplier regardless of current retail stock — so the sourcing preview must fire
+# even when stock could cover it (a restock/replenishment is not gated on retail availability). Vertical-blind.
+_SOURCING_RE = re.compile(
+    r"\b(re-?order|re-?stock|procure|procurement|"
+    r"source\s+(?:from|them|these|it|this)|from\s+(?:a\s+|the\s+|our\s+)?suppliers?|"
+    r"wholesale|bulk\s+(?:order|buy|purchase|reorder)|place\s+an?\s+order\s+with|"
+    r"order\s+(?:from|with)\s+(?:a\s+|the\s+|our\s+)?suppliers?)\b", re.IGNORECASE)
+
+
+def _wants_sourcing(query: Optional[str]) -> bool:
+    return bool(query and _SOURCING_RE.search(str(query)))
 
 
 def _flag(flags: Optional[Dict[str, Any]], key: str) -> bool:
@@ -129,7 +143,8 @@ def run_fulfillment_stage(
         _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
-                     flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id)
+                     flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id,
+                     force_sourcing=_wants_sourcing(query))
     return line
 
 
@@ -274,7 +289,7 @@ def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
         record_partial_failure("bulk_alternatives", exc, trace_id=trace_id)
 
 
-def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False, pr_id=None) -> None:
+def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False, pr_id=None, force_sourcing=False) -> None:
     """Open a fulfilment_case at GATE 1 on a real shortfall (flag-gated, best-effort). Two entry points:
     a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True).
     When ``defer`` (FULFILLMENT_DEFER_TO_CART), the intent stays FLUID: set payload['sourcing_intent']
@@ -287,10 +302,15 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
     except Exception:
         threshold = 5
     shortfall = int((avail or {}).get("shortfall") or 0)
-    if shortfall <= 0:
-        return  # no shortfall → nothing to procure
     in_stock = int((avail or {}).get("in_stock") or 0)
     bulk_ok = order_qty >= threshold
+    # EXPLICIT reorder/source intent on a bulk request → source the FULL requested qty even if it's in stock
+    # (a B2B replenishment is a procurement decision, not gated on current retail availability). This is the
+    # fix for "buyer says 'reorder 50 from a supplier' but the item is in stock → no sourcing preview".
+    if force_sourcing and bulk_ok and shortfall < order_qty:
+        shortfall = order_qty
+    if shortfall <= 0:
+        return  # no shortfall and no explicit reorder → nothing to procure
     single_ok = single_item and in_stock == 0  # a single item we have NONE of → offer to source it
     if not (bulk_ok or single_ok):
         return
