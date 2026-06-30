@@ -92,9 +92,11 @@ def _ensure_table() -> None:
                     "ON kyv_vendors(tenant_id, registration_number) WHERE registration_number IS NOT NULL"
                 )
             )
+            # UNIQUE: one vendor per (tenant, verified_domain) — register_vendor upserts on this key so the same
+            # supplier domain can't accrete duplicate rows (a suspended dup could otherwise shadow a good one).
             db.execute(
                 text(
-                    "CREATE INDEX IF NOT EXISTS idx_kyv_tenant_domain "
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_kyv_tenant_domain "
                     "ON kyv_vendors(tenant_id, verified_domain) WHERE verified_domain IS NOT NULL"
                 )
             )
@@ -200,36 +202,49 @@ def register_vendor(
         status = "verified"
         verified_at = datetime.now(timezone.utc).isoformat()
 
+    domain_norm = (verified_domain or "").strip().lower() or None
+    deduped = False
+    params = {
+        "id": vendor_id, "tenant_id": tenant_id, "legal_name": legal_name, "trading_name": trading_name,
+        "registration_number": registration_number, "registration_type": registration_type,
+        "verified_domain": domain_norm, "status": status, "risk_tier": risk_tier,
+        "contact_email": contact_email, "notes": notes, "verified_at": verified_at,
+    }
     try:
         with db_session() as db:
-            db.execute(
-                text(
-                    """
-                    INSERT INTO kyv_vendors
-                    (id, tenant_id, legal_name, trading_name, registration_number,
-                     registration_type, verified_domain, status, risk_tier,
-                     contact_email, notes, onboarded_at, verified_at, last_review_at, updated_at)
-                    VALUES
-                    (:id, :tenant_id, :legal_name, :trading_name, :registration_number,
-                     :registration_type, :verified_domain, :status, :risk_tier,
-                     :contact_email, :notes, CURRENT_TIMESTAMP, :verified_at, NULL, CURRENT_TIMESTAMP)
-                    """
-                ),
-                {
-                    "id": vendor_id,
-                    "tenant_id": tenant_id,
-                    "legal_name": legal_name,
-                    "trading_name": trading_name,
-                    "registration_number": registration_number,
-                    "registration_type": registration_type,
-                    "verified_domain": (verified_domain or "").strip().lower() or None,
-                    "status": status,
-                    "risk_tier": risk_tier,
-                    "contact_email": contact_email,
-                    "notes": notes,
-                    "verified_at": verified_at,
-                },
-            )
+            # UPSERT on (tenant, verified_domain): re-onboarding the SAME domain UPDATES the existing vendor
+            # instead of inserting a duplicate (the duplicate-vendor bug). A null domain can't be deduped, so
+            # it inserts as before.
+            existing = None
+            if domain_norm:
+                existing = db.execute(
+                    text("SELECT id FROM kyv_vendors WHERE tenant_id=:t AND verified_domain=:d LIMIT 1"),
+                    {"t": tenant_id, "d": domain_norm}).fetchone()
+            if existing:
+                deduped = True
+                vendor_id = str(existing[0])
+                params["id"] = vendor_id
+                db.execute(
+                    text("UPDATE kyv_vendors SET legal_name=:legal_name, trading_name=:trading_name, "
+                         "registration_number=:registration_number, registration_type=:registration_type, "
+                         "status=:status, risk_tier=:risk_tier, contact_email=:contact_email, notes=:notes, "
+                         "verified_at=:verified_at, updated_at=CURRENT_TIMESTAMP WHERE id=:id"),
+                    params)
+            else:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO kyv_vendors
+                        (id, tenant_id, legal_name, trading_name, registration_number,
+                         registration_type, verified_domain, status, risk_tier,
+                         contact_email, notes, onboarded_at, verified_at, last_review_at, updated_at)
+                        VALUES
+                        (:id, :tenant_id, :legal_name, :trading_name, :registration_number,
+                         :registration_type, :verified_domain, :status, :risk_tier,
+                         :contact_email, :notes, CURRENT_TIMESTAMP, :verified_at, NULL, CURRENT_TIMESTAMP)
+                        """
+                    ),
+                    params)
             db.commit()
     except Exception as exc:
         logger.warning("vendor registration failed: %s", exc)
@@ -241,6 +256,7 @@ def register_vendor(
         "status": status,
         "risk_tier": risk_tier,
         "registration_valid": reg_result,
+        "deduped": deduped,
     }
 
 
