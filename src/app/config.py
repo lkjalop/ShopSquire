@@ -258,9 +258,6 @@ def load_feature_flags(path: str) -> dict:
     def _apply_toggle_overrides(flags: dict) -> dict:
         out = dict(flags or {})
         override_map = {
-            "DYNAMIC_CONTEXT_PROVIDER_ENABLED": "DYNAMIC_CONTEXT_PROVIDER_ENABLED",
-            "CAG_CONTEXT_ENABLED": "CAG_CONTEXT_ENABLED",
-            "GRAPH_RAG_ENABLED": "GRAPH_RAG_ENABLED",
             "FULFILLMENT_DEFER_TO_CART": "FULFILLMENT_DEFER_TO_CART",
         }
         for key, env_key in override_map.items():
@@ -332,9 +329,6 @@ def load_feature_flags(path: str) -> dict:
             },
             "RAGAS_EVAL_ENABLED": False,
             "TEST_FORCE_BAD_SKU": False,
-            "DYNAMIC_CONTEXT_PROVIDER_ENABLED": True,
-            "CAG_CONTEXT_ENABLED": True,
-            "GRAPH_RAG_ENABLED": True,
             "SECURITY_THRESHOLDS": {
                 "ML_DECISION_GATE": {
                     "enabled": True,

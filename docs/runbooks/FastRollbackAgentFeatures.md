@@ -3,6 +3,12 @@
 ## Purpose
 Rapid rollback procedure for context-injection and graph-enrichment features when SLO or quality alerts fire.
 
+> NOTE (2026-06-30): The `DYNAMIC_CONTEXT_PROVIDER_ENABLED` / `CAG_CONTEXT_ENABLED` /
+> `GRAPH_RAG_ENABLED` toggles previously listed here were dead config — defined in
+> `config.py` but never read in `src/app`. They were removed. This runbook is
+> retained as a template for future context/graph rollouts; replace the toggle
+> names below when those features ship a real implementation + flag.
+
 ## Trigger Conditions
 - `ABVariantBQualityDrop`
 - `ABVariantBQualityCritical`
@@ -10,10 +16,8 @@ Rapid rollback procedure for context-injection and graph-enrichment features whe
 - Any severe latency/error SLO breach linked to recent rollout
 
 ## Immediate Actions (under 5 minutes)
-1. Set all rollout toggles off via environment variables:
-   - `DYNAMIC_CONTEXT_PROVIDER_ENABLED=0`
-   - `CAG_CONTEXT_ENABLED=0`
-   - `GRAPH_RAG_ENABLED=0`
+1. Set all rollout toggles off via environment variables (replace `<TOGGLE_NAME>` with the live flag(s)):
+   - `<TOGGLE_NAME>=0`
 2. Keep service running and confirm health:
    - `GET /healthz` returns `200`
 3. Confirm impact stabilization:
@@ -23,9 +27,7 @@ Rapid rollback procedure for context-injection and graph-enrichment features whe
 
 ## API-Based Rollback (alternative)
 1. Call `POST /api/v1/admin/flags` as owner and update:
-   - `DYNAMIC_CONTEXT_PROVIDER_ENABLED=false`
-   - `CAG_CONTEXT_ENABLED=false`
-   - `GRAPH_RAG_ENABLED=false`
+   - `<TOGGLE_NAME>=false`
 2. Verify with `GET /api/v1/admin/diagnostics/agent-toggles`.
 
 ## Verification Checklist
