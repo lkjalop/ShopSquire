@@ -99,11 +99,20 @@ def evaluate_now(db, *, experiment_id: str = DEFAULT_EXPERIMENT_ID, min_samples:
 
 def revert(db, *, experiment_id: str = DEFAULT_EXPERIMENT_ID) -> Dict[str, Any]:
     """The manual revert lever — flip the experiment to 'reverted' so the nudge stops globally. Returns
-    the new state."""
+    the new state. Reverting a LIVE experiment is an operator-initiated rollback, so it's recorded as a
+    terminal outcome (auto-reverts are recorded by evaluate_now) — the governance rollback count reflects it."""
     if db is not None:
         try:
+            was_live = bool(state(db, experiment_id=experiment_id).get("live"))
             from src.app.services.experiments import set_status
             set_status(db, experiment_id=experiment_id, status="reverted")
+            if was_live:
+                try:
+                    from src.app.services import market_outcome
+                    market_outcome.record_outcome(db, decision_ref=experiment_id, decision="revert",
+                                                  reverted=True, source="operator")
+                except Exception as exc:
+                    logger.debug("revert outcome record failed: %s", exc)
             db.commit()
         except Exception as exc:
             logger.warning("experiment_console.revert failed: %s", exc)

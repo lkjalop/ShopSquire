@@ -939,13 +939,15 @@ def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]
 
 
 @router.get("/governance/pulse")
-def governance_pulse(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+def governance_pulse(tenant_id: str = Query("default"),
+                     role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Owner/governance VISIBILITY (deck Step 11): one read-only snapshot rolling the existing audit trails
     into four cards — signal & decision state, experiment health, policy & compliance, operational pressure.
-    The owner observes WITHOUT becoming a runtime dependency (this writes nothing)."""
+    The owner observes WITHOUT becoming a runtime dependency (this writes nothing). ``tenant_id`` lets the
+    pulse follow the view (e.g. the isolated 'replay-demo' tenant during the synthetic replay)."""
     from src.app.services.governance_pulse import governance_pulse as pulse
     with db_session() as db:
-        return pulse(db)
+        return pulse(db, tenant_id=str(tenant_id or "default"))
 
 
 # ── ranking-experiment console (operator) — promote/observe/evaluate/revert the live-adaptation loop ──

@@ -58,4 +58,7 @@ export interface GovernancePulse {
     total_signal_findings: number; open_action_proposals: number;
   };
 }
-export const governancePulse = () => http<GovernancePulse>(`/api/v1/fulfillment/governance/pulse`);
+// tenant_id lets the pulse follow the view — the isolated 'replay-demo' tenant during synthetic replay,
+// else the real 'default' operational tenant.
+export const governancePulse = (tenantId = 'default') =>
+  http<GovernancePulse>(`/api/v1/fulfillment/governance/pulse?tenant_id=${encodeURIComponent(tenantId)}`);

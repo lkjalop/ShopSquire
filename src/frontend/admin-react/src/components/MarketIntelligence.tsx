@@ -15,7 +15,9 @@ import {
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
 
-export function MarketIntelligence() {
+// authVersion bumps whenever the API key/cookie is (re)established — every fetch effect depends on it so the
+// panel retries after auth succeeds (instead of silently staying empty if it mounted before auth landed).
+export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number } = {}) {
   const [st, setSt] = useState<ReplayState | null>(null);
   const [day, setDay] = useState(7);
   const [busy, setBusy] = useState(false);
@@ -27,7 +29,7 @@ export function MarketIntelligence() {
     const fn = mode === 'live' ? marketState : replayState;
     fn().then(setSt).catch((e) => setError(e.message));
   }, [mode]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, authVersion]);
 
   const refreshLive = async () => {
     setBusy(true); setError(null);
@@ -46,7 +48,7 @@ export function MarketIntelligence() {
   // ── ranking-experiment console (the live-adaptation levers) ──
   const [exp, setExp] = useState<ExperimentState | null>(null);
   const loadExp = useCallback(() => { experimentState().then(setExp).catch(() => {}); }, []);
-  useEffect(() => { loadExp(); }, [loadExp]);
+  useEffect(() => { loadExp(); }, [loadExp, authVersion]);
   const runExp = async (fn: () => Promise<any>) => {
     setBusy(true); setError(null);
     try { await fn(); loadExp(); }
@@ -61,10 +63,12 @@ export function MarketIntelligence() {
     finally { setBusy(false); }
   };
 
-  // ── governance pulse (Step-11 owner visibility) — read-only; refreshes with the other panels ──
+  // ── governance pulse (Step-11 owner visibility) — read-only; follows the active view's tenant so the
+  //    figures match the findings panel above (synthetic replay writes the isolated 'replay-demo' tenant) ──
+  const govTenant = mode === 'replay' ? 'replay-demo' : 'default';
   const [pulse, setPulse] = useState<GovernancePulse | null>(null);
-  const loadPulse = useCallback(() => { governancePulse().then(setPulse).catch(() => {}); }, []);
-  useEffect(() => { loadPulse(); }, [loadPulse, st, exp]);
+  const loadPulse = useCallback(() => { governancePulse(govTenant).then(setPulse).catch(() => {}); }, [govTenant]);
+  useEffect(() => { loadPulse(); }, [loadPulse, st, exp, authVersion]);
 
   const series = st?.series;
   const live = mode === 'live';
@@ -174,7 +178,9 @@ export function MarketIntelligence() {
           runtime dependency. Read-only roll-up of the existing audit trails into four cards. */}
       {pulse && (
         <section data-testid="mi-governance" style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
-          <h4 style={{ margin: '0 0 8px' }}>Governance visibility</h4>
+          <h4 style={{ margin: '0 0 8px' }}>Governance visibility{' '}
+            <span data-testid="gov-tenant" style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>
+              (tenant: {pulse.tenant_id})</span></h4>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <GovCard title="Signal & decision state" testid="gov-signal">
               <Row k="Active findings" v={pulse.signal_decision_state.active_findings} />

@@ -92,3 +92,31 @@ def test_adaptation_mode_reflects_flags(db, monkeypatch):
     monkeypatch.setenv("HIPPOGRAPH_FEEDBACK_ENABLED", "shadow")
     mode = gp.governance_pulse(db)["signal_decision_state"]["adaptation_mode"]
     assert mode["kill_switch"] is True and mode["hippograph_mode"] == "shadow"
+
+
+def test_pulse_is_tenant_scoped(db):
+    """Review fix #3: the pulse follows a tenant, so the synthetic-replay ('replay-demo') view doesn't bleed
+    into the real 'default' operational view (and vice versa)."""
+    ma.persist_findings(db, [ma.MarketFinding("demand_shift", "rA", "critical", 0.9, "x", {}, "7d")],
+                        tenant_id="default")
+    ma.persist_findings(db, [ma.MarketFinding("demand_shift", "rB", "warn", 0.6, "y", {}, "7d")],
+                        tenant_id="replay-demo")
+    assert gp.governance_pulse(db, tenant_id="default")["signal_decision_state"]["active_findings"] == 1
+    assert gp.governance_pulse(db, tenant_id="replay-demo")["signal_decision_state"]["active_findings"] == 1
+    assert gp.governance_pulse(db, tenant_id="replay-demo")["signal_decision_state"]["findings_by_severity"]["warn"] == 1
+
+
+def test_manual_revert_of_live_experiment_counts_as_rollback(db):
+    """Review fix #4: reverting a LIVE experiment is an operator rollback — it must register in rollback_count."""
+    from src.app.services import experiment_console as ec
+    ec.promote(db)                      # status → live
+    ec.revert(db)                       # manual operator kill of a live experiment
+    eh = gp.governance_pulse(db)["experiment_health"]
+    assert eh["rollback_count"] == 1 and eh["decision_breakdown"].get("revert") == 1
+
+
+def test_revert_of_non_live_experiment_records_no_rollback(db):
+    """The was_live guard: reverting something that was never live must NOT inflate the rollback count."""
+    from src.app.services import experiment_console as ec
+    ec.revert(db)                       # nothing was live
+    assert gp.governance_pulse(db)["experiment_health"]["rollback_count"] == 0
