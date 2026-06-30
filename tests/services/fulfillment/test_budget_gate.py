@@ -31,3 +31,13 @@ def test_bad_input_is_safe(monkeypatch):
     monkeypatch.setattr(budget_gate, "_cap_for", lambda category: 1000000)
     s = budget_gate.budget_status("oops", category="office", committed_cents=None)
     assert s["spend_cents"] == 0 and s["within_budget"] is True
+
+
+def test_cumulative_two_cases_breach_one_cap(monkeypatch):
+    """Review fix #5: two $6k cases under a $10k cap must NOT both pass — the second sees the first as
+    committed and is blocked. (The router supplies committed_cents from prior committed cases in the category.)"""
+    monkeypatch.setattr(budget_gate, "_cap_for", lambda category: 1000000)  # $10,000 cap
+    first = budget_gate.budget_status(600000, category="it", committed_cents=0)        # $6k, nothing prior
+    assert first["within_budget"] is True
+    second = budget_gate.budget_status(600000, category="it", committed_cents=600000)  # $6k + $6k committed
+    assert second["within_budget"] is False  # 12k > 10k

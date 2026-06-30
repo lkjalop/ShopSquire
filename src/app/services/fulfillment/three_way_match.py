@@ -52,6 +52,10 @@ def match(po: Optional[Dict[str, Any]], goods_receipt: Optional[Dict[str, Any]],
             amt_tol = po_amt * max(0.0, float(amount_tolerance_pct))
             if abs(po_amt - inv_amt) > amt_tol:
                 mismatches.append(f"amount_po_vs_invoice:{po_amt}!={inv_amt}")
+        elif inv_amt > 0:
+            # An invoiced amount with NO PO baseline cannot be reconciled — never pass it (would let an
+            # unpriced PO pay any invoice). A genuinely amount-less match (qty-only PO + qty-only invoice) is fine.
+            mismatches.append(f"missing_po_amount:invoice={inv_amt}")
     return {"matched": not mismatches, "mismatches": mismatches,
             "po_qty": po_qty, "receipt_qty": rcv_qty, "invoice_qty": inv_qty,
             "po_amount_cents": po_amt, "invoice_amount_cents": inv_amt}

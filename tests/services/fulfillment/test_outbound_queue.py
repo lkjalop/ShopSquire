@@ -148,3 +148,65 @@ def test_dead_letters_lists_exhausted(db):
         q.process_pending(db, transport=_FailTransport(), now_iso=t)
     dl = q.dead_letters(db)
     assert len(dl) == 1 and dl[0]["case_id"] == "c1" and dl[0]["attempts"] == 3
+
+
+# ── fixes from the Tier-1 #5 review ───────────────────────────────────────────
+class _CountingTransport:
+    def __init__(self):
+        self.calls = 0
+
+    def send(self, *, to, subject, body, idempotency_key=""):
+        self.calls += 1
+        return _Res("sent", provider_ref="PROV-C")
+
+
+def test_claimed_sending_row_is_not_resent(db):
+    """A row already CLAIMED ('sending', within the stale window) by another worker must NOT be transmitted by
+    a concurrent process pass — the claim guard prevents the double-send race."""
+    _enq(db, key="claimed")
+    db.execute(text("UPDATE outbound_message SET status='sending', updated_at='2026-06-28T10:00:00' "
+                    "WHERE idempotency_key='claimed'"))
+    db.commit()
+    tx = _CountingTransport()
+    out = q.process_pending(db, transport=tx, now_iso="2026-06-28T10:01:00")  # well within 300s stale window
+    assert tx.calls == 0 and out["processed"] == 0
+    assert db.execute(text("SELECT status FROM outbound_message")).fetchone()[0] == "sending"
+
+
+def test_stale_claim_is_reclaimed_and_delivered(db):
+    """A 'sending' row older than the stale-claim window (crashed worker) is reclaimed to pending and retried."""
+    _enq(db, key="stale")
+    db.execute(text("UPDATE outbound_message SET status='sending', updated_at='2026-06-28T09:00:00' "
+                    "WHERE idempotency_key='stale'"))
+    db.commit()
+    tx = _CountingTransport()
+    out = q.process_pending(db, transport=tx, now_iso="2026-06-28T10:00:00")  # >300s later → reclaimed
+    assert tx.calls == 1 and out["sent"] == 1
+    assert db.execute(text("SELECT status FROM outbound_message")).fetchone()[0] == "sent"
+
+
+def test_record_ack_rejects_unsent_row(db):
+    _enq(db, key="unsent")  # never processed → still pending
+    r = q.record_ack(db, idempotency_key="unsent", now_iso="2026-06-28T11:00:00")
+    assert r["acked"] is False and r["reason"].startswith("not_sent")
+    assert db.execute(text("SELECT ack_status FROM outbound_message")).fetchone()[0] == "awaiting"
+
+
+def test_record_ack_rejects_case_mismatch(db):
+    _enq(db, key="cm")  # case_id="c1"
+    q.process_pending(db, transport=_OkTransport(), now_iso="2026-06-28T10:00:01")
+    r = q.record_ack(db, idempotency_key="cm", case_id="WRONG-CASE", now_iso="2026-06-28T11:00:00")
+    assert r["acked"] is False and r["reason"] == "case_mismatch"
+    ok = q.record_ack(db, idempotency_key="cm", case_id="c1", now_iso="2026-06-28T11:00:00")
+    assert ok["acked"] is True
+
+
+def test_sent_rows_carry_the_approved_transition_intent(db):
+    q.enqueue(db, case_id="c9", recipient="s@x.com", subject="RFQ", body="...", idempotency_key="intent",
+              actor_type="human_operator", actor_id="ap-1", transition_event="external_message_sent",
+              now_iso="2026-06-28T10:00:00")
+    out = q.process_pending(db, transport=_OkTransport(), now_iso="2026-06-28T10:00:01")
+    assert len(out["sent_rows"]) == 1
+    row = out["sent_rows"][0]
+    assert (row["case_id"] == "c9" and row["actor_type"] == "human_operator"
+            and row["transition_event"] == "external_message_sent" and row["provider_ref"] == "PROV-1")

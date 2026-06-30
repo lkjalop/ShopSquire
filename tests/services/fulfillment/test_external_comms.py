@@ -59,6 +59,20 @@ def test_send_with_matching_hash_sends(db):
     assert r.ok and wf.current_state(db, cid) == S.QUOTE_SENT
 
 
+def test_send_through_reliable_queue_when_flag_on(db, monkeypatch):
+    """GATE-2 reliable path: with FULFILLMENT_OUTBOUND_QUEUE_ENABLED the send routes through the durable queue —
+    it still advances to QUOTE_SENT, AND a durable 'sent' outbound_message row exists for retry/ack tracking."""
+    monkeypatch.setenv("FULFILLMENT_OUTBOUND_QUEUE_ENABLED", "1")
+    from sqlalchemy import text
+    cid = _to_approved(db)
+    r = ec.send_approved(db, case_id=cid, actor=HU(), approval_content_hash="H1", now_iso="2026-06-26 09:10:05")
+    assert r.ok and wf.current_state(db, cid) == S.QUOTE_SENT
+    row = db.execute(text("SELECT status, idempotency_key, actor_type, transition_event "
+                          "FROM outbound_message WHERE case_id=:c"), {"c": cid}).fetchone()
+    assert row is not None and row[0] == "sent" and row[1] == "H1"
+    assert row[2] == "human_operator" and row[3] == "external_message_sent"
+
+
 def test_send_with_stale_approval_is_blocked(db):
     cid = _to_approved(db)
     # the approval was for hash H1 but the current draft is H1 — simulate an approval that no longer matches

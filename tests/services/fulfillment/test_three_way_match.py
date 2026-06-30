@@ -33,6 +33,19 @@ def test_amount_within_tolerance_passes():
     assert r["matched"] is True
 
 
+def test_missing_po_amount_with_invoiced_amount_blocks():
+    """Review fix #7: a PO with no amount cannot reconcile an invoice that DOES carry an amount — never pass it."""
+    po_no_amt = {"quantity": 10}  # qty only, no total_amount_cents
+    r = match(po_no_amt, {"quantity": 10}, {"quantity": 10, "amount_cents": 999900})
+    assert r["matched"] is False and any("missing_po_amount" in m for m in r["mismatches"])
+
+
+def test_amountless_qty_only_match_still_passes():
+    """A genuinely amount-less reconciliation (qty-only PO + qty-only invoice) is still a valid match."""
+    r = match({"quantity": 10}, {"quantity": 10}, {"quantity": 10})
+    assert r["matched"] is True
+
+
 def test_match_for_case_reads_state_json():
     sj = {"purchase_order": _PO, "goods_receipt": {"quantity": 10},
           "invoice": {"quantity": 10, "amount_cents": 100000}}

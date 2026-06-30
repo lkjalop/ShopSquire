@@ -124,7 +124,9 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
         # never double-sends). Only a confirmed 'sent' advances the state machine, so the human-only invariant holds.
         from src.app.services.fulfillment import outbound_queue as _oq
         r = _oq.send_now(db, case_id=case_id, recipient=recipient, subject=subject, body=body,
-                         idempotency_key=content_hash, transport=tx, tenant_id=tenant_id, now_iso=now_iso)
+                         idempotency_key=content_hash, transport=tx, tenant_id=tenant_id,
+                         actor_type=getattr(actor.type, "value", str(actor.type)), actor_id=actor.id,
+                         transition_event=event, now_iso=now_iso)
         if r.get("status") != "sent":
             return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
         provider_ref = r.get("provider_ref", "")

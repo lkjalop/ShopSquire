@@ -644,9 +644,10 @@ def _case_category(db, case_id: str) -> str:
         return "default"
 
 
-def _case_spend_cents(db, case_id: str) -> int:
+def _case_spend_cents(db, case_id: str) -> Optional[int]:
     """The spend this case commits to a supplier (the approval-gate value): the wholesale cost from economics,
-    else the draft's estimated value. Best-effort; 0 when unknown."""
+    else the draft's estimated value. Returns None when the spend is UNKNOWN (no economics + no estimate) — the
+    caller must fail CLOSED, never treat unknown as $0 (which would slip a high-value send past a low tier)."""
     try:
         from src.app.services.fulfillment import economics as _feco
         econ = _feco.from_case(db, case_id) or {}
@@ -658,9 +659,43 @@ def _case_spend_cents(db, case_id: str) -> int:
     try:
         cur = fwf.repository.current_version(db, case_id)
         scope = ((cur.state_json.get("draft") or {}).get("commercial_scope") or {}) if cur and isinstance(cur.state_json, dict) else {}
-        return int(scope.get("estimated_value_cents") or 0)
+        est = scope.get("estimated_value_cents")
+        if est is not None:
+            v = int(est)
+            if v > 0:
+                return v
+    except Exception:
+        pass
+    return None
+
+
+_COMMITTED_SPEND_STATES = ("APPROVED_TO_SEND", "QUOTE_SENT", "QUOTE_RECEIVED", "QUOTE_VALIDATED",
+                           "PO_PROPOSED", "PO_ISSUED", "READY_TO_SHIP", "PARTIALLY_READY", "COMPLETED")
+
+
+def _category_committed_cents(db, category: str, *, exclude_case_id: str) -> int:
+    """Spend already COMMITTED this period for a budget category — the sum over OTHER cases in that category
+    that have passed the approval gate (APPROVED_TO_SEND and beyond, excluding superseded/rejected). Makes the
+    budget gate CUMULATIVE: two separate cases can't each slip under the cap while together breaching it."""
+    total = 0
+    try:
+        rows = fwf.repository.list_cases(db) or []
     except Exception:
         return 0
+    for c in rows:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("case_id")
+        if not cid or str(cid) == str(exclude_case_id):
+            continue
+        if str(c.get("status")) not in _COMMITTED_SPEND_STATES:
+            continue
+        if _case_category(db, cid) != str(category):
+            continue
+        spend = _case_spend_cents(db, cid)
+        if spend and spend > 0:
+            total += int(spend)
+    return total
 
 
 @router.post("/cases/{case_id}/request-approval")
@@ -674,8 +709,15 @@ def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR)))
         # Both recorded for audit + surfaced so the operator routes correctly; enforced at the send gate
         # when their flags are on (default OFF preserves behaviour).
         spend = _case_spend_cents(db, case_id)
-        tier = required_approval_tier(spend)
-        budget = budget_status(spend, category=_case_category(db, case_id))
+        category = _case_category(db, case_id)
+        if spend is None:
+            # surface the unknown explicitly so the operator prices the case; the send gate will block it
+            tier = {"tier": "blocked", "min_level": 99, "value_cents": None, "reason": "spend_unknown"}
+            budget = {"within_budget": False, "reason": "spend_unknown", "category": category}
+        else:
+            committed = _category_committed_cents(db, category, exclude_case_id=case_id)
+            tier = required_approval_tier(spend)
+            budget = budget_status(spend, category=category, committed_cents=committed)
         try:
             from src.app.services.decision_log import log_trace_event
             cur = fwf.repository.current_version(db, case_id)
@@ -778,6 +820,13 @@ def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(
     with db_session() as db:
         if _approval_tiers_enabled() or _budget_gate_enabled():
             _spend = _case_spend_cents(db, case_id)
+            if _spend is None:
+                # FAIL CLOSED: a send whose value can't be determined must NOT slip through as $0 — block it
+                # so a human prices the case before it clears any gate.
+                raise HTTPException(status_code=409, detail={
+                    "error": "spend_unknown",
+                    "reason": "cannot determine case spend (no economics + no estimate) — price the case before sending"})
+            _category = _case_category(db, case_id)
             if _approval_tiers_enabled():
                 from src.app.services.fulfillment.approval_policy import approver_can_clear
                 verdict = approver_can_clear(role, _spend)
@@ -785,7 +834,8 @@ def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(
                     raise HTTPException(status_code=403, detail={"error": "approval_tier_insufficient", **verdict})
             if _budget_gate_enabled():
                 from src.app.services.fulfillment.budget_gate import budget_status
-                b = budget_status(_spend, category=_case_category(db, case_id))
+                committed = _category_committed_cents(db, _category, exclude_case_id=case_id)
+                b = budget_status(_spend, category=_category, committed_cents=committed)
                 if not b["within_budget"]:
                     raise HTTPException(status_code=403, detail={"error": "over_budget", **b})
         _raise_if_failed(fwf.transition(db, case_id=case_id, event="approval_granted", actor=human,
@@ -1040,13 +1090,45 @@ class AckBody(BaseModel):
     ack_ref: str = ""
 
 
+def _replay_deferred_send_transitions(db, sent_rows: list) -> Dict[str, int]:
+    """A background delivery only TRANSMITS; the case still sits in APPROVED_TO_SEND. Here we replay the
+    EXACT transition that the human (or autonomous agent) already approved at dispatch time — recorded on the
+    queue row — so a deferred send advances the case to QUOTE_SENT instead of stranding it. Idempotent: a case
+    already advanced (or superseded) simply fails the guard and is counted as skipped, never re-fired."""
+    advanced, skipped = 0, 0
+    for row in (sent_rows or []):
+        ev = str(row.get("transition_event") or "")
+        a_type = str(row.get("actor_type") or "")
+        cid = str(row.get("case_id") or "")
+        if not (ev and a_type and cid):
+            skipped += 1
+            continue
+        try:
+            actor = Actor(ActorType(a_type), str(row.get("actor_id") or ""))
+            res = fwf.transition(db, case_id=cid, event=ev, actor=actor, reason_code="deferred_send_delivered",
+                                 evidence={"provider_ref": row.get("provider_ref", ""), "deferred": True},
+                                 state_patch={"outbound": {"provider_ref": row.get("provider_ref", ""),
+                                                           "content_hash": row.get("content_hash"), "status": "sent",
+                                                           "transport": "queued"}})
+            if getattr(res, "ok", False):
+                advanced += 1
+            else:
+                skipped += 1  # case no longer in APPROVED_TO_SEND (e.g. superseded) — guard refused, by design
+        except Exception:
+            skipped += 1
+    return {"advanced": advanced, "skipped": skipped}
+
+
 @router.post("/outbound/process")
 def outbound_process(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Drive the durable outbound queue once — attempt every DUE pending send, backing off failures and
-    dead-lettering exhausted ones. In production a worker calls this on a schedule; here an operator can too."""
+    dead-lettering exhausted ones. A deferred delivery then REPLAYS the approved transition so the case advances
+    to QUOTE_SENT (no stranding). In production a worker calls this on a schedule; here an operator can too."""
     from src.app.services.fulfillment import outbound_queue as oq
     with db_session() as db:
-        return oq.process_pending(db)
+        out = oq.process_pending(db)
+        out["transitions"] = _replay_deferred_send_transitions(db, out.get("sent_rows") or [])
+        return out
 
 
 @router.get("/outbound/status")
@@ -1077,7 +1159,9 @@ def outbound_record_ack(case_id: str, body: AckBody,
         content_hash = str((sj.get("outbound") or {}).get("content_hash") or "")
         if not content_hash:
             raise HTTPException(status_code=409, detail={"error": "no_outbound_to_ack"})
-        r = oq.record_ack(db, idempotency_key=content_hash, ack_ref=body.ack_ref)
+        r = oq.record_ack(db, idempotency_key=content_hash, ack_ref=body.ack_ref, case_id=case_id)
         if not r.get("acked"):
-            raise HTTPException(status_code=404, detail={"error": "outbound_message_not_found"})
+            # 409 when the message exists but isn't ackable yet (not sent); 404 only when truly absent.
+            code = 404 if r.get("reason") == "not_found" else 409
+            raise HTTPException(status_code=code, detail={"error": "ack_rejected", **r})
         return {"case_id": case_id, **r}

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS outbound_message (
     subject          TEXT,
     body             TEXT,
     idempotency_key  TEXT,
-    status           TEXT DEFAULT 'pending',   -- pending | sent | dead_letter
+    status           TEXT DEFAULT 'pending',   -- pending | sending | sent | dead_letter
     attempts         INTEGER DEFAULT 0,
     max_attempts     INTEGER DEFAULT 5,
     next_attempt_at  TEXT,
@@ -38,17 +38,30 @@ CREATE TABLE IF NOT EXISTS outbound_message (
     ack_status       TEXT DEFAULT 'awaiting',  -- awaiting | acked  (EDI 855)
     acked_at         TEXT,
     last_error       TEXT,
+    actor_type       TEXT,                     -- the approved transition intent, replayed on deferred delivery
+    actor_id         TEXT,
+    transition_event TEXT,
     created_at       TEXT,
     updated_at       TEXT,
     UNIQUE (tenant_id, idempotency_key)
 )
 """
 
+# How long a row may sit CLAIMED ('sending') before a crashed worker's claim is reclaimed for retry.
+def _stale_claim_seconds() -> int:
+    return int(os.getenv("OUTBOUND_STALE_CLAIM_SEC", "300") or 300)
+
 
 def _now_iso(now_iso: Optional[str]) -> str:
-    if now_iso:
-        return str(now_iso)
+    """Canonical 'T'-separated, seconds-precision ISO. ALL queue timestamps go through here so the lexical
+    next_attempt_at <= now comparison is sound — callers pass space- OR T-separated strings (the workflow uses
+    a space, ISO uses a 'T'); mixing them silently breaks string ordering ('T' 0x54 > ' ' 0x20)."""
     from datetime import datetime, timezone
+    if now_iso:
+        try:
+            return datetime.fromisoformat(str(now_iso)).isoformat(timespec="seconds")
+        except (TypeError, ValueError):
+            return str(now_iso)
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
 
 
@@ -70,10 +83,13 @@ def _backoff_seconds(attempts: int) -> int:
 
 
 def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempotency_key: str,
-            max_attempts: int = 5, tenant_id: str = "default", now_iso: Optional[str] = None) -> Dict[str, Any]:
+            max_attempts: int = 5, tenant_id: str = "default", actor_type: str = "", actor_id: str = "",
+            transition_event: str = "", now_iso: Optional[str] = None) -> Dict[str, Any]:
     """Durably enqueue an outbound supplier message. IDEMPOTENT on (tenant, idempotency_key) — a retried
     enqueue of the same content_hash returns the existing row (deduped), never a second send. pending +
-    due now. Returns {message_id, status, deduped}."""
+    due now. ``actor_type``/``actor_id``/``transition_event`` persist the already-approved workflow intent so a
+    DEFERRED delivery (background processor) can replay exactly that transition — never inventing a new one.
+    Returns {message_id, status, deduped}."""
     if db is None or not idempotency_key:
         return {"message_id": None, "status": "skipped", "deduped": False}
     ts = _now_iso(now_iso)
@@ -86,10 +102,12 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
         mid = f"out-{uuid.uuid4().hex[:12]}"
         db.execute(text(
             "INSERT INTO outbound_message (id, tenant_id, case_id, recipient, subject, body, idempotency_key, "
-            "status, attempts, max_attempts, next_attempt_at, ack_status, created_at, updated_at) "
-            "VALUES (:i,:t,:c,:r,:s,:b,:k,'pending',0,:m,:n,'awaiting',:ts,:ts)"),
+            "status, attempts, max_attempts, next_attempt_at, ack_status, actor_type, actor_id, transition_event, "
+            "created_at, updated_at) "
+            "VALUES (:i,:t,:c,:r,:s,:b,:k,'pending',0,:m,:n,'awaiting',:at,:ai,:te,:ts,:ts)"),
             {"i": mid, "t": tenant_id, "c": case_id, "r": recipient, "s": subject, "b": body,
-             "k": idempotency_key, "m": int(max_attempts), "n": ts, "ts": ts})
+             "k": idempotency_key, "m": int(max_attempts), "n": ts, "at": actor_type, "ai": actor_id,
+             "te": transition_event, "ts": ts})
         db.commit()
         return {"message_id": mid, "status": "pending", "deduped": False}
     except Exception as exc:
@@ -101,20 +119,34 @@ def enqueue(db, *, case_id: str, recipient: str, subject: str, body: str, idempo
         return {"message_id": None, "status": "error", "deduped": False}
 
 
+def _reclaim_stale(db, *, tenant_id: str, ts: str) -> None:
+    """A row claimed ('sending') by a worker that then crashed is reset to 'pending' once its claim ages past
+    OUTBOUND_STALE_CLAIM_SEC, so it is retried rather than stranded. Idempotency on content_hash keeps the
+    eventual resend at-least-once-safe for a transport that honours it."""
+    cutoff = _plus_seconds(ts, -_stale_claim_seconds())
+    db.execute(text("UPDATE outbound_message SET status='pending', updated_at=:ts WHERE tenant_id=:t "
+                    "AND status='sending' AND updated_at < :cut"), {"ts": ts, "t": tenant_id, "cut": cutoff})
+
+
 def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "default",
                     limit: int = 50, only_key: str = "", now_iso: Optional[str] = None) -> Dict[str, Any]:
-    """Attempt every DUE pending message once. On success → sent (+ provider_ref). On failure → bump attempts
-    and schedule a backoff retry; at max_attempts → dead_letter. Returns {processed, sent, retried, dead_lettered}.
-    ``only_key`` scopes the drive to a single message (used by the synchronous send path)."""
+    """Attempt every DUE pending message once. Each row is ATOMICALLY CLAIMED (pending→sending) before transmit
+    so two workers can never both send it (the loser's claim affects 0 rows and is skipped); the result is
+    committed PER ROW so a crash after transmit leaves the row 'sending' (recoverable, NOT re-sent) rather than
+    'pending' (which would re-send). On success → sent (+ provider_ref); on failure → backoff retry, or
+    dead_letter at max_attempts. Returns {processed, sent, retried, dead_lettered, sent_rows} where sent_rows
+    carries the approved transition intent for a workflow-aware caller to replay (fixes deferred-send stranding).
+    ``only_key`` scopes the drive to a single message (the synchronous send path)."""
     if db is None:
-        return {"processed": 0, "sent": 0, "retried": 0, "dead_lettered": 0}
+        return {"processed": 0, "sent": 0, "retried": 0, "dead_lettered": 0, "sent_rows": []}
     tx = transport or _default_transport()
     ts = _now_iso(now_iso)
-    out = {"processed": 0, "sent": 0, "retried": 0, "dead_lettered": 0}
+    out: Dict[str, Any] = {"processed": 0, "sent": 0, "retried": 0, "dead_lettered": 0, "sent_rows": []}
     try:
         db.execute(text(_DDL))
-        sql = ("SELECT id, case_id, recipient, subject, body, idempotency_key, attempts, max_attempts "
-               "FROM outbound_message WHERE tenant_id=:t AND status='pending' "
+        _reclaim_stale(db, tenant_id=tenant_id, ts=ts)
+        sql = ("SELECT id, case_id, recipient, subject, body, idempotency_key, attempts, max_attempts, "
+               "actor_type, actor_id, transition_event FROM outbound_message WHERE tenant_id=:t AND status='pending' "
                "AND (next_attempt_at IS NULL OR next_attempt_at <= :ts) ")
         params: Dict[str, Any] = {"t": tenant_id, "ts": ts, "lim": int(limit)}
         if only_key:
@@ -122,12 +154,28 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             params["k"] = only_key
         sql += "ORDER BY created_at ASC LIMIT :lim"
         rows = db.execute(text(sql), params).fetchall()
+        db.commit()
     except Exception as exc:
         logger.debug("process_pending query failed: %s", exc)
         return out
     for r in (rows or []):
-        mid, case_id, recipient, subject, body, idem, attempts, max_attempts = r
+        mid, case_id, recipient, subject, body, idem, attempts, max_attempts, a_type, a_id, t_event = r
+        # ATOMIC CLAIM: only the worker whose UPDATE flips pending→sending may transmit (rowcount guard).
+        try:
+            claim = db.execute(text("UPDATE outbound_message SET status='sending', attempts=attempts+1, "
+                                    "updated_at=:ts WHERE id=:i AND status='pending'"), {"ts": ts, "i": mid})
+            db.commit()
+        except Exception as exc:
+            logger.warning("outbound claim failed for %s: %s", mid, exc)
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            continue
+        if getattr(claim, "rowcount", 0) != 1:
+            continue  # another worker claimed it first
         out["processed"] += 1
+        new_attempts = int(attempts or 0) + 1
         try:
             res = tx.send(to=recipient, subject=subject, body=body, idempotency_key=str(idem or ""))
             status = getattr(res, "status", "failed")
@@ -135,25 +183,35 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             detail = getattr(res, "detail", "") or ""
         except Exception as exc:
             status, provider_ref, detail = "failed", "", str(exc)[:200]
-        if status == "sent":
-            db.execute(text("UPDATE outbound_message SET status='sent', provider_ref=:p, attempts=attempts+1, "
-                            "updated_at=:ts WHERE id=:i"), {"p": provider_ref, "ts": ts, "i": mid})
-            out["sent"] += 1
-        else:
-            new_attempts = int(attempts or 0) + 1
-            if new_attempts >= int(max_attempts or 5):
-                db.execute(text("UPDATE outbound_message SET status='dead_letter', attempts=:a, last_error=:e, "
-                                "updated_at=:ts WHERE id=:i"), {"a": new_attempts, "e": detail, "ts": ts, "i": mid})
+        try:
+            if status == "sent":
+                db.execute(text("UPDATE outbound_message SET status='sent', provider_ref=:p, updated_at=:ts "
+                                "WHERE id=:i"), {"p": provider_ref, "ts": ts, "i": mid})
+                db.commit()
+                out["sent"] += 1
+                out["sent_rows"].append({"case_id": case_id, "content_hash": idem, "provider_ref": provider_ref,
+                                         "actor_type": a_type or "", "actor_id": a_id or "",
+                                         "transition_event": t_event or ""})
+            elif new_attempts >= int(max_attempts or 5):
+                db.execute(text("UPDATE outbound_message SET status='dead_letter', last_error=:e, updated_at=:ts "
+                                "WHERE id=:i"), {"e": detail, "ts": ts, "i": mid})
+                db.commit()
                 out["dead_lettered"] += 1
             else:
                 nxt = _plus_seconds(ts, _backoff_seconds(new_attempts))
-                db.execute(text("UPDATE outbound_message SET attempts=:a, next_attempt_at=:n, last_error=:e, "
-                                "updated_at=:ts WHERE id=:i"), {"a": new_attempts, "n": nxt, "e": detail, "ts": ts, "i": mid})
+                db.execute(text("UPDATE outbound_message SET status='pending', next_attempt_at=:n, last_error=:e, "
+                                "updated_at=:ts WHERE id=:i"), {"n": nxt, "e": detail, "ts": ts, "i": mid})
+                db.commit()
                 out["retried"] += 1
-    try:
-        db.commit()
-    except Exception:
-        pass
+        except Exception as exc:
+            # Commit of the RESULT failed. The row stays 'sending' (not 'pending'), so it is NOT re-sent on the
+            # next pass — only reclaimed after the stale window. Surface loudly; never swallow silently.
+            logger.error("outbound result-commit failed for %s (transport status=%s) — row left 'sending' for "
+                         "stale-reclaim: %s", mid, status, exc)
+            try:
+                db.rollback()
+            except Exception:
+                pass
     return out
 
 
@@ -176,44 +234,54 @@ def get_by_key(db, *, idempotency_key: str, tenant_id: str = "default") -> Dict[
 
 def send_now(db, *, case_id: str, recipient: str, subject: str, body: str, idempotency_key: str,
              transport: Optional[Any] = None, max_attempts: int = 5, tenant_id: str = "default",
+             actor_type: str = "", actor_id: str = "", transition_event: str = "",
              now_iso: Optional[str] = None) -> Dict[str, Any]:
     """Synchronous RELIABLE send for the GATE-2 path: durably enqueue (idempotent on content_hash) then attempt
-    THIS message once. Returns {status, provider_ref, detail}: 'sent' (transition + record now), or 'pending'
+    THIS message once. Returns {status, provider_ref, detail}: 'sent' (caller transitions now), or 'pending'
     (transient failure — durably retryable by the background processor, the human can re-dispatch), or
-    'dead_letter'. Preserves the human-only send invariant: it only sends what the caller already approved, and
-    a re-dispatch of the same content_hash never double-sends (deduped)."""
-    enq = enqueue(db, case_id=case_id, recipient=recipient, subject=subject, body=body,
-                  idempotency_key=idempotency_key, max_attempts=max_attempts, tenant_id=tenant_id, now_iso=now_iso)
+    'dead_letter'. The actor/event are persisted so a DEFERRED delivery replays the SAME approved transition.
+    Preserves the human-only send invariant: it only sends what the caller already approved, and a re-dispatch
+    of the same content_hash never double-sends (deduped)."""
+    enqueue(db, case_id=case_id, recipient=recipient, subject=subject, body=body, idempotency_key=idempotency_key,
+            max_attempts=max_attempts, tenant_id=tenant_id, actor_type=actor_type, actor_id=actor_id,
+            transition_event=transition_event, now_iso=now_iso)
     existing = get_by_key(db, idempotency_key=idempotency_key, tenant_id=tenant_id)
     if existing.get("status") == "sent":  # idempotent re-dispatch of an already-delivered message
         return {"status": "sent", "provider_ref": existing.get("provider_ref", ""), "detail": "deduped"}
+    if existing.get("status") == "sending":  # claimed by a concurrent worker — do NOT re-send; let it settle
+        return {"status": "pending", "provider_ref": "", "detail": "in_flight"}
     process_pending(db, transport=transport, tenant_id=tenant_id, only_key=idempotency_key, now_iso=now_iso)
     row = get_by_key(db, idempotency_key=idempotency_key, tenant_id=tenant_id)
     return {"status": row.get("status", "pending"), "provider_ref": row.get("provider_ref", ""),
             "detail": row.get("last_error", "")}
 
 
-def record_ack(db, *, idempotency_key: str, ack_ref: str = "", tenant_id: str = "default",
+def record_ack(db, *, idempotency_key: str, ack_ref: str = "", case_id: str = "", tenant_id: str = "default",
                now_iso: Optional[str] = None) -> Dict[str, Any]:
-    """Record the supplier's acknowledgement (EDI 855) for a sent message — closes the send→ack loop so an
-    unacknowledged send is visible. Returns {acked, message_id}."""
+    """Record the supplier's acknowledgement (EDI 855) — but ONLY for a message that was actually SENT (you
+    cannot acknowledge an unsent draft), and ONLY when the optional ``case_id`` matches the row (so an ack can't
+    be routed to the wrong case). Returns {acked, message_id, reason}."""
     if db is None or not idempotency_key:
-        return {"acked": False, "message_id": None}
+        return {"acked": False, "message_id": None, "reason": "no_key"}
     ts = _now_iso(now_iso)
     try:
         db.execute(text(_DDL))
-        row = db.execute(text("SELECT id FROM outbound_message WHERE tenant_id=:t AND idempotency_key=:k LIMIT 1"),
-                         {"t": tenant_id, "k": idempotency_key}).fetchone()
+        row = db.execute(text("SELECT id, status, case_id FROM outbound_message WHERE tenant_id=:t "
+                              "AND idempotency_key=:k LIMIT 1"), {"t": tenant_id, "k": idempotency_key}).fetchone()
         if not row:
-            return {"acked": False, "message_id": None}
+            return {"acked": False, "message_id": None, "reason": "not_found"}
+        if row[1] != "sent":
+            return {"acked": False, "message_id": row[0], "reason": f"not_sent:{row[1]}"}
+        if case_id and str(row[2] or "") != str(case_id):
+            return {"acked": False, "message_id": row[0], "reason": "case_mismatch"}
         db.execute(text("UPDATE outbound_message SET ack_status='acked', acked_at=:ts, provider_ref="
-                        "COALESCE(NULLIF(:ar,''), provider_ref), updated_at=:ts WHERE id=:i"),
+                        "COALESCE(NULLIF(:ar,''), provider_ref), updated_at=:ts WHERE id=:i AND status='sent'"),
                    {"ts": ts, "ar": ack_ref, "i": row[0]})
         db.commit()
-        return {"acked": True, "message_id": row[0]}
+        return {"acked": True, "message_id": row[0], "reason": "ok"}
     except Exception as exc:
         logger.debug("record_ack failed for %s: %s", idempotency_key, exc)
-        return {"acked": False, "message_id": None}
+        return {"acked": False, "message_id": None, "reason": "error"}
 
 
 def queue_status(db, *, tenant_id: str = "default") -> Dict[str, Any]:
