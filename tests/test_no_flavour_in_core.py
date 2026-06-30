@@ -224,6 +224,8 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/margin_advisor.py",
     # approval-tier policy (enterprise gate): spend→tier bands + role→level, cents/ints only — no product vocab.
     "src/app/services/fulfillment/approval_policy.py",
+    # budget gate (enterprise gate): spend-vs-cap arithmetic keyed by an opaque category — no product vocab.
+    "src/app/services/fulfillment/budget_gate.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.

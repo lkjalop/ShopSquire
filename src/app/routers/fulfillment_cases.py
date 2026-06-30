@@ -630,6 +630,20 @@ def _approval_tiers_enabled() -> bool:
     return str(os.getenv("FULFILLMENT_APPROVAL_TIERS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _budget_gate_enabled() -> bool:
+    return str(os.getenv("FULFILLMENT_BUDGET_GATE_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _case_category(db, case_id: str) -> str:
+    """The budget category for a case — the buyer's use_case (from requirements), else 'default'."""
+    try:
+        cur = fwf.repository.current_version(db, case_id)
+        reqs = (cur.state_json.get("requirements") or {}) if cur and isinstance(cur.state_json, dict) else {}
+        return str(reqs.get("use_case") or "default").strip().lower() or "default"
+    except Exception:
+        return "default"
+
+
 def _case_spend_cents(db, case_id: str) -> int:
     """The spend this case commits to a supplier (the approval-gate value): the wholesale cost from economics,
     else the draft's estimated value. Best-effort; 0 when unknown."""
@@ -652,23 +666,27 @@ def _case_spend_cents(db, case_id: str) -> int:
 @router.post("/cases/{case_id}/request-approval")
 def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     from src.app.services.fulfillment.approval_policy import required_approval_tier
+    from src.app.services.fulfillment.budget_gate import budget_status
     with db_session() as db:
         res, approval_id = fdraft.request_supplier_approval(db, case_id=case_id, actor=_agent())
         _raise_if_failed(res)
-        # enterprise gate: compute WHICH approver tier this spend requires (recorded for audit; enforced at
-        # the send gate when FULFILLMENT_APPROVAL_TIERS_ENABLED). Surfaced so the operator routes it correctly.
-        tier = required_approval_tier(_case_spend_cents(db, case_id))
+        # enterprise gates: WHICH approver tier this spend requires + whether it fits the category budget.
+        # Both recorded for audit + surfaced so the operator routes correctly; enforced at the send gate
+        # when their flags are on (default OFF preserves behaviour).
+        spend = _case_spend_cents(db, case_id)
+        tier = required_approval_tier(spend)
+        budget = budget_status(spend, category=_case_category(db, case_id))
         try:
             from src.app.services.decision_log import log_trace_event
             cur = fwf.repository.current_version(db, case_id)
-            log_trace_event(trace_id=(cur.source_trace_id if cur else None), event_type="approval_tier_required",
+            log_trace_event(trace_id=(cur.source_trace_id if cur else None), event_type="approval_gates",
                             source_type="agent", source_id="Approval_Policy_Agent", target_type="fulfillment_case",
-                            target_id=case_id, payload=tier, durable=True)
+                            target_id=case_id, payload={"tier": tier, "budget": budget}, durable=True)
         except Exception:
             pass
         auto = _attempt_autonomous_send(db, case_id)
         return {**_case_view(db, case_id, for_operator=True), "approval_id": approval_id,
-                "approval_required_tier": tier,
+                "approval_required_tier": tier, "budget_status": budget,
                 "autonomous_send": {"action": auto.action, "reason": auto.reason,
                                     "provider_ref": auto.provider_ref}}
 
@@ -758,11 +776,18 @@ def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(
     are enabled, an approver below the spend's required tier is REJECTED (escalate to the right authority)."""
     human = Actor(ActorType.HUMAN_OPERATOR, role)
     with db_session() as db:
-        if _approval_tiers_enabled():
-            from src.app.services.fulfillment.approval_policy import approver_can_clear
-            verdict = approver_can_clear(role, _case_spend_cents(db, case_id))
-            if not verdict["ok"]:
-                raise HTTPException(status_code=403, detail={"error": "approval_tier_insufficient", **verdict})
+        if _approval_tiers_enabled() or _budget_gate_enabled():
+            _spend = _case_spend_cents(db, case_id)
+            if _approval_tiers_enabled():
+                from src.app.services.fulfillment.approval_policy import approver_can_clear
+                verdict = approver_can_clear(role, _spend)
+                if not verdict["ok"]:
+                    raise HTTPException(status_code=403, detail={"error": "approval_tier_insufficient", **verdict})
+            if _budget_gate_enabled():
+                from src.app.services.fulfillment.budget_gate import budget_status
+                b = budget_status(_spend, category=_case_category(db, case_id))
+                if not b["within_budget"]:
+                    raise HTTPException(status_code=403, detail={"error": "over_budget", **b})
         _raise_if_failed(fwf.transition(db, case_id=case_id, event="approval_granted", actor=human,
                                         reason_code="human_approved"))
         res = fec.send_approved(db, case_id=case_id, actor=human, approval_content_hash=body.content_hash)
