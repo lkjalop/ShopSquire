@@ -16,7 +16,14 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.app.models.db import db_session
-from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, require_role
+from src.app.security.auth import ROLE_MERCHANT, ROLE_OWNER, OperatorSubject, operator_subject, require_role
+
+
+def _operator_actor(role: str, subj: "OperatorSubject") -> Actor:
+    """A HUMAN_OPERATOR actor stamped with the per-user identity when a JWT carried one, else a 'key:<role>'
+    sentinel so the audit shows 'shared key, no user'. role stays the AUTHORITY axis; user_id the AUDIT axis."""
+    uid = (getattr(subj, "user_id", "") or "").strip() or f"key:{role}"
+    return Actor(ActorType.HUMAN_OPERATOR, role, user_id=uid)
 from src.app.services.fulfillment import draft as fdraft
 from src.app.services.fulfillment import economics as feco
 from src.app.services.fulfillment import external_comms as fec
@@ -819,10 +826,11 @@ class DispatchBody(BaseModel):
 
 
 @router.post("/cases/{case_id}/dispatch")
-def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(_OPERATOR)),
+             subj: OperatorSubject = Depends(operator_subject)) -> Dict[str, Any]:
     """GATE 2: the HUMAN approves + sends. approval_granted then the hash-checked send. When approval tiers
     are enabled, an approver below the spend's required tier is REJECTED (escalate to the right authority)."""
-    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    human = _operator_actor(role, subj)
     with db_session() as db:
         if _approval_tiers_enabled() or _budget_gate_enabled():
             _spend = _case_spend_cents(db, case_id)
@@ -1035,10 +1043,11 @@ class ExecutePOBody(BaseModel):
 
 @router.post("/cases/{case_id}/execute-po")
 def execute_po(case_id: str, body: ExecutePOBody = Body(default=ExecutePOBody()),
-               role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+               role: str = Depends(require_role(_OPERATOR)),
+               subj: OperatorSubject = Depends(operator_subject)) -> Dict[str, Any]:
     """HUMAN approves AND creates the PO (APPROVAL_REQUIRED → IN_PROGRESS → READY_TO_SHIP). Refused if
     the quote expired or the PO exceeds the approved scope. SANDBOX: records a PO ref, transmits nothing."""
-    human = Actor(ActorType.HUMAN_OPERATOR, role)
+    human = _operator_actor(role, subj)
     with db_session() as db:
         res = fpo.execute(db, case_id=case_id, actor=human, idempotency_key=body.idempotency_key,
                           today=body.today)
@@ -1089,7 +1098,8 @@ def record_invoice(case_id: str, body: InvoiceBody,
 
 
 @router.post("/cases/{case_id}/complete")
-def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR)),
+                  subj: OperatorSubject = Depends(operator_subject)) -> Dict[str, Any]:
     """HUMAN marks the order COMPLETED (READY_TO_SHIP → COMPLETED) — the journey's final act. When
     FULFILLMENT_THREE_WAY_MATCH_ENABLED, completion (payment) is GATED on PO = goods-receipt = invoice."""
     with db_session() as db:
@@ -1099,7 +1109,7 @@ def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR))) ->
             twm = match_for_case(cur.state_json if cur and isinstance(cur.state_json, dict) else {})
             if not twm["matched"]:
                 raise HTTPException(status_code=409, detail={"error": "three_way_match_failed", **twm})
-        res = fpo.complete(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role))
+        res = fpo.complete(db, case_id=case_id, actor=_operator_actor(role, subj))
         _raise_if_failed(res)
         return _case_view(db, case_id, for_operator=True)
 
@@ -1149,7 +1159,8 @@ def propose_change(case_id: str, body: ProposeChangeBody,
 
 @router.post("/cases/{case_id}/cancel")
 def cancel_order(case_id: str, body: CancelBody = Body(default=CancelBody()),
-                 role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+                 role: str = Depends(require_role(_OPERATOR)),
+                 subj: OperatorSubject = Depends(operator_subject)) -> Dict[str, Any]:
     """GATE 3: a HUMAN authorises cancellation of a COMMITTED order (PROCUREMENT_IN_PROGRESS/READY_TO_SHIP →
     CANCELLED). The domain guard makes this human-only — an agent can never fire it. The original order is
     preserved bitemporally; refund/restock EXECUTION stays behind FULFILLMENT_REFUND_ENABLED (no money moves)."""
@@ -1157,7 +1168,7 @@ def cancel_order(case_id: str, body: CancelBody = Body(default=CancelBody()),
         raise HTTPException(status_code=403, detail={"error": "change_order_disabled"})
     from src.app.services.fulfillment import change_order as fco
     with db_session() as db:
-        res = fco.authorize_cancellation(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role),
+        res = fco.authorize_cancellation(db, case_id=case_id, actor=_operator_actor(role, subj),
                                          reason=body.reason)
         _raise_if_failed(res)
         return _case_view(db, case_id, for_operator=True)

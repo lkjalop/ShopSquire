@@ -131,7 +131,11 @@ def transition(
                 reason = f"gate:{gate.reason}"
                 return TransitionResult(False, case_id, state.value, reason, http_status=403)
 
-        # 3. apply — bitemporal version
+        # 3. apply — bitemporal version. Stamp the per-user identity (when present) into the evidence so the
+        #    version record + the trace both answer "WHICH user fired this" — not just the role. Additive: a
+        #    role-only actor (user_id='') records nothing extra, so old behaviour + tests are unchanged.
+        if getattr(actor, "user_id", ""):
+            evidence = {**(evidence or {}), "actor_user_id": actor.user_id}
         dst = domain.next_state(state, event, actor)
         if dst is None:  # defensive: can_fire passed but no dst (shouldn't happen)
             return TransitionResult(False, case_id, state.value, "illegal_transition", http_status=409)

@@ -8,6 +8,7 @@ import ipaddress
 import base64
 import hmac
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -119,6 +120,45 @@ def _bearer_subject(auth_header: Optional[str]) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def _bearer_email(auth_header: Optional[str]) -> Optional[str]:
+    """The email claim from a bearer (local JWT, else introspection), or None. Best-effort, never raises."""
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return None
+    token = auth_header.split(" ", 1)[1].strip()
+    try:
+        parts = token.split(".")
+        if len(parts) == 3:
+            p = parts[1]
+            pad = "=" * ((4 - len(p) % 4) % 4)
+            claims = json.loads(base64.urlsafe_b64decode((p + pad).encode("ascii")).decode("utf-8"))
+            if claims.get("email"):
+                return str(claims["email"])
+    except Exception:
+        pass
+    try:
+        data = _introspect_token(auth_header)
+        if isinstance(data, dict) and data.get("email"):
+            return str(data["email"])
+    except Exception:
+        pass
+    return None
+
+
+@dataclass
+class OperatorSubject:
+    """Best-effort per-user identity for AUDIT attribution (not authorization). user_id='' when only a shared
+    API key is used — the caller stamps a 'key:<role>' sentinel so the trail still shows 'shared key, no user'."""
+    user_id: str = ""
+    email: str = ""
+
+
+def operator_subject(authorization: Optional[str] = Header(default=None, alias="Authorization")) -> OperatorSubject:
+    """FastAPI dependency: extract the JWT subject + email for per-user audit attribution. Does NOT enforce
+    auth — pair it with require_role, which does. Ready to capture a real operator the moment an IdP issues
+    JWTs; until then it returns empty and the caller falls back to a role sentinel."""
+    return OperatorSubject(user_id=_bearer_subject(authorization) or "", email=_bearer_email(authorization) or "")
 
 
 def _assert_privileged_role_server_side(*, role: str, authorization: Optional[str], effective_key: Optional[str]) -> bool:

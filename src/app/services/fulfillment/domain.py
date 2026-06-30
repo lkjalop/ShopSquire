@@ -39,7 +39,9 @@ class ActorType(str, Enum):
 @dataclass(frozen=True)
 class Actor:
     type: ActorType
-    id: str = ""
+    id: str = ""              # role for an operator, name for an agent, uid for a buyer (the authority axis)
+    user_id: str = ""         # OPTIONAL real per-user identity (JWT sub / 'key:<role>' sentinel) — audit axis,
+                              # NEVER read by an authorization guard (all guards key on .type). Additive.
 
 
 class FulfillmentState(str, Enum):
