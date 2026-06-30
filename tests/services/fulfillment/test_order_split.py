@@ -97,6 +97,49 @@ def test_resolve_line_skus_maps_phrase_to_catalog_sku(db):
     assert by["LAP-9"]["requested_qty"] == 15 and by["MON-1"]["requested_qty"] == 10
 
 
+# ── Pass B: no line or quantity is ever silently dropped ──────────────────────
+def test_collision_sums_quantities_no_qty_loss(db):
+    """D1: two phrases that resolve to the SAME sku must SUM (buyer ordered 15, gets 15), never drop the 2nd."""
+    from src.app.services.fulfillment.order_split import resolve_line_skus_detailed
+    _seed_product(db, "LAP-1", "Acer laptop")  # the only laptop → both phrases resolve here
+    db.commit()
+    d = resolve_line_skus_detailed(db, parse_order_lines("10 gaming laptops + 5 work laptops"))
+    assert len(d["resolved"]) == 1 and d["resolved"][0]["requested_qty"] == 15   # SUMMED, not 10
+    assert d["unresolved"] == []
+
+
+def test_unresolved_phrase_is_surfaced_not_dropped(db):
+    """L5: a phrase that matches no product is surfaced in `unresolved`, never silently discarded."""
+    from src.app.services.fulfillment.order_split import resolve_line_skus_detailed
+    _seed_product(db, "LAP-9", "Dell laptop")
+    db.commit()
+    d = resolve_line_skus_detailed(db, parse_order_lines("15 laptops + 7 flux-capacitors"))
+    assert [r["item_ref"] for r in d["resolved"]] == ["LAP-9"]
+    assert len(d["unresolved"]) == 1 and d["unresolved"][0]["quantity"] == 7
+    # nothing lost: every parsed unit is accounted for in resolved + unresolved
+    parsed_units = sum(l["quantity"] for l in parse_order_lines("15 laptops + 7 flux-capacitors"))
+    accounted = sum(r["requested_qty"] for r in d["resolved"]) + sum(u["quantity"] for u in d["unresolved"])
+    assert accounted == parsed_units == 22
+
+
+def test_partial_resolution_does_not_collapse_to_single_line(monkeypatch):
+    """L6: a 2-phrase order where one phrase fails must still surface the resolved line + the unresolved one
+    via the fluid preview — NOT collapse to the single-line path (which would lose the resolved line)."""
+    import src.app.services.recommend_fulfillment_stage as stage
+    from src.app.services.fulfillment import order_split as os_
+    monkeypatch.setattr(os_, "resolve_line_skus_detailed",
+                        lambda db, lines, **k: {"resolved": [{"item_ref": "LAP-9", "requested_qty": 15, "phrase": "laptops"}],
+                                                "unresolved": [{"phrase": "widgets", "quantity": 5}]})
+    monkeypatch.setattr(os_, "plan_order_split", lambda db, lines: {"group_count": 1})
+    monkeypatch.setattr(os_, "emit_split_trace", lambda *a, **k: None)
+    payload = {}
+    line = stage._fluid_multiline_intent(query="15 laptops + 5 widgets", constraints={}, trace_id="T", payload=payload)
+    si = payload["sourcing_intent"]
+    assert [l["item_ref"] for l in si["lines"]] == ["LAP-9"]            # the resolved line survived
+    assert si["unresolved_phrases"] == [{"phrase": "widgets", "quantity": 5}]  # the unmatched one is surfaced
+    assert "couldn't match" in line
+
+
 def test_create_grouped_cases_makes_one_case_per_supplier_group(db):
     _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
     _seed_product(db, "MON-1", "LG monitor")
@@ -145,7 +188,7 @@ def test_defer_to_cart_uses_fluid_multiline_path_not_eager(monkeypatch):
     from src.app.services import recommend_fulfillment_stage as stage
     called = {}
     monkeypatch.setattr(stage, "_fluid_multiline_intent",
-                        lambda *, query, constraints, trace_id, payload: (called.__setitem__("fluid", True) or "preview only"))
+                        lambda *, query, constraints, trace_id, payload, pr_id=None: (called.__setitem__("fluid", True) or "preview only"))
     monkeypatch.setattr(stage, "_maybe_multiline_order",
                         lambda **k: (called.__setitem__("eager", True) or "EAGER"))
     payload = {}

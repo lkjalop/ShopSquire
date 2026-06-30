@@ -206,15 +206,19 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None
     summary line, or '' when it is not a mixed order. Cases are created at cart-confirmation."""
     from src.app.models.db import db_session
     from src.app.services.fulfillment.order_split import (
-        emit_split_trace, parse_order_lines, plan_order_split, resolve_line_skus)
+        emit_split_trace, parse_order_lines, plan_order_split, resolve_line_skus_detailed)
     parsed = parse_order_lines(query)
     if len(parsed) < 2:
-        return ""  # not a mixed order → normal single-line path
+        return ""  # genuinely single-line → normal single-line path
     with db_session() as db:
-        lines = resolve_line_skus(db, parsed)
-        if len(lines) < 2:
-            return ""
-        plan = plan_order_split(db, lines=lines)  # read-only; no case created
+        detailed = resolve_line_skus_detailed(db, parsed)
+        lines = detailed["resolved"]
+        unresolved = detailed["unresolved"]
+        if not lines and not unresolved:
+            return ""  # nothing recognisable as an order line
+        # NOTE: we proceed even when only ONE line resolved — collapsing a ≥2-phrase order to the single-line
+        # path lost the other resolved line(s). The buyer's full intent is surfaced here (resolved + unresolved).
+        plan = plan_order_split(db, lines=lines) if lines else {"group_count": 0}
     emit_split_trace(trace_id, plan=plan)  # the split is a visible (read-only) preview step
     payload["sourcing_intent"] = {
         "mode": "deferred_to_cart",
@@ -222,13 +226,21 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None
         "lines": [{"item_ref": l["item_ref"], "quantity": l["requested_qty"]} for l in lines],
         "planned_case_count": int(plan.get("group_count") or 0),
     }
+    if unresolved:
+        # SURFACE phrases we couldn't match instead of dropping them — the buyer clarifies before confirming.
+        payload["sourcing_intent"]["unresolved_phrases"] = unresolved
     _reqs = _buyer_requirements(constraints or {})
     if _reqs:
         payload["sourcing_intent"]["requirements"] = _reqs  # carried to confirm-cart → onto the case
     n_units = sum(int(l["requested_qty"]) for l in lines)
-    return (f"Your mixed order ({len(lines)} item lines, {n_units} units) would be split into "
+    unresolved_note = (f" We couldn't match {len(unresolved)} item(s) you asked for — tell us which products "
+                       f"you mean so nothing is missed." if unresolved else "")
+    if not lines:
+        return (f"We couldn't match {len(unresolved)} of the items you asked for — tell us which products you "
+                f"mean and we'll source them.")
+    return (f"Your mixed order ({len(lines)} item line(s), {n_units} units) would be split into "
             f"{plan.get('group_count')} sourcing request(s) when you confirm your cart — "
-            f"nothing is ordered or sent to a supplier yet.")
+            f"nothing is ordered or sent to a supplier yet.{unresolved_note}")
 
 
 def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:

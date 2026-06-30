@@ -25,6 +25,7 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const lines = intent.lines || [];
+  const unresolved = intent.unresolved_phrases || [];
   const totalUnits = lines.reduce((n, l) => n + (Number(l.quantity) || 0), 0);
 
   const run = async (supersede: boolean) => {
@@ -63,10 +64,22 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
         Nothing is ordered and no supplier is contacted until you confirm.
       </p>
 
+      {/* phrases we couldn't match to a product — surfaced, never silently dropped. Confirm is blocked until
+          they're resolved so the buyer never gets fewer items than they asked for. */}
+      {unresolved.length > 0 && (
+        <div data-testid="si-unresolved" role="status" style={{ color: '#b45309' }}>
+          We couldn't match {unresolved.length} item(s) you asked for:{' '}
+          {unresolved.map((u, i) => (
+            <span key={i}>{i > 0 ? ', ' : ''}{u.quantity ?? '?'}× “{u.phrase ?? 'unknown'}”</span>
+          ))}. Please tell us which product you mean before confirming, so nothing is missed.
+        </div>
+      )}
+
       {error && <p role="alert" data-testid="si-error">{error}</p>}
 
       {!result && (
-        <button disabled={busy} onClick={onConfirm} data-testid="si-confirm-btn">
+        <button disabled={busy || unresolved.length > 0} onClick={onConfirm} data-testid="si-confirm-btn"
+                title={unresolved.length > 0 ? 'Resolve the unmatched items before confirming' : undefined}>
           {busy ? 'Confirming…' : 'Confirm sourcing from cart'}
         </button>
       )}

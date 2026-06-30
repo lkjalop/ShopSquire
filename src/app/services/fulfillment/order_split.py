@@ -73,12 +73,17 @@ def _find_sku_for_phrase(db, phrase: str) -> Optional[str]:
     return _match_sku_for_phrase(_load_active_products(db), phrase)
 
 
-def resolve_line_skus(db, lines: List[Dict[str, Any]], *, tenant_id: str = "default") -> List[Dict[str, Any]]:
-    """Map parsed {phrase, quantity} lines to {item_ref, requested_qty} using the catalog. Lines whose phrase
-    resolves to no SKU are dropped (the caller can surface them). Preserves explicit item_ref when present.
-    The catalog is fetched AT MOST ONCE (lazy — only when a phrase actually needs resolving) — no N+1."""
-    out: List[Dict[str, Any]] = []
-    seen = set()
+def _resolve_lines(db, lines: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Core resolution: map parsed {phrase, quantity} lines to {item_ref, requested_qty}. NEVER silently loses
+    a line or a quantity:
+      • two phrases that resolve to the SAME sku → quantities are SUMMED (not the second dropped) — the buyer
+        ordered 15, they get 15 (closes D1);
+      • a phrase that resolves to NO sku is collected in ``unresolved`` (not dropped) so the caller can ask the
+        buyer to clarify (closes L5).
+    Catalog fetched at most once (lazy). Returns {resolved:[...], unresolved:[{phrase, quantity}]}."""
+    resolved: List[Dict[str, Any]] = []
+    by_sku: Dict[str, int] = {}      # sku -> index in resolved, for sum-on-collision
+    unresolved: List[Dict[str, Any]] = []
     _rows: Optional[List[Any]] = None
     for ln in (lines or []):
         ir = str(ln.get("item_ref") or ln.get("sku") or "").strip()
@@ -87,12 +92,30 @@ def resolve_line_skus(db, lines: List[Dict[str, Any]], *, tenant_id: str = "defa
                 _rows = _load_active_products(db)  # one fetch, reused for every phrase
             ir = _match_sku_for_phrase(_rows, str(ln.get("phrase") or "")) or ""
         qty = _int(ln.get("requested_qty", ln.get("quantity")))
-        if not ir or qty <= 0 or ir in seen:
+        if qty <= 0:
+            continue  # a zero/negative-qty line carries no order — genuinely empty, not a loss
+        if not ir:
+            unresolved.append({"phrase": ln.get("phrase"), "quantity": qty})  # SURFACE, never drop
             continue
-        seen.add(ir)
-        out.append({"item_ref": ir, "requested_qty": qty, "in_stock": _int(ln.get("in_stock")),
-                    "phrase": ln.get("phrase")})
-    return out
+        if ir in by_sku:
+            resolved[by_sku[ir]]["requested_qty"] += qty                       # SUM, never drop
+        else:
+            by_sku[ir] = len(resolved)
+            resolved.append({"item_ref": ir, "requested_qty": qty, "in_stock": _int(ln.get("in_stock")),
+                             "phrase": ln.get("phrase")})
+    return {"resolved": resolved, "unresolved": unresolved}
+
+
+def resolve_line_skus(db, lines: List[Dict[str, Any]], *, tenant_id: str = "default") -> List[Dict[str, Any]]:
+    """Resolved {item_ref, requested_qty} lines (back-compat shape). Sum-on-collision (no qty loss); unresolved
+    phrases are surfaced via resolve_line_skus_detailed — use that when you need to clarify with the buyer."""
+    return _resolve_lines(db, lines)["resolved"]
+
+
+def resolve_line_skus_detailed(db, lines: List[Dict[str, Any]], *, tenant_id: str = "default") -> Dict[str, Any]:
+    """Both halves: {resolved:[{item_ref, requested_qty, ...}], unresolved:[{phrase, quantity}]}. The caller
+    surfaces ``unresolved`` so no buyer-stated line is silently dropped."""
+    return _resolve_lines(db, lines)
 
 
 def _int(v: Any, default: int = 0) -> int:
