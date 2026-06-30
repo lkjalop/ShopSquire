@@ -33,8 +33,8 @@ class SemanticCache:
         self._redis = None
         if redis_url and _has_redis:
             try:
-                self._redis = redis.from_url(redis_url, decode_responses=True,
-                                             socket_connect_timeout=0.5, socket_timeout=2.0)
+                from src.app.services.redis_factory import create_redis_client
+                self._redis = create_redis_client(url=redis_url, decode_responses=True)
             except Exception:
                 self._redis = None
 

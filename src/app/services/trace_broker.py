@@ -47,14 +47,8 @@ async def _redis() -> Any:
     if _REDIS_CLIENT is not None:
         return _REDIS_CLIENT
     try:
-        import redis.asyncio as redis  # type: ignore
-    except Exception:
-        return None
-    try:
-        url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-        # fail-fast timeouts so an unreachable Redis never blocks the async broker (matches deps.py).
-        _REDIS_CLIENT = redis.from_url(url, decode_responses=True,
-                                       socket_connect_timeout=0.5, socket_timeout=2.0)
+        from src.app.services.redis_factory import create_redis_client
+        _REDIS_CLIENT = create_redis_client(async_client=True, decode_responses=True)
         return _REDIS_CLIENT
     except Exception:
         return None

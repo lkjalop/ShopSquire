@@ -32,20 +32,9 @@ def _get_redis_connection() -> Optional["redis.Redis"]:
     if not REDIS_AVAILABLE:
         return None
     try:
-        url = os.getenv("REDIS_URL") or "redis://localhost:6379/0"
-        env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
-        non_dev = env not in ("local", "dev", "development", "test", "testing")
-        parsed = urlparse(str(url))
-        acl_user = str(os.getenv("REDIS_ACL_USERNAME", "") or "").strip()
-        acl_pass = str(os.getenv("REDIS_ACL_PASSWORD", "") or "").strip()
-        if non_dev:
-            if str(parsed.scheme or "").lower() != "rediss":
-                return None
-            if not acl_user or not acl_pass:
-                return None
-            return redis.from_url(url, username=acl_user, password=acl_pass,
-                                  socket_connect_timeout=0.5, socket_timeout=2.0)  # type: ignore
-        return redis.from_url(url, socket_connect_timeout=0.5, socket_timeout=2.0)  # type: ignore
+        from src.app.services.redis_factory import create_redis_client
+        # RQ uses raw bytes (no decode_responses) and enforces TLS+ACL in prod.
+        return create_redis_client(decode_responses=False, enforce_tls_acl=True)
     except Exception:
         return None
 
