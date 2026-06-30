@@ -1098,6 +1098,65 @@ def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR))) ->
         return _case_view(db, case_id, for_operator=True)
 
 
+# ── GATE 3: post-commitment change-order / cancellation (the irreversibility ladder) ────────────────
+def _change_order_enabled() -> bool:
+    return str(os.getenv("FULFILLMENT_CHANGE_ORDER_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+class ProposeChangeBody(BaseModel):
+    kind: str = "cancel"            # cancel | amend | new_linked
+    reason: str = "buyer_change"
+    refundable_to_buyer_cents: int = 0
+    derived_pr_id: Optional[str] = None
+
+
+class CancelBody(BaseModel):
+    reason: str = "operator_authorised_cancellation"
+
+
+@router.get("/cases/{case_id}/change-economics")
+def change_economics(case_id: str, refundable_to_buyer_cents: int = Query(0),
+                     role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """GATE 3: the economics a human sees before authorising a post-commitment change — committed cost,
+    restock fee, supplier penalty, net cancellation cost. Read-only; moves nothing."""
+    from src.app.services.fulfillment import change_order as fco
+    with db_session() as db:
+        return fco.assess_for_case(db, case_id, refundable_to_buyer_cents=refundable_to_buyer_cents)
+
+
+@router.post("/cases/{case_id}/propose-change")
+def propose_change(case_id: str, body: ProposeChangeBody,
+                   role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """GATE 3 proposal: RECORD a post-commitment change request + its economics (no money moves, no state
+    change). The original order is preserved; a human authorises any cancellation separately."""
+    if not _change_order_enabled():
+        raise HTTPException(status_code=403, detail={"error": "change_order_disabled"})
+    from src.app.services.fulfillment import change_order as fco
+    with db_session() as db:
+        res = fco.propose_change(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role),
+                                 kind=body.kind, reason=body.reason, derived_pr_id=body.derived_pr_id,
+                                 assessment=fco.assess_for_case(db, case_id,
+                                                                refundable_to_buyer_cents=body.refundable_to_buyer_cents))
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
+@router.post("/cases/{case_id}/cancel")
+def cancel_order(case_id: str, body: CancelBody = Body(default=CancelBody()),
+                 role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """GATE 3: a HUMAN authorises cancellation of a COMMITTED order (PROCUREMENT_IN_PROGRESS/READY_TO_SHIP →
+    CANCELLED). The domain guard makes this human-only — an agent can never fire it. The original order is
+    preserved bitemporally; refund/restock EXECUTION stays behind FULFILLMENT_REFUND_ENABLED (no money moves)."""
+    if not _change_order_enabled():
+        raise HTTPException(status_code=403, detail={"error": "change_order_disabled"})
+    from src.app.services.fulfillment import change_order as fco
+    with db_session() as db:
+        res = fco.authorize_cancellation(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role),
+                                         reason=body.reason)
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
 # ── Reliable outbound queue (Tier-1 #5): retry/dead-letter/855-ack operability ────────────────────
 class AckBody(BaseModel):
     ack_ref: str = ""

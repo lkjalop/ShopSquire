@@ -73,6 +73,9 @@ class FulfillmentState(str, Enum):
     # terminal-NEUTRAL: the buyer amended this order before any supplier was contacted, so this version of
     # the case is retired (a fresh case is materialized for the new lines). Not an error.
     SUPERSEDED = "SUPERSEDED"
+    # terminal-NEUTRAL: a buyer change AFTER irreversibility (supplier PO committed) was authorised by a HUMAN
+    # as a cancellation — economics recorded, original preserved bitemporally. Not an error, not a supersede.
+    CANCELLED = "CANCELLED"
 
 
 FAILURE_STATES: FrozenSet[FulfillmentState] = frozenset({
@@ -84,7 +87,14 @@ FAILURE_STATES: FrozenSet[FulfillmentState] = frozenset({
 # SUPERSEDED is terminal + inactive but NOT a failure (kept out of FAILURE_STATES so it isn't reported as
 # an error); TERMINAL_STATES makes it non-transitionable like COMPLETED.
 TERMINAL_STATES: FrozenSet[FulfillmentState] = FAILURE_STATES | {FulfillmentState.COMPLETED,
-                                                                 FulfillmentState.SUPERSEDED}
+                                                                 FulfillmentState.SUPERSEDED,
+                                                                 FulfillmentState.CANCELLED}
+# GATE 3 — the irreversibility window: a PO has been committed to the supplier but the order is not yet
+# COMPLETED. A buyer mind-change here is NOT a supersede; it is a human-authorised change-order/cancellation
+# with the economics surfaced (see change_order.py + docs/...IRREVERSIBILITY_2026-06-30.md).
+CHANGE_WINDOW_STATES: FrozenSet[FulfillmentState] = frozenset({
+    FulfillmentState.PROCUREMENT_IN_PROGRESS, FulfillmentState.PARTIALLY_READY, FulfillmentState.READY_TO_SHIP,
+})
 
 # The CONSEQUENTIAL external action — sending to an external party. HUMAN-only by construction.
 EXTERNAL_SEND_EVENTS: FrozenSet[str] = frozenset({"external_message_sent"})
@@ -241,6 +251,24 @@ TRANSITIONS: Tuple[Transition, ...] = (
                frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True),
     Transition("completed", _S.READY_TO_SHIP, _S.COMPLETED, frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR})),
     Transition("completed", _S.PARTIALLY_READY, _S.COMPLETED, frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR})),
+
+    # ── GATE 3: a buyer change AFTER the supplier PO is committed. A mind-change here is NOT a supersede.
+    #    change_requested is a self-loop that RECORDS the request + its economics (agent/buyer/system/operator
+    #    may PROPOSE) — it never moves money or cancels. order_cancelled is HUMAN_OPERATOR-only: the human
+    #    AUTHORISES the cancellation after seeing the economics. The agent may propose, only a human executes. ──
+    Transition("change_requested", _S.PROCUREMENT_IN_PROGRESS, _S.PROCUREMENT_IN_PROGRESS,
+               frozenset({_A.AGENT, _A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True,
+               note="GATE 3 proposal: record a post-commitment change request + economics — no money moves"),
+    Transition("change_requested", _S.PARTIALLY_READY, _S.PARTIALLY_READY,
+               frozenset({_A.AGENT, _A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True),
+    Transition("change_requested", _S.READY_TO_SHIP, _S.READY_TO_SHIP,
+               frozenset({_A.AGENT, _A.BUYER, _A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True),
+    Transition("order_cancelled", _S.PROCUREMENT_IN_PROGRESS, _S.CANCELLED, frozenset({_A.HUMAN_OPERATOR}),
+               requires_evidence=True, note="GATE 3: HUMAN authorises cancellation of a committed order"),
+    Transition("order_cancelled", _S.PARTIALLY_READY, _S.CANCELLED, frozenset({_A.HUMAN_OPERATOR}),
+               requires_evidence=True),
+    Transition("order_cancelled", _S.READY_TO_SHIP, _S.CANCELLED, frozenset({_A.HUMAN_OPERATOR}),
+               requires_evidence=True),
 )
 
 # Index: (state, event) → list of matching transitions (usually one).

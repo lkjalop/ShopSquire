@@ -234,6 +234,8 @@ _CORE_MODULES = [
     "src/app/services/governance_pulse.py",
     # procurement-request identity: PR/CASE/PO naming + rotation policy — opaque ids/dates/counts, no product vocab.
     "src/app/services/fulfillment/procurement_request.py",
+    # Gate-3 change-order/cancellation: committed-cost/restock/penalty cents math + human-gated cancel — no product vocab.
+    "src/app/services/fulfillment/change_order.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.
