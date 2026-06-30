@@ -201,6 +201,46 @@ class TestPersistTurnState:
         persist_turn_state(self._make_input(payload={}), hooks)
         assert "last_sourcing_intent" not in mem.set_kv.call_args[0][1]
 
+    def test_sourcing_intent_decays_when_use_case_changes(self):
+        # A5 decay: a prior sourcing memo for use_case=gaming must be dropped when the buyer pivots to
+        # use_case=office on a non-sourcing turn — otherwise the next narration preamble would still say
+        # "for your 15-laptop gaming sourcing request" after they've moved on.
+        mem = self._make_mem()
+        mem.get_kv.return_value = {
+            "last_sourcing_intent": {
+                "mode": "deferred_to_cart",
+                "lines": [{"item_ref": "GAM-1", "quantity": 15}],
+                "requirements": {"use_case": "gaming"},
+            }
+        }
+        ctx = MagicMock()
+        hooks = TurnPersistenceHooks(mem=mem, suggest_ctx=ctx, log_trace_event=MagicMock(),
+                                     trace_meta_payload=lambda **kw: {})
+        inp = self._make_input(constraints={"use_case": "office"}, payload={})
+        persist_turn_state(inp, hooks)
+        kv_saved = mem.set_kv.call_args[0][1]
+        assert "last_sourcing_intent" not in kv_saved
+        ss_saved = mem.set_structured_state.call_args[0][1]
+        assert "last_sourcing_intent" not in ss_saved
+
+    def test_sourcing_intent_retained_when_use_case_unchanged(self):
+        # Inverse of the decay test: same use_case on a non-sourcing turn must keep the memo so a
+        # follow-up like "can you do that cheaper?" still references the prior sourcing request.
+        mem = self._make_mem()
+        prior = {
+            "mode": "deferred_to_cart",
+            "lines": [{"item_ref": "GAM-1", "quantity": 15}],
+            "requirements": {"use_case": "gaming"},
+        }
+        mem.get_kv.return_value = {"last_sourcing_intent": dict(prior)}
+        ctx = MagicMock()
+        hooks = TurnPersistenceHooks(mem=mem, suggest_ctx=ctx, log_trace_event=MagicMock(),
+                                     trace_meta_payload=lambda **kw: {})
+        inp = self._make_input(constraints={"use_case": "gaming"}, payload={})
+        persist_turn_state(inp, hooks)
+        kv_saved = mem.set_kv.call_args[0][1]
+        assert kv_saved.get("last_sourcing_intent", {}).get("mode") == "deferred_to_cart"
+
     def test_never_raises(self):
         """persist_turn_state must never propagate exceptions (mirrors original try/except: pass)."""
         mem = MagicMock()

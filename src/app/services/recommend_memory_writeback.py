@@ -230,6 +230,19 @@ def _persist_turn_state_inner(inp: TurnPersistenceInput, hooks: TurnPersistenceH
     # requirements — NO supplier identity, NO durable case) so the NEXT turn's narration/NQE can reference
     # "your N-unit sourcing request" instead of a cold search. Overwritten each turn; TTL-expires with the
     # session. This is the conversational-memory half of the fluid-procurement model.
+    #
+    # DECAY (A5): when the buyer pivots to a different use_case on a non-sourcing turn (e.g. "10 laptops"
+    # → "show me monitors"), clear the stale memo so the preamble doesn't keep referencing the prior
+    # sourcing request. A new sourcing intent this turn would overwrite it anyway; the decay only matters
+    # when there is no fresh intent.
+    _prior_si = kv_out.get("last_sourcing_intent")
+    if isinstance(_prior_si, dict):
+        _prior_uc = str(((_prior_si.get("requirements") or {}).get("use_case") or "")).strip().lower()
+        _curr_uc = str(inp.constraints.get("use_case") or "").strip().lower()
+        if _prior_uc and _curr_uc and _prior_uc != _curr_uc:
+            kv_out.pop("last_sourcing_intent", None)
+            structured_state_out.pop("last_sourcing_intent", None)
+
     _pay = inp.payload if isinstance(inp.payload, dict) else {}
     _si = _pay.get("sourcing_intent") if isinstance(_pay.get("sourcing_intent"), dict) else None
     _og = _pay.get("order_group") if isinstance(_pay.get("order_group"), dict) else None

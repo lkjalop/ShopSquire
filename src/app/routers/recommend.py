@@ -3726,18 +3726,29 @@ def _summarize_results(
                 from src.app.services.embedding_pipeline import EmbeddingPipeline
                 from src.app.services.vector_store import PgVectorStore
 
-                # Build a stable fingerprint: query + budget + use_case + top skus + order_quantity. The
-                # order_quantity bucket matters: a BULK ask ("50 laptops") narrates sourcing where a single
-                # ask ("a laptop") does not — without it, embedding-similar queries could reuse the wrong
-                # (non-sourcing) prose even though the structured sourcing card is correct (prose↔card mismatch).
+                # Build a stable fingerprint: query + budget + use_case + top skus + order_quantity +
+                # sourcing_intent.mode. The order_quantity bucket matters: a BULK ask ("50 laptops")
+                # narrates sourcing where a single ask ("a laptop") does not — without it, embedding-
+                # similar queries could reuse the wrong (non-sourcing) prose even though the structured
+                # sourcing card is correct (prose↔card mismatch). sourcing_intent.mode is belt-and-
+                # suspenders (A6): a confirm-cart vs amend vs preview turn must not collide even when
+                # the same query + bucket recur, so the prose stays in sync with the structured action.
                 _oq = str(constraints.get("order_quantity") or "").strip()
                 _oq_bucket = "bulk" if (_oq.isdigit() and int(_oq) > 1) else "single"
+                _si_mode = ""
+                try:
+                    _si_payload = payload.get("sourcing_intent") if isinstance(payload, dict) else None
+                    if isinstance(_si_payload, dict):
+                        _si_mode = str(_si_payload.get("mode") or "").strip()
+                except Exception:
+                    _si_mode = ""
                 _fp_parts = [
                     (query or "").lower().strip(),
                     str(constraints.get("budget_max") or ""),
                     str(constraints.get("use_case") or ""),
                     ",".join(str(r.get("sku") or "") for r in (results or [])[:3]),
                     _oq_bucket,
+                    _si_mode,
                 ]
                 _cache_key = hashlib.md5("|".join(_fp_parts).encode()).hexdigest()
                 _store = PgVectorStore("query_cache")
