@@ -17,12 +17,19 @@ Vertical-blind; best-effort; never raises into a caller.
 """
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from typing import Any, Dict, List, Optional
 
 from src.app.services.fulfillment import workflow
 from src.app.services.fulfillment.domain import Actor, ActorType
+
+
+def _outbound_queue_enabled() -> bool:
+    """Route the GATE-2 send through the durable outbound queue (retry/backoff/dead-letter/855-ack). OFF by
+    default — the direct-transport path stays byte-identical to the prior behaviour."""
+    return str(os.getenv("FULFILLMENT_OUTBOUND_QUEUE_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "on"}
 
 # Robust supplier-quote extraction. The patterns are GENERIC commercial parsing (units / money / dates /
 # lead time) — vertical-blind, no product flavour. The RAW body stays authoritative and ambiguous input is
@@ -107,19 +114,35 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
     from src.app.services.fulfillment.transport import get_transport
     tx = transport or get_transport()
     recipient = str(draft.get("recipient_email") or draft.get("recipient_domain") or "")
-    sent = tx.send(to=recipient, subject=str(draft.get("subject") or ""),
-                   body=str(draft.get("body") or ""), idempotency_key=str(draft.get("content_hash") or ""))
-    if getattr(sent, "status", "failed") != "sent":
-        return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
-    provider_ref = sent.provider_ref
+    subject = str(draft.get("subject") or "")
+    body = str(draft.get("body") or "")
+    content_hash = str(draft.get("content_hash") or "")
+    transport_detail = ""
+    if _outbound_queue_enabled():
+        # RELIABLE path: durably enqueue (idempotent on content_hash) + attempt once. A transient failure
+        # leaves the message PENDING for the background processor to retry — the human can re-dispatch (deduped,
+        # never double-sends). Only a confirmed 'sent' advances the state machine, so the human-only invariant holds.
+        from src.app.services.fulfillment import outbound_queue as _oq
+        r = _oq.send_now(db, case_id=case_id, recipient=recipient, subject=subject, body=body,
+                         idempotency_key=content_hash, transport=tx, tenant_id=tenant_id, now_iso=now_iso)
+        if r.get("status") != "sent":
+            return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
+        provider_ref = r.get("provider_ref", "")
+        transport_detail = r.get("detail", "") or "queued"
+    else:
+        sent = tx.send(to=recipient, subject=subject, body=body, idempotency_key=content_hash)
+        if getattr(sent, "status", "failed") != "sent":
+            return workflow.TransitionResult(False, case_id, cur.state, "send_failed", http_status=502)
+        provider_ref = sent.provider_ref
+        transport_detail = getattr(sent, "detail", "")
     return workflow.transition(
         db, case_id=case_id, event=event, actor=actor, reason_code=reason_code,
         evidence={"content_hash": draft.get("content_hash"), "provider_ref": provider_ref,
                   "recipient": recipient, "recipient_domain": draft.get("recipient_domain"),
-                  "transport": getattr(sent, "detail", "")},
+                  "transport": transport_detail},
         state_patch={"outbound": {"provider_ref": provider_ref, "recipient_domain": draft.get("recipient_domain"),
                                   "recipient": recipient, "content_hash": draft.get("content_hash"), "status": "sent",
-                                  "transport": getattr(sent, "detail", "")}},
+                                  "transport": transport_detail}},
         tenant_id=tenant_id, now_iso=now_iso, trace_id=trace_id)
 
 

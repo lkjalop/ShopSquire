@@ -1033,3 +1033,51 @@ def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR))) ->
         res = fpo.complete(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role))
         _raise_if_failed(res)
         return _case_view(db, case_id, for_operator=True)
+
+
+# ── Reliable outbound queue (Tier-1 #5): retry/dead-letter/855-ack operability ────────────────────
+class AckBody(BaseModel):
+    ack_ref: str = ""
+
+
+@router.post("/outbound/process")
+def outbound_process(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Drive the durable outbound queue once — attempt every DUE pending send, backing off failures and
+    dead-lettering exhausted ones. In production a worker calls this on a schedule; here an operator can too."""
+    from src.app.services.fulfillment import outbound_queue as oq
+    with db_session() as db:
+        return oq.process_pending(db)
+
+
+@router.get("/outbound/status")
+def outbound_status(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Queue health: counts by status + how many sent messages are still unacknowledged (no 855)."""
+    from src.app.services.fulfillment import outbound_queue as oq
+    with db_session() as db:
+        return oq.queue_status(db)
+
+
+@router.get("/outbound/dead-letters")
+def outbound_dead_letters(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """The sends that exhausted their retries — operator triage queue."""
+    from src.app.services.fulfillment import outbound_queue as oq
+    with db_session() as db:
+        return {"dead_letters": oq.dead_letters(db)}
+
+
+@router.post("/cases/{case_id}/record-ack")
+def outbound_record_ack(case_id: str, body: AckBody,
+                        role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Record the supplier's acknowledgement (EDI 855) for the case's sent message — closes the send→ack loop.
+    Resolves the message by the case's outbound content_hash. SYSTEM (855 inbound) or operator."""
+    from src.app.services.fulfillment import outbound_queue as oq
+    with db_session() as db:
+        cur = fwf.repository.current_version(db, case_id)
+        sj = cur.state_json if cur and isinstance(cur.state_json, dict) else {}
+        content_hash = str((sj.get("outbound") or {}).get("content_hash") or "")
+        if not content_hash:
+            raise HTTPException(status_code=409, detail={"error": "no_outbound_to_ack"})
+        r = oq.record_ack(db, idempotency_key=content_hash, ack_ref=body.ack_ref)
+        if not r.get("acked"):
+            raise HTTPException(status_code=404, detail={"error": "outbound_message_not_found"})
+        return {"case_id": case_id, **r}
