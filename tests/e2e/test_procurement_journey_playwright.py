@@ -148,7 +148,10 @@ def test_buyer_storefront_renders_procurement_check():
         msg.wait_for(timeout=10000)
         msg.fill("I need 20 gaming laptops for an esports lab, $1800 each within two weeks")
         msg.press("Enter")
-        # the fulfilment block renders when the response carries a case (FULFILLMENT_CASES_ENABLED)
-        page.wait_for_selector("[data-testid='fulfilment-options']", timeout=75000)
-        assert "awaiting buyer commitment" in page.locator("[data-testid='fc-status']").inner_text().lower()
+        # FLUID model (FULFILLMENT_DEFER_TO_CART) shows the buyer sourcing-preview card; legacy eager mode
+        # shows the fulfilment block. Accept either so the harness tracks the current UI.
+        page.wait_for_selector("[data-testid='sourcing-intent'], [data-testid='fulfilment-options']", timeout=75000)
+        body = page.locator("body").inner_text().lower()
+        assert ("needs confirmation before sourcing" in body
+                or "awaiting buyer commitment" in body), "expected a sourcing preview or procurement case"
         browser.close()

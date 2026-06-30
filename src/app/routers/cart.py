@@ -92,7 +92,8 @@ def _hydrate(items: List[Dict]) -> Dict:
             continue
         product = repo.get_product_by_sku(sku)
         if not product:
-            out_items.append({"sku": sku, "quantity": qty, "price_cents": 0, "name": "Unknown"})
+            # an unresolvable SKU (deleted/renamed product) can never be ordered — skip it rather than
+            # surface a phantom "Unknown / $0" row that clutters the cart (demo-cart-hygiene fix).
             continue
         price = int(product.price_cents or 0)
         subtotal += price * qty
