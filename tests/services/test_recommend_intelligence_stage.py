@@ -80,6 +80,28 @@ def test_market_intel_annotates_when_enabled(aligned_engine, monkeypatch):
     assert mem.store["u1"]["hippograph_insights"]  # persisted for next turn
 
 
+def test_market_intel_shadow_observes_without_mutating(aligned_engine, monkeypatch):
+    # A7: SHADOW mode COMPUTES + LOGS the market signals (observability) but does NOT mutate the
+    # buyer-facing response/kv/memory — the governed first rung before trusting signals in a decision.
+    monkeypatch.setattr("src.app.services.market_intelligence_agent.gather_market_context",
+                        lambda *a, **k: {"hippograph_insights": [{"id": "A", "kind": "product", "label": "demand_peak"}],
+                                         "market_findings": [{"x": 1}], "needs_market_evidence": False})
+    traced = []
+    monkeypatch.setattr("src.app.services.recommend_intelligence_stage.log_trace_event",
+                        lambda **kw: traced.append(kw))
+    st = _state(flags={"ATTRIBUTION_ENABLED": False, "HIPPOGRAPH_FEEDBACK_ENABLED": "shadow"})
+    mem = _FakeMem()
+    run_intelligence_stage(st, mem=mem)
+    # NOT decision-affecting
+    assert "hippograph_insights" not in st.payload and "market_findings" not in st.payload
+    assert "hippograph_insights" not in (st.kv or {})
+    assert "u1" not in mem.store
+    # but the signals ARE observed in the trace (mode=shadow, applied=False)
+    mi = [t for t in traced if t.get("event_type") == "market_intelligence"]
+    assert mi and mi[0]["payload"]["mode"] == "shadow" and mi[0]["payload"]["applied"] is False
+    assert mi[0]["payload"]["insights"] == 1 and "demand_peak" in mi[0]["payload"]["signal_labels"]
+
+
 def test_stage_never_raises_on_bad_state(aligned_engine):
     st = _state(results=None, flags={"ATTRIBUTION_ENABLED": True, "HIPPOGRAPH_FEEDBACK_ENABLED": True})
     # should not raise even with results=None

@@ -55,8 +55,24 @@ def _capture(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> No
         record_partial_failure("attribution_capture", exc, trace_id=state.trace_id)
 
 
+def _mi_mode(flags: Dict[str, Any]) -> str:
+    """HIPPOGRAPH_FEEDBACK_ENABLED as a MODE, not just a boolean:
+      • 'live'   — inject the market signals into the response + session (decision-affecting);
+      • 'shadow' — COMPUTE + LOG the signals (observability) but DO NOT mutate the buyer-facing decision —
+                   the governed first rung: watch demand/competitor signals before trusting them;
+      • 'off'    — skip entirely (default).
+    'shadow' is the safe rollout: signals appear in the decision trace, never in the buyer's response."""
+    raw = str(flags.get("HIPPOGRAPH_FEEDBACK_ENABLED", "") or "").strip().lower()
+    if raw == "shadow":
+        return "shadow"
+    if raw in ("1", "true", "yes", "on", "live"):
+        return "live"
+    return "off"
+
+
 def _market_intelligence(state: IntelligenceStageState, results: List[Dict[str, Any]], *, mem) -> None:
-    if not (state.flags.get("HIPPOGRAPH_FEEDBACK_ENABLED", False) and not state.simulate):
+    mode = _mi_mode(state.flags)
+    if mode == "off" or state.simulate:
         return
     try:
         from src.app.models.db import db_session
@@ -70,26 +86,33 @@ def _market_intelligence(state: IntelligenceStageState, results: List[Dict[str, 
         note = mi.get("narration_note") or ""
         if not (insights or findings):
             return
-        if insights:
-            state.payload["hippograph_insights"] = insights
-        if findings:
-            state.payload["market_findings"] = findings
-        if evidence:
-            state.payload["market_evidence"] = evidence       # structured (frontend/agents)
-        if note:
-            state.payload["market_evidence_note"] = note      # narration-ready preamble (S2)
-        if isinstance(state.kv, dict):  # flow into THIS turn's NQE agent (state.kv) + persist next turn
-            state.kv["hippograph_insights"] = insights
+        # LIVE mutates the response + memory (decision-affecting). SHADOW does NOT — it only observes via the
+        # trace below, so demand/competitor signals can be watched (and trusted) before they steer a decision.
+        if mode == "live":
+            if insights:
+                state.payload["hippograph_insights"] = insights
             if findings:
-                state.kv["market_findings"] = findings
-        persisted = mem.get_kv(state.uid) or {}
-        persisted["hippograph_insights"] = insights
-        mem.set_kv(state.uid, persisted)
+                state.payload["market_findings"] = findings
+            if evidence:
+                state.payload["market_evidence"] = evidence       # structured (frontend/agents)
+            if note:
+                state.payload["market_evidence_note"] = note      # narration-ready preamble (S2)
+            if isinstance(state.kv, dict):  # flow into THIS turn's NQE agent (state.kv) + persist next turn
+                state.kv["hippograph_insights"] = insights
+                if findings:
+                    state.kv["market_findings"] = findings
+            persisted = mem.get_kv(state.uid) or {}
+            persisted["hippograph_insights"] = insights
+            mem.set_kv(state.uid, persisted)
+        # BOTH modes emit the observability trace — shadow logs the signals WITHOUT acting on them.
         log_trace_event(trace_id=state.trace_id, event_type="market_intelligence", source_type="agent",
                         source_id="Market_Intelligence_Agent", target_type="recommendation",
                         target_id=state.decision_id,
-                        payload={"insights": len(insights), "findings": len(findings),
-                                 "needs_market_evidence": bool(mi.get("needs_market_evidence"))})
+                        payload={"mode": mode, "applied": mode == "live",
+                                 "insights": len(insights), "findings": len(findings),
+                                 "needs_market_evidence": bool(mi.get("needs_market_evidence")),
+                                 "signal_labels": [str(i.get("label")) for i in insights[:5]
+                                                   if isinstance(i, dict) and i.get("label")]})
     except Exception as exc:
         record_partial_failure("market_intelligence", exc, trace_id=state.trace_id)
 
