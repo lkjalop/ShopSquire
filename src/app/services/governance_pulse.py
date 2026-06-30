@@ -20,6 +20,8 @@ from typing import Any, Dict, List
 logger = logging.getLogger("shopsquire.governance_pulse")
 
 DEFAULT_TENANT = "default"
+# The ranking experiment + its outcomes are GLOBAL (not per-tenant); the experiment card always reads here.
+EXPERIMENT_TENANT = "default"
 
 
 def _kill_switch_on() -> bool:
@@ -87,10 +89,14 @@ def governance_pulse(db, *, tenant_id: str = DEFAULT_TENANT, window_limit: int =
     except Exception as exc:
         logger.debug("pulse: contact audit unavailable: %s", exc)
 
+    # The ranking experiment is GLOBAL (experiment_run has no tenant) and its outcomes are recorded under the
+    # default tenant — so the experiment card is ALWAYS sourced from there, regardless of the pulse's display
+    # tenant. Mixing a global status with tenant-scoped outcome counts produced a 'reverted but 0 rollbacks'
+    # split-brain in the replay-demo view.
     outcomes: List[Dict[str, Any]] = []
     try:
         from src.app.services.market_outcome import load_recent_outcomes
-        outcomes = load_recent_outcomes(db, limit=window_limit, tenant_id=tid) or []
+        outcomes = load_recent_outcomes(db, limit=window_limit, tenant_id=EXPERIMENT_TENANT) or []
     except Exception as exc:
         logger.debug("pulse: outcomes unavailable: %s", exc)
 
@@ -128,6 +134,7 @@ def governance_pulse(db, *, tenant_id: str = DEFAULT_TENANT, window_limit: int =
         last_uplift = outcomes[0].get("uplift_pct")
     experiment_health = {
         "experiment_id": experiment.get("experiment_id"),
+        "scope": "global",  # the ranking experiment is global; outcomes read from EXPERIMENT_TENANT
         "status": experiment.get("status", "absent"),
         "live": bool(experiment.get("live")),
         "assignments": experiment.get("assignments", {}),

@@ -16,8 +16,10 @@ import {
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
 
 // authVersion bumps whenever the API key/cookie is (re)established — every fetch effect depends on it so the
-// panel retries after auth succeeds (instead of silently staying empty if it mounted before auth landed).
-export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number } = {}) {
+// panel retries after auth succeeds. authReady gates the fetches so an UN-authed mount shows a clean
+// "set your API key" placeholder instead of firing a burst of 401s and rendering empty cards.
+export function MarketIntelligence({ authVersion = 0, authReady = true }:
+                                   { authVersion?: number; authReady?: boolean } = {}) {
   const [st, setSt] = useState<ReplayState | null>(null);
   const [day, setDay] = useState(7);
   const [busy, setBusy] = useState(false);
@@ -29,7 +31,7 @@ export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number }
     const fn = mode === 'live' ? marketState : replayState;
     fn().then(setSt).catch((e) => setError(e.message));
   }, [mode]);
-  useEffect(() => { load(); }, [load, authVersion]);
+  useEffect(() => { if (authReady) load(); }, [load, authVersion, authReady]);
 
   const refreshLive = async () => {
     setBusy(true); setError(null);
@@ -48,7 +50,7 @@ export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number }
   // ── ranking-experiment console (the live-adaptation levers) ──
   const [exp, setExp] = useState<ExperimentState | null>(null);
   const loadExp = useCallback(() => { experimentState().then(setExp).catch(() => {}); }, []);
-  useEffect(() => { loadExp(); }, [loadExp, authVersion]);
+  useEffect(() => { if (authReady) loadExp(); }, [loadExp, authVersion, authReady]);
   const runExp = async (fn: () => Promise<any>) => {
     setBusy(true); setError(null);
     try { await fn(); loadExp(); }
@@ -67,14 +69,31 @@ export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number }
   //    figures match the findings panel above (synthetic replay writes the isolated 'replay-demo' tenant) ──
   const govTenant = mode === 'replay' ? 'replay-demo' : 'default';
   const [pulse, setPulse] = useState<GovernancePulse | null>(null);
-  const loadPulse = useCallback(() => { governancePulse(govTenant).then(setPulse).catch(() => {}); }, [govTenant]);
-  useEffect(() => { loadPulse(); }, [loadPulse, st, exp, authVersion]);
+  const [govNote, setGovNote] = useState<string | null>(null);
+  const loadPulse = useCallback(() => {
+    governancePulse(govTenant)
+      .then((p) => { setPulse(p); setGovNote(null); })
+      .catch(() => setGovNote('Governance visibility unavailable — check your API key / role (operator access required).'));
+  }, [govTenant]);
+  useEffect(() => { if (authReady) loadPulse(); }, [loadPulse, st, exp, authVersion, authReady]);
 
   const series = st?.series;
   const live = mode === 'live';
   // the displayed source is driven by the active MODE (not just the last payload's label), so the
   // switch is unmistakable even before the next fetch lands.
   const sourceLabel = live ? (st?.label || 'LIVE') : (st?.label || 'SYNTHETIC REPLAY');
+
+  // Clean empty state instead of empty cards + a burst of 401s when the panel is opened before auth lands.
+  if (!authReady) {
+    return (
+      <div className="market-intelligence" data-testid="market-intelligence">
+        <strong>Market Intelligence</strong>
+        <p className="page-sub" data-testid="mi-auth-needed" style={{ color: '#6b7280', marginTop: 8 }}>
+          Set your API key to load market intelligence — the panel loads automatically once you authenticate.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="market-intelligence" data-testid="market-intelligence">
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
@@ -164,7 +183,7 @@ export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number }
               {exp.adaptation_killed ? ' · KILL-SWITCH ON' : ''}</small>
           )}
           <button disabled={busy} onClick={() => runExp(experimentPromote)} data-testid="exp-promote">Promote → live</button>
-          <button disabled={busy} onClick={() => runExp(() => experimentEvaluate(1))} data-testid="exp-evaluate">Evaluate now</button>
+          <button disabled={busy} onClick={() => runExp(() => experimentEvaluate())} data-testid="exp-evaluate">Evaluate now</button>
           <button disabled={busy} onClick={() => runExp(experimentRevert)} data-testid="exp-revert"
                   style={{ color: 'crimson' }}>Revert (kill)</button>
         </div>
@@ -192,7 +211,8 @@ export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number }
                    v={`${pulse.signal_decision_state.adaptation_mode.kill_switch ? 'KILLED' : 'armed'} · hippograph=${pulse.signal_decision_state.adaptation_mode.hippograph_mode}`} />
             </GovCard>
 
-            <GovCard title="Experiment health" testid="gov-experiment">
+            <GovCard title={`Experiment health${pulse.experiment_health.scope === 'global' ? ' (global)' : ''}`}
+                     testid="gov-experiment">
               <Row k="Status" v={pulse.experiment_health.live ? 'LIVE' : pulse.experiment_health.status} />
               <Row k="Outcomes recorded" v={pulse.experiment_health.outcomes_recorded} />
               <Row k="Rollback count" v={pulse.experiment_health.rollback_count}
@@ -225,6 +245,12 @@ export function MarketIntelligence({ authVersion = 0 }: { authVersion?: number }
             Read-only — the owner observes without becoming a runtime dependency. Every figure is rolled up
             from the durable audit trails (adaptive-action gate, contact governance, experiment outcomes, findings).
           </small>
+        </section>
+      )}
+      {!pulse && govNote && (
+        <section data-testid="mi-governance-note" style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
+          <h4 style={{ margin: '0 0 6px' }}>Governance visibility</h4>
+          <p role="alert" style={{ color: 'crimson', margin: 0 }}>{govNote}</p>
         </section>
       )}
     </div>

@@ -23,6 +23,13 @@ from src.app.services.experiments import (
 )
 
 
+def test_single_sample_per_arm_is_never_significant():
+    """Demo-safety: 1 observation/arm gives se=0 → z=inf. Without the n>=2 floor this reads 'significant'
+    and a coin-flip would scale or auto-revert the live experiment. The floor must hold even at min_samples=1."""
+    assert compute_uplift([10.0], [11.0], min_samples=1).significant is False
+    assert compute_uplift([10.0, 10.0], [11.0, 11.0], min_samples=1).significant is True  # n>=2 is allowed
+
+
 # ── assignment ────────────────────────────────────────────────────────────────
 def test_assignment_deterministic_and_stable():
     a = assign_variant(experiment_id="E1", subject="user-1", variants=["control", "treatment"])

@@ -120,3 +120,14 @@ def test_revert_of_non_live_experiment_records_no_rollback(db):
     from src.app.services import experiment_console as ec
     ec.revert(db)                       # nothing was live
     assert gp.governance_pulse(db)["experiment_health"]["rollback_count"] == 0
+
+
+def test_experiment_card_is_global_no_split_brain_in_replay_view(db):
+    """Review-fix #1: the experiment is GLOBAL; its outcomes are read from the experiment tenant regardless of
+    the pulse's display tenant. A replay-demo pulse must NOT show 'reverted but 0 rollbacks' (split-brain)."""
+    from src.app.services import experiment_console as ec
+    ec.promote(db)
+    ec.revert(db)                       # records a revert outcome under the default (experiment) tenant
+    eh = gp.governance_pulse(db, tenant_id="replay-demo")["experiment_health"]
+    assert eh["scope"] == "global"
+    assert eh["status"] == "reverted" and eh["rollback_count"] == 1  # consistent, not split

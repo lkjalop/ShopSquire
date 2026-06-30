@@ -12,6 +12,7 @@ only revert on no-lift until a guardrail source is wired). Vertical-blind; never
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import text
@@ -24,6 +25,8 @@ from src.app.services.experiments import (
     record_result,
     set_status,
 )
+
+logger = logging.getLogger("shopsquire.experiment_eval")
 
 
 def _subject_metric_by_variant(db, experiment_id: str) -> Dict[str, List[float]]:
@@ -97,6 +100,14 @@ def evaluate_experiment(
     decide_kw: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Evaluate one experiment: uplift → decision → record → auto-revert on REVERT."""
+    # Ensure BOTH source tables exist before the join — experiment_assignment (experiments) and
+    # conversion_event (attribution) — so a fresh/unmigrated DB returns an empty result, not 'no such table'.
+    try:
+        ensure_tables(db)
+        from src.app.services.attribution import ensure_tables as _ensure_attribution
+        _ensure_attribution(db)
+    except Exception as exc:
+        logger.debug("evaluate_experiment ensure_tables best-effort failed: %s", exc)
     by_variant = _subject_metric_by_variant(db, experiment_id)
     control = by_variant.get("control", [])
     treatment = by_variant.get("treatment", [])

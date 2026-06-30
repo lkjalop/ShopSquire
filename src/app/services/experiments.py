@@ -130,7 +130,10 @@ def compute_uplift(control: Sequence[float], treatment: Sequence[float], *,
     else:
         uplift = 0.0 if tm == 0 else 100.0
     significant = False
-    if len(c) >= min_samples and len(t) >= min_samples:
+    # HARD FLOOR of 2 samples per arm — a single observation gives se=0 → z=inf → spurious "significance"
+    # (a coin-flip would then scale or auto-revert the live experiment). This floor holds even if a caller
+    # passes min_samples=1. With n>=2, zero sample-variance with separated means is genuine separation.
+    if len(c) >= max(2, min_samples) and len(t) >= max(2, min_samples):
         try:
             vc = statistics.pvariance(c)
             vt = statistics.pvariance(t)

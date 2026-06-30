@@ -30,7 +30,8 @@ const _exp = '/api/v1/fulfillment/market/experiment';
 export const experimentState = () => http<ExperimentState>(`${_exp}/state`);
 export const experimentPromote = () => http<ExperimentState>(`${_exp}/promote`, { method: 'POST', body: '{}' });
 export const experimentRevert = () => http<ExperimentState>(`${_exp}/revert`, { method: 'POST', body: '{}' });
-export const experimentEvaluate = (min_samples = 1) =>
+// default 30 samples/arm — evaluating on 1 sample yields se=0 → fake "significance" → scale/auto-revert on noise.
+export const experimentEvaluate = (min_samples = 30) =>
   http<any>(`${_exp}/evaluate`, { method: 'POST', body: JSON.stringify({ min_samples }) });
 
 // Governance pulse — the owner/governance Step-11 visibility snapshot (read-only, writes nothing).
@@ -43,7 +44,7 @@ export interface GovernancePulse {
     adaptation_mode: { kill_switch: boolean; hippograph_mode: string; experiment_live: boolean };
   };
   experiment_health: {
-    status: string; live: boolean; outcomes_recorded: number;
+    status: string; live: boolean; outcomes_recorded: number; scope?: string;
     decision_breakdown: Record<string, number>; rollback_count: number;
     last_decision: string | null; last_uplift_pct: number | null;
   };

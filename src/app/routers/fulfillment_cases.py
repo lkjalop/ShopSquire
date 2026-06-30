@@ -984,8 +984,9 @@ def experiment_evaluate(body: ExperimentBody = Body(default=ExperimentBody()),
     """Run uplift → decide → auto-revert now (the rollback safety net, on demand)."""
     from src.app.services import experiment_console as ec
     with db_session() as db:
-        return ec.evaluate_now(db, experiment_id=_exp_id(body),
-                               min_samples=int(body.min_samples) if body and body.min_samples else 30)
+        # never evaluate on fewer than 2 samples/arm — a 1-sample 'significance' would scale/auto-revert on noise.
+        requested = int(body.min_samples) if body and body.min_samples else 30
+        return ec.evaluate_now(db, experiment_id=_exp_id(body), min_samples=max(2, requested))
 
 
 @router.post("/market/experiment/revert")

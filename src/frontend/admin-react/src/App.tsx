@@ -286,7 +286,7 @@ export default function App() {
         {active === 'rules' && <RulesAdmin role={role} />}
         {active === 'approvals' && <Approvals role={role} />}
         {active === 'procurement' && <ProcurementCases />}
-        {active === 'market-intel' && <MarketIntelligence authVersion={authVersion} />}
+        {active === 'market-intel' && <MarketIntelligence authVersion={authVersion} authReady={authReady} />}
         {active === 'orders' && <Orders role={role} />}
         {active === 'analytics' && <Analytics role={role} />}
         {active === 'grafana' && <GrafanaDashboards role={role} />}
