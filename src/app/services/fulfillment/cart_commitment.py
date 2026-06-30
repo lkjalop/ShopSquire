@@ -33,6 +33,25 @@ def order_group_id_for(order_id: str) -> Optional[str]:
     return f"order-{oid}" if oid else None
 
 
+def count_amendments(db, order_id: str, tenant_id: str = "default") -> int:
+    """How many times this order has been amended = the count of SUPERSEDED case versions under its group.
+    The churn-brake signal (procurement_fraud_signals.assess_amendments). Best-effort; 0 on any error."""
+    group_id = order_group_id_for(order_id)
+    if db is None or not group_id:
+        return 0
+    try:
+        from src.app.services.fulfillment.repository import ensure_tables
+        ensure_tables(db)
+        row = db.execute(text(
+            "SELECT COUNT(DISTINCT case_id) FROM fulfillment_case_version "
+            "WHERE tenant_id=:t AND state='SUPERSEDED' AND state_json LIKE :p"),
+            {"t": str(tenant_id or "default"), "p": f'%"order_group_id"%{group_id}%'}).fetchone()
+        return int((row or [0])[0] or 0)
+    except Exception as exc:
+        logger.debug("count_amendments failed for %s: %s", order_id, exc)
+        return 0
+
+
 def _already_materialized(db, order_group_id: str, tenant_id: str = "default") -> List[str]:
     """Idempotency probe: the case ids already materialized for this order's commitment, found by the
     order_group_id stamped into the case state_json. A re-confirm (double-submit) returns these instead of

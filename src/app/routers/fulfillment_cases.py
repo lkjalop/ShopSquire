@@ -418,6 +418,12 @@ def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
                 l["in_stock"] = int(stock.get(str(l.get("item_ref")), 0))
         # supersede=True → buyer is amending a confirmed order: retire the active pre-send cases + re-source.
         if body.supersede:
+            # churn brake: an order amended past the cap must go to a human (amendment-churn DoS defense).
+            from src.app.services.fulfillment.cart_commitment import count_amendments
+            from src.app.services.fulfillment.procurement_fraud_signals import assess_amendments
+            _amend = assess_amendments(amendment_count=count_amendments(db, body.order_id))
+            if _amend["over_cap"]:
+                raise HTTPException(status_code=429, detail={"error": "amendment_cap_exceeded", **_amend})
             result = supersede_order(db, order_id=body.order_id, lines=resolved, uid=body.uid,
                                      trace_id=body.trace_id, requirements=body.requirements)
         else:
