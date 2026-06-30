@@ -9,8 +9,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   experimentEvaluate, experimentPromote, experimentRevert, experimentState,
-  marketState, refreshMarket, replayAdvance, replayReset, replayState,
-  type ExperimentState, type ReplayState,
+  governancePulse, marketState, refreshMarket, replayAdvance, replayReset, replayState,
+  type ExperimentState, type GovernancePulse, type ReplayState,
 } from '../api';
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
@@ -60,6 +60,11 @@ export function MarketIntelligence() {
     catch (e: any) { setError(e?.message || 'replay action failed'); }
     finally { setBusy(false); }
   };
+
+  // ── governance pulse (Step-11 owner visibility) — read-only; refreshes with the other panels ──
+  const [pulse, setPulse] = useState<GovernancePulse | null>(null);
+  const loadPulse = useCallback(() => { governancePulse().then(setPulse).catch(() => {}); }, []);
+  useEffect(() => { loadPulse(); }, [loadPulse, st, exp]);
 
   const series = st?.series;
   const live = mode === 'live';
@@ -164,6 +169,83 @@ export function MarketIntelligence() {
           when RANKING_NUDGE_EXPERIMENT_ENABLED is on. Evaluate runs uplift → decide → auto-revert on no-lift.
         </small>
       </section>
+
+      {/* Governance visibility (deck Step 11): the owner OBSERVES the autonomous subsystem without becoming a
+          runtime dependency. Read-only roll-up of the existing audit trails into four cards. */}
+      {pulse && (
+        <section data-testid="mi-governance" style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
+          <h4 style={{ margin: '0 0 8px' }}>Governance visibility</h4>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <GovCard title="Signal & decision state" testid="gov-signal">
+              <Row k="Active findings" v={pulse.signal_decision_state.active_findings} />
+              <Row k="Critical / warn / info"
+                   v={`${sev(pulse, 'critical')} / ${sev(pulse, 'warn')} / ${sev(pulse, 'info')}`} />
+              <Row k="AI confidence (lo/med/hi)"
+                   v={`${conf(pulse, 'low')} / ${conf(pulse, 'medium')} / ${conf(pulse, 'high')}`} />
+              <Row k="Adaptation mode"
+                   v={`${pulse.signal_decision_state.adaptation_mode.kill_switch ? 'KILLED' : 'armed'} · hippograph=${pulse.signal_decision_state.adaptation_mode.hippograph_mode}`} />
+            </GovCard>
+
+            <GovCard title="Experiment health" testid="gov-experiment">
+              <Row k="Status" v={pulse.experiment_health.live ? 'LIVE' : pulse.experiment_health.status} />
+              <Row k="Outcomes recorded" v={pulse.experiment_health.outcomes_recorded} />
+              <Row k="Rollback count" v={pulse.experiment_health.rollback_count}
+                   warn={pulse.experiment_health.rollback_count > 0} />
+              <Row k="Last decision"
+                   v={`${pulse.experiment_health.last_decision ?? '–'} (${pulse.experiment_health.last_uplift_pct ?? '–'}%)`} />
+            </GovCard>
+
+            <GovCard title="Policy & compliance" testid="gov-policy">
+              <Row k="Policy block rate"
+                   v={`${(pulse.policy_compliance.policy_block_rate * 100).toFixed(1)}% (${pulse.policy_compliance.actions_blocked}/${pulse.policy_compliance.actions_evaluated})`}
+                   warn={pulse.policy_compliance.policy_block_rate > 0.25} />
+              <Row k="Contacts suppressed"
+                   v={`${pulse.policy_compliance.contacts_suppressed}/${pulse.policy_compliance.contacts_evaluated}`} />
+              <Row k="Suppression by region"
+                   v={kvStr(pulse.policy_compliance.suppression_by_region) || '–'} />
+              <Row k="Exception count" v={pulse.policy_compliance.exception_count}
+                   warn={pulse.policy_compliance.exception_count > 0} />
+            </GovCard>
+
+            <GovCard title="Operational pressure" testid="gov-pressure">
+              <Row k="Critical findings" v={pulse.operational_pressure.critical_findings}
+                   warn={pulse.operational_pressure.critical_findings > 0} />
+              <Row k="Open action proposals" v={pulse.operational_pressure.open_action_proposals} />
+              <Row k="Findings by type"
+                   v={kvStr(pulse.operational_pressure.findings_by_type) || '–'} />
+            </GovCard>
+          </div>
+          <small style={{ color: '#6b7280' }}>
+            Read-only — the owner observes without becoming a runtime dependency. Every figure is rolled up
+            from the durable audit trails (adaptive-action gate, contact governance, experiment outcomes, findings).
+          </small>
+        </section>
+      )}
+    </div>
+  );
+}
+
+const sev = (p: GovernancePulse, k: string) => p.signal_decision_state.findings_by_severity[k] || 0;
+const conf = (p: GovernancePulse, k: string) => p.signal_decision_state.ai_confidence_distribution[k] || 0;
+const kvStr = (m: Record<string, number>) =>
+  Object.entries(m || {}).map(([k, v]) => `${k}:${v}`).join(', ');
+
+function GovCard({ title, testid, children }: { title: string; testid: string; children: React.ReactNode }) {
+  return (
+    <div data-testid={testid} style={{
+      border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, minWidth: 240, flex: '1 1 240px',
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ k, v, warn }: { k: string; v: React.ReactNode; warn?: boolean }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13, padding: '1px 0' }}>
+      <span style={{ color: '#6b7280' }}>{k}</span>
+      <strong style={{ color: warn ? 'crimson' : '#111827' }}>{v}</strong>
     </div>
   );
 }

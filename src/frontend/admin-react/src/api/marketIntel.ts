@@ -32,3 +32,30 @@ export const experimentPromote = () => http<ExperimentState>(`${_exp}/promote`, 
 export const experimentRevert = () => http<ExperimentState>(`${_exp}/revert`, { method: 'POST', body: '{}' });
 export const experimentEvaluate = (min_samples = 1) =>
   http<any>(`${_exp}/evaluate`, { method: 'POST', body: JSON.stringify({ min_samples }) });
+
+// Governance pulse — the owner/governance Step-11 visibility snapshot (read-only, writes nothing).
+export interface GovernancePulse {
+  tenant_id: string;
+  signal_decision_state: {
+    active_findings: number;
+    findings_by_severity: Record<string, number>;
+    ai_confidence_distribution: Record<string, number>;
+    adaptation_mode: { kill_switch: boolean; hippograph_mode: string; experiment_live: boolean };
+  };
+  experiment_health: {
+    status: string; live: boolean; outcomes_recorded: number;
+    decision_breakdown: Record<string, number>; rollback_count: number;
+    last_decision: string | null; last_uplift_pct: number | null;
+  };
+  policy_compliance: {
+    actions_evaluated: number; actions_blocked: number; policy_block_rate: number;
+    block_reasons: Record<string, number>;
+    contacts_evaluated: number; contacts_suppressed: number; contact_suppression_rate: number;
+    suppression_by_region: Record<string, number>; exception_count: number;
+  };
+  operational_pressure: {
+    findings_by_type: Record<string, number>; critical_findings: number;
+    total_signal_findings: number; open_action_proposals: number;
+  };
+}
+export const governancePulse = () => http<GovernancePulse>(`/api/v1/fulfillment/governance/pulse`);

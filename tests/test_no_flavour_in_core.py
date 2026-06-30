@@ -230,6 +230,8 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/three_way_match.py",
     # reliable outbound queue: durable send + retry/backoff/dead-letter/855-ack — opaque to/subject/body, no product vocab.
     "src/app/services/fulfillment/outbound_queue.py",
+    # governance pulse: read-only Step-11 visibility — counts/rates over opaque audit labels, no product vocab.
+    "src/app/services/governance_pulse.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.

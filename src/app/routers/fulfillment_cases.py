@@ -938,6 +938,16 @@ def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]
         return mp.state(db)
 
 
+@router.get("/governance/pulse")
+def governance_pulse(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Owner/governance VISIBILITY (deck Step 11): one read-only snapshot rolling the existing audit trails
+    into four cards — signal & decision state, experiment health, policy & compliance, operational pressure.
+    The owner observes WITHOUT becoming a runtime dependency (this writes nothing)."""
+    from src.app.services.governance_pulse import governance_pulse as pulse
+    with db_session() as db:
+        return pulse(db)
+
+
 # ── ranking-experiment console (operator) — promote/observe/evaluate/revert the live-adaptation loop ──
 class ExperimentBody(BaseModel):
     experiment_id: Optional[str] = None
