@@ -52,6 +52,52 @@ def count_amendments(db, order_id: str, tenant_id: str = "default") -> int:
         return 0
 
 
+def list_order_cases(db, order_id: str, tenant_id: str = "default") -> List[Dict[str, Any]]:
+    """Every case under an order group — ACTIVE and SUPERSEDED — newest-first, with a draft summary. The
+    'amendment history of this order' read model (#5): the operator sees each version that was sourced and,
+    via draft_diff, what changed between drafts. Best-effort; [] on error."""
+    group_id = order_group_id_for(order_id)
+    if db is None or not group_id:
+        return []
+    try:
+        from src.app.services.fulfillment.repository import ensure_tables
+        ensure_tables(db)
+        rows = db.execute(text(
+            "SELECT case_id, state, state_json, valid_from FROM fulfillment_case_version "
+            "WHERE tenant_id=:t AND valid_to IS NULL AND state_json LIKE :p ORDER BY valid_from DESC"),
+            {"t": str(tenant_id or "default"), "p": f'%"order_group_id"%{group_id}%'}).fetchall()
+    except Exception as exc:
+        logger.debug("list_order_cases failed for %s: %s", order_id, exc)
+        return []
+    import json as _json
+    out: List[Dict[str, Any]] = []
+    for r in (rows or []):
+        try:
+            sj = r[2] if isinstance(r[2], dict) else _json.loads(r[2] or "{}")
+        except Exception:
+            sj = {}
+        draft = sj.get("draft") or {}
+        out.append({"case_id": r[0], "state": r[1], "valid_from": r[3],
+                    "superseded": r[1] == "SUPERSEDED",
+                    "draft": {"subject": draft.get("subject"), "recipient_domain": draft.get("recipient_domain"),
+                              "content_hash": draft.get("content_hash")}})
+    return out
+
+
+def draft_diff(old_draft: Optional[Dict[str, Any]], new_draft: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """What changed between two supplier drafts (amend-diff). Pure; opaque fields only — no product vocab."""
+    old = old_draft if isinstance(old_draft, dict) else {}
+    new = new_draft if isinstance(new_draft, dict) else {}
+    fields: Dict[str, Any] = {}
+    for k in ("recipient_domain", "recipient_email", "subject", "content_hash"):
+        if str(old.get(k) or "") != str(new.get(k) or ""):
+            fields[k] = {"from": old.get(k), "to": new.get(k)}
+    body_changed = str(old.get("body") or "") != str(new.get("body") or "")
+    return {"changed_fields": list(fields.keys()), "fields": fields, "body_changed": body_changed,
+            "prior_content_hash": old.get("content_hash"), "new_content_hash": new.get("content_hash"),
+            "changed": bool(fields) or body_changed}
+
+
 def _already_materialized(db, order_group_id: str, tenant_id: str = "default") -> List[str]:
     """Idempotency probe: the case ids already materialized for this order's commitment, found by the
     order_group_id stamped into the case state_json. A re-confirm (double-submit) returns these instead of

@@ -182,6 +182,20 @@ def get_journey(case_id: str) -> Dict[str, Any]:
         return {"case_id": case_id, "journey": fwf.journey(db, case_id)}
 
 
+@router.get("/cases/by-order/{order_id}")
+def cases_by_order(order_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """The amendment history of one order (#5): every case under the order group — active + superseded,
+    newest-first — plus a draft-DIFF showing what changed between the most-recently-superseded draft and the
+    current active draft. Lets the operator see 'what the buyer changed' across an amendment."""
+    from src.app.services.fulfillment.cart_commitment import draft_diff, list_order_cases
+    with db_session() as db:
+        cases = list_order_cases(db, order_id)
+        active = next((c for c in cases if not c["superseded"]), None)
+        prior = next((c for c in cases if c["superseded"]), None)
+        diff = draft_diff(prior["draft"], active["draft"]) if (active and prior) else None
+        return {"order_id": order_id, "case_count": len(cases), "cases": cases, "draft_diff": diff}
+
+
 @router.get("/cases/{case_id}/supplier-candidates")
 def supplier_candidates(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Ranked, confidence-scored, provenance-tagged APPROVED-supplier shortlist for the case's SKU — a
