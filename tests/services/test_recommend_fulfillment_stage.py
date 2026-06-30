@@ -41,6 +41,17 @@ def test_no_order_quantity_returns_empty():
     assert "availability" not in payload
 
 
+def test_pr_id_lands_on_the_sourcing_preview():
+    # the deferred (fluid) preview must carry the stable PR id so an amendment re-confirms onto the SAME order.
+    payload = {}
+    stage.run_fulfillment_stage(
+        results=[{"sku": "SKU-1"}], constraints={"order_quantity": 10}, payload=payload, uid="u1",
+        trace_id="T1", pr_id="PR-default-20260630-abc12345",
+        flags={"FULFILLMENT_CASES_ENABLED": True, "FULFILLMENT_DEFER_TO_CART": True})
+    si = payload.get("sourcing_intent") or {}
+    assert si.get("mode") == "deferred_to_cart" and si.get("pr_id") == "PR-default-20260630-abc12345"
+
+
 def test_flag_on_bulk_shortfall_opens_case_at_gate1():
     payload, _line = _run(flags={"FULFILLMENT_CASES_ENABLED": True}, qty=10)
     fc = payload.get("fulfillment_case")

@@ -49,3 +49,37 @@ def test_rotation_keeps_amendments_stable_rotates_on_lifecycle():
 
 def test_retention_window_is_compliance_grade():
     assert pr.RETENTION_WINDOW_DAYS >= 365 * 7   # financial/procurement record retention
+
+
+# ── resolve_pr: the R1 fix — amendments reuse, new carts get a distinct PR ─────
+def test_amendments_reuse_the_same_pr_no_churn():
+    s0 = pr.resolve_pr(None, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:00:00", nonce="t1")
+    s1 = pr.resolve_pr(s0, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:01:00", nonce="t2")
+    s2 = pr.resolve_pr(s1, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:02:00", nonce="t3")
+    assert s0["pr_id"] == s1["pr_id"] == s2["pr_id"]      # three amendment turns → ONE PR (no churn)
+    assert s2["last_activity"] == "2026-06-30 09:02:00"   # activity advances
+
+
+def test_idle_past_ttl_rotates_to_a_new_pr():
+    s0 = pr.resolve_pr(None, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:00:00", nonce="t1")
+    # next sourcing 25h later = a new cart → DISTINCT PR (no cross-order capture of a stale cart)
+    s1 = pr.resolve_pr(s0, tenant_id="default", buyer_key="u1", now_iso="2026-07-01 10:00:00", nonce="t9")
+    assert s1["pr_id"] != s0["pr_id"]
+
+
+def test_explicit_new_and_finalize_rotate():
+    s0 = pr.resolve_pr(None, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:00:00", nonce="t1")
+    # explicit "start a new order"
+    s_new = pr.resolve_pr(s0, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:05:00",
+                          nonce="t2", explicit_new=True)
+    assert s_new["pr_id"] != s0["pr_id"]
+    # finalize (order placed) → the NEXT resolve rotates
+    s_fin = pr.mark_finalized(s0)
+    s_after = pr.resolve_pr(s_fin, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:06:00", nonce="t3")
+    assert s_after["pr_id"] != s0["pr_id"]
+
+
+def test_two_buyers_never_share_a_pr():
+    a = pr.resolve_pr(None, tenant_id="default", buyer_key="u1", now_iso="2026-06-30 09:00:00", nonce="t")
+    b = pr.resolve_pr(None, tenant_id="default", buyer_key="u2", now_iso="2026-06-30 09:00:00", nonce="t")
+    assert a["pr_id"] != b["pr_id"]

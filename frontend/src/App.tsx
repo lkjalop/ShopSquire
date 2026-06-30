@@ -1953,12 +1953,12 @@ export default function App() {
                   )}
                   {!fulfilmentCase && sourcingIntent && (sourcingIntent.lines?.length ?? 0) > 0 && (
                     <div className={styles.procurementPanelSlot}>
-                      {/* order_id must be STABLE across turns (one cart per session) so a buyer amendment
-                          re-confirms onto the SAME order group → supersede + re-draft, not a duplicate case.
-                          Using the per-turn traceId here was the bug: every turn reset it, so amend never
-                          superseded. traceId is still passed separately for the decision-trace link. */}
+                      {/* order_id = the server-minted Procurement Request (PR) id — STABLE across amendments
+                          (re-confirm supersedes the SAME order group, no duplicate cases) and DISTINCT for a
+                          genuinely new cart (closes cross-order contamination). Falls back to a session id only
+                          if the backend didn't mint one. traceId stays separate for the decision-trace link. */}
                       <SourcingIntentCard intent={sourcingIntent} uid={uid}
-                                          orderId={`cart-${uid}`} traceId={traceId || undefined} />
+                                          orderId={sourcingIntent.pr_id || `cart-${uid}`} traceId={traceId || undefined} />
                     </div>
                   )}
                   {rightPanelContract?.image_untrusted && (

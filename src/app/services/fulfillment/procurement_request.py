@@ -105,3 +105,41 @@ def should_rotate(*, explicit_new: bool = False, finalized: bool = False,
     if idle_seconds is not None and idle_ttl_seconds and float(idle_seconds) > float(idle_ttl_seconds):
         return True
     return False
+
+
+def _iso_delta_seconds(earlier_iso: str, later_iso: str) -> Optional[float]:
+    """Seconds between two ISO timestamps (space- or T-separated), or None if either is unparseable."""
+    from datetime import datetime
+    try:
+        a = datetime.fromisoformat(str(earlier_iso).strip())
+        b = datetime.fromisoformat(str(later_iso).strip())
+        return (b - a).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_pr(active_pr: Optional[Dict[str, Any]], *, tenant_id: str, buyer_key: str, now_iso: str,
+               nonce: str, explicit_new: bool = False,
+               idle_ttl_seconds: int = DEFAULT_IDLE_TTL_SECONDS) -> Dict[str, Any]:
+    """PURE resolution of the buyer's ACTIVE Procurement Request from its stored state (the caller does the
+    session-memory I/O). Reuses the current PR across amendments; mints a fresh one only when there is none, or
+    ``should_rotate`` fires (explicit-new / finalized / idle past TTL). Returns the new active-PR state
+    {pr_id, opened_at, last_activity, finalized?}. This is what closes the cross-order-contamination bug: a
+    genuinely new cart (after idle/finalize/explicit-new) gets a DISTINCT pr_id, while rapid amendments keep
+    the SAME one (no churn)."""
+    cur = active_pr if isinstance(active_pr, dict) else {}
+    cur_id = cur.get("pr_id")
+    last = cur.get("last_activity") or cur.get("opened_at")
+    idle = _iso_delta_seconds(last, now_iso) if (cur_id and last) else None
+    rotate = (not cur_id) or should_rotate(explicit_new=explicit_new, finalized=bool(cur.get("finalized")),
+                                           idle_seconds=idle, idle_ttl_seconds=idle_ttl_seconds)
+    if rotate:
+        pr_id = mint_pr_id(tenant_id=tenant_id, buyer_key=buyer_key, opened_at_iso=now_iso, nonce=nonce)
+        return {"pr_id": pr_id, "opened_at": now_iso, "last_activity": now_iso}
+    return {**cur, "last_activity": now_iso, "finalized": False}
+
+
+def mark_finalized(active_pr: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Flag the active PR as finalized (order placed) so the NEXT resolve rotates to a fresh PR. Pure."""
+    cur = active_pr if isinstance(active_pr, dict) else {}
+    return {**cur, "finalized": True}

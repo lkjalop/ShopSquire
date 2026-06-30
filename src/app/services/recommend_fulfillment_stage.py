@@ -56,6 +56,7 @@ def run_fulfillment_stage(
     trace_id: Optional[str] = None,
     flags: Optional[Dict[str, Any]] = None,
     query: Optional[str] = None,
+    pr_id: Optional[str] = None,
 ) -> str:
     """Compute bulk availability (sets payload['availability']) and, when enabled, open a procurement
     case on a real shortfall. Returns the availability summary line (or '')."""
@@ -69,7 +70,8 @@ def run_fulfillment_stage(
     # single-line query falls through to the normal path. Best-effort — never breaks the recommend reply.
     if query and _flag(flags, "FULFILLMENT_CASES_ENABLED"):
         try:
-            line = (_fluid_multiline_intent(query=query, constraints=constraints, trace_id=trace_id, payload=payload)
+            line = (_fluid_multiline_intent(query=query, constraints=constraints, trace_id=trace_id,
+                                            payload=payload, pr_id=pr_id)
                     if defer_to_cart else
                     _maybe_multiline_order(query=query, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
                                            payload=payload))
@@ -127,7 +129,7 @@ def run_fulfillment_stage(
         _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
-                     flags=flags, single_item=single_item, defer=defer_to_cart)
+                     flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id)
     return line
 
 
@@ -195,7 +197,7 @@ def _maybe_multiline_order(*, query, uid, uid_hash, trace_id, payload) -> str:
             f"any supplier is contacted.")
 
 
-def _fluid_multiline_intent(*, query, constraints, trace_id, payload) -> str:
+def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None) -> str:
     """FLUID-mode counterpart to _maybe_multiline_order: PREVIEW the mixed-order split (read-only) WITHOUT
     materializing any durable case. The buyer's intent stays fluid until cart-confirmation — nothing is
     persisted, nothing is contacted. Sets payload['sourcing_intent'] (buyer-safe, no supplier identity) —
@@ -216,6 +218,7 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload) -> str:
     emit_split_trace(trace_id, plan=plan)  # the split is a visible (read-only) preview step
     payload["sourcing_intent"] = {
         "mode": "deferred_to_cart",
+        "pr_id": pr_id,  # the STABLE order identity — amendments re-confirm onto the same PR (no duplicate cases)
         "lines": [{"item_ref": l["item_ref"], "quantity": l["requested_qty"]} for l in lines],
         "planned_case_count": int(plan.get("group_count") or 0),
     }
@@ -259,7 +262,7 @@ def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
         record_partial_failure("bulk_alternatives", exc, trace_id=trace_id)
 
 
-def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False) -> None:
+def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False, pr_id=None) -> None:
     """Open a fulfilment_case at GATE 1 on a real shortfall (flag-gated, best-effort). Two entry points:
     a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True).
     When ``defer`` (FULFILLMENT_DEFER_TO_CART), the intent stays FLUID: set payload['sourcing_intent']
@@ -282,7 +285,7 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
     item_ref = str((avail or {}).get("sku") or "")
     if defer:
         # FLUID: preview the sourcing intent; the durable case is created at cart-confirmation, not here.
-        payload["sourcing_intent"] = {"mode": "deferred_to_cart",
+        payload["sourcing_intent"] = {"mode": "deferred_to_cart", "pr_id": pr_id,
                                       "lines": [{"item_ref": item_ref, "quantity": order_qty,
                                                  "shortfall": shortfall}],
                                       "planned_case_count": 1 if item_ref else 0}

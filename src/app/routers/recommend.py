@@ -10506,9 +10506,26 @@ def suggest(
     # a durable procurement case on a real bulk shortfall (advanced to GATE 1 — no supplier contacted).
     # Procurement logic stays OUT of this monolith — this is the only fulfilment touchpoint here.
     from src.app.services.recommend_fulfillment_stage import run_fulfillment_stage as _run_fulfillment_stage
+    # Resolve the buyer's STABLE Procurement Request (PR) id BEFORE the stage so a sourcing preview carries it:
+    # rapid amendments reuse the same PR (no case churn), a genuinely new cart (idle/finalized/explicit-new)
+    # gets a DISTINCT one (closes the cross-order-contamination R1). Best-effort — never breaks the response.
+    _pr_id = None
+    try:
+        from datetime import datetime, timezone
+        from src.app.services.fulfillment import procurement_request as _pr
+        _now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds")
+        _pr_kv = mem.get_kv(uid) or {}
+        _active_pr = _pr.resolve_pr(_pr_kv.get("active_pr"), tenant_id="default",
+                                    buyer_key=str(uid_hash or uid or "anon"), now_iso=_now_iso,
+                                    nonce=str(trace_id or _now_iso))
+        _pr_kv["active_pr"] = _active_pr
+        mem.set_kv(uid, _pr_kv)
+        _pr_id = _active_pr.get("pr_id")
+    except Exception as _pr_exc:
+        logger.debug("PR resolve skipped: %s", _pr_exc)
     _availability_line = _run_fulfillment_stage(
         results=results, constraints=constraints, payload=payload, uid=uid, uid_hash=uid_hash,
-        trace_id=trace_id, flags=flags, query=query,
+        trace_id=trace_id, flags=flags, query=query, pr_id=_pr_id,
     )
 
     assistant_message = None
