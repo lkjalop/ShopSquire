@@ -977,10 +977,59 @@ def execute_po(case_id: str, body: ExecutePOBody = Body(default=ExecutePOBody())
         return _case_view(db, case_id, for_operator=True)
 
 
+class GoodsReceiptBody(BaseModel):
+    quantity: int
+
+
+class InvoiceBody(BaseModel):
+    quantity: int
+    amount_cents: int
+
+
+def _three_way_match_enabled() -> bool:
+    return str(os.getenv("FULFILLMENT_THREE_WAY_MATCH_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+@router.post("/cases/{case_id}/record-receipt")
+def record_receipt(case_id: str, body: GoodsReceiptBody,
+                   role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Record goods receipt (received quantity) — the second leg of the 3-way match. SYSTEM (ASN/EDI 856)
+    or operator. A self-loop: no state change, just the document the AP control reconciles."""
+    with db_session() as db:
+        res = fwf.transition(db, case_id=case_id, event="goods_receipt_recorded",
+                             actor=Actor(ActorType.HUMAN_OPERATOR, role), reason_code="goods_receipt",
+                             evidence={"quantity": int(body.quantity)},
+                             state_patch={"goods_receipt": {"quantity": int(body.quantity)}})
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
+@router.post("/cases/{case_id}/record-invoice")
+def record_invoice(case_id: str, body: InvoiceBody,
+                   role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Record the supplier invoice (quantity + amount) — the third leg of the 3-way match. SYSTEM (EDI 810)
+    or operator. Self-loop; reconciled against the PO + goods receipt at completion."""
+    with db_session() as db:
+        res = fwf.transition(db, case_id=case_id, event="invoice_recorded",
+                             actor=Actor(ActorType.HUMAN_OPERATOR, role), reason_code="invoice",
+                             evidence={"quantity": int(body.quantity), "amount_cents": int(body.amount_cents)},
+                             state_patch={"invoice": {"quantity": int(body.quantity),
+                                                      "amount_cents": int(body.amount_cents)}})
+        _raise_if_failed(res)
+        return _case_view(db, case_id, for_operator=True)
+
+
 @router.post("/cases/{case_id}/complete")
 def complete_case(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
-    """HUMAN marks the order COMPLETED (READY_TO_SHIP → COMPLETED) — the journey's final act."""
+    """HUMAN marks the order COMPLETED (READY_TO_SHIP → COMPLETED) — the journey's final act. When
+    FULFILLMENT_THREE_WAY_MATCH_ENABLED, completion (payment) is GATED on PO = goods-receipt = invoice."""
     with db_session() as db:
+        if _three_way_match_enabled():
+            from src.app.services.fulfillment.three_way_match import match_for_case
+            cur = fwf.repository.current_version(db, case_id)
+            twm = match_for_case(cur.state_json if cur and isinstance(cur.state_json, dict) else {})
+            if not twm["matched"]:
+                raise HTTPException(status_code=409, detail={"error": "three_way_match_failed", **twm})
         res = fpo.complete(db, case_id=case_id, actor=Actor(ActorType.HUMAN_OPERATOR, role))
         _raise_if_failed(res)
         return _case_view(db, case_id, for_operator=True)

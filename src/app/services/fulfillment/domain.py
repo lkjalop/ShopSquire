@@ -227,6 +227,18 @@ TRANSITIONS: Tuple[Transition, ...] = (
     Transition("purchase_order_created", _S.PROCUREMENT_IN_PROGRESS, _S.READY_TO_SHIP,
                frozenset({_A.HUMAN_OPERATOR, _A.SYSTEM}), requires_evidence=True),
     Transition("shipment_plan_created", _S.PROCUREMENT_IN_PROGRESS, _S.PARTIALLY_READY, frozenset({_A.SYSTEM})),
+
+    # ── 3-WAY MATCH inputs: record goods-receipt + invoice (self-loops; no state change). These accumulate
+    #    the documents the AP control reconciles before COMPLETION (payment). SYSTEM (EDI/ASN/e-invoice) or
+    #    HUMAN_OPERATOR. Allowed at READY_TO_SHIP (after the PO) and PARTIALLY_READY (split receipt). ──
+    Transition("goods_receipt_recorded", _S.READY_TO_SHIP, _S.READY_TO_SHIP,
+               frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True, note="goods received — qty for 3-way match"),
+    Transition("goods_receipt_recorded", _S.PARTIALLY_READY, _S.PARTIALLY_READY,
+               frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True),
+    Transition("invoice_recorded", _S.READY_TO_SHIP, _S.READY_TO_SHIP,
+               frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True, note="supplier invoice — qty+amount for 3-way match"),
+    Transition("invoice_recorded", _S.PARTIALLY_READY, _S.PARTIALLY_READY,
+               frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR}), requires_evidence=True),
     Transition("completed", _S.READY_TO_SHIP, _S.COMPLETED, frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR})),
     Transition("completed", _S.PARTIALLY_READY, _S.COMPLETED, frozenset({_A.SYSTEM, _A.HUMAN_OPERATOR})),
 )

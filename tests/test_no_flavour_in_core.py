@@ -226,6 +226,8 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/approval_policy.py",
     # budget gate (enterprise gate): spend-vs-cap arithmetic keyed by an opaque category — no product vocab.
     "src/app/services/fulfillment/budget_gate.py",
+    # 3-way match (AP control): PO=receipt=invoice qty/amount reconciliation, cents/ints only — no product vocab.
+    "src/app/services/fulfillment/three_way_match.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.
