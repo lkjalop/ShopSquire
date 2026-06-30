@@ -626,13 +626,49 @@ def _attempt_autonomous_send(db, case_id: str):
         return fauto.SendDecision("escalated", "error_fail_closed")
 
 
+def _approval_tiers_enabled() -> bool:
+    return str(os.getenv("FULFILLMENT_APPROVAL_TIERS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _case_spend_cents(db, case_id: str) -> int:
+    """The spend this case commits to a supplier (the approval-gate value): the wholesale cost from economics,
+    else the draft's estimated value. Best-effort; 0 when unknown."""
+    try:
+        from src.app.services.fulfillment import economics as _feco
+        econ = _feco.from_case(db, case_id) or {}
+        sc = int(econ.get("supplier_cost_cents") or 0)
+        if sc > 0:
+            return sc
+    except Exception:
+        pass
+    try:
+        cur = fwf.repository.current_version(db, case_id)
+        scope = ((cur.state_json.get("draft") or {}).get("commercial_scope") or {}) if cur and isinstance(cur.state_json, dict) else {}
+        return int(scope.get("estimated_value_cents") or 0)
+    except Exception:
+        return 0
+
+
 @router.post("/cases/{case_id}/request-approval")
 def request_approval(case_id: str, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    from src.app.services.fulfillment.approval_policy import required_approval_tier
     with db_session() as db:
         res, approval_id = fdraft.request_supplier_approval(db, case_id=case_id, actor=_agent())
         _raise_if_failed(res)
+        # enterprise gate: compute WHICH approver tier this spend requires (recorded for audit; enforced at
+        # the send gate when FULFILLMENT_APPROVAL_TIERS_ENABLED). Surfaced so the operator routes it correctly.
+        tier = required_approval_tier(_case_spend_cents(db, case_id))
+        try:
+            from src.app.services.decision_log import log_trace_event
+            cur = fwf.repository.current_version(db, case_id)
+            log_trace_event(trace_id=(cur.source_trace_id if cur else None), event_type="approval_tier_required",
+                            source_type="agent", source_id="Approval_Policy_Agent", target_type="fulfillment_case",
+                            target_id=case_id, payload=tier, durable=True)
+        except Exception:
+            pass
         auto = _attempt_autonomous_send(db, case_id)
         return {**_case_view(db, case_id, for_operator=True), "approval_id": approval_id,
+                "approval_required_tier": tier,
                 "autonomous_send": {"action": auto.action, "reason": auto.reason,
                                     "provider_ref": auto.provider_ref}}
 
@@ -718,9 +754,15 @@ class DispatchBody(BaseModel):
 
 @router.post("/cases/{case_id}/dispatch")
 def dispatch(case_id: str, body: DispatchBody, role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
-    """GATE 2: the HUMAN approves + sends. approval_granted then the hash-checked send."""
+    """GATE 2: the HUMAN approves + sends. approval_granted then the hash-checked send. When approval tiers
+    are enabled, an approver below the spend's required tier is REJECTED (escalate to the right authority)."""
     human = Actor(ActorType.HUMAN_OPERATOR, role)
     with db_session() as db:
+        if _approval_tiers_enabled():
+            from src.app.services.fulfillment.approval_policy import approver_can_clear
+            verdict = approver_can_clear(role, _case_spend_cents(db, case_id))
+            if not verdict["ok"]:
+                raise HTTPException(status_code=403, detail={"error": "approval_tier_insufficient", **verdict})
         _raise_if_failed(fwf.transition(db, case_id=case_id, event="approval_granted", actor=human,
                                         reason_code="human_approved"))
         res = fec.send_approved(db, case_id=case_id, actor=human, approval_content_hash=body.content_hash)
