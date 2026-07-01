@@ -8,7 +8,7 @@ import ExternalResearchPanel, { type ExternalResearchItem } from './components/E
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, clearCart, type SourcingIntent } from './lib/api';
+import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, type SourcingIntent } from './lib/api';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -679,24 +679,23 @@ export default function App() {
     }
   };
 
-  const addToCart = async (sku: string) => {
+  const addToCart = async (sku: string, qty: number = 1) => {
     if (!sku) return;
     try {
-      const j = await addCartItem(uid, sku, 1);
+      const j = await addCartItem(uid, sku, Math.max(1, Math.floor(qty)));
       setCart(j);
       switchRightPanelMode('cart');
       // Proactive post-add message in the chat
       const addedProduct = products.find((p) => p.sku === sku);
       const productName = addedProduct?.name || sku;
       setChatOpen(true);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant' as const,
-          content: `Nice choice! **${productName}** has been added to your cart. Want to see compatible accessories, or are you ready to checkout?`,
-          timestamp: new Date(),
-        },
-      ]);
+      const addMsg = `Nice choice! **${productName}** has been added to your cart. Want to see compatible accessories, or are you ready to checkout?`;
+      setMessages((prev) => {
+        // dedupe: a double-invoke (StrictMode / double-click) must not append the same line twice
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === addMsg) return prev;
+        return [...prev, { role: 'assistant' as const, content: addMsg, timestamp: new Date() }];
+      });
     } catch {
       // ignore for MVP
     }
@@ -716,6 +715,17 @@ export default function App() {
       setCart(j);
     } catch {
       // ignore
+    }
+  };
+
+  /** Cart stepper — SET a line's absolute quantity ("change your mind"). qty<=0 removes it. */
+  const setCartQty = async (sku: string, qty: number) => {
+    if (!sku) return;
+    try {
+      const j = await setCartItemQty(uid, sku, qty);
+      setCart(j);
+    } catch {
+      // ignore (stock-gate 409s surface via the existing error path)
     }
   };
 
@@ -2272,6 +2282,7 @@ export default function App() {
                         onRemove={removeFromCart}
                         onClear={clearCartAll}
                         onAdd={addToCart}
+                        onSetQty={setCartQty}
                         onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
                       />
                     ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (

@@ -278,6 +278,19 @@ export async function addCartItem(uid: string, sku: string, quantity = 1) {
   return j;
 }
 
+// SET a line's absolute quantity (the cart stepper / "change your mind" control). qty<=0 removes it.
+export async function setCartItemQty(uid: string, sku: string, quantity: number) {
+  const r = await fetch(apiUrl(`/api/v1/cart/items/${encodeURIComponent(sku)}`), {
+    method: 'PUT',
+    credentials: 'include',
+    headers: authHeaders({}, true),
+    body: JSON.stringify({ uid: uid || 'demo-user', sku, quantity: Math.max(0, Math.floor(quantity)) }),
+  });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cart_set_qty_failed (${r.status})`);
+  return j;
+}
+
 export async function removeCartItem(uid: string, sku: string) {
   const u = new URL(apiUrl(`/api/v1/cart/items/${encodeURIComponent(sku)}`), window.location.href);
   u.searchParams.set('uid', uid || 'demo-user');

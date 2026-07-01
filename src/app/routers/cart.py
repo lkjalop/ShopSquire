@@ -403,6 +403,42 @@ def remove_item(sku: str, uid: str, role: str = Depends(require_role([ROLE_MERCH
         return {"cart_id": cart_id, **hydrated}
 
 
+@router.put("/items/{sku}")
+def set_item_quantity(sku: str, payload: CartItemPayload,
+                      role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+    """SET a line's ABSOLUTE quantity (the cart stepper / 'change your mind' control) — distinct from
+    POST /items which INCREMENTS. qty<=0 removes the line. Stock-gated like add. Vertical-blind."""
+    with tracer.start_as_current_span("cart.set_item_quantity"):
+        target = int(payload.quantity or 0)
+        signal = _guard_cart_request(surface="cart.set_item_quantity", uid=payload.uid,
+                                     sku_values=[sku], quantity_values=[max(0, target)])
+        if target > 0:
+            stock = _get_stock_level(sku)
+            if stock == 0:
+                raise HTTPException(status_code=409, detail={"error": "out_of_stock", "sku": sku, "available": 0})
+            if stock < target:
+                raise HTTPException(status_code=409, detail={
+                    "error": "insufficient_stock", "sku": sku, "available": stock, "requested": target})
+        cart_id, items = _get_or_create_cart(payload.uid)
+        _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.set_item_quantity", signal=signal)
+        if target <= 0:
+            items = [it for it in items if it.get("sku") != sku]
+        else:
+            found = False
+            for it in items:
+                if it.get("sku") == sku:
+                    it["quantity"] = target
+                    found = True
+                    break
+            if not found:
+                items.append({"sku": sku, "quantity": target})
+        _save_cart(cart_id, items)
+        with tracer.start_as_current_span("cart.hydrate"):
+            hydrated = _hydrate(items)
+        hydrated = _with_bundle_state(cart_id=cart_id, uid=payload.uid, role=role, hydrated=hydrated)
+        return {"cart_id": cart_id, **hydrated}
+
+
 @router.post("/clear")
 def clear_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.clear"):

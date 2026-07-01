@@ -29,6 +29,7 @@ export default function CartPanel({
   onRemove,
   onClear,
   onAdd,
+  onSetQty,
   onTraceId,
 }: {
   uid: string;
@@ -37,6 +38,7 @@ export default function CartPanel({
   onRemove: (sku: string) => Promise<void>;
   onClear: () => Promise<void>;
   onAdd: (sku: string) => Promise<void>;
+  onSetQty?: (sku: string, qty: number) => Promise<void>;
   onTraceId?: (traceId: string | null) => void;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
@@ -218,7 +220,19 @@ export default function CartPanel({
                 <div className={styles.name}>{productDisplayName(it)}</div>
                 {productSubtitle(it) && <div className={styles.sku}>{productSubtitle(it)}</div>}
                 <div className={styles.sku}>{it.sku}</div>
-                <div className={styles.qty}>Qty: {it.quantity}</div>
+                {onSetQty ? (
+                  <div className={styles.qty} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>Qty:</span>
+                    <button type="button" aria-label={`decrease ${it.sku}`} className={styles.btn}
+                            disabled={it.quantity <= 1}
+                            onClick={() => onSetQty(it.sku, it.quantity - 1)}>−</button>
+                    <span data-testid={`qty-${it.sku}`}>{it.quantity}</span>
+                    <button type="button" aria-label={`increase ${it.sku}`} className={styles.btn}
+                            onClick={() => onSetQty(it.sku, it.quantity + 1)}>＋</button>
+                  </div>
+                ) : (
+                  <div className={styles.qty}>Qty: {it.quantity}</div>
+                )}
               </div>
               <div className={styles.rowRight}>
                 <div className={styles.price}>
