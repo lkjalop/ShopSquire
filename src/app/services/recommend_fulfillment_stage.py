@@ -130,6 +130,8 @@ def run_fulfillment_stage(
     payload["availability"] = assess_availability(
         avail_skus, qty, constraints.get("availability_horizon_days"), draft_reorder=is_b2b_bulk)
     line = availability_summary_line(payload["availability"])
+    if _primary_over_budget:
+        line = ""
     # multi-location view: per-location stock + a transfer plan to cover the buyer's preferred-location gap
     # BEFORE any supplier reorder. Merged onto the availability payload (aggregate fields preserved).
     try:
@@ -162,7 +164,8 @@ def run_fulfillment_stage(
         _emit_trace(trace_id, "bulk_availability_assessed", "Market_Intelligence_Agent",
                     {"sku": _av.get("sku"), "order_qty": qty, "in_stock": _av.get("in_stock"),
                      "shortfall": _av.get("shortfall"), "network": _av.get("network")})
-        _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
+        if not _primary_over_budget:
+            _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
                      flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id,

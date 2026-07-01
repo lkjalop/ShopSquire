@@ -1673,12 +1673,27 @@ async def chat_query(
         params["turn_intent"] = turn_intent
     nqe_selection = (payload or {}).get("nqe_selection") or {}
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
+    if not confirmed_slots:
+        try:
+            recent_for_slots = (payload or {}).get("recent_messages") if isinstance((payload or {}).get("recent_messages"), list) else []
+            for msg in reversed(recent_for_slots or []):
+                if not isinstance(msg, dict) or str(msg.get("role") or "").lower() != "user":
+                    continue
+                slots = _extract_confirmed_slots(query=str(msg.get("content") or ""), response=None)
+                if slots:
+                    confirmed_slots = slots
+                    break
+        except Exception:
+            confirmed_slots = {}
     if isinstance(nqe_selection, dict):
         try:
             oval = str(nqe_selection.get("option_value") or "").strip().lower()
             if oval.startswith("expand_budget:+"):
                 delta = int(oval.split(":+", 1)[1])
-                base_budget = _budget_range_from_slots(confirmed_slots, q)
+                # The current query is usually the button label ("Widen more (+$400)").
+                # Do not re-parse that label as a real budget cap; widen from confirmed
+                # prior slots only, otherwise "$400" collapses a prior 1100-1400 range.
+                base_budget = _budget_range_from_slots(confirmed_slots, "")
                 widened = _compute_widened_budget(base_budget, delta)
                 q = (
                     f"{q}. budget between ${int(widened['budget_min'])} and ${int(widened['budget_max'])} "
@@ -2338,6 +2353,7 @@ async def chat_query(
         "next_questions": next_questions,
         "needs_disambiguation": bool(data.get("needs_disambiguation") or (not products and next_questions)),
         "nqe_selection_applied": data.get("nqe_selection_applied") or {},
+        "confirmed_slots": _extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else {}),
         "llm_model": data.get("llm_model"),
         "model_tier": data.get("model_tier"),
         "complexity": complexity_result,

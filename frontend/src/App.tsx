@@ -562,6 +562,7 @@ export default function App() {
 
   // NQE history: tracks every question-option interaction for backend context
   const [nqeHistory, setNqeHistory] = useState<NqeInteraction[]>([]);
+  const [confirmedSlots, setConfirmedSlots] = useState<Record<string, any>>({});
 
   // Multimodal: attached images queued for Send
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
@@ -1239,6 +1240,9 @@ export default function App() {
         if (nqeHistory.length > 0) {
           chatPayload.nqe_history = nqeHistory.slice(-10);
         }
+        if (confirmedSlots && Object.keys(confirmedSlots).length > 0) {
+          chatPayload.confirmed_slots = confirmedSlots;
+        }
 
         const apiHeaders = {
           'Content-Type': 'application/json',
@@ -1358,6 +1362,9 @@ export default function App() {
         const disambiguationOpts = Array.isArray(data.next_questions) ? data.next_questions.map((nq: any) => typeof nq === 'string' ? nq : nq?.text || '') : [];
         const complexity = data.complexity || null;
         const backendApplied = data.nqe_selection_applied || null;
+        const backendConfirmedSlots = data.confirmed_slots && typeof data.confirmed_slots === 'object'
+          ? data.confirmed_slots
+          : null;
         const agentStepsReadable: string[] | undefined = (() => {
           const steps = data?.proposal?.agent_steps_readable || data?.agent_steps_readable;
           return Array.isArray(steps) && steps.length > 0 ? steps : undefined;
@@ -1378,6 +1385,9 @@ export default function App() {
           ).trim();
           if (useCase) localStorage.setItem('shopsquire_last_use_case', useCase);
         } catch {}
+        if (backendConfirmedSlots && Object.keys(backendConfirmedSlots).length > 0) {
+          setConfirmedSlots(prev => ({ ...prev, ...backendConfirmedSlots }));
+        }
         // Update NQE history with backend-confirmed applied constraints
         if (backendApplied && Object.keys(backendApplied).length > 0 && nqeHistory.length > 0) {
           setNqeHistory(prev => {
