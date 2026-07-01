@@ -278,6 +278,23 @@ export async function addCartItem(uid: string, sku: string, quantity = 1) {
   return j;
 }
 
+// ── Market-intel storefront surfaces (M5): read-only copy-angle signals the storefront renders ──
+export async function getStorefrontEmphasis(inventoryPosition = 'balanced'):
+  Promise<{ messaging_emphasis?: string; demand_trend?: string; rationale?: string[] } | null> {
+  const u = new URL(apiUrl('/api/v1/fulfillment/market/storefront-emphasis'), window.location.href);
+  u.searchParams.set('inventory_position', inventoryPosition);
+  const r = await fetch(u.toString(), { credentials: 'include', headers: authHeaders() });
+  return (r.ok ? await safeJson(r) : null);
+}
+
+export async function getSupportResponse(objection?: string):
+  Promise<{ objection_theme?: string; response_angle?: string; guidance?: string } | null> {
+  const u = new URL(apiUrl('/api/v1/fulfillment/market/support-response'), window.location.href);
+  if (objection) u.searchParams.set('objection', objection);
+  const r = await fetch(u.toString(), { credentials: 'include', headers: authHeaders() });
+  return (r.ok ? await safeJson(r) : null);
+}
+
 // SET a line's absolute quantity (the cart stepper / "change your mind" control). qty<=0 removes it.
 export async function setCartItemQty(uid: string, sku: string, quantity: number) {
   const r = await fetch(apiUrl(`/api/v1/cart/items/${encodeURIComponent(sku)}`), {

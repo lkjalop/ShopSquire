@@ -1,6 +1,7 @@
 ﻿import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import styles from './App.module.css';
 import ProductGrid from './components/ProductGrid';
+import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
 import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
@@ -1640,6 +1641,7 @@ export default function App() {
 
       {/* Homepage Product Grid */}
       <main className={styles.main} {...backgroundInertProps}>
+        <StorefrontEmphasisBanner />
         <div className={styles.categoryBar}>
           <span className={styles.categoryTitle}>Laptops</span>
           <div className={styles.filters}>

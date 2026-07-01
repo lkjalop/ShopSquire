@@ -235,9 +235,19 @@ export default function CartPanel({
                 )}
               </div>
               <div className={styles.rowRight}>
-                <div className={styles.price}>
-                  {typeof it.price_cents === 'number' ? `$${(it.price_cents / 100).toLocaleString()}` : '-'}
-                </div>
+                {typeof it.price_cents === 'number' ? (
+                  <div className={styles.price} data-testid={`line-price-${it.sku}`}>
+                    {it.quantity > 1 ? (
+                      <>
+                        <span style={{ color: '#6b7280', fontSize: 12, fontWeight: 400 }}>
+                          {it.quantity} × ${(it.price_cents / 100).toLocaleString()} = </span>
+                        ${((it.price_cents * it.quantity) / 100).toLocaleString()}
+                      </>
+                    ) : `$${(it.price_cents / 100).toLocaleString()}`}
+                  </div>
+                ) : (
+                  <div className={styles.price}>-</div>
+                )}
                 <div className={styles.btnRow}>
                   <button className={styles.btn} onClick={() => onRemove(it.sku)}>Remove</button>
                 </div>
