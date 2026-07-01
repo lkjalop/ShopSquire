@@ -242,6 +242,10 @@ _CORE_MODULES = [
     "src/app/services/traffic_source.py",
     # sales-response policy: {demand,inventory,margin}→{discount,price,promo,reorder} decision matrix — commerce-generic.
     "src/app/services/sales_response_policy.py",
+    # support-phrasing policy: objection theme→response angle (price→value) — commerce-generic categories, no product vocab.
+    "src/app/services/support_response_policy.py",
+    # market store (deck M2): trend_indicator/competitor_snapshot/offer_policy — opaque entity_ref + numbers/enums.
+    "src/app/services/market_store.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.

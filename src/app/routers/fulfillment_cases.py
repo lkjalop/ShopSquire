@@ -1095,6 +1095,36 @@ def market_storefront_emphasis(inventory_position: str = Query("balanced"),
             "demand_findings_seen": len(findings or [])}
 
 
+@router.get("/market/support-response")
+def market_support_response(objection: Optional[str] = Query(None),
+                            role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """M5 SUPPORT lane — the pre-sales phrasing angle to counter the blocking objection (deck: price
+    objections → shift to lifetime VALUE). Uses the explicit ``objection`` when given, else the dominant
+    objection theme from recent findings. Returns the response angle + guidance; the support runtime renders
+    APPROVED copy for that angle (never free-form). Recommends only."""
+    from src.app.services.support_response_policy import objection_response, dominant_objection
+    from src.app.services.market_analysis import load_recent_findings
+    if objection:
+        resp = objection_response(objection)
+        return {**resp.as_dict(), "source": "explicit"}
+    with db_session() as db:
+        findings = load_recent_findings(db, limit=50)
+    resp = objection_response(dominant_objection(findings))
+    return {**resp.as_dict(), "source": "recent_findings", "objection_findings_seen": len(findings or [])}
+
+
+@router.get("/market/history")
+def market_history(entity_ref: Optional[str] = Query(None), limit: int = Query(100, ge=1, le=1000),
+                   role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Deck Module-2 read surface — the persistent market memory: trend indicators, competitor snapshots,
+    and offer-policy decisions (optionally for one entity_ref), newest first. Read-only."""
+    from src.app.services.market_store import list_trend_indicators, list_competitor_snapshots, list_offer_policies
+    with db_session() as db:
+        return {"trend_indicators": list_trend_indicators(db, entity_ref=entity_ref, limit=limit),
+                "competitor_snapshots": list_competitor_snapshots(db, entity_ref=entity_ref, limit=limit),
+                "offer_policies": list_offer_policies(db, entity_ref=entity_ref, limit=limit)}
+
+
 @router.get("/governance/pulse")
 def governance_pulse(tenant_id: str = Query("default"),
                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
