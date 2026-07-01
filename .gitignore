@@ -119,3 +119,6 @@ resume_*.md
 
 # pytest run-output artifact (was accidentally tracked)
 pytest_run_out.txt
+backups/
+_boot_audit.db*
+tmp_browser_deepdive/
