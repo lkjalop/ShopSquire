@@ -1026,6 +1026,34 @@ def market_network_breakdown(role: str = Depends(require_role(_OPERATOR))) -> Di
         return network_breakdown(db)
 
 
+@router.get("/market/sales-response")
+def market_sales_response(sku: str = Query(...), qty: int = Query(1, ge=1),
+                          retail_cents: Optional[int] = Query(None),
+                          supplier_cost_cents: Optional[int] = Query(None),
+                          role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Answers "how do sales change as demand / inventory / margin change?" for one item. Assembles the
+    three axes from the EXISTING intelligence — recent demand findings (market_analysis), the item's live
+    availability, and its deal economics (when retail + supplier cost are known) — and runs the pure
+    sales-response policy. Returns the recommended discount/price/promotion/reorder move WITH its rationale.
+    Recommends only (nothing is applied); the discount is always clamped to the margin floor."""
+    from src.app.services.sales_response_policy import assess_sales_response
+    from src.app.services.availability_agent import assess_availability
+    from src.app.services.fulfillment.economics import compute as econ_compute
+    from src.app.services.market_analysis import load_recent_findings
+    econ = None
+    if retail_cents and supplier_cost_cents:
+        econ = econ_compute(supplier_unit_cost_cents=supplier_cost_cents, retail_unit_cents=retail_cents, quantity=qty)
+    avail = assess_availability([sku], qty)
+    with db_session() as db:
+        findings = load_recent_findings(db, limit=50)
+    resp = assess_sales_response(demand_findings=findings, availability=avail, economics=econ)
+    out = resp.as_dict()
+    out["item_ref"] = sku
+    out["inputs"] = {"availability": {k: avail.get(k) for k in ("in_stock", "shortfall", "requested_qty")},
+                     "economics_known": econ is not None, "demand_findings_seen": len(findings or [])}
+    return out
+
+
 @router.get("/governance/pulse")
 def governance_pulse(tenant_id: str = Query("default"),
                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:

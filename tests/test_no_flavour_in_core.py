@@ -240,6 +240,8 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/procurement_fraud_signals.py",
     # traffic-source attribution: utm/referrer → opaque channel label + per-channel visit/conversion — no product vocab.
     "src/app/services/traffic_source.py",
+    # sales-response policy: {demand,inventory,margin}→{discount,price,promo,reorder} decision matrix — commerce-generic.
+    "src/app/services/sales_response_policy.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.
