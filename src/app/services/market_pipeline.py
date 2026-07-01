@@ -32,6 +32,17 @@ def run_pipeline(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 2000, min_
         findings = run_analysis(db, limit=limit, anomaly_fn=anomaly_fn, forecast_fn=forecast_fn,
                                 tenant_id=tenant_id)
         persisted = persist_findings(db, findings, tenant_id=tenant_id, expire_unobserved=expire_unobserved)
+        # Module-2 HISTORICAL entities (deck): mirror the findings into trend_indicator / competitor_snapshot
+        # so the market store accrues durable history (M3→M2 write path). Own session so its per-row commits
+        # never touch this pipeline's transaction; operates on the in-memory findings, not uncommitted DB rows.
+        try:
+            from src.app.models.db import db_session as _store_db
+            from src.app.services.market_store import persist_findings as _store_findings
+            with _store_db() as _sdb:
+                _store_findings(_sdb, findings, tenant_id=tenant_id)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("market_pipeline M2 store sink failed: %s", exc)
         # Module-2 warehouse sink: roll raw signals into the durable depth aggregate (cheap, writes a
         # SEPARATE rollup table — never touches signals/findings) + optional retention pruning, env-gated
         # (MARKET_SIGNAL_RETENTION_DAYS, default 0 = never prune; we never silently delete in test/demo).
