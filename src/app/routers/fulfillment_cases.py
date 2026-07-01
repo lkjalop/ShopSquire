@@ -110,7 +110,7 @@ def _case_view(db, case_id: str, *, for_operator: bool) -> Dict[str, Any]:
             from src.app.services.fulfillment.margin_advisor import assess as _margin_assess
             adv = _margin_assess(db, case_id)
             if adv.get("available"):
-                out["margin_advice"] = adv
+                out["margin_advice"] = _attach_sales_response(db, case_id, adv)  # M4→M5 demand-aware overlay
                 if adv.get("verdict") == "below_floor" and _margin_gate_mode() != "off":
                     out["margin_warning"] = {
                         "mode": _margin_gate_mode(),
@@ -293,6 +293,27 @@ def get_economics(case_id: str, retail_unit_cents: Optional[int] = Query(None),
         return {"case_id": case_id, "economics": econ}
 
 
+def _attach_sales_response(db, case_id: str, advice: Dict[str, Any]) -> Dict[str, Any]:
+    """M4→M5 demand-aware overlay on the margin advice: given demand trend + stock position, HOW to use the
+    discount headroom (increase to clear surplus / reduce to protect a rising line). Recommends, never
+    applies; the recommended discount is margin-clamped by the policy. Best-effort — never breaks the
+    margin verdict (returns ``advice`` unchanged on any failure)."""
+    if not advice.get("available"):
+        return advice
+    try:
+        from src.app.services.sales_response_policy import assess_sales_response
+        from src.app.services.market_analysis import load_recent_findings
+        cur = fwf.repository.current_version(db, case_id)
+        avail = (cur.state_json.get("availability") if cur and isinstance(cur.state_json, dict) else {}) or {}
+        sr = assess_sales_response(demand_findings=load_recent_findings(db, limit=50),
+                                   availability=avail, economics=advice.get("economics"))
+        advice["sales_response"] = sr.as_dict()
+    except Exception as _srx:
+        import logging
+        logging.getLogger("shopsquire.fulfillment").debug("sales_response overlay skipped: %s", _srx)
+    return advice
+
+
 @router.get("/cases/{case_id}/margin-advice")
 def get_margin_advice(case_id: str, retail_unit_cents: Optional[int] = Query(None),
                       floor_margin_pct: float = Query(0.10),
@@ -303,8 +324,8 @@ def get_margin_advice(case_id: str, retail_unit_cents: Optional[int] = Query(Non
     supplier send to judge whether the reorder is worth it."""
     from src.app.services.fulfillment.margin_advisor import assess as _margin_assess
     with db_session() as db:
-        return {"case_id": case_id, **_margin_assess(db, case_id, retail_unit_cents=retail_unit_cents,
-                                                     floor_margin_pct=floor_margin_pct)}
+        advice = _margin_assess(db, case_id, retail_unit_cents=retail_unit_cents, floor_margin_pct=floor_margin_pct)
+        return {"case_id": case_id, **_attach_sales_response(db, case_id, advice)}
 
 
 # ── commands ──────────────────────────────────────────────────────────────────

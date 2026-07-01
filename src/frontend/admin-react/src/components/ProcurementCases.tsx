@@ -176,6 +176,25 @@ export function ProcurementCases() {
                     ⚠ {view.margin_warning.message}
                   </div>
                 )}
+                {view.margin_advice.sales_response && (
+                  <div data-testid="op-sales-response" style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed #d1d5db' }}>
+                    <strong>Demand-aware call:</strong>{' '}
+                    {view.margin_advice.sales_response.discount_action === 'increase'
+                      ? `discount up to ${pct(view.margin_advice.sales_response.recommended_discount_pct)} to move stock`
+                      : view.margin_advice.sales_response.discount_action === 'reduce'
+                        ? 'hold/trim discount — protect margin'
+                        : 'hold — no discount pressure'}
+                    {' · '}reorder: {view.margin_advice.sales_response.reorder_urgency}
+                    <div style={{ color: '#6b7280', fontSize: 12, marginTop: 2 }}>
+                      {(view.margin_advice.sales_response.rationale || []).slice(0, 2).map((r: string, i: number) => (
+                        <div key={i}>• {r}</div>
+                      ))}
+                      <div style={{ fontStyle: 'italic' }}>
+                        demand {view.margin_advice.sales_response.situation?.demand_trend} · stock {view.margin_advice.sales_response.situation?.inventory_position} · margin {view.margin_advice.sales_response.situation?.margin_headroom}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
