@@ -89,12 +89,21 @@ def ingest_consumer_signals(events: List[Dict[str, Any]], request: Request, role
     # privacy-first ingest above (raw IP is still dropped there; only the opaque channel is derived here).
     try:
         from src.app.services import traffic_source as _ts
+        from src.app.services.geoip import enrich_ip as _enrich_ip
         with db_session() as _tdb:
             for ev in events:
                 sh = hash_value(ev.get("session_id") or "") if ev.get("session_id") else None
-                if sh:
-                    _ts.capture(_tdb, session_hash=sh, properties=security_sanitize(ev.get("properties") or {}),
-                                action=ev.get("action"), occurred_at=ev.get("ts") or now_iso)
+                if not sh:
+                    continue
+                # repurpose the fraud-grade network flags for VERIFIED-HUMAN traffic quality: a datacenter/
+                # VPN/Tor visit is bot-suspect. Derived from the IP here then discarded — only the boolean is kept.
+                try:
+                    _net = _enrich_ip(ev.get("ip")) or {}
+                    _bot = bool(_net.get("is_hosting") or _net.get("is_vpn") or _net.get("is_tor"))
+                except Exception:
+                    _bot = False
+                _ts.capture(_tdb, session_hash=sh, properties=security_sanitize(ev.get("properties") or {}),
+                            action=ev.get("action"), bot_suspect=_bot, occurred_at=ev.get("ts") or now_iso)
     except Exception:
         pass
     return {"stored": stored}

@@ -110,10 +110,12 @@ def channel_for_session(db, *, tenant_id: str, session_hash: str) -> Optional[st
 
 
 def capture(db, *, session_hash: Optional[str], properties: Optional[Dict[str, Any]], action: Optional[str] = None,
-            occurred_at: Optional[str] = None, tenant_id: str = "default") -> Dict[str, Any]:
+            bot_suspect: bool = False, occurred_at: Optional[str] = None, tenant_id: str = "default") -> Dict[str, Any]:
     """Best-effort capture at the consumer-signals ingest: record the session's first-touch channel + emit a
     market signal — a `demand` per unique session (a visit), and a `conversion` (tagged with that session's
-    channel) when the action is a purchase. Feeds detect_channel_performance. Returns {channel, emitted}."""
+    channel) when the action is a purchase. ``bot_suspect`` (a datacenter/VPN/Tor visit — the same fraud-grade
+    network flag, repurposed) tags the visit so VERIFIED-HUMAN visits can be counted (bot-clean traffic quality
+    most SMB analytics can't produce). Feeds detect_channel_performance. Returns {channel, emitted}."""
     if db is None or not session_hash:
         return {"channel": None, "emitted": None}
     tid = str(tenant_id or "default")
@@ -134,7 +136,7 @@ def capture(db, *, session_hash: Optional[str], properties: Optional[Dict[str, A
             emitted = "conversion"
         else:
             sig = normalize(signal_type="demand", source="traffic_source",
-                            payload={"session": session_hash, "channel": channel},
+                            payload={"session": session_hash, "channel": channel, "bot_suspect": bool(bot_suspect)},
                             occurred_at=occurred_at, trust_score=0.8, dedup_fields=["session", "channel"],
                             tenant_id=tid)
             emitted = "demand"
@@ -165,6 +167,7 @@ def channel_breakdown(db, *, tenant_id: str = "default", limit: int = 5000) -> D
         return out
     import json as _json
     visits: Dict[str, int] = {}
+    human: Dict[str, int] = {}       # visits that are NOT datacenter/VPN/Tor (verified-human)
     conv: Dict[str, int] = {}
     signals: List[Dict[str, Any]] = []
     for st, pj in (rows or []):
@@ -180,10 +183,16 @@ def channel_breakdown(db, *, tenant_id: str = "default", limit: int = 5000) -> D
             conv[ch] = conv.get(ch, 0) + 1
         elif st == "demand":
             visits[ch] = visits.get(ch, 0) + 1
+            if not (payload or {}).get("bot_suspect"):
+                human[ch] = human.get(ch, 0) + 1
     out["channels"] = sorted(
-        ({"channel": c, "visits": visits.get(c, 0), "conversions": conv.get(c, 0),
+        ({"channel": c, "visits": visits.get(c, 0), "verified_human_visits": human.get(c, 0),
+          "conversions": conv.get(c, 0),
           "conversion_rate": round(conv.get(c, 0) / visits[c], 4) if visits.get(c) else 0.0}
          for c in set(list(visits) + list(conv))), key=lambda r: -r["visits"])
+    tv, th = sum(visits.values()), sum(human.values())
+    out["summary"] = {"total_visits": tv, "verified_human_visits": th, "bot_suspect_visits": tv - th,
+                      "human_ratio": round(th / tv, 4) if tv else 0.0, "conversions": sum(conv.values())}
     try:
         out["findings"] = [f.summary for f in detect_channel_performance(signals, min_volume=1)]
     except Exception:

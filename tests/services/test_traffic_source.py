@@ -67,3 +67,16 @@ def test_channel_breakdown_computes_conversion_rate(db):
 
 def test_capture_is_safe_without_session(db):
     assert ts.capture(db, session_hash=None, properties={"utm_source": "x"}, action="view")["channel"] is None
+
+
+def test_verified_human_visits_excludes_bot_suspect(db):
+    # 2 human visits + 1 datacenter/VPN visit (bot-suspect) from the same channel
+    ts.capture(db, session_hash="h1", properties={"utm_source": "google"}, action="view", bot_suspect=False)
+    ts.capture(db, session_hash="h2", properties={"utm_source": "google"}, action="view", bot_suspect=False)
+    ts.capture(db, session_hash="b1", properties={"utm_source": "google"}, action="view", bot_suspect=True)
+    bd = ts.channel_breakdown(db)
+    s = bd["summary"]
+    assert s["total_visits"] == 3 and s["verified_human_visits"] == 2 and s["bot_suspect_visits"] == 1
+    assert s["human_ratio"] == round(2 / 3, 4)
+    g = next(c for c in bd["channels"] if c["channel"] == "google")
+    assert g["visits"] == 3 and g["verified_human_visits"] == 2
