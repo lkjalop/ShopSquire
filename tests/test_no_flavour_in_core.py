@@ -246,6 +246,12 @@ _CORE_MODULES = [
     "src/app/services/support_response_policy.py",
     # market store (deck M2): trend_indicator/competitor_snapshot/offer_policy — opaque entity_ref + numbers/enums.
     "src/app/services/market_store.py",
+    # multi-intent turn parser (P0): amend/new-line/scoped-budget decomposition — numbers + grammar cues, no product vocab.
+    "src/app/services/intent_decomposer.py",
+    # scatter-gather adversarial guard (P0): category/budget/qty/context checks — opaque category token + numbers.
+    "src/app/services/scatter_gather_guard.py",
+    # multi-intent planner (P0): decompose→amend→scatter-gather→guard orchestration — opaque refs, injected search.
+    "src/app/services/multi_intent_planner.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.
