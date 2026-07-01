@@ -504,7 +504,14 @@ def _build_anchor_sections(
         try:
             from src.app.services.cv_triage_basic import classify_image_relevance
             _labels = img.get("labels") if isinstance(img.get("labels"), list) else []
-            if classify_image_relevance(_labels, str(img.get("ocr_text") or "")) == "off_topic":
+            _cr = img.get("catalog_relevance") if isinstance(img.get("catalog_relevance"), dict) else {}
+            # skip the "matches for this image" group when EITHER the relevance classifier says off_topic OR
+            # an explicit off-domain flag is set (the classifier needs good CV labels; the flag is the backstop
+            # so a mislabelled off-domain image can't still claim "Best 3 matches for this image" — screenshot 007).
+            _off = (classify_image_relevance(_labels, str(img.get("ocr_text") or "")) == "off_topic"
+                    or bool(img.get("off_domain")) or bool(_cr.get("off_domain"))
+                    or str(img.get("image_relevance") or "").strip().lower() == "off_topic")
+            if _off:
                 continue
         except Exception:
             pass
@@ -540,8 +547,8 @@ def _build_anchor_sections(
         )
         uc = str(use_case_key or buyer_persona or anchor.get("use_case_hint") or "general").replace("_", " ")
         summary = (
-            f"Best 3 matches for this image in {budget_phrase}. "
-            f"Prioritized for {uc} based on brand/form-factor hint and price fit."
+            f"Closest catalog picks for your image + text, in {budget_phrase}. "
+            f"Prioritized for {uc} on brand/form-factor and price fit."
         )
         sections.append(
             {
