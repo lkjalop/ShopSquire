@@ -83,4 +83,18 @@ def ingest_consumer_signals(events: List[Dict[str, Any]], request: Request, role
             db.commit()
     except Exception:
         raise HTTPException(status_code=500, detail="persist_failed")
+    # Marketing-BI foundation: capture the visit's traffic source (utm_*/referrer/gclid) → session channel + a
+    # channel-tagged market signal, so the already-built market_analysis channel/segment detectors + attribution
+    # light up ("which campaign drove the sale"). ISOLATED best-effort on a fresh session — never affects the
+    # privacy-first ingest above (raw IP is still dropped there; only the opaque channel is derived here).
+    try:
+        from src.app.services import traffic_source as _ts
+        with db_session() as _tdb:
+            for ev in events:
+                sh = hash_value(ev.get("session_id") or "") if ev.get("session_id") else None
+                if sh:
+                    _ts.capture(_tdb, session_hash=sh, properties=security_sanitize(ev.get("properties") or {}),
+                                action=ev.get("action"), occurred_at=ev.get("ts") or now_iso)
+    except Exception:
+        pass
     return {"stored": stored}

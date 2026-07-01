@@ -966,6 +966,16 @@ def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]
         return mp.state(db)
 
 
+@router.get("/market/traffic-sources")
+def market_traffic_sources(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """Marketing-BI: visits + conversions + conversion-rate PER CHANNEL (traffic source), plus the
+    channel-performance findings — 'which campaign/channel actually drove the sale'. Fed by the
+    utm/referrer/gclid captured at the consumer-signals ingest; the channel is an opaque label (no raw IP)."""
+    from src.app.services.traffic_source import channel_breakdown
+    with db_session() as db:
+        return channel_breakdown(db)
+
+
 @router.get("/governance/pulse")
 def governance_pulse(tenant_id: str = Query("default"),
                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:

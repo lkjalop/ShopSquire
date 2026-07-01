@@ -238,6 +238,8 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/change_order.py",
     # procurement fraud signals: amendment-churn cap + cancellation-pattern counts — opaque buyer key, no product vocab.
     "src/app/services/fulfillment/procurement_fraud_signals.py",
+    # traffic-source attribution: utm/referrer → opaque channel label + per-channel visit/conversion — no product vocab.
+    "src/app/services/traffic_source.py",
     # canonical catalog: price_book_entry + inventory_level (retail/stock), cents + counts — no product vocab.
     "src/app/services/commerce_catalog.py",
     # inventory source adapter: canonical-vs-legacy stock selection, sku→count only — no product vocab.
