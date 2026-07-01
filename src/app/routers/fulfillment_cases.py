@@ -346,6 +346,8 @@ class SplitLineBody(BaseModel):
     item_ref: str
     requested_qty: int
     in_stock: int = 0
+    source_qty: Optional[int] = None
+    shortfall: Optional[int] = None
     line_id: Optional[str] = None
 
 
@@ -1011,6 +1013,17 @@ def market_traffic_sources(role: str = Depends(require_role(_OPERATOR))) -> Dict
     from src.app.services.traffic_source import channel_breakdown
     with db_session() as db:
         return channel_breakdown(db)
+
+
+@router.get("/market/network-breakdown")
+def market_network_breakdown(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """BI + security view of the COARSE, non-PII network fingerprint ({asn, country, risk_tier}) carried on
+    visit signals: visits + verified-human counts by COUNTRY (region segmentation), by ASN (cluster
+    forensics), and by RISK_TIER. Never exposes a raw IP — the enrichment is coarsened at capture and the IP
+    is dropped. `coverage` reports how many visits carry the fingerprint."""
+    from src.app.services.traffic_source import network_breakdown
+    with db_session() as db:
+        return network_breakdown(db)
 
 
 @router.get("/governance/pulse")

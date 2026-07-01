@@ -80,3 +80,43 @@ def test_verified_human_visits_excludes_bot_suspect(db):
     assert s["human_ratio"] == round(2 / 3, 4)
     g = next(c for c in bd["channels"] if c["channel"] == "google")
     assert g["visits"] == 3 and g["verified_human_visits"] == 2
+
+
+# ── §6 coarsened network fingerprint (non-PII: {asn, country, risk_tier}, never the IP) ───────
+def test_coarsen_network_is_non_pii_and_tiers_risk():
+    # a plain residential visit → low risk, ASN + country kept, NO ip field anywhere
+    c = ts._coarsen_network({"asn": 4764, "country": "au", "is_hosting": False, "is_vpn": False, "is_tor": False})
+    assert c == {"risk_tier": "low", "asn": 4764, "country": "AU"}
+    # datacenter/VPN → medium; Tor → high
+    assert ts._coarsen_network({"asn": 14618, "country": "US", "is_hosting": True})["risk_tier"] == "medium"
+    assert ts._coarsen_network({"asn": 1, "country": "US", "is_tor": True})["risk_tier"] == "high"
+    # unknown country (ZZ) and a 0/None ASN are dropped, never faked
+    c2 = ts._coarsen_network({"asn": 0, "country": "ZZ", "is_vpn": True})
+    assert c2 == {"risk_tier": "medium"} and "ip" not in c2
+    assert ts._coarsen_network(None) is None and ts._coarsen_network({}) is None
+
+
+def test_network_breakdown_aggregates_by_country_asn_risk(db):
+    ts.capture(db, session_hash="n1", properties={"utm_source": "google"}, action="view",
+               network={"asn": 4764, "country": "AU", "risk_tier": "low"})
+    ts.capture(db, session_hash="n2", properties={"utm_source": "google"}, action="view",
+               network={"asn": 4764, "country": "AU", "risk_tier": "low"})
+    # a datacenter visitor (bot-suspect) from the same ASN — counted as a visit, NOT verified-human
+    ts.capture(db, session_hash="n3", properties={"utm_source": "google"}, action="view", bot_suspect=True,
+               network={"asn": 14618, "country": "US", "risk_tier": "medium"})
+    nb = ts.network_breakdown(db)
+    au = next(r for r in nb["by_country"] if r["country"] == "AU")
+    assert au["visits"] == 2 and au["verified_human_visits"] == 2
+    us = next(r for r in nb["by_country"] if r["country"] == "US")
+    assert us["visits"] == 1 and us["verified_human_visits"] == 0   # datacenter visit is not verified-human
+    assert any(r["asn"] == 4764 and r["visits"] == 2 for r in nb["by_asn"])
+    tiers = {r["risk_tier"]: r["visits"] for r in nb["by_risk_tier"]}
+    assert tiers.get("low") == 2 and tiers.get("medium") == 1
+    assert nb["coverage"]["with_network"] == 3 and nb["coverage"]["coverage_ratio"] == 1.0
+
+
+def test_capture_without_network_carries_no_fingerprint(db):
+    # a visit with no network enrichment must not fabricate a net block — coverage stays 0
+    ts.capture(db, session_hash="p1", properties={"utm_source": "google"}, action="view")
+    nb = ts.network_breakdown(db)
+    assert nb["coverage"]["with_network"] == 0 and nb["by_country"] == []

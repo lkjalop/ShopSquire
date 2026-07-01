@@ -97,13 +97,18 @@ def ingest_consumer_signals(events: List[Dict[str, Any]], request: Request, role
                     continue
                 # repurpose the fraud-grade network flags for VERIFIED-HUMAN traffic quality: a datacenter/
                 # VPN/Tor visit is bot-suspect. Derived from the IP here then discarded — only the boolean is kept.
+                _coarse_net = None
                 try:
                     _net = _enrich_ip(ev.get("ip")) or {}
                     _bot = bool(_net.get("is_hosting") or _net.get("is_vpn") or _net.get("is_tor"))
+                    # keep a COARSE, non-PII fingerprint {asn, country, risk_tier} for BI + security forensics;
+                    # the raw IP is still dropped — only these region/network-grade fields survive.
+                    _coarse_net = _ts._coarsen_network(_net)
                 except Exception:
                     _bot = False
                 _ts.capture(_tdb, session_hash=sh, properties=security_sanitize(ev.get("properties") or {}),
-                            action=ev.get("action"), bot_suspect=_bot, occurred_at=ev.get("ts") or now_iso)
+                            action=ev.get("action"), bot_suspect=_bot, occurred_at=ev.get("ts") or now_iso,
+                            network=_coarse_net)
     except Exception:
         pass
     return {"stored": stored}

@@ -47,6 +47,35 @@ def _referrer_domain(referrer: Optional[str]) -> str:
         return ""
 
 
+def _coarsen_network(net: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Coarsen a fraud-grade IP enrichment ({asn, country, is_hosting, is_vpn, is_tor, geo_risk}) into a
+    NON-PII, retention-safe network fingerprint: {asn, country, risk_tier}. The raw IP is NEVER stored — an
+    ASN is a public network operator shared by thousands-to-millions of endpoints (coarse by construction),
+    a 2-letter country is region-grade, and risk_tier is a derived bucket. This is what lets marketing BI
+    segment by region/network and lets security cluster abusive ASNs after the fact — without holding an IP.
+    Returns None when there's nothing coarse to keep."""
+    if not isinstance(net, dict) or not net:
+        return None
+    asn = net.get("asn")
+    country = str(net.get("country") or "").strip().upper()[:2] or None
+    # IDEMPOTENT: honour an already-coarsened tier so re-coarsening a coarse dict is a no-op (the raw
+    # is_vpn/is_tor flags are gone by then). Only derive from raw enrichment flags when no tier is set.
+    risk_tier = str(net.get("risk_tier") or "").strip().lower()
+    if not risk_tier:
+        if net.get("is_tor"):
+            risk_tier = "high"
+        elif net.get("is_hosting") or net.get("is_vpn"):
+            risk_tier = "medium"
+        else:
+            risk_tier = str(net.get("geo_risk") or "low").strip().lower() or "low"
+    out: Dict[str, Any] = {"risk_tier": risk_tier}
+    if isinstance(asn, int) and asn > 0:
+        out["asn"] = asn
+    if country and country != "ZZ":
+        out["country"] = country
+    return out
+
+
 def canonical_channel(*, utm_source: Any = None, utm_medium: Any = None, referrer: Any = None,
                       gclid: Any = None, fbclid: Any = None) -> str:
     """Derive one opaque CHANNEL label from a visit's attribution params. Priority: explicit UTM > paid-click
@@ -110,7 +139,8 @@ def channel_for_session(db, *, tenant_id: str, session_hash: str) -> Optional[st
 
 
 def capture(db, *, session_hash: Optional[str], properties: Optional[Dict[str, Any]], action: Optional[str] = None,
-            bot_suspect: bool = False, occurred_at: Optional[str] = None, tenant_id: str = "default") -> Dict[str, Any]:
+            bot_suspect: bool = False, occurred_at: Optional[str] = None, tenant_id: str = "default",
+            network: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Best-effort capture at the consumer-signals ingest: record the session's first-touch channel + emit a
     market signal — a `demand` per unique session (a visit), and a `conversion` (tagged with that session's
     channel) when the action is a purchase. ``bot_suspect`` (a datacenter/VPN/Tor visit — the same fraud-grade
@@ -135,8 +165,13 @@ def capture(db, *, session_hash: Optional[str], properties: Optional[Dict[str, A
                             tenant_id=tid)
             emitted = "conversion"
         else:
+            demand_payload: Dict[str, Any] = {"session": session_hash, "channel": channel,
+                                              "bot_suspect": bool(bot_suspect)}
+            coarse = _coarsen_network(network)
+            if coarse:
+                demand_payload["net"] = coarse   # {asn, country, risk_tier} — coarse + non-PII (never the IP)
             sig = normalize(signal_type="demand", source="traffic_source",
-                            payload={"session": session_hash, "channel": channel, "bot_suspect": bool(bot_suspect)},
+                            payload=demand_payload,
                             occurred_at=occurred_at, trust_score=0.8, dedup_fields=["session", "channel"],
                             tenant_id=tid)
             emitted = "demand"
@@ -197,4 +232,52 @@ def channel_breakdown(db, *, tenant_id: str = "default", limit: int = 5000) -> D
         out["findings"] = [f.summary for f in detect_channel_performance(signals, min_volume=1)]
     except Exception:
         pass
+    return out
+
+
+def network_breakdown(db, *, tenant_id: str = "default", limit: int = 5000) -> Dict[str, Any]:
+    """The BI + security view of the coarsened network fingerprint carried on `demand` signals. Aggregates
+    visits by COUNTRY (marketing region segmentation) and by ASN (security cluster forensics) and by
+    RISK_TIER — all from the non-PII {asn, country, risk_tier} embedded at capture. Read-only; never touches
+    a raw IP (there isn't one to touch). Empty structure on error."""
+    out: Dict[str, Any] = {"by_country": [], "by_asn": [], "by_risk_tier": [], "coverage": {}}
+    try:
+        rows = db.execute(text(
+            "SELECT payload_json FROM market_signal WHERE tenant_id=:t AND source='traffic_source' "
+            "AND signal_type='demand' ORDER BY ingested_at DESC LIMIT :lim"),
+            {"t": str(tenant_id or "default"), "lim": int(limit)}).fetchall()
+    except Exception as exc:
+        logger.debug("network_breakdown query failed: %s", exc)
+        return out
+    import json as _json
+    by_country: Dict[str, Dict[str, int]] = {}
+    by_asn: Dict[int, Dict[str, int]] = {}
+    by_risk: Dict[str, int] = {}
+    total = enriched = 0
+    for (pj,) in (rows or []):
+        try:
+            payload = pj if isinstance(pj, dict) else _json.loads(pj or "{}")
+        except Exception:
+            payload = {}
+        total += 1
+        human = 0 if (payload or {}).get("bot_suspect") else 1
+        net = (payload or {}).get("net") if isinstance((payload or {}).get("net"), dict) else None
+        if not net:
+            continue
+        enriched += 1
+        c = str(net.get("country") or "").upper()
+        if c:
+            b = by_country.setdefault(c, {"visits": 0, "verified_human_visits": 0})
+            b["visits"] += 1; b["verified_human_visits"] += human
+        a = net.get("asn")
+        if isinstance(a, int) and a > 0:
+            b = by_asn.setdefault(a, {"visits": 0, "verified_human_visits": 0})
+            b["visits"] += 1; b["verified_human_visits"] += human
+        rt = str(net.get("risk_tier") or "low")
+        by_risk[rt] = by_risk.get(rt, 0) + 1
+    out["by_country"] = sorted(({"country": c, **v} for c, v in by_country.items()), key=lambda r: -r["visits"])[:50]
+    out["by_asn"] = sorted(({"asn": a, **v} for a, v in by_asn.items()), key=lambda r: -r["visits"])[:50]
+    out["by_risk_tier"] = sorted(({"risk_tier": k, "visits": v} for k, v in by_risk.items()), key=lambda r: -r["visits"])
+    out["coverage"] = {"demand_signals": total, "with_network": enriched,
+                       "coverage_ratio": round(enriched / total, 4) if total else 0.0}
     return out
