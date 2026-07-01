@@ -262,9 +262,12 @@ def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]
         return {"order_group_id": group_id, "case_count": 0, "cases": [], "idempotent": False}
 
     resolved = resolve_line_skus(db, lines, tenant_id=tenant_id)
-    # only the lines we cannot fill from stock need sourcing (requested > in_stock).
-    sourcing = [l for l in resolved
-                if int(l.get("requested_qty") or 0) > int(l.get("in_stock") or 0)]
+    # Source explicit buyer-sourcing lines, plus ordinary stock shortfalls.
+    sourcing = [
+        l for l in resolved
+        if (int(l.get("source_qty") or l.get("shortfall") or 0) > 0)
+        or int(l.get("requested_qty") or 0) > int(l.get("in_stock") or 0)
+    ]
 
     existing = _already_materialized(db, group_id, tenant_id=tenant_id)
     if existing:

@@ -47,6 +47,26 @@ def test_quantity_from_delivery_horizon(q, expected):
     assert _extract_quantity(q) == expected
 
 
+def test_budget_range_before_product_is_not_quantity():
+    q = "i got a budget for 1200 to 1400 for work laptops"
+    p = decompose(q)
+    assert _extract_quantity(q) is None
+    assert p.quantity is None
+    assert (p.budget_min, p.budget_max) == (1200, 1400)
+
+
+def test_contextual_short_quantity_after_budget_range():
+    q = "i got a budget for 1200 to 1400 for work laptops? i need about 20?"
+    p = decompose(q)
+    assert _extract_quantity(q) == 20
+    assert p.quantity == 20
+    assert (p.budget_min, p.budget_max) == (1200, 1400)
+
+
+def test_contextual_short_quantity_rejects_time_unit():
+    assert _extract_quantity("show me work laptops, i need about 20 minutes") is None
+
+
 @pytest.mark.parametrize("q,expected_days", [
     ("deliver in fourteen days", 14), ("in two weeks", 14), ("within three days", 3),
     ("in 4 weeks", 28), ("by ten days", 10),

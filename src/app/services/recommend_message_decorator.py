@@ -140,7 +140,7 @@ def apply_contextual_notes(
         )
     if availability_line:
         assistant_message = (
-            f"{assistant_message} {availability_line}".strip()
+            f"{assistant_message.rstrip()}\n\n{availability_line}".strip()
             if assistant_message
             else availability_line
         )

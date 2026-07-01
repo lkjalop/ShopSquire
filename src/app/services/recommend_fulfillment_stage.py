@@ -131,6 +131,11 @@ def run_fulfillment_stage(
                 "transfer_plan": net.get("transfer_plan"), "fillable_from_network": net.get("fillable_from_network"),
                 "shortfall": net.get("shortfall"),
             }
+            _primary_name = ""
+            for _r in (results or [])[:1]:
+                if isinstance(_r, dict):
+                    _primary_name = str(_r.get("name") or (_r.get("specs") or {}).get("display_name") or "").strip()
+            line = _network_adjusted_availability_line(line, payload["availability"], primary_name=_primary_name)
     except Exception as exc:
         record_partial_failure("network_availability", exc, trace_id=trace_id)
     # decision-trace: the bulk availability assessment is a visible agent step (fires for any bulk query,
@@ -146,6 +151,40 @@ def run_fulfillment_stage(
                      flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id,
                      force_sourcing=_wants_sourcing(query))
     return line
+
+
+def _network_adjusted_availability_line(line: str, avail: Dict[str, Any], primary_name: Optional[str] = None) -> str:
+    """Prefer location-aware wording when network stock requires a transfer to satisfy the buyer quantity.
+
+    The availability is assessed against the TOP pick's SKU (results[0]) — for a generic browse the buyer
+    hasn't chosen a product yet, so we NAME that pick ("For the top match, <name>: …") rather than implying
+    "we have N of the thing you want". Keeps the copy honest without hiding availability from a bulk buyer.
+    """
+    net = (avail or {}).get("network") if isinstance(avail, dict) else {}
+    if not isinstance(net, dict) or not net.get("transfer_plan"):
+        return line
+    try:
+        n = int((avail or {}).get("requested_qty") or 0)
+        preferred = int(net.get("preferred_qty") or 0)
+        moved = sum(int(t.get("qty") or 0) for t in (net.get("transfer_plan") or []) if isinstance(t, dict))
+        network_shortfall = int(net.get("shortfall") or 0)
+    except Exception:
+        return line
+    if n <= 0 or moved <= 0:
+        return line
+    name = str(primary_name or "").strip()
+    if name:  # buyer's top pick is known → name it (honest for a generic browse)
+        if bool(net.get("fillable_from_network")):
+            return (f"For the top match, {name}: {n} units are available across the network — {preferred} at "
+                    f"your preferred location now and {moved} can transfer from other locations.")
+        return (f"For the top match, {name}: {preferred} at your preferred location now; {moved} can transfer "
+                f"from other locations, leaving {network_shortfall} to source.")
+    # no product to name → neutral wording (unchanged; preserves existing parity)
+    if bool(net.get("fillable_from_network")):
+        return (f"On availability: {n} are available across the network; {preferred} at your preferred "
+                f"location now and {moved} can transfer from other locations.")
+    return (f"On availability: {preferred} at your preferred location now; {moved} can transfer from other "
+            f"locations, leaving {network_shortfall} to source.")
 
 
 def _buyer_requirements(constraints: Dict[str, Any]) -> Dict[str, Any]:

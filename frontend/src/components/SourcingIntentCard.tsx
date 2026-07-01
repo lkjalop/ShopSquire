@@ -10,7 +10,7 @@
  * stays server-side (the preview never names a supplier).
  */
 import { useState } from 'react';
-import { confirmCartSourcing, type ConfirmCartResult, type SourcingIntent } from '../lib/api';
+import { commitFulfillmentCase, confirmCartSourcing, type ConfirmCartResult, type SourcingIntent } from '../lib/api';
 
 interface Props {
   intent: SourcingIntent;
@@ -32,8 +32,19 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
     setBusy(true); setError('');
     try {
       const r = await confirmCartSourcing(uid, orderId, lines, traceId, supersede, intent.requirements);
-      setResult(r);
-      onConfirmed?.(r);
+      let out = r;
+      if (!supersede && !r.idempotent && !r.amend_required && r.status == null && Array.isArray(r.cases) && r.cases.length > 0) {
+        let committed = 0;
+        for (const c of r.cases) {
+          if (c?.case_id) {
+            await commitFulfillmentCase(c.case_id, uid);
+            committed += 1;
+          }
+        }
+        out = { ...r, committed_count: committed } as ConfirmCartResult;
+      }
+      setResult(out);
+      onConfirmed?.(out);
     } catch (e: any) {
       setError(e?.message || 'could not confirm sourcing');
     } finally {

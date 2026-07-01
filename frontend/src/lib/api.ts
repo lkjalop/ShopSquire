@@ -203,6 +203,7 @@ export interface ConfirmCartResult {
   order_group_id: string | null;
   case_count?: number;
   cases?: Array<{ case_id: string; supplier_name?: string; total_quantity?: number }>;
+  committed_count?: number;
   idempotent?: boolean;
   amend_required?: boolean;
   reason?: string;
@@ -233,7 +234,11 @@ export async function confirmCartSourcing(
       trace_id: traceId,
       supersede,
       requirements: requirements || undefined,
-      lines: (lines || []).map((l) => ({ item_ref: l.item_ref, requested_qty: l.quantity })),
+      lines: (lines || []).map((l) => ({
+        item_ref: l.item_ref,
+        requested_qty: l.quantity,
+        source_qty: l.shortfall && l.shortfall > 0 ? l.shortfall : undefined,
+      })),
     }),
   });
   const j = await safeJson(r);

@@ -464,12 +464,32 @@ _QTY_STOP_NOUNS = {
     "weeks", "week", "days", "day", "months", "month", "years", "year", "hours", "hour",
     "minutes", "mins", "dollars", "bucks", "options", "results", "matches", "ones", "items",
     "products", "things", "models", "specs", "reviews",
+    # budget/range glue words: in "budget for 1200 to 1400 for work laptops", the plural noun after
+    # the range belongs to the product query, not the number before the range.
+    "to", "and", "for", "from", "between", "budget", "budgets", "price", "prices", "range",
+    "under", "below", "over", "above", "within", "around", "about", "max", "maximum", "min",
+    "minimum", "each", "per",
     # spec UNITS that follow a number as a spec, never a bulk quantity (refresh-rate, RAM/storage
     # sizes, screen size, weight, etc.) — so a spec value is never read as an order quantity.
     "fps", "hz", "ghz", "mhz", "khz", "nits", "wh", "mah", "mp", "dpi", "ppi", "rpm",
     "kg", "kgs", "lb", "lbs", "mm", "cm", "inch", "inches", "gb", "tb", "mb", "kb",
     "w", "watts", "v", "volts", "ms", "cores", "core", "ghz", "k",
 }
+
+
+def _has_prior_quantity_context(prefix: str) -> bool:
+    """True when an implicit count ("I need about 20?") has a product/item anchor earlier in the query.
+
+    This is deliberately grammar-only: any earlier plural noun/unit is enough, but budget/time/spec words are
+    excluded so standalone numeric chatter is not promoted to a bulk order.
+    """
+    words = re.findall(r"[a-z]+", str(prefix or "").lower())[-12:]
+    for w in words:
+        if w in _QTY_STOP_NOUNS:
+            continue
+        if (w.endswith("s") and len(w) >= 3) or w in ("units", "pcs", "pieces"):
+            return True
+    return False
 
 
 def _extract_quantity(q: str) -> Optional[int]:
@@ -494,6 +514,23 @@ def _extract_quantity(q: str) -> Optional[int]:
     if m2:
         n = _token_to_int(m2.group(1))
         if n is not None and 1 < n <= 9999:
+            return n
+    # Contextual short count: "work laptops? I need about 20?" has the product noun before the count,
+    # not after it. Only accept it when a prior plural/unit anchor exists and the following token is not
+    # a time/currency/spec word.
+    for m3 in re.finditer(
+        rf"\b(?:i\s+)?(?:need|want|require|order|buy|get|source|procure|after|looking\s+for)"
+        rf"\s+(?:about|around|roughly|approximately|approx|~)?\s*(\d{{1,4}}|{_NUMBER_WORD_ALT})\b",
+        ql,
+    ):
+        n = _token_to_int(m3.group(1))
+        if n is None or not (1 < n <= 9999):
+            continue
+        tail = ql[m3.end():]
+        next_words = re.findall(r"[a-z]+", tail)[:1]
+        if next_words and next_words[0] in _QTY_STOP_NOUNS:
+            continue
+        if _has_prior_quantity_context(ql[:m3.start()]):
             return n
     return None
 

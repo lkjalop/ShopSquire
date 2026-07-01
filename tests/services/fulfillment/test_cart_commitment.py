@@ -173,6 +173,20 @@ def test_materialize_skips_fully_in_stock_lines(db):
     assert r["case_count"] == 0 and r["idempotent"] is False
 
 
+def test_materialize_honors_explicit_source_qty_even_when_stock_exists(db):
+    # Explicit supplier sourcing from the buyer preview must not be recomputed away by current retail stock.
+    _seed_product(db, "GAM-0002", "HP Victus Gaming Laptop RTX")
+    ensure_supplier_coverage(db)
+    r = materialize_cases_for_order(db, order_id="ORD-SRC", uid="u1",
+                                    lines=[{"item_ref": "GAM-0002", "requested_qty": 7,
+                                            "in_stock": 10, "source_qty": 7}])
+    assert r["case_count"] == 1 and r["idempotent"] is False
+    cid = r["cases"][0]["case_id"]
+    sj = wf.repository.current_version(db, cid).state_json
+    assert sj["availability"]["requested_qty"] == 7
+    assert sj["availability"]["shortfall"] == 7
+
+
 def test_materialize_blank_order_id_is_a_safe_noop(db):
     _seed_product(db, "MON-1", "LG monitor")
     ensure_supplier_coverage(db)

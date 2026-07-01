@@ -1941,7 +1941,7 @@ export default function App() {
                       {rightPanelContract.emphasis.text}
                     </div>
                   )}
-                  {bulkAlternatives.length > 0 && (
+                  {bulkAlternatives.length > 0 && !(sourcingIntent && (sourcingIntent.lines?.length ?? 0) > 0 && !fulfilmentCase) && (
                     <div className={styles.procurementPanelSlot}>
                       <BulkAlternatives options={bulkAlternatives} />
                     </div>

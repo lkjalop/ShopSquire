@@ -49,6 +49,18 @@ def test_wants_sourcing_detects_reorder_language():
     assert not stage._wants_sourcing("")
 
 
+def test_availability_line_names_the_top_pick():
+    # §5: for a generic bulk browse the availability is assessed against the TOP pick — the line must NAME it
+    # (not imply "we have N of the thing you want" before the buyer has chosen a product).
+    avail = {"requested_qty": 20, "network": {"preferred_qty": 3, "fillable_from_network": True,
+             "transfer_plan": [{"from_location": "warehouse", "qty": 17}]}}
+    named = stage._network_adjusted_availability_line("base", avail, primary_name="HP Envy x360")
+    assert named.startswith("For the top match, HP Envy x360:") and "20 units are available" in named
+    # no name → falls back to the neutral phrasing (never crashes)
+    anon = stage._network_adjusted_availability_line("base", avail, primary_name=None)
+    assert anon.startswith("On availability:")
+
+
 def test_force_sourcing_emits_preview_even_when_in_stock():
     # 'reorder 50 from a supplier' but stock covers it (shortfall 0) → still emit the sourcing preview, sourcing
     # the FULL requested qty (a B2B replenishment isn't gated on retail stock). Closes the unreliable-trigger bug.
@@ -161,12 +173,13 @@ def test_network_breakdown_merged_onto_availability(monkeypatch):
             "transfer_plan": [{"from_location": "melbourne", "qty": 5}],
             "fillable_from_network": True, "shortfall": 0})
     payload = {}
-    stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}],
-                                constraints={"order_quantity": 10, "ship_to": "sydney"},
-                                payload=payload, uid="u1", trace_id="T1", flags={})
+    line = stage.run_fulfillment_stage(results=[{"sku": "SKU-1"}],
+                                       constraints={"order_quantity": 10, "ship_to": "sydney"},
+                                       payload=payload, uid="u1", trace_id="T1", flags={})
     net = payload["availability"]["network"]
     assert net["total_in_network"] == 17 and net["preferred_location"] == "sydney"
     assert net["transfer_plan"] == [{"from_location": "melbourne", "qty": 5}]
+    assert line == "On availability: 10 are available across the network; 5 at your preferred location now and 5 can transfer from other locations."
 
 
 def test_bulk_alternatives_attached_on_shortfall(monkeypatch):

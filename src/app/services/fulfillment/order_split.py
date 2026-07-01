@@ -92,6 +92,7 @@ def _resolve_lines(db, lines: List[Dict[str, Any]]) -> Dict[str, Any]:
                 _rows = _load_active_products(db)  # one fetch, reused for every phrase
             ir = _match_sku_for_phrase(_rows, str(ln.get("phrase") or "")) or ""
         qty = _int(ln.get("requested_qty", ln.get("quantity")))
+        source_qty = _int(ln.get("source_qty", ln.get("shortfall")))
         if qty <= 0:
             continue  # a zero/negative-qty line carries no order — genuinely empty, not a loss
         if not ir:
@@ -99,10 +100,15 @@ def _resolve_lines(db, lines: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
         if ir in by_sku:
             resolved[by_sku[ir]]["requested_qty"] += qty                       # SUM, never drop
+            if source_qty > 0:
+                resolved[by_sku[ir]]["source_qty"] = _int(resolved[by_sku[ir]].get("source_qty")) + source_qty
         else:
             by_sku[ir] = len(resolved)
-            resolved.append({"item_ref": ir, "requested_qty": qty, "in_stock": _int(ln.get("in_stock")),
-                             "phrase": ln.get("phrase")})
+            line = {"item_ref": ir, "requested_qty": qty, "in_stock": _int(ln.get("in_stock")),
+                    "phrase": ln.get("phrase")}
+            if source_qty > 0:
+                line["source_qty"] = source_qty
+            resolved.append(line)
     return {"resolved": resolved, "unresolved": unresolved}
 
 
@@ -188,7 +194,12 @@ def plan_order_split(db, *, lines: List[Dict[str, Any]], tenant_id: str = "defau
         item_ref = str(raw.get("item_ref") or raw.get("sku") or "").strip()
         requested = max(0, _int(raw.get("requested_qty", raw.get("quantity")), 0))
         in_stock = max(0, _int(raw.get("in_stock"), 0))
-        shortfall = max(0, requested - in_stock)
+        explicit_source = None
+        if raw.get("source_qty") is not None:
+            explicit_source = _int(raw.get("source_qty"), 0)
+        elif raw.get("shortfall") is not None:
+            explicit_source = _int(raw.get("shortfall"), 0)
+        shortfall = max(0, min(requested, explicit_source)) if explicit_source is not None else max(0, requested - in_stock)
         line = {
             "line_id": str(raw.get("line_id") or f"line-{idx + 1}"),
             "item_ref": item_ref,

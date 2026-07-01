@@ -728,22 +728,24 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
             fit_line = f"Closest options with trade-offs: {picks}."
     budget_reasoning = _build_budget_reasoning_note(query, results, constraints)
 
-    parts: list[str] = []
+    # PARAGRAPH the message so the buyer chat reads as distinct thoughts, not one blob. The frontend
+    # splits assistant copy on blank lines (App.tsx: split(/\n\n+/)), so grouping into 3 logical
+    # paragraphs — (1) the budget verdict + reasoning, (2) the concrete picks, (3) the follow-up —
+    # renders cleanly. Within a paragraph we still space-join. Downstream decorators append the
+    # availability + price-range notes as their own \n\n paragraphs.
+    verdict_bits: list[str] = []
     if not clean_use_case_fit and use_case_fit_status.get("message"):
-        parts.append(str(use_case_fit_status["message"]))
-    if brand_budget_answer:
-        parts.append(brand_budget_answer)
-        if budget_reasoning:
-            parts.append(budget_reasoning)
-        if fit_line:
-            parts.append(fit_line)
-    else:
-        parts.append(core_line)
-        if budget_reasoning:
-            parts.append(budget_reasoning)
-        if fit_line:
-            parts.append(fit_line)
+        verdict_bits.append(str(use_case_fit_status["message"]))
+    verdict_bits.append(brand_budget_answer if brand_budget_answer else core_line)
+    if budget_reasoning:
+        verdict_bits.append(budget_reasoning)
+    closing_bits: list[str] = []
     if urgency_note:
-        parts.append(urgency_note.strip())
-    parts.append(closing.strip())
-    return " ".join(p for p in parts if p).strip()
+        closing_bits.append(urgency_note.strip())
+    closing_bits.append(closing.strip())
+    paragraphs = [
+        " ".join(b for b in verdict_bits if b).strip(),   # 1) the answer to what they asked
+        (fit_line or "").strip(),                          # 2) the concrete picks
+        " ".join(b for b in closing_bits if b).strip(),    # 3) the follow-up question
+    ]
+    return "\n\n".join(p for p in paragraphs if p).strip()

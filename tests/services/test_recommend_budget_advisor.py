@@ -100,6 +100,17 @@ def test_deterministic_message_with_results():
     assert msg and "found" in msg.lower()
 
 
+def test_deterministic_message_is_paragraphed_not_one_blob():
+    # the buyer chat splits on blank lines — the verdict, the picks, and the follow-up question must
+    # land on separate paragraphs so the reply doesn't render as one wall of text (screenshot #008).
+    msg = _deterministic_assistant_message(
+        "gaming laptop", _rows(1200, 1500), {"budget_max": 2000, "use_case": "gaming"}
+    )
+    paras = [p for p in msg.split("\n\n") if p.strip()]
+    assert len(paras) >= 2, msg                      # at least verdict + follow-up as distinct paras
+    assert paras[-1].strip().endswith("?"), msg      # the follow-up question is its own final paragraph
+
+
 def test_build_budget_reasoning_note_gated():
     # not requested → empty
     assert _build_budget_reasoning_note("show me laptops", _rows(1200), {"budget_max": 1500}) == ""
