@@ -221,6 +221,21 @@ def decide(situation: SalesSituation) -> SalesResponse:
     )
 
 
+def promotion_biases(demand_trend: str, inventory_by_sku: Dict[str, str], *,
+                     margin_headroom: str = MARGIN_HEALTHY) -> Dict[str, str]:
+    """Per-item promotion_bias (boost | steady | suppress) from the SHARED demand trend + each item's
+    inventory position — the M5 ranking consumer. Runs the same decide() matrix per item, so the ranking
+    nudge and the margin panel stay consistent. Opaque sku + enum inputs (vertical-blind); pure. Items whose
+    bias is 'steady' are still returned (the caller can skip them). Empty input → {}."""
+    out: Dict[str, str] = {}
+    for sku, inv in (inventory_by_sku or {}).items():
+        if not sku:
+            continue
+        out[str(sku)] = decide(SalesSituation(demand_trend=demand_trend, inventory_position=str(inv),
+                                              margin_headroom=margin_headroom)).promotion_bias
+    return out
+
+
 def assess_sales_response(*, demand_findings: Optional[List[Any]] = None,
                           availability: Optional[Dict[str, Any]] = None,
                           economics: Optional[Any] = None,

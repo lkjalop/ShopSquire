@@ -61,18 +61,67 @@ def apply_experiment_nudge(
     return out
 
 
+_SR_TAG = "market-intel (demand-aware)"
+
+
+def apply_sales_response_nudge(
+    results: List[Dict[str, Any]],
+    *,
+    bias_by_sku: Dict[str, str],
+    max_delta: float = 0.04,
+    max_nudged_items: int = 6,
+) -> List[Dict[str, Any]]:
+    """Demand-aware ranking nudge (M5 consume #2): each item's promotion_bias moves its score by a small,
+    BOUNDED delta — PROMO_BOOST (surplus/hot) → +delta so it surfaces; PROMO_SUPPRESS (can't-ship shortage)
+    → -delta so it recedes; anything else is left untouched. Two caps bound the blast radius (``max_delta``
+    magnitude, ``max_nudged_items`` count) so it can never reshuffle the whole list. Reversible: the delta is
+    tagged ``_sales_response_delta`` (subtractable by revert_nudge). Returns the SAME object when nothing is
+    nudged (callers can `is`-check). Vertical-blind: sku + score + bias enum only."""
+    bias = {str(k): str(v) for k, v in (bias_by_sku or {}).items()}
+    rows = results or []
+    if not bias or not rows:
+        return results
+    cap = max(0, int(max_nudged_items))
+    out: List[Dict[str, Any]] = []
+    changed = False
+    nudged = 0
+    for r in rows:
+        b = bias.get(str(r.get("sku"))) if isinstance(r, dict) else None
+        if b in ("boost", "suppress") and nudged < cap:
+            r2 = dict(r)
+            base = float(r2.get("score") or r2.get("score_norm") or 0.0)
+            delta = float(max_delta) if b == "boost" else -float(max_delta)
+            r2["score"] = base + delta
+            r2["_sales_response_delta"] = delta
+            why = list(r2.get("why") or [])
+            tag = _SR_TAG + (" ↑" if b == "boost" else " ↓")
+            if tag not in why:
+                why.append(tag)
+            r2["why"] = why[:5]
+            out.append(r2)
+            changed = True
+            nudged += 1
+        else:
+            out.append(r)
+    if not changed:
+        return results
+    out.sort(key=lambda x: -(float(x.get("score") or 0.0)) if isinstance(x, dict) else 0.0)
+    return out
+
+
 def revert_nudge(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Undo a nudge from a captured response (replay/audit): subtract each `_nudge_delta` and re-sort.
     Proves per-response reversibility — the boost leaves a complete trail."""
     rows = results or []
-    if not any(isinstance(r, dict) and r.get("_nudge_delta") for r in rows):
+    if not any(isinstance(r, dict) and (r.get("_nudge_delta") or r.get("_sales_response_delta")) for r in rows):
         return results
     out = []
     for r in rows:
-        if isinstance(r, dict) and r.get("_nudge_delta"):
+        if isinstance(r, dict) and (r.get("_nudge_delta") or r.get("_sales_response_delta")):
             r2 = dict(r)
-            r2["score"] = float(r2.get("score") or 0.0) - float(r2.pop("_nudge_delta"))
-            r2["why"] = [w for w in (r2.get("why") or []) if w != _NUDGE_TAG]
+            delta = float(r2.pop("_nudge_delta", 0.0) or 0.0) + float(r2.pop("_sales_response_delta", 0.0) or 0.0)
+            r2["score"] = float(r2.get("score") or 0.0) - delta
+            r2["why"] = [w for w in (r2.get("why") or []) if w != _NUDGE_TAG and not str(w).startswith(_SR_TAG)]
             out.append(r2)
         else:
             out.append(r)

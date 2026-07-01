@@ -179,10 +179,90 @@ def _nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List
     return results
 
 
+def _inventory_position(row: Dict[str, Any], *, overstock_units: int) -> str:
+    """Commerce-generic inventory position for one candidate (vertical-blind: stock COUNTS only, no product
+    vocab): near-empty → shortage (recede if we can't ship), heavy overstock → surplus (surface to clear),
+    else balanced. Falls back to the in_stock boolean (OOS-only) when no count is present."""
+    s = row.get("stock")
+    if isinstance(s, (int, float)):
+        s = int(s)
+        if s <= 2:
+            return "shortage"
+        if s >= overstock_units:
+            return "surplus"
+        return "balanced"
+    ins = row.get("in_stock")
+    if ins is False or ins == 0:
+        return "shortage"
+    return "balanced"
+
+
+def _sales_response_nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """M5 consume #2 — Phase-3 LOW-RISK adaptation: a demand-aware ranking nudge. Given the shared demand
+    trend + each item's inventory position, surplus/hot items get a small BOUNDED boost and can't-ship
+    shortages recede. Flag-gated default-OFF (SALES_RESPONSE_NUDGE_ENABLED), respects the global kill switch,
+    AUTHORIZED through the adaptive action gate (Policy authorizes), bounded + reversible + audited. Returns
+    ``results`` unchanged when off / denied / nothing actionable."""
+    if not (state.flags.get("SALES_RESPONSE_NUDGE_ENABLED", False) and not state.simulate and results):
+        return results
+    try:
+        from src.app.models.db import db_session
+        from src.app.services.experiment_ops import adaptation_killed
+        from src.app.services.market_analysis import load_recent_findings
+        from src.app.services.ranking_nudge import apply_sales_response_nudge
+        from src.app.services.sales_response_policy import classify_demand_trend, promotion_biases
+        if adaptation_killed():
+            return results  # global kill switch — no adaptation
+        try:
+            max_items = int(state.flags.get("SALES_RESPONSE_NUDGE_MAX_ITEMS") or 6)
+        except (TypeError, ValueError):
+            max_items = 6
+        try:
+            overstock = int(state.flags.get("SALES_RESPONSE_OVERSTOCK_UNITS") or 20)
+        except (TypeError, ValueError):
+            overstock = 20
+        with db_session() as db:
+            findings = load_recent_findings(db, limit=50)
+        demand_trend, conf = classify_demand_trend(findings)
+        inv_by_sku = {str(r.get("sku")): _inventory_position(r, overstock_units=overstock)
+                      for r in results if isinstance(r, dict) and r.get("sku")}
+        actionable = {s: b for s, b in promotion_biases(demand_trend, inv_by_sku).items()
+                      if b in ("boost", "suppress")}
+        if not actionable:
+            return results  # only a 'steady' picture → nothing to adjust
+        # UNIFIED GATE — the adaptation is AUTHORIZED (confidence = demand-signal strength) + durable audit.
+        from src.app.services.adaptive_action_gate import authorize
+        with db_session() as gdb:
+            gate = authorize(gdb, action_type="adjust_ranking", confidence=float(conf),
+                             subject=str(state.uid_hash or state.uid or ""), target=str(next(iter(actionable))))
+        if not gate.allowed:
+            state.payload["sales_response_nudge"] = {"applied": 0, "gate": gate.reason,
+                                                     "demand_trend": demand_trend}
+            return results  # authorized DENY — no adjustment
+        nudged = apply_sales_response_nudge(results, bias_by_sku=actionable, max_nudged_items=max_items)
+        if nudged is not results:
+            results = nudged
+            state.payload["results"] = results
+        state.payload["sales_response_nudge"] = {
+            "applied": sum(1 for r in results if isinstance(r, dict) and r.get("_sales_response_delta")),
+            "demand_trend": demand_trend,
+            "boosted": sum(1 for b in actionable.values() if b == "boost"),
+            "suppressed": sum(1 for b in actionable.values() if b == "suppress"),
+            "gate": gate.reason,
+        }
+        log_trace_event(trace_id=state.trace_id, event_type="sales_response_applied", source_type="agent",
+                        source_id="Sales_Response_Agent", target_type="recommendation", target_id=state.decision_id,
+                        payload=state.payload["sales_response_nudge"])
+    except Exception as exc:
+        record_partial_failure("sales_response_nudge", exc, trace_id=state.trace_id)
+    return results
+
+
 def run_intelligence_stage(state: IntelligenceStageState, *, mem) -> List[Dict[str, Any]]:
-    """Capture → market-intel → reversible nudge. Returns the (possibly nudged) results list; the
+    """Capture → market-intel → reversible nudge(s). Returns the (possibly nudged) results list; the
     caller assigns it and (the nudge already set) payload['results']."""
     results = state.results
     _capture(state, results)
     _market_intelligence(state, results, mem=mem)
-    return _nudge(state, results)
+    results = _nudge(state, results)                    # experiment (hippograph recall) nudge
+    return _sales_response_nudge(state, results)        # M5 demand-aware nudge (Phase-3)

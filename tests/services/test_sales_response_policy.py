@@ -99,3 +99,15 @@ def test_assess_all_unknown_is_a_safe_hold():
     r = srp.assess_sales_response()   # nothing known
     assert r.discount_action == srp.DISCOUNT_HOLD and r.recommended_discount_pct == 0.0
     assert r.price_bias == srp.PRICE_HOLD
+
+
+# ── M5 consume #2: per-item promotion_biases for the ranking nudge ────────────
+def test_promotion_biases_per_item_from_shared_demand():
+    inv = {"A": srp.INV_SURPLUS, "B": srp.INV_SHORTAGE, "C": srp.INV_BALANCED}
+    # falling demand: surplus → boost (clear it); shortage → suppress; balanced → steady
+    b = srp.promotion_biases(srp.DEMAND_FALLING, inv)
+    assert b == {"A": srp.PROMO_BOOST, "B": srp.PROMO_SUPPRESS, "C": srp.PROMO_STEADY}
+    # rising demand: surplus still boosts (hot), a shortage is steady (don't over-promote what can't ship)
+    b2 = srp.promotion_biases(srp.DEMAND_RISING, inv)
+    assert b2["A"] == srp.PROMO_BOOST and b2["B"] == srp.PROMO_STEADY
+    assert srp.promotion_biases(srp.DEMAND_STEADY, {}) == {}

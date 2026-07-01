@@ -7,7 +7,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from src.app.services import experiments as ex
-from src.app.services.ranking_nudge import apply_experiment_nudge, revert_nudge
+from src.app.services.ranking_nudge import (
+    apply_experiment_nudge, apply_sales_response_nudge, revert_nudge)
 
 
 def _results():
@@ -54,6 +55,39 @@ def test_revert_nudge_restores_original():
     assert skus == ["A", "B", "C"]  # original order restored
     assert all("_nudge_delta" not in r for r in restored)
     assert all("market-intel boost (experiment)" not in (r.get("why") or []) for r in restored)
+
+
+# ── M5 demand-aware nudge (surplus boosts, can't-ship shortage recedes) ───────
+def test_sales_response_nudge_boosts_surplus_demotes_shortage():
+    # A(0.90) surplus→boost, C(0.80) shortage→suppress; B steady
+    out = apply_sales_response_nudge(
+        _results(), bias_by_sku={"A": "boost", "C": "suppress", "B": "steady"}, max_delta=0.05)
+    a = next(r for r in out if r["sku"] == "A")
+    c = next(r for r in out if r["sku"] == "C")
+    assert a["_sales_response_delta"] == 0.05 and c["_sales_response_delta"] == -0.05
+    assert a["score"] == pytest.approx(0.95) and c["score"] == pytest.approx(0.75)   # bounded ± delta
+    assert "market-intel (demand-aware) ↑" in a["why"] and "market-intel (demand-aware) ↓" in c["why"]
+
+
+def test_sales_response_nudge_identity_when_all_steady():
+    r = _results()
+    assert apply_sales_response_nudge(r, bias_by_sku={"A": "steady", "B": "steady"}) is r
+
+
+def test_sales_response_nudge_is_bounded_by_item_cap():
+    out = apply_sales_response_nudge(
+        _results(), bias_by_sku={"A": "boost", "B": "boost", "C": "boost"}, max_delta=0.05, max_nudged_items=1)
+    assert sum(1 for r in out if r.get("_sales_response_delta")) == 1   # only 1 nudged, cap respected
+
+
+def test_revert_nudge_undoes_sales_response_delta():
+    nudged = apply_sales_response_nudge(
+        _results(), bias_by_sku={"A": "boost", "C": "suppress"}, max_delta=0.05)
+    restored = revert_nudge(nudged)
+    assert [r["sku"] for r in restored] == ["A", "B", "C"]              # original order back
+    assert all("_sales_response_delta" not in r for r in restored)
+    assert all(not any(str(w).startswith("market-intel (demand-aware)") for w in (r.get("why") or []))
+               for r in restored)
 
 
 # ── experiment live gate ──────────────────────────────────────────────────────
