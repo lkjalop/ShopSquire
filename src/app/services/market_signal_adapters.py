@@ -61,7 +61,10 @@ def from_search(row: Dict[str, Any]) -> Optional[MarketSignal]:
         return None
     return normalize(
         signal_type="demand", source="search_events",
-        payload={"event_id": eid, "query": row.get("query"), "result_count": row.get("result_count")},
+        # carry the (hashed) identity so the unmet-demand detector can gate on DISTINCT users, not raw count —
+        # a single actor scripting a zero-result query must not manufacture a customer-visible finding.
+        payload={"event_id": eid, "query": row.get("query"), "result_count": row.get("result_count"),
+                 "uid_hash": row.get("uid_hash"), "session": row.get("session_id")},
         occurred_at=row.get("event_time"), trust_score=0.8, dedup_fields=["event_id"],
     )
 
@@ -129,8 +132,10 @@ _SOURCES = {
         from_conversion,
     ),
     "search_events": (
-        "SELECT id, query, result_count, event_time FROM search_events ORDER BY event_time DESC LIMIT :lim",
-        lambda r: {"id": r[0], "query": r[1], "result_count": r[2], "event_time": r[3]},
+        "SELECT id, query, result_count, event_time, uid_hash, session_id FROM search_events "
+        "ORDER BY event_time DESC LIMIT :lim",
+        lambda r: {"id": r[0], "query": r[1], "result_count": r[2], "event_time": r[3],
+                   "uid_hash": r[4], "session_id": r[5]},
         from_search,
     ),
     "returns": (

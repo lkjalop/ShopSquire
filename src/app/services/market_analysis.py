@@ -26,6 +26,7 @@ Vertical-blind: finding_type/entity_ref/evidence are opaque to product vocabular
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -137,25 +138,48 @@ def detect_conversion_anomaly(signals, *, anomaly_fn: Optional[Callable] = None,
     )]
 
 
+# buyer-search text becomes a customer-visible finding summary (LLM narration in live mode). NEUTRALISE it:
+# strip control chars/newlines (kills newline-based injection), collapse + cap length (kills long payloads),
+# and redact obvious injection phrases. Defence-in-depth — the summary is quoted DATA, never an instruction.
+_INJECTION_RE = re.compile(
+    r"ignore\s+(previous|above|all|prior)|system\s+prompt|jailbreak|disregard|override\s+(policy|instructions)|"
+    r"you\s+are\s+now|new\s+instructions|forget\s+(everything|the\s+above)", re.IGNORECASE)
+
+
+def _neutralize_query(q: Any) -> str:
+    s = re.sub(r"[\x00-\x1f\x7f]+", " ", str(q or ""))   # strip control chars / newlines
+    s = re.sub(r"\s+", " ", s).strip()[:80]               # collapse whitespace + cap length
+    return "[redacted: suspicious search]" if _INJECTION_RE.search(s) else s
+
+
 def detect_inventory_demand_mismatch(signals, *, min_unmet: int = 3) -> List[MarketFinding]:
-    unmet: Dict[str, int] = {}
+    """Zero-result searches → a catalog-gap finding. HARDENED against poisoning: gated on DISTINCT USERS (not
+    raw search count), so one actor scripting a query can't manufacture a customer-visible finding; and the
+    query string is NEUTRALISED before it becomes the (LLM-narrated) summary. An anonymous zero-result search
+    (no uid/session) never counts toward a finding."""
+    unmet: Dict[str, set] = {}   # neutralised query -> set of DISTINCT hashed identities
     for s in signals or []:
         if (s or {}).get("signal_type") != "demand":
             continue
         p = s.get("payload") or {}
         rc = p.get("result_count")
         q = str(p.get("query") or "").strip().lower()
-        if q and rc is not None and int(rc) <= 0:
-            unmet[q] = unmet.get(q, 0) + 1
+        if not (q and rc is not None and int(rc) <= 0):
+            continue
+        ident = str(p.get("uid_hash") or p.get("session") or "").strip()
+        if not ident:
+            continue  # an unidentified zero-result search cannot manufacture a finding (anti-flood)
+        unmet.setdefault(_neutralize_query(q), set()).add(ident)
     out: List[MarketFinding] = []
-    for q, n in sorted(unmet.items(), key=lambda x: (-x[1], x[0])):
+    for q, idents in sorted(unmet.items(), key=lambda x: (-len(x[1]), x[0])):
+        n = len(idents)
         if n < min_unmet:
             continue
         severity = "warn" if n < min_unmet * 2 else "critical"
         out.append(MarketFinding(
             FINDING_INVENTORY_MISMATCH, q, severity, min(1.0, n / float(min_unmet * 3)),
-            f"Unmet demand: '{q}' searched {n}x with no results (catalog gap).",
-            {"query": q, "zero_result_searches": n}, "recent",
+            f"Unmet demand: '{q}' searched by {n} distinct users with no results (catalog gap).",
+            {"query": q, "distinct_users": n, "provenance": "buyer_search_unverified"}, "recent",
         ))
     return out
 
