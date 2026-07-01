@@ -102,7 +102,12 @@ def _dereference_product_labels(payload: Dict[str, Any]) -> Dict[str, Any]:
                     return ""
                 return " " + nm
             out = re.sub(r"\s*\[(\d+)\]", _repl, str(am))
-            out = re.sub(r"\s{2,}", " ", out).replace(" .", ".").replace(" ,", ",")
+            # collapse only HORIZONTAL whitespace — preserve \n\n paragraph breaks (the buyer chat splits
+            # on blank lines). A blanket \s{2,}->' ' here was flattening every reply that contained a '['
+            # (e.g. a "[512GB]" spec suffix triggered this path) into one blob.
+            out = re.sub(r"[ \t]{2,}", " ", out).replace(" .", ".").replace(" ,", ",")
+            out = re.sub(r"[ \t]+\n", "\n", out)      # no trailing spaces before a newline
+            out = re.sub(r"\n{3,}", "\n\n", out)      # cap consecutive blank lines at one break
             payload["assistant_message"] = out.strip()
     except Exception:
         pass
