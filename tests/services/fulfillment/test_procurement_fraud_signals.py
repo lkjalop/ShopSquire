@@ -25,6 +25,23 @@ def test_cancellation_pattern_flags_abuse():
     assert bad["flagged"] is True and bad["post_commit_cancellations"] == 4
 
 
+def test_redraft_abuse_is_network_aware():
+    # normal source, under cap → allow
+    assert fs.assess_redraft_abuse(amendment_count=2, amendment_cap=10)["action"] == "allow"
+    # normal source, OVER cap → throttle (existing human route)
+    assert fs.assess_redraft_abuse(amendment_count=10, amendment_cap=10)["action"] == "throttle"
+    # HOSTILE network (datacenter/VPN/Tor) OVER cap → BLOCK as suspected abuse
+    blk = fs.assess_redraft_abuse(amendment_count=10, amendment_cap=10, bot_suspect=True)
+    assert blk["action"] == "block" and blk["suspicious_network"] is True
+    assert "amendment_cap_exceeded" in blk["reasons"] and "bot_suspect_network" in blk["reasons"]
+    # high-geo-risk source over cap → block
+    assert fs.assess_redraft_abuse(amendment_count=12, amendment_cap=10, geo_risk="high")["action"] == "block"
+    # EARLY churn from a hostile source (past half the cap) → escalate/watch, not blocked yet
+    assert fs.assess_redraft_abuse(amendment_count=6, amendment_cap=10, bot_suspect=True)["action"] == "escalate"
+    # early churn from a NORMAL source → allow
+    assert fs.assess_redraft_abuse(amendment_count=6, amendment_cap=10)["action"] == "allow"
+
+
 def test_bad_input_is_safe():
     a = fs.assess_amendments(amendment_count=None, cap=10)
     assert a["amendment_count"] == 0 and a["over_cap"] is False

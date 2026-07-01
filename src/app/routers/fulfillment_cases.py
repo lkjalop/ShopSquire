@@ -12,7 +12,7 @@ from src.app.feature_flags import get_flags as _ff_get_flags
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from src.app.models.db import db_session
@@ -405,8 +405,36 @@ class ConfirmCartBody(BaseModel):
     requirements: Optional[Dict[str, Any]] = None  # buyer deadline/use_case/ship_to (from the preview) → onto the case
 
 
+def _client_network(request: Optional[Request]) -> Dict[str, Any]:
+    """Best-effort {bot_suspect, geo_risk} from the request IP, using the fraud-grade geoip enrichment. The IP
+    is used then discarded — only the booleans/label are returned. Empty (allow) when unavailable."""
+    if request is None:
+        return {"bot_suspect": False, "geo_risk": "low"}
+    try:
+        ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or \
+             (request.client.host if request.client else "")
+        from src.app.services.geoip import enrich_ip
+        net = enrich_ip(ip) or {}
+        return {"bot_suspect": bool(net.get("is_hosting") or net.get("is_vpn") or net.get("is_tor")),
+                "geo_risk": str(net.get("geo_risk") or "low")}
+    except Exception:
+        return {"bot_suspect": False, "geo_risk": "low"}
+
+
+def _emit_confirm_trace(db, order_id: str, verdict: Dict[str, Any]) -> None:
+    """Best-effort: record a redraft-abuse WATCH on the decision trace (escalate = proceed but surfaced to
+    governance). Never raises into the buyer flow."""
+    try:
+        from src.app.services.decision_log import log_trace_event
+        log_trace_event(trace_id=None, event_type="redraft_abuse_watch", source_type="agent",
+                        source_id="Procurement_Fraud_Agent", target_type="order", target_id=str(order_id),
+                        payload=verdict, durable=True)
+    except Exception:
+        pass
+
+
 @router.post("/cases/confirm-cart")
-def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
+def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, Any]:
     """GATE 1 at the CART-CONFIRMATION boundary (buyer action — no operator role): materialize the confirmed
     cart's SHORTFALL lines into durable procurement cases (one per supplier group), IDEMPOTENTLY keyed on
     order_id — a double-submitted confirm returns the SAME cases, never duplicates. No supplier is contacted
@@ -439,12 +467,21 @@ def confirm_cart(body: ConfirmCartBody) -> Dict[str, Any]:
                 l["in_stock"] = int(stock.get(str(l.get("item_ref")), 0))
         # supersede=True → buyer is amending a confirmed order: retire the active pre-send cases + re-source.
         if body.supersede:
-            # churn brake: an order amended past the cap must go to a human (amendment-churn DoS defense).
+            # NETWORK-AWARE churn brake: amendment-churn spins up supplier RFQ redrafts (a DDoS vector). Combine
+            # the per-PR amendment cap with the fraud-grade ASN/GeoIP flags — a datacenter/VPN/Tor or high-geo
+            # source over the cap is BLOCKED as suspected abuse; a normal source over the cap is throttled to a
+            # human; early churn from a hostile source is escalated (watched). Buyer-mind-change stays smooth.
             from src.app.services.fulfillment.cart_commitment import count_amendments
-            from src.app.services.fulfillment.procurement_fraud_signals import assess_amendments
-            _amend = assess_amendments(amendment_count=count_amendments(db, body.order_id))
-            if _amend["over_cap"]:
-                raise HTTPException(status_code=429, detail={"error": "amendment_cap_exceeded", **_amend})
+            from src.app.services.fulfillment.procurement_fraud_signals import assess_redraft_abuse
+            _net = _client_network(request)
+            _verdict = assess_redraft_abuse(amendment_count=count_amendments(db, body.order_id),
+                                            bot_suspect=_net["bot_suspect"], geo_risk=_net["geo_risk"])
+            if _verdict["action"] == "block":
+                raise HTTPException(status_code=403, detail={"error": "redraft_abuse_suspected", **_verdict})
+            if _verdict["action"] == "throttle":
+                raise HTTPException(status_code=429, detail={"error": "amendment_cap_exceeded", **_verdict})
+            if _verdict["action"] == "escalate":
+                _emit_confirm_trace(db, body.order_id, _verdict)  # watch, but let the buyer proceed
             result = supersede_order(db, order_id=body.order_id, lines=resolved, uid=body.uid,
                                      trace_id=body.trace_id, requirements=body.requirements)
         else:
