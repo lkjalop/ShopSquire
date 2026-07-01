@@ -64,7 +64,7 @@ export default function SourcingIntentCard({ intent, uid, orderId, traceId, onCo
       <ol className="fc-why" data-testid="si-lines">
         {lines.map((l, i) => (
           <li key={`${l.item_ref}-${i}`}>
-            {l.item_ref} — {l.quantity} unit(s)
+            <strong>{l.name || l.item_ref}</strong>{l.name ? <span style={{ color: '#6b7280' }}> ({l.item_ref})</span> : null} — {l.quantity} unit(s)
             {l.shortfall != null && l.shortfall !== l.quantity ? ` (${l.shortfall} to source)` : ''}
           </li>
         ))}

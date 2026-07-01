@@ -191,7 +191,7 @@ export async function getFulfillmentCaseByTrace(traceId: string): Promise<{ case
 }
 
 // ── Fluid procurement: the deferred sourcing PREVIEW + the cart-confirmation that materializes it ──
-export interface SourcingIntentLine { item_ref: string; quantity: number; shortfall?: number; }
+export interface SourcingIntentLine { item_ref: string; name?: string | null; quantity: number; shortfall?: number; }
 export interface UnresolvedPhrase { phrase?: string | null; quantity?: number; }
 export interface SourcingIntent {
   mode?: string; pr_id?: string | null;  // STABLE Procurement Request id — the order identity across amendments

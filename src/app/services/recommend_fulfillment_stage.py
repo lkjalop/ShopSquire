@@ -105,6 +105,12 @@ def run_fulfillment_stage(
     avail_skus = [str(r.get("sku")) for r in (results or [])[:5] if isinstance(r, dict) and r.get("sku")]
     if not avail_skus:
         return ""
+    # the top pick's buyer-facing name — reused for the §5 availability line AND the sourcing preview line
+    # (so the preview shows the product NAME, not a raw SKU) — DB-free, from the results already in hand.
+    _primary_name = ""
+    for _r in (results or [])[:1]:
+        if isinstance(_r, dict):
+            _primary_name = str(_r.get("name") or (_r.get("specs") or {}).get("display_name") or "").strip()
     qty = int(order_qty) if is_bulk else 1
     is_b2b_bulk = is_bulk and qty >= 5
     payload["availability"] = assess_availability(
@@ -131,10 +137,6 @@ def run_fulfillment_stage(
                 "transfer_plan": net.get("transfer_plan"), "fillable_from_network": net.get("fillable_from_network"),
                 "shortfall": net.get("shortfall"),
             }
-            _primary_name = ""
-            for _r in (results or [])[:1]:
-                if isinstance(_r, dict):
-                    _primary_name = str(_r.get("name") or (_r.get("specs") or {}).get("display_name") or "").strip()
             line = _network_adjusted_availability_line(line, payload["availability"], primary_name=_primary_name)
     except Exception as exc:
         record_partial_failure("network_availability", exc, trace_id=trace_id)
@@ -149,7 +151,7 @@ def run_fulfillment_stage(
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,
                      constraints=constraints, uid=uid, uid_hash=uid_hash, trace_id=trace_id,
                      flags=flags, single_item=single_item, defer=defer_to_cart, pr_id=pr_id,
-                     force_sourcing=_wants_sourcing(query))
+                     force_sourcing=_wants_sourcing(query), primary_name=_primary_name)
     return line
 
 
@@ -260,10 +262,11 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None
     summary line, or '' when it is not a mixed order. Cases are created at cart-confirmation."""
     from src.app.models.db import db_session
     from src.app.services.fulfillment.order_split import (
-        emit_split_trace, parse_order_lines, plan_order_split, resolve_line_skus_detailed)
+        emit_split_trace, parse_order_lines, plan_order_split, product_names, resolve_line_skus_detailed)
     parsed = parse_order_lines(query)
     if len(parsed) < 2:
         return ""  # genuinely single-line → normal single-line path
+    _names: Dict[str, str] = {}
     with db_session() as db:
         detailed = resolve_line_skus_detailed(db, parsed)
         lines = detailed["resolved"]
@@ -273,11 +276,12 @@ def _fluid_multiline_intent(*, query, constraints, trace_id, payload, pr_id=None
         # NOTE: we proceed even when only ONE line resolved — collapsing a ≥2-phrase order to the single-line
         # path lost the other resolved line(s). The buyer's full intent is surfaced here (resolved + unresolved).
         plan = plan_order_split(db, lines=lines) if lines else {"group_count": 0}
+        _names = product_names(db, [l["item_ref"] for l in lines])  # buyer-facing names, not raw SKUs
     emit_split_trace(trace_id, plan=plan)  # the split is a visible (read-only) preview step
     payload["sourcing_intent"] = {
         "mode": "deferred_to_cart",
         "pr_id": pr_id,  # the STABLE order identity — amendments re-confirm onto the same PR (no duplicate cases)
-        "lines": [{"item_ref": l["item_ref"], "quantity": l["requested_qty"]} for l in lines],
+        "lines": [{"item_ref": l["item_ref"], "name": _names.get(l["item_ref"]), "quantity": l["requested_qty"]} for l in lines],
         "planned_case_count": int(plan.get("group_count") or 0),
     }
     if unresolved:
@@ -328,7 +332,7 @@ def _attach_alternatives(*, payload, avail, qty, constraints, trace_id) -> None:
         record_partial_failure("bulk_alternatives", exc, trace_id=trace_id)
 
 
-def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False, pr_id=None, force_sourcing=False) -> None:
+def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_hash, trace_id, flags, single_item=False, defer=False, pr_id=None, force_sourcing=False, primary_name=None) -> None:
     """Open a fulfilment_case at GATE 1 on a real shortfall (flag-gated, best-effort). Two entry points:
     a BULK order at/above the threshold, or a SINGLE fully out-of-stock item (single_item=True).
     When ``defer`` (FULFILLMENT_DEFER_TO_CART), the intent stays FLUID: set payload['sourcing_intent']
@@ -354,11 +358,13 @@ def _maybe_open_case(*, payload, avail, order_qty, constraints=None, uid, uid_ha
     if not (bulk_ok or single_ok):
         return
     item_ref = str((avail or {}).get("sku") or "")
+    _line = {"item_ref": item_ref, "quantity": order_qty, "shortfall": shortfall}
+    if primary_name:  # buyer-facing name (from results[0]) so the preview shows the product, not a raw SKU
+        _line["name"] = primary_name
     if defer:
         # FLUID: preview the sourcing intent; the durable case is created at cart-confirmation, not here.
         payload["sourcing_intent"] = {"mode": "deferred_to_cart", "pr_id": pr_id,
-                                      "lines": [{"item_ref": item_ref, "quantity": order_qty,
-                                                 "shortfall": shortfall}],
+                                      "lines": [dict(_line)],
                                       "planned_case_count": 1 if item_ref else 0}
         _reqs = _buyer_requirements(constraints or {})
         if _reqs:

@@ -6191,9 +6191,9 @@ def suggest(
     # the label's "$400" as budget_max=400, which (a) blocks the prior-budget reload and (b) forces the
     # cheap-fallback (the "$629-$800" bug). Reload the prior envelope from session and recompute from it,
     # then persist the widened envelope so the NEXT turn inherits it. Closes the widen context-loss. ──
-    try:
-        _wv = str(nqe_option_value or "").strip().lower()
-        if str(nqe_question_id or "").strip().lower() == "widen_budget" or _wv.startswith("expand_budget"):
+    _wv = str(nqe_option_value or "").strip().lower()
+    if str(nqe_question_id or "").strip().lower() == "widen_budget" or _wv.startswith("expand_budget"):
+        try:
             _wm = re.search(r"([+-]?\d+)", _wv) or re.search(r"([+-]?\d+)", str(nqe_option_label or ""))
             if _wm:
                 _wd = int(_wm.group(1))
@@ -6206,23 +6206,23 @@ def suggest(
                 constraints["budget_min"] = int(_pmin) if _pmin is not None else None
                 if constraints["budget_max"] is not None:
                     nqe_selection_applied["budget_max"] = constraints["budget_max"]
-                    try:  # persist the widened envelope so a second widen (1800→2200) keeps compounding
-                        _ws = mem.get_structured_state(uid) or {}
-                        _wa = dict(_ws.get("nqe_answered_fields") or {})
-                        _wa["budget_max"] = constraints["budget_max"]
-                        if constraints.get("budget_min") is not None:
-                            _wa["budget_min"] = constraints["budget_min"]
-                        _ws["nqe_answered_fields"] = _wa
-                        mem.set_structured_state(uid, _ws)
-                    except Exception:
-                        pass
+                    # persist the widened envelope so a second widen (1800→2200) keeps compounding
+                    _ws = mem.get_structured_state(uid) or {}
+                    _wa = dict(_ws.get("nqe_answered_fields") or {})
+                    _wa["budget_max"] = constraints["budget_max"]
+                    if constraints.get("budget_min") is not None:
+                        _wa["budget_min"] = constraints["budget_min"]
+                    _ws["nqe_answered_fields"] = _wa
+                    mem.set_structured_state(uid, _ws)
                     log_trace_event(trace_id=trace_id, event_type="nqe_assumption_applied",
                                     source_type="agent", source_id="NQE_Agent", target_type="system",
                                     target_id=None, payload={"assumption": "budget_widened_from_followup",
                                     "budget_delta": _wd, "budget_min": constraints.get("budget_min"),
                                     "budget_max": constraints["budget_max"]})
-    except Exception:
-        pass
+        except Exception as _wex:  # visible failure — never a silent swallow (ratchet)
+            log_trace_event(trace_id=trace_id, event_type="stage_partial_failure", source_type="agent",
+                            source_id="NQE_Agent", target_type="system", target_id=None,
+                            payload={"stage": "budget_widen", "error": str(_wex)[:200]})
     current_turn = int(kv.get("conversation_turn") or structured_state.get("conversation_turn") or 0) + 1
     fatigue_turns = max(1, _safe_int(os.getenv("NQE_QUESTION_FATIGUE_TURNS", "4"), 4))
     prior_constraints_snapshot = (

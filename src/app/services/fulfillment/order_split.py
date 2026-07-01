@@ -112,6 +112,21 @@ def _resolve_lines(db, lines: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"resolved": resolved, "unresolved": unresolved}
 
 
+def product_names(db, skus) -> Dict[str, str]:
+    """{sku: display name} for the given SKUs — buyer-facing labels so a sourcing preview shows the product
+    NAME, not a raw code like 'GAM-0006'. Opaque product DATA (vertical-blind); one catalog fetch. {} on any
+    failure (the caller falls back to the SKU)."""
+    want = {str(s) for s in (skus or []) if s}
+    if not want:
+        return {}
+    out: Dict[str, str] = {}
+    for r in _load_active_products(db):
+        s = str(r[0])
+        if s in want and r[1]:
+            out[s] = str(r[1])
+    return out
+
+
 def resolve_line_skus(db, lines: List[Dict[str, Any]], *, tenant_id: str = "default") -> List[Dict[str, Any]]:
     """Resolved {item_ref, requested_qty} lines (back-compat shape). Sum-on-collision (no qty loss); unresolved
     phrases are surfaced via resolve_line_skus_detailed — use that when you need to clarify with the buyer."""
