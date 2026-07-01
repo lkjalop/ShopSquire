@@ -27,11 +27,44 @@ loop (Track 3).
 
 ## What's NOT done (the honest gap)
 The **visible surfaces** (frontend) and the **real data** (live ingestion vs replay). Everything the intelligence
-decides is either invisible to the buyer/admin, or driven by synthetic replay data.
+decides is either invisible to the buyer/admin, or driven by synthetic replay data. PLUS the newly-identified
+**multi-intent gap** (below) — the single biggest "make it not dumb" lever.
 
 ---
 
-## TRACK 1 — Demo Completeness (make the built intelligence VISIBLE) · DO FIRST
+## PRIORITY 0 — Multi-intent turn handling (the "not-dumb" build) · DO FIRST
+**Why bumped to the top:** it's no-secrets, testable end-to-end WITHOUT a browser, and it's the highest-leverage
+"make the platform not dumb" work — higher than the remaining frontend polish. A real buyer turn carries several
+intents at once ("nah too expensive, actually **15** instead, and what **headsets + hard drives** can I get for
+**$1200 for those**?"). Today the platform loses the laptop, applies one global budget, or turns "15" into a new
+line. This closes that.
+
+**The gap (from the design discussion):**
+- amend the qty of an ALREADY-CHOSEN item via NL ("15 instead") — bind to the last shortlist, not a new line;
+- SCOPE a budget to specific lines ("$1200 for those" → accessories only, laptop keeps its context);
+- decompose MULTIPLE intents in ONE turn (amend + add-lines + scoped-budget + objection);
+- an **adversarial scatter-gather guard** that rechecks the assembled plan before it's shown.
+
+**Architecture — "AI proposes, deterministic authorizes" applied to parsing (hybrid, not pure-LLM/pure-regex):**
+1. Deterministic extractor pulls structural primitives (extends query_decomposer/order_split).
+2. A constrained LLM (or classifier) resolves the ambiguous BINDING → forced schema
+   `{amendments:[{ref,new_qty}], new_lines:[{category,qty}], budget_scopes:[{applies_to,min,max}]}`.
+3. Deterministic layer VALIDATES the plan (grammar rules: budget-after-category binds to those categories;
+   "N instead" binds to the last-referenced item; qty 1–500) → violate a rule ⇒ fall back or ASK.
+
+**Build (agnostic-core, testable):**
+- `intent_decomposer.py` — turn → {amendments, new_lines, budget_scopes}; deterministic primitives + optional
+  schema-validated LLM binding. Vertical-blind.
+- `scatter_gather_guard.py` — per-line verification: category match, budget scope, qty sanity, context survival,
+  no cross-contamination. Pure, agnostic. Fail ⇒ re-ask/fallback, never assemble a wrong plan.
+- Wire scoped budgets into `order_split` (per-line budget) + bind qty-amendments to the last shortlist.
+
+**Guardrails:** never silently drop a line/qty; never guess on money/qty (confirm card on low confidence);
+reversible via the existing supersede ladder; confidence-gated. **Effort ~2–3 days; risk low; no browser needed.**
+
+---
+
+## TRACK 1 — Demo Completeness (make the built intelligence VISIBLE) · 1a/1c/1d DONE · 1b/1e = browser
 **Why first:** highest ROI, lowest risk, **no secrets**. A demo is judged by what's on screen; the value is
 built but invisible/rough. This is a **paired browser session** (the `.tsx` surfaces can't be verified blind).
 
@@ -102,14 +135,23 @@ Autonomy on synthetic data or without identity/rollback proof is the deck's "con
 
 ---
 
-## Recommended sequencing (next ~2 weeks)
-1. **Week 1 — Track 1 (paired browser)**: banner, support surface, cart math, image wording, trace
-   visibility, + show the live nudge/discount. → *a demo that lands.*
-2. **Week 1–2 — Track 2**: seed network signals, wire real click capture, set the confidence floor. → *the
-   demo feels real, panels non-empty.*
+## Recommended sequencing (next ~2 weeks) — REORDERED
+0. **NOW — Priority 0: Multi-intent turn handling** (no browser, no secrets, highest "not-dumb" leverage):
+   `intent_decomposer` + `scatter_gather_guard` + scoped-budgets + qty-amendment. → *the platform stops
+   being dumb on real buyer turns.*
+1. **DONE this session — Track 1 visible surfaces 1a/1c/1d**: storefront emphasis banner, cart qty×unit,
+   off-domain image wording. **Remaining 1b/1e/1f = the paired-browser session** (support surface, trace
+   visibility, show the live nudge/discount).
+2. **Then Track 2**: seed network signals, wire real click capture, set the confidence floor. → *the demo
+   feels real, panels non-empty.*
 3. **Decision gate**: is this a *sandbox demo* or a *production pilot*? If pilot → start **Track 3** (secrets)
    in priority order 3a→3b→3c/3d→3e. If demo → stop after Track 2 and frame the rest honestly.
 4. **Only after Track 3 is real** → **Track 4** autonomy, one phase at a time, measured by M6, governed by M7.
+
+## Priority order at a glance
+**P0 Multi-intent (now)** → **Track 1 browser 1b/1e/1f** → **Track 2 realism** → *[demo vs pilot fork]* →
+**Track 3 secrets** (3a SMTP → 3b inbound → 3c/3d ingestion → 3e auth) → **Track 4 autonomy** (4a keep-off →
+4b Phase-4 → 4c Phase-5).
 
 ## The single most important "why"
 You've built the hard part — **governed intelligence that proposes, is authorized, executes bounded, and
