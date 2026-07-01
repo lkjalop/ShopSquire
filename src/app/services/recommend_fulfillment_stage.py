@@ -108,9 +108,23 @@ def run_fulfillment_stage(
     # the top pick's buyer-facing name — reused for the §5 availability line AND the sourcing preview line
     # (so the preview shows the product NAME, not a raw SKU) — DB-free, from the results already in hand.
     _primary_name = ""
+    _primary_price = 0.0
     for _r in (results or [])[:1]:
         if isinstance(_r, dict):
             _primary_name = str(_r.get("name") or (_r.get("specs") or {}).get("display_name") or "").strip()
+            try:
+                _pc = _r.get("price_cents")
+                _primary_price = (float(_pc) / 100.0) if _pc else float(_r.get("price") or 0)
+            except (TypeError, ValueError):
+                _primary_price = 0.0
+    # G: is the top pick OVER budget? If so, advertising "20 available across the network" for an
+    # unaffordable product is misleading — suppress the cross-store line and let the sourcing preview
+    # (source an in-budget unit) carry the message instead. Pure price compare (vertical-blind).
+    try:
+        _bmax = float(constraints.get("budget_max")) if constraints.get("budget_max") is not None else None
+    except (TypeError, ValueError):
+        _bmax = None
+    _primary_over_budget = bool(_bmax and _primary_price and _primary_price > _bmax)
     qty = int(order_qty) if is_bulk else 1
     is_b2b_bulk = is_bulk and qty >= 5
     payload["availability"] = assess_availability(
@@ -137,7 +151,8 @@ def run_fulfillment_stage(
                 "transfer_plan": net.get("transfer_plan"), "fillable_from_network": net.get("fillable_from_network"),
                 "shortfall": net.get("shortfall"),
             }
-            line = _network_adjusted_availability_line(line, payload["availability"], primary_name=_primary_name)
+            if not _primary_over_budget:  # G: don't advertise cross-store stock of an over-budget pick
+                line = _network_adjusted_availability_line(line, payload["availability"], primary_name=_primary_name)
     except Exception as exc:
         record_partial_failure("network_availability", exc, trace_id=trace_id)
     # decision-trace: the bulk availability assessment is a visible agent step (fires for any bulk query,
