@@ -70,6 +70,14 @@ def test_neutral_situation_holds_everything():
     r = srp.decide(SalesSituation())   # steady / balanced / healthy defaults
     assert r.discount_action == srp.DISCOUNT_HOLD and r.recommended_discount_pct == 0.0
     assert r.price_bias == srp.PRICE_HOLD and r.reorder_urgency == srp.REORDER_NORMAL
+    assert r.messaging_emphasis == srp.EMPHASIS_FEATURES   # neutral → features copy
+
+
+def test_storefront_messaging_emphasis():
+    # surplus → VALUE (clear it); rising demand we can ship → URGENCY; can't-ship shortage → neutral FEATURES
+    assert srp.decide(SalesSituation(srp.DEMAND_FALLING, srp.INV_SURPLUS)).messaging_emphasis == srp.EMPHASIS_VALUE
+    assert srp.decide(SalesSituation(srp.DEMAND_RISING, srp.INV_BALANCED)).messaging_emphasis == srp.EMPHASIS_URGENCY
+    assert srp.decide(SalesSituation(srp.DEMAND_RISING, srp.INV_SHORTAGE)).messaging_emphasis == srp.EMPHASIS_FEATURES
 
 
 def test_recommended_discount_never_exceeds_ceiling_property():

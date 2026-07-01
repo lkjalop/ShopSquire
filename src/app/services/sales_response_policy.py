@@ -44,6 +44,9 @@ _HEALTHY_MAX = 0.15
 # surplus when on-hand covers demand this many times over
 _SURPLUS_MULT = 3.0
 
+# storefront MESSAGING emphasis (deck Module-4 "shift homepage emphasis from features to value or urgency")
+EMPHASIS_FEATURES, EMPHASIS_VALUE, EMPHASIS_URGENCY = "features", "value", "urgency"
+
 
 @dataclass(frozen=True)
 class SalesSituation:
@@ -61,6 +64,7 @@ class SalesResponse:
     price_bias: str
     promotion_bias: str
     reorder_urgency: str
+    messaging_emphasis: str = EMPHASIS_FEATURES   # storefront copy angle (features | value | urgency)
     rationale: List[str] = field(default_factory=list)
     situation: Dict[str, Any] = field(default_factory=dict)
 
@@ -71,6 +75,7 @@ class SalesResponse:
             "price_bias": self.price_bias,
             "promotion_bias": self.promotion_bias,
             "reorder_urgency": self.reorder_urgency,
+            "messaging_emphasis": self.messaging_emphasis,
             "rationale": list(self.rationale),
             "situation": dict(self.situation),
         }
@@ -212,9 +217,22 @@ def decide(situation: SalesSituation) -> SalesResponse:
     else:
         reorder_urgency = REORDER_NORMAL
 
+    # storefront messaging emphasis (the M5 storefront lane): surplus → VALUE framing to clear it; rising
+    # demand we CAN ship → URGENCY ("popular, going fast"); everything else → neutral FEATURES copy. A
+    # can't-ship shortage stays on features (never manufacture urgency for stock we can't fulfil).
+    if inv == INV_SURPLUS:
+        messaging_emphasis = EMPHASIS_VALUE
+        rationale.append("Storefront copy: lead with VALUE to move the surplus.")
+    elif dt == DEMAND_RISING and inv != INV_SHORTAGE:
+        messaging_emphasis = EMPHASIS_URGENCY
+        rationale.append("Storefront copy: lead with URGENCY — it's in demand and we can ship it.")
+    else:
+        messaging_emphasis = EMPHASIS_FEATURES
+
     return SalesResponse(
         discount_action=discount_action, recommended_discount_pct=recommended,
         price_bias=price_bias, promotion_bias=promotion_bias, reorder_urgency=reorder_urgency,
+        messaging_emphasis=messaging_emphasis,
         rationale=rationale,
         situation={"demand_trend": dt, "inventory_position": inv, "margin_headroom": margin,
                    "max_discount_pct": ceiling, "demand_confidence": round(float(situation.demand_confidence or 0.0), 3)},

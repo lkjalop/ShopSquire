@@ -1075,6 +1075,26 @@ def market_sales_response(sku: str = Query(...), qty: int = Query(1, ge=1),
     return out
 
 
+@router.get("/market/storefront-emphasis")
+def market_storefront_emphasis(inventory_position: str = Query("balanced"),
+                               role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """M5 STOREFRONT lane — the demand-aware homepage/product copy angle (features | value | urgency).
+    Computes the demand trend from recent findings + the given inventory posture and runs the policy, so
+    the storefront leads with VALUE on a surplus, URGENCY on shippable rising demand, else neutral FEATURES.
+    Recommends only — the storefront banner reads this behind its own flag; nothing is applied here."""
+    from src.app.services.sales_response_policy import SalesSituation, classify_demand_trend, decide
+    from src.app.services.market_analysis import load_recent_findings
+    with db_session() as db:
+        findings = load_recent_findings(db, limit=50)
+    trend, conf = classify_demand_trend(findings)
+    inv = str(inventory_position or "balanced").strip().lower()
+    r = decide(SalesSituation(demand_trend=trend, inventory_position=inv))
+    return {"messaging_emphasis": r.messaging_emphasis, "demand_trend": trend,
+            "demand_confidence": conf, "inventory_position": r.situation.get("inventory_position"),
+            "promotion_bias": r.promotion_bias, "rationale": r.rationale,
+            "demand_findings_seen": len(findings or [])}
+
+
 @router.get("/governance/pulse")
 def governance_pulse(tenant_id: str = Query("default"),
                      role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
