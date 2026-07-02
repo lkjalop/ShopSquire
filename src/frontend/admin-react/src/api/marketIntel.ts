@@ -34,6 +34,16 @@ export const experimentRevert = () => http<ExperimentState>(`${_exp}/revert`, { 
 export const experimentEvaluate = (min_samples = 30) =>
   http<any>(`${_exp}/evaluate`, { method: 'POST', body: JSON.stringify({ min_samples }) });
 
+// M5 SUPPORT lane — the pre-sales phrasing angle to counter the dominant buyer objection (deck: price
+// objections → shift to lifetime VALUE). Operator-only; recommends an APPROVED angle, never free-form copy.
+export interface SupportResponse {
+  objection_theme?: string; response_angle?: string; guidance?: string; source?: string;
+}
+export const supportResponse = (objection?: string) =>
+  http<SupportResponse>(
+    `/api/v1/fulfillment/market/support-response${objection ? `?objection=${encodeURIComponent(objection)}` : ''}`,
+  );
+
 // Governance pulse — the owner/governance Step-11 visibility snapshot (read-only, writes nothing).
 export interface GovernancePulse {
   tenant_id: string;

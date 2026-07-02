@@ -10,7 +10,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   experimentEvaluate, experimentPromote, experimentRevert, experimentState,
   governancePulse, marketState, refreshMarket, replayAdvance, replayReset, replayState,
-  type ExperimentState, type GovernancePulse, type ReplayState,
+  supportResponse,
+  type ExperimentState, type GovernancePulse, type ReplayState, type SupportResponse,
 } from '../api';
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
@@ -76,6 +77,15 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
       .catch(() => setGovNote('Governance visibility unavailable — check your API key / role (operator access required).'));
   }, [govTenant]);
   useEffect(() => { if (authReady) loadPulse(); }, [loadPulse, st, exp, authVersion, authReady]);
+
+  // ── M5 SUPPORT lane — the pre-sales angle to counter the dominant buyer objection (price→value, etc.).
+  //    Recommends an APPROVED angle from support_response_policy; no free-form copy. Refreshes with the
+  //    findings so the angle tracks what buyers are actually objecting to. ──
+  const [support, setSupport] = useState<SupportResponse | null>(null);
+  const loadSupport = useCallback(() => {
+    supportResponse().then(setSupport).catch(() => setSupport(null));
+  }, []);
+  useEffect(() => { if (authReady) loadSupport(); }, [loadSupport, st, authVersion, authReady]);
 
   const series = st?.series;
   const live = mode === 'live';
@@ -251,6 +261,30 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
         <section data-testid="mi-governance-note" style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
           <h4 style={{ margin: '0 0 6px' }}>Governance visibility</h4>
           <p role="alert" style={{ color: 'crimson', margin: 0 }}>{govNote}</p>
+        </section>
+      )}
+
+      {/* M5 SUPPORT lane — the pre-sales objection-handling angle, made visible. The angle is chosen by
+          policy from the dominant buyer objection; the support runtime renders APPROVED copy for it. */}
+      {support && support.response_angle && (
+        <section data-testid="mi-support" style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
+          <h4 style={{ margin: '0 0 8px' }}>Support response lane{' '}
+            <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>
+              (objection handling · {support.source === 'explicit' ? 'explicit' : 'dominant objection'})</span></h4>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <GovCard title="Recommended angle" testid="support-angle">
+              <Row k="Objection theme" v={support.objection_theme || '–'} />
+              <Row k="Response angle" v={<strong style={{ color: '#166534' }}>{support.response_angle}</strong>} />
+            </GovCard>
+            {support.guidance && (
+              <GovCard title="Guidance" testid="support-guidance">
+                <div style={{ fontSize: 13, color: '#374151' }}>{support.guidance}</div>
+              </GovCard>
+            )}
+          </div>
+          <small style={{ color: '#6b7280' }}>
+            Recommends only — the support runtime renders approved copy for this angle; it never free-forms a reply.
+          </small>
         </section>
       )}
     </div>
