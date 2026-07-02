@@ -11,6 +11,7 @@ import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
 import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { procurementAwareTraceId } from './lib/trace';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -2419,10 +2420,10 @@ export default function App() {
       )}
 
       {/* Decision Trace Modal */}
-      {/* When a procurement context exists, open the trace on the SOURCING turn's trace so the Procurement
-          tab/badge resolves — otherwise a later upsell turn's trace would show no journey. */}
+      {/* Open the trace on the SOURCING turn's trace when a procurement context exists, so the Procurement
+          tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
       {traceOpen && <DecisionTrace
-        traceId={(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0) ? (sourcingTraceId || traceId) : traceId}
+        traceId={procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0))}
         onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} />}
 
       {/* Escalation Room Modal */}

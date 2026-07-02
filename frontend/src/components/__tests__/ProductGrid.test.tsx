@@ -41,6 +41,22 @@ describe('ProductGrid stock badges', () => {
   });
 });
 
+describe('ProductGrid buyer-facing "why" (no internal ranker tags leak)', () => {
+  it('drops raw ranker tags and maps the useful ones to friendly labels', () => {
+    render(<ProductGrid products={[product({
+      why: ['+in_stock', '+within_budget', '+ram_gb_min:8', '+embedding_similarity', '+cross_encoder'],
+    })]} />);
+    // internal score/technical tokens must never reach a shopper card
+    expect(screen.queryByText(/\+?in_stock/)).toBeNull();
+    expect(screen.queryByText(/ram_gb_min/)).toBeNull();
+    expect(screen.queryByText(/embedding_similarity/)).toBeNull();
+    expect(screen.queryByText(/cross_encoder/)).toBeNull();
+    // the worth-showing ones render as friendly labels
+    expect(screen.getByText(/In stock/)).toBeTruthy();
+    expect(screen.getByText(/Meets RAM needs/)).toBeTruthy();
+  });
+});
+
 describe('ProductGrid cart gating', () => {
   it('disables Add to Cart and shows "Out of stock" when not cart-eligible', () => {
     const onAdd = vi.fn();
