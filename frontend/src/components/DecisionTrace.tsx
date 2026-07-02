@@ -237,7 +237,9 @@ function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
 
 export default function DecisionTrace({ traceId, onClose, imageTriage }: { traceId: string | null; onClose: () => void; imageTriage?: any[] }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
-  const effectiveApiKey = API_KEY || getOwnerApiKey() || 'local-merchant-key';
+  // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
+  // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
+  const effectiveApiKey = API_KEY || getOwnerApiKey() || '';
   const authHeaders = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
   const [trace, setTrace] = useState<Trace | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);

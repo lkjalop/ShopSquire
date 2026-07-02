@@ -2154,6 +2154,38 @@ async def chat_query(
             {"id": "relax_brand", "text": "Are you open to brands beyond Apple/Windows-first picks?", "goal": "increase_match_space"},
             {"id": "priority_tradeoff", "text": "Prioritize gaming FPS or rendering/export speed first?", "goal": "resolve_tradeoff"},
         ]
+    # Budget stated but NO in-budget match (nearest-above fallback shows OVER-budget products): still expose
+    # the WIDEN option. The old trigger only fired when products was empty, so a budget query that fell back
+    # to over-budget picks hid the widen chip (the brittle path GPT-5.5 flagged). Deterministic: budget set +
+    # every shown product over it → prepend widen (unless already present). Never clobbers other questions.
+    try:
+        if turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM") and products:
+            # budget from the QUERY (constraints_used is often empty in the chat response) → compare to the
+            # shown product prices. If a ceiling was stated and EVERY shown product exceeds it, the buyer got
+            # only over-budget picks → offer widen.
+            from src.app.services.query_decomposer import decompose as _decompose_budget
+            _bmax = _decompose_budget(str(q or "")).budget_max
+
+            def _pp(pr: Dict[str, Any]) -> float:
+                try:
+                    return float(pr.get("price") or 0) or (float(pr.get("price_cents") or 0) / 100.0)
+                except (TypeError, ValueError):
+                    return 0.0
+            _priced = [pr for pr in products if isinstance(pr, dict) and _pp(pr) > 0]
+            _all_over = bool(_bmax and _priced and all(_pp(pr) > float(_bmax) for pr in _priced))
+            _has_widen = any(isinstance(x, dict) and x.get("id") == "widen_budget" for x in next_questions)
+            if _all_over and not _has_widen:
+                next_questions = [{
+                    "id": "widen_budget",
+                    "text": "Nothing landed exactly in budget — widen it a little to see closer fits?",
+                    "goal": "increase_match_space",
+                    "options": [
+                        {"id": "widen_small", "label": "Widen a little (+$200)", "value": "expand_budget:+200"},
+                        {"id": "widen_medium", "label": "Widen more (+$400)", "value": "expand_budget:+400"},
+                    ],
+                }] + list(next_questions)
+    except Exception:
+        pass
     if not assistant_message and not products and next_questions:
         prompts = [f"- {q.get('text')}" for q in next_questions if isinstance(q, dict) and q.get("text")]
         assistant_message = "I could not find a confident in-catalog match yet. Try one of these refinements:\n" + "\n".join(prompts)
