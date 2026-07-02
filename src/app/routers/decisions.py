@@ -22,7 +22,7 @@ import time
 from sqlalchemy import text
 import uuid
 import os
-from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER, _env_role_key
 from src.app.deps import hash_uid
 from src.app.services.ragas_eval import evaluate_and_persist
 from src.app.observability.metrics import record_ragas_eval
@@ -679,11 +679,13 @@ async def stream_summary(uid: str, request: Request, api_key: Optional[str] = No
     # Lightweight auth: accept header or query param
     try:
         provided = request.headers.get("x-api-key") or api_key
-        expected_keys = {
-            os.getenv("MERCHANT_API_KEY", "local-merchant-key"),
-            os.getenv("DEVELOPER_API_KEY", "local-developer-key"),
-            os.getenv("OWNER_API_KEY", "local-owner-key"),
-        }
+        # fail-closed in non-dev: _env_role_key returns "" for an unset key there; drop empties so an
+        # empty provided key can never match a "not configured" slot.
+        expected_keys = {k for k in (
+            _env_role_key("MERCHANT_API_KEY", "local-merchant-key"),
+            _env_role_key("DEVELOPER_API_KEY", "local-developer-key"),
+            _env_role_key("OWNER_API_KEY", "local-owner-key"),
+        ) if k}
         if not provided or provided not in expected_keys:
             from fastapi import Response
             return Response(content="unauthorized", status_code=401)
@@ -1048,8 +1050,8 @@ async def websocket_stream_summary(websocket: WebSocket, uid: str | None = None,
     # Lightweight auth: accept header or query param via querystring
     try:
         provided = websocket.query_params.get("api_key") or api_key
-        expected = os.getenv("MERCHANT_API_KEY", "local-merchant-key")
-        if not provided or provided != expected:
+        expected = _env_role_key("MERCHANT_API_KEY", "local-merchant-key")  # "" in non-dev if unset → fail-closed
+        if not provided or not expected or provided != expected:
             await websocket.close(code=1008)
             return
     except Exception:

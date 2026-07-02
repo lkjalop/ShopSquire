@@ -755,11 +755,31 @@ ROLE_OWNER = "owner"
 ROLE_DEVELOPER = "developer"
 
 
+def _non_dev_env() -> bool:
+    """Non-dev = staging/prod/anything that isn't a local/dev/test run (mirrors config._is_non_dev_env)."""
+    return str(os.getenv("APP_ENV", "local") or "local").strip().lower() not in (
+        "local", "dev", "development", "test", "testing",
+    )
+
+
+def _env_role_key(name: str, dev_default: str) -> str:
+    """Resolve a role's env key with a FAIL-CLOSED default in non-dev.
+
+    Dev/local/test: an unset key falls back to the well-known 'local-*' value (ergonomics). In a non-dev
+    env an UNSET key resolves to "" instead of the guessable default — get_role_from_key() skips empty
+    keys, so a forgotten key config is fail-CLOSED (no backdoor), while an explicitly-set env key and any
+    vault/file keys still authenticate. Closes the "auth defaults to a known key" fail-open."""
+    v = os.getenv(name)
+    if v not in (None, ""):
+        return str(v)
+    return "" if _non_dev_env() else dev_default
+
+
 def _role_keys() -> dict[str, str]:
     return {
-        ROLE_MERCHANT: os.getenv("MERCHANT_API_KEY", "local-merchant-key"),
-        ROLE_OWNER: os.getenv("OWNER_API_KEY", "local-owner-key"),
-        ROLE_DEVELOPER: os.getenv("DEVELOPER_API_KEY", "local-developer-key"),
+        ROLE_MERCHANT: _env_role_key("MERCHANT_API_KEY", "local-merchant-key"),
+        ROLE_OWNER: _env_role_key("OWNER_API_KEY", "local-owner-key"),
+        ROLE_DEVELOPER: _env_role_key("DEVELOPER_API_KEY", "local-developer-key"),
     }
 
 

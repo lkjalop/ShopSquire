@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from src.app.security.auth import ROLE_MERCHANT, require_role
+from src.app.security.auth import ROLE_MERCHANT, require_role, _env_role_key
 from src.app.security.csrf_middleware import CSRF_COOKIE_NAME, generate_csrf_token, set_csrf_cookie
 from src.app.services.nlp_query_clustering import QueryClusterer
 
@@ -134,9 +134,10 @@ def merchant_dashboard_faq(
 ):
     """Simple merchant dashboard showing top suggested FAQs from clustering."""
     if not _allow_unauth_dashboard(request):
-        # Enforce the same merchant key as the API for non-local requests.
-        expected = os.getenv("MERCHANT_API_KEY", "local-merchant-key")
-        if not x_api_key or x_api_key.strip() != str(expected).strip():
+        # Enforce the same merchant key as the API for non-local requests (fail-closed in non-dev: an
+        # unset key resolves to "" there, so a forgotten config rejects rather than accepting a known default).
+        expected = _env_role_key("MERCHANT_API_KEY", "local-merchant-key")
+        if not x_api_key or not expected or x_api_key.strip() != str(expected).strip():
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
         # Keep role semantics for internal callers that already use dependency injection.
         # (This is a no-op if the key maps to ROLE_MERCHANT.)
