@@ -343,6 +343,10 @@ export default function App() {
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
   const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
   const [sourcingIntent, setSourcingIntent] = useState<SourcingIntent | null>(null);
+  // The decision trace of the TURN that produced the sourcing preview — pinned so a later turn's trace
+  // doesn't advance past it. confirm-cart links the case to THIS trace, so the Decision-Trace procurement
+  // badge resolves against the decision that actually opened the journey (not whatever turn is latest).
+  const [sourcingTraceId, setSourcingTraceId] = useState<string | null>(null);
   // P0 multi-intent plan (amend chosen qty + scoped new lines) surfaced for buyer confirmation.
   const [multiIntent, setMultiIntent] = useState<MultiIntentPlan | null>(null);
   const [bulkAlternatives, setBulkAlternatives] = useState<BulkAlternativeOption[]>([]);
@@ -1397,6 +1401,11 @@ export default function App() {
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
         const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
+        // Pin the sourcing trace to THIS turn only when this turn produced a sourcing preview; otherwise
+        // leave the previously-pinned one intact so a later plain query doesn't unlink the confirm.
+        if (data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines) && (data.sourcing_intent as any).lines.length > 0) {
+          setSourcingTraceId(nextTraceId);
+        }
         persistOperatorMetrics(data.timing_breakdown, nextTraceId, Array.isArray(chatPayload.images) && chatPayload.images.length > 0 ? 'chat+image' : 'chat');
         try {
           const persona = String(data.buyer_persona || data.buyer_persona_candidate || '').trim();
@@ -2012,7 +2021,8 @@ export default function App() {
                           genuinely new cart (closes cross-order contamination). Falls back to a session id only
                           if the backend didn't mint one. traceId stays separate for the decision-trace link. */}
                       <SourcingIntentCard intent={sourcingIntent} uid={uid}
-                                          orderId={sourcingIntent.pr_id || `cart-${uid}`} traceId={traceId || undefined} />
+                                          orderId={sourcingIntent.pr_id || `cart-${uid}`}
+                                          traceId={sourcingTraceId || traceId || undefined} />
                     </div>
                   )}
                   {rightPanelContract?.image_untrusted && (
