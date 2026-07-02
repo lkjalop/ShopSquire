@@ -273,6 +273,12 @@ export default function App() {
           )}
         </div>
 
+        {/* Gate ALL panels on auth: they mount + fetch on mount, so rendering them before fetchMe resolves
+            (authReady) fired a burst of 401s and drew empty cards; rendering them when auth FAILED (authError)
+            fired 401s against an invalid key. One gate here fixes it for every panel — cheaper and safer than
+            threading authReady into 23 components (only MarketIntelligence took that per-component route). */}
+        {authReady && !authError && (
+        <>
         {active === 'merchant-bi' && <MerchantBIPro role={role} />}
         {active === 'overview' && <Overview role={role} />}
         {active === 'decisions' && <Decisions role={role} />}
@@ -298,6 +304,8 @@ export default function App() {
         {active === 'sc-sim' && <SupplyChainSim role={role} />}
         {active === 'agent-intelligence' && <AgentIntelligence role={role} />}
         {active === 'maestro' && <MaestroRegistry role={role} />}
+        </>
+        )}
 
         {!authReady && (
           <div className="callout" style={{ marginTop: 12 }}>

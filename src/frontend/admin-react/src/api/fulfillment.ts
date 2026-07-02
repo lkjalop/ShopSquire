@@ -7,11 +7,22 @@ export interface FulfillmentCaseRow {
   requested_by?: string | null; source_trace_id?: string | null; updated_at?: string | null;
   item_ref?: string | null; quantity?: number | null;
 }
+// M4 demand→sales decision overlay (from sales_response_policy.decide) — attached to margin advice so the
+// operator sees the demand-aware call (discount/reorder pressure) alongside the margin headroom. Optional:
+// present only when the sales-response overlay is enabled server-side.
+export interface SalesResponse {
+  discount_action: 'increase' | 'reduce' | 'hold' | string;
+  recommended_discount_pct?: number;
+  price_bias?: string; promotion_bias?: string; reorder_urgency?: string; messaging_emphasis?: string;
+  rationale?: string[];
+  situation?: { demand_trend?: string; inventory_position?: string; margin_headroom?: string };
+}
 export interface MarginAdvice {
   available: boolean; verdict: 'healthy' | 'thin' | 'below_floor' | null;
   economics?: Record<string, any>; max_buyer_discount_cents?: number;
   recommended_buyer_discount_cents?: number; supplier_last_invoice_cents?: number | null;
   rationale?: string[];
+  sales_response?: SalesResponse;
 }
 export interface FulfillmentCaseView {
   case_id: string; state: string; state_json: Record<string, any>; source_trace_id?: string | null;
