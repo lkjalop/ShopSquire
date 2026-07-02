@@ -119,11 +119,59 @@ _ROUTED_DEMO_SUPPLIERS = [
 _ALL_DEMO_SUPPLIER_IDS = {s["id"] for s in (_DEMO_SUPPLIERS + _ROUTED_DEMO_SUPPLIERS)}
 
 
+# Preferred COMMUNICATION channel per demo supplier — how each supplier accepts an order/RFQ. Varied on
+# purpose so the demo shows the router route different suppliers differently (agent-drafts an email vs a
+# human-only phone/portal task vs a system-to-system EDI/cXML/API handoff). Opaque DATA, vertical-blind.
+_DEMO_SUPPLIER_CHANNELS = {
+    "SUP-7": "edi",           # a large distributor → EDI (X12 850) integration
+    "SUP-3": "email",
+    "SUP-BIZ": "email",       # the standard demoable draft path
+    "SUP-CREATOR": "api",     # modern supplier with a REST API
+    "SUP-APPLE": "portal",    # submit via the supplier's web portal (human logs in)
+    "SUP-PERIPH": "phone",    # small accessory supplier → a HUMAN calls (never an LLM voice call)
+    "SUP-OFFICE": "cxml",     # Ariba/Coupa network (cXML)
+}
+
+
+def _ensure_suppliers_columns(db) -> None:
+    """Idempotently add suppliers.preferred_channel (additive ALTER, sqlite + pg). Best-effort."""
+    try:
+        existing = {str(r[1]) for r in db.execute(text("PRAGMA table_info(suppliers)")).fetchall()}
+    except Exception:
+        try:
+            existing = {str(r[0]) for r in db.execute(text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='suppliers'")).fetchall()}
+        except Exception:
+            return
+    if "preferred_channel" not in existing:
+        try:
+            db.execute(text("ALTER TABLE suppliers ADD COLUMN preferred_channel TEXT"))
+        except Exception as exc:
+            logger.debug("suppliers.preferred_channel add skipped: %s", exc)
+
+
+def apply_demo_supplier_channels(db) -> int:
+    """Stamp the demo suppliers' preferred_channel (idempotent). Returns rows updated. Lets the live
+    self-healing coverage path assign channels to already-seeded suppliers without a re-seed."""
+    _ensure_suppliers_columns(db)
+    n = 0
+    for sid, ch in _DEMO_SUPPLIER_CHANNELS.items():
+        try:
+            res = db.execute(text("UPDATE suppliers SET preferred_channel = :c WHERE id = :i "
+                                  "AND (preferred_channel IS NULL OR preferred_channel = '')"),
+                             {"c": ch, "i": sid})
+            n += int(getattr(res, "rowcount", 0) or 0)
+        except Exception as exc:
+            logger.debug("supplier channel stamp skipped for %s: %s", sid, exc)
+    return n
+
+
 def ensure_tables(db) -> None:
     db.execute(text(_SUPPLIERS_DDL))
     db.execute(text(_SUPPLIER_PRODUCTS_DDL))
     db.execute(text(_TRUSTED_DDL))
     _ensure_supplier_products_columns(db)
+    _ensure_suppliers_columns(db)
     for idx in _INDEXES:
         db.execute(text(idx))
 
@@ -447,10 +495,12 @@ def ensure_supplier_coverage(db, *, commit: bool = True) -> Dict[str, int]:
         for sid in _supplier_route_for_product(sku, row.get("name") or sku, row.get("specs") or {}):
             supplier_skus.setdefault(sid, []).append(sku)
     routed_counts = _seed_supplier_set(db, _ROUTED_DEMO_SUPPLIERS, supplier_skus)
+    channels_set = apply_demo_supplier_channels(db)   # stamp each demo supplier's preferred comms channel
     counts = {
         "suppliers": int(legacy_counts.get("suppliers") or 0) + int(routed_counts.get("suppliers") or 0),
         "products": int(legacy_counts.get("products") or 0) + int(routed_counts.get("products") or 0),
         "domains": int(legacy_counts.get("domains") or 0) + int(routed_counts.get("domains") or 0),
+        "channels": int(channels_set),
     }
     if commit:
         try:

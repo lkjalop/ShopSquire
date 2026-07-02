@@ -727,11 +727,16 @@ def _emit_supplier_selection_trace(
     scope = draft.commercial_scope or {}
     item_ref = str(scope.get("item_ref") or "").strip()
     terms: Dict[str, Any] = {}
+    channel_plan: Dict[str, Any] = {}
     try:
         from src.app.models.db import db_session
         from src.app.services.supplier_catalog import supplier_terms
+        from src.app.services.fulfillment.supplier_channel import channel_plan_for_supplier
         with db_session() as _db:
             terms = supplier_terms(_db, draft.recipient_ref, item_ref, tenant_id=tenant_id) if item_ref else {}
+            # HOW will we reach this supplier? email (agent drafts) / phone|portal (human-only) / edi|cxml|api
+            # (system-to-system). Recorded on the journey so the operator sees the routing per supplier.
+            channel_plan = channel_plan_for_supplier(_db, draft.recipient_ref).as_dict()
     except Exception:
         terms = {}
     payload = {
@@ -771,6 +776,14 @@ def _emit_supplier_selection_trace(
         log_trace_event(trace_id=trace_id, event_type="supplier_selected", source_type="agent",
                         source_id="Supplier_Selection_Agent", target_type="fulfillment_case",
                         target_id=case_id, payload=payload, durable=True)
+        # Distinct channel-routing event so the procurement journey shows HOW this supplier is reached
+        # (email → agent drafts · phone/portal → human-only task · edi/cxml/api → integration handoff).
+        if channel_plan:
+            log_trace_event(trace_id=trace_id, event_type="supplier_channel_resolved", source_type="agent",
+                            source_id="Supplier_Channel_Agent", target_type="fulfillment_case",
+                            target_id=case_id,
+                            payload={"case_id": case_id, "supplier_ref": draft.recipient_ref, **channel_plan},
+                            durable=True)
     except Exception:
         return
 

@@ -2991,6 +2991,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                               p.status && `status ${p.status}`,
                               Array.isArray(p.types) && p.types.length > 0 && `options: ${p.types.join(', ')}`,
                               p.count != null && `${p.count} alternatives`,
+                              // supplier communication channel (how we reach this supplier)
+                              p.channel && `channel: ${p.channel}`,
+                              p.requires_human === true && '👤 HUMAN-only outreach',
+                              p.integration_kind && `→ ${String(p.integration_kind).toUpperCase()} integration`,
+                              p.channel && p.agent_may_draft === true && 'agent drafts · human sends',
                               p.case_id && `case ${String(p.case_id).slice(0, 8)}`,
                             ].filter(Boolean).join(' · ');
                             return (
