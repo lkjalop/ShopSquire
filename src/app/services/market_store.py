@@ -156,11 +156,12 @@ def list_offer_policies(db, *, entity_ref: Optional[str] = None, limit: int = 20
                  entity_ref=entity_ref, limit=limit, tenant_id=tenant_id)
 
 
-def persist_findings(db, findings: Optional[List[Any]], *, observed_at: Optional[str] = None,
-                     tenant_id: str = "default") -> Dict[str, int]:
-    """The M3→M2 write path: turn the analysis engine's findings into durable history — demand findings
-    become trend_indicators, competitor findings become competitor_snapshots. Idempotent enough for replay
-    (append-only history). Returns {trends, competitors} counts. Best-effort; never raises."""
+def persist_history(db, findings: Optional[List[Any]], *, observed_at: Optional[str] = None,
+                    tenant_id: str = "default") -> Dict[str, int]:
+    """The M3→M2 write path: turn the analysis engine's findings into durable HISTORY — demand findings
+    become trend_indicators, competitor findings become competitor_snapshots. Named distinctly from
+    market_analysis.persist_findings (which writes the findings table) to avoid confusion. Idempotent enough
+    for replay (append-only history). Returns {trends, competitors} counts. Best-effort; never raises."""
     trends = competitors = 0
     for f in (findings or []):
         try:

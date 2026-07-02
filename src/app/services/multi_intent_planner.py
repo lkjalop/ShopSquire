@@ -58,11 +58,13 @@ def plan_turn(
             scoped_max, scoped_min = b.budget_max, b.budget_min
 
     # 3+4) scatter over the new category lines, gather results within the scoped budget
+    warnings: List[str] = []
     for nl in intents.new_lines:
         try:
             results = search_fn(nl.category, scoped_max) or []
-        except Exception:
+        except Exception as exc:  # a search failure is a SOFT failure — surface it, don't hide an empty line
             results = []
+            warnings.append(f"search failed for '{nl.category}': {str(exc)[:120]}")
         lines.append({"category": nl.category, "scope": "new", "requested_qty": nl.qty,
                       "budget_min": scoped_min, "budget_max": scoped_max, "results": results})
 
@@ -83,4 +85,5 @@ def plan_turn(
             objection_angle = "value"
 
     return {"intents": intents.as_dict(), "plan": lines, "verdict": verdict.as_dict(),
-            "needs_confirmation": needs_confirmation, "objection_angle": objection_angle}
+            "needs_confirmation": needs_confirmation or bool(warnings), "objection_angle": objection_angle,
+            "warnings": warnings}

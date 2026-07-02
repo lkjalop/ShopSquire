@@ -54,7 +54,7 @@ def test_persist_findings_maps_m3_to_m2(db):
         MarketFinding(FINDING_COMPETITOR_UNDERCUT, "GAM-1", "warn", 0.7, "undercut",
                       {"our_price_cents": 199900, "competitor_price_cents": 179900, "competitor": "acme"}, "recent"),
     ]
-    counts = ms.persist_findings(db, findings, observed_at="2026-07-01T10:00:00")
+    counts = ms.persist_history(db, findings, observed_at="2026-07-01T10:00:00")
     assert counts == {"trends": 1, "competitors": 1}
     assert ms.list_trend_indicators(db, entity_ref="laptops")[0]["value"] == 140.0
     assert ms.list_competitor_snapshots(db, entity_ref="GAM-1")[0]["competitor"] == "acme"
@@ -63,5 +63,5 @@ def test_persist_findings_maps_m3_to_m2(db):
 def test_writers_are_best_effort_on_bad_db():
     # None db never raises — returns False (ingest must never break on a store failure)
     assert ms.record_trend_indicator(None, entity_ref="x", indicator_type="demand", direction="spike") is False
-    assert ms.persist_findings(None, [MarketFinding(FINDING_DEMAND_SHIFT, "x", "warn", 0.5, "s",
+    assert ms.persist_history(None, [MarketFinding(FINDING_DEMAND_SHIFT, "x", "warn", 0.5, "s",
                                {"direction": "spike"}, "recent")]) == {"trends": 0, "competitors": 0}

@@ -37,9 +37,9 @@ def run_pipeline(db, *, tenant_id: str = DEFAULT_TENANT, limit: int = 2000, min_
         # never touch this pipeline's transaction; operates on the in-memory findings, not uncommitted DB rows.
         try:
             from src.app.models.db import db_session as _store_db
-            from src.app.services.market_store import persist_findings as _store_findings
+            from src.app.services.market_store import persist_history as _store_history
             with _store_db() as _sdb:
-                _store_findings(_sdb, findings, tenant_id=tenant_id)
+                _store_history(_sdb, findings, tenant_id=tenant_id)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("market_pipeline M2 store sink failed: %s", exc)
