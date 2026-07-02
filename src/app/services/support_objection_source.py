@@ -10,6 +10,7 @@ Vertical-blind (opaque theme · entity ref); idempotent record/seed (determinist
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -67,8 +68,10 @@ def record_objection(db, *, theme: str, entity_ref: str = "", raised_at: str = "
         return False
 
 
-# enough of the same theme to trip detect_objection_cluster (min_count=3 → "price" cluster)
-_DEMO = [("price", f"2026-06-26T0{i}:00:00") for i in range(4)] + [("delivery_time", "2026-06-26T05:00:00")]
+# enough of the same theme to trip detect_objection_cluster (min_count=3 → "price" cluster).
+# Timestamps relative to today so the demo objection cluster never ages out of the analysis window.
+_TODAY = date.today().isoformat()
+_DEMO = [("price", f"{_TODAY}T0{i}:00:00") for i in range(4)] + [("delivery_time", f"{_TODAY}T05:00:00")]
 
 
 def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Dict[str, int]:

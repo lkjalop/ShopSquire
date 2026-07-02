@@ -1,6 +1,7 @@
 """Market pipeline — the REAL ingestion → analysis → findings path (default tenant, replay-clean)."""
 from __future__ import annotations
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -29,15 +30,25 @@ def db():
     s = sessionmaker(bind=eng, future=True)()
     # real source tables the backfill reads
     s.execute(text("CREATE TABLE orders (id TEXT, total_cents INTEGER, status TEXT, created_at TEXT)"))
-    s.execute(text("CREATE TABLE search_events (id TEXT, event_time TEXT, query TEXT, result_count INTEGER)"))
+    # search_events must carry the columns the backfill SELECTs (id, query, result_count, event_time,
+    # uid_hash, session_id) — the adapter was extended with uid_hash/session_id and this minimal fixture
+    # wasn't, so the SELECT errored and 0 rows ingested (the real cause of the 0-findings, not date rot).
+    s.execute(text("CREATE TABLE search_events (id TEXT, event_time TEXT, query TEXT, result_count INTEGER, "
+                   "uid_hash TEXT, session_id TEXT)"))
     attribution.ensure_tables(s)
-    # a demand spike across days + a zero-result catalog gap → real findings
-    for i, day in enumerate(["2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24"]):
+    # a demand spike across days + a zero-result catalog gap → real findings. Dates are RELATIVE to today
+    # (last 5 days, oldest first; spike on the newest) so the fixture never ages out of the pipeline's
+    # recency window — the hardcoded 2026-06 dates rotted and ingested 0 search_events → 0 findings.
+    days = [(date.today() - timedelta(days=4 - i)).isoformat() for i in range(5)]
+    for i, day in enumerate(days):
         n = 2 if i < 4 else 20
         for j in range(n):
-            s.execute(text("INSERT INTO search_events (id, query, result_count, event_time) "
-                           "VALUES (:id,'widget',0,:t)"), {"id": f"{day}-{j}", "t": f"{day}T10:00:00"})
-    s.execute(text("INSERT INTO orders VALUES ('O1',119900,'paid','2026-06-24')"))
+            # distinct uid_hash per searcher — detect_inventory_demand_mismatch gates on DISTINCT users
+            # (anti-flood), so anonymous zero-result rows never manufacture the catalog-gap finding.
+            s.execute(text("INSERT INTO search_events (id, query, result_count, event_time, uid_hash) "
+                           "VALUES (:id,'widget',0,:t,:u)"),
+                      {"id": f"{day}-{j}", "t": f"{day}T10:00:00", "u": f"u{j}"})
+    s.execute(text("INSERT INTO orders VALUES ('O1',119900,'paid',:d)"), {"d": days[-1]})
     s.commit()
     try:
         yield s

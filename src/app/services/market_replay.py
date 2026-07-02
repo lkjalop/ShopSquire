@@ -11,6 +11,7 @@ tenants"). Deterministic anomaly_fn (no ~1.6s models) so a replay is reproducibl
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any, Dict, List
 
 from sqlalchemy import text
@@ -20,7 +21,12 @@ from src.app.services import market_signal as ms
 
 REPLAY_TENANT = "replay-demo"
 REPLAY_ITEM = "demo-sku"
-_DATES = ["2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25", "2026-06-26"]
+_N_REPLAY_DAYS = 7
+# Dates are RELATIVE to today (7 consecutive days, oldest first, ending today) so the synthetic curve never
+# ages out of the analysis recency window. They were pinned to 2026-06-20..26 and rotted — a bare run then
+# ingested 0 signals and produced 0 findings. The value curves below stay fixed (deterministic finding
+# TYPES); only the day labels shift with the calendar.
+_DATES = [(date.today() - timedelta(days=_N_REPLAY_DAYS - 1 - i)).isoformat() for i in range(_N_REPLAY_DAYS)]
 _DEMAND = [10, 11, 10, 12, 11, 25, 60]      # demand index per day — spikes on days 6-7
 _CONV = [8, 8, 7, 8, 8, 6, 2]               # conversions per day — drops on day 7
 _RESULT_COUNT = [5, 5, 5, 5, 5, 0, 0]       # later days return no results → inventory mismatch
@@ -80,7 +86,7 @@ def load_days(db, *, up_to_day: int, tenant: str = REPLAY_TENANT) -> Dict[str, i
         for i in range(_DEMAND[d]):
             sig = ms.normalize(signal_type="demand", source="search_events",
                                payload={"event_id": f"{date}-d{i}", "query": REPLAY_ITEM,
-                                        "result_count": _RESULT_COUNT[d]},
+                                        "result_count": _RESULT_COUNT[d], "uid_hash": f"replay-u{i}"},
                                occurred_at=f"{date}T10:00:00", dedup_fields=["event_id"], tenant_id=tenant)
             if ms.ingest(db, sig):
                 n += 1

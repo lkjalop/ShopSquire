@@ -10,6 +10,7 @@ Vertical-blind (sku · cents); idempotent record/seed (deterministic id); never 
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -69,7 +70,8 @@ def record_observation(db, *, sku: str, competitor_price_cents: int, competitor:
         return False
 
 
-_DEMO = [("LAP-021", 99900, "rival-store.example", "2026-06-26T09:00:00")]  # under our 1200.00 → undercut
+# relative to today so the demo undercut never ages out of the analysis window (was pinned to 2026-06-26).
+_DEMO = [("LAP-021", 99900, "rival-store.example", f"{date.today().isoformat()}T09:00:00")]  # under our 1200.00 → undercut
 
 
 def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Dict[str, int]:

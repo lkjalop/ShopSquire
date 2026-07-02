@@ -50,8 +50,11 @@ def test_gate2_signal_to_finding_to_recall_to_narration(db):
     # seed a recurring zero-result demand for a single-token entity across enough history
     for day in ("2026-06-20", "2026-06-21", "2026-06-22", "2026-06-23", "2026-06-24"):
         for i in range(4):
+            # distinct uid_hash per searcher — detect_inventory_demand_mismatch gates on DISTINCT users
+            # (anti-flood), so anonymous zero-result signals never manufacture the catalog-gap finding.
             sig = ms.normalize(signal_type="demand", source="search_events",
-                               payload={"event_id": f"{day}-{i}", "query": "sku9monitor", "result_count": 0},
+                               payload={"event_id": f"{day}-{i}", "query": "sku9monitor",
+                                        "result_count": 0, "uid_hash": f"u{i}"},
                                occurred_at=f"{day} 10:0{i}:00", dedup_fields=["event_id"])
             ms.ingest(db, sig)
     db.commit()

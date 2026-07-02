@@ -11,6 +11,7 @@ Vertical-blind (opaque stage label · counts); idempotent record/seed (determini
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -69,8 +70,10 @@ def record_event(db, *, stage: str, entered: int, abandoned: int, observed_at: s
         return False
 
 
-# a payment stage bleeding ~70% of carts → a finding (entered well above the detector's min_volume)
-_DEMO = [("cart", 100, 20, "2026-06-26T08:00:00"), ("payment", 60, 42, "2026-06-26T08:00:00")]
+# a payment stage bleeding ~70% of carts → a finding (entered well above the detector's min_volume).
+# Timestamps relative to today so the demo funnel drop never ages out of the analysis window.
+_DEMO = [("cart", 100, 20, f"{date.today().isoformat()}T08:00:00"),
+         ("payment", 60, 42, f"{date.today().isoformat()}T08:00:00")]
 
 
 def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Dict[str, int]:
