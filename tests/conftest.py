@@ -262,6 +262,18 @@ def pytest_sessionstart(session):
     os.environ["DATABASE_URL"] = session_db_url
     os.environ["DATABASE_URL_RO"] = session_db_url
 
+    # ── Isolate tests from the DEMO .env's operational flags ────────────────
+    # config.py calls load_dotenv() at import, so a demo-configured .env
+    # (FULFILLMENT_DEMO_ENABLED=1) and the feature_flags baseline
+    # (FULFILLMENT_AUTO_DRAFT_ON_COMMIT=true) bleed into the test process and
+    # break tests that assert DEFAULT (off) behaviour — e.g. "replay gated off
+    # by default", "commit stops at COMMITTED (no auto-draft)". Force them OFF
+    # here (direct assignment — the .env set them truthy, so setdefault wouldn't
+    # win). Tests that need them ON opt in via monkeypatch.setenv(), as the
+    # auto-draft/replay-enabled tests already do.
+    os.environ["FULFILLMENT_DEMO_ENABLED"] = "0"
+    os.environ["FULFILLMENT_AUTO_DRAFT_ON_COMMIT"] = "0"
+
     # Keep full-suite tests deterministic by disabling background workers that
     # can create timing/port collisions during parallelized app startup.
     os.environ.setdefault("INVENTORY_WORKER_ENABLED", "0")
