@@ -516,7 +516,39 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       }
     };
 
-    // Try WS first; give it 5 s to connect before falling back to SSE
+    // Streaming ladder: WS → SSE → poll. The fallback MUST engage on ASYNC failure (5 s timeout /
+    // onerror / a WS that 404s or closes after construction), not only when `new WebSocket()` throws
+    // synchronously — the old code set up SSE/poll while `ws` was still truthy, so an async WS failure
+    // left the trace with no live updates AND no fallback (the stale-trace / "WS noise" GPT-5.5 flagged).
+    let fallbackStarted = false;
+    const startPoll = () => {
+      if (!mounted || pollIv !== null) return;
+      setStreamMode('poll');
+      pollIv = setInterval(fetchCanonicalTrace, 5000);
+    };
+    const startFallback = () => {
+      if (!mounted || fallbackStarted || es) return;
+      fallbackStarted = true;
+      try {
+        if ((window as any).EventSource) {
+          const source = new EventSource(apiUrl(`/api/v1/decisions/${currentTraceId}/events/stream`));
+          source.onmessage = (ev: MessageEvent) => {
+            try {
+              const data = JSON.parse(ev.data);
+              const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
+              mergeEvents(incoming);
+            } catch {}
+          };
+          source.onerror = () => { try { source.close(); } catch {} if (es === source) es = null; startPoll(); };
+          es = source;
+          if (mounted) setStreamMode('sse');
+          return;
+        }
+      } catch { es = null; }
+      startPoll();
+    };
+
+    // Try WS first; give it 5 s to connect before degrading.
     let wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       const url = wsUrl(`/api/v1/decisions/${currentTraceId}/events/ws`);
@@ -525,6 +557,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         if (ws && ws.readyState !== WebSocket.OPEN) {
           try { ws.close(); } catch {}
           ws = null;
+          startFallback();   // WS never opened → degrade
         }
       }, 5000);
       ws.onopen = () => {
@@ -541,40 +574,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       ws.onerror = () => {
         if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
         try { ws?.close(); } catch {} ws = null;
+        startFallback();   // WS errored (incl. 404/close) → degrade cleanly
       };
     } catch {
       ws = null;
+      startFallback();     // WS construction threw → degrade
     }
 
-    // Fall back to SSE if WS unavailable
-    if (!ws) {
-      try {
-        if ((window as any).EventSource) {
-          const wire = (source: EventSource) => {
-            source.onmessage = (ev: MessageEvent) => {
-              try {
-                const data = JSON.parse(ev.data);
-                const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-                mergeEvents(incoming);
-              } catch {}
-            };
-            source.onerror = () => { try { source.close(); } catch {} if (es === source) es = null; };
-            return source;
-          };
-          try {
-            es = wire(new EventSource(apiUrl(`/api/v1/decisions/${currentTraceId}/events/stream`)));
-          } catch { es = null; }
-          if (es && mounted) setStreamMode('sse');
-        }
-      } catch { es = null; }
-    }
-
-    // Always do an initial snapshot fetch; if neither WS nor SSE connected, also poll
+    // Always load the initial snapshot immediately, independent of the streaming transport.
     fetchCanonicalTrace();
-    if (!ws && !es) {
-      setStreamMode('poll');
-      pollIv = setInterval(fetchCanonicalTrace, 5000);
-    }
 
     return () => {
       mounted = false;
