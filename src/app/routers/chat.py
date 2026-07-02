@@ -2382,6 +2382,30 @@ async def chat_query(
             )
     except Exception:
         pass
+
+    # ── P0 multi-intent planner (flag-gated default-OFF) ─────────────────────────────────────────────
+    # A mixed buyer turn — "actually make it 15, and what headsets + hard drives for $1200 for those" —
+    # must (a) KEEP the chosen laptop, (b) change ITS quantity, and (c) source the new categories under the
+    # SCOPED budget only. plan_live decomposes the turn against the live cart, fans out per new category, and
+    # RE-CHECKS the assembled plan adversarially before we surface it. Additive: it attaches `multi_intent`
+    # (with needs_confirmation so money/qty is confirmed, never guessed); it never mutates products here.
+    multi_intent: Optional[Dict[str, Any]] = None
+    try:
+        _mi_on = str(os.getenv("MULTI_INTENT_PLANNER_ENABLED", "")).strip().lower() in ("1", "true", "yes", "on")
+        if not _mi_on:
+            try:
+                from src.app.feature_flags import get_flags as _get_flags
+                _mi_on = bool(_get_flags().get("MULTI_INTENT_PLANNER_ENABLED", False))
+            except Exception:
+                _mi_on = False
+        if _mi_on and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
+            from src.app.services.multi_intent_live import plan_live
+            multi_intent = plan_live(str(q or ""), str(uid))
+    except Exception as _mi_exc:
+        # Non-silent: attach the failure to the response instead of crashing the turn or hiding it.
+        multi_intent = {"warnings": [f"multi_intent planner error: {str(_mi_exc)[:120]}"],
+                        "needs_confirmation": True}
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -2390,6 +2414,9 @@ async def chat_query(
         "trace_id": decision_trace_id,
         "assistant_message": assistant_message,
         "next_questions": next_questions,
+        # P0 multi-intent plan (present only on a genuine mixed turn; None otherwise). Carries the scoped
+        # new-line picks + adversarial verdict + needs_confirmation so the UI confirms qty/budget, not guesses.
+        "multi_intent": multi_intent,
         "needs_disambiguation": bool(data.get("needs_disambiguation") or (not products and next_questions)),
         "nqe_selection_applied": data.get("nqe_selection_applied") or {},
         "confirmed_slots": _extract_confirmed_slots(query=q, response=data if isinstance(data, dict) else {}),
