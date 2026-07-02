@@ -4,12 +4,13 @@ import ProductGrid from './components/ProductGrid';
 import StorefrontEmphasisBanner from './components/StorefrontEmphasisBanner';
 import FulfilmentOptions, { type FulfilmentCaseSummary } from './components/FulfilmentOptions';
 import SourcingIntentCard from './components/SourcingIntentCard';
+import MultiIntentCard from './components/MultiIntentCard';
 import BulkAlternatives, { type BulkAlternativeOption } from './components/BulkAlternatives';
 import ExternalResearchPanel, { type ExternalResearchItem } from './components/ExternalResearchPanel';
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, type SourcingIntent } from './lib/api';
+import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -342,6 +343,8 @@ export default function App() {
   const [externalResearch, setExternalResearch] = useState<ExternalResearchItem[]>([]);
   const [fulfilmentCase, setFulfilmentCase] = useState<FulfilmentCaseSummary | null>(null);
   const [sourcingIntent, setSourcingIntent] = useState<SourcingIntent | null>(null);
+  // P0 multi-intent plan (amend chosen qty + scoped new lines) surfaced for buyer confirmation.
+  const [multiIntent, setMultiIntent] = useState<MultiIntentPlan | null>(null);
   const [bulkAlternatives, setBulkAlternatives] = useState<BulkAlternativeOption[]>([]);
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
@@ -1351,6 +1354,11 @@ export default function App() {
         setSourcingIntent(
           data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines)
             ? (data.sourcing_intent as SourcingIntent) : null);
+        // P0 multi-intent: present only on a genuine mixed turn (amend + scoped new lines). Surface it so
+        // the buyer confirms the qty change and adds the scoped picks — never silently applied.
+        setMultiIntent(
+          data.multi_intent && Array.isArray((data.multi_intent as any).plan) && (data.multi_intent as any).plan.length > 0
+            ? (data.multi_intent as MultiIntentPlan) : null);
         setBulkAlternatives(Array.isArray(data.fulfillment_options) ? (data.fulfillment_options as BulkAlternativeOption[]) : []);
         const respAssistant = data.assistant_message || '';
         // Async-narration handoff: recommend returned the deterministic answer now + a job id for the
@@ -1961,6 +1969,16 @@ export default function App() {
                       }}
                     >
                       {rightPanelContract.emphasis.text}
+                    </div>
+                  )}
+                  {multiIntent && (multiIntent.plan?.length ?? 0) > 0 && (
+                    <div className={styles.procurementPanelSlot}>
+                      <MultiIntentCard
+                        plan={multiIntent}
+                        onAmendQty={(sku, qty) => setCartQty(sku, qty)}
+                        onAddItem={(sku, qty) => addToCart(sku, qty)}
+                        onDismiss={() => setMultiIntent(null)}
+                      />
                     </div>
                   )}
                   {bulkAlternatives.length > 0 && !(sourcingIntent && (sourcingIntent.lines?.length ?? 0) > 0 && !fulfilmentCase) && (

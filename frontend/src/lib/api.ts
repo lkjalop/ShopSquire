@@ -199,6 +199,27 @@ export interface SourcingIntent {
   unresolved_phrases?: UnresolvedPhrase[];  // phrases we couldn't match to a SKU — surfaced, never dropped
   requirements?: Record<string, any>;  // buyer deadline/use_case/ship_to → carried to the case at confirm
 }
+// P0 multi-intent plan (from chat.py's `multi_intent`, present only on a genuine mixed turn). The planner
+// AMENDS a prior/chosen line's qty and SCOPES new-category lines to a budget; the card renders it for the
+// buyer to CONFIRM (never auto-applies money/qty). One line: scope 'prior' (ref+requested_qty) or 'new'
+// (category+budget+results).
+export interface MultiIntentPickResult { sku?: string; name?: string; price?: number; price_cents?: number; }
+export interface MultiIntentLine {
+  scope: 'prior' | 'new';
+  ref?: string; name?: string;                 // prior line: the chosen sku + its display name
+  category?: string;                            // new line: the category token
+  requested_qty?: number | null;
+  budget_min?: number | null; budget_max?: number | null;
+  results?: MultiIntentPickResult[];            // new line: candidate picks within the scoped budget
+}
+export interface MultiIntentPlan {
+  plan: MultiIntentLine[];
+  verdict?: { ok: boolean; violations: string[]; checked_lines?: number };
+  needs_confirmation?: boolean;
+  objection_angle?: string | null;
+  warnings?: string[];
+}
+
 export interface ConfirmCartResult {
   order_group_id: string | null;
   case_count?: number;
