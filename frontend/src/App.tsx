@@ -10,7 +10,7 @@ import ExternalResearchPanel, { type ExternalResearchItem } from './components/E
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -387,6 +387,11 @@ export default function App() {
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = (getStoredUid() || 'demo-user');
 
+  // Track 2b — real clickstream: emit a first-touch page_view (with any ?utm_* channel) so the marketing-BI
+  // channel / verified-human / network panels populate from an ACTUAL visit, not just the synthetic seed.
+  // Best-effort + privacy-first (server hashes ids, drops raw IP); emitPageView de-dupes to once per load.
+  useEffect(() => { emitPageView(uid); }, [uid]);
+
   const persistOperatorMetrics = useCallback((timing: any, nextTraceId?: string | null, source = 'chat') => {
     if (!timing || typeof timing !== 'object') return;
     const prev = operatorMetrics && typeof operatorMetrics === 'object' ? operatorMetrics : {};
@@ -693,6 +698,10 @@ export default function App() {
     try {
       const j = await addCartItem(uid, sku, Math.max(1, Math.floor(qty)));
       setCart(j);
+      // Track 2b — real conversion: add-to-cart is the demo storefront's terminal buy-intent action (no
+      // separate checkout page), so it registers as a conversion for the session (de-duped per session →
+      // one conversion regardless of how many items are added). Feeds the channel conversion-rate panel.
+      emitConsumerSignal(uid, 'checkout', {});
       switchRightPanelMode('cart');
       // Proactive post-add message in the chat
       const addedProduct = products.find((p) => p.sku === sku);

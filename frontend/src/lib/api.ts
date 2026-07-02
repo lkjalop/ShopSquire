@@ -314,6 +314,46 @@ export async function getStorefrontEmphasis(inventoryPosition = 'balanced'):
   return (r.ok ? await safeJson(r) : null);
 }
 
+// ── Consumer-signal emitter (Track 2b): real buyer interactions → /consumer/ingest, so the marketing-BI
+// channel / verified-human / conversion panels populate from ACTUAL browsing, not just the synthetic seed.
+// Best-effort + fire-and-forget (never blocks or surfaces errors) and privacy-first — the endpoint hashes
+// ids, sanitizes properties, derives coarse ASN/country, and drops the raw IP. Send coarse props only
+// (no query text / PII); the visit's channel is stamped first-touch from the UTM params. ──
+function _consumerSessionId(): string {
+  try {
+    let s = sessionStorage.getItem('ss_sid');
+    if (!s) { s = 'sid-' + Math.random().toString(36).slice(2, 12); sessionStorage.setItem('ss_sid', s); }
+    return s;
+  } catch { return 'sid-ephemeral'; }
+}
+export function emitConsumerSignal(uid: string, action: string, properties: Record<string, any> = {}): void {
+  try {
+    const body = [{
+      uid: uid || 'demo-user',
+      session_id: _consumerSessionId(),
+      action,
+      path: (typeof window !== 'undefined' && window.location ? window.location.pathname : '/') || '/',
+      properties,
+    }];
+    fetch(apiUrl('/api/v1/consumer/ingest'), {
+      method: 'POST', credentials: 'include', headers: authHeaders({}, true),
+      body: JSON.stringify(body), keepalive: true,
+    }).catch(() => { /* best-effort telemetry */ });
+  } catch { /* best-effort */ }
+}
+let _pageViewEmitted = false;
+export function emitPageView(uid: string): void {
+  if (_pageViewEmitted) return;   // first-touch visit — one per session/page load
+  _pageViewEmitted = true;
+  const props: Record<string, any> = {};
+  try {
+    const p = new URLSearchParams(window.location.search);
+    for (const k of ['utm_source', 'utm_medium', 'utm_campaign']) { const v = p.get(k); if (v) props[k] = v; }
+    if (document.referrer) props.referrer = document.referrer;
+  } catch { /* ignore */ }
+  emitConsumerSignal(uid, 'page_view', props);
+}
+
 export async function getSupportResponse(objection?: string):
   Promise<{ objection_theme?: string; response_angle?: string; guidance?: string } | null> {
   const u = new URL(apiUrl('/api/v1/fulfillment/market/support-response'), window.location.href);
