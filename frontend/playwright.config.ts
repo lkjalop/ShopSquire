@@ -16,7 +16,9 @@ export default defineConfig({
     baseURL: 'http://localhost:5173',
     headless: true,
     actionTimeout: 20_000,
-    trace: 'retain-on-failure',
+    trace: 'on',            // full Playwright trace (npx playwright show-trace ...) for every run
+    video: 'on',            // record a .webm of every run → test-results/**/video.webm (screen-recordable proof)
+    screenshot: 'on',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });
