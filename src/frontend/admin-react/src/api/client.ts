@@ -4,7 +4,10 @@
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) || window.location.origin;
 const API_KEY_ENV = (import.meta.env.VITE_API_KEY as string) || '';
-let VOLATILE_API_KEY = '';
+// Hydrate from sessionStorage so a hard navigation (e.g. ?tab=procurement) keeps the key without
+// re-prompting. sessionStorage (not localStorage) = cleared on tab close; production should prefer an
+// HttpOnly cookie/session over any browser-stored key.
+let VOLATILE_API_KEY = (() => { try { return sessionStorage.getItem('shopsquire_admin_api_key') || ''; } catch { return ''; } })();
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export function apiBase(): string {
@@ -26,10 +29,12 @@ function getApiKey(): string {
 
 export function setClientApiKey(key: string) {
   VOLATILE_API_KEY = String(key || '').trim();
+  try { sessionStorage.setItem('shopsquire_admin_api_key', VOLATILE_API_KEY); } catch { /* storage unavailable */ }
 }
 
 export function clearClientApiKey() {
   VOLATILE_API_KEY = '';
+  try { sessionStorage.removeItem('shopsquire_admin_api_key'); } catch { /* storage unavailable */ }
 }
 
 function buildHeaders(opts?: RequestInit, withContentType = true): Record<string, string> {

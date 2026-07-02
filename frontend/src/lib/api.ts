@@ -363,15 +363,21 @@ export async function getSupportResponse(objection?: string):
 }
 
 // SET a line's absolute quantity (the cart stepper / "change your mind" control). qty<=0 removes it.
-export async function setCartItemQty(uid: string, sku: string, quantity: number) {
+export async function setCartItemQty(uid: string, sku: string, quantity: number, allowSourcing = false) {
   const r = await fetch(apiUrl(`/api/v1/cart/items/${encodeURIComponent(sku)}`), {
     method: 'PUT',
     credentials: 'include',
     headers: authHeaders({}, true),
-    body: JSON.stringify({ uid: uid || 'demo-user', sku, quantity: Math.max(0, Math.floor(quantity)) }),
+    // allow_sourcing lets a procurement amendment ("15 instead") exceed on-hand stock — the shortfall is
+    // sourced at confirm-cart — instead of a 409. Off by default so the normal stepper keeps the stock gate.
+    body: JSON.stringify({ uid: uid || 'demo-user', sku, quantity: Math.max(0, Math.floor(quantity)), allow_sourcing: allowSourcing }),
   });
   const j = await safeJson(r);
-  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cart_set_qty_failed (${r.status})`);
+  if (!r.ok || !j) {
+    const d = j && (j as any).detail;
+    const msg = typeof d === 'string' ? d : (d && (d.error || JSON.stringify(d))) || `cart_set_qty_failed (${r.status})`;
+    throw new Error(msg);
+  }
   return j;
 }
 

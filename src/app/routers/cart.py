@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import uuid
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -39,6 +39,10 @@ class CartItemPayload(BaseModel):
     uid: str
     sku: str
     quantity: int = 1
+    # Procurement-aware amendment (multi-intent "actually 15 instead"): allow the line qty to EXCEED
+    # on-hand stock instead of a 409 — the shortfall is sourced from suppliers at cart-confirmation (GATE 1).
+    # Default False keeps the normal retail stock gate intact for the ordinary stepper / add path.
+    allow_sourcing: bool = False
 
 
 def _load_items(raw) -> List[Dict]:
@@ -412,13 +416,18 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
         target = int(payload.quantity or 0)
         signal = _guard_cart_request(surface="cart.set_item_quantity", uid=payload.uid,
                                      sku_values=[sku], quantity_values=[max(0, target)])
+        shortfall_meta: Optional[Dict[str, int]] = None
         if target > 0:
             stock = _get_stock_level(sku)
-            if stock == 0:
-                raise HTTPException(status_code=409, detail={"error": "out_of_stock", "sku": sku, "available": 0})
             if stock < target:
-                raise HTTPException(status_code=409, detail={
-                    "error": "insufficient_stock", "sku": sku, "available": stock, "requested": target})
+                if not payload.allow_sourcing:
+                    # normal retail path — the stock gate stands (out_of_stock when 0, else insufficient_stock).
+                    raise HTTPException(status_code=409, detail={
+                        "error": "out_of_stock" if stock == 0 else "insufficient_stock",
+                        "sku": sku, "available": stock, "requested": target})
+                # procurement amendment — let the line hold the full requested qty; the shortfall sources at
+                # confirm-cart. Metadata is durable on the line + echoed so the UI can say "X will be sourced".
+                shortfall_meta = {"available_now": int(stock), "shortfall": int(target - stock), "requested": int(target)}
         cart_id, items = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.set_item_quantity", signal=signal)
         if target <= 0:
@@ -428,15 +437,29 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
             for it in items:
                 if it.get("sku") == sku:
                     it["quantity"] = target
+                    it["sourcing_required"] = bool(shortfall_meta)
+                    if shortfall_meta:
+                        it["shortfall"] = shortfall_meta["shortfall"]
+                        it["available_now"] = shortfall_meta["available_now"]
+                    else:
+                        it.pop("shortfall", None); it.pop("available_now", None)
                     found = True
                     break
             if not found:
-                items.append({"sku": sku, "quantity": target})
+                line: Dict[str, Any] = {"sku": sku, "quantity": target, "sourcing_required": bool(shortfall_meta)}
+                if shortfall_meta:
+                    line["shortfall"] = shortfall_meta["shortfall"]
+                    line["available_now"] = shortfall_meta["available_now"]
+                items.append(line)
         _save_cart(cart_id, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
         hydrated = _with_bundle_state(cart_id=cart_id, uid=payload.uid, role=role, hydrated=hydrated)
-        return {"cart_id": cart_id, **hydrated}
+        out = {"cart_id": cart_id, **hydrated}
+        if shortfall_meta:
+            out["sourcing_required"] = True
+            out["sourcing_shortfall"] = {"sku": sku, **shortfall_meta}
+        return out
 
 
 @router.post("/clear")

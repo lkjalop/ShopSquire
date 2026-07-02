@@ -283,6 +283,48 @@ def test_put_items_mixed_valid_and_oos_rejected(client_with_stock):
     assert detail.get("error") == "stock_validation_failed"
 
 
+# ── PUT /api/v1/cart/items/{sku} — single-line set (+ procurement-aware over-stock) ──────────────────
+
+def test_set_item_qty_exceeds_stock_rejected_by_default(client_with_stock):
+    """The single-line stepper keeps the stock gate: qty > stock without allow_sourcing → 409."""
+    resp = client_with_stock.put(
+        "/api/v1/cart/items/SKU-INSTOCK-5",
+        json={"uid": UID + "-setqty", "sku": "SKU-INSTOCK-5", "quantity": 10},
+    )
+    assert resp.status_code == 409, resp.text
+    detail = resp.json().get("detail", {})
+    assert detail.get("error") == "insufficient_stock"
+    assert detail.get("available") == 5 and detail.get("requested") == 10
+
+
+def test_set_item_qty_sourcing_backed_succeeds_with_shortfall(client_with_stock):
+    """A multi-intent amendment (allow_sourcing) lets the line exceed stock; the shortfall is reported for
+    sourcing at confirm-cart instead of a 409."""
+    resp = client_with_stock.put(
+        "/api/v1/cart/items/SKU-INSTOCK-5",
+        json={"uid": UID + "-setqty-src", "sku": "SKU-INSTOCK-5", "quantity": 10, "allow_sourcing": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    line = next((it for it in body.get("items", []) if it["sku"] == "SKU-INSTOCK-5"), None)
+    assert line and line["quantity"] == 10                       # cart holds the full requested qty
+    assert body.get("sourcing_required") is True
+    sf = body.get("sourcing_shortfall") or {}
+    assert sf.get("available_now") == 5 and sf.get("shortfall") == 5 and sf.get("requested") == 10
+
+
+def test_set_item_qty_within_stock_has_no_shortfall(client_with_stock):
+    """When the requested qty fits in stock, no sourcing flag/shortfall is attached even with the flag on."""
+    resp = client_with_stock.put(
+        "/api/v1/cart/items/SKU-INSTOCK-5",
+        json={"uid": UID + "-setqty-fit", "sku": "SKU-INSTOCK-5", "quantity": 3, "allow_sourcing": True},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert not body.get("sourcing_required")
+    assert body.get("sourcing_shortfall") is None
+
+
 # ── POST /api/v1/cart/voucher ─────────────────────────────────────────────────
 
 def test_voucher_endpoint_disabled_by_default(client_with_stock):

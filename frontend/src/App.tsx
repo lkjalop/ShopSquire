@@ -386,6 +386,12 @@ export default function App() {
   const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = (getStoredUid() || 'demo-user');
+  // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer — show it only in a dev build
+  // or when explicitly opted in (localStorage 'shopsquire_debug'='1'), never to a normal shopper.
+  const showDebugBadges = Boolean(
+    (import.meta as any)?.env?.DEV ||
+    (typeof localStorage !== 'undefined' && localStorage.getItem('shopsquire_debug') === '1'),
+  );
 
   // Track 2b — real clickstream: emit a first-touch page_view (with any ?utm_* channel) so the marketing-BI
   // channel / verified-human / network panels populate from an ACTUAL visit, not just the synthetic seed.
@@ -750,14 +756,36 @@ export default function App() {
     }
   };
 
-  /** Cart stepper — SET a line's absolute quantity ("change your mind"). qty<=0 removes it. */
-  const setCartQty = async (sku: string, qty: number) => {
+  /** Cart stepper / multi-intent amendment — SET a line's absolute quantity. qty<=0 removes it.
+   *  allowSourcing=true (from the multi-intent Confirm-qty) lets the line exceed stock; the shortfall is
+   *  sourced at confirm-cart, so "15 instead" no longer 409s on a low-stock item. */
+  const setCartQty = async (sku: string, qty: number, allowSourcing = false) => {
     if (!sku) return;
     try {
-      const j = await setCartItemQty(uid, sku, qty);
+      const j = await setCartItemQty(uid, sku, qty, allowSourcing);
       setCart(j);
-    } catch {
-      // ignore (stock-gate 409s surface via the existing error path)
+      // honesty: when the confirmed qty exceeds stock, tell the buyer the rest will be sourced.
+      const sf = (j as any)?.sourcing_shortfall;
+      if ((j as any)?.sourcing_required && sf && Number(sf.shortfall) > 0) {
+        const nm = products.find((p) => p.sku === sku)?.name || sku;
+        setChatOpen(true);
+        setMessages((prev) => [...prev, { role: 'assistant' as const, timestamp: new Date(),
+          content: `Set **${nm}** to ${sf.requested}. ${sf.available_now} in stock now — the other ${sf.shortfall} will be sourced from suppliers when you confirm your cart.` }]);
+      }
+    } catch (e: any) {
+      // Never fail silently — surface WHY (out of stock / qty exceeds available), mirroring add-to-cart.
+      const nm = products.find((p) => p.sku === sku)?.name || sku;
+      const m = String(e?.message || '');
+      const stockish = /stock|409|insufficient|out_of_stock|available/i.test(m);
+      setChatOpen(true);
+      setMessages((prev) => {
+        const content = stockish
+          ? `I couldn't set **${nm}** to that quantity — it's out of stock or exceeds what's available.`
+          : `Sorry, I couldn't update **${nm}** just now. Please try again.`;
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === content) return prev;
+        return [...prev, { role: 'assistant' as const, content, timestamp: new Date() }];
+      });
     }
   };
 
@@ -1783,8 +1811,8 @@ export default function App() {
                         : msg.content}
                       {/* Voice badge */}
                       {msg.voiceUsed && <span className={styles.voiceBadge} title="Sent via voice">🎤</span>}
-                      {/* Complexity badge — dev-only hint, shown below message as dim metadata */}
-                      {msg.complexity && (
+                      {/* Complexity badge — dev-only hint; hidden from pilot buyers (showDebugBadges gate) */}
+                      {showDebugBadges && msg.complexity && (
                         <span
                           className={styles.complexityBadge}
                           title={`Complexity ${msg.complexity.score}/10 · Tier: ${msg.complexity.tier} · Model: ${msg.complexity.model}`}
@@ -2007,7 +2035,7 @@ export default function App() {
                     <div className={styles.procurementPanelSlot}>
                       <MultiIntentCard
                         plan={multiIntent}
-                        onAmendQty={(sku, qty) => setCartQty(sku, qty)}
+                        onAmendQty={(sku, qty) => setCartQty(sku, qty, true)}
                         onAddItem={(sku, qty) => addToCart(sku, qty)}
                         onDismiss={() => setMultiIntent(null)}
                       />
@@ -2087,11 +2115,12 @@ export default function App() {
                           <section key={`blane-${lane.key}`} className={styles.deviceLaneBlock}
                                    data-testid="device-lane" data-lane={lane.key} data-primary={lane.primary ? '1' : '0'}>
                             <div className={styles.deviceLaneHeader}>
-                              <div className={styles.deviceLaneTitle}>
-                                {lane.title}
+                              <div className={styles.deviceLaneTitle}
+                                   style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <span>{lane.title}</span>
                                 {lane.non_primary && (
                                   <span data-testid="lane-non-primary"
-                                        style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, padding: '1px 6px',
+                                        style={{ fontSize: 11, fontWeight: 700, padding: '1px 6px',
                                                  borderRadius: 4, background: '#fef3c7', color: '#92400e' }}>
                                     not a primary pick
                                   </span>
@@ -2390,7 +2419,11 @@ export default function App() {
       )}
 
       {/* Decision Trace Modal */}
-      {traceOpen && <DecisionTrace traceId={traceId} onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} />}
+      {/* When a procurement context exists, open the trace on the SOURCING turn's trace so the Procurement
+          tab/badge resolves — otherwise a later upsell turn's trace would show no journey. */}
+      {traceOpen && <DecisionTrace
+        traceId={(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0) ? (sourcingTraceId || traceId) : traceId}
+        onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} />}
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (
