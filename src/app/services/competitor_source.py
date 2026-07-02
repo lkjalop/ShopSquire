@@ -70,8 +70,10 @@ def record_observation(db, *, sku: str, competitor_price_cents: int, competitor:
         return False
 
 
-# relative to today so the demo undercut never ages out of the analysis window (was pinned to 2026-06-26).
-_DEMO = [("LAP-021", 99900, "rival-store.example", f"{date.today().isoformat()}T09:00:00")]  # under our 1200.00 → undercut
+# relative to today, computed at CALL time (not import) so a long-lived server doesn't freeze the demo
+# undercut at its import day and let it age out of the analysis window.
+def _demo():
+    return [("LAP-021", 99900, "rival-store.example", f"{date.today().isoformat()}T09:00:00")]  # under our 1200.00 → undercut
 
 
 def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Dict[str, int]:
@@ -80,7 +82,7 @@ def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Di
     if db is None:
         return {}
     ensure_table(db)
-    n = sum(1 for sku, cents, comp, ts in _DEMO
+    n = sum(1 for sku, cents, comp, ts in _demo()
             if record_observation(db, sku=sku, competitor_price_cents=cents, competitor=comp,
                                   observed_at=ts, source="seed", tenant_id=tenant_id))
     if commit:

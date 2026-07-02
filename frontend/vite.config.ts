@@ -14,6 +14,8 @@ export default defineConfig(({ mode }) => {
       globals: true,
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],
+      // e2e/ holds Playwright specs (own runner via `npm run e2e`) — keep them out of the vitest suite.
+      exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
       coverage: {
         provider: 'v8',
         reporter: ['text', 'lcov'],

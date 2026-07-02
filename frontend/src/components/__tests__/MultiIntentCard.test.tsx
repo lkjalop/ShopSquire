@@ -10,7 +10,7 @@ import type { MultiIntentPlan } from '../../lib/api';
 
 const PLAN: MultiIntentPlan = {
   plan: [
-    { scope: 'prior', ref: 'LAP-1', name: 'Asus VivoBook', requested_qty: 15 },
+    { scope: 'prior', ref: 'LAP-1', name: 'Asus VivoBook', requested_qty: 15, amended: true },
     { scope: 'new', category: 'headsets', budget_max: 1200, results: [
       { sku: 'AUD-1', name: 'RIG Headset', price: 179 },
       { sku: 'AUD-2', name: 'Studio Pro', price: 249 },
@@ -50,5 +50,18 @@ describe('MultiIntentCard', () => {
       <MultiIntentCard plan={{ plan: [] }} onAmendQty={vi.fn()} onAddItem={vi.fn()} onDismiss={vi.fn()} />,
     );
     expect(container.querySelector('[data-testid="multi-intent-card"]')).toBeNull();
+  });
+
+  it('does NOT show a Confirm-qty row for a carried-forward (unamended) prior line', () => {
+    // a prior line the turn did not change (amended !== true) must never render a spurious amendment
+    const plan: MultiIntentPlan = {
+      plan: [
+        { scope: 'prior', ref: 'LAP-1', name: 'Asus VivoBook', requested_qty: 1, amended: false },
+        { scope: 'new', category: 'headsets', budget_max: 1200, results: [{ sku: 'AUD-1', name: 'RIG', price: 179 }] },
+      ],
+    };
+    render(<MultiIntentCard plan={plan} onAmendQty={vi.fn()} onAddItem={vi.fn()} onDismiss={vi.fn()} />);
+    expect(screen.queryByText('Confirm qty')).toBeNull();          // no spurious amendment
+    expect(screen.getByText(/RIG/)).toBeTruthy();                   // but the scoped new line still shows
   });
 });

@@ -21,7 +21,12 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
   onDismiss: () => void;
 }) {
   const lines = plan?.plan || [];
-  const amendments = lines.filter((l) => l.scope === 'prior' && l.ref && typeof l.requested_qty === 'number');
+  // Only show an amendment row for a line THIS turn actually changed (amended === true) and to a real
+  // positive qty — never for a carried-forward/unchanged prior line (that would be a spurious confirm that
+  // adds/changes an item the buyer didn't ask about) nor for qty<=0 (which would silently remove the line).
+  const amendments = lines.filter(
+    (l) => l.scope === 'prior' && l.ref && l.amended === true && typeof l.requested_qty === 'number' && (l.requested_qty as number) >= 1,
+  );
   const newLines = lines.filter((l) => l.scope === 'new');
   const hasNewPicks = newLines.some((l) => (l.results?.length ?? 0) > 0);
   // Nothing to confirm → render nothing (a plain single-intent turn never reaches here anyway).

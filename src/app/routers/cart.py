@@ -45,6 +45,11 @@ class CartItemPayload(BaseModel):
     allow_sourcing: bool = False
 
 
+# Per-line quantity ceiling (matches scatter_gather_guard's 1..500 sanity). Bounds the allow_sourcing path
+# so lifting the STOCK gate can't push an unbounded qty into the cart from a single request.
+_MAX_LINE_QTY = 500
+
+
 def _load_items(raw) -> List[Dict]:
     if raw is None:
         return []
@@ -101,15 +106,20 @@ def _hydrate(items: List[Dict]) -> Dict:
             continue
         price = int(product.price_cents or 0)
         subtotal += price * qty
-        out_items.append(
-            {
-                "sku": sku,
-                "quantity": qty,
-                "price_cents": price,
-                "name": product.name,
-                "specs": product.specs if isinstance(product.specs, dict) else None,
-            }
-        )
+        row = {
+            "sku": sku,
+            "quantity": qty,
+            "price_cents": price,
+            "name": product.name,
+            "specs": product.specs if isinstance(product.specs, dict) else None,
+        }
+        # Carry the procurement-shortfall markers through so the "X will be sourced" state is DURABLE
+        # across GET /cart (not just the one PUT echo) — the UI reads them to badge the line.
+        if it.get("sourcing_required"):
+            row["sourcing_required"] = True
+            row["shortfall"] = int(it.get("shortfall") or 0)
+            row["available_now"] = int(it.get("available_now") or 0)
+        out_items.append(row)
     bundle_savings = evaluate_bundle_savings(out_items)
     return {
         "items": out_items,
@@ -414,6 +424,11 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
     POST /items which INCREMENTS. qty<=0 removes the line. Stock-gated like add. Vertical-blind."""
     with tracer.start_as_current_span("cart.set_item_quantity"):
         target = int(payload.quantity or 0)
+        # Sanity ceiling — mirrors scatter_gather_guard's per-line 1..500 range. allow_sourcing lifts the
+        # STOCK gate, not this bound, so a single request can't push an unbounded qty into the cart.
+        if target > _MAX_LINE_QTY:
+            raise HTTPException(status_code=400, detail={
+                "error": "quantity_out_of_range", "sku": sku, "requested": target, "max": _MAX_LINE_QTY})
         signal = _guard_cart_request(surface="cart.set_item_quantity", uid=payload.uid,
                                      sku_values=[sku], quantity_values=[max(0, target)])
         shortfall_meta: Optional[Dict[str, int]] = None

@@ -1,27 +1,53 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import List, Dict, Any
+import os
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
+
+from fastapi import APIRouter, HTTPException, Request, Header
 
 from src.app.models.db import db_session
 from src.app.deps import hash_uid, hash_value, security_sanitize
 from src.app.services.geoip import resolve_asn_country
-from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.security.auth import get_role_from_key
 from src.app.services.trace_taxonomy import normalize_trace_event_type
 
 router = APIRouter(prefix="/api/v1/consumer", tags=["consumer-signals"])
 
 
+def _anon_ingest_allowed() -> bool:
+    return str(os.getenv("CONSUMER_INGEST_ALLOW_ANON", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
 @router.post("/ingest")
-def ingest_consumer_signals(events: List[Dict[str, Any]], request: Request, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))):
+def ingest_consumer_signals(events: List[Dict[str, Any]], request: Request,
+                            x_api_key: Optional[str] = Header(default=None, alias="x-api-key")):
     """Privacy-first ingestion for consumer behavior signals.
 
     - Accepts a batch of events. Each event may include: `uid`, `session_id`, `device_id`, `action`, `path`, `dwell_ms`, `trace_id`, `properties`, `ip`, `ts`.
     - Hashes identifiers, sanitizes properties, derives coarse ASN/country then drops raw IP.
     - If `trace_id` present the event is stored in `decision_trace_events` (real-time UI stream); otherwise falls back to `event_log` outbox.
+
+    AUTH: an operator key is accepted (the demo shopper carries one). A REAL buyer's browser has no operator
+    key, so Track-2b would 401 for exactly its target population; when CONSUMER_INGEST_ALLOW_ANON is enabled
+    an ANONYMOUS shopper is accepted and RATE-LIMITED per source (the payload is hashed/sanitized + IP-dropped
+    regardless). Default OFF keeps the endpoint operator-gated — no security change unless a pilot opts in.
     """
+    role = get_role_from_key(x_api_key)
+    if not role and not _anon_ingest_allowed():
+        raise HTTPException(status_code=401, detail="unauthorized")
     if not events:
         raise HTTPException(status_code=400, detail="no_events")
+    if not role:
+        # anonymous buyer telemetry → bound abuse per source (fail-open if the limiter backend is down)
+        try:
+            from src.app.security.rate_limit import consume_fixed_window_limit
+            src_key = request.client.host if (request and request.client) else "anon"
+            if not consume_fixed_window_limit(key=f"consumer_ingest:{src_key}", limit=120, window_sec=60):
+                raise HTTPException(status_code=429, detail="rate_limited")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     stored = 0
     now_iso = datetime.utcnow().isoformat()
     try:

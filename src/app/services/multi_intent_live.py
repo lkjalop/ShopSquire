@@ -27,11 +27,15 @@ from src.app.services.multi_intent_planner import plan_turn
 from src.app.services.scatter_gather_guard import _matches_category
 
 
-def _row_to_result(sku: str, name: str, price_cents: Any, specs: Any) -> Dict[str, Any]:
+def _row_to_result(sku: str, name: str, price_cents: Any, specs: Any,
+                   col_category: Any = None, col_type: Any = None) -> Dict[str, Any]:
     """Shape one products row into the opaque result the planner + guard expect
     ({name, price_cents, price, category, type, tags}). ``specs`` may arrive as a dict (pg jsonb) or a
-    JSON string (sqlite) — normalise both. Category/type/tags come from specs (the agnostic keystone)."""
-    cat = typ = ""
+    JSON string (sqlite) — normalise both. Category/type resolve from the DEDICATED products columns first
+    (the agnostic keystone: products.category / products.product_type), falling back to the specs JSON, so a
+    catalog that populates the columns instead of specs still matches scoped new-line scatter."""
+    cat = str(col_category or "").strip()
+    typ = str(col_type or "").strip()
     tags: List[str] = []
     if isinstance(specs, str):
         try:
@@ -39,8 +43,8 @@ def _row_to_result(sku: str, name: str, price_cents: Any, specs: Any) -> Dict[st
         except (ValueError, TypeError):
             specs = {}
     if isinstance(specs, dict):
-        cat = str(specs.get("category") or specs.get("product_type") or "")
-        typ = str(specs.get("type") or specs.get("product_type") or "")
+        cat = cat or str(specs.get("category") or specs.get("product_type") or "")
+        typ = typ or str(specs.get("type") or specs.get("product_type") or "")
         raw_tags = specs.get("tags")
         if isinstance(raw_tags, list):
             tags = [str(t) for t in raw_tags if str(t).strip()]
@@ -50,13 +54,24 @@ def _row_to_result(sku: str, name: str, price_cents: Any, specs: Any) -> Dict[st
 
 
 def _load_catalog(db) -> List[Dict[str, Any]]:
-    """One read of the active catalog as opaque rows for in-memory category/budget filtering.
-    Bound param for ``active`` so the literal adapts across sqlite (1) and postgres (true)."""
-    rows = db.execute(
-        _sql("SELECT sku, name, price_cents, specs FROM products WHERE active = :active"),
-        {"active": True},
-    ).fetchall()
-    return [_row_to_result(r[0], r[1], r[2], r[3]) for r in rows]
+    """One read of the active catalog as opaque rows for in-memory category/budget filtering. Reads the
+    dedicated category/product_type columns when the schema has them, falling back to a specs-only SELECT
+    for schemas that don't (rollback between attempts so a pg aborted-tx doesn't poison the fallback)."""
+    for select, with_cols in (
+        ("SELECT sku, name, price_cents, specs, category, product_type FROM products WHERE active = :active", True),
+        ("SELECT sku, name, price_cents, specs FROM products WHERE active = :active", False),
+    ):
+        try:
+            rows = db.execute(_sql(select), {"active": True}).fetchall()
+            if with_cols:
+                return [_row_to_result(r[0], r[1], r[2], r[3], col_category=r[4], col_type=r[5]) for r in rows]
+            return [_row_to_result(r[0], r[1], r[2], r[3]) for r in rows]
+        except Exception:
+            try:
+                db.rollback()   # a missing-column SELECT aborts a pg tx; clear it before the fallback
+            except Exception:
+                pass
+    return []
 
 
 def _prior_lines_from_cart(db, uid: str, by_sku: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -83,10 +98,14 @@ def _prior_lines_from_cart(db, uid: str, by_sku: Dict[str, Dict[str, Any]]) -> L
             continue
         sku = str(it.get("sku"))
         prod = by_sku.get(sku) or {}
+        try:
+            qty = int(it.get("quantity") or 1)
+        except (TypeError, ValueError):
+            qty = 1   # a corrupt/non-numeric cart quantity must not abort the whole plan (mislabeled as a DB fail)
         lines.append({
             "ref": sku,
             "category": prod.get("category") or prod.get("type") or "",
-            "requested_qty": int(it.get("quantity") or 1),
+            "requested_qty": qty,
             "name": prod.get("name") or sku,
         })
     return lines

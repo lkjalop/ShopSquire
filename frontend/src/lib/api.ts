@@ -207,6 +207,7 @@ export interface MultiIntentPickResult { sku?: string; name?: string; price?: nu
 export interface MultiIntentLine {
   scope: 'prior' | 'new';
   ref?: string; name?: string;                 // prior line: the chosen sku + its display name
+  amended?: boolean;                            // prior line: THIS turn actually changed its qty (vs carried forward)
   category?: string;                            // new line: the category token
   requested_qty?: number | null;
   budget_min?: number | null; budget_max?: number | null;

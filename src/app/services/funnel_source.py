@@ -71,9 +71,10 @@ def record_event(db, *, stage: str, entered: int, abandoned: int, observed_at: s
 
 
 # a payment stage bleeding ~70% of carts → a finding (entered well above the detector's min_volume).
-# Timestamps relative to today so the demo funnel drop never ages out of the analysis window.
-_DEMO = [("cart", 100, 20, f"{date.today().isoformat()}T08:00:00"),
-         ("payment", 60, 42, f"{date.today().isoformat()}T08:00:00")]
+# Timestamps relative to today, computed at CALL time (not import) so the demo funnel drop never ages out.
+def _demo():
+    today = date.today().isoformat()
+    return [("cart", 100, 20, f"{today}T08:00:00"), ("payment", 60, 42, f"{today}T08:00:00")]
 
 
 def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Dict[str, int]:
@@ -81,7 +82,7 @@ def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Di
     if db is None:
         return {}
     ensure_table(db)
-    n = sum(1 for stage, entered, abandoned, ts in _DEMO
+    n = sum(1 for stage, entered, abandoned, ts in _demo()
             if record_event(db, stage=stage, entered=entered, abandoned=abandoned, observed_at=ts,
                             source="seed", tenant_id=tenant_id))
     if commit:

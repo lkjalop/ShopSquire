@@ -389,10 +389,14 @@ export default function App() {
   const uid = (getStoredUid() || 'demo-user');
   // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer — show it only in a dev build
   // or when explicitly opted in (localStorage 'shopsquire_debug'='1'), never to a normal shopper.
-  const showDebugBadges = Boolean(
-    (import.meta as any)?.env?.DEV ||
-    (typeof localStorage !== 'undefined' && localStorage.getItem('shopsquire_debug') === '1'),
-  );
+  const showDebugBadges = ((): boolean => {
+    // `localStorage` (even `typeof localStorage`) can THROW SecurityError in a sandboxed iframe / locked-down
+    // privacy context — a bare check here would blank the whole app, so guard the access.
+    try {
+      if ((import.meta as any)?.env?.DEV) return true;
+      return typeof localStorage !== 'undefined' && localStorage.getItem('shopsquire_debug') === '1';
+    } catch { return false; }
+  })();
 
   // Track 2b — real clickstream: emit a first-touch page_view (with any ?utm_* channel) so the marketing-BI
   // channel / verified-human / network panels populate from an ACTUAL visit, not just the synthetic seed.

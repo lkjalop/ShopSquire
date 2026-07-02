@@ -46,7 +46,11 @@ def plan_turn(
     for i, p in enumerate(prior):
         row = dict(p)
         row["scope"] = "prior"
-        if amend_qty is not None and i == len(prior) - 1:
+        # `amended` is True ONLY for the line this turn actually changed the qty of. A carried-forward,
+        # unchanged prior line must NOT be presented as an amendment (else the UI shows a spurious
+        # "Change X quantity to N" and confirming it would apply/add an item the buyer never asked to change).
+        row["amended"] = bool(amend_qty is not None and i == len(prior) - 1)
+        if row["amended"]:
             row["requested_qty"] = amend_qty            # 20 → 15 on the chosen laptop
         lines.append(row)
 

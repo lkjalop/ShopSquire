@@ -69,9 +69,10 @@ def record_objection(db, *, theme: str, entity_ref: str = "", raised_at: str = "
 
 
 # enough of the same theme to trip detect_objection_cluster (min_count=3 → "price" cluster).
-# Timestamps relative to today so the demo objection cluster never ages out of the analysis window.
-_TODAY = date.today().isoformat()
-_DEMO = [("price", f"{_TODAY}T0{i}:00:00") for i in range(4)] + [("delivery_time", f"{_TODAY}T05:00:00")]
+# Timestamps relative to today, computed at CALL time (not import) so the cluster never ages out.
+def _demo():
+    today = date.today().isoformat()
+    return [("price", f"{today}T0{i}:00:00") for i in range(4)] + [("delivery_time", f"{today}T05:00:00")]
 
 
 def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Dict[str, int]:
@@ -79,7 +80,7 @@ def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Di
     if db is None:
         return {}
     ensure_table(db)
-    n = sum(1 for theme, ts in _DEMO
+    n = sum(1 for theme, ts in _demo()
             if record_objection(db, theme=theme, raised_at=ts, source="seed", tenant_id=tenant_id))
     if commit:
         try:

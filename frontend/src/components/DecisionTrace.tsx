@@ -576,6 +576,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
         try { ws?.close(); } catch {} ws = null;
         startFallback();   // WS errored (incl. 404/close) → degrade cleanly
       };
+      ws.onclose = () => {
+        // A CLEAN server close (code 1000) fires onclose but NOT onerror, so without this the trace would
+        // silently stop with no fallback. startFallback is idempotent + guarded on `mounted`, so this is a
+        // no-op on intentional teardown (cleanup sets mounted=false first) and after an onerror already ran.
+        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+        ws = null;
+        startFallback();
+      };
     } catch {
       ws = null;
       startFallback();     // WS construction threw → degrade
