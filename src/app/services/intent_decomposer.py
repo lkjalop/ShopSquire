@@ -20,9 +20,14 @@ Pure: no DB, no LLM, no request locals. The caller resolves ``__last__`` / ``__n
 """
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# injected LLM: takes a prompt, returns raw JSON text. The CORE never imports a model — the live adapter
+# supplies the real (schema-forced) call; tests supply a stub. Keeps this module pure + vertical-blind.
+LLMFn = Callable[[str], str]
 
 # ── grammar cues (commerce-generic, NOT product vocabulary) ──────────────────
 _AMEND_RE = re.compile(
@@ -46,6 +51,14 @@ _STOP_NOUNS = {
     "picks", "recommendations", "yours", "ours", "goods",
 }
 _NUM = r"(\d[\d,]{0,6})"
+
+# change/add signals that the deterministic parser doesn't fully cover — their presence WITHOUT a captured
+# amendment/new-line is what triggers the LLM binding fallback (the "trap" cases like "reduce to 10 and get
+# 40 mice" or "make it 15 and add a docking station" that the regex verb set misses).
+_CHANGE_VERB_RE = re.compile(
+    r"\b(?:reduce|lower|drop|cut|bump|bring|only|down\s+to|make\s+it|change|instead|halve|double)\b", re.I)
+_ADD_VERB_RE = re.compile(
+    r"\b(?:add|get|grab|throw\s+in|include|also|plus|as\s+well|toss\s+in|chuck\s+in)\b", re.I)
 
 
 @dataclass(frozen=True)
@@ -88,10 +101,28 @@ class TurnIntents:
         }
 
 
-def decompose_turn(query: str, *, has_prior_selection: bool = False) -> TurnIntents:
-    """Decompose one buyer turn into its intents. ``has_prior_selection`` = there is a chosen/shortlisted item
-    to amend (from session state); without it, a bare "15 instead" is ambiguous and is surfaced as a note
-    instead of a silent amendment (never guess on quantity)."""
+def decompose_turn(query: str, *, has_prior_selection: bool = False,
+                   llm_fn: Optional["LLMFn"] = None) -> TurnIntents:
+    """Decompose one buyer turn into its intents. Hybrid ("AI proposes, deterministic authorizes"):
+
+    1. the DETERMINISTIC parser runs first (fast, free, covers the common phrasings);
+    2. if it likely MISSED an intent — a change/add signal is present but the corresponding amendment/new-line
+       wasn't captured, or confidence is low — and an ``llm_fn`` is injected, a schema-constrained LLM re-parses
+       the turn; its output is VALIDATED by the same grammar rules (qty 1..500, budget >= 50, ref __last__)
+       before it's trusted, so the LLM never sets a quantity or budget the deterministic authorizer rejects.
+
+    The downstream scatter-gather guard + confirmation card are the final safety net, so even a bad LLM parse
+    can never silently apply a wrong plan. ``llm_fn(prompt) -> str`` returns raw JSON text (injected; the live
+    adapter supplies the real model, tests a stub). Pure otherwise — no DB, no network here."""
+    deterministic = _decompose_deterministic(str(query or ""), has_prior_selection)
+    if llm_fn is None or not _needs_llm_binding(deterministic, str(query or "").lower(), has_prior_selection):
+        return deterministic
+    refined = _bind_with_llm(str(query or ""), has_prior_selection, llm_fn)
+    return refined if refined is not None else deterministic
+
+
+def _decompose_deterministic(query: str, has_prior_selection: bool) -> TurnIntents:
+    """The deterministic primitive parser (grammar cues + binding rules). Vertical-blind, pure."""
     q = str(query or "")
     ql = q.lower()
     notes: List[str] = []
@@ -225,3 +256,122 @@ def _to_int(v: Any) -> Optional[int]:
         return int(str(v).replace(",", ""))
     except (TypeError, ValueError):
         return None
+
+
+# ── LLM binding layer (schema-constrained; validated by the same grammar rules) ──────────────────────────
+def _needs_llm_binding(intents: TurnIntents, ql: str, has_prior_selection: bool) -> bool:
+    """Call the LLM only when the deterministic parse likely MISSED an intent — a change signal with no
+    amendment, or an add signal with no new line, or genuinely low confidence. A fully-captured turn keeps
+    the free fast-path (no model call)."""
+    if intents.confidence < 0.75:
+        return True
+    if has_prior_selection and _CHANGE_VERB_RE.search(ql) and not intents.amendments:
+        return True
+    if _ADD_VERB_RE.search(ql) and not intents.new_lines:
+        return True
+    return False
+
+
+_LLM_BINDING_PROMPT = (
+    "You extract a shopper's shopping intents from ONE message into STRICT JSON. Output ONLY the JSON object,"
+    " no prose. Schema:\n"
+    '{"amendments":[{"ref":"__last__","new_qty":<int>}],'
+    '"new_lines":[{"category":"<short generic plural noun>","qty":<int or null>}],'
+    '"budget_scopes":[{"applies_to":["__new__"],"budget_min":<int or null>,"budget_max":<int or null>}],'
+    '"objection":"price" or null}\n'
+    "Rules:\n"
+    "- amendments: ONLY when the shopper changes the QUANTITY of the item they already chose (e.g. 'make it"
+    " 15', 'reduce to 10', 'lower to 20', 'bump to 30', 'only 5'). ref is always '__last__'. Omit if the"
+    " quantity of the prior item is not changed. has_prior_selection={prior}; if false, emit NO amendment.\n"
+    "- new_lines: each DISTINCT additional product category the shopper wants, with its quantity if stated"
+    " ('3 monitors' -> qty 3; 'some headsets' -> qty null; 'a docking station' -> qty 1). Use short GENERIC"
+    " category nouns (plural), never brands or models. qty must be 1..500 or null.\n"
+    "- budget_scopes: a budget the shopper ties to the new items ('2000 for those', 'under 500 for the"
+    " accessories', 'with the leftover budget') -> applies_to ['__new__']. Omit if no budget. Values are"
+    " whole numbers >= 50.\n"
+    "- objection: 'price' if they complain about cost, else null.\n"
+    'Message: "{msg}"\nJSON:'
+)
+
+
+def _bind_with_llm(query: str, has_prior_selection: bool, llm_fn: LLMFn) -> Optional[TurnIntents]:
+    """Ask the injected LLM for the forced schema, then VALIDATE it with the deterministic rules. Returns a
+    TurnIntents on success, or None on any failure (caller falls back to the deterministic parse)."""
+    prompt = _LLM_BINDING_PROMPT.replace("{prior}", "true" if has_prior_selection else "false").replace(
+        "{msg}", str(query or "").replace('"', "'")[:400])
+    try:
+        raw = llm_fn(prompt)
+    except Exception:
+        return None
+    return _parse_llm_intents(raw, has_prior_selection)
+
+
+def _parse_llm_intents(raw: Any, has_prior_selection: bool) -> Optional[TurnIntents]:
+    """Parse + VALIDATE the model's JSON into TurnIntents. Every number is re-checked against the same rules
+    the deterministic authorizer uses (qty 1..500, budget >= 50, ref __last__, no amendment without a prior).
+    Any structural problem → None (never trust an unvalidated model plan)."""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    # tolerate a model that wraps the JSON in prose/code fences — grab the first {...} block
+    if not text.startswith("{"):
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return None
+        text = m.group(0)
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    amendments: List[Amendment] = []
+    for a in (data.get("amendments") or [])[:1]:   # one amendment per turn (the buyer changes their mind once)
+        if not isinstance(a, dict):
+            continue
+        nq = _to_int(a.get("new_qty"))
+        if nq is not None and 1 <= nq <= 500 and has_prior_selection:
+            amendments.append(Amendment(ref="__last__", new_qty=nq))
+
+    new_lines: List[NewLine] = []
+    seen: set = set()
+    for nl in (data.get("new_lines") or [])[:8]:
+        if not isinstance(nl, dict):
+            continue
+        cat = str(nl.get("category") or "").strip().lower()
+        cat = re.sub(r"[^a-z0-9 /\-]", "", cat)[:40].strip()
+        if not cat or cat in seen or cat.rstrip("s") in _STOP_NOUNS or cat in _STOP_NOUNS:
+            continue
+        q = _to_int(nl.get("qty"))
+        if q is not None and not (1 <= q <= 500):
+            q = None
+        seen.add(cat)
+        new_lines.append(NewLine(category=cat, qty=q))
+
+    budget_scopes: List[BudgetScope] = []
+    global_budget: Optional[Tuple[Optional[int], Optional[int]]] = None
+    for b in (data.get("budget_scopes") or [])[:1]:
+        if not isinstance(b, dict):
+            continue
+        bmin, bmax = _to_int(b.get("budget_min")), _to_int(b.get("budget_max"))
+        bmin = bmin if (bmin is not None and bmin >= 50) else None
+        bmax = bmax if (bmax is not None and bmax >= 50) else None
+        if bmin is None and bmax is None:
+            continue
+        if new_lines:
+            budget_scopes.append(BudgetScope(applies_to=("__new__",), budget_min=bmin, budget_max=bmax))
+        else:
+            global_budget = (bmin, bmax)
+
+    objection = "price" if str(data.get("objection") or "").strip().lower() == "price" else None
+
+    if not (amendments or new_lines or budget_scopes or global_budget or objection):
+        return None   # the model added nothing usable → let the deterministic parse stand
+
+    notes = ["parsed by LLM binding (schema-validated)"]
+    # a mixed, money-changing turn always warrants confirmation.
+    present = sum(bool(x) for x in (amendments, new_lines, budget_scopes or global_budget, objection))
+    confidence = 0.7 if present >= 2 else 0.8
+    return TurnIntents(amendments=amendments, new_lines=new_lines, budget_scopes=budget_scopes,
+                       global_budget=global_budget, objection=objection, confidence=confidence, notes=notes)

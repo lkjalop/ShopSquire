@@ -28,13 +28,17 @@ def plan_turn(
     prior_lines: Optional[List[Dict[str, Any]]] = None,
     search_fn: Callable[[str, Optional[int]], List[Dict[str, Any]]],
     confirm_below: float = 0.8,
+    llm_fn: Optional[Callable[[str], str]] = None,
+    intents: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Plan a multi-intent turn. ``prior_lines``: the chosen/shortlisted items BEFORE this turn, newest last —
     each {ref, category?, requested_qty, budget_max?, results?}; the LAST is the "__last__" amendment target.
     ``search_fn(category, budget_max)`` returns candidate results for a new line within the scoped budget.
     Returns {intents, plan, verdict, needs_confirmation, objection_angle}. Never raises."""
     prior = [dict(p) for p in (prior_lines or []) if isinstance(p, dict)]
-    intents = decompose_turn(query, has_prior_selection=bool(prior))
+    # accept a pre-decomposed plan (so the caller's probe + this call don't double the LLM binding); else decompose.
+    if intents is None:
+        intents = decompose_turn(query, has_prior_selection=bool(prior), llm_fn=llm_fn)
 
     lines: List[Dict[str, Any]] = []
 

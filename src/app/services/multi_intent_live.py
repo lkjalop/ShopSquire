@@ -17,6 +17,7 @@ in-memory snapshot — no DB access inside the injected closure (keeps it off th
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import text as _sql
@@ -159,8 +160,37 @@ def plan_live(query: str, uid: str, *, limit: int = 6,
 
     # Gate: only engage on a genuinely multi-intent turn (an amendment OR a new category line). A plain
     # single-intent search gains nothing from the planner, so we return None and leave the turn untouched.
-    probe = decompose_turn(query, has_prior_selection=bool(prior))
+    # Hybrid parse: the deterministic fast-path first, then the schema-constrained LLM binding (flag-gated)
+    # for phrasings the regex misses ("reduce to 10 and get 40 mice"). Decompose ONCE here and reuse it in
+    # plan_turn so the model is called at most once per turn.
+    llm_fn = _binding_llm_fn()
+    probe = decompose_turn(query, has_prior_selection=bool(prior), llm_fn=llm_fn)
     if not probe.amendments and not probe.new_lines:
         return None
 
-    return plan_turn(query, prior_lines=prior, search_fn=_make_search_fn(catalog, limit))
+    return plan_turn(query, prior_lines=prior, search_fn=_make_search_fn(catalog, limit),
+                     intents=probe, llm_fn=llm_fn)
+
+
+def _binding_llm_fn() -> Optional[Callable[[str], str]]:
+    """A sync, schema-forced Ollama call for the multi-intent LLM binding — or None when disabled. Flag-gated
+    (MULTI_INTENT_LLM_BINDING_ENABLED, default OFF) so the default path stays deterministic + Ollama-free.
+    Best-effort: any error returns '' so the deterministic parse always stands."""
+    if str(os.getenv("MULTI_INTENT_LLM_BINDING_ENABLED", "")).strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+    model = (os.getenv("MULTI_INTENT_LLM_MODEL") or os.getenv("OLLAMA_SMALL_MODEL")
+             or os.getenv("OLLAMA_DEFAULT_MODEL") or "qwen3:14b")
+    timeout = float(os.getenv("MULTI_INTENT_LLM_TIMEOUT_SEC", "12") or 12)
+
+    def _fn(prompt: str) -> str:
+        try:
+            import httpx
+            r = httpx.post(f"{url}/api/generate",
+                           json={"model": model, "prompt": prompt, "stream": False, "format": "json",
+                                 "options": {"temperature": 0, "num_predict": 512}},
+                           timeout=timeout)
+            return str((r.json() or {}).get("response", "") or "")
+        except Exception:
+            return ""   # deterministic parse stands
+    return _fn
