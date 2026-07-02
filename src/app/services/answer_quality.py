@@ -38,12 +38,19 @@ def _extract_budget_threshold(query: str) -> int | None:
 
 def _extract_query_budget_bounds(query: str) -> Tuple[int | None, int | None]:
     q = str(query or "").lower()
-    m_range = re.search(r"(?:between|from)\s*\$?\s*([\d,]{2,6})\s*(?:and|to|-)\s*\$?\s*([\d,]{2,6})", q)
-    if m_range:
-        lo = _to_int(m_range.group(1))
-        hi = _to_int(m_range.group(2))
-        if lo is not None and hi is not None:
-            return (min(lo, hi), max(lo, hi))
+    # A cue-anchored OR $-anchored range so bare bulk phrasings parse too: "budget 1500 to 1900",
+    # "price 1500-1900", "$1500-$1900 each". Without an anchor a bare "1500 to 1900" is too ambiguous
+    # (spec ranges, counts) — the anchor (between/from/budget/price/a leading $) keeps it a BUDGET range.
+    for pat in (
+        r"(?:between|from|budget(?:\s+(?:is|of))?|price(?:\s+range)?)\s*\$?\s*([\d,]{3,6})\s*(?:and|to|-|–|—)\s*\$?\s*([\d,]{3,6})",
+        r"\$\s*([\d,]{3,6})\s*(?:and|to|-|–|—)\s*\$?\s*([\d,]{3,6})",
+    ):
+        m_range = re.search(pat, q)
+        if m_range:
+            lo = _to_int(m_range.group(1))
+            hi = _to_int(m_range.group(2))
+            if lo is not None and hi is not None:
+                return (min(lo, hi), max(lo, hi))
     m_under = re.search(r"(?:under|below|less than|<)\s*\$?\s*([\d,]{2,6})", q)
     if m_under:
         return (None, _to_int(m_under.group(1)))
@@ -180,7 +187,10 @@ def _render_budget_decision(*, query: str, products: List[Dict[str, Any]], base_
     if direct is None:
         direct = "For your case,"
     if lo_msg is not None and hi_msg is not None:
-        return f"{direct} a practical budget band is ${lo_msg:,}-${hi_msg:,}. {base_message}".strip()
+        # Never print a reversed band (a mis-parsed cap once produced "$1,599-$1,500"): the floor is the
+        # cheapest in-budget option and the ceiling the buyer's cap, so order them defensively.
+        lo_band, hi_band = min(lo_msg, hi_msg), max(lo_msg, hi_msg)
+        return f"{direct} a practical budget band is ${lo_band:,}-${hi_band:,}. {base_message}".strip()
     return f"{direct} {base_message}".strip()
 
 

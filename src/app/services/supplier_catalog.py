@@ -522,6 +522,36 @@ def domain_for_supplier(db, supplier_id: str) -> Optional[str]:
         return None
 
 
+def lead_times_for_skus(db, skus: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Per-sku assigned supplier + its REAL lead time — the ETA for the backordered part of a split shipment.
+    Picks the most reliable active supplier that carries each sku; the per-sku supplier_products.lead_time_days
+    overrides the supplier default. Returns {sku: {supplier_ref, lead_time_days}}; a sku no active supplier
+    carries simply has no entry (its backorder then reads "once replenished", never a fabricated ETA)."""
+    out: Dict[str, Dict[str, Any]] = {}
+    if db is None or not skus:
+        return out
+    try:
+        params = {f"s{i}": str(s) for i, s in enumerate(skus)}
+        placeholders = ", ".join(f":{k}" for k in params)
+        rows = db.execute(text(
+            f"SELECT sp.sku, s.id, COALESCE(sp.lead_time_days, s.lead_time_days) AS lt, "
+            f"COALESCE(s.reliability_score, 0) AS rel "
+            f"FROM suppliers s JOIN supplier_products sp ON sp.supplier_id = s.id "
+            f"WHERE sp.sku IN ({placeholders}) AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1"),
+            params).fetchall()
+    except Exception:
+        return out
+    best_rel: Dict[str, float] = {}
+    for r in rows:
+        sku = str(r[0])
+        rel = float(r[3] or 0)
+        if sku not in out or rel > best_rel.get(sku, -1.0):
+            best_rel[sku] = rel
+            out[sku] = {"supplier_ref": str(r[1]),
+                        "lead_time_days": (int(r[2]) if r[2] is not None else None)}
+    return out
+
+
 def cheapest_wholesale_cents(db, sku: str) -> Optional[int]:
     """The lowest active-supplier wholesale for a sku, in CENTS — the economics fallback when there is
     no live validated quote (suppliers.unit_cost is stored in dollars). None if no supplier carries it."""

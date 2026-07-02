@@ -698,7 +698,21 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
                     return label
             return str((row or {}).get("name") or "").strip()
 
-        for row in (results or [])[:2]:
+        # When we present a clean use-case fit, the "Best fits for X" picks must ACTUALLY fit the use case.
+        # A gaming laptop that merely lands in the budget band (high raw score, no use-case match) must not
+        # be paraded as a "best fit for office work". Prefer rows carrying a positive use_case_match marker;
+        # fall back to the top rows only when NONE carry it, so the line never silently disappears.
+        def _positively_fits_use_case(row: dict) -> bool:
+            fac = (row or {}).get("factors") or {}
+            pos = fac.get("positive") if isinstance(fac, dict) else None
+            if not isinstance(pos, list):
+                pos = (row or {}).get("why") or []
+            return any("use_case_match" in str(f) for f in (pos or []))
+
+        source_rows = list(results or [])
+        if clean_use_case_fit and use_case and any(_positively_fits_use_case(r) for r in source_rows):
+            source_rows = [r for r in source_rows if _positively_fits_use_case(r)]
+        for row in source_rows[:2]:
             name = _display_name(row)
             if not name:
                 continue

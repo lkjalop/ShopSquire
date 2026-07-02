@@ -1686,7 +1686,7 @@ export default function App() {
             <button className={styles.searchBtn} onClick={handleHeaderSearch}>Search</button>
           </div>
           <div className={styles.headerActions}>
-            <button className={styles.headerBtn} onClick={() => { refreshCart(); switchRightPanelMode('cart'); }}>
+            <button className={styles.headerBtn} onClick={() => { refreshCart(); switchRightPanelMode('cart'); setChatOpen(true); }}>
               Cart ({(cart?.items || []).length || 0})
             </button>
             {authUser ? (

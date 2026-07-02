@@ -154,6 +154,28 @@ export async function getCart(uid: string) {
   return j;
 }
 
+export interface SplitShipmentLine { sku: string; qty: number; unit_cents: number; eta_days?: number | null; supplier_ref?: string | null }
+export interface SplitDelivery {
+  currency: string; fee_now_cents: number; fee_later_cents: number; total_fee_cents: number;
+  free_shipping_threshold_cents: number; waived: boolean; shipments: number; backorder_enabled: boolean;
+}
+export interface SplitPlan {
+  now: SplitShipmentLine[]; later: SplitShipmentLine[]; subtotal_cents: number;
+  delivery: SplitDelivery; fully_in_stock: boolean; rationale: string;
+}
+export interface SplitOfferResult { cart_id: string; subtotal_cents: number; currency: string; split: SplitPlan | null }
+
+// Pre-payment split-fulfilment offer: what ships now (stock) vs follows from a supplier (with the supplier's
+// REAL lead time as the ETA), plus the store's delivery economics. The buyer confirms this before payment.
+export async function getSplitOffer(uid: string): Promise<SplitOfferResult> {
+  const u = new URL(apiUrl('/api/v1/cart/split-offer'), window.location.href);
+  u.searchParams.set('uid', uid || 'demo-user');
+  const r = await fetch(u.toString(), { credentials: 'include', headers: authHeaders() });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `split_offer_failed (${r.status})`);
+  return j as SplitOfferResult;
+}
+
 // ── Fulfilment / procurement (buyer-facing; operator actions live in admin-react) ──
 export interface FulfillmentOption {
   option_id: string;

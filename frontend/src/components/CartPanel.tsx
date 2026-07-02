@@ -3,6 +3,7 @@ import styles from './CartPanel.module.css';
 import type { Product } from '../App';
 import { apiUrl, safeJson, confirmCartSourcing } from '../lib/api';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
+import SplitFulfillmentCard from './SplitFulfillmentCard';
 
 type CartItem = { sku: string; quantity: number; price_cents?: number; name?: string; specs?: Record<string, any> | null };
 type BundleSavings = {
@@ -120,6 +121,24 @@ export default function CartPanel({
   const bundle = cart?.bundle_savings;
   const [sourcingNote, setSourcingNote] = useState<string | null>(null);
   const [checkingSourcing, setCheckingSourcing] = useState(false);
+  // Pre-payment split-fulfilment confirmation. The card reports whether the cart splits (a supplier-backed
+  // second shipment exists) and whether the buyer has confirmed the plan; checkout is gated on that confirm.
+  const [splitHasSplit, setSplitHasSplit] = useState(false);
+  const [splitConfirmed, setSplitConfirmed] = useState(false);
+  // A stable signature of the cart lines (sku:qty) — the split card re-fetches whenever this changes.
+  const splitKey = useMemo(
+    () => (cart?.items || []).map((i) => `${i.sku}:${i.quantity}`).sort().join('|'),
+    [cart],
+  );
+  const nameForSku = (sku: string): string => {
+    const it = (cart?.items || []).find((x) => x.sku === sku);
+    return it ? productDisplayName(it) : sku;
+  };
+  const onSplitState = (hasSplit: boolean, confirmed: boolean) => {
+    setSplitHasSplit(hasSplit);
+    setSplitConfirmed(confirmed);
+  };
+  const splitBlocksCheckout = splitHasSplit && !splitConfirmed;
 
   const proceedToCheckout = () => {
     // Persist cart snapshot so the checkout page can show an order summary
@@ -255,6 +274,8 @@ export default function CartPanel({
             </div>
           ))}
 
+          <SplitFulfillmentCard uid={uid} refreshKey={splitKey} nameFor={nameForSku} onSplitState={onSplitState} />
+
           <div className={styles.row}>
             <div className={styles.rowLeft}>
               <div className={styles.name}>Subtotal</div>
@@ -269,8 +290,10 @@ export default function CartPanel({
                   ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-proceed"
                             onClick={proceedToCheckout}>Continue to checkout</button>
                   : <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-checkout"
-                            disabled={checkingSourcing} onClick={goToCheckout}>
-                      {checkingSourcing ? 'Checking stock…' : 'Checkout'}
+                            disabled={checkingSourcing || splitBlocksCheckout} onClick={goToCheckout}
+                            title={splitBlocksCheckout ? 'Confirm the delivery plan first' : undefined}>
+                      {checkingSourcing ? 'Checking stock…'
+                        : splitBlocksCheckout ? 'Confirm delivery plan first' : 'Checkout'}
                     </button>}
               </div>
             </div>

@@ -200,6 +200,46 @@ def get_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWN
         return {"cart_id": cart_id, **hydrated}
 
 
+@router.get("/split-offer")
+def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+    """Split-fulfillment offer for the buyer's cart, surfaced BEFORE payment: what ships NOW (from on-hand
+    stock) vs what FOLLOWS from a supplier — the "follows" ETA is the SUPPLIER's own lead time (a real figure
+    from the supplier catalog, not a guess). Delivery fees + the free-shipping threshold come from the active
+    StoreProfile (agnostic — every store sets its own economics). The buyer CONFIRMS this before payment; we
+    never silently split a shipment or add a fee. A fully-in-stock cart returns a single-shipment plan."""
+    from src.app.services.fulfillment.fulfillment_split import (
+        SplitLine, compute_split, delivery_policy_from_profile)
+    from src.app.services.supplier_catalog import lead_times_for_skus
+
+    with tracer.start_as_current_span("cart.split_offer"):
+        cart_id, items = _get_or_create_cart(uid)
+        hydrated = _hydrate(items)
+        rows = hydrated.get("items") or []
+        if not rows:
+            return {"cart_id": cart_id, "subtotal_cents": 0, "currency": "USD", "split": None}
+        skus = [str(r["sku"]) for r in rows if r.get("sku")]
+        stock = _batch_stock_levels(skus)
+        try:
+            with db_session() as db:
+                leads = lead_times_for_skus(db, skus)
+        except Exception:
+            leads = {}
+        lines = [
+            SplitLine(
+                sku=str(r.get("sku")),
+                requested_qty=int(r.get("quantity") or 1),
+                in_stock=int(stock.get(str(r.get("sku")), 0)),
+                unit_cents=int(r.get("price_cents") or 0),
+                supplier_lead_time_days=(leads.get(str(r.get("sku"))) or {}).get("lead_time_days"),
+                supplier_ref=(leads.get(str(r.get("sku"))) or {}).get("supplier_ref"),
+            )
+            for r in rows if r.get("sku")
+        ]
+        plan = compute_split(lines, policy=delivery_policy_from_profile())
+        return {"cart_id": cart_id, "subtotal_cents": int(hydrated.get("subtotal_cents", 0) or 0),
+                "currency": hydrated.get("currency", "USD"), "split": plan.as_dict()}
+
+
 def _get_cart_sku_qty(uid: str, sku: str) -> int:
     """Return quantity of *sku* already in uid's active cart without creating one."""
     try:

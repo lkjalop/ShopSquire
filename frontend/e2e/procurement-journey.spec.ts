@@ -32,8 +32,13 @@ test('procurement journey — bulk order + reallocation mind-change, agentic + s
       'actually lower the laptops to 20, and with the leftover budget get me headsets and hard drives for 2000 for those');
     const card = page.getByTestId('multi-intent-card');
     await expect(card).toBeVisible({ timeout: 60_000 });
-    // the amendment (only the line the turn changed) + the two scoped new categories
-    await expect(card.getByText(/quantity to.*20/i)).toBeVisible();
+    // the amendment (only the line the turn changed) — target the amend ROW testid (the qty lives in a
+    // nested <strong>, so a cross-element /quantity to.*20/ text regex is flaky; assert the row's content).
+    const amendRow = card.locator('[data-testid^="multi-intent-amend-"]');
+    await expect(amendRow).toBeVisible({ timeout: 30_000 });
+    await expect(amendRow).toContainText(/quantity to/i);
+    await expect(amendRow).toContainText('20');
+    // the two scoped new categories
     await expect(card.getByText(/headsets/i)).toBeVisible();
     await expect(card.getByText(/hard drives/i)).toBeVisible();
     await page.waitForTimeout(3000);
