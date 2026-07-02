@@ -247,6 +247,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'audit' | 'raw'>('events');
+  // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
+  // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
+  const [procurementCaseId, setProcurementCaseId] = useState<string | null>(null);
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -1287,7 +1290,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
               <button className={activeTab === 'complexity' ? styles.activeTab : ''} onClick={() => setActiveTab('complexity')}>Complexity</button>
               <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
               <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
-              <button className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => setActiveTab('procurement')}>Procurement</button>
+              <button className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => setActiveTab('procurement')}>
+                Procurement{procurementCaseId ? <span title="A procurement journey was opened from this decision" style={{ marginLeft: 5, color: '#059669', fontWeight: 700 }}>●</span> : null}
+              </button>
               <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
                 setActiveTab('audit');
                 if (!auditTrail && traceIdText && !auditLoading) {
@@ -1307,7 +1312,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                 </div>
               )}
               {/* Links this decision to the procurement journey it opened (renders only when one exists) */}
-              <FulfilmentTraceLink traceId={effectiveTraceId || undefined} />
+              <FulfilmentTraceLink traceId={effectiveTraceId || undefined} onResolved={setProcurementCaseId} />
               {activeTab === 'events' && (
                 <>
                   <div className={styles.eventFilterRow}>
