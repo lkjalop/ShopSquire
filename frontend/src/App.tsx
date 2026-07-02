@@ -701,8 +701,22 @@ export default function App() {
         if (last && last.role === 'assistant' && last.content === addMsg) return prev;
         return [...prev, { role: 'assistant' as const, content: addMsg, timestamp: new Date() }];
       });
-    } catch {
-      // ignore for MVP
+    } catch (e: any) {
+      // Never fail silently: a stock-gate 409 previously showed nothing, so the buyer clicked Add and
+      // got no feedback (and the planner then had no prior cart item). Surface WHY it was blocked.
+      const addedProduct = products.find((p) => p.sku === sku);
+      const productName = addedProduct?.name || sku;
+      const m = String(e?.message || '');
+      const outOfStock = /stock|409|insufficient|out_of_stock|available/i.test(m);
+      const failMsg = outOfStock
+        ? `I couldn't add **${productName}** — it's out of stock or the quantity exceeds what's available. Want me to find an in-stock alternative?`
+        : `Sorry, I couldn't add **${productName}** to your cart just now. Please try again.`;
+      setChatOpen(true);
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === failMsg) return prev;
+        return [...prev, { role: 'assistant' as const, content: failMsg, timestamp: new Date() }];
+      });
     }
   };
 

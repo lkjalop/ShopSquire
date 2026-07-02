@@ -108,11 +108,17 @@ def _make_search_fn(catalog: List[Dict[str, Any]], limit: int) -> Callable[[str,
     return _search
 
 
-def plan_live(query: str, uid: str, *, limit: int = 6) -> Optional[Dict[str, Any]]:
+def plan_live(query: str, uid: str, *, limit: int = 6,
+              fallback_prior_skus: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
     """Run the planner against the buyer's live context. Returns None for a plain single-intent turn (no
     amendment and no new line) so the caller adds no noise; otherwise returns
     {intents, plan, verdict, needs_confirmation, objection_angle, warnings} (JSON-safe). Never raises —
-    surfaces a load failure as a warning inside the result rather than crashing the turn."""
+    surfaces a load failure as a warning inside the result rather than crashing the turn.
+
+    ``fallback_prior_skus``: the buyer's most-recent shortlist (top pick first), captured BEFORE this turn.
+    When the cart is empty (e.g. add-to-cart 409'd on stock) an amendment like "actually 15 instead" would
+    have nothing to bind to; we then bind "__last__" to the first catalog-resolvable fallback sku so the
+    amendment still lands on the item the buyer was just shown."""
     try:
         with db_session() as db:
             catalog = _load_catalog(db)
@@ -122,6 +128,15 @@ def plan_live(query: str, uid: str, *, limit: int = 6) -> Optional[Dict[str, Any
         return {"intents": {}, "plan": [], "verdict": {"ok": False, "violations": ["catalog_unavailable"]},
                 "needs_confirmation": True, "objection_angle": None,
                 "warnings": [f"multi_intent catalog load failed: {str(exc)[:120]}"]}
+
+    # Cart empty → fall back to the recent shortlist's top pick so an amendment still has a target.
+    if not prior and fallback_prior_skus:
+        for sku in fallback_prior_skus:
+            prod = by_sku.get(str(sku))
+            if prod:
+                prior = [{"ref": prod["sku"], "category": prod.get("category") or prod.get("type") or "",
+                          "requested_qty": 1, "name": prod.get("name") or prod["sku"]}]
+                break
 
     # Gate: only engage on a genuinely multi-intent turn (an amendment OR a new category line). A plain
     # single-intent search gains nothing from the planner, so we return None and leave the turn untouched.

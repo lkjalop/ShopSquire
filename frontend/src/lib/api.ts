@@ -295,7 +295,13 @@ export async function addCartItem(uid: string, sku: string, quantity = 1) {
     body: JSON.stringify({ uid: uid || 'demo-user', sku, quantity }),
   });
   const j = await safeJson(r);
-  if (!r.ok || !j) throw new Error((j && j.detail) ? j.detail : `cart_add_failed (${r.status})`);
+  if (!r.ok || !j) {
+    // detail may be a string OR the stock-gate object {error, available, ...} — surface a useful message
+    // (not "[object Object]") so the UI can tell the buyer WHY the add was blocked (409 stock gate).
+    const d = j && (j as any).detail;
+    const msg = typeof d === 'string' ? d : (d && (d.error || JSON.stringify(d))) || `cart_add_failed (${r.status})`;
+    throw new Error(msg);
+  }
   return j;
 }
 

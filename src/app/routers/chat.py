@@ -1286,11 +1286,18 @@ async def chat_query(
         copy_profile_inline = None
 
     # Reload confirmed slots at turn start to keep context continuity explicit.
+    # Also capture the PRIOR turn's shortlist NOW (before this turn's recommend overwrites it) so the
+    # multi-intent planner can bind "actually 15 instead" to the item the buyer was just shown when the
+    # cart is empty (e.g. an add-to-cart 409'd on stock).
+    _prior_turn_shortlist: List[str] = []
     try:
         _prior_ss = Memory(redis).get_structured_state(uid) or {}
         _confirmed_in = _prior_ss.get("confirmed_slots") if isinstance(_prior_ss.get("confirmed_slots"), dict) else {}
         if _confirmed_in:
             payload["confirmed_slots"] = _confirmed_in
+        _ls = _prior_ss.get("last_shortlist_skus") or _prior_ss.get("last_valid_shortlist_skus")
+        if isinstance(_ls, list):
+            _prior_turn_shortlist = [str(s) for s in _ls if s][:5]
     except Exception:
         pass
 
@@ -2400,7 +2407,7 @@ async def chat_query(
                 _mi_on = False
         if _mi_on and turn_intent not in ("EXPLAIN", "SUPPORT_CLAIM"):
             from src.app.services.multi_intent_live import plan_live
-            multi_intent = plan_live(str(q or ""), str(uid))
+            multi_intent = plan_live(str(q or ""), str(uid), fallback_prior_skus=_prior_turn_shortlist or None)
     except Exception as _mi_exc:
         # Non-silent: attach the failure to the response instead of crashing the turn or hiding it.
         multi_intent = {"warnings": [f"multi_intent planner error: {str(_mi_exc)[:120]}"],
