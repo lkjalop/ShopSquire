@@ -1,4 +1,20 @@
 import { test, expect, Page } from '@playwright/test';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+
+// The dev key the browser bundle already ships with (VITE_API_KEY) — used to seed the cart deterministically
+// over the API. Not a secret: it's inlined into the served JS.
+function devApiKey(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  for (const rel of ['../.env.local', '../.env.development.local']) {
+    try {
+      const m = readFileSync(resolve(here, rel), 'utf8').match(/^VITE_API_KEY=(.*)$/m);
+      if (m && m[1].trim()) return m[1].trim();
+    } catch { /* next */ }
+  }
+  return '';
+}
 
 /**
  * Direct clickthrough of the shopper storefront against the live dev stack (Vite :5173 + backend :8080
@@ -31,18 +47,29 @@ test.describe('shopper storefront', () => {
     expect(body).not.toMatch(/\+in_stock|ram_gb_min|embedding_similarity|cross_encoder/);
   });
 
-  test('T4 — multi-intent Confirm-qty sets the laptop line to 15 (sourcing-backed, no 409)', async ({ page }) => {
-    await page.goto('/');
-    // 1) establish a prior selection — search laptops (populates the shortlist the planner falls back to)
-    await openChatAndSend(page, 'business laptop around 1300');
-    await expect(page.getByText(/laptop/i).first()).toBeVisible({ timeout: 60_000 });
-    // Let the first turn FULLY settle so its shortlist is persisted to Redis before the amendment turn reads
-    // it (the planner falls back to that shortlist when the cart is empty). The main flake source was this
-    // race + a cross-<strong> text regex below; a longer settle + a testid-anchored assertion remove both.
-    await page.waitForTimeout(4000);
+  const T4_UID = 'e2e-t4-buyer';
+  const T4_SKU = 'LAP-433AB371';  // a resolvable, in-stock business laptop the amendment binds "__last__" to
 
-    // 2) the mixed multi-intent turn
-    await openChatAndSend(page, 'nah too expensive, actually i need 15 instead. what headsets and hard drives for 1200 for those?');
+  test('T4 — multi-intent Confirm-qty sets the laptop line to 15 (sourcing-backed, no 409)', async ({ page }) => {
+    // 1) DURABLE prior selection: seed the cart over the API (the storefront's "in stock" pick can 409 on
+    // add, and the Redis-shortlist fallback is a cross-turn race — a real cart line makes the amendment
+    // deterministic, which is what a production test needs).
+    await page.addInitScript((uid) => { try { sessionStorage.setItem('uid', uid); } catch { /* no-op */ } }, T4_UID);
+    const key = devApiKey();
+    expect(key, 'VITE_API_KEY must be readable from .env.local for the cart seed').not.toEqual('');
+    const seed = await page.request.put(`/api/v1/cart/items/${T4_SKU}`, {
+      headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
+      data: { uid: T4_UID, sku: T4_SKU, quantity: 1 },
+    });
+    expect(seed.ok(), `cart seed failed (${seed.status()})`).toBeTruthy();
+
+    await page.goto('/');
+
+    // 2) the mixed multi-intent turn — amend the cart laptop's qty + scope two new categories. (No "too
+    // expensive" objection: with browser context that phrasing classifies as SUPPORT_CLAIM, which chat.py
+    // deliberately skips the planner for — a support turn, not a cart-changing one. The amendment itself is
+    // what T4 exercises.)
+    await openChatAndSend(page, 'actually make it 15, and get me headsets and hard drives for 1200 for those');
 
     // 3) the confirmation card renders with the amendment + scoped picks
     const card = page.getByTestId('multi-intent-card');
