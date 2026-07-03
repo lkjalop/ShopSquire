@@ -2441,6 +2441,13 @@ async def chat_query(
         "budget_viability": budget_viability,
         "use_case_analysis": use_case_analysis,
         "buyer_persona": data.get("buyer_persona"),
+        # Phase-3 adaptive-storefront observability: forward the market-driven ranking adaptations (the
+        # demand-aware sales-response nudge + experiment ranking nudge + storefront emphasis) so the frontend
+        # and the Decision Trace can SHOW the governed adaptation ("why these moved", gate allow/deny). Each
+        # is present only when its flag-gated lever ran; the products themselves are already re-ranked.
+        "sales_response_nudge": data.get("sales_response_nudge") if isinstance(data.get("sales_response_nudge"), dict) else None,
+        "ranking_experiment": data.get("ranking_experiment") if isinstance(data.get("ranking_experiment"), dict) else None,
+        "storefront_emphasis": data.get("storefront_emphasis") if isinstance(data.get("storefront_emphasis"), dict) else None,
         # Buyer-safe procurement projection from /recommend/suggest. The recommend
         # layer owns case creation/redaction; chat must preserve it so the storefront
         # can render the commitment gate instead of hiding a real shortfall.

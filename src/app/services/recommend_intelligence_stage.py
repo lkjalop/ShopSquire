@@ -12,11 +12,24 @@ Vertical-blind.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from src.app.services.decision_log import log_trace_event
 from src.app.services.safe_stage import record_partial_failure
+
+
+def _market_min_confidence() -> float:
+    """Calibrated confidence floor for the Phase-3 storefront-adaptation levers (ranking + sales-response
+    nudge). The shared adaptive_action_gate defaults its global floor to 0.0 ("off until calibrated"), which
+    is right for procurement's use of the gate but would let a storefront nudge act on a NOISE signal the
+    moment the flag is flipped. So the market levers pass an explicit floor — MARKET_ADAPTIVE_MIN_CONFIDENCE,
+    default 0.6 — so a weak demand signal is DENIED (governed) while a strong one adapts. Never raises."""
+    try:
+        return float(os.getenv("MARKET_ADAPTIVE_MIN_CONFIDENCE", "0.6") or 0.6)
+    except (TypeError, ValueError):
+        return 0.6
 
 
 @dataclass
@@ -155,6 +168,7 @@ def _nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List
                         if isinstance(i, dict) and i.get("kind") == "product"), default=1.0)
             with db_session() as gdb:
                 gate = authorize(gdb, action_type="adjust_ranking", confidence=_conf,
+                                 min_confidence=_market_min_confidence(),
                                  subject=subject, target=str(recall_ids[0]))
             gate_reason = gate.reason
             if not gate.allowed:
@@ -234,6 +248,7 @@ def _sales_response_nudge(state: IntelligenceStageState, results: List[Dict[str,
         from src.app.services.adaptive_action_gate import authorize
         with db_session() as gdb:
             gate = authorize(gdb, action_type="adjust_ranking", confidence=float(conf),
+                             min_confidence=_market_min_confidence(),
                              subject=str(state.uid_hash or state.uid or ""), target=str(next(iter(actionable))))
         if not gate.allowed:
             state.payload["sales_response_nudge"] = {"applied": 0, "gate": gate.reason,
