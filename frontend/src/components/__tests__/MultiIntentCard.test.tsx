@@ -11,11 +11,11 @@ import type { MultiIntentPlan } from '../../lib/api';
 const PLAN: MultiIntentPlan = {
   plan: [
     { scope: 'prior', ref: 'LAP-1', name: 'Asus VivoBook', requested_qty: 15, amended: true },
-    { scope: 'new', category: 'headsets', budget_max: 1200, results: [
+    { scope: 'new', category: 'headsets', budget_max: 1200, requested_qty: 5, results: [
       { sku: 'AUD-1', name: 'RIG Headset', price: 179 },
       { sku: 'AUD-2', name: 'Studio Pro', price: 249 },
     ] },
-    { scope: 'new', category: 'hard drives', budget_max: 1200, results: [] },
+    { scope: 'new', category: 'hard drives', budget_max: 1200, requested_qty: 10, results: [] },
   ],
   verdict: { ok: true, violations: [] },
   needs_confirmation: true,
@@ -31,13 +31,25 @@ describe('MultiIntentCard', () => {
     expect(onAmendQty).toHaveBeenCalledWith('LAP-1', 15);
   });
 
-  it('adds a scoped pick via onAddItem and shows the value reframe', () => {
+  it('adds a scoped pick at the REQUESTED qty (5 headsets → adds 5, not 1) and shows the value reframe', () => {
     const onAddItem = vi.fn();
     render(<MultiIntentCard plan={PLAN} onAmendQty={vi.fn()} onAddItem={onAddItem} onDismiss={vi.fn()} />);
     expect(screen.getByTestId('multi-intent-objection')).toBeTruthy();      // value reframe note
     expect(screen.getByText(/RIG Headset/)).toBeTruthy();
-    fireEvent.click(screen.getAllByText('Add')[0]);
-    expect(onAddItem).toHaveBeenCalledWith('AUD-1', 1);
+    // the line asked for 5 headsets — the Add button carries that qty (the old hardcoded 1 dropped it)
+    const addBtn = screen.getAllByRole('button', { name: 'Add 5' })[0];
+    fireEvent.click(addBtn);
+    expect(onAddItem).toHaveBeenCalledWith('AUD-1', 5);
+  });
+
+  it('falls back to qty 1 for a new line with no stated quantity', () => {
+    const onAddItem = vi.fn();
+    const plan: MultiIntentPlan = {
+      plan: [{ scope: 'new', category: 'mice', budget_max: 100, results: [{ sku: 'PER-1', name: 'Mouse', price: 20 }] }],
+    };
+    render(<MultiIntentCard plan={plan} onAmendQty={vi.fn()} onAddItem={onAddItem} onDismiss={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(onAddItem).toHaveBeenCalledWith('PER-1', 1);
   });
 
   it('shows a no-options message for a scoped line with no picks', () => {

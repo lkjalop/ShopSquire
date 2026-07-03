@@ -387,13 +387,13 @@ export default function App() {
   const [whyDrawerLoading, setWhyDrawerLoading] = useState(false);
   const [whyDrawerError, setWhyDrawerError] = useState<string | null>(null);
   const uid = (getStoredUid() || 'demo-user');
-  // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer — show it only in a dev build
-  // or when explicitly opted in (localStorage 'shopsquire_debug'='1'), never to a normal shopper.
+  // Dev-only debug metadata (LLM tier·model badge) is noise for a pilot buyer OR a live demo (the demo runs
+  // the Vite dev server, so a DEV auto-enable leaks the badge on camera). Show it ONLY on an explicit opt-in
+  // (localStorage 'shopsquire_debug'='1') — never to a normal shopper and never by default in a dev build.
   const showDebugBadges = ((): boolean => {
     // `localStorage` (even `typeof localStorage`) can THROW SecurityError in a sandboxed iframe / locked-down
     // privacy context — a bare check here would blank the whole app, so guard the access.
     try {
-      if ((import.meta as any)?.env?.DEV) return true;
       return typeof localStorage !== 'undefined' && localStorage.getItem('shopsquire_debug') === '1';
     } catch { return false; }
   })();

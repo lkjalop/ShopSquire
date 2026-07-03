@@ -58,8 +58,11 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
         </div>
       ))}
 
-      {/* new scoped category lines — the buyer adds the pick they want */}
-      {newLines.map((l, i) => (
+      {/* new scoped category lines — the buyer adds the pick they want, at the qty the turn asked for
+          ("5 headsets" adds 5 of the chosen model, not 1 — the old hardcoded qty ignored the request). */}
+      {newLines.map((l, i) => {
+        const addQty = Math.max(1, Number(l.requested_qty) || 1);
+        return (
         <div key={`${l.category}-${i}`} data-testid={`multi-intent-line-${i}`} style={{ marginTop: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', textTransform: 'capitalize' }}>
             {l.category}
@@ -72,15 +75,16 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
               <div key={r.sku || r.name}
                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '3px 0', fontSize: 13 }}>
                 <span>{r.name}{priceText(r) ? ` — ${priceText(r)}` : ''}</span>
-                <button disabled={!r.sku} onClick={() => r.sku && onAddItem(r.sku, 1)}
+                <button disabled={!r.sku} onClick={() => r.sku && onAddItem(r.sku, addQty)}
                         style={{ background: r.sku ? '#fff' : '#f3f4f6', color: '#4f46e5', border: '1px solid #c7d2fe', borderRadius: 6, padding: '3px 10px', cursor: r.sku ? 'pointer' : 'default', fontWeight: 600 }}>
-                  Add
+                  {addQty > 1 ? `Add ${addQty}` : 'Add'}
                 </button>
               </div>
             ))
           )}
         </div>
-      ))}
+        );
+      })}
 
       <div style={{ marginTop: 10, textAlign: 'right' }}>
         <button onClick={onDismiss}

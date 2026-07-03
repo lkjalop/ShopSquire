@@ -154,6 +154,16 @@ def _decompose_deterministic(query: str, has_prior_selection: bool) -> TurnInten
                 notes.append(f"amend-to-{n} ignored: no prior selection to amend (ask which item).")
             break  # one amendment per turn (the buyer changes their mind once)
 
+    # ── gate new lines to a genuinely MULTI-intent "add-on" turn ─────────────────────────────────────
+    # A new line only means something when the buyer is ADDING on top of something: there must be a prior
+    # selection to add to, OR an in-turn signal that this is an add ("actually 15" amendment, a "for those"
+    # scope cue, or an explicit add verb). A plain fresh search ("what laptops for work, I need 25") trips a
+    # request cue but is SINGLE-intent — surfacing a new-line confirmation card there is noise (the bulk-query
+    # false card GPT-5.5 flagged). Scoped turns keep their lines (the OR below), so budget binding is intact.
+    if new_lines and not (has_prior_selection or amendments or scoped or _ADD_VERB_RE.search(ql)):
+        notes.append("new-line categories dropped: plain single-intent search (no prior/amend/scope/add cue).")
+        new_lines = []
+
     # ── bind budgets ────────────────────────────────────────────────────────────────────────────────
     budget_scopes: List[BudgetScope] = []
     global_budget: Optional[Tuple[Optional[int], Optional[int]]] = None

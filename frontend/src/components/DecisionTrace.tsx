@@ -252,6 +252,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [procurementCaseId, setProcurementCaseId] = useState<string | null>(null);
   const [auditTrail, setAuditTrail] = useState<any | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
+  // Procurement tab drill-downs — the DRAFTED supplier RFQ + the case's bitemporal journey (its own audit),
+  // fetched by trace so the whole procurement story lives on ONE tab (no jumping to the ops console). The
+  // drafted RFQ carries a supplier contact, so it's shown ONLY when an owner/operator key is configured
+  // (a normal shopper never sees it — blind-ship stays intact).
+  const [procCase, setProcCase] = useState<any | null>(null);
+  const [procJourney, setProcJourney] = useState<any[] | null>(null);
+  const [procLoading, setProcLoading] = useState(false);
+  const canSeeOperatorDraft = !!getOwnerApiKey();
   const [updating, setUpdating] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [streamMode, setStreamMode] = useState<'ws' | 'sse' | 'poll'>('poll');
@@ -438,6 +446,37 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       setExplainReplayLoading(false);
     }
   }, [effectiveTraceId, activeTab, effectiveApiKey]);
+
+  // Procurement drill-down: fetch the case (operator view → the drafted supplier RFQ) + its bitemporal
+  // journey (the case's own audit trail) when the Procurement tab is open. Keeps the whole procurement
+  // story — agent events, the human-gated draft, and the audit — on one tab. Re-runs when a case resolves.
+  const loadProcurementDetail = useCallback(async () => {
+    if (!effectiveTraceId) return;
+    setProcLoading(true);
+    try {
+      const headers = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
+      const caseView: any = await fetch(
+        apiUrl(`/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}?view=operator`),
+        { credentials: 'include', headers },
+      ).then(safeJson).catch(() => null);
+      setProcCase(caseView && (caseView.case_id || caseView.state) ? caseView : null);
+      const cid = (caseView && caseView.case_id) || procurementCaseId;
+      if (cid) {
+        const jr: any = await fetch(
+          apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(cid)}/journey`),
+          { credentials: 'include', headers },
+        ).then(safeJson).catch(() => null);
+        setProcJourney(Array.isArray(jr?.journey) ? jr.journey : null);
+      }
+    } finally {
+      setProcLoading(false);
+    }
+  }, [effectiveTraceId, effectiveApiKey, procurementCaseId]);
+
+  useEffect(() => {
+    if (activeTab !== 'procurement' || !effectiveTraceId) return;
+    loadProcurementDetail();
+  }, [activeTab, effectiveTraceId, procurementCaseId, loadProcurementDetail]);
 
   useEffect(() => {
     if (traceId && traceId.trim()) {
@@ -649,6 +688,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
       : allDisplayEvents.filter((e) => String(e.event_type || '').toLowerCase() === eventFilter);
 
   const ms = trace?.model_selection || {};
+
+  // Badge the Procurement tab when a case resolved OR the trace already carries procurement/split/supplier
+  // activity — so the operator sees there's a story to open even before FulfilmentTraceLink resolves a case.
+  const hasProcurementSignal = !!procurementCaseId || (events.length > 0 ? events : displayEvents).some((e) => {
+    const s = String((e as any).source_id || '').toLowerCase();
+    const t = String(e.event_type || '').toLowerCase();
+    return s.includes('procurement') || s.includes('split') || s.includes('supplier') || s.includes('sourcing')
+      || t.includes('procurement') || t.includes('split') || t.includes('sourc') || t.includes('availability') || t.includes('channel');
+  });
 
   // Prefer recommendation records emitted through normalized envelopes
   // (e.g. feedback_loop with _original_event_type=recommendation_result).
@@ -1307,7 +1355,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
               <button className={activeTab === 'memory' ? styles.activeTab : ''} onClick={() => setActiveTab('memory')}>Memory</button>
               <button className={activeTab === 'security' ? styles.activeTab : ''} onClick={() => setActiveTab('security')}>Security Matrix</button>
               <button className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => setActiveTab('procurement')}>
-                Procurement{procurementCaseId ? <span title="A procurement journey was opened from this decision" style={{ marginLeft: 5, color: '#059669', fontWeight: 700 }}>●</span> : null}
+                Procurement{hasProcurementSignal ? <span title="Procurement activity is present in this decision (open to see the drafted RFQ + audit)" style={{ marginLeft: 5, color: '#059669', fontWeight: 700 }}>●</span> : null}
               </button>
               <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
                 setActiveTab('audit');
@@ -2967,47 +3015,111 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                     const src = events.length > 0 ? events : displayEvents;
                     const procEvents = (src || []).filter((e) => {
                       const sid = String((e as any).source_id || '');
+                      const sidl = sid.toLowerCase();
                       const et = String(e.event_type || '').toLowerCase();
                       return ['Market_Intelligence_Agent', 'Procurement_Agent', 'Alternatives_Agent', 'Supplier_Selection_Agent'].includes(sid)
+                        // agents whose id carries the procurement/split/supplier/sourcing role (catches
+                        // Procurement_Split_Agent + Supplier_Channel_Agent the old allow-list missed)
+                        || sidl.includes('procurement') || sidl.includes('split') || sidl.includes('supplier') || sidl.includes('sourcing')
                         || et.startsWith('bulk_') || et.startsWith('procurement_') || et.startsWith('alternatives_')
-                        || et.includes('availability') || et.includes('buyer_qualif') || et.includes('supplier');
+                        || et.includes('availability') || et.includes('buyer_qualif') || et.includes('supplier')
+                        || et.includes('split') || et.includes('sourc') || et.includes('channel');
                     });
-                    if (procEvents.length === 0) {
-                      return <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>;
-                    }
+                    const draft: any = (procCase?.state_json?.draft) || null;
+                    const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     return (
-                      <table className={styles.table}>
-                        <thead><tr><th>Agent</th><th>Event</th><th>Detail</th></tr></thead>
-                        <tbody>
-                          {procEvents.map((e, i) => {
-                            const p: any = (e as any).payload || {};
-                            const tp = Array.isArray(p.transfer_plan) ? p.transfer_plan : [];
-                            const detail = [
-                              p.sku && `SKU ${p.sku}`,
-                              p.order_qty != null && `qty ${p.order_qty}`,
-                              p.in_stock != null && `in-stock ${p.in_stock}`,
-                              p.shortfall != null && `shortfall ${p.shortfall}`,
-                              tp.length > 0 && `transfer ${tp.map((t: any) => `${t.qty}@${t.from_location}`).join(', ')}`,
-                              p.status && `status ${p.status}`,
-                              Array.isArray(p.types) && p.types.length > 0 && `options: ${p.types.join(', ')}`,
-                              p.count != null && `${p.count} alternatives`,
-                              // supplier communication channel (how we reach this supplier)
-                              p.channel && `channel: ${p.channel}`,
-                              p.requires_human === true && '👤 HUMAN-only outreach',
-                              p.integration_kind && `→ ${String(p.integration_kind).toUpperCase()} integration`,
-                              p.channel && p.agent_may_draft === true && 'agent drafts · human sends',
-                              p.case_id && `case ${String(p.case_id).slice(0, 8)}`,
-                            ].filter(Boolean).join(' · ');
-                            return (
-                              <tr key={i}>
-                                <td>{(e as any).source_id || '—'}</td>
-                                <td>{e.event_type}</td>
-                                <td>{detail || getSummary(e)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                      <>
+                        {procEvents.length === 0 ? (
+                          <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
+                        ) : (
+                          <table className={styles.table}>
+                            <thead><tr><th>Agent</th><th>Event</th><th>Detail</th></tr></thead>
+                            <tbody>
+                              {procEvents.map((e, i) => {
+                                const p: any = (e as any).payload || {};
+                                const tp = Array.isArray(p.transfer_plan) ? p.transfer_plan : [];
+                                const detail = [
+                                  p.sku && `SKU ${p.sku}`,
+                                  p.order_qty != null && `qty ${p.order_qty}`,
+                                  p.in_stock != null && `in-stock ${p.in_stock}`,
+                                  p.shortfall != null && `shortfall ${p.shortfall}`,
+                                  p.now_qty != null && `ship-now ${p.now_qty}`,
+                                  p.later_qty != null && `follow ${p.later_qty}`,
+                                  p.eta_days != null && `ETA ~${p.eta_days}d`,
+                                  tp.length > 0 && `transfer ${tp.map((t: any) => `${t.qty}@${t.from_location}`).join(', ')}`,
+                                  p.status && `status ${p.status}`,
+                                  Array.isArray(p.types) && p.types.length > 0 && `options: ${p.types.join(', ')}`,
+                                  p.count != null && `${p.count} alternatives`,
+                                  p.channel && `channel: ${p.channel}`,
+                                  p.requires_human === true && '👤 HUMAN-only outreach',
+                                  p.integration_kind && `→ ${String(p.integration_kind).toUpperCase()} integration`,
+                                  p.channel && p.agent_may_draft === true && 'agent drafts · human sends',
+                                  p.case_id && `case ${String(p.case_id).slice(0, 8)}`,
+                                ].filter(Boolean).join(' · ');
+                                return (
+                                  <tr key={i}>
+                                    <td>{(e as any).source_id || '—'}</td>
+                                    <td>{e.event_type}</td>
+                                    <td>{detail || getSummary(e)}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+
+                        {procLoading && <div className={styles.empty} style={{ marginTop: 8 }}>Loading the procurement case…</div>}
+
+                        {/* Drafted supplier RFQ — the "how it's made" artefact, inline + collapsed so the demo
+                            never leaves this tab. Human-gated: shown only with an owner/operator key; a normal
+                            shopper never sees a supplier contact (blind-ship stays intact). It is NOT sent. */}
+                        {procCase && draft && canSeeOperatorDraft && (
+                          <details style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }}>
+                            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+                              📧 Drafted supplier RFQ — {String(procCase.state || '').replace(/_/g, ' ').toLowerCase()}
+                              <span style={{ marginLeft: 8, fontWeight: 600, color: '#b45309', fontSize: 12 }}>human-gated · not sent</span>
+                            </summary>
+                            <div style={{ marginTop: 8, fontSize: 13 }}>
+                              <div className={styles.kvRow}><span>To (supplier)</span><span>{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
+                              {draft.recipient_email && <div className={styles.kvRow}><span>Contact</span><span className={styles.mono}>{draft.recipient_email}</span></div>}
+                              <div className={styles.kvRow}><span>Subject</span><span>{draft.subject || '—'}</span></div>
+                              {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
+                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{String(draft.send_gate?.status || draft.send_gate || draft.gate)}</span></div>}
+                              <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
+                              <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
+                            </div>
+                          </details>
+                        )}
+                        {procCase && draft && !canSeeOperatorDraft && (
+                          <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order (human-gated). Sign in with an operator key to view it.</div>
+                        )}
+
+                        {/* Audit trail — the case's own bitemporal journey (state · actor · reason · time),
+                            inline so the operator proves provenance without switching tabs/windows. */}
+                        {procCase && Array.isArray(procJourney) && procJourney.length > 0 && (
+                          <details style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
+                            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+                              🧾 Procurement audit trail <span style={{ fontWeight: 500, color: '#6b7280' }}>({procJourney.length} state transitions · bitemporal)</span>
+                            </summary>
+                            <table className={styles.table} style={{ marginTop: 8 }}>
+                              <thead><tr><th>State</th><th>Event</th><th>Actor</th><th>When</th></tr></thead>
+                              <tbody>
+                                {procJourney.map((s: any, i: number) => (
+                                  <tr key={i}>
+                                    <td>{String(s.state || '').replace(/_/g, ' ')}</td>
+                                    <td>{s.event}{s.reason_code ? ` · ${s.reason_code}` : ''}</td>
+                                    <td>{s.actor_type === 'human_operator' ? '👤 ' : ''}{s.actor_id || s.actor_type || '—'}</td>
+                                    <td className={styles.mono} style={{ fontSize: 11 }}>{String(s.valid_from || '').replace('T', ' ').slice(0, 19)}{s.valid_to == null ? ' · current' : ''}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {money(procCase?.state_json?.split?.subtotal_cents) && (
+                              <div className={styles.kvRow} style={{ marginTop: 6 }}><span>Order subtotal</span><span>{money(procCase.state_json.split.subtotal_cents)}</span></div>
+                            )}
+                          </details>
+                        )}
+                      </>
                     );
                   })()}
                 </div>

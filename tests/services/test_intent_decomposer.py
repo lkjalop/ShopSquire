@@ -72,3 +72,23 @@ def test_as_dict_shape():
     d = idc.decompose_turn(SCENARIO, has_prior_selection=True).as_dict()
     assert set(d) == {"amendments", "new_lines", "budget_scopes", "global_budget", "objection",
                       "confidence", "notes"}
+
+
+def test_plain_bulk_search_does_not_surface_new_lines():
+    # "what laptops for work? ... I need about 25" trips a request cue but is SINGLE-intent (no prior, no
+    # amendment, no scope cue, no add verb) — it must NOT emit a new-line (the bulk-query false multi-intent
+    # card GPT-5.5 flagged). Budget still parses.
+    t = idc.decompose_turn("what laptops for work? budget 1500 to 1900, I need about 25", has_prior_selection=False)
+    assert t.new_lines == [] and t.amendments == []
+    assert t.global_budget == (1500, 1900)
+
+
+def test_new_lines_survive_with_an_add_cue_or_prior_or_scope():
+    # explicit add verb, no prior → the buyer really is asking to add categories
+    a = idc.decompose_turn("get me 5 headsets and 10 hard drives", has_prior_selection=False)
+    assert {n.category for n in a.new_lines} == {"headsets", "hard drives"}
+    # amendment + add + scope, with a prior selection → the full mixed turn is preserved
+    b = idc.decompose_turn("actually make it 15 and get me 5 headsets and 10 hard drives for 2000 for those",
+                           has_prior_selection=True)
+    assert b.amendments and b.amendments[0].new_qty == 15
+    assert {n.category for n in b.new_lines} == {"headsets", "hard drives"}
