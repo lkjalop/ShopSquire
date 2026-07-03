@@ -277,7 +277,7 @@ function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
   return /^https?:\/\//i.test(candidate) ? candidate : null;
 }
 
-export default function DecisionTrace({ traceId, onClose, imageTriage }: { traceId: string | null; onClose: () => void; imageTriage?: any[] }) {
+export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
@@ -288,7 +288,9 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'audit' | 'raw'>('events');
+  const _TABS = ['events', 'summary', 'why', 'intent', 'multimodal', 'complexity', 'memory', 'security', 'procurement', 'audit', 'raw'] as const;
+  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'audit' | 'raw'>(
+    (initialTab && (_TABS as readonly string[]).includes(initialTab)) ? (initialTab as typeof _TABS[number]) : 'events');
   // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
   // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
   const [procurementCaseId, setProcurementCaseId] = useState<string | null>(null);
@@ -3138,19 +3140,19 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             never leaves this tab. Human-gated: shown only with an owner/operator key; a normal
                             shopper never sees a supplier contact (blind-ship stays intact). It is NOT sent. */}
                         {procCase && draft && canSeeOperatorDraft && (
-                          <details style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }}>
+                          <details data-testid="proc-drafted-rfq" style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
                             <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
                               📧 Drafted supplier RFQ — {String(procCase.state || '').replace(/_/g, ' ').toLowerCase()}
                               <span style={{ marginLeft: 8, fontWeight: 600, color: '#b45309', fontSize: 12 }}>human-gated · not sent</span>
                             </summary>
                             <div style={{ marginTop: 8, fontSize: 13 }}>
-                              <div className={styles.kvRow}><span>To (supplier)</span><span>{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
+                              <div className={styles.kvRow}><span>To (supplier)</span><span data-testid="proc-rfq-recipient">{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
                               {draft.recipient_email && <div className={styles.kvRow}><span>Contact</span><span className={styles.mono}>{draft.recipient_email}</span></div>}
-                              <div className={styles.kvRow}><span>Subject</span><span>{draft.subject || '—'}</span></div>
+                              <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
                               {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
                               {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{String(draft.send_gate?.status || draft.send_gate || draft.gate)}</span></div>}
                               <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
-                              <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
+                              <pre data-testid="proc-rfq-body" style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
                             </div>
                           </details>
                         )}
@@ -3161,7 +3163,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         {/* Audit trail — the case's own bitemporal journey (state · actor · reason · time),
                             inline so the operator proves provenance without switching tabs/windows. */}
                         {procCase && Array.isArray(procJourney) && procJourney.length > 0 && (
-                          <details style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
+                          <details data-testid="proc-audit-trail" style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
                             <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
                               🧾 Procurement audit trail <span style={{ fontWeight: 500, color: '#6b7280' }}>({procJourney.length} state transitions · bitemporal)</span>
                             </summary>

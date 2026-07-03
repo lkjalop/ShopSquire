@@ -354,6 +354,21 @@ export default function App() {
   const [tierFilter, setTierFilter] = useState<'all' | 'lower' | 'higher'>('all');
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
+  const [traceInitialTab, setTraceInitialTab] = useState<string | undefined>(undefined);
+  // Deep-link: /?trace=<id>&tracetab=procurement opens the Decision Trace straight onto a tab. Lets an
+  // operator/demo jump to a specific decision (e.g. the procurement drafted-RFQ + audit) without replaying
+  // the whole turn — also what makes the Procurement-tab recording deterministic.
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const t = (p.get('trace') || '').trim();
+      if (t) {
+        setTraceId(t);
+        setTraceInitialTab((p.get('tracetab') || '').trim() || undefined);
+        setTraceOpen(true);
+      }
+    } catch { /* no query params available — ignore */ }
+  }, []);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>({ ok: false, latencyMs: null, checkedAt: null, error: null });
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [readyz, setReadyz] = useState<ReadyzResponse | null>(null);
@@ -2428,7 +2443,7 @@ export default function App() {
           tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
       {traceOpen && <DecisionTrace
         traceId={procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0))}
-        onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} />}
+        onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} />}
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (
