@@ -24,7 +24,9 @@ test('procurement journey — bulk order + reallocation mind-change, agentic + s
     await page.goto('/');
     await openChatAndSend(page, 'business laptop around 1300');
     await expect(page.getByText(/laptop/i).first()).toBeVisible({ timeout: 60_000 });
-    await page.waitForTimeout(2500); // let the turn settle + the recording breathe
+    // settle so this turn's shortlist is persisted before the amendment turn falls back to it (this recorder
+    // spec keeps the authentic search→amend flow; retries:1 covers the rare Redis-persistence race)
+    await page.waitForTimeout(4000);
   });
 
   await test.step('2 · buyer CHANGES THEIR MIND in one turn: lower to 20 + reallocate the leftover to headsets & hard drives', async () => {
