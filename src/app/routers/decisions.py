@@ -2423,6 +2423,26 @@ def decision_audit_trail(
         "pii_fields_detected": _detect_pii_fields(decisions, trace_events),
     }
 
+    # Persisted WORM-chain verdict (the REAL tamper-evidence): audit_log_chain is an append-only,
+    # HMAC-anchored merkle chain (services/audit_chain.py). Surface its actual verification here so the tab
+    # reflects production truth — "verified" flips to True automatically once the chain is populated (every
+    # decision appended) AND the daily anchor is published. In dev the chain is usually empty/unanchored, so
+    # this reports the HONEST reason (e.g. anchor pending) rather than a bare, alarming "No".
+    try:
+        from src.app.services.audit_chain import verify_audit_chain
+        _pv = verify_audit_chain(limit=2000)
+    except Exception as _pv_exc:  # never let audit visualisation crash on the verifier
+        _pv = {"ok": None, "checked": 0, "error": str(_pv_exc)[:160]}
+    _anchor = _pv.get("anchor") or _pv.get("anchor_status") or {}
+    _chain_populated = int(_pv.get("checked") or 0) > 0
+    _persisted_verified = bool(_pv.get("ok") and _chain_populated)
+    if _persisted_verified:
+        _reason = "persisted chain intact + anchor verified"
+    elif not _chain_populated:
+        _reason = "persisted WORM chain not populated in this environment (dev) — append + daily anchor pending"
+    else:
+        _reason = f"persisted-chain check: {_pv.get('reason') or 'anchor pending'}"
+
     return {
         "trace_id": trace_id,
         "decision_count": len(decisions),
@@ -2431,19 +2451,26 @@ def decision_audit_trail(
         "events": trace_events[:200],
         "hash_chain": hash_chain,
         "immutability": {
-            # Honest scope: this chain is RECOMPUTED at read time for replay /
-            # visualisation. It is not (yet) verified against persisted prev_hash /
-            # record_hash columns or an external WORM anchor, so it is not proof of
-            # tamper-evidence on its own. Persisted-hash verification lives in
-            # security/audit_chain.py (WORM archive) and should be wired here before
-            # this is represented as "tamper-proof".
+            # Two scopes: (1) a read-time replay chain (recomputed here for visualisation only) and (2) the
+            # PERSISTED, HMAC-anchored WORM chain in services/audit_chain.py — the real tamper-evidence.
             "method": "sha256_chain_read_time",
             "chain_length": len(hash_chain),
             "genesis_hash": "genesis",
             "tip_hash": prev_hash,
-            "verified": False,
-            "verification_scope": "read_time_replay",
-            "note": "read-time replay chain; persisted + externally-anchored verification pending",
+            # `verified` now reflects the PERSISTED chain (not the read-time replay): True only when the WORM
+            # chain has entries AND its anchor verifies. Honest in dev (empty chain → not verified, with why).
+            "verified": _persisted_verified,
+            "verification_scope": "persisted_worm_chain",
+            "reason": _reason,
+            "read_time_replay_length": len(hash_chain),
+            "persisted_chain": {
+                "populated": _chain_populated,
+                "entries_checked": int(_pv.get("checked") or 0),
+                "anchor_present": bool(_anchor.get("present")),
+                "anchor_signature_ok": _anchor.get("signature_ok"),
+                "anchor_head_match": _anchor.get("head_match"),
+            },
+            "note": _reason,
         },
         "retention_policy": retention,
         "storage": {

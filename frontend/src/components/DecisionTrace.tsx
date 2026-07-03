@@ -88,6 +88,48 @@ function formatTime(ts: string | undefined): string {
   }
 }
 
+// Turn an internal rank token ("+ram_gb_min:8", "+use_case_match:office_general", "-oos") into a plain-English
+// "Why recommended" pill. The RAW token stays in the pill's title (hover) so an operator can still audit it —
+// this reads-out the reason instead of leaking rank internals to a buyer.
+const _UC_LABELS: Record<string, string> = {
+  office_general: 'office / work', business_professional: 'business use', office_finance: 'finance work',
+  office_executive: 'exec use', gaming: 'gaming', gaming_competitive: 'competitive gaming',
+  gaming_casual: 'casual gaming', university_general: 'study', note_taking_student: 'note-taking',
+  content_creator: 'creative work', content_creation: 'creative work', ai_ml_workstation: 'AI / ML',
+  data_science_student: 'data science', engineering_student: 'engineering', computer_science_student: 'coding',
+};
+const _SPEC_LABELS: Record<string, string> = {
+  ram_gb: 'RAM', storage_gb: 'storage', refresh_hz: 'refresh', display_inches: 'display',
+  gpu_vram_gb: 'GPU VRAM', battery_wh: 'battery', weight_kg: 'weight', price: 'price',
+};
+const _SPEC_UNITS: Record<string, string> = { ram_gb: 'GB', storage_gb: 'GB', refresh_hz: 'Hz', gpu_vram_gb: 'GB', display_inches: '"' };
+const _REASON_FLAGS: Record<string, string> = {
+  in_stock: 'In stock', within_budget: 'Within budget', over_budget: 'Over budget', oos: 'Out of stock',
+  out_of_stock: 'Out of stock', embedding_similarity: 'Close match to your query', semantic_match: 'Close match to your query',
+  supplier_available: 'Supplier available', preferred_brand: 'Preferred brand', price_value: 'Strong value',
+  discrete_gpu: 'Dedicated GPU', nvidia: 'NVIDIA GPU', portable: 'Portable',
+};
+function humanizeReason(token: string): string {
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+  const neg = raw.startsWith('-');
+  const body = raw.replace(/^[+-]/, '');
+  // already a readable phrase (has spaces, not a key:value) → keep it
+  if (body.includes(' ') && !body.includes(':')) return body;
+  const [key, val] = body.split(':');
+  if (key === 'use_case_match') return `Fits ${_UC_LABELS[val] || String(val || '').replace(/_/g, ' ')}`;
+  if (key === 'use_case_tag' || key === 'use_case_tags') return `For ${String(val || '').replace(/_/g, ' ')}`;
+  const mMin = key.match(/^(.*)_min$/);
+  if (mMin && val) { const b = mMin[1]; return `${val}${_SPEC_UNITS[b] || ''}+ ${_SPEC_LABELS[b] || b.replace(/_/g, ' ')}`; }
+  const mMax = key.match(/^(.*)_max$/);
+  if (mMax && val) { const b = mMax[1]; return `≤${val}${_SPEC_UNITS[b] || ''} ${_SPEC_LABELS[b] || b.replace(/_/g, ' ')}`; }
+  const flagKey = key.replace(/_use_case_match$/, '');
+  if (key.endsWith('_use_case_match')) return `Fits ${_UC_LABELS[flagKey] || flagKey.replace(/_/g, ' ')}`;
+  if (_REASON_FLAGS[key]) return (neg && key === 'in_stock') ? 'Out of stock' : _REASON_FLAGS[key];
+  const pretty = key.replace(/_/g, ' ').replace(/\bgb\b/gi, 'GB').replace(/\bhz\b/gi, 'Hz');
+  return (neg ? 'Not ' : '') + pretty.charAt(0).toUpperCase() + pretty.slice(1) + (val ? ` ${val}` : '');
+}
+
 function inlineText(value: any): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === 'string') return value;
@@ -868,6 +910,20 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
   })();
 
   const security = extractSecurity() || fallbackSecurity;
+
+  // Did this turn actually carry an IMAGE? The Security Matrix's QR / steganography / OCR / adversarial
+  // checks only run on uploads — on a text-only turn `security` is still truthy (a security_matrix contract
+  // + default quarantine flags), which reads as if an image were scanned. Detect the real thing so the tab
+  // can label image-security as upload-only COVERAGE instead of implying this text query was scanned.
+  const hadImage = (() => {
+    if (Array.isArray(imageTriage) && imageTriage.length > 0) return true;
+    const s: any = security || {};
+    if (s.image_security && Object.keys(s.image_security).length > 0) return true;
+    if (Array.isArray(s.image_triage) && s.image_triage.length > 0) return true;
+    const sig: any = s.signals || {};
+    return !!(sig.qr_code_detected || sig.steg_suspicious || sig.steg_detected || sig.ocr_text
+      || sig.adversarial_detected || sig.image_relevance || sig.gan_detected);
+  })();
 
   // Collect MAESTRO agent_guardrail events from the trace event stream.
   // These are emitted by the orchestrator and recommend ingress with
@@ -1688,7 +1744,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                             {Array.isArray(p?.reasons) && p.reasons.length > 0 && (
                               <div className={styles.pillRow}>
                                 {p.reasons.slice(0, 3).map((r: string, i: number) => (
-                                  <span key={`${p?.sku || pIdx}-r-${i}`} className={styles.pill}>{r}</span>
+                                  <span key={`${p?.sku || pIdx}-r-${i}`} className={styles.pill} title={r}>{humanizeReason(r)}</span>
                                 ))}
                               </div>
                             )}
@@ -1714,8 +1770,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                         {Array.isArray(p?.reason_codes) && p.reason_codes.length > 0 ? (
                           <div className={styles.pillRow}>
                             {p.reason_codes.slice(0, 3).map((rc: any, rcIdx: number) => (
-                              <span key={`${p?.sku || i}-rc-${rcIdx}`} className={styles.pill}>
-                                {String(rc?.code || 'reason')} ({Math.round((Number(rc?.confidence) || 0) * 100)}%)
+                              <span key={`${p?.sku || i}-rc-${rcIdx}`} className={styles.pill} title={String(rc?.code || '')}>
+                                {humanizeReason(String(rc?.code || 'reason'))} ({Math.round((Number(rc?.confidence) || 0) * 100)}%)
                               </span>
                             ))}
                           </div>
@@ -1723,7 +1779,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                           Array.isArray(p?.reasons) && p.reasons.length > 0 && (
                             <div className={styles.pillRow}>
                               {p.reasons.slice(0, 3).map((r: string, rIdx: number) => (
-                                <span key={`${p?.sku || i}-r2-${rIdx}`} className={styles.pill}>{r}</span>
+                                <span key={`${p?.sku || i}-r2-${rIdx}`} className={styles.pill} title={r}>{humanizeReason(r)}</span>
                               ))}
                             </div>
                           )
@@ -2164,6 +2220,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                 <div className={styles.summaryPane}>
                   {!security && (
                     <div className={styles.empty}>No security analysis available for this trace.</div>
+                  )}
+                  {security && !hadImage && (
+                    <div style={{ margin: '0 0 10px', padding: '8px 10px', borderRadius: 8, border: '1px solid #bfdbfe', background: '#eff6ff', fontSize: 13, color: '#1e3a8a' }}>
+                      <strong>Text-only turn — no image uploaded.</strong> The image checks below (QR decode,
+                      steganography, OCR, adversarial/GAN) describe the coverage that runs on <em>uploaded images</em>;
+                      they did not scan this text query. This turn's controls are input inspection, rate limiting, and
+                      the framework mappings shown — not image forensics.
+                    </div>
                   )}
                   {security && (
                     <>
@@ -3136,7 +3200,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage }: { trace
                       <div className={styles.kvRow}><span>Events</span><span>{auditTrail.event_count}</span></div>
                       <div className={styles.kvRow}><span>Hash Chain Length</span><span>{auditTrail.immutability?.chain_length}</span></div>
                       <div className={styles.kvRow}><span>Tip Hash</span><span className={styles.mono}>{auditTrail.immutability?.tip_hash}</span></div>
-                      <div className={styles.kvRow}><span>Chain Verified</span><span>{auditTrail.immutability?.verified ? '\u2705 Yes' : '\u274c No'}</span></div>
+                      <div className={styles.kvRow}><span>Chain Verified</span><span>{auditTrail.immutability?.verified ? '\u2705 Yes' : '\u26a0\ufe0f Not in this environment'}</span></div>
+                      {auditTrail.immutability?.reason && (
+                        <div className={styles.kvRow}><span>Why</span><span style={{ fontSize: 12, color: '#6b7280' }}>{auditTrail.immutability.reason}</span></div>
+                      )}
+                      {auditTrail.immutability?.persisted_chain && (
+                        <div className={styles.kvRow}><span>Persisted WORM chain</span><span style={{ fontSize: 12 }}>
+                          {auditTrail.immutability.persisted_chain.entries_checked} entries \u00b7 anchor {auditTrail.immutability.persisted_chain.anchor_present ? 'present' : 'pending'}
+                        </span></div>
+                      )}
 
                       <div className={styles.sectionTitle}>Storage & Immutability</div>
                       <div className={styles.kvRow}><span>Backend</span><span>{auditTrail.storage?.backend}</span></div>

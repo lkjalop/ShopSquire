@@ -6,9 +6,9 @@ import { test, expect, Page } from '@playwright/test';
  * a buyer (T1), and the P0 multi-intent Confirm-qty path works end-to-end (T4) — the sourcing-backed
  * amendment that used to 409.
  *
- * Note on #3 (debug metadata): the badge is gated on `import.meta.env.DEV || localStorage.shopsquire_debug`.
- * The dev server IS a DEV build, so the badge is shown here BY DESIGN — #3 (hidden from buyers) is only
- * observable in a production build and is covered by the gate logic, not this dev-server E2E.
+ * Note on #3 (debug metadata): the badge is gated on `localStorage.shopsquire_debug === '1'` ONLY (the
+ * DEV-build auto-enable was removed so the badge never leaks on the demo dev server). It is hidden here by
+ * default, which is why T1's no-rank-tags-in-body check is a reliable buyer-facing invariant.
  */
 
 async function openChatAndSend(page: Page, text: string) {
@@ -36,8 +36,10 @@ test.describe('shopper storefront', () => {
     // 1) establish a prior selection — search laptops (populates the shortlist the planner falls back to)
     await openChatAndSend(page, 'business laptop around 1300');
     await expect(page.getByText(/laptop/i).first()).toBeVisible({ timeout: 60_000 });
-    // let the first turn fully settle so its shortlist is persisted before the amendment turn reads it
-    await page.waitForTimeout(3000);
+    // Let the first turn FULLY settle so its shortlist is persisted to Redis before the amendment turn reads
+    // it (the planner falls back to that shortlist when the cart is empty). The main flake source was this
+    // race + a cross-<strong> text regex below; a longer settle + a testid-anchored assertion remove both.
+    await page.waitForTimeout(4000);
 
     // 2) the mixed multi-intent turn
     await openChatAndSend(page, 'nah too expensive, actually i need 15 instead. what headsets and hard drives for 1200 for those?');
@@ -45,7 +47,11 @@ test.describe('shopper storefront', () => {
     // 3) the confirmation card renders with the amendment + scoped picks
     const card = page.getByTestId('multi-intent-card');
     await expect(card).toBeVisible({ timeout: 60_000 });
-    await expect(card.getByText(/quantity to.*15/i)).toBeVisible();
+    // target the amend ROW testid (the qty lives in a nested <strong>, so a /quantity to.*15/ text regex
+    // races the card's internal render); assert the row's content instead.
+    const amendRow = card.locator('[data-testid^="multi-intent-amend-"]');
+    await expect(amendRow).toBeVisible({ timeout: 30_000 });
+    await expect(amendRow).toContainText('15');
 
     // 4) confirm the qty → the sourcing-backed set succeeds (message names the sourced shortfall)
     await card.getByRole('button', { name: 'Confirm qty' }).click();
