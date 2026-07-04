@@ -457,6 +457,15 @@ def _extract_budget_range(q: str) -> tuple[Optional[int], Optional[int]]:
         v = _budget_int(m.group(1))
         if v is not None:
             return None, v
+    # Budget REVISION down: "cut it to 1000 max", "drop the budget to 800". Requires a budget cue
+    # (max/budget/spend/price/currency) and value >= 100 — "reduce to 10" is a quantity amendment,
+    # never a $10 budget. Pure numbers + generic verbs (vertical-blind). A cut sets a new CEILING.
+    m = re.search(r"\b(?:cut|drop|lower|bring|reduce)\s+(?:it|that|this|the\s+(?:budget|price|spend))?\s*"
+                  r"(?:down\s+)?to\s*[\$€£]?\s*" + _BUDGET_NUM + r"\b", ql)
+    if m and re.search(r"\bmax\b|\bbudget\b|\bspend\b|\bprice\b|[\$€£]", ql):
+        v = _budget_int(m.group(1))
+        if v is not None and v >= 100:
+            return None, v
     return None, None
 
 

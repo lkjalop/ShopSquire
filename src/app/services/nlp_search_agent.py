@@ -122,6 +122,10 @@ def parse_query(query: str) -> ParsedQuery:
     range_m = re.search(r"[\$£€]\s*(\d[\d,]*)\s*[-–to]+\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
     if not range_m:
         range_m = re.search(r"(\d[\d,]*)\s*[-–to]+\s*(\d[\d,]*)\s*(?:dollar|buck|pound|euro|£|\$|€)", q, re.I)
+    if not range_m:
+        # cue-anchored bare range: "budget 1200 to 1500", "price range 1100-1400" (no currency symbol).
+        # Without this, the fuzzy _BUDGET_PHRASES fallback mangled these to a generic cap (the "600" bug).
+        range_m = re.search(r"\b(?:budget|price(?:\s+range)?)\s*(?:is|of|:)?\s*(\d[\d,]*)\s*(?:-|–|to)\s*(\d[\d,]*)", q, re.I)
     if range_m:
         _bmin = _sane_budget(_parse_number(range_m.group(1)))
         _bmax = _sane_budget(_parse_number(range_m.group(2)))
@@ -136,6 +140,19 @@ def parse_query(query: str) -> ParsedQuery:
             if _bmax is not None:
                 result.budget_max = _bmax
                 signals += 1
+        # Budget REVISION down: "cut it to 1000 max", "drop the budget to 800". A budget cue (max/budget/
+        # spend/price/$) is REQUIRED and the value must be >= 100 — "reduce to 10" is a quantity amendment,
+        # never a $10 budget. A cut sets a new CEILING (the old floor no longer applies).
+        if result.budget_max is None:
+            cut_m = re.search(
+                r"\b(?:cut|drop|lower|bring|reduce)\s+(?:it|that|this|the\s+(?:budget|price|spend))?\s*"
+                r"(?:down\s+)?to\s*[\$£€]?\s*(\d[\d,]*)\b", q, re.I)
+            if cut_m and re.search(r"\bmax\b|\bbudget\b|\bspend\b|\bprice\b|[\$£€]", q, re.I):
+                _bmax = _sane_budget(_parse_number(cut_m.group(1)))
+                if _bmax is not None and _bmax >= 100:
+                    result.budget_max = _bmax
+                    result.budget_min = None
+                    signals += 1
         # Above/over X
         above_m = re.search(r"\b(?:above|over|more than|at least|minimum)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if above_m:

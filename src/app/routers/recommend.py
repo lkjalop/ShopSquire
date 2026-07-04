@@ -6481,6 +6481,18 @@ def suggest(
             # prior budget envelope unless user references earlier results.
             constraints["budget_max"] = None
             constraints["budget_min"] = None
+        # Budget UPDATE keeps the remembered FLOOR: "actually budget is now 1800 max" raises the ceiling —
+        # it does not silently re-open the $629 tier the buyer already excluded (the demo's "$629-$1,499"
+        # regression). Applies only on an explicit UPDATE cue, never on a cut/reset verb (a cut sets a new
+        # ceiling and the old floor no longer applies), and only when the prior floor still fits.
+        if (parsed.get("budget_max") is not None and parsed.get("budget_min") is None
+                and re.search(r"\b(now|actually|instead|change[d]?|update[d]?)\b", q_low)
+                and not re.search(r"\b(cut|drop|lower|reduce|cheaper)\b", q_low)):
+            _prior_floor = _decayed_pref("budget_min")
+            if (isinstance(_prior_floor, (int, float)) and not isinstance(_prior_floor, bool)
+                    and isinstance(parsed.get("budget_max"), (int, float))
+                    and float(_prior_floor) < float(parsed["budget_max"])):
+                constraints["budget_min"] = int(_prior_floor)
         if not asks_budget and parsed.get("budget_max") is None and parsed.get("budget_min") is None and (references_prior or followup_explain):
             # Preserve memory-derived budget only for explicit follow-up turns
             # (deictic references like "those/that" or explain/detail requests).
@@ -6831,6 +6843,10 @@ def suggest(
             qty = _early_bulk_qty if _early_bulk_qty else _extract_quantity_from_query(query_effective)
             if qty:
                 constraints["quantity"] = qty
+        # the early parse EXCISED the count from the text, so downstream text-parsers (b2b bulk
+        # assessment reads constraints["order_quantity"]) can no longer re-derive it — bridge it here.
+        if constraints.get("quantity") and not constraints.get("order_quantity"):
+            constraints["order_quantity"] = int(constraints["quantity"])
     except Exception:
         pass
     # ── Use-Case Advisor: enrich constraints with domain-specific min specs ──
