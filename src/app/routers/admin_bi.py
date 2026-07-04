@@ -5,7 +5,10 @@ import json
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta
+import logging
 from typing import Dict, Any, List
+
+logger = logging.getLogger("shopsquire.admin_bi")
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -1677,3 +1680,100 @@ def recommend_latency_api(
     from src.app.observability.latency_tracker import get_recommend_tracker
     return get_recommend_tracker().summary()
 
+
+
+# ── Investor metrics (B1) — ONE screen composing the aggregates that already exist ─────────────────────
+# "Show me the numbers": exec KPIs + bounded-autonomy proof + governance pulse + procurement cycle time +
+# the capability-gap ledger. Mostly REUSE: each block delegates to an existing service/route function and
+# degrades independently (a failed block returns its error note, never a 500 for the whole screen).
+
+@router.get("/investor-metrics")
+def investor_metrics(
+    days: int = Query(30, ge=1, le=365),
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict[str, Any]:
+    from datetime import datetime, timedelta, timezone
+    out: Dict[str, Any] = {"window_days": int(days), "sections": {}}
+    _end = datetime.now(timezone.utc).date()
+    _start = _end - timedelta(days=int(days))
+
+    # 1) Executive KPIs (revenue, margin%, refund/chargeback, autonomy%, MTTD/MTTR)
+    try:
+        out["sections"]["executive"] = executive_pulse_api(start=_start.isoformat(), end=_end.isoformat(), role=role)
+    except Exception as exc:
+        logger.debug("investor-metrics executive block failed: %s", exc)
+        out["sections"]["executive"] = {"error": "unavailable"}
+
+    # 2) Bounded autonomy — the RFQ decision trail + the market-adaptation gate (allow vs governed-deny)
+    try:
+        from src.app.services.adaptive_action_gate import load_recent_audit
+        with db_session() as db:
+            rfq = load_recent_audit(db, limit=500, action_type="supplier_rfq_send")
+            mkt = load_recent_audit(db, limit=500, action_type="adjust_ranking")
+        out["sections"]["autonomy"] = {
+            "rfq": {"sent": sum(1 for r in rfq if r["decision"] == "allow"),
+                    "escalated": sum(1 for r in rfq if r["decision"] != "allow")},
+            "market_adaptation": {"allowed": sum(1 for r in mkt if r["decision"] == "allow"),
+                                  "denied_governed": sum(1 for r in mkt if r["decision"] == "deny")},
+        }
+    except Exception as exc:
+        logger.debug("investor-metrics autonomy block failed: %s", exc)
+        out["sections"]["autonomy"] = {"error": "unavailable"}
+
+    # 3) Market-intelligence governance pulse (signals → findings → shadow decisions → experiments)
+    try:
+        from src.app.services.governance_pulse import governance_pulse
+        with db_session() as db:
+            out["sections"]["governance"] = governance_pulse(db)
+    except Exception as exc:
+        logger.debug("investor-metrics governance block failed: %s", exc)
+        out["sections"]["governance"] = {"error": "unavailable"}
+
+    # 4) Procurement cycle time — median/p90 hours from first to last bitemporal transition per case
+    try:
+        with db_session() as db:
+            rows = db.execute(sql_text(
+                "SELECT case_id, MIN(valid_from) AS a, MAX(valid_from) AS b "
+                "FROM fulfillment_case_version GROUP BY case_id HAVING COUNT(*) >= 2"
+            )).fetchall()
+        durs: List[float] = []
+        for _cid, a, b in rows:
+            try:
+                ta = datetime.fromisoformat(str(a).replace("Z", "+00:00"))
+                tb = datetime.fromisoformat(str(b).replace("Z", "+00:00"))
+                durs.append(max(0.0, (tb - ta).total_seconds() / 3600.0))
+            except (TypeError, ValueError):
+                continue
+        durs.sort()
+        n = len(durs)
+        out["sections"]["procurement"] = {
+            "cases_measured": n,
+            "cycle_hours_median": round(durs[n // 2], 2) if n else None,
+            "cycle_hours_p90": round(durs[min(n - 1, int(n * 0.9))], 2) if n else None,
+        }
+    except Exception as exc:
+        logger.debug("investor-metrics procurement block failed: %s", exc)
+        out["sections"]["procurement"] = {"error": "unavailable"}
+
+    # 5) Capability-gap ledger — what buyers asked for that we couldn't/wouldn't do (the QA roadmap feed)
+    try:
+        from src.app.services.capability_gap import gap_rollup
+        with db_session() as db:
+            out["sections"]["capability_gaps"] = gap_rollup(db, limit=10)
+    except Exception as exc:
+        logger.debug("investor-metrics capability block failed: %s", exc)
+        out["sections"]["capability_gaps"] = {"error": "unavailable"}
+
+    # 6) Fraud screening volume — per-order fraud_score decision events (blocked = level high)
+    try:
+        with db_session() as db:
+            frow = db.execute(sql_text(
+                "SELECT COUNT(*), SUM(CASE WHEN payload LIKE '%\"level\": \"high\"%' "
+                "OR payload LIKE '%\"level\":\"high\"%' THEN 1 ELSE 0 END) "
+                "FROM decision_trace_events WHERE event_type='fraud_score'")).fetchone()
+        out["sections"]["fraud"] = {"scored": int(frow[0] or 0), "high_risk": int(frow[1] or 0)}
+    except Exception as exc:
+        logger.debug("investor-metrics fraud block failed: %s", exc)
+        out["sections"]["fraud"] = {"error": "unavailable"}
+
+    return out
