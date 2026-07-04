@@ -34,6 +34,11 @@ def _check_redis() -> Dict[str, Any]:
     start = time.time()
     try:
         redis_client = get_redis()
+        # The DummyRedis dev fallback answers every call in-process — it must NOT read as healthy,
+        # or a memory-less server looks fine while losing context every turn (observed live).
+        if type(redis_client).__name__ == "DummyRedis":
+            raise ConnectionError("dummy_fallback: Redis was unreachable when first used; "
+                                  "session memory is a no-op stub")
         if hasattr(redis_client, "ping"):
             redis_client.ping()
         latency_ms = int((time.time() - start) * 1000)

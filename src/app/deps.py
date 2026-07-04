@@ -36,6 +36,11 @@ class DummyRedis:
 
 _lazy_redis: redis.Redis | None = None
 _redis_warned = False
+# When on the DummyRedis fallback, re-attempt the REAL connection at most this often. Without this,
+# a server that boots while Redis is down caches DummyRedis FOREVER and stays memory-less even after
+# Redis recovers (observed live: Redis restored, session memory still gone until a manual restart).
+_DUMMY_RETRY_S = 30.0
+_dummy_next_retry = 0.0
 
 
 def _is_non_dev_env() -> bool:
@@ -93,14 +98,28 @@ def _create_redis_client() -> redis.Redis | None:
 
 
 def get_redis() -> redis.Redis:
-    global _lazy_redis
+    global _lazy_redis, _dummy_next_retry
     if _lazy_redis is not None:
+        # Self-heal: if we fell back to DummyRedis at boot, keep probing for the real store
+        # (rate-limited) so session memory RECOVERS when Redis comes back — no restart needed.
+        if isinstance(_lazy_redis, DummyRedis):
+            import time as _t
+            now = _t.monotonic()
+            if now >= _dummy_next_retry:
+                _dummy_next_retry = now + _DUMMY_RETRY_S
+                cli = _create_redis_client()
+                if cli is not None:
+                    _lazy_redis = cli
+                    logging.getLogger("shopsquire.startup").warning(
+                        "memory store (Redis) RECOVERED — replacing DummyRedis fallback; session memory active")
         return _lazy_redis
     cli = _create_redis_client()
     if cli is None:
         if _is_non_dev_env():
             raise RuntimeError("redis_unavailable_in_non_dev")
         _lazy_redis = DummyRedis()
+        import time as _t
+        _dummy_next_retry = _t.monotonic() + _DUMMY_RETRY_S
         global _redis_warned
         if not _redis_warned:
             try:
