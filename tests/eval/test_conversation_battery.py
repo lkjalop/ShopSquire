@@ -157,3 +157,33 @@ def test_broken_item_return_IS_a_support_claim():
     body = _suggest("how do i return a broken laptop i bought?")
     cu = body.get("constraints_used") or {}
     assert str(cu.get("turn_intent") or "").upper() == "SUPPORT_CLAIM"
+
+
+# ── 6. split-fulfilment shape: qty > stock splits into now/later with correct arithmetic ──────────
+def test_split_offer_shape_and_arithmetic():
+    """The screenshots' delivery-plan class: cart qty exceeding stock must split into ship-now (stock)
+    + follow-later (shortfall), with the numbers adding up — never a silent block or a zero-out."""
+    r = client.put("/api/v1/cart/items/BAT-A",
+                   json={"uid": "bat-split-1", "sku": "BAT-A", "quantity": 25, "allow_sourcing": True})
+    assert r.status_code == 200, r.text
+    s = client.get("/api/v1/cart/split-offer", params={"uid": "bat-split-1"})
+    assert s.status_code == 200, s.text
+    body = s.json()
+    split = body.get("split") or {}
+    now_qty = sum(x["qty"] for x in (split.get("now") or []) if x.get("sku") == "BAT-A")
+    later_qty = sum(x["qty"] for x in (split.get("later") or []) if x.get("sku") == "BAT-A")
+    assert now_qty == 9, f"ship-now must equal stock (9), got {now_qty}"      # BAT-A seeded with stock 9
+    assert later_qty == 16, f"follow-later must equal shortfall (16), got {later_qty}"
+    assert split.get("fully_in_stock") is False
+    assert isinstance(body.get("suppliers"), dict)   # per-supplier name/channel directory (may be empty in test env)
+
+
+def test_bundle_approval_ttl_expires_stale_rows():
+    """The '-$17,627 discount I didn't select' class: an approval older than the TTL must stop binding."""
+    from src.app.services.bundle_approvals import _approval_expired
+    import datetime as dt
+    old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=48)).isoformat()
+    fresh = dt.datetime.now(dt.timezone.utc).isoformat()
+    assert _approval_expired({"approved_at": old}) is True
+    assert _approval_expired({"approved_at": fresh}) is False
+    assert _approval_expired({"approved_at": None, "created_at": None}) is False

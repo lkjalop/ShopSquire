@@ -44,6 +44,30 @@ def _load_bundle_approval_rows(db) -> list[dict[str, Any]]:
     return out
 
 
+def _approval_expired(row: dict[str, Any]) -> bool:
+    """TTL guard: an approval older than BUNDLE_APPROVAL_TTL_HOURS (default 24) no longer binds.
+    Fixes the stale-state demo bug where a 20%-approved bundle from a PREVIOUS session kept
+    re-applying to the same per-uid cart forever ('-$17,627 discount I didn't select')."""
+    import datetime as _dt
+    import os as _os
+    try:
+        ttl_h = float(_os.getenv("BUNDLE_APPROVAL_TTL_HOURS", "24") or 24)
+    except (TypeError, ValueError):
+        ttl_h = 24.0
+    if ttl_h <= 0:
+        return False  # TTL disabled
+    stamp = row.get("approved_at") or row.get("created_at")
+    if not stamp:
+        return False
+    try:
+        ts = _dt.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_dt.timezone.utc)
+        return (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() > ttl_h * 3600
+    except (TypeError, ValueError):
+        return False
+
+
 def find_bundle_approval(db, *, cart_id: str) -> dict[str, Any] | None:
     cart = str(cart_id or "").strip()
     if not cart:
@@ -51,8 +75,29 @@ def find_bundle_approval(db, *, cart_id: str) -> dict[str, Any] | None:
     for row in _load_bundle_approval_rows(db):
         payload = row.get("payload") or {}
         if str(payload.get("cart_id") or "").strip() == cart:
+            if _approval_expired(row):
+                return None  # stale — a fresh bundle must re-request approval
             return row
     return None
+
+
+def expire_bundle_approvals_for_cart(db, *, cart_id: str) -> int:
+    """Explicitly retire a cart's bundle approvals (called when the buyer CLEARS the cart — a cleared
+    cart is a new shopping intent; yesterday's approved discount must not ride along). Returns rows
+    updated; best-effort."""
+    cart = str(cart_id or "").strip()
+    if not cart:
+        return 0
+    try:
+        res = db.execute(
+            text("UPDATE approvals SET status='expired' WHERE capability='bundle_discount' "
+                 "AND status IN ('pending','approved') AND payload LIKE :pat"),
+            {"pat": f'%"cart_id": "{cart}"%'},
+        )
+        db.commit()
+        return int(getattr(res, "rowcount", 0) or 0)
+    except Exception:
+        return 0
 
 
 def ensure_bundle_discount_approval(

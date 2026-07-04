@@ -532,6 +532,14 @@ def clear_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_O
         cart_id, _ = _get_or_create_cart(uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.clear", signal=signal)
         _save_cart(cart_id, [])
+        # A cleared cart is a NEW shopping intent — yesterday's approved bundle discount must not ride
+        # along onto whatever the buyer builds next (the stale "-$17,627 discount I didn't select" bug).
+        try:
+            from src.app.services.bundle_approvals import expire_bundle_approvals_for_cart
+            with db_session() as _bdb:
+                expire_bundle_approvals_for_cart(_bdb, cart_id=cart_id)
+        except Exception as _bexp:
+            logging.getLogger("shopsquire.cart").debug("bundle-approval expiry on clear failed: %s", _bexp)
         return {
             "cart_id": cart_id,
             "items": [],

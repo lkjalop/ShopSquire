@@ -1925,24 +1925,36 @@ export default function App() {
                         </details>
                       )}
                       {msg.nextQuestions && msg.nextQuestions.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                          {/* cap at 2 so the turn asks focused questions, not a wall (was 3-4 + duplicated below) */}
-                          {msg.nextQuestions.slice(0, 2).map((nq) => (
-                            <div key={nq.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, width: '100%' }}>
-                              {nq.why_hint && (
-                                <button type="button" className={styles.hintBtn} title={nq.why_hint}>
-                                  Why this question?
+                        /* ONE framed "narrow this down" card instead of a loose chip wall (demo
+                           feedback: "looks clunky — maybe a separate output box"). Question text is a
+                           heading, its options are compact chips beneath; capped at 2 questions. */
+                        <div data-testid="nqe-card" style={{
+                          marginTop: 10, border: '1px solid #c7d2fe', background: '#f8faff',
+                          borderRadius: 10, padding: '10px 12px',
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
+                            Help me narrow this down
+                          </div>
+                          {msg.nextQuestions.slice(0, 2).map((nq, qi) => (
+                            <div key={nq.id} style={{ marginTop: qi > 0 ? 8 : 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickAction(nq.text)}
+                                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                           font: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f2937', textAlign: 'left' }}
+                                >
+                                  {nq.text}
                                 </button>
-                              )}
-                              <button
-                                type="button"
-                                className={styles.filterBtn}
-                                onClick={() => handleQuickAction(nq.text)}
-                              >
-                                {nq.text}
-                              </button>
+                                {nq.why_hint && (
+                                  <button type="button" className={styles.hintBtn} title={nq.why_hint}
+                                          style={{ fontSize: 11 }}>
+                                    why?
+                                  </button>
+                                )}
+                              </div>
                               {Array.isArray(nq.options) && nq.options.length > 0 && (
-                                <>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
                                   {nq.options.map((opt) => (
                                     <button
                                       key={`${nq.id}:${opt.id}`}
@@ -1953,7 +1965,7 @@ export default function App() {
                                       {opt.label}
                                     </button>
                                   ))}
-                                </>
+                                </div>
                               )}
                             </div>
                           ))}
