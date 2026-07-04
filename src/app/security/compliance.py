@@ -44,22 +44,30 @@ class ComplianceMiddleware:
             "last_checked_at": __import__("datetime").datetime.utcnow().isoformat(),
         })
         # Detect PCI patterns on payment endpoints
+        downstream_receive = receive
         try:
             if path.startswith("/api/v1/payments") and method in {"POST", "PUT", "PATCH"}:
-                # Read the body without consuming downstream by buffering
+                # Buffer the request body for the PAN scan. The receive channel is consumed by
+                # this, so downstream MUST be handed a replaying receive (below) — the previous
+                # "scope['_body_sender']" approach never replayed anything, which made EVERY
+                # customer payment POST hang at body parse until the client timed out.
                 body = b""
-                more_body = True
                 chunks = []
-                while more_body:
+                pending: list[dict] = []  # terminal non-body message (e.g. http.disconnect) to replay
+                while True:
                     message = await receive()
                     if message["type"] == "http.request":
                         chunk = message.get("body", b"")
                         if chunk:
                             chunks.append(chunk)
-                        more_body = message.get("more_body", False)
-                        if not more_body:
+                        if not message.get("more_body", False):
                             body = b"".join(chunks)
                             break
+                    else:
+                        # client disconnected mid-body — stop buffering, replay the event downstream
+                        pending.append(message)
+                        body = b"".join(chunks)
+                        break
                 text = body.decode("utf-8", errors="ignore") if body else ""
                 if text and contains_pci_data(text):
                     comp.setdefault("flags", []).append({
@@ -82,13 +90,18 @@ class ComplianceMiddleware:
                     )
                     await resp(scope, receive, send)
                     return
-                else:
-                    # Re-inject buffered body to downstream
-                    async def _body_sender() -> None:
-                        await send({"type": "http.request", "body": body, "more_body": False})
-                    scope.setdefault("_body_sender", _body_sender)
+                # Clean body: replay it to the app, then any buffered terminal message, then
+                # fall through to the live channel (disconnect notifications etc.).
+                replay = [{"type": "http.request", "body": body, "more_body": False}] + pending
+
+                async def _replaying_receive():
+                    if replay:
+                        return replay.pop(0)
+                    return await receive()
+
+                downstream_receive = _replaying_receive
         except Exception:
             pass
         # Attach compliance to scope for downstream access
         scope.setdefault("compliance", comp)
-        await self.app(scope, receive, send)
+        await self.app(scope, downstream_receive, send)

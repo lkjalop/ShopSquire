@@ -391,3 +391,4 @@ async def stripe_webhook(request: Request) -> Dict:
         _log.info("stripe_webhook: refund processed for intent %s", pi_id)
 
     return {"received": True, "type": event_type}
+
