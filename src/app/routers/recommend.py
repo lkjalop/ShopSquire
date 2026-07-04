@@ -5080,6 +5080,7 @@ def suggest(
         )
     except Exception:
         pass
+    _ckpt("security_join")  # setup + BLOCKING join on the pooled security analysis + taxonomy re-emit
     details = analysis.get("details") or {}
     signals = details.get("signals") or {}
     pii_types = details.get("evidence", {}).get("pii_types") or []
@@ -5490,6 +5491,7 @@ def suggest(
     except Exception as _e:
         _record_partial_failure("security_event_emit_image", _e, trace_id=trace_id)
     severity = analysis.get("severity", "info")
+    _ckpt("policy_gate_and_session")  # kv load + vision prelaunch + policy gate + GDPR/PCI + gate traces
     fraud_summary: Dict[str, Any] = {}
     try:
         tls_fp = extract_tls_fingerprints_from_request(request) if request is not None else {}
@@ -5597,6 +5599,7 @@ def suggest(
         fraud_summary = {}
     # SuggestContext adoption (Pass 1): mirror the finalized fraud_summary onto the ctx.
     _ctx.fraud_summary = fraud_summary
+    _ckpt("fraud_scoring")  # TLS fingerprint extraction + 26-signal fraud scorer
 
     budget = TokenBudget(redis)
     tier = infer_tier(uid)
@@ -5687,7 +5690,9 @@ def suggest(
     # SuggestContext adoption (Pass 6): one-time deps bind (clients/ids; never reassigned) so
     # extracted stages take ctx instead of threading mem/service/db/tenant_id as params.
     _ctx.deps = {"mem": mem, "service": service, "db": db, "tenant_id": tenant_id}
-    _ckpt("early_hooks_and_gates")
+    _ckpt("budget_and_rollout_gates")  # token budget + rollout cohort + circuit breaker + Memory init
+    # (the former seg_early_hooks_and_gates_ms is now decomposed: security_join →
+    #  policy_gate_and_session → fraud_scoring → budget_and_rollout_gates)
     ctx = mem.get_context(uid)
     kv = ctx.get("kv") or {}
     structured_state = mem.get_structured_state(uid) or {}
