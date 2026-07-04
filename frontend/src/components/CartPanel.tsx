@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import styles from './CartPanel.module.css';
 import type { Product } from '../App';
-import { apiUrl, safeJson, confirmCartSourcing } from '../lib/api';
+import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase } from '../lib/api';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 import SplitFulfillmentCard from './SplitFulfillmentCard';
 
@@ -137,6 +137,24 @@ export default function CartPanel({
   const onSplitState = (hasSplit: boolean, confirmed: boolean) => {
     setSplitHasSplit(hasSplit);
     setSplitConfirmed(confirmed);
+  };
+  // GATE 1 on "Confirm delivery plan": committing the plan IS the buyer commitment — it creates the
+  // sourcing cases and auto-drafts the supplier RFQs (human-gated, never sent). Payment capture is a
+  // LATER, PCI-gated step — a demo can show the drafted RFQ without ever touching payment credentials.
+  const confirmPlanSourcing = async () => {
+    try {
+      if (!cart?.cart_id || !items.length) return;
+      const res = await confirmCartSourcing(uid, cart.cart_id,
+        items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })));
+      const cases = res.cases || [];
+      for (const c of cases) {
+        try { await commitFulfillmentCase((c as any).case_id, uid); } catch { /* case stays uncommitted */ }
+      }
+      if ((res.case_count ?? 0) > 0) {
+        setSourcingNote(`${res.case_count} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
+        if ((res as any).order_group_id) onTraceId?.(String((res as any).order_group_id));
+      }
+    } catch { /* best-effort — the delivery-plan confirm itself still stands */ }
   };
   const splitBlocksCheckout = splitHasSplit && !splitConfirmed;
 
@@ -274,7 +292,8 @@ export default function CartPanel({
             </div>
           ))}
 
-          <SplitFulfillmentCard uid={uid} refreshKey={splitKey} nameFor={nameForSku} onSplitState={onSplitState} />
+          <SplitFulfillmentCard uid={uid} refreshKey={splitKey} nameFor={nameForSku} onSplitState={onSplitState}
+                                onConfirmed={confirmPlanSourcing} />
 
           <div className={styles.row}>
             <div className={styles.rowLeft}>

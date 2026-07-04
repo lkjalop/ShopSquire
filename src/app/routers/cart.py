@@ -236,8 +236,16 @@ def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_
             for r in rows if r.get("sku")
         ]
         plan = compute_split(lines, policy=delivery_policy_from_profile())
+        # supplier directory for the UI (name + reorder channel per referenced supplier) — the Procurement
+        # tab's PENDING-plan view groups the backorder by supplier and shows HOW each would be reached.
+        suppliers: Dict[str, Dict] = {}
+        for meta in leads.values():
+            ref = meta.get("supplier_ref")
+            if ref and ref not in suppliers:
+                suppliers[ref] = {"name": meta.get("supplier_name"), "channel": meta.get("channel")}
         return {"cart_id": cart_id, "subtotal_cents": int(hydrated.get("subtotal_cents", 0) or 0),
-                "currency": hydrated.get("currency", "USD"), "split": plan.as_dict()}
+                "currency": hydrated.get("currency", "USD"), "split": plan.as_dict(),
+                "suppliers": suppliers}
 
 
 def _get_cart_sku_qty(uid: str, sku: str) -> int:

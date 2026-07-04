@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
 import styles from './DecisionTrace.module.css';
-import { apiUrl, wsUrl, getApiBase, safeJson } from '../lib/api';
+import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
 
@@ -302,6 +302,20 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // (a normal shopper never sees it — blind-ship stays intact).
   const [procCase, setProcCase] = useState<any | null>(null);
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
+  // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
+  // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
+  // instead of a bare empty tab. The RFQ drafts materialize at "Confirm delivery plan" (GATE 1).
+  const [pendingSplit, setPendingSplit] = useState<SplitOfferResult | null>(null);
+  useEffect(() => {
+    if (activeTab !== 'procurement' || procCase) { return; }
+    let alive = true;
+    const uid = (() => { try { return sessionStorage.getItem('uid') || 'demo-user'; } catch { return 'demo-user'; } })();
+    getSplitOffer(uid)
+      .then((r) => { if (alive) setPendingSplit(r?.split && !r.split.fully_in_stock ? r : null); })
+      .catch(() => { if (alive) setPendingSplit(null); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, procCase]);
   const [procLoading, setProcLoading] = useState(false);
   const canSeeOperatorDraft = !!getOwnerApiKey();
   const [updating, setUpdating] = useState(false);
@@ -3095,7 +3109,35 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     return (
                       <>
-                        {procEvents.length === 0 ? (
+                        {procEvents.length === 0 && !procCase && pendingSplit?.split ? (
+                          <div data-testid="proc-pending-plan" style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ Pending sourcing plan — nothing confirmed, no supplier contacted</div>
+                            <div style={{ color: '#92400e', marginBottom: 8 }}>
+                              {pendingSplit.split.now.reduce((s, l) => s + l.qty, 0)} ship from stock · {pendingSplit.split.later.reduce((s, l) => s + l.qty, 0)} require supplier reorder
+                            </div>
+                            {Object.entries(
+                              pendingSplit.split.later.reduce((acc: Record<string, typeof pendingSplit.split.later>, l) => {
+                                const k = l.supplier_ref || 'unassigned'; (acc[k] = acc[k] || []).push(l); return acc;
+                              }, {})
+                            ).map(([ref, lines]) => {
+                              const sup: any = (pendingSplit as any).suppliers?.[ref] || {};
+                              const ch = String(sup.channel || 'email').toLowerCase();
+                              const chLabel = ch === 'email' ? '✉ EMAIL — agent drafts, human sends'
+                                : (ch === 'phone' || ch === 'portal') ? `${ch === 'phone' ? '📞 PHONE' : '🌐 PORTAL'} — HUMAN-ONLY`
+                                : `⚙ ${ch.toUpperCase()} — system integration`;
+                              const eta = Math.max(...lines.map((l) => l.eta_days ?? 0));
+                              return (
+                                <div key={ref} style={{ marginBottom: 8, paddingLeft: 6, borderLeft: '3px solid #f59e0b' }}>
+                                  <div style={{ fontWeight: 600 }}>
+                                    {sup.name || ref} <span style={{ fontWeight: 400, color: '#6b7280' }}>· {lines.reduce((s, l) => s + l.qty, 0)} unit(s){eta ? ` · ~${eta}d` : ''} · {chLabel}</span>
+                                  </div>
+                                  {lines.map((l) => (<div key={l.sku} style={{ color: '#374151' }}>{l.qty} × {l.sku}</div>))}
+                                </div>
+                              );
+                            })}
+                            <div style={{ color: '#6b7280' }}>RFQ drafts are created when the buyer confirms the delivery plan in the cart (GATE 1) — then this tab shows each drafted email + the audit trail.</div>
+                          </div>
+                        ) : procEvents.length === 0 ? (
                           <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
                         ) : (
                           <table className={styles.table}>

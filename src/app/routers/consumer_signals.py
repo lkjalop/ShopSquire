@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 
 from fastapi import APIRouter, HTTPException, Request, Header
+from pydantic import BaseModel
 
 from src.app.models.db import db_session
 from src.app.deps import hash_uid, hash_value, security_sanitize
@@ -138,3 +139,54 @@ def ingest_consumer_signals(events: List[Dict[str, Any]], request: Request,
     except Exception:
         pass
     return {"stored": stored}
+
+
+# ── Capability-gap ledger — "what users asked for that we couldn't/wouldn't do" ─────────────────────────
+# Every honest refusal is product signal: the storefront POSTs one row per unmet request (unsupported
+# action / unmet search / refused+injection attempt); QA reads the rollup at the weekly roadmap review.
+
+class CapabilityGapIn(BaseModel):
+    utterance: str
+    category: str = "unsupported_action"
+    refusal_reason: str = ""
+    surface: str = "chat"
+    uid: Optional[str] = None
+    trace_id: Optional[str] = None
+
+
+@router.post("/capability-gap")
+def record_capability_gap(payload: CapabilityGapIn, request: Request,
+                          x_api_key: Optional[str] = Header(default=None)) -> Dict[str, Any]:
+    """Record ONE capability gap (rate-limited like ingest; anonymous allowed only when the ingest flag
+    permits it — the storefront ships a key). Body text is sanitized; uid stored as a hash only."""
+    role = get_role_from_key(x_api_key)
+    if not role and not _anon_ingest_allowed():
+        raise HTTPException(status_code=401, detail="API key required")
+    try:
+        from src.app.security.rate_limit import consume_fixed_window_limit
+        ok, _ = consume_fixed_window_limit(f"capgap:{request.client.host if request.client else 'na'}",
+                                           limit=60, window_seconds=60)
+        if not ok:
+            raise HTTPException(status_code=429, detail="rate_limited")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    from src.app.services.capability_gap import record_gap
+    with db_session() as db:
+        stored = record_gap(
+            db, category=str(payload.category), utterance=security_sanitize(payload.utterance),
+            refusal_reason=str(payload.refusal_reason or ""), surface=str(payload.surface or "chat"),
+            uid_hash=(hash_uid(payload.uid) if payload.uid else None), trace_id=payload.trace_id)
+    return {"stored": bool(stored)}
+
+
+@router.get("/capability-gaps")
+def list_capability_gaps(x_api_key: Optional[str] = Header(default=None), limit: int = 50) -> Dict[str, Any]:
+    """QA/roadmap rollup (operator-only): per-category counts + recent examples."""
+    role = get_role_from_key(x_api_key)
+    if role not in ("owner", "merchant", "developer"):
+        raise HTTPException(status_code=401, detail="operator key required")
+    from src.app.services.capability_gap import gap_rollup
+    with db_session() as db:
+        return gap_rollup(db, limit=max(1, min(int(limit or 50), 200)))

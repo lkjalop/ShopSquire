@@ -11,11 +11,13 @@ export default function SplitFulfillmentCard({
   refreshKey,
   nameFor,
   onSplitState,
+  onConfirmed,
 }: {
   uid: string;
   refreshKey: string;                                   // re-fetch when the cart signature changes
   nameFor: (sku: string) => string;                     // resolve a display name from the cart
   onSplitState?: (hasSplit: boolean, confirmed: boolean) => void;
+  onConfirmed?: () => void | Promise<void>;             // GATE 1: commit sourcing + draft RFQs (human-gated)
 }) {
   const [plan, setPlan] = useState<SplitPlan | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -43,7 +45,11 @@ export default function SplitFulfillmentCard({
 
   const d = plan.delivery;
   const money = (c: number) => `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-  const confirmPlan = () => { setConfirmed(true); onSplitState?.(true, true); };
+  const confirmPlan = () => {
+    setConfirmed(true);
+    onSplitState?.(true, true);
+    void onConfirmed?.();   // GATE 1: create + commit the sourcing cases → RFQs drafted (human-gated)
+  };
 
   return (
     <div

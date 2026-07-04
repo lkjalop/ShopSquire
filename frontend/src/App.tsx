@@ -355,6 +355,12 @@ export default function App() {
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [traceInitialTab, setTraceInitialTab] = useState<string | undefined>(undefined);
+  // Bulk-order carry-through: the conversation's parsed unit count ("15 work laptops" → 15). Add buttons
+  // land THIS qty (sourcing-aware) instead of a silent 1. Cleared/updated on every chat turn.
+  const [pendingBulkQty, setPendingBulkQty] = useState<number | null>(null);
+  // Session hygiene: a PRIOR session's cart must never silently shape this conversation (stale items were
+  // inflating totals in the demo). On first chat open with a non-empty cart, disclose it + how to clear.
+  const staleCartNoticeShown = useRef(false);
   // Deep-link: /?trace=<id>&tracetab=procurement opens the Decision Trace straight onto a tab. Lets an
   // operator/demo jump to a specific decision (e.g. the procurement drafted-RFQ + audit) without replaying
   // the whole turn — also what makes the Procurement-tab recording deterministic.
@@ -594,6 +600,21 @@ export default function App() {
     setRightPanelPrevMode(current);
   }, [rightPanelMode, rightPanelPrevMode]);
   const [cart, setCart] = useState<any | null>(null);
+  // Session hygiene: a PRIOR session's cart must never silently shape this conversation (stale items were
+  // inflating totals in the demo). On first chat open with a non-empty cart, disclose it + how to clear.
+  useEffect(() => {
+    if (!chatOpen || staleCartNoticeShown.current) return;
+    const items: any[] = cart?.items || [];
+    if (items.length === 0) return;
+    staleCartNoticeShown.current = true;
+    const units = items.reduce((s: number, i: any) => s + (Number(i.quantity) || 1), 0);
+    setMessages(prev => [...prev, {
+      role: 'assistant' as const,
+      content: `🛒 Heads up — your cart already has **${items.length} item${items.length !== 1 ? 's' : ''} (${units} unit${units !== 1 ? 's' : ''})** from a previous session. If that's not intentional, just say **"clear my cart"** and we'll start fresh; otherwise I'll factor it in.`,
+      timestamp: new Date(),
+    }]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatOpen, cart]);
   const [showLogin, setShowLogin] = useState(false);
   const [showAdminDash, setShowAdminDash] = useState(false);
   const [expandedLane, setExpandedLane] = useState<DeviceLane | null>(null);
@@ -721,6 +742,25 @@ export default function App() {
 
   const addToCart = async (sku: string, qty: number = 1) => {
     if (!sku) return;
+    // Bulk-order carry-through: if the CONVERSATION asked for N units ("15 work laptops") and this Add
+    // came from a pick button (qty 1), land the conversation's quantity — via the sourcing-aware qty PUT
+    // (allow_sourcing) so exceeding stock sources the shortfall instead of a silent 409. Fixes the demo's
+    // "asked for 30, cart got 1".
+    const bulkQty = qty <= 1 && pendingBulkQty && pendingBulkQty > 1 ? pendingBulkQty : null;
+    if (bulkQty) {
+      await setCartQty(sku, bulkQty, true);
+      switchRightPanelMode('cart');
+      setChatOpen(true);
+      const addedProduct = products.find((p) => p.sku === sku);
+      const bulkMsg = `Added **${bulkQty} × ${addedProduct?.name || sku}** to your cart (from your request). Any shortfall vs stock will be sourced from a supplier — check the delivery plan in the cart.`;
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === 'assistant' && last.content === bulkMsg) return prev;
+        return [...prev, { role: 'assistant' as const, content: bulkMsg, timestamp: new Date() }];
+      });
+      emitConsumerSignal(uid, 'checkout', {});
+      return;
+    }
     try {
       const j = await addCartItem(uid, sku, Math.max(1, Math.floor(qty)));
       setCart(j);
@@ -1042,6 +1082,34 @@ export default function App() {
       };
       setMessages(prev => [...prev, userMsg, warningMsg]);
       setInputValue('');
+      return;
+    }
+
+    // CART ACTIONS the assistant can genuinely do — executed client-side against the real cart API, with
+    // an honest confirmation ("clear my cart" used to silently do nothing; the demo's top complaint).
+    if (/\b(?:clear|empty|wipe|reset)\b.{0,20}\bcart\b|\bcart\b.{0,12}\b(?:clear|empty)\b/i.test(q)) {
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content: '🧹 Done — your cart is now empty. Tell me what you need and I\'ll help you rebuild it.', timestamp: new Date() }]);
+      setInputValue('');
+      await clearCartAll();
+      switchRightPanelMode('cart');
+      return;
+    }
+    // HONEST REFUSAL + capability-gap ledger: actions the assistant genuinely can't execute yet get a
+    // truthful "not yet" (never silence), and the ask is RECORDED so QA can mine the ledger for the
+    // roadmap — a bounded platform getting smarter without getting looser.
+    const unsupported = /\b(cancel|refund|return)\b.{0,24}\border\b|\btrack\b.{0,20}\b(order|package|delivery)\b|\b(change|update)\b.{0,20}\b(address|shipping address|payment)\b|\bapply\b.{0,16}\b(coupon|voucher|discount code)\b/i.exec(q);
+    if (unsupported) {
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content: `I can't do that from chat yet ("${unsupported[0]}") — a human teammate can via the admin console. I've logged your request so we prioritize building it. Meanwhile I can help you find products, manage cart quantities, or plan a bulk order.`, timestamp: new Date() }]);
+      setInputValue('');
+      try {
+        fetch(apiUrl('/api/v1/consumer/capability-gap'), {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': ((import.meta as any).env?.VITE_API_KEY || '') },
+          body: JSON.stringify({ utterance: q, category: 'unsupported_action', refusal_reason: 'chat_action_not_implemented', surface: 'chat', uid }),
+        }).catch(() => {});
+      } catch { /* ledger is best-effort */ }
       return;
     }
 
@@ -1422,6 +1490,11 @@ export default function App() {
           }
         }
         const prods = (data.products || []) as Product[];
+        // bulk-order carry-through: remember the conversation's requested unit count for the Add buttons
+        {
+          const _rq = Number((data as any).requested_quantity);
+          setPendingBulkQty(Number.isFinite(_rq) && _rq > 1 ? Math.min(1000, Math.floor(_rq)) : null);
+        }
         setExternalResearch(Array.isArray(data.external_research) ? (data.external_research as ExternalResearchItem[]) : []);
         setFulfilmentCase(data.fulfillment_case && (data.fulfillment_case as any).case_id ? (data.fulfillment_case as FulfilmentCaseSummary) : null);
         // FLUID-procurement preview (FULFILLMENT_DEFER_TO_CART): a buyer-safe sourcing split with no durable

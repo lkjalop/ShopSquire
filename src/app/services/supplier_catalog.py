@@ -535,7 +535,7 @@ def lead_times_for_skus(db, skus: List[str]) -> Dict[str, Dict[str, Any]]:
         placeholders = ", ".join(f":{k}" for k in params)
         rows = db.execute(text(
             f"SELECT sp.sku, s.id, COALESCE(sp.lead_time_days, s.lead_time_days) AS lt, "
-            f"COALESCE(s.reliability_score, 0) AS rel "
+            f"COALESCE(s.reliability_score, 0) AS rel, s.name, s.preferred_channel "
             f"FROM suppliers s JOIN supplier_products sp ON sp.supplier_id = s.id "
             f"WHERE sp.sku IN ({placeholders}) AND COALESCE(s.active,1)=1 AND COALESCE(sp.active,1)=1"),
             params).fetchall()
@@ -548,7 +548,9 @@ def lead_times_for_skus(db, skus: List[str]) -> Dict[str, Dict[str, Any]]:
         if sku not in out or rel > best_rel.get(sku, -1.0):
             best_rel[sku] = rel
             out[sku] = {"supplier_ref": str(r[1]),
-                        "lead_time_days": (int(r[2]) if r[2] is not None else None)}
+                        "lead_time_days": (int(r[2]) if r[2] is not None else None),
+                        "supplier_name": (str(r[4]) if r[4] else None),
+                        "channel": (str(r[5]) if r[5] else None)}
     return out
 
 

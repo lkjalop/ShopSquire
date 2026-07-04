@@ -163,7 +163,10 @@ export interface SplitPlan {
   now: SplitShipmentLine[]; later: SplitShipmentLine[]; subtotal_cents: number;
   delivery: SplitDelivery; fully_in_stock: boolean; rationale: string;
 }
-export interface SplitOfferResult { cart_id: string; subtotal_cents: number; currency: string; split: SplitPlan | null }
+export interface SplitOfferResult {
+  cart_id: string; subtotal_cents: number; currency: string; split: SplitPlan | null;
+  suppliers?: Record<string, { name?: string | null; channel?: string | null }>;
+}
 
 // Pre-payment split-fulfilment offer: what ships now (stock) vs follows from a supplier (with the supplier's
 // REAL lead time as the ETA), plus the store's delivery economics. The buyer confirms this before payment.

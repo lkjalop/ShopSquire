@@ -2975,31 +2975,76 @@ def _apply_model_theft_output_protection(payload: Dict[str, Any], *, trace_id: s
     return out
 
 
-def _extract_quantity_from_query(query: str | None) -> int | None:
-    """Best-effort quantity extraction for bulk-order intent."""
+# Function words that may sit before a quantity ("with 15 work laptops", "about 25"). A number preceded by
+# an ALPHA token NOT in this set is treated as part of a product name ("dell 15 laptops") — never a qty.
+_QTY_PRECEDING_OK = frozenset({
+    "with", "need", "needs", "want", "wants", "get", "buy", "order", "purchase", "about", "around",
+    "roughly", "approx", "approximately", "so", "for", "of", "the", "some", "extra", "another", "me",
+    "us", "like", "say", "grab", "source", "and", "plus", "have", "getting", "buying", "ordering",
+})
+# A word between the number and the unit-noun that means the number is a SPEC, not a quantity ("15 inch laptops").
+_QTY_SPEC_FILLERS = re.compile(r"\b(?:inch(?:es)?|in|\"|gb|tb|mb|hz|ghz|kg|lb|nits?|core|gen)\b", re.I)
+_QTY_UNIT_NOUNS = (
+    r"units?|items?|pieces?|pcs|laptops?|desktops?|monitors?|keyboards?|mice|phones?|headsets?|"
+    r"tablets?|drives?|routers?|chargers?|docks?|of\s+(?:them|these|those)"
+)
+
+
+def _extract_quantity_span(query: str | None) -> tuple[int, str] | None:
+    """Quantity for bulk-order intent + the MATCHED NUMBER TEXT so the caller can excise it from the
+    retrieval text (a bare '15' left in the query becomes a product-NAME token — matching 'Dell 15' /
+    'HP 15-…' — which then intersects with the budget band and zeroes the results; the demo's
+    '15 work laptops, 1100 to 1400 → no match' bug). Returns (qty, number_text) or None.
+
+    Handles: 'qty: 15', '15x', '15 laptops', '15 work laptops' (≤2 filler words), '30 or so laptops',
+    'need about 25'. Guards: a spec filler (15 INCH laptops) or a name-like preceding token
+    (DELL 15 laptops) is never a quantity."""
     if not query:
         return None
     q = str(query).strip().lower()
     if not q:
         return None
 
+    def _ok(m: "re.Match", *, check_fillers: bool = False) -> tuple[int, str] | None:
+        try:
+            qty = int(m.group(1))
+        except (TypeError, ValueError):
+            return None
+        if qty < 1 or qty > 1000:
+            return None
+        # the token right before the number must be a function word (or nothing) — not a brand/model
+        before = q[: m.start(1)].rstrip()
+        prev = re.split(r"[^a-z0-9]+", before)[-1] if before else ""
+        if prev and prev.isalpha() and prev not in _QTY_PRECEDING_OK:
+            return None
+        if check_fillers and _QTY_SPEC_FILLERS.search(m.group(2) or ""):
+            return None  # '15 inch laptops' — a spec, not a quantity
+        return qty, m.group(1)
+
     m = re.search(r"\b(?:qty|quantity)\s*[:=#-]?\s*(\d{1,4})\b", q)
-    if not m:
-        m = re.search(r"\b(\d{1,4})\s*[x×]\b", q)
-    if not m:
-        m = re.search(
-            r"\b(\d{1,4})\s*(?:units?|items?|pieces?|pcs|laptops?|desktops?|monitors?|keyboards?|mice|phones?)\b",
-            q,
-        )
-    if not m:
-        return None
-    try:
-        qty = int(m.group(1))
-    except Exception:
-        return None
-    if qty <= 0 or qty > 1000:
-        return None
-    return qty
+    if m:
+        return _ok(m)
+    m = re.search(r"\b(\d{1,4})\s*[x×]\b", q)
+    if m:
+        return _ok(m)
+    # number + up to two filler words + a unit noun: '15 laptops', '15 work laptops', '30 or so laptops'
+    m = re.search(rf"\b(\d{{1,4}})\s+((?:[a-z]+\s+){{0,2}}?)(?:{_QTY_UNIT_NOUNS})\b", q)
+    if m:
+        r = _ok(m, check_fillers=True)
+        if r:
+            return r
+    # verb-context count with no noun: 'I need about 25', 'we want 30'
+    m = re.search(r"\b(?:need|want|get|buy|order|purchase|looking\s+for|help\s+with)\s+"
+                  r"(?:about|around|roughly|approx\w*|maybe|some|say)?\s*(\d{1,4})\b", q)
+    if m:
+        return _ok(m)
+    return None
+
+
+def _extract_quantity_from_query(query: str | None) -> int | None:
+    """Best-effort quantity extraction for bulk-order intent (span-less wrapper)."""
+    r = _extract_quantity_span(query)
+    return r[0] if r else None
 
 
 def _extract_result_limit_from_query(query: str | None) -> int | None:
@@ -4838,6 +4883,25 @@ def suggest(
             )
         except Exception:
             pass
+    # EARLY bulk-quantity extraction — BEFORE the multi-part decomposer, intent routing, and NLP parsing
+    # (every downstream consumer of query_effective). A bare count left in the text ("15 work laptops")
+    # is tokenized as a product-NAME hint (matches 'Dell 15' / 'HP 15-…'), which then intersects with the
+    # budget band and zeroes the results. Extract the qty here, EXCISE the number, carry it into
+    # constraints once they exist.
+    _early_bulk_qty: int | None = None
+    try:
+        _eq = _extract_quantity_span(query_effective)
+        if _eq:
+            _early_bulk_qty = _eq[0]
+            query_effective = re.sub(rf"\b{re.escape(_eq[1])}\b", " ", query_effective, count=1)
+            query_effective = re.sub(r"\s{2,}", " ", query_effective).strip()
+            # also excise from the RAW query: the multi-part decomposer + image-fusion rebuilds derive
+            # their text from `query`, and the count must never re-enter as a name token anywhere.
+            if isinstance(query, str) and query:
+                query = re.sub(rf"\b{re.escape(_eq[1])}\b", " ", query, count=1)
+                query = re.sub(r"\s{2,}", " ", query).strip()
+    except Exception:
+        _early_bulk_qty = None
     # Ensure decision trace stream has at least one event early so SSE clients
     # don't block waiting for the first chunk.
     try:
@@ -6707,7 +6771,9 @@ def suggest(
         }
     try:
         if constraints.get("quantity") is None:
-            qty = _extract_quantity_from_query(query_effective)
+            # the early pass (pre-NLP) already extracted + excised the count; fall back to a late parse
+            # only when the early pass found nothing (e.g. a path that rebuilt query_effective).
+            qty = _early_bulk_qty if _early_bulk_qty else _extract_quantity_from_query(query_effective)
             if qty:
                 constraints["quantity"] = qty
     except Exception:
@@ -10178,6 +10244,9 @@ def suggest(
         "buyer_persona_confidence": constraints.get("buyer_persona_confidence"),
         "buyer_persona_candidate": constraints.get("buyer_persona_candidate"),
         "budget_fitness": constraints.get("budget_fitness"),
+        # bulk-order intent: the parsed unit count ("15 work laptops" → 15) so the storefront's Add
+        # buttons can land the CONVERSATION's quantity (with allow_sourcing), not a silent qty=1.
+        "requested_quantity": constraints.get("quantity"),
         "learn_more_url": "/ui/status",
         "agent_chain": agent_chain,
         "trace_tags": strategy_corr.get("tags") or [],

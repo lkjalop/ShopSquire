@@ -2445,6 +2445,8 @@ async def chat_query(
         # demand-aware sales-response nudge + experiment ranking nudge + storefront emphasis) so the frontend
         # and the Decision Trace can SHOW the governed adaptation ("why these moved", gate allow/deny). Each
         # is present only when its flag-gated lever ran; the products themselves are already re-ranked.
+        # bulk-order intent: the parsed unit count so Add buttons land the conversation's qty, not 1.
+        "requested_quantity": data.get("requested_quantity"),
         "sales_response_nudge": data.get("sales_response_nudge") if isinstance(data.get("sales_response_nudge"), dict) else None,
         "ranking_experiment": data.get("ranking_experiment") if isinstance(data.get("ranking_experiment"), dict) else None,
         "storefront_emphasis": data.get("storefront_emphasis") if isinstance(data.get("storefront_emphasis"), dict) else None,
