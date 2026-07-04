@@ -407,6 +407,7 @@ from src.app.services.recommend_nqe_stage import (  # noqa: E402
 )
 from src.app.services.query_understanding import build_query_understanding  # noqa: E402
 from src.app.services.safe_stage import record_partial_failure as _record_partial_failure  # noqa: E402
+from src.app.services.recommend_constraint_builder import apply_budget_revisions as _apply_budget_revisions  # noqa: E402
 from src.app.services.recommend_narration_stage import (  # noqa: E402
     NarrationInputs,
     apply_narration_inputs_to_constraints,
@@ -6456,67 +6457,39 @@ def suggest(
                         )
             except Exception:
                 pass
-            # Reset stale opposite bound when user gives one-sided budget updates
-            # like "under $900" or "above $2000".
-            if parsed.get("budget_max") is not None and parsed.get("budget_min") is None and any(
-                tok in q_low for tok in ("under", "below", "up to", "max")
-            ):
-                constraints["budget_min"] = None
-            if parsed.get("budget_min") is not None and parsed.get("budget_max") is None and any(
-                tok in q_low for tok in ("above", "over", "minimum", "at least")
-            ):
-                constraints["budget_max"] = None
-            bmin_now = constraints.get("budget_min")
-            bmax_now = constraints.get("budget_max")
-            if bmin_now is not None and bmax_now is not None and float(bmin_now) > float(bmax_now):
-                if any(tok in q_low for tok in ("under", "below", "up to", "max")):
-                    constraints["budget_min"] = None
-                elif any(tok in q_low for tok in ("above", "over", "minimum", "at least")):
-                    constraints["budget_max"] = None
-                else:
-                    constraints["budget_min"], constraints["budget_max"] = bmax_now, bmin_now
+        # Budget revision rules — EXTRACTED to the pure merge table (recommend_constraint_builder.
+        # apply_budget_revisions): one-sided resets, inverted-band repair, spec-only-turn clear,
+        # floor-carry on a raise, memory reload for deictic follow-ups. One call, one provenance
+        # trace event, one stage timer — this block is where six live budget bugs used to hide.
         references_prior = _references_previous_shortlist(q_low)
-        if explicit_constraint_update and not asks_budget and not references_prior and parsed.get("budget_max") is None and parsed.get("budget_min") is None:
-            # New explicit constraint turn (e.g., spec-only refinement) should not inherit
-            # prior budget envelope unless user references earlier results.
-            constraints["budget_max"] = None
-            constraints["budget_min"] = None
-        # Budget UPDATE keeps the remembered FLOOR: "actually budget is now 1800 max" raises the ceiling —
-        # it does not silently re-open the $629 tier the buyer already excluded (the demo's "$629-$1,499"
-        # regression). Applies only on an explicit UPDATE cue, never on a cut/reset verb (a cut sets a new
-        # ceiling and the old floor no longer applies), and only when the prior floor still fits.
-        if (parsed.get("budget_max") is not None and parsed.get("budget_min") is None
-                and re.search(r"\b(now|actually|instead|change[d]?|update[d]?)\b", q_low)
-                and not re.search(r"\b(cut|drop|lower|reduce|cheaper)\b", q_low)):
-            _prior_floor = _decayed_pref("budget_min")
-            if (isinstance(_prior_floor, (int, float)) and not isinstance(_prior_floor, bool)
-                    and isinstance(parsed.get("budget_max"), (int, float))
-                    and float(_prior_floor) < float(parsed["budget_max"])):
-                constraints["budget_min"] = int(_prior_floor)
-        if not asks_budget and parsed.get("budget_max") is None and parsed.get("budget_min") is None and (references_prior or followup_explain):
-            # Preserve memory-derived budget only for explicit follow-up turns
-            # (deictic references like "those/that" or explain/detail requests).
-            nlp_budget_max = nlp.get("preferences", {}).get("budget_max")
-            nlp_budget_min = nlp.get("preferences", {}).get("budget_min")
-            if nlp_budget_max is not None:
-                constraints["budget_max"] = nlp_budget_max
-            if nlp_budget_min is not None:
-                constraints["budget_min"] = nlp_budget_min
-            if nlp_budget_min is not None or nlp_budget_max is not None:
-                log_trace_event(
-                    trace_id=trace_id,
-                    event_type="nqe_assumption_applied",
-                    source_type="agent",
-                    source_id="NQE_Agent",
-                    target_type="system",
-                    target_id=None,
-                    payload={
-                        "assumption": "budget_from_memory",
-                        "budget_min": nlp_budget_min,
-                        "budget_max": nlp_budget_max,
-                        **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["memory_prefs"]),
-                    },
-                )
+        _br_t0 = time.perf_counter()
+        _br = _apply_budget_revisions(
+            current_min=constraints.get("budget_min"), current_max=constraints.get("budget_max"),
+            parsed_min=parsed.get("budget_min"), parsed_max=parsed.get("budget_max"),
+            query_lower=q_low, asks_budget=asks_budget,
+            explicit_constraint_update=explicit_constraint_update,
+            references_prior=references_prior, followup_explain=followup_explain,
+            decayed_min=_decayed_pref("budget_min"),
+            nlp_min=nlp.get("preferences", {}).get("budget_min"),
+            nlp_max=nlp.get("preferences", {}).get("budget_max"),
+        )
+        constraints["budget_min"], constraints["budget_max"] = _br.budget_min, _br.budget_max
+        timing_breakdown["budget_resolution_ms"] = round((time.perf_counter() - _br_t0) * 1000, 2)
+        if _br.provenance:
+            log_trace_event(
+                trace_id=trace_id,
+                event_type="budget_resolution",
+                source_type="agent",
+                source_id="Constraint_Merge_Agent",
+                target_type="system",
+                target_id=None,
+                payload={
+                    "provenance": [{"slot": s, "source": src, "value": v} for s, src, v in _br.provenance],
+                    "budget_min": _br.budget_min,
+                    "budget_max": _br.budget_max,
+                    **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["constraints", "memory_prefs"]),
+                },
+            )
     except Exception:
         pass
     # GPU-aware intent handling for AI training / rendering / gaming workflows.

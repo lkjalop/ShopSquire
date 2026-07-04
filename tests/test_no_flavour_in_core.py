@@ -248,6 +248,7 @@ _CORE_MODULES = [
     "src/app/services/market_store.py",
     # multi-intent turn parser (P0): amend/new-line/scoped-budget decomposition — numbers + grammar cues, no product vocab.
     "src/app/services/budget_grammar.py",
+    "src/app/services/recommend_constraint_builder.py",
     "src/app/services/intent_decomposer.py",
     # scatter-gather adversarial guard (P0): category/budget/qty/context checks — opaque category token + numbers.
     "src/app/services/scatter_gather_guard.py",
