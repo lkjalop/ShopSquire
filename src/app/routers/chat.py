@@ -187,7 +187,13 @@ def _extract_budget_bounds(query: str) -> Dict[str, int | None]:
     """Parse a budget from natural phrasings into {budget_min, budget_max}. Handles ranges (between/from/
     bare 'X to Y'/'$X-$Y'), ceilings (under/below/up to), floors (over/at least), PER-UNIT budgets
     ('$1900 each', 'per laptop'), and fuzzy amounts ('budget about 1900', 'spend ~$2000', a lone '$1900').
-    Amounts require 3+ digits so quantities like '15 laptops' are never read as a price."""
+    Amounts require 3+ digits so quantities like '15 laptops' are never read as a price.
+
+    Delegates FIRST to the canonical budget_grammar; local patterns are legacy fallback only."""
+    from src.app.services.budget_grammar import parse_budget as _canon
+    _bp = _canon(query)
+    if _bp is not None and _bp.found:
+        return {"budget_min": _bp.budget_min, "budget_max": _bp.budget_max}
     q = str(query or "").lower()
 
     def _n(s: str) -> int:

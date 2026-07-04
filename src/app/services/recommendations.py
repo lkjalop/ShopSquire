@@ -431,6 +431,12 @@ class RecommendationService:
         # Remove obvious PII-like tokens before numeric parsing so IDs/SSNs
         # cannot contaminate budget extraction.
         t = scrub_pii(text or "")
+        # Canonical grammar FIRST (budget_grammar — one place to add a phrasing for every lane);
+        # the local patterns below remain as legacy fallback only.
+        from src.app.services.budget_grammar import parse_budget as _canon
+        _bp = _canon(t)
+        if _bp is not None and _bp.found:
+            return _bp.budget_min, _bp.budget_max, None
         # Remove storage/ram size mentions so they don't get misread as prices
         t = re.sub(r"\b\d+(?:\.\d+)?\s*(tb|gb)\b(?:\s*(ssd|storage|disk|hdd|ram))?", " ", t, flags=re.IGNORECASE)
         # Remove typical order/reference identifiers that may look numeric.

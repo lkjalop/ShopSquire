@@ -117,9 +117,17 @@ def parse_query(query: str) -> ParsedQuery:
 
     # ── Budget extraction ──
     ql = q.lower()
+    # Canonical grammar FIRST (budget_grammar — one place to add a phrasing for every lane); the local
+    # patterns below remain as legacy fallback only.
+    from src.app.services.budget_grammar import parse_budget as _canon
+    _bp = _canon(q)
+    if _bp is not None and _bp.found:
+        result.budget_min = _sane_budget(_bp.budget_min)
+        result.budget_max = _sane_budget(_bp.budget_max)
+        signals += 1
     # Explicit numeric patterns first
     # Range: $500-$1000
-    range_m = re.search(r"[\$£€]\s*(\d[\d,]*)\s*[-–to]+\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
+    range_m = None if (_bp is not None and _bp.found) else re.search(r"[\$£€]\s*(\d[\d,]*)\s*[-–to]+\s*[\$£€]?\s*(\d[\d,]*)", q, re.I)
     if not range_m:
         range_m = re.search(r"(\d[\d,]*)\s*[-–to]+\s*(\d[\d,]*)\s*(?:dollar|buck|pound|euro|£|\$|€)", q, re.I)
     if not range_m:
@@ -132,7 +140,7 @@ def parse_query(query: str) -> ParsedQuery:
         if _bmin is not None or _bmax is not None:
             result.budget_min, result.budget_max = _bmin, _bmax
             signals += 1
-    else:
+    elif _bp is None or not _bp.found:  # legacy single-value patterns only when the canonical grammar saw nothing
         # Under/below X (not a spec unit — "under 2 kg" is weight, not $2)
         under_m = re.search(r"\b(?:under|below|less than|max|up to)\s*[\$£€]?\s*(\d[\d,]*)" + _NOT_BUDGET_UNIT, q, re.I)
         if under_m:

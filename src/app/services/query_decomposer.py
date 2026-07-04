@@ -433,7 +433,14 @@ def _budget_int(s: str) -> Optional[int]:
 def _extract_budget_range(q: str) -> tuple[Optional[int], Optional[int]]:
     """Agnostic numeric budget parse → (min, max). Pure numbers + currency symbols, NO vertical
     literals, so it is valid for any store. Handles comma-formatted amounts ("$1,600"). Surfaced into
-    QueryPlan.budget_min/max."""
+    QueryPlan.budget_min/max.
+
+    Delegates FIRST to the canonical budget_grammar (core-to-core) — one place to add a phrasing for
+    every lane; the local patterns below remain as legacy fallback only."""
+    from src.app.services.budget_grammar import parse_budget as _canon
+    _bp = _canon(q)
+    if _bp is not None and _bp.found:
+        return _bp.budget_min, _bp.budget_max
     ql = str(q or "").lower()
     rng = re.search(r"[\$€£]?\s*" + _BUDGET_NUM + r"\s*(?:to|and|-|–|—)\s*[\$€£]?\s*" + _BUDGET_NUM + r"\b", ql)
     if rng:
