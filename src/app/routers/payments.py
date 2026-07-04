@@ -311,6 +311,14 @@ def checkout_initiate(
                             _db.commit()
                     except Exception as _db_exc:
                         _log.warning("checkout_initiate: failed to store stripe_intent_id: %s", _db_exc)
+                    try:
+                        from src.app.services.payment_ledger import KIND_INTENT_CREATED, record_txn
+                        with db_session() as _ldb:
+                            record_txn(_ldb, order_id=order_id, kind=KIND_INTENT_CREATED,
+                                       intent_id=stripe_intent_id, amount_cents=amount_cents,
+                                       currency=currency, provider="stripe", commit=True)
+                    except Exception as _l_exc:
+                        _log.warning("checkout_initiate: ledger write failed: %s", _l_exc)
                 return {
                     "order_id": order_id or stripe_intent_id,
                     "stripe_intent_id": stripe_intent_id,
@@ -356,6 +364,13 @@ def checkout_initiate(
                 _db.commit()
         except Exception as _db_exc:
             _log.warning("checkout_initiate: failed to store demo intent id: %s", _db_exc)
+        try:
+            from src.app.services.payment_ledger import KIND_INTENT_CREATED, record_txn
+            with db_session() as _ldb:
+                record_txn(_ldb, order_id=order_id, kind=KIND_INTENT_CREATED, intent_id=demo_intent_id,
+                           amount_cents=amount_cents, currency=currency, provider="demo", commit=True)
+        except Exception as _l_exc:
+            _log.warning("checkout_initiate: ledger write failed: %s", _l_exc)
     return {
         "order_id": order_id or f"DEMO-{secrets.token_urlsafe(6).upper()}",
         "stripe_intent_id": demo_intent_id,
@@ -422,6 +437,7 @@ async def stripe_webhook(request: Request) -> Dict:
             _db.commit()
         _log.info("stripe_webhook: marked paid for intent %s (rows=%s)", intent_id, getattr(result, "rowcount", "?"))
         if getattr(result, "rowcount", 0):
+            _ledger_txn_for_intent(intent_id, "payment_succeeded")
             try:
                 _dispatch_paid_order(intent_id)
             except Exception as exc:
@@ -438,6 +454,7 @@ async def stripe_webhook(request: Request) -> Dict:
             )
             _db.commit()
         _log.warning("stripe_webhook: payment_failed for intent %s", intent_id)
+        _ledger_txn_for_intent(intent_id, "payment_failed")
 
     elif event_type == "charge.refunded" and intent_id:
         # charge.refunded carries payment_intent field, not id
@@ -452,8 +469,124 @@ async def stripe_webhook(request: Request) -> Dict:
             )
             _db.commit()
         _log.info("stripe_webhook: refund processed for intent %s", pi_id)
+        # Reconcile settlement against the governed ledger: a provider refund with NO approved
+        # request on file is recorded but flagged loudly — money moved outside the approval flow.
+        try:
+            from src.app.services.payment_ledger import refund_state
+            _amt = data_obj.get("amount_refunded")
+            _oid = _ledger_txn_for_intent(pi_id, "refund_settled",
+                                          amount_cents=(int(_amt) if _amt is not None else None))
+            if _oid:
+                with db_session() as _rdb:
+                    state = refund_state(_rdb, _oid)
+                if int(state.get("approved_cents") or 0) < int(state.get("settled_cents") or 0):
+                    _log.critical(
+                        "stripe_webhook: refund SETTLED WITHOUT MATCHING APPROVAL for order %s "
+                        "(approved=%s settled=%s) — reconcile with the provider dashboard.",
+                        _oid, state.get("approved_cents"), state.get("settled_cents"))
+        except Exception as exc:
+            _log.warning("stripe_webhook: refund reconciliation failed for %s: %s", pi_id, exc)
 
     return {"received": True, "type": event_type}
+
+
+# ─── Governed refunds (GATE-2 mold: propose → human approve → provider settles) ──────────────
+# Refunds were previously OBSERVED only (charge.refunded flips status); nothing could INITIATE
+# one and nothing reconciled. Now: a merchant REQUESTS (append refund_requested), a human owner
+# APPROVES (append refund_approved — the authorization to execute at the provider), and the
+# charge.refunded webhook SETTLES + reconciles against these events, screaming on any refund
+# that settled without an approval on file. One open request per order at a time.
+
+class _RefundRequestBody(BaseModel):
+    order_id: str
+    amount_cents: int | None = None  # default: full remaining refundable amount
+    reason: str = ""
+
+
+@router.post("/refunds/request")
+def refund_request(
+    body: _RefundRequestBody,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    from src.app.services.payment_ledger import KIND_REFUND_REQUESTED, record_txn, refund_state
+    with db_session() as db:
+        row = db.execute(text("SELECT status, total_cents, currency FROM orders WHERE id = :o LIMIT 1"),
+                         {"o": body.order_id}).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="order_not_found")
+        if str(row[0]) not in ("paid", "shipped", "delivered"):
+            raise HTTPException(status_code=409, detail={"message": "order_not_refundable", "status": row[0]})
+        state = refund_state(db, body.order_id)
+        if state["open_request"]:
+            raise HTTPException(status_code=409, detail="refund_request_already_open")
+        refundable = int(state["captured_cents"] or row[1] or 0) - int(state["settled_cents"] or 0)
+        amount = int(body.amount_cents) if body.amount_cents is not None else refundable
+        if amount <= 0 or amount > refundable:
+            raise HTTPException(status_code=422, detail={"message": "invalid_refund_amount",
+                                                         "refundable_cents": refundable})
+        record_txn(db, order_id=body.order_id, kind=KIND_REFUND_REQUESTED, amount_cents=amount,
+                   currency=str(row[2] or "USD"), actor_type="role", actor_id=role,
+                   reason=body.reason, commit=True)
+    return {"order_id": body.order_id, "status": "refund_requested", "amount_cents": amount,
+            "approval_required": True, "approve_via": f"/api/v1/payments/refunds/{body.order_id}/approve"}
+
+
+@router.post("/refunds/{order_id}/approve")
+def refund_approve(
+    order_id: str,
+    role: str = Depends(require_role([ROLE_OWNER])),  # HUMAN owner only — the GATE-2 invariant
+) -> Dict:
+    from src.app.services.payment_ledger import (KIND_REFUND_APPROVED, KIND_REFUND_REQUESTED,
+                                                 ledger_for_order, record_txn)
+    with db_session() as db:
+        events = ledger_for_order(db, order_id)
+        requests = [e for e in events if e["kind"] == KIND_REFUND_REQUESTED]
+        approvals = [e for e in events if e["kind"] == KIND_REFUND_APPROVED]
+        if len(requests) <= len(approvals):
+            raise HTTPException(status_code=409, detail="no_open_refund_request")
+        open_req = requests[len(approvals)]
+        record_txn(db, order_id=order_id, kind=KIND_REFUND_APPROVED,
+                   amount_cents=open_req.get("amount_cents"), currency=open_req.get("currency") or "USD",
+                   actor_type="role", actor_id=role, reason="approved", commit=True)
+    _log.info("refund approved for order %s (%s cents) by role=%s", order_id, open_req.get("amount_cents"), role)
+    # Honest execution note: StripeClient has no refund API wired — the approval AUTHORIZES the
+    # provider-side refund; charge.refunded settles + reconciles it here when it lands.
+    return {"order_id": order_id, "status": "refund_approved",
+            "amount_cents": open_req.get("amount_cents"),
+            "provider_execution": "manual_or_webhook", "settled_by": "charge.refunded webhook"}
+
+
+@router.get("/refunds/{order_id}")
+def refund_ledger(
+    order_id: str,
+    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
+) -> Dict:
+    from src.app.services.payment_ledger import ledger_for_order, refund_state
+    with db_session() as db:
+        return {"order_id": order_id, "state": refund_state(db, order_id),
+                "ledger": ledger_for_order(db, order_id)}
+
+
+def _ledger_txn_for_intent(intent_id: str, kind: str, amount_cents: int | None = None) -> str | None:
+    """Resolve the order behind an intent and append a ledger event (amount defaults to the order
+    total). Returns the order_id, or None. Best-effort — webhook processing never fails on this."""
+    try:
+        from src.app.services.payment_ledger import record_txn
+        with db_session() as db:
+            row = db.execute(
+                text("SELECT id, total_cents, currency FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
+                {"iid": intent_id},
+            ).fetchone()
+            if not row:
+                return None
+            record_txn(db, order_id=str(row[0]), kind=kind, intent_id=intent_id,
+                       amount_cents=(amount_cents if amount_cents is not None else row[1]),
+                       currency=str(row[2] or "USD"),
+                       provider=("demo" if intent_id.startswith("pi_demo_") else "stripe"), commit=True)
+            return str(row[0])
+    except Exception as exc:
+        _log.warning("payment ledger write (%s) failed for intent %s: %s", kind, intent_id, exc)
+        return None
 
 
 def _dispatch_paid_order(intent_id: str) -> None:
@@ -488,6 +621,12 @@ def _dispatch_paid_order(intent_id: str) -> None:
             idempotency_key=f"dispatch:{oid}",
             transition_event="shipment_plan_created",
         )
+        try:
+            from src.app.services.payment_ledger import KIND_DISPATCH_QUEUED, record_txn
+            record_txn(db, order_id=oid, kind=KIND_DISPATCH_QUEUED, intent_id=intent_id,
+                       provider=carrier, reason=f"tracking={tracking}")
+        except Exception as _l_exc:
+            _log.warning("dispatch ledger write failed for %s: %s", oid, _l_exc)
         db.commit()
     _log.info("stripe_webhook: dispatch queued for order %s (tracking=%s, carrier=%s)", oid, tracking, carrier)
 

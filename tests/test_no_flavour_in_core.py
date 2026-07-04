@@ -80,6 +80,9 @@ _CORE_MODULES = [
     # attribution backbone: decision→conversion measurement loop, vertical-blind (speaks only
     # decision_id/trace_id/sku/uid_hash/value_cents/window — no product vocabulary).
     "src/app/services/attribution.py",
+    # append-only payment ledger: order/intent ids + cents + event kinds only — no product
+    # vocabulary. The governed refund two-step folds over these events.
+    "src/app/services/payment_ledger.py",
     # adaptive agent budgets: tier/risk/event-signal → per-agent tool+token budget, agent names
     # only (no product vocabulary). Extracted from orchestrator.
     "src/app/services/agent_budgets.py",
