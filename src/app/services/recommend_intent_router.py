@@ -36,6 +36,12 @@ def stable_rollout_bucket(seed: str | None) -> int:
     return int(hashlib.sha256(s.encode("utf-8")).hexdigest(), 16) % 100
 
 
+# Shadow-capture executor: shadow comparisons are observability and must never block a buyer's turn.
+from concurrent.futures import ThreadPoolExecutor as _ShadowPool
+
+_SHADOW_EXECUTOR = _ShadowPool(max_workers=2, thread_name_prefix="intent-shadow")
+
+
 def resolve_ollama_intent_rollout(
     flags: Dict[str, Any], *, uid: str, trace_id: str | None
 ) -> Dict[str, Any]:
@@ -189,8 +195,10 @@ def _run_intent_routing(
         ollama_summary = None
         dt_ms = None
 
-        if ollama_rollout.get("invoke_ollama") or ollama_rollout.get("shadow_capture"):
-            _intent_payload: Dict[str, Any] = {
+        def _ollama_intent_call():
+            """The Ollama intent-summary call, shared by the inline (real routing) and background
+            (shadow-only) paths. Returns (summary, latency_ms); never raises."""
+            _payload: Dict[str, Any] = {
                 "model": model,
                 "prompt": (
                     "Summarize the user's shopping intent in one sentence and list the top 2 attributes to consider.\n"
@@ -200,26 +208,67 @@ def _run_intent_routing(
                 "options": {"temperature": 0.2, "num_predict": 256},
             }
             if "qwen3" in model.lower():
-                _intent_payload["think"] = False
+                _payload["think"] = False
             try:
-                t0 = time.perf_counter()
-                with httpx.Client(timeout=30.0) as client:
-                    r = client.post(
-                        f"{OLLAMA_URL.rstrip('/')}/api/generate", json=_intent_payload
-                    )
-                    r.raise_for_status()
-                    resp = r.json()
-                    ollama_summary = resp.get("response")
-                    dt_ms = (time.perf_counter() - t0) * 1000.0
+                _t0 = time.perf_counter()
+                with httpx.Client(timeout=30.0) as _client:
+                    _r = _client.post(f"{OLLAMA_URL.rstrip('/')}/api/generate", json=_payload)
+                    _r.raise_for_status()
+                    return (_r.json() or {}).get("response"), (time.perf_counter() - _t0) * 1000.0
             except Exception:
-                ollama_summary = None
-                dt_ms = None
+                return None, None
+
+        # SHADOW-ONLY capture goes OFF the hot path: its result is never used in the response
+        # (`selected_summary` takes the rule value unless invoke_ollama), yet it was blocking EVERY
+        # suggest for ~165ms warm / ~1.9s cold. The buyer proceeds on rule-based routing immediately;
+        # the shadow diff lands in the trace asynchronously. Real routing (invoke_ollama) stays inline.
+        # SAMPLED: shadow observability at 100% floods Ollama (it serializes requests), slowing every
+        # other LLM call on the box — measured: narration 47→95ms, this segment 164→500ms when the
+        # background shadow ran per-request. A 10% stable-bucket sample gives the same drift signal at
+        # 1/10th the load. INTENT_SHADOW_SAMPLE_PERCENT overrides (0 disables shadow entirely).
+        try:
+            _shadow_sample = int(os.getenv("INTENT_SHADOW_SAMPLE_PERCENT", "10") or 10)
+        except (TypeError, ValueError):
+            _shadow_sample = 10
+        _shadow_only = (bool(ollama_rollout.get("shadow_capture"))
+                        and not bool(ollama_rollout.get("invoke_ollama"))
+                        and int(ollama_rollout.get("bucket", 100)) < max(0, min(100, _shadow_sample)))
+        if _shadow_only:
+            def _bg_shadow(rollout=dict(ollama_rollout), rs=rule_summary, tid=trace_id):
+                _sm, _lt = _ollama_intent_call()
+                try:
+                    log_trace_event(
+                        trace_id=tid,
+                        event_type="ollama_intent_shadow_diff",
+                        source_type="agent",
+                        source_id="Model_Selector",
+                        target_type="system",
+                        target_id=None,
+                        payload={
+                            "stage": rollout.get("stage"),
+                            "bucket": rollout.get("bucket"),
+                            "invoke_ollama": False,
+                            "rule_summary": rs,
+                            "ollama_summary": _sm,
+                            "summaries_differ": summaries_differ(rs, _sm),
+                            "latency_ms": _lt,
+                            "shadow_async": True,
+                        },
+                    )
+                except Exception:
+                    pass
+            try:
+                _SHADOW_EXECUTOR.submit(_bg_shadow)
+            except Exception:
+                pass
+        elif ollama_rollout.get("invoke_ollama"):
+            ollama_summary, dt_ms = _ollama_intent_call()
 
         selected_summary = ollama_summary if ollama_rollout.get("invoke_ollama") else rule_summary
         selected_model = model if ollama_rollout.get("invoke_ollama") else f"rule-based ({action})"
         selected_provider = "ollama" if ollama_rollout.get("invoke_ollama") else "rules"
 
-        if ollama_rollout.get("shadow_capture"):
+        if ollama_rollout.get("shadow_capture") and ollama_rollout.get("invoke_ollama"):
             try:
                 log_trace_event(
                     trace_id=trace_id,

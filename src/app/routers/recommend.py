@@ -5896,6 +5896,7 @@ def suggest(
         fast_path_enabled=fast_path_enabled,
         log_trace_event=log_trace_event,
     )
+    _ckpt("intent_routing")
     ollama_meta = _ir.ollama_meta
     model_tier = _ir.model_tier
     llm_model = _ir.llm_model
@@ -5903,6 +5904,7 @@ def suggest(
     if _ir.timing_ms is not None:
         timing_breakdown["ollama_summary_ms"] = _ir.timing_ms
 
+    _ckpt("nlp_and_setup")
     parsed = service.parse_constraints(query_effective)
     explanation_request = _is_selection_rationale_query(query_effective)
     explicit_constraint_update = _has_explicit_constraint_update(parsed, query)
@@ -10352,6 +10354,10 @@ def suggest(
     # returns the (possibly nudged) results and mutates payload/kv in place.
     _ckpt("output_security_and_prep")
     from src.app.services.recommend_intelligence_stage import IntelligenceStageState, run_intelligence_stage
+    # Re-point the local timing dict at the PAYLOAD's live dict: the payload copy was summarized at
+    # build time, so tail checkpoints written to the old local dict never reached the response.
+    if isinstance(payload.get("timing_breakdown"), dict):
+        timing_breakdown = payload["timing_breakdown"]
     results = run_intelligence_stage(
         IntelligenceStageState(
             results=results, payload=payload, flags=flags, simulate=simulate, uid=uid, uid_hash=uid_hash,
