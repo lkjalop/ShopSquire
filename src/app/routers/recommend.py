@@ -4950,8 +4950,8 @@ def suggest(
                     record_gap(_gdb, category=GAP_REFUSED_REQUEST, utterance=str(query or "")[:300],
                                refusal_reason=f"quantity_out_of_range:{_aq[0]}", surface="recommend",
                                uid_hash=uid_hash, trace_id=trace_id)
-            except Exception:
-                pass
+            except Exception as _cg_exc:  # ledger is best-effort but its failure must be OBSERVED
+                _record_partial_failure("capability_gap_write", _cg_exc, trace_id=trace_id)
         _eq = _extract_quantity_span(query_effective)
         if _eq:
             _early_bulk_qty = _eq[0]
