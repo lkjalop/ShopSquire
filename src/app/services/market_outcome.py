@@ -131,6 +131,29 @@ def record_attribution(db, *, decision_ref: str, metric: str, value: Any, segmen
         return None
 
 
+def load_attribution_rollup(db, *, decision_ref: Optional[str] = None, limit: int = 20,
+                            tenant_id: str = DEFAULT_TENANT) -> List[Dict[str, Any]]:
+    """Attributed metric events rolled up per (decision_ref, metric, segment): event count + value sum.
+    The read side of the M6 close-loop — "what outcomes accrued to this adaptation, split by exposure
+    segment?" Newest-activity refs first. Best-effort; never raises."""
+    if db is None:
+        return []
+    try:
+        ensure_tables(db)
+        sql = ("SELECT decision_ref, metric, segment, COUNT(*), SUM(value), MAX(recorded_at) "
+               "FROM attribution_event WHERE COALESCE(tenant_id,'default')=:t ")
+        params: Dict[str, Any] = {"t": str(tenant_id or DEFAULT_TENANT), "lim": int(limit)}
+        if decision_ref:
+            sql += "AND decision_ref=:dr "
+            params["dr"] = str(decision_ref)
+        rows = db.execute(text(sql + "GROUP BY decision_ref, metric, segment "
+                                     "ORDER BY MAX(recorded_at) DESC LIMIT :lim"), params).fetchall()
+    except Exception:
+        return []
+    return [{"decision_ref": r[0], "metric": r[1], "segment": r[2], "events": int(r[3] or 0),
+             "total_value": (float(r[4]) if r[4] is not None else None), "last_event_at": r[5]} for r in rows]
+
+
 def load_recent_outcomes(db, *, decision_ref: Optional[str] = None, limit: int = 50,
                          tenant_id: str = DEFAULT_TENANT) -> List[Dict[str, Any]]:
     """Recent decision outcomes (optionally for one decision_ref), newest first. Best-effort."""

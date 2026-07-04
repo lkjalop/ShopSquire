@@ -137,29 +137,39 @@ def record_decision(
         return None
 
 
+def _loads_dict(raw: Any) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        out = json.loads(raw) if isinstance(raw, str) else raw
+        return out if isinstance(out, dict) else {}
+    except Exception:
+        return {}
+
+
 def _find_decision(db, *, trace_id: Optional[str], uid_hash: Optional[str]) -> Optional[Dict[str, Any]]:
     """Find the decision an order should be credited to: exact trace_id match first (the cart
     carries it), else the most recent decision for this uid_hash."""
     if trace_id:
         row = db.execute(
             text(
-                "SELECT decision_id, skus_json FROM recommendation_decision "
+                "SELECT decision_id, skus_json, context_json FROM recommendation_decision "
                 "WHERE trace_id = :t ORDER BY created_at DESC LIMIT 1"
             ),
             {"t": trace_id},
         ).fetchone()
         if row:
-            return {"decision_id": row[0], "skus": _loads_list(row[1])}
+            return {"decision_id": row[0], "skus": _loads_list(row[1]), "context": _loads_dict(row[2])}
     if uid_hash:
         row = db.execute(
             text(
-                "SELECT decision_id, skus_json FROM recommendation_decision "
+                "SELECT decision_id, skus_json, context_json FROM recommendation_decision "
                 "WHERE uid_hash = :u ORDER BY created_at DESC LIMIT 1"
             ),
             {"u": uid_hash},
         ).fetchone()
         if row:
-            return {"decision_id": row[0], "skus": _loads_list(row[1])}
+            return {"decision_id": row[0], "skus": _loads_list(row[1]), "context": _loads_dict(row[2])}
     return None
 
 
@@ -216,6 +226,18 @@ def attribute_order(
                 "ts": converted_at,
             },
         )
+        # M6 close-the-loop: if the credited decision-turn was EXPOSED to an adaptation (ranking
+        # experiment / demand-aware nudge), attribute this conversion's value to that adaptation as a
+        # metric event — decision_ref = the adaptation ref (matching record_outcome's convention),
+        # segment = the exposure arm (treatment/control/trend). This is the metric feed the uplift
+        # evaluation's "did the change actually work?" reads alongside terminal outcomes. Best-effort.
+        adaptations = (match.get("context") or {}).get("adaptations")
+        if isinstance(adaptations, dict) and adaptations:
+            from src.app.services.market_outcome import record_attribution
+            for ref, segment in adaptations.items():
+                record_attribution(db, decision_ref=str(ref), metric="conversion_value_cents",
+                                   value=int(value_cents or 0), segment=str(segment) if segment else None,
+                                   occurred_at=converted_at)
         return AttributionResult(
             attributed=True, decision_id=match["decision_id"], order_id=order_id,
             value_cents=int(value_cents or 0), attributed_skus=attributed_skus, reason="ok",

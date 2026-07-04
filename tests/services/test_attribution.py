@@ -168,3 +168,38 @@ def test_reward_feed_marks_no_decision_and_skips(db):
     s = attribution.run_reward_feed(db, settle_cutoff_iso="2099-01-01T00:00:00",
                                     bandit_reward_fn=lambda *a, **k: None)
     assert s["skipped_no_decision"] >= 1 and s["rewarded"] == 0
+
+
+def test_conversion_attributes_back_to_adaptation_exposure(db):
+    """M6 close-the-loop: a decision-turn EXPOSED to an adaptation (context.adaptations, ref → segment)
+    must, on conversion, append attribution_event rows keyed to the ADAPTATION ref — the metric feed the
+    uplift evaluation reads. One row per adaptation, value = the order's value, segment = the exposure."""
+    attribution.record_decision(
+        db, trace_id="T-m6", decision_id="D-m6", uid_hash="u6", skus=["A"],
+        context={"adaptations": {"ranking_nudge_v1": "treatment", "sales_response": "rising"}},
+    )
+    res = attribution.attribute_order(db, order_id="O-m6", trace_id="T-m6", uid_hash="u6",
+                                      value_cents=250000, line_skus=["A"])
+    assert res.attributed is True
+    rows = db.execute(text("SELECT decision_ref, metric, value, segment FROM attribution_event "
+                           "ORDER BY decision_ref")).fetchall()
+    assert [(r[0], r[1], r[2], r[3]) for r in rows] == [
+        ("ranking_nudge_v1", "conversion_value_cents", 250000.0, "treatment"),
+        ("sales_response", "conversion_value_cents", 250000.0, "rising"),
+    ]
+    # rollup reader: grouped per (ref, metric, segment) with count + sum
+    from src.app.services.market_outcome import load_attribution_rollup
+    roll = {r["decision_ref"]: r for r in load_attribution_rollup(db)}
+    assert roll["ranking_nudge_v1"]["events"] == 1 and roll["ranking_nudge_v1"]["total_value"] == 250000.0
+
+
+def test_conversion_without_exposure_writes_no_attribution_events(db):
+    from src.app.services import market_outcome as mo
+    mo.ensure_tables(db)  # table must exist to prove it stays EMPTY
+    attribution.record_decision(db, trace_id="T-plain", decision_id="D-plain", uid_hash="u7", skus=["A"],
+                                context={"budget_max": 1500})
+    res = attribution.attribute_order(db, order_id="O-plain", trace_id="T-plain", uid_hash="u7",
+                                      value_cents=9900, line_skus=["A"])
+    assert res.attributed is True
+    n = db.execute(text("SELECT COUNT(*) FROM attribution_event")).scalar()
+    assert n == 0

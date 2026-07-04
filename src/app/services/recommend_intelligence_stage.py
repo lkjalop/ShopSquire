@@ -48,6 +48,21 @@ class IntelligenceStageState:
     decision_id: Optional[str]
 
 
+def _adaptation_exposure(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The adaptation(s) this turn was exposed to, in decision_ref terms (the M6 close-loop key).
+    Recorded into the E0 decision's context so a LATER conversion can attribute its value back to the
+    adaptation that shaped the ranking — treatment AND control exposures both matter (uplift needs
+    both sides). Empty dict when no adaptation touched the turn."""
+    out: Dict[str, Any] = {}
+    re_ = payload.get("ranking_experiment")
+    if isinstance(re_, dict) and re_.get("experiment_id"):
+        out[str(re_["experiment_id"])] = str(re_.get("variant") or "control")
+    sr = payload.get("sales_response_nudge")
+    if isinstance(sr, dict) and int(sr.get("applied") or 0) > 0:
+        out["sales_response"] = str(sr.get("demand_trend") or "applied")
+    return out
+
+
 def _capture(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> None:
     if not (state.flags.get("ATTRIBUTION_ENABLED", True) and not state.simulate):
         return
@@ -56,13 +71,17 @@ def _capture(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> No
         from src.app.services.attribution import record_decision
         from src.app.services.bandit_context import get_bandit_arm
         skus = [r.get("sku") for r in results if isinstance(r, dict) and r.get("sku")]
+        context: Dict[str, Any] = {"budget_max": state.constraints.get("budget_max"),
+                                   "use_case": state.constraints.get("use_case")}
+        exposure = _adaptation_exposure(state.payload)
+        if exposure:
+            context["adaptations"] = exposure  # ref → segment, consumed by attribute_order (M6)
         # arm = the LinUCB ranking arm (for the E3 reward), variant = the A/B arm — distinct.
         with db_session() as db:
             record_decision(db, trace_id=state.trace_id, decision_id=state.decision_id, uid_hash=state.uid_hash,
                             skus=skus, surface="recommend", arm=get_bandit_arm(),
                             variant=(state.proposal or {}).get("ab_variant"),
-                            context={"budget_max": state.constraints.get("budget_max"),
-                                     "use_case": state.constraints.get("use_case")})
+                            context=context)
             db.commit()
     except Exception as exc:
         record_partial_failure("attribution_capture", exc, trace_id=state.trace_id)
@@ -274,10 +293,13 @@ def _sales_response_nudge(state: IntelligenceStageState, results: List[Dict[str,
 
 
 def run_intelligence_stage(state: IntelligenceStageState, *, mem) -> List[Dict[str, Any]]:
-    """Capture → market-intel → reversible nudge(s). Returns the (possibly nudged) results list; the
-    caller assigns it and (the nudge already set) payload['results']."""
+    """Market-intel → reversible nudge(s) → capture. Returns the (possibly nudged) results list; the
+    caller assigns it and (the nudge already set) payload['results']. Capture runs LAST deliberately:
+    the E0 decision must record what was ACTUALLY SHOWN (post-nudge order) plus which adaptation(s)
+    the turn was exposed to — the exposure a later conversion attributes back to (M6 close-loop)."""
     results = state.results
-    _capture(state, results)
     _market_intelligence(state, results, mem=mem)
     results = _nudge(state, results)                    # experiment (hippograph recall) nudge
-    return _sales_response_nudge(state, results)        # M5 demand-aware nudge (Phase-3)
+    results = _sales_response_nudge(state, results)     # M5 demand-aware nudge (Phase-3)
+    _capture(state, results)
+    return results

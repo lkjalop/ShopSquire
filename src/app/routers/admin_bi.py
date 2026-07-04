@@ -1716,6 +1716,17 @@ def investor_metrics(
             "market_adaptation": {"allowed": sum(1 for r in mkt if r["decision"] == "allow"),
                                   "denied_governed": sum(1 for r in mkt if r["decision"] == "deny")},
         }
+        # M6 close-the-loop: outcomes attributed BACK to each adaptation (conversion value per
+        # exposure segment) + the terminal keep/revert verdicts — "the adaptations are measured".
+        try:
+            from src.app.services.market_outcome import load_attribution_rollup, load_recent_outcomes
+            with db_session() as db:
+                out["sections"]["autonomy"]["adaptation_outcomes"] = {
+                    "attributed": load_attribution_rollup(db, limit=12),
+                    "verdicts": load_recent_outcomes(db, limit=6),
+                }
+        except Exception as exc:
+            logger.debug("investor-metrics adaptation-outcomes block failed: %s", exc)
     except Exception as exc:
         logger.debug("investor-metrics autonomy block failed: %s", exc)
         out["sections"]["autonomy"] = {"error": "unavailable"}
