@@ -24,15 +24,30 @@ def _check_db() -> Dict[str, Any]:
         return {"status": "unhealthy", "error": str(exc), "last_ok": None, "latency_ms": None}
 
 
+# up/down transition memory so a MID-RUN Redis death produces ONE screaming log line instead of
+# silent per-call timeouts (the outage mode that cost days of confused latency numbers).
+_REDIS_LAST_STATUS: Dict[str, Any] = {"status": None}
+
+
 def _check_redis() -> Dict[str, Any]:
+    import logging as _l
     start = time.time()
     try:
         redis_client = get_redis()
         if hasattr(redis_client, "ping"):
             redis_client.ping()
         latency_ms = int((time.time() - start) * 1000)
+        if _REDIS_LAST_STATUS["status"] == "unhealthy":
+            _l.getLogger("shopsquire.health").warning("memory store (Redis) RECOVERED — session memory active again")
+        _REDIS_LAST_STATUS["status"] = "healthy"
         return {"status": "healthy", "latency_ms": latency_ms, "last_ok": int(time.time())}
     except Exception as exc:
+        if _REDIS_LAST_STATUS["status"] != "unhealthy":
+            _l.getLogger("shopsquire.health").critical(
+                "MEMORY STORE (Redis) WENT DOWN mid-run: %s — session memory is GONE (context loss "
+                "every turn) and every request now pays connection-timeout latency. "
+                "Fix: Docker Desktop up, then `docker compose up -d redis`.", str(exc)[:120])
+        _REDIS_LAST_STATUS["status"] = "unhealthy"
         return {"status": "unhealthy", "error": str(exc), "last_ok": None, "latency_ms": None}
 
 

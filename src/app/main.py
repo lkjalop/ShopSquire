@@ -230,6 +230,30 @@ def create_app() -> FastAPI:
             ensure_qr_allowlist_table()
         except Exception:
             pass
+        # LOUD memory-store guard: a dead Redis does not stop the app — it silently degrades into
+        # per-call connection timeouts (measured ~4s each) and LITERAL context loss (session memory
+        # gone). That failure mode cost days of confused latency numbers and would cost a live demo
+        # its memory. Scream at startup, and scream ONCE on every up/down transition at runtime.
+        try:
+            import logging as _rl
+            _redis_log = _rl.getLogger("shopsquire.startup")
+            try:
+                from src.app.deps import get_redis as _gr
+                _rc = _gr()
+                if hasattr(_rc, "ping"):
+                    _rc.ping()
+                _redis_log.info("memory store (Redis) reachable — session memory ACTIVE")
+            except Exception as _rerr:
+                _redis_log.critical(
+                    "\n" + "!" * 78 +
+                    "\n!! MEMORY STORE (Redis) UNREACHABLE: %s"
+                    "\n!! The app will RUN but with NO session memory (context loss every turn) and"
+                    "\n!! multi-second connection timeouts inflating EVERY request's latency."
+                    "\n!! Fix: start Docker Desktop, then `docker compose up -d redis`."
+                    "\n" + "!" * 78, str(_rerr)[:120],
+                )
+        except Exception:
+            pass
         try:
             from src.app.services.supplier_domain_guard import ensure_trusted_supplier_domains_table
             ensure_trusted_supplier_domains_table()
