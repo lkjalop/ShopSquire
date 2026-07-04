@@ -2974,107 +2974,50 @@ def _apply_model_theft_output_protection(payload: Dict[str, Any], *, trace_id: s
     return out
 
 
-# Function words that may sit before a quantity ("with 15 work laptops", "about 25"). A number preceded by
-# an ALPHA token NOT in this set is treated as part of a product name ("dell 15 laptops") — never a qty.
-_QTY_PRECEDING_OK = frozenset({
-    "with", "need", "needs", "want", "wants", "get", "buy", "order", "purchase", "about", "around",
-    "roughly", "approx", "approximately", "so", "for", "of", "the", "some", "extra", "another", "me",
-    "us", "like", "say", "grab", "source", "and", "plus", "have", "getting", "buying", "ordering",
-})
-# A word between the number and the unit-noun that means the number is a SPEC, not a quantity ("15 inch laptops").
-_QTY_SPEC_FILLERS = re.compile(r"\b(?:inch(?:es)?|in|\"|gb|tb|mb|hz|ghz|kg|lb|nits?|core|gen)\b", re.I)
-_QTY_UNIT_NOUNS = (
-    r"units?|items?|pieces?|pcs|laptops?|desktops?|monitors?|keyboards?|mice|phones?|headsets?|"
-    r"tablets?|drives?|routers?|chargers?|docks?|of\s+(?:them|these|those)"
+# Bulk-quantity grammar EXTRACTED to the agnostic core (bulk_intent.py — the twin of budget_grammar).
+# This adapter owns only the VOCABULARY: it flattens the active StoreProfile's category_keywords into
+# the unit nouns the core grammar accepts (plus this vertical's irregulars the profile doesn't list).
+# A store whose profile fills category_keywords gets "15 <their noun>" parsing with no code change.
+from src.app.services.bulk_intent import (  # noqa: E402
+    MAX_SOURCEABLE_QTY as _MAX_SOURCEABLE_QTY,
+    absurd_quantity_span as _core_absurd_quantity_span,
+    extract_quantity_span as _core_extract_quantity_span,
+)
+
+_ELECTRONICS_EXTRA_NOUNS = (
+    "laptop", "desktop", "monitor", "keyboard", "mice", "mouse", "phone", "headset",
+    "tablet", "drive", "router", "charger", "dock",
 )
 
 
+def _profile_unit_nouns() -> tuple:
+    """Unit nouns for the ACTIVE vertical: profile category_keywords (flattened) + adapter extras."""
+    nouns = set(_ELECTRONICS_EXTRA_NOUNS)
+    try:
+        from src.app.platform.store_profile import profile_slot
+        ck = profile_slot("category_keywords", default=None)
+        if isinstance(ck, dict):
+            for cat, kws in ck.items():
+                nouns.add(str(cat))
+                if isinstance(kws, list):
+                    nouns.update(str(k) for k in kws if str(k).strip())
+    except Exception as _pn_exc:  # profile read is best-effort but must be OBSERVED
+        logging.getLogger("shopsquire.recommend").debug("profile unit-noun read failed: %s", _pn_exc)
+    return tuple(sorted(nouns))
+
+
 def _extract_quantity_span(query: str | None) -> tuple[int, str] | None:
-    """Quantity for bulk-order intent + the MATCHED NUMBER TEXT so the caller can excise it from the
-    retrieval text (a bare '15' left in the query becomes a product-NAME token — matching 'Dell 15' /
-    'HP 15-…' — which then intersects with the budget band and zeroes the results; the demo's
-    '15 work laptops, 1100 to 1400 → no match' bug). Returns (qty, number_text) or None.
-
-    Handles: 'qty: 15', '15x', '15 laptops', '15 work laptops' (≤2 filler words), '30 or so laptops',
-    'need about 25'. Guards: a spec filler (15 INCH laptops) or a name-like preceding token
-    (DELL 15 laptops) is never a quantity."""
-    if not query:
-        return None
-    q = str(query).strip().lower()
-    if not q:
-        return None
-
-    def _ok(m: "re.Match", *, check_fillers: bool = False) -> tuple[int, str] | None:
-        try:
-            qty = int(m.group(1))
-        except (TypeError, ValueError):
-            return None
-        if qty < 1 or qty > 1000:
-            return None
-        # the token right before the number must be a function word (or nothing) — not a brand/model
-        before = q[: m.start(1)].rstrip()
-        prev = re.split(r"[^a-z0-9]+", before)[-1] if before else ""
-        if prev and prev.isalpha() and prev not in _QTY_PRECEDING_OK:
-            return None
-        if check_fillers and _QTY_SPEC_FILLERS.search(m.group(2) or ""):
-            return None  # '15 inch laptops' — a spec, not a quantity
-        return qty, m.group(1)
-
-    m = re.search(r"\b(?:qty|quantity)\s*[:=#-]?\s*(\d{1,4})\b", q)
-    if m:
-        return _ok(m)
-    m = re.search(r"\b(\d{1,4})\s*[x×]\b", q)
-    if m:
-        return _ok(m)
-    # number + up to two filler words + a unit noun: '15 laptops', '15 work laptops', '30 or so laptops'
-    m = re.search(rf"\b(\d{{1,4}})\s+((?:[a-z]+\s+){{0,2}}?)(?:{_QTY_UNIT_NOUNS})\b", q)
-    if m:
-        r = _ok(m, check_fillers=True)
-        if r:
-            return r
-    # verb-context count with no noun: 'I need about 25', 'we want 30'
-    m = re.search(r"\b(?:need|want|get|buy|order|purchase|looking\s+for|help\s+with)\s+"
-                  r"(?:about|around|roughly|approx\w*|maybe|some|say)?\s*(\d{1,4})\b", q)
-    if m:
-        return _ok(m)
-    return None
+    return _core_extract_quantity_span(query, unit_nouns=_profile_unit_nouns())
 
 
 def _extract_quantity_from_query(query: str | None) -> int | None:
-    """Best-effort quantity extraction for bulk-order intent (span-less wrapper)."""
     r = _extract_quantity_span(query)
     return r[0] if r else None
 
 
-_MAX_SOURCEABLE_QTY = 1000
-
-
 def _absurd_quantity_span(query: str | None) -> tuple[int, str] | None:
-    """An out-of-range unit count the platform must REFUSE HONESTLY instead of silently degrading:
-    > _MAX_SOURCEABLE_QTY ("99999 laptops"), zero, or negative ("-5 laptops", "0 laptops"). Returns
-    (count, number_text) or None. Mirrors _extract_quantity_span's noun/verb context so a model number
-    or a price never matches."""
-    if not query:
-        return None
-    q = str(query).strip().lower()
-    m = re.search(rf"(-?\d{{1,9}})\s+(?:[a-z]+\s+){{0,2}}?(?:{_QTY_UNIT_NOUNS})\b", q)
-    if not m:
-        m = re.search(r"\b(?:need|want|get|buy|order|purchase|give\s+me)\s+(?:about|around|roughly)?\s*(-?\d{4,9})\b", q)
-    if not m:
-        return None
-    # same guard as the sane extractor: a number preceded by a NAME-like token ("rtx 4070 laptop") is a
-    # model number, never a count.
-    before = q[: m.start(1)].rstrip()
-    prev = re.split(r"[^a-z0-9]+", before)[-1] if before else ""
-    if prev and prev.isalpha() and prev not in _QTY_PRECEDING_OK:
-        return None
-    try:
-        n = int(m.group(1))
-    except (TypeError, ValueError):
-        return None
-    if 1 <= n <= _MAX_SOURCEABLE_QTY:
-        return None  # a sane count — the normal extractor owns it
-    return n, m.group(1)
+    return _core_absurd_quantity_span(query, unit_nouns=_profile_unit_nouns())
+
 
 
 def _extract_result_limit_from_query(query: str | None) -> int | None:
