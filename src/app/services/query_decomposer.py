@@ -879,12 +879,33 @@ def decompose(query: Optional[str], *, has_image: bool = False) -> QueryPlan:
         segments = _segment_query(q)
         if len(segments) >= 2:
             subs = [_classify_clause(s) for s in segments]
+            # A fragment is a MODIFIER of the main ask, not a separate ask, when it carries no substance
+            # of its own: a pure budget clause ("budget is 1100 to 1400" — already lifted into
+            # plan.budget_min/max above) or a contentless refinement tail ("which to get?"). Treating
+            # those as independent product sub-queries made the scatter retrieve nothing for them and the
+            # gather zero the whole result set ("can i get help with X. budget is A to B? which to get?"
+            # → 0 results while the un-split phrasing returned 17).
+            def _substantive(s: SubQuestion) -> bool:
+                txt = str(s.text or "").strip().lower()
+                if s.is_budget_question and not (s.use_cases or coarse_product_category(s.text)):
+                    # An INTERROGATIVE budget clause ("is $1400 enough?") is a real ask deserving a
+                    # direct answer; a DECLARATIVE one ("budget is 1100 to 1400") is a modifier whose
+                    # numbers already live on the plan.
+                    return bool(re.match(r"^(?:is|are|will|would|can|could|does|do)\b", txt)
+                                or "enough" in txt)
+                if s.intent not in (INTENT_PRODUCT_SEARCH, INTENT_MULTI):
+                    return True   # knowledge / support / availability / comparison clauses stand alone
+                return bool(
+                    coarse_product_category(s.text) or s.use_cases or s.hard_constraints
+                    or s.comparison_subjects or s.answer_without_products
+                )
+            subs = [s for s in subs if _substantive(s)]
             distinct_intents = {s.intent for s in subs}
             # Treat as compound only when the split produced genuinely different asks
             # (e.g. product_search + budget question, or knowledge + product_search) —
             # not two near-identical product clauses.
             has_qna = any(s.answer_without_products or s.is_budget_question for s in subs)
-            if len(distinct_intents) >= 2 or has_qna:
+            if len(subs) >= 2 and (len(distinct_intents) >= 2 or has_qna):
                 plan.sub_questions = subs
                 plan.is_compound = True
                 plan.is_multi_intent = True
