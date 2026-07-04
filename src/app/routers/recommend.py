@@ -2039,13 +2039,18 @@ def _classify_turn_intent(
     q = str(query or "").strip().lower()
     if followup_explain:
         return "EXPLAIN"
-    if re.search(
-        r"\b("
-        r"warranty|return|refund|broken|damaged|cracked|shattered|repair|replacement|support|"
-        r"not working|faulty|dead pixel|screen damage|bsod|blue screen|stop code"
-        r")\b",
-        q,
-    ):
+    # CLAIM-CHECK (same fix as the inventory-lane hijack): the support lane may only claim the turn when
+    # it is genuinely a post-purchase CLAIM. Damage/fault words are inherently post-purchase; bare policy
+    # words (warranty/return/refund/support) additionally need possession/purchase context — otherwise
+    # "what is your warranty policy?" (pre-sales FAQ) or "gaming laptop under 2000. also what warranty do
+    # you offer?" (mixed ask) was hijacked into photo-triage with ZERO products.
+    _damage = re.search(
+        r"\b(broken|damaged|cracked|shattered|not working|faulty|dead pixel|screen damage|bsod|"
+        r"blue screen|stop code|repair|replacement)\b", q)
+    _policy_word = re.search(r"\b(warranty|returns?|refunds?|support)\b", q)
+    _post_purchase = re.search(
+        r"\b(my|i bought|i purchased|i got|i received|i ordered|arrived|came with|send (it )?back)\b", q)
+    if _damage or (_policy_word and _post_purchase):
         return "SUPPORT_CLAIM"
     if re.search(r"\b(compare|vs|versus|difference|which one|better)\b", q):
         return "COMPARE"
@@ -3045,6 +3050,37 @@ def _extract_quantity_from_query(query: str | None) -> int | None:
     """Best-effort quantity extraction for bulk-order intent (span-less wrapper)."""
     r = _extract_quantity_span(query)
     return r[0] if r else None
+
+
+_MAX_SOURCEABLE_QTY = 1000
+
+
+def _absurd_quantity_span(query: str | None) -> tuple[int, str] | None:
+    """An out-of-range unit count the platform must REFUSE HONESTLY instead of silently degrading:
+    > _MAX_SOURCEABLE_QTY ("99999 laptops"), zero, or negative ("-5 laptops", "0 laptops"). Returns
+    (count, number_text) or None. Mirrors _extract_quantity_span's noun/verb context so a model number
+    or a price never matches."""
+    if not query:
+        return None
+    q = str(query).strip().lower()
+    m = re.search(rf"(-?\d{{1,9}})\s+(?:[a-z]+\s+){{0,2}}?(?:{_QTY_UNIT_NOUNS})\b", q)
+    if not m:
+        m = re.search(r"\b(?:need|want|get|buy|order|purchase|give\s+me)\s+(?:about|around|roughly)?\s*(-?\d{4,9})\b", q)
+    if not m:
+        return None
+    # same guard as the sane extractor: a number preceded by a NAME-like token ("rtx 4070 laptop") is a
+    # model number, never a count.
+    before = q[: m.start(1)].rstrip()
+    prev = re.split(r"[^a-z0-9]+", before)[-1] if before else ""
+    if prev and prev.isalpha() and prev not in _QTY_PRECEDING_OK:
+        return None
+    try:
+        n = int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+    if 1 <= n <= _MAX_SOURCEABLE_QTY:
+        return None  # a sane count — the normal extractor owns it
+    return n, m.group(1)
 
 
 def _extract_result_limit_from_query(query: str | None) -> int | None:
@@ -4889,7 +4925,33 @@ def suggest(
     # budget band and zeroes the results. Extract the qty here, EXCISE the number, carry it into
     # constraints once they exist.
     _early_bulk_qty: int | None = None
+    _qty_refusal_note: str | None = None
     try:
+        # HONEST REFUSAL first: an out-of-range count (99999 / 0 / negative) is refused in plain words —
+        # and RECORDED in the capability-gap ledger — instead of silently degrading retrieval. The number
+        # is still excised so the turn stays helpful (products render normally).
+        _aq = _absurd_quantity_span(query_effective)
+        if _aq:
+            _qty_refusal_note = (
+                f"⚠️ I can't source {_aq[0]:,} unit(s) — orders are limited to {_MAX_SOURCEABLE_QTY:,} "
+                f"units per line (talk to us for larger contracts). Here's what I found otherwise:"
+                if _aq[0] > _MAX_SOURCEABLE_QTY else
+                f"⚠️ A quantity of {_aq[0]} isn't orderable — tell me how many you actually need. "
+                f"Meanwhile, here's what matches:")
+            query_effective = re.sub(rf"(?<![\d.]){re.escape(_aq[1])}\b", " ", query_effective, count=1)
+            query_effective = re.sub(r"\s{2,}", " ", query_effective).strip()
+            if isinstance(query, str) and query:
+                query = re.sub(rf"(?<![\d.]){re.escape(_aq[1])}\b", " ", query, count=1)
+                query = re.sub(r"\s{2,}", " ", query).strip()
+            try:
+                from src.app.models.db import db_session as _cg_db
+                from src.app.services.capability_gap import GAP_REFUSED_REQUEST, record_gap
+                with _cg_db() as _gdb:
+                    record_gap(_gdb, category=GAP_REFUSED_REQUEST, utterance=str(query or "")[:300],
+                               refusal_reason=f"quantity_out_of_range:{_aq[0]}", surface="recommend",
+                               uid_hash=uid_hash, trace_id=trace_id)
+            except Exception:
+                pass
         _eq = _extract_quantity_span(query_effective)
         if _eq:
             _early_bulk_qty = _eq[0]
@@ -10760,6 +10822,10 @@ def suggest(
             (constraints.get("_claim_guard_status") if isinstance(constraints, dict) else None)
             or ("fell_back_to_deterministic" if (assistant_message or "") != (_pre_guard_msg or "") else "disabled")
         )
+    # HONEST REFUSAL prefix: an out-of-range quantity was refused (and ledgered) at the early parse —
+    # the buyer must SEE the refusal, not just get silently-sane results.
+    if _qty_refusal_note:
+        assistant_message = f"{_qty_refusal_note}\n\n{assistant_message}" if assistant_message else _qty_refusal_note
     if explanation_request:
         payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
         try:

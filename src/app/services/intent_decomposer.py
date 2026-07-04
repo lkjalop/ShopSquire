@@ -102,7 +102,8 @@ class TurnIntents:
 
 
 def decompose_turn(query: str, *, has_prior_selection: bool = False,
-                   llm_fn: Optional["LLMFn"] = None) -> TurnIntents:
+                   llm_fn: Optional["LLMFn"] = None,
+                   prior_context: Optional[Dict[str, Any]] = None) -> TurnIntents:
     """Decompose one buyer turn into its intents. Hybrid ("AI proposes, deterministic authorizes"):
 
     1. the DETERMINISTIC parser runs first (fast, free, covers the common phrasings);
@@ -117,7 +118,7 @@ def decompose_turn(query: str, *, has_prior_selection: bool = False,
     deterministic = _decompose_deterministic(str(query or ""), has_prior_selection)
     if llm_fn is None or not _needs_llm_binding(deterministic, str(query or "").lower(), has_prior_selection):
         return deterministic
-    refined = _bind_with_llm(str(query or ""), has_prior_selection, llm_fn)
+    refined = _bind_with_llm(str(query or ""), has_prior_selection, llm_fn, prior_context=prior_context)
     return refined if refined is not None else deterministic
 
 
@@ -300,15 +301,36 @@ _LLM_BINDING_PROMPT = (
     " accessories', 'with the leftover budget') -> applies_to ['__new__']. Omit if no budget. Values are"
     " whole numbers >= 50.\n"
     "- objection: 'price' if they complain about cost, else null.\n"
+    "- RELATIVE changes need the prior state: 'halve it' with prior qty 20 -> new_qty 10; 'double it' with"
+    " prior qty 5 -> new_qty 10; 'cut it to 1000' about the BUDGET -> budget change, not a quantity.\n"
+    "{context}"
     'Message: "{msg}"\nJSON:'
 )
 
 
-def _bind_with_llm(query: str, has_prior_selection: bool, llm_fn: LLMFn) -> Optional[TurnIntents]:
+def _bind_with_llm(query: str, has_prior_selection: bool, llm_fn: LLMFn,
+                   prior_context: Optional[Dict[str, Any]] = None) -> Optional[TurnIntents]:
     """Ask the injected LLM for the forced schema, then VALIDATE it with the deterministic rules. Returns a
-    TurnIntents on success, or None on any failure (caller falls back to the deterministic parse)."""
-    prompt = _LLM_BINDING_PROMPT.replace("{prior}", "true" if has_prior_selection else "false").replace(
-        "{msg}", str(query or "").replace('"', "'")[:400])
+    TurnIntents on success, or None on any failure (caller falls back to the deterministic parse).
+
+    ``prior_context`` (optional, numbers + an opaque label only) is what makes RELATIVE language computable:
+    "halve the order" is unanswerable without the prior qty — with {"qty": 20} in the prompt the model can
+    emit new_qty=10, which the deterministic validator then re-checks like any other number."""
+    ctx = ""
+    if isinstance(prior_context, dict) and prior_context:
+        bits = []
+        if prior_context.get("qty") is not None:
+            bits.append(f"quantity {int(prior_context['qty'])}")
+        if prior_context.get("name"):
+            bits.append(f"item '{str(prior_context['name'])[:60]}'")
+        if prior_context.get("budget_max") is not None:
+            bits.append(f"budget up to {int(prior_context['budget_max'])}")
+        if bits:
+            ctx = "Prior selection: " + ", ".join(bits) + ".\n"
+    prompt = (_LLM_BINDING_PROMPT
+              .replace("{prior}", "true" if has_prior_selection else "false")
+              .replace("{context}", ctx)
+              .replace("{msg}", str(query or "").replace('"', "'")[:400]))
     try:
         raw = llm_fn(prompt)
     except Exception:

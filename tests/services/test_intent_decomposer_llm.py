@@ -56,3 +56,27 @@ def test_llm_output_is_validated_bad_qty_is_rejected():
     hyb = decompose_turn("reduce to 10 and get 40 mice", has_prior_selection=True, llm_fn=_bad)
     # 99999 qty rejected (1..500) and 'those' is a stop-noun → nothing usable → deterministic stands (empty)
     assert hyb.amendments == [] and hyb.new_lines == []
+
+
+def test_prior_context_makes_relative_language_computable():
+    """'halve the order' is unanswerable without the prior qty — the binding prompt must carry it, and the
+    model's computed absolute qty passes the same validator as any other number."""
+    seen = {}
+
+    def _halver(prompt: str) -> str:
+        seen["prompt"] = prompt
+        # the model can only answer because the prompt told it the prior quantity
+        assert "quantity 20" in prompt
+        return json.dumps({"amendments": [{"ref": "__last__", "new_qty": 10}]})
+
+    hyb = decompose_turn("actually halve the laptop order", has_prior_selection=True,
+                         llm_fn=_halver, prior_context={"qty": 20, "name": "Lenovo IdeaPad"})
+    assert [(a.ref, a.new_qty) for a in hyb.amendments] == [("__last__", 10)]
+    assert "item 'Lenovo IdeaPad'" in seen["prompt"]
+
+
+def test_prior_context_absent_prompt_has_no_context_line():
+    def _echo(prompt: str) -> str:
+        assert "Prior selection:" not in prompt
+        return "{}"
+    decompose_turn("actually halve the laptop order", has_prior_selection=True, llm_fn=_echo)

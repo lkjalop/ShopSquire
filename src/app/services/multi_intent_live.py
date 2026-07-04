@@ -164,7 +164,14 @@ def plan_live(query: str, uid: str, *, limit: int = 6,
     # for phrasings the regex misses ("reduce to 10 and get 40 mice"). Decompose ONCE here and reuse it in
     # plan_turn so the model is called at most once per turn.
     llm_fn = _binding_llm_fn()
-    probe = decompose_turn(query, has_prior_selection=bool(prior), llm_fn=llm_fn)
+    # prior context (numbers + an opaque label only) makes RELATIVE language computable for the LLM tier:
+    # "halve the order" is unanswerable without the prior qty (20 → 10). The deterministic validator
+    # re-checks whatever the model emits, so the context can inform but never bypass the grammar rules.
+    prior_ctx = None
+    if prior:
+        _last = prior[-1]
+        prior_ctx = {"qty": _last.get("requested_qty"), "name": _last.get("name")}
+    probe = decompose_turn(query, has_prior_selection=bool(prior), llm_fn=llm_fn, prior_context=prior_ctx)
     if not probe.amendments and not probe.new_lines:
         return None
 
