@@ -452,6 +452,19 @@ class RecommendationService:
                     budget_min, budget_max = (a_i, b_i) if a_i <= b_i else (b_i, a_i)
                     break
         if budget_min is None and budget_max is None:
+            # Budget REVISION down: "cut it to 1000 max", "drop the budget to 800" — a follow-up that
+            # SETS A NEW CEILING (and clears any prior floor). Requires a budget cue (max/budget/spend/
+            # price/currency) and value >= 100, so "reduce to 10" stays a quantity amendment. NOTE: this
+            # pattern intentionally mirrors query_decomposer._extract_budget_range and
+            # nlp_search_agent.parse_query — parse_constraints is the FIFTH budget parser in the stack
+            # and the live `parsed` source for suggest(); consolidation of the five is tracked debt.
+            m = re.search(r"\b(?:cut|drop|lower|bring|reduce)\s+(?:it|that|this|the\s+(?:budget|price|spend))?\s*"
+                          r"(?:down\s+)?to\s*\$?\s*([\d\.,]+[kKmM]?)\b", t, flags=re.IGNORECASE)
+            if m and re.search(r"\bmax\b|\bbudget\b|\bspend\b|\bprice\b|\$", t, flags=re.IGNORECASE):
+                val = self._parse_number_with_suffix(m.group(1))
+                if val is not None and int(val) >= 100:
+                    return None, int(val), None
+        if budget_min is None and budget_max is None:
             # look for single-value budget mentions: "under $500", "below 1000", or standalone $1000.
             # A trailing spec/measurement unit means the number is a SPEC, not a budget — "under 2 kg"
             # / "under 2kg" / "under 16 gb" must NOT become $2 / $2000 / $16 (live Tier-0 finding).
