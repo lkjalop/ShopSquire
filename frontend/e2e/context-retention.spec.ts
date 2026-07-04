@@ -68,3 +68,15 @@ test('budget context survives raise + cut across turns (one session)', async ({ 
     for (const v of ps) expect(v, 'T3 nothing over the new $1,000 ceiling').toBeLessThanOrEqual(1000);
   });
 });
+
+test('bulk quantity survives non-qty turns; a fresh amendment wins and then holds', async ({ page }) => {
+  const uid = `e2e-qty-${Date.now()}`;
+  const d1 = await chat(page, uid, 'i need 25 work laptops, budget 1200 to 1500');
+  expect(Number(d1.requested_quantity)).toBe(25);
+  const d2 = await chat(page, uid, 'which of these has the best battery life?');
+  expect(Number(d2.requested_quantity), 'memory FILLS on a no-qty turn').toBe(25);
+  const d3 = await chat(page, uid, 'actually make it 12 units');
+  expect(Number(d3.requested_quantity), 'a fresh amendment WINS over memory').toBe(12);
+  const d4 = await chat(page, uid, 'and what about delivery for those?');
+  expect(Number(d4.requested_quantity), 'memory holds the UPDATED count').toBe(12);
+});

@@ -84,6 +84,12 @@ def _extract_confirmed_slots(*, query: str, response: Dict[str, Any] | None = No
     data = response if isinstance(response, dict) else {}
     applied = data.get("nqe_selection_applied") if isinstance(data.get("nqe_selection_applied"), dict) else {}
     used = data.get("constraints_used") if isinstance(data.get("constraints_used"), dict) else {}
+    # LONG-HORIZON qty memory: the bulk unit count survives non-qty turns the same way budget does —
+    # turn 1 "need 25 laptops", turn 3 "which has the best battery?" must still know it's a 25-unit
+    # conversation (Add buttons + procurement previews read requested_quantity every turn).
+    _rq = data.get("requested_quantity")
+    if isinstance(_rq, (int, float)) and 1 <= int(_rq) <= 1000:
+        out["order_quantity"] = int(_rq)
     for key in ("budget_min", "budget_max", "use_case", "gpu_preference", "availability", "condition", "buyer_persona", "issue_type"):
         v = applied.get(key)
         if v is None:

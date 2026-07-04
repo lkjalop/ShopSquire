@@ -5687,6 +5687,7 @@ def suggest(
     # SuggestContext adoption (Pass 6): one-time deps bind (clients/ids; never reassigned) so
     # extracted stages take ctx instead of threading mem/service/db/tenant_id as params.
     _ctx.deps = {"mem": mem, "service": service, "db": db, "tenant_id": tenant_id}
+    _ckpt("early_hooks_and_gates")
     ctx = mem.get_context(uid)
     kv = ctx.get("kv") or {}
     structured_state = mem.get_structured_state(uid) or {}
@@ -5886,6 +5887,7 @@ def suggest(
     except Exception:
         pass
     # Ollama intent routing (extracted to recommend_intent_router.resolve_intent_routing).
+    _ckpt("session_memory_loads")
     _ir = _resolve_intent_routing_stage(
         query_effective=query_effective,
         nlp=nlp if isinstance(nlp, dict) else {},
@@ -6785,6 +6787,13 @@ def suggest(
             # the early pass (pre-NLP) already extracted + excised the count; fall back to a late parse
             # only when the early pass found nothing (e.g. a path that rebuilt query_effective).
             qty = _early_bulk_qty if _early_bulk_qty else _extract_quantity_from_query(query_effective)
+            if not qty:
+                # LONG-HORIZON qty memory (same law as budget: a fresh parse always WINS; memory only
+                # FILLS): turn 1 "need 25 laptops" → turn 3 "which has the best battery?" is still a
+                # 25-unit conversation. Chat persists it via confirmed_slots.order_quantity.
+                _remembered_qty = confirmed_slots.get("order_quantity")
+                if isinstance(_remembered_qty, (int, float)) and 1 <= int(_remembered_qty) <= 1000:
+                    qty = int(_remembered_qty)
             if qty:
                 constraints["quantity"] = qty
         # the early parse EXCISED the count from the text, so downstream text-parsers (b2b bulk
