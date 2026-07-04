@@ -159,9 +159,9 @@ export default function CartPanel({
   const splitBlocksCheckout = splitHasSplit && !splitConfirmed;
 
   const proceedToCheckout = () => {
-    // Persist cart snapshot so the checkout page can show an order summary
+    // Persist cart snapshot (+ uid, so checkout can create the REAL order server-side)
     try {
-      sessionStorage.setItem('shopsquire_checkout_cart', JSON.stringify(cart));
+      sessionStorage.setItem('shopsquire_checkout_cart', JSON.stringify({ ...cart, uid }));
     } catch {
       // sessionStorage unavailable — continue anyway
     }

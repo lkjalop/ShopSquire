@@ -26,7 +26,11 @@ def test_paypal_intent_blocked_on_unauthorized_pattern():
             "idempotency_key": "k-pay-risk-1",
         },
     )
-    assert r.status_code in (401, 403)
+    # 401 step-up / 403 block / 202 manual review — all are "not processed unchallenged".
+    # (202 appears when shared velocity counters — real Redis, same client IP across the suite —
+    # shift the classification from hard_block to manual_review; the action list below always
+    # accepted manual_review, the status list was out of sync with it.)
+    assert r.status_code in (401, 403, 202)
     detail = r.json().get("detail") or {}
     if isinstance(detail, dict):
         sec = detail.get("security") or {}

@@ -535,7 +535,11 @@ def checkout() -> HTMLResponse:
             customer_name: name,
             customer_email: email,
             shipping_address: addr,
-            cart_id: (cartSummary && cartSummary.cart_id) || null
+            cart_id: (cartSummary && cartSummary.cart_id) || null,
+            uid: (cartSummary && cartSummary.uid) || null,
+            items: ((cartSummary && cartSummary.items) || []).map(function(i) {{
+              return {{sku: i.sku, quantity: i.quantity || 1}};
+            }})
           }})
         }})
         .then(function(r) {{ return r.json().then(function(d) {{ return {{ok: r.ok, data: d}}; }}); }})

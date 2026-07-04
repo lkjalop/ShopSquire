@@ -100,8 +100,21 @@ def _get_order_status(order_id: str, db=None) -> str:
         pass
     return str(row)
 
-@router.post("/create")
-def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])), db=Depends(get_db)) -> Dict:
+def create_order_core(db, *, uid: str, items: list, customer_id: str | None = None,
+                      guest_email: str | None = None, trace_id: str | None = None) -> Dict:
+    """Order creation shared by the merchant route and the public checkout bridge (P0-A:
+    checkout-initiate creates the order server-side so the customer path yields a REAL order row
+    and the webhook's created→paid transition is reachable). ``items`` accepts OrderItem models or
+    {sku, quantity} dicts. Prices are ALWAYS server-side catalog prices. Raises HTTPException."""
+    from types import SimpleNamespace
+    norm = []
+    for i in (items or []):
+        sku = getattr(i, "sku", None) or (i.get("sku") if isinstance(i, dict) else None)
+        qty = getattr(i, "quantity", None) or (i.get("quantity") if isinstance(i, dict) else 1) or 1
+        if sku:
+            norm.append(SimpleNamespace(sku=str(sku), quantity=int(qty)))
+    req = SimpleNamespace(uid=str(uid or ""), items=norm, customer_id=customer_id,
+                          guest_email=guest_email, trace_id=trace_id)
     with tracer.start_as_current_span("orders.create"):
         if not req.items:
             raise HTTPException(status_code=400, detail="Items required")
@@ -245,6 +258,13 @@ def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHA
 
         summary = {"order_id": order_id, "total_cents": total_cents, "created_at": datetime.utcnow().isoformat()}
         return {"created": True, "order_id": order_id, "total_cents": total_cents, "created_at": summary["created_at"], "status": "created", "customer_id": customer_id}
+
+
+@router.post("/create")
+def create_order(req: OrderCreate, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])), db=Depends(get_db)) -> Dict:
+    return create_order_core(db, uid=req.uid, items=req.items, customer_id=req.customer_id,
+                             guest_email=(str(req.guest_email) if req.guest_email else None),
+                             trace_id=req.trace_id)
 
 
 @router.post("/guest/lookup")

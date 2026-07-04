@@ -208,6 +208,10 @@ class _CheckoutInitiateBody(BaseModel):
     shipping_address: str | None = None
     cart_id: str | None = None
     order_id: str | None = None  # internal order ID from POST /api/v1/orders/create
+    # P0-A bridge: the checkout page sends the cart lines so a REAL order row is created
+    # server-side (server-priced), making the webhook's created→paid transition reachable.
+    uid: str | None = None
+    items: list[dict] | None = None
 
 
 @router.post("/checkout-initiate")
@@ -237,6 +241,47 @@ def checkout_initiate(
 
     allow_demo_checkout = _demo_checkout_allowed(settings, cap)
 
+    # P0-B gate parity: the PUBLIC route gets the same transaction firewall + idempotency the
+    # merchant /intent enforces (it previously had the LEAST protection of any payment route).
+    risk = evaluate_transaction_firewall(
+        provider="stripe",
+        uid=str(body.uid or "public_checkout"),
+        amount_cents=amount_cents,
+        currency=currency,
+        description=None,
+        request_ip=(request.client.host if request and request.client else None),
+        idempotency_key=(request.headers.get("Idempotency-Key") or None),
+        tenant_id=None,
+        trace_id=None,
+    )
+    if risk.get("action") == "hard_block":
+        raise HTTPException(status_code=403, detail={"message": "Payment request blocked by security policy", "security": risk})
+    if risk.get("action") in ("step_up_mfa", "manual_review"):
+        code = 401 if risk.get("action") == "step_up_mfa" else 202
+        raise HTTPException(status_code=code, detail={
+            "message": "mfa_stepup_required" if code == 401 else "manual_review_required", "security": risk})
+
+    # P0-A: no order_id but cart lines present → create the REAL order row server-side.
+    # The server-priced total wins over the client-sent amount (never trust client pricing).
+    order_id = (body.order_id or "").strip() or None
+    if order_id is None and body.items:
+        from src.app.routers.orders import create_order_core
+        with db_session() as _odb:
+            created = create_order_core(
+                _odb,
+                uid=str(body.uid or f"guest-{secrets.token_hex(4)}"),
+                items=list(body.items or []),
+                guest_email=(body.customer_email or None),
+            )
+        order_id = created.get("order_id")
+        if created.get("total_cents"):
+            amount_cents = int(created["total_cents"])
+
+    # Idempotency (fail-closed, same as /intent): one initiate per order / explicit key.
+    _idem_key = (request.headers.get("Idempotency-Key") or "").strip() or (f"co:{order_id}" if order_id else None)
+    if _idem_key and not _idempotent("checkout_initiate", _idem_key):
+        raise HTTPException(status_code=409, detail="Duplicate checkout initiation")
+
     stripe_live = (
         settings.stripe_api_key
         and settings.stripe_api_key.startswith("sk_")
@@ -252,7 +297,7 @@ def checkout_initiate(
                 stripe_intent_id = intent.get("id") or f"pi_{secrets.token_hex(8)}"
                 # Link the Stripe intent to the internal order so the webhook can
                 # transition pending → paid without guessing the association.
-                if body.order_id:
+                if order_id:
                     try:
                         with db_session() as _db:
                             _db.execute(
@@ -261,13 +306,13 @@ def checkout_initiate(
                                     "updated_at = CURRENT_TIMESTAMP "
                                     "WHERE id = :oid"
                                 ),
-                                {"iid": stripe_intent_id, "oid": body.order_id},
+                                {"iid": stripe_intent_id, "oid": order_id},
                             )
                             _db.commit()
                     except Exception as _db_exc:
                         _log.warning("checkout_initiate: failed to store stripe_intent_id: %s", _db_exc)
                 return {
-                    "order_id": body.order_id or stripe_intent_id,
+                    "order_id": order_id or stripe_intent_id,
                     "stripe_intent_id": stripe_intent_id,
                     "client_secret": intent.get("client_secret"),
                     "status": "requires_payment",
@@ -297,10 +342,23 @@ def checkout_initiate(
         getattr(settings, "app_env", "unknown"),
         os.environ.get("ALLOW_DEMO_CHECKOUT", ""),
     )
-    demo_order_id = f"DEMO-{secrets.token_urlsafe(6).upper()}"
+    # Demo mode with a REAL order row: stamp a demo intent id so the (dev-only, unsigned) webhook
+    # can drive the SAME created→paid→dispatch chain the production Stripe path uses.
+    demo_intent_id = None
+    if order_id:
+        demo_intent_id = f"pi_demo_{secrets.token_hex(8)}"
+        try:
+            with db_session() as _db:
+                _db.execute(
+                    text("UPDATE orders SET stripe_intent_id = :iid, updated_at = CURRENT_TIMESTAMP WHERE id = :oid"),
+                    {"iid": demo_intent_id, "oid": order_id},
+                )
+                _db.commit()
+        except Exception as _db_exc:
+            _log.warning("checkout_initiate: failed to store demo intent id: %s", _db_exc)
     return {
-        "order_id": demo_order_id,
-        "stripe_intent_id": None,
+        "order_id": order_id or f"DEMO-{secrets.token_urlsafe(6).upper()}",
+        "stripe_intent_id": demo_intent_id,
         "client_secret": None,
         "status": "demo_confirmed",
         "amount_cents": amount_cents,
@@ -363,6 +421,11 @@ async def stripe_webhook(request: Request) -> Dict:
             )
             _db.commit()
         _log.info("stripe_webhook: marked paid for intent %s (rows=%s)", intent_id, getattr(result, "rowcount", "?"))
+        if getattr(result, "rowcount", 0):
+            try:
+                _dispatch_paid_order(intent_id)
+            except Exception as exc:
+                _log.warning("stripe_webhook: dispatch after paid failed for %s: %s", intent_id, exc)
 
     elif event_type == "payment_intent.payment_failed" and intent_id:
         with db_session() as _db:
@@ -391,4 +454,40 @@ async def stripe_webhook(request: Request) -> Dict:
         _log.info("stripe_webhook: refund processed for intent %s", pi_id)
 
     return {"received": True, "type": event_type}
+
+
+def _dispatch_paid_order(intent_id: str) -> None:
+    """P0-C: paid → dispatch. Assigns a tracking ref and enqueues the dispatch through the durable
+    outbound queue (retry/backoff/dead-letter/idempotency already built for supplier sends — reused
+    here; sandbox transport by default). This is what finally gives the inbound carrier webhooks a
+    tracking_number to match, un-orphaning shipped/delivered transitions. Idempotent per order."""
+    import json as _json
+    import secrets as _s
+    from src.app.services.fulfillment.outbound_queue import enqueue as _enqueue
+    with db_session() as db:
+        row = db.execute(
+            text("SELECT id, tracking_number FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
+            {"iid": intent_id},
+        ).fetchone()
+        if not row:
+            return
+        oid = str(row[0])
+        tracking = str(row[1] or "") or f"TRK-{_s.token_hex(6).upper()}"
+        carrier = os.environ.get("DISPATCH_DEFAULT_CARRIER", "sandbox")
+        if not row[1]:
+            db.execute(
+                text("UPDATE orders SET tracking_number = :tn, carrier = :c, updated_at = CURRENT_TIMESTAMP WHERE id = :oid"),
+                {"tn": tracking, "c": carrier, "oid": oid},
+            )
+        _enqueue(
+            db,
+            case_id=f"order:{oid}",
+            recipient=f"dispatch:{carrier}",
+            subject=f"Dispatch order {oid}",
+            body=_json.dumps({"order_id": oid, "tracking_number": tracking, "carrier": carrier}),
+            idempotency_key=f"dispatch:{oid}",
+            transition_event="shipment_plan_created",
+        )
+        db.commit()
+    _log.info("stripe_webhook: dispatch queued for order %s (tracking=%s, carrier=%s)", oid, tracking, carrier)
 
