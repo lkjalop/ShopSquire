@@ -829,7 +829,11 @@
       "specs": {
         "material": "linen",
         "fit": "wrap"
-      }
+      },
+      "price_cents": 12900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "FSH-DRS-001"
     },
     {
       "sku": "FSH-JKT-002",
@@ -838,7 +842,11 @@
       "category": "jacket",
       "specs": {
         "material": "denim"
-      }
+      },
+      "price_cents": 8900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "FSH-JKT-002"
     },
     {
       "sku": "FSH-JNS-003",
@@ -848,7 +856,11 @@
       "specs": {
         "rise": "high",
         "cut": "straight"
-      }
+      },
+      "price_cents": 7900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "FSH-JNS-003"
     },
     {
       "sku": "FSH-SHO-004",
@@ -857,7 +869,11 @@
       "category": "shoe",
       "specs": {
         "material": "leather"
-      }
+      },
+      "price_cents": 11900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "FSH-SHO-004"
     },
     {
       "sku": "FSH-BAG-005",
@@ -866,7 +882,11 @@
       "category": "bag",
       "specs": {
         "material": "vegan leather"
-      }
+      },
+      "price_cents": 14900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "FSH-BAG-005"
     },
     {
       "sku": "FSH-TOP-006",
@@ -875,7 +895,11 @@
       "category": "top",
       "specs": {
         "material": "silk"
-      }
+      },
+      "price_cents": 5900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "FSH-TOP-006"
     }
   ],
   "delivery_policy": {

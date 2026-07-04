@@ -9426,6 +9426,30 @@ def suggest(
                                    timing_breakdown=timing_breakdown)
         except Exception as _rmexc:
             _trace_system_error(trace_id=trace_id, stage="retrieval_mode", exc=_rmexc)
+        # CATALOG ISOLATION per vertical: the shared products table is seeded for the DEFAULT vertical
+        # only, so a non-default profile (X-Store-Profile: fashion/pharmacy) must NEVER serve those rows
+        # (the "TP-Link routers for a dress query" leak). Until per-vertical catalog rows exist, a
+        # non-default vertical serves its profile's own demo_fallback_catalog — honestly, and with the
+        # same downstream ranking/guards.
+        try:
+            from src.app.platform.store_profile import active_profile_id as _apid
+            from src.app.platform.store_profile import profile_slot as _vc_slot
+            if _apid() != "electronics":
+                _vc_rows = [
+                    {**r, "specs": dict(r.get("specs") or {})}
+                    for r in (_vc_slot("demo_fallback_catalog", default=[]) or [])
+                    if isinstance(r, dict) and r.get("sku")
+                ]
+                candidates = _vc_rows
+                timing_breakdown["vertical_catalog_override"] = len(_vc_rows)
+                log_trace_event(
+                    trace_id=trace_id, event_type="vertical_catalog_override", source_type="agent",
+                    source_id="Catalog_Isolation_Guard", target_type="system", target_id=None,
+                    payload={"profile": _apid(), "rows": len(_vc_rows),
+                             **_trace_meta_payload(policy_version=flags.get("POLICY_VERSION", "v1"), context_ids=["store_profile"])},
+                )
+        except Exception as _vc_exc:
+            _record_partial_failure("vertical_catalog_override", _vc_exc, trace_id=trace_id)
         with tracer.start_as_current_span("recommend.rerank_baseline"):
             baseline_scored = service.rerank_candidates_with_factors(candidates, constraints)
             baseline_skus = [i["candidate"]["sku"] for i in baseline_scored]

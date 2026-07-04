@@ -851,7 +851,11 @@
       "category": "vitamin",
       "specs": {
         "count": 180
-      }
+      },
+      "price_cents": 1900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-VIT-001"
     },
     {
       "sku": "PHM-PAI-002",
@@ -860,7 +864,11 @@
       "category": "pain relief",
       "specs": {
         "strength_mg": 200
-      }
+      },
+      "price_cents": 1200,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-PAI-002"
     },
     {
       "sku": "PHM-FAK-003",
@@ -869,7 +877,11 @@
       "category": "first aid",
       "specs": {
         "pieces": 120
-      }
+      },
+      "price_cents": 3900,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-FAK-003"
     },
     {
       "sku": "PHM-SUN-004",
@@ -878,7 +890,11 @@
       "category": "skincare",
       "specs": {
         "spf": 50
-      }
+      },
+      "price_cents": 1600,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-SUN-004"
     },
     {
       "sku": "PHM-CLD-005",
@@ -887,7 +903,11 @@
       "category": "cold and flu",
       "specs": {
         "count": 48
-      }
+      },
+      "price_cents": 1500,
+      "currency": "USD",
+      "stock": 25,
+      "id": "PHM-CLD-005"
     }
   ],
   "delivery_policy": {
