@@ -4965,6 +4965,23 @@ def suggest(
     # The real result is collected at _security_join() below.
     analysis: Dict[str, Any] = {"severity": "info", "details": {"signals": {}, "reason": "pending"}}
     severity = "info"
+
+    def _finalize_payload(p: Dict[str, Any]) -> Dict[str, Any]:
+        """The response-builder guarantee (P5): EVERY payload branch carries the honest fields, so no
+        early return can ever silently drop a refusal or the parsed bulk quantity again (the
+        'which payload branch has refusal_note?' bug class). Reads suggest()'s locals via closure at
+        CALL time — the refusal/qty are set by the early parse above."""
+        if isinstance(p, dict):
+            if _qty_refusal_note and not p.get("refusal_note"):
+                p["refusal_note"] = _qty_refusal_note
+                _am = p.get("assistant_message")
+                if _am and _qty_refusal_note not in str(_am):
+                    p["assistant_message"] = f"{_qty_refusal_note}\n\n{_am}"
+                elif not _am:
+                    p["assistant_message"] = _qty_refusal_note
+            if p.get("requested_quantity") is None and _early_bulk_qty:
+                p["requested_quantity"] = _early_bulk_qty
+        return p
     def _log_early_decision(status: str, proposed_action: Dict[str, Any], agent_chain: list[Dict[str, Any]] | None = None, retrieved_context: Dict[str, Any] | None = None, execution_status: str = "executed") -> None:
         if not _decision_log_writes_enabled(flags):
             return
@@ -5173,7 +5190,7 @@ def suggest(
                 source="recommend.gdpr_opt_out",
             )
             payload = _ensure_trace_response(payload, trace_id, flags)
-            return _with_trace(payload, trace_id)
+            return _with_trace(_finalize_payload(payload), trace_id)
         else:
             policy_notes["opt_out_automated_decisions"] = False
     except Exception:
@@ -5374,7 +5391,7 @@ def suggest(
         payload = _ensure_trace_response(payload, trace_id, flags)
         if gate.decision == "deny":
             return _block_response(_with_trace(payload, trace_id), 403)
-        return _with_trace(payload, trace_id)
+        return _with_trace(_finalize_payload(payload), trace_id)
     # Review without approval: log the gate event and continue processing.
     try:
         sec_details = analysis.get("details") or {}
@@ -5620,7 +5637,7 @@ def suggest(
                 "security": _build_security_payload(sec_details, analysis.get("severity", "warn")),
             }
             payload = _ensure_trace_response(payload, trace_id, flags)
-            return _with_trace(payload, trace_id)
+            return _with_trace(_finalize_payload(payload), trace_id)
         payload = {
             "status": "budget_exceeded",
             "reason": reason,
@@ -5635,7 +5652,7 @@ def suggest(
             "complexity_signals": {},
         }
         payload = _ensure_trace_response(payload, trace_id, flags)
-        return _with_trace(payload, trace_id)
+        return _with_trace(_finalize_payload(payload), trace_id)
     elif not allowed and bypass_budget:
         allowed = True
 
@@ -7238,7 +7255,7 @@ def suggest(
                 "complexity_signals": complexity_signals,
             }
         payload = _ensure_trace_response(payload, trace_id, flags)
-        return _with_trace(payload, trace_id)
+        return _with_trace(_finalize_payload(payload), trace_id)
     if incoming_image_payload and image_reupload_reasons:
         image_reupload_reasons = list(dict.fromkeys([str(r) for r in image_reupload_reasons if str(r)]))
         try:
@@ -7519,7 +7536,7 @@ def suggest(
                 "memory_confidence": round(float(memory_confidence), 4),
             }
             payload = _ensure_trace_response(payload, trace_id, flags)
-            return _with_trace(payload, trace_id)
+            return _with_trace(_finalize_payload(payload), trace_id)
         image_gate_warning = None
     # Emit model selection early so tiering is visible even on early returns.
     try:
@@ -7611,7 +7628,7 @@ def suggest(
             execution_status="executed",
         )
         payload = _ensure_trace_response(payload, trace_id, flags)
-        return _with_trace(payload, trace_id)
+        return _with_trace(_finalize_payload(payload), trace_id)
     if _query_signals_unsupported_intent(query):
         try:
             log_trace_event(
@@ -7668,7 +7685,7 @@ def suggest(
             execution_status="executed",
         )
         payload = _ensure_trace_response(payload, trace_id, flags)
-        return _with_trace(payload, trace_id)
+        return _with_trace(_finalize_payload(payload), trace_id)
     try:
         log_trace_event(
             trace_id=trace_id,
@@ -8088,7 +8105,7 @@ def suggest(
             execution_status="executed",
         )
         payload = _ensure_trace_response(payload, trace_id, flags)
-        return _with_trace(payload, trace_id)
+        return _with_trace(_finalize_payload(payload), trace_id)
 
     # SUPPORT_CLAIM path: text-only OR image with CV damage/triage signals but not off-domain
     # (off-domain + SUPPORT_CLAIM is handled earlier in the image off-domain block)
@@ -8198,7 +8215,7 @@ def suggest(
             "memory_confidence": round(float(memory_confidence), 4),
         }
         payload = _ensure_trace_response(payload, trace_id, flags)
-        return _with_trace(payload, trace_id)
+        return _with_trace(_finalize_payload(payload), trace_id)
 
     retrieve_ms = None
     rerank_ms = None
@@ -8836,7 +8853,7 @@ def suggest(
                                     retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
                                 )
                                 payload = _ensure_trace_response(payload, trace_id, flags)
-                                return _with_trace(payload, trace_id)
+                                return _with_trace(_finalize_payload(payload), trace_id)
         # Enforce spec filtering if requested
         specs = constraints.get("specs") or []
         if specs and not shortlist_lock_active:
@@ -9141,7 +9158,7 @@ def suggest(
                             retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
                         )
                         payload = _ensure_trace_response(payload, trace_id, flags)
-                        return _with_trace(payload, trace_id)
+                        return _with_trace(_finalize_payload(payload), trace_id)
                 cb_record(redis, "recommend", True, degradation_cfg)
                 payload = {
                     "results": [],
@@ -9173,7 +9190,7 @@ def suggest(
                     retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
                 )
                 payload = _ensure_trace_response(payload, trace_id, flags)
-                return _with_trace(payload, trace_id)
+                return _with_trace(_finalize_payload(payload), trace_id)
         # Brand exclusions
         brand_excludes = constraints.get("brand_excludes") or []
         if brand_excludes:
@@ -9345,7 +9362,7 @@ def suggest(
                 retrieved_context={"query": query, "constraints": constraints, "security_analysis": analysis.get("details")},
             )
             payload = _ensure_trace_response(payload, trace_id, flags)
-            return _with_trace(payload, trace_id)
+            return _with_trace(_finalize_payload(payload), trace_id)
 
         complexity_score = _safe_int((complexity_signals or {}).get("score"), 0)
         complexity_min = _safe_int(flags.get("LLM_RERANK_COMPLEXITY_MIN", 6), 6)

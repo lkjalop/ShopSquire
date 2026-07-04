@@ -2,69 +2,284 @@
   "_comment": "FASHION (clothing + shoes) StoreProfile — the THIRD agnostic proof. Same shape as electronics.json / pharmacy.json, totally different flavour. Demonstrates that the SAME upsell core does 'complete the outfit' (mix-and-match) purely from profile data: cart shoes -> socks + belt; cart a top -> bottom + outerwear. Zero laptop/medicine tokens. Proves the core demarcates cleanly and does not bleed across tenants.",
   "id": "fashion",
   "version": "2026-06-19",
-
   "_complexity_keywords_comment": "Domain-specific terms that signal a complex query needing medium+ model tier. Zero laptop/GPU tokens.",
   "complexity_keywords": [
-    "fabric", "composition", "thread count", "gsm", "denier", "moisture wicking",
-    "waterproof", "breathable", "gore-tex", "merino", "sizing", "fit guide",
-    "tailoring", "sustainable", "ethical", "organic cotton", "recycled",
-    "colour matching", "capsule wardrobe", "layering system"
+    "fabric",
+    "composition",
+    "thread count",
+    "gsm",
+    "denier",
+    "moisture wicking",
+    "waterproof",
+    "breathable",
+    "gore-tex",
+    "merino",
+    "sizing",
+    "fit guide",
+    "tailoring",
+    "sustainable",
+    "ethical",
+    "organic cotton",
+    "recycled",
+    "colour matching",
+    "capsule wardrobe",
+    "layering system"
   ],
-
-  "known_brands": ["nike","adidas","new balance","levis","zara","uniqlo","h&m","gap","calvin klein","tommy hilfiger","converse","vans"],
-  "nqe_brand_detect": ["nike","adidas","levis","zara","uniqlo","converse","vans"],
-
+  "known_brands": [
+    "nike",
+    "adidas",
+    "new balance",
+    "levis",
+    "zara",
+    "uniqlo",
+    "h&m",
+    "gap",
+    "calvin klein",
+    "tommy hilfiger",
+    "converse",
+    "vans"
+  ],
+  "nqe_brand_detect": [
+    "nike",
+    "adidas",
+    "levis",
+    "zara",
+    "uniqlo",
+    "converse",
+    "vans"
+  ],
   "_manufacturers_comment": "Same 3-axis schema (manufacturer / line / vs type), fashion flavour. Lines are product ranges (Air Max, 501).",
   "manufacturers": {
-    "nike":    {"lines": ["air max","air force 1","dunk"], "aliases": ["nike"]},
-    "adidas":  {"lines": ["ultraboost","stan smith","samba"], "aliases": ["adidas"]},
-    "levis":   {"lines": ["501","511"], "aliases": ["levis","levi's"]},
-    "converse":{"lines": ["chuck taylor","all star"], "aliases": ["converse"]}
+    "nike": {
+      "lines": [
+        "air max",
+        "air force 1",
+        "dunk"
+      ],
+      "aliases": [
+        "nike"
+      ]
+    },
+    "adidas": {
+      "lines": [
+        "ultraboost",
+        "stan smith",
+        "samba"
+      ],
+      "aliases": [
+        "adidas"
+      ]
+    },
+    "levis": {
+      "lines": [
+        "501",
+        "511"
+      ],
+      "aliases": [
+        "levis",
+        "levi's"
+      ]
+    },
+    "converse": {
+      "lines": [
+        "chuck taylor",
+        "all star"
+      ],
+      "aliases": [
+        "converse"
+      ]
+    }
   },
-
-  "primary_types": ["top","bottom","shoes","dress","outerwear"],
-  "price_bands_usd": {"top":[10,150],"bottom":[15,200],"shoes":[20,300],"dress":[20,400],"outerwear":[30,600],"sock":[3,40],"belt":[10,120],"accessory":[2,200]},
-
+  "primary_types": [
+    "top",
+    "bottom",
+    "shoes",
+    "dress",
+    "outerwear"
+  ],
+  "price_bands_usd": {
+    "top": [
+      10,
+      150
+    ],
+    "bottom": [
+      15,
+      200
+    ],
+    "shoes": [
+      20,
+      300
+    ],
+    "dress": [
+      20,
+      400
+    ],
+    "outerwear": [
+      30,
+      600
+    ],
+    "sock": [
+      3,
+      40
+    ],
+    "belt": [
+      10,
+      120
+    ],
+    "accessory": [
+      2,
+      200
+    ]
+  },
   "_product_type_rules_comment": "Ordered, first-match-wins, specific (sock/belt) before primary garment types so 'Ankle Socks' -> sock not accessory and 'Denim Jacket' -> outerwear not top.",
-  "spec_units": ["xs","s","m","l","xl","xxl"],
+  "spec_units": [
+    "xs",
+    "s",
+    "m",
+    "l",
+    "xl",
+    "xxl"
+  ],
   "gpu_prefixes": [],
   "product_type_rules": [
-    {"type": "sock",      "pattern": "\\b(socks?)\\b"},
-    {"type": "belt",      "pattern": "\\b(belts?)\\b"},
-    {"type": "shoes",     "pattern": "\\b(shoes?|sneakers?|trainers?|boots?|loafers?|heels?|sandals?|runners?|footwear|pumps?)\\b"},
-    {"type": "outerwear", "pattern": "\\b(jackets?|coats?|blazers?|parkas?|cardigans?|hoodies?|windbreakers?)\\b"},
-    {"type": "dress",     "pattern": "\\b(dress(es)?|gowns?|frocks?)\\b"},
-    {"type": "top",       "pattern": "\\b(shirts?|t-?shirts?|tees?|blouses?|tops?|sweaters?|jumpers?|polos?|knits?|tanks?)\\b"},
-    {"type": "bottom",    "pattern": "\\b(jeans|pants|trousers|chinos?|shorts|skirts?|leggings|joggers|slacks)\\b"}
+    {
+      "type": "sock",
+      "pattern": "\\b(socks?)\\b"
+    },
+    {
+      "type": "belt",
+      "pattern": "\\b(belts?)\\b"
+    },
+    {
+      "type": "shoes",
+      "pattern": "\\b(shoes?|sneakers?|trainers?|boots?|loafers?|heels?|sandals?|runners?|footwear|pumps?)\\b"
+    },
+    {
+      "type": "outerwear",
+      "pattern": "\\b(jackets?|coats?|blazers?|parkas?|cardigans?|hoodies?|windbreakers?)\\b"
+    },
+    {
+      "type": "dress",
+      "pattern": "\\b(dress(es)?|gowns?|frocks?)\\b"
+    },
+    {
+      "type": "top",
+      "pattern": "\\b(shirts?|t-?shirts?|tees?|blouses?|tops?|sweaters?|jumpers?|polos?|knits?|tanks?)\\b"
+    },
+    {
+      "type": "bottom",
+      "pattern": "\\b(jeans|pants|trousers|chinos?|shorts|skirts?|leggings|joggers|slacks)\\b"
+    }
   ],
-  "brand_price_floors_usd": {"nike":40,"adidas":40,"levis":30,"converse":35},
-  "use_case_budget_floors": {"casual":25,"formal":60,"athletic":40,"outdoor":50},
+  "brand_price_floors_usd": {
+    "nike": 40,
+    "adidas": 40,
+    "levis": 30,
+    "converse": 35
+  },
+  "use_case_budget_floors": {
+    "casual": 25,
+    "formal": 60,
+    "athletic": 40,
+    "outdoor": 50
+  },
   "use_case_patterns": {
     "casual": "\\b(casual|everyday|relaxed|weekend|streetwear|loungewear)\\b",
     "formal": "\\b(formal|business|office|wedding|interview|smart|dress up|black ?tie)\\b",
     "athletic": "\\b(athletic|gym|workout|running|sport\\w*|training|active ?wear|exercise)\\b",
     "outdoor": "\\b(outdoor|hiking|camping|winter|rain\\w*|cold weather|trail)\\b"
   },
-
   "use_cases": {
-    "casual":   {"nqe_question": "ask_occasion"},
-    "formal":   {"nqe_question": "ask_occasion"},
-    "athletic": {"nqe_question": "ask_activity"},
-    "outdoor":  {"nqe_question": "ask_climate"}
+    "casual": {
+      "nqe_question": "ask_occasion"
+    },
+    "formal": {
+      "nqe_question": "ask_occasion"
+    },
+    "athletic": {
+      "nqe_question": "ask_activity"
+    },
+    "outdoor": {
+      "nqe_question": "ask_climate"
+    }
   },
-
   "_use_case_keyword_map_comment": "Fashion use-case keyword matching (excised from use_case_advisor). Vertical-exclusive — zero laptop/GPU tokens.",
   "use_case_keyword_map": {
-    "casual": ["casual", "everyday", "relaxed", "weekend", "streetwear", "loungewear", "comfy", "laid back", "daily wear"],
-    "formal": ["formal", "business", "office", "wedding", "interview", "smart", "dress up", "black tie", "suit", "blazer", "cocktail"],
-    "athletic": ["athletic", "gym", "workout", "running", "sport", "training", "activewear", "exercise", "yoga", "pilates", "cycling"],
-    "outdoor": ["outdoor", "hiking", "camping", "winter", "rain", "cold weather", "trail", "waterproof", "insulated", "layering"],
-    "summer": ["summer", "beach", "holiday", "vacation", "warm weather", "lightweight", "linen", "tropical"],
-    "workwear": ["workwear", "uniform", "hi-vis", "steel cap", "safety", "tradesman"]
+    "casual": [
+      "casual",
+      "everyday",
+      "relaxed",
+      "weekend",
+      "streetwear",
+      "loungewear",
+      "comfy",
+      "laid back",
+      "daily wear"
+    ],
+    "formal": [
+      "formal",
+      "business",
+      "office",
+      "wedding",
+      "interview",
+      "smart",
+      "dress up",
+      "black tie",
+      "suit",
+      "blazer",
+      "cocktail"
+    ],
+    "athletic": [
+      "athletic",
+      "gym",
+      "workout",
+      "running",
+      "sport",
+      "training",
+      "activewear",
+      "exercise",
+      "yoga",
+      "pilates",
+      "cycling"
+    ],
+    "outdoor": [
+      "outdoor",
+      "hiking",
+      "camping",
+      "winter",
+      "rain",
+      "cold weather",
+      "trail",
+      "waterproof",
+      "insulated",
+      "layering"
+    ],
+    "summer": [
+      "summer",
+      "beach",
+      "holiday",
+      "vacation",
+      "warm weather",
+      "lightweight",
+      "linen",
+      "tropical"
+    ],
+    "workwear": [
+      "workwear",
+      "uniform",
+      "hi-vis",
+      "steel cap",
+      "safety",
+      "tradesman"
+    ]
   },
   "use_case_keyword_priority": [
-    "workwear", "outdoor", "athletic",
-    "formal", "summer", "casual"
+    "workwear",
+    "outdoor",
+    "athletic",
+    "formal",
+    "summer",
+    "casual"
   ],
   "use_case_to_persona": {
     "casual": "shopper",
@@ -74,80 +289,181 @@
     "summer": "shopper",
     "workwear": "tradesperson"
   },
-
   "_nqe_question_packs_comment": "Fashion-domain NQE clarifying questions. Zero laptop/GPU/gaming content.",
   "nqe_question_packs": {
     "ask_occasion": {
-      "trigger_use_cases": ["casual", "formal"],
+      "trigger_use_cases": [
+        "casual",
+        "formal"
+      ],
       "answered_field": "occasion",
       "text": "What's the occasion? This helps me suggest the right style.",
       "goal": "refine_use_case",
-      "evidence_needed": ["occasion"],
+      "evidence_needed": [
+        "occasion"
+      ],
       "source": "use_case_disambiguation",
       "options": [
-        {"label": "Everyday / casual wear", "value": "everyday"},
-        {"label": "Work / office", "value": "office"},
-        {"label": "Wedding / formal event", "value": "event"},
-        {"label": "Date night / going out", "value": "going_out"},
-        {"label": "Travel / holiday", "value": "travel"}
+        {
+          "label": "Everyday / casual wear",
+          "value": "everyday"
+        },
+        {
+          "label": "Work / office",
+          "value": "office"
+        },
+        {
+          "label": "Wedding / formal event",
+          "value": "event"
+        },
+        {
+          "label": "Date night / going out",
+          "value": "going_out"
+        },
+        {
+          "label": "Travel / holiday",
+          "value": "travel"
+        }
       ]
     },
     "ask_activity": {
-      "trigger_use_cases": ["athletic"],
+      "trigger_use_cases": [
+        "athletic"
+      ],
       "answered_field": "activity_type",
       "text": "What activity is this for? Different sports need different fabrics and fits.",
       "goal": "refine_use_case",
-      "evidence_needed": ["activity_type"],
+      "evidence_needed": [
+        "activity_type"
+      ],
       "source": "use_case_disambiguation",
       "options": [
-        {"label": "Running / cardio", "value": "running"},
-        {"label": "Gym / weights", "value": "gym"},
-        {"label": "Yoga / pilates", "value": "yoga"},
-        {"label": "Team sports (football, basketball)", "value": "team_sport"},
-        {"label": "General fitness / walking", "value": "general_fitness"}
+        {
+          "label": "Running / cardio",
+          "value": "running"
+        },
+        {
+          "label": "Gym / weights",
+          "value": "gym"
+        },
+        {
+          "label": "Yoga / pilates",
+          "value": "yoga"
+        },
+        {
+          "label": "Team sports (football, basketball)",
+          "value": "team_sport"
+        },
+        {
+          "label": "General fitness / walking",
+          "value": "general_fitness"
+        }
       ]
     },
     "ask_climate": {
-      "trigger_use_cases": ["outdoor"],
+      "trigger_use_cases": [
+        "outdoor"
+      ],
       "answered_field": "climate",
       "text": "What weather conditions will you face? This determines the right materials.",
       "goal": "refine_specs",
-      "evidence_needed": ["climate"],
+      "evidence_needed": [
+        "climate"
+      ],
       "source": "use_case_disambiguation",
       "options": [
-        {"label": "Cold / winter", "value": "cold"},
-        {"label": "Rain / wet conditions", "value": "rain"},
-        {"label": "Wind / exposed terrain", "value": "wind"},
-        {"label": "Mixed / layering needed", "value": "mixed"}
+        {
+          "label": "Cold / winter",
+          "value": "cold"
+        },
+        {
+          "label": "Rain / wet conditions",
+          "value": "rain"
+        },
+        {
+          "label": "Wind / exposed terrain",
+          "value": "wind"
+        },
+        {
+          "label": "Mixed / layering needed",
+          "value": "mixed"
+        }
       ]
     }
   },
-
   "spec_constraints": {
-    "size": {"pattern": "\\b(xs|s|m|l|xl|xxl|\\d{1,2})\\b", "field": "size"}
+    "size": {
+      "pattern": "\\b(xs|s|m|l|xl|xxl|\\d{1,2})\\b",
+      "field": "size"
+    }
   },
-
   "_upsell_comment": "Outfit mix-and-match: the SAME companion engine that pairs a laptop with a bag pairs shoes with socks/belt and a top with a bottom/outerwear. Pure profile data, zero code change.",
   "upsell_companions": {
-    "shoes":     ["sock","belt"],
-    "top":       ["bottom","outerwear"],
-    "bottom":    ["top","belt"],
-    "dress":     ["outerwear","shoes"],
-    "outerwear": ["top","bottom"]
+    "shoes": [
+      "sock",
+      "belt"
+    ],
+    "top": [
+      "bottom",
+      "outerwear"
+    ],
+    "bottom": [
+      "top",
+      "belt"
+    ],
+    "dress": [
+      "outerwear",
+      "shoes"
+    ],
+    "outerwear": [
+      "top",
+      "bottom"
+    ]
   },
-
   "_image_relevance_comment": "Tokens for CV triage relevance gate. An image matching relevant_image_tokens is on-topic; matching off_topic_image_tokens is flagged. Zero laptop/GPU tokens.",
   "relevant_image_tokens": [
-    "shirt", "dress", "shoes", "sneakers", "boots", "jacket", "coat", "pants",
-    "jeans", "skirt", "hoodie", "hat", "bag", "clothing", "garment", "fabric",
-    "nike", "adidas", "levis", "converse", "vans", "zara", "uniqlo",
-    "mannequin", "hanger", "outfit", "fashion"
+    "shirt",
+    "dress",
+    "shoes",
+    "sneakers",
+    "boots",
+    "jacket",
+    "coat",
+    "pants",
+    "jeans",
+    "skirt",
+    "hoodie",
+    "hat",
+    "bag",
+    "clothing",
+    "garment",
+    "fabric",
+    "nike",
+    "adidas",
+    "levis",
+    "converse",
+    "vans",
+    "zara",
+    "uniqlo",
+    "mannequin",
+    "hanger",
+    "outfit",
+    "fashion"
   ],
   "off_topic_image_tokens": [
-    "laptop", "computer", "gpu", "keyboard", "mouse", "monitor", "gaming",
-    "medicine", "pill", "capsule", "pharmacy", "syringe"
+    "laptop",
+    "computer",
+    "gpu",
+    "keyboard",
+    "mouse",
+    "monitor",
+    "gaming",
+    "medicine",
+    "pill",
+    "capsule",
+    "pharmacy",
+    "syringe"
   ],
-
   "_persona_patterns_comment": "ADAPTER: buyer-persona detection keywords (recommend_persona core algo is vertical-blind). Phase 2A P0.",
   "persona_patterns": {
     "shopper": [
@@ -207,7 +523,6 @@
       "\\bworksite\\b"
     ]
   },
-
   "_spec_extraction_rules_comment": "ADAPTER (Phase 2A): vertical spec metrics for ranking. numeric=spec_key+regex patterns; flags=token presence. Consumed by recommend_utils._extract_candidate_numeric_specs + ranking_rules.",
   "spec_extraction_rules": {
     "numeric": [],
@@ -279,7 +594,6 @@
       }
     ]
   },
-
   "_ranking_rules_comment": "ADAPTER (Phase 2A): use-case ranking rules. A rule fires when use_case matches; each met condition (metric op value) adds delta+reason. Metrics from spec_extraction_rules. Consumed by recommend_ranking.use_case_rank_adjustment.",
   "ranking_rules": [
     {
@@ -385,23 +699,29 @@
       ]
     }
   ],
-
   "_external_research_allowlist_comment": "ADAPTER: per-vertical web-research domain allowlist (illustrative — configure per deployment). Resolved per-request by recommend.py via profile_slot; safe internet search never reaches a domain outside this list.",
   "external_research_allowlist": [
     "vogue.com",
     "gq.com",
     "businessoffashion.com"
   ],
-
   "nqe_use_case_fallback_question": {
     "text": "To help narrow it down, what's the occasion: everyday casual, work/office, or a special event?",
     "options": [
-      {"id": "use_case_casual", "label": "Everyday casual"},
-      {"id": "use_case_work", "label": "Work/office"},
-      {"id": "use_case_event", "label": "Special event"}
+      {
+        "id": "use_case_casual",
+        "label": "Everyday casual"
+      },
+      {
+        "id": "use_case_work",
+        "label": "Work/office"
+      },
+      {
+        "id": "use_case_event",
+        "label": "Special event"
+      }
     ]
   },
-
   "supplier_message_templates": {
     "reorder": {
       "subject": "Restock request — {item}",
@@ -416,7 +736,176 @@
       "body": "Hi {supplier_name},\n\nPlease confirm which sizes of {item} are in stock and the next delivery window. {details}\n\nDraft for review.\n\nKind regards,\n{sender_name}"
     }
   },
-
   "cv_returns_pack": "electronics",
-  "narration_spec_dimensions": [{"label":"Material","variants":[{"key":"material"}]},{"label":"Fit","variants":[{"key":"fit"}]},{"label":"Sizes","variants":[{"key":"size_range"}]},{"label":"Color","variants":[{"key":"color"}]}]
+  "narration_spec_dimensions": [
+    {
+      "label": "Material",
+      "variants": [
+        {
+          "key": "material"
+        }
+      ]
+    },
+    {
+      "label": "Fit",
+      "variants": [
+        {
+          "key": "fit"
+        }
+      ]
+    },
+    {
+      "label": "Sizes",
+      "variants": [
+        {
+          "key": "size_range"
+        }
+      ]
+    },
+    {
+      "label": "Color",
+      "variants": [
+        {
+          "key": "color"
+        }
+      ]
+    }
+  ],
+  "category_keywords": {
+    "dress": [
+      "dress",
+      "gown",
+      "sundress",
+      "maxi"
+    ],
+    "top": [
+      "top",
+      "blouse",
+      "shirt",
+      "tee",
+      "t-shirt"
+    ],
+    "jacket": [
+      "jacket",
+      "coat",
+      "blazer",
+      "parka"
+    ],
+    "jeans": [
+      "jeans",
+      "denim",
+      "trousers",
+      "pants"
+    ],
+    "skirt": [
+      "skirt"
+    ],
+    "shoe": [
+      "shoe",
+      "sneaker",
+      "heel",
+      "boot",
+      "loafer"
+    ],
+    "bag": [
+      "bag",
+      "handbag",
+      "tote",
+      "clutch"
+    ],
+    "accessory": [
+      "scarf",
+      "belt",
+      "hat",
+      "sunglasses"
+    ]
+  },
+  "demo_fallback_catalog": [
+    {
+      "sku": "FSH-DRS-001",
+      "name": "Linen Wrap Midi Dress",
+      "price": 129.0,
+      "category": "dress",
+      "specs": {
+        "material": "linen",
+        "fit": "wrap"
+      }
+    },
+    {
+      "sku": "FSH-JKT-002",
+      "name": "Cropped Denim Jacket",
+      "price": 89.0,
+      "category": "jacket",
+      "specs": {
+        "material": "denim"
+      }
+    },
+    {
+      "sku": "FSH-JNS-003",
+      "name": "High-Rise Straight Jeans",
+      "price": 79.0,
+      "category": "jeans",
+      "specs": {
+        "rise": "high",
+        "cut": "straight"
+      }
+    },
+    {
+      "sku": "FSH-SHO-004",
+      "name": "Leather White Sneakers",
+      "price": 119.0,
+      "category": "shoe",
+      "specs": {
+        "material": "leather"
+      }
+    },
+    {
+      "sku": "FSH-BAG-005",
+      "name": "Structured Tote Bag",
+      "price": 149.0,
+      "category": "bag",
+      "specs": {
+        "material": "vegan leather"
+      }
+    },
+    {
+      "sku": "FSH-TOP-006",
+      "name": "Silk Camisole Top",
+      "price": 59.0,
+      "category": "top",
+      "specs": {
+        "material": "silk"
+      }
+    }
+  ],
+  "delivery_policy": {
+    "currency": "USD",
+    "base_fee_cents": 900,
+    "split_shipment_fee_cents": 500,
+    "free_shipping_threshold_cents": 15000,
+    "backorder_enabled": true
+  },
+  "supplier_routing_rules": [
+    {
+      "match": {
+        "category": "dress"
+      },
+      "suppliers": [
+        "SUP-ATELIER"
+      ]
+    },
+    {
+      "match": {
+        "category": "shoe"
+      },
+      "suppliers": [
+        "SUP-COBBLER"
+      ]
+    }
+  ],
+  "policy_faq": {
+    "returns": "Free 30-day returns on unworn items with tags attached; final-sale items are marked at checkout.",
+    "shipping": "Free delivery over $150; standard $9 (2-4 business days).",
+    "warranty": "Quality guarantee: manufacturing faults are replaced or refunded within 90 days."
+  }
 }
