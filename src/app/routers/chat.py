@@ -257,23 +257,11 @@ def _classify_turn_intent(query: str) -> str:
     q = str(query or "").strip().lower()
     if not q:
         return "SEARCH"
-    if any(
-        tok in q
-        for tok in (
-            "warranty",
-            "return",
-            "refund",
-            "broken",
-            "damaged",
-            "crack",
-            "repair",
-            "replacement",
-            "blue screen",
-            "bsod",
-            "stop code",
-            "support",
-        )
-    ):
+    # CLAIM-CHECKED support detection (shared predicate with recommend.py's classifier): only a genuine
+    # post-purchase claim routes to the support lane. The old bare keyword list here hijacked pre-sales
+    # policy questions ("what is your warranty policy?") into photo-triage with zero products.
+    from src.app.services.answer_quality import is_support_claim
+    if is_support_claim(q):
         return "SUPPORT_CLAIM"
     if (
         " vs " in q
@@ -2253,6 +2241,12 @@ async def chat_query(
         brand_name=brand_name,
     )
     assistant_message = copy_out.get("assistant_message")
+    # HONEST REFUSAL survives every compose path: suggest() may refuse an out-of-range quantity
+    # (99999/0/negative) — the note must reach the buyer even when chat rebuilds the message
+    # (answer-quality templates, copywriting, no-match compose all run after suggest's own narration).
+    _refusal = str(data.get("refusal_note") or "").strip()
+    if _refusal and _refusal not in str(assistant_message or ""):
+        assistant_message = f"{_refusal}\n\n{assistant_message}" if assistant_message else _refusal
     copy_meta = copy_out.get("meta") if isinstance(copy_out.get("meta"), dict) else {}
     try:
         if decision_trace_id and (bool(copy_meta.get("applied")) or bool(copywriting_requested)):

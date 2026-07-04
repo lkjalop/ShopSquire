@@ -60,6 +60,30 @@ def _extract_query_budget_bounds(query: str) -> Tuple[int | None, int | None]:
     return (None, None)
 
 
+_DAMAGE_RE = re.compile(
+    r"\b(broken|damaged|cracked|shattered|not working|faulty|dead pixel|screen damage|bsod|"
+    r"blue screen|stop code|repair|replacement)\b")
+_POLICY_WORD_RE = re.compile(r"\b(warranty|returns?|refunds?|support)\b")
+_POST_PURCHASE_RE = re.compile(
+    r"\b(my|i bought|i purchased|i got|i received|i ordered|arrived|came with|send (it )?back)\b")
+
+
+def is_support_claim(query: str) -> bool:
+    """CLAIM-CHECKED support detection, shared by every lane that routes to repair/return handling.
+
+    The support lane may only claim a turn that is genuinely a post-purchase CLAIM: damage/fault words are
+    inherently post-purchase; bare policy words (warranty/return/refund/support) additionally need
+    possession/purchase context. Without this, "what is your warranty policy?" (pre-sales FAQ) and
+    "gaming laptop under 2000. also what warranty do you offer?" (mixed ask) were hijacked into
+    photo-triage with zero products — the same disease as the inventory-lane "can i get" hijack."""
+    q = str(query or "").strip().lower()
+    if not q:
+        return False
+    if _DAMAGE_RE.search(q):
+        return True
+    return bool(_POLICY_WORD_RE.search(q) and _POST_PURCHASE_RE.search(q))
+
+
 def decompose_intent_and_questions(
     *,
     query: str,

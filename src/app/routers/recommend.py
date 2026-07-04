@@ -2039,18 +2039,11 @@ def _classify_turn_intent(
     q = str(query or "").strip().lower()
     if followup_explain:
         return "EXPLAIN"
-    # CLAIM-CHECK (same fix as the inventory-lane hijack): the support lane may only claim the turn when
-    # it is genuinely a post-purchase CLAIM. Damage/fault words are inherently post-purchase; bare policy
-    # words (warranty/return/refund/support) additionally need possession/purchase context — otherwise
-    # "what is your warranty policy?" (pre-sales FAQ) or "gaming laptop under 2000. also what warranty do
-    # you offer?" (mixed ask) was hijacked into photo-triage with ZERO products.
-    _damage = re.search(
-        r"\b(broken|damaged|cracked|shattered|not working|faulty|dead pixel|screen damage|bsod|"
-        r"blue screen|stop code|repair|replacement)\b", q)
-    _policy_word = re.search(r"\b(warranty|returns?|refunds?|support)\b", q)
-    _post_purchase = re.search(
-        r"\b(my|i bought|i purchased|i got|i received|i ordered|arrived|came with|send (it )?back)\b", q)
-    if _damage or (_policy_word and _post_purchase):
+    # CLAIM-CHECKED support detection (shared predicate — same discipline as the inventory-lane fix):
+    # only a genuine post-purchase claim routes to the support lane; a pre-sales policy question or a
+    # mixed product+policy ask stays a product turn.
+    from src.app.services.answer_quality import is_support_claim
+    if is_support_claim(q):
         return "SUPPORT_CLAIM"
     if re.search(r"\b(compare|vs|versus|difference|which one|better)\b", q):
         return "COMPARE"
@@ -8124,8 +8117,12 @@ def suggest(
                 "followup_contract": followup_contract,
                 "intent_execution_plan": intent_execution_plan,
                 "policy_version": flags.get("POLICY_VERSION", "v1"),
+                # the honest qty refusal (99999/0/negative — set at the early parse) must survive THIS
+                # early-return payload too, not just the main narration path.
+                "refusal_note": _qty_refusal_note,
                 "assistant_message": (
-                    "I can narrow this quickly with one or two details. "
+                    (f"{_qty_refusal_note}\n\n" if _qty_refusal_note else "")
+                    + "I can narrow this quickly with one or two details. "
                     "If you skip details, I'll assume sensible defaults and show constrained alternatives."
                 ),
                 "next_questions": next_questions,
@@ -10309,6 +10306,9 @@ def suggest(
         # bulk-order intent: the parsed unit count ("15 work laptops" → 15) so the storefront's Add
         # buttons can land the CONVERSATION's quantity (with allow_sourcing), not a silent qty=1.
         "requested_quantity": constraints.get("quantity"),
+        # honest refusal (out-of-range quantity) — a first-class field so DOWNSTREAM composers (chat's
+        # answer-quality/copywriting/no-match paths) can re-prepend it to whatever message they build.
+        "refusal_note": _qty_refusal_note,
         "learn_more_url": "/ui/status",
         "agent_chain": agent_chain,
         "trace_tags": strategy_corr.get("tags") or [],
