@@ -10838,10 +10838,36 @@ def suggest(
             (constraints.get("_claim_guard_status") if isinstance(constraints, dict) else None)
             or ("fell_back_to_deterministic" if (assistant_message or "") != (_pre_guard_msg or "") else "disabled")
         )
+    # CONTRADICTION check (A3): "50 laptops but keep the total under 5 grand" — when the buyer states a
+    # TOTAL cap and qty × the CHEAPEST match already exceeds it, say so in plain words (and ledger it)
+    # instead of a silent no-match. Only fires on an explicit total cue (a bare budget is per-unit).
+    try:
+        _c_qty = int(constraints.get("quantity") or 0)
+        _c_cap = constraints.get("budget_max")
+        if (not _qty_refusal_note and _c_qty >= 2 and _c_cap and results
+                and re.search(r"\b(?:total|all\s+in|altogether|combined|in\s+total|grand\s+total|for\s+(?:all|everything))\b",
+                              str(query or "").lower())):
+            _cheapest = min((float(r0.get("price") or 0) for r0 in results if r0.get("price")), default=0.0)
+            if _cheapest > 0 and _cheapest * _c_qty > float(_c_cap) * 1.02:
+                _qty_refusal_note = (
+                    f"⚠️ That doesn't add up: {_c_qty} units at the cheapest match (${_cheapest:,.0f}) is "
+                    f"${_cheapest * _c_qty:,.0f} — over your ${float(_c_cap):,.0f} total. I can reduce the "
+                    f"quantity, raise the total, or source cheaper units from a supplier.")
+                try:
+                    from src.app.services.capability_gap import GAP_REFUSED_REQUEST, record_gap
+                    with db_session() as _gdb2:
+                        record_gap(_gdb2, category=GAP_REFUSED_REQUEST, utterance=str(query or "")[:300],
+                                   refusal_reason=f"qty_x_price_exceeds_total:{_c_qty}x{int(_cheapest)}>{int(_c_cap)}",
+                                   surface="recommend", uid_hash=uid_hash, trace_id=trace_id)
+                except Exception as _cg3:
+                    _record_partial_failure("capability_gap_write", _cg3, trace_id=trace_id)
+    except (TypeError, ValueError) as _cx:
+        _record_partial_failure("contradiction_check", _cx, trace_id=trace_id)
     # HONEST REFUSAL prefix: an out-of-range quantity was refused (and ledgered) at the early parse —
     # the buyer must SEE the refusal, not just get silently-sane results.
     if _qty_refusal_note:
         assistant_message = f"{_qty_refusal_note}\n\n{assistant_message}" if assistant_message else _qty_refusal_note
+        payload["refusal_note"] = _qty_refusal_note
     if explanation_request:
         payload["explainability_mode"] = "llm_assisted" if llm_summary_requested else "rules_only"
         try:

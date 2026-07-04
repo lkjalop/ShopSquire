@@ -34,7 +34,7 @@
     "nvidia",
     "toshiba"
   ],
-  "_nqe_brand_detect_comment": "Laptop MAKERS only (for NQE brand-preference detection) \u2014 deliberately excludes component makers (intel/amd/nvidia) that appear in known_brands for claim-guard but must not be read as a buyer's brand choice. Matches the list excised from nqe.py.",
+  "_nqe_brand_detect_comment": "Laptop MAKERS only (for NQE brand-preference detection) — deliberately excludes component makers (intel/amd/nvidia) that appear in known_brands for claim-guard but must not be read as a buyer's brand choice. Matches the list excised from nqe.py.",
   "nqe_brand_detect": [
     "lenovo",
     "dell",
@@ -48,7 +48,7 @@
     "msi",
     "lg"
   ],
-  "_prohibited_claim_patterns_comment": "Send-cage EXTENSION (fulfillment/draft.claim_safety_reason). These regexes ADD to the hardcoded governance floor (we-guarantee / order-confirmed / price-match / PO-confirmed) \u2014 they can only TIGHTEN the cage, never weaken it. Electronics-specific over-promises a procurement RFQ must never assert (counterfeit/grey-market/condition claims). A malformed pattern is skipped fail-safe; the floor always applies.",
+  "_prohibited_claim_patterns_comment": "Send-cage EXTENSION (fulfillment/draft.claim_safety_reason). These regexes ADD to the hardcoded governance floor (we-guarantee / order-confirmed / price-match / PO-confirmed) — they can only TIGHTEN the cage, never weaken it. Electronics-specific over-promises a procurement RFQ must never assert (counterfeit/grey-market/condition claims). A malformed pattern is skipped fail-safe; the floor always applies.",
   "prohibited_claim_patterns": [
     "\\bbrand[- ]?new sealed\\b",
     "\\b100%\\s+(genuine|authentic|original)\\b",
@@ -194,7 +194,7 @@
     "microsoft": 900,
     "samsung": 800
   },
-  "_use_case_budget_floors_comment": "Minimum viable price (USD) per use-case \u2014 excised from recommend_budget_advisor._USE_CASE_BUDGET_FLOORS. Vertical-EXCLUSIVE (prefer-profile, not union): a pharmacy must not inherit gaming floors.",
+  "_use_case_budget_floors_comment": "Minimum viable price (USD) per use-case — excised from recommend_budget_advisor._USE_CASE_BUDGET_FLOORS. Vertical-EXCLUSIVE (prefer-profile, not union): a pharmacy must not inherit gaming floors.",
   "use_case_budget_floors": {
     "high_school": 400,
     "gaming_casual": 600,
@@ -476,7 +476,7 @@
       "wi-fi 6"
     ]
   },
-  "_evidence_markers_comment": "Marker groups for per-pick narration evidence (recommend_evidence). DATA only \u2014 opaque substrings matched against a candidate's name+specs+features for the portability/docking/warranty/os_ecosystem metrics. The fleet/office metrics reuse use_case_soft_markers.",
+  "_evidence_markers_comment": "Marker groups for per-pick narration evidence (recommend_evidence). DATA only — opaque substrings matched against a candidate's name+specs+features for the portability/docking/warranty/os_ecosystem metrics. The fleet/office metrics reuse use_case_soft_markers.",
   "evidence_markers": {
     "portability": [
       "ultrabook",
@@ -567,7 +567,7 @@
     "soft": 6.0,
     "exclusion": -22.0
   },
-  "_recommendation_lanes_comment": "Backend choice-lanes (recommend_choice_lanes). DATA only \u2014 markers/exclusions are opaque substrings matched against a candidate's name+specs+features; the core just groups. A candidate joins the highest-priority lane whose marker matches and whose exclusions don't. `primary_for` lists the use-cases for which the lane is a PRIMARY pick; `non_primary` lanes (gaming chassis) are never primary, so a work query never surfaces gaming as a top office pick.",
+  "_recommendation_lanes_comment": "Backend choice-lanes (recommend_choice_lanes). DATA only — markers/exclusions are opaque substrings matched against a candidate's name+specs+features; the core just groups. A candidate joins the highest-priority lane whose marker matches and whose exclusions don't. `primary_for` lists the use-cases for which the lane is a PRIMARY pick; `non_primary` lanes (gaming chassis) are never primary, so a work query never surfaces gaming as a top office pick.",
   "recommendation_lanes": [
     {
       "key": "windows_business",
@@ -746,7 +746,7 @@
         "rtx 50"
       ],
       "exclusions": [],
-      "explain": "Powerful discrete-GPU laptops \u2014 the right pick for GPU-heavy work (AI/ML model training, content/video editing, 3D/CAD) and gaming. For normal office work they are a poor fit (thermals, battery, weight, webcam/conferencing), so they are demoted there.",
+      "explain": "Powerful discrete-GPU laptops — the right pick for GPU-heavy work (AI/ML model training, content/video editing, 3D/CAD) and gaming. For normal office work they are a poor fit (thermals, battery, weight, webcam/conferencing), so they are demoted there.",
       "metrics": [
         "gpu",
         "performance",
@@ -771,11 +771,11 @@
       "specialty": true
     }
   ],
-  "_storefront_emphasis_comment": "Phase-3 storefront-emphasis variants (David Module 4/5). DATA copy only \u2014 never free-form LLM. The experiment-gated, reversible lever picks one per TREATMENT subject; control gets none. Vertical-flavoured strings live HERE (profile), the core lever stays vertical-blind.",
+  "_storefront_emphasis_comment": "Phase-3 storefront-emphasis variants (David Module 4/5). DATA copy only — never free-form LLM. The experiment-gated, reversible lever picks one per TREATMENT subject; control gets none. Vertical-flavoured strings live HERE (profile), the core lever stays vertical-blind.",
   "storefront_emphasis_variants": {
-    "value": "Great value picks \u2014 performance per dollar, matched to your budget.",
-    "urgency": "Popular right now and moving fast \u2014 secure your pick before stock shifts.",
-    "features": "Spec-forward picks \u2014 the capabilities that matter for your use-case, up front."
+    "value": "Great value picks — performance per dollar, matched to your budget.",
+    "urgency": "Popular right now and moving fast — secure your pick before stock shifts.",
+    "features": "Spec-forward picks — the capabilities that matter for your use-case, up front."
   },
   "_nqe_question_packs_comment": "Domain-specific NQE clarifying questions (excised from nqe.py hardcoded packs). Each entry is keyed by question id and contains: text, goal, evidence_needed, source, options. NQE reads these from the active profile; non-electronics verticals supply their own domain questions.",
   "nqe_question_packs": {
@@ -869,7 +869,7 @@
       "source": "use_case_disambiguation",
       "options": [
         {
-          "label": "School notes / browsing only \u2014 keep it light",
+          "label": "School notes / browsing only — keep it light",
           "value": "high_school_basic"
         },
         {
@@ -1040,7 +1040,7 @@
   },
   "portable_pattern": "\\b(portable|lightweight|light ?weight|thin and light|ultrabook|ultra ?portable|travel|carry around|commut\\w*)\\b",
   "portable_weight_kg_max": 2.0,
-  "_hard_constraint_rules_comment": "Spec-constraint extraction rules excised VERBATIM from query_decomposer._extract_hard_constraints (NEW-2) so that function is vertical-blind. Each rule: pattern (regex), key (constraint), cast (int|float), group (capture #), optional multiplier. Non-electronics verticals carry their own (or none) \u2014 no GPU/refresh/RAM bleed.",
+  "_hard_constraint_rules_comment": "Spec-constraint extraction rules excised VERBATIM from query_decomposer._extract_hard_constraints (NEW-2) so that function is vertical-blind. Each rule: pattern (regex), key (constraint), cast (int|float), group (capture #), optional multiplier. Non-electronics verticals carry their own (or none) — no GPU/refresh/RAM bleed.",
   "hard_constraint_rules": [
     {
       "pattern": "\\b(60|75|90|120|144|165|240|360)\\s*(?:hz|fps|frames?)\\b",
@@ -2089,7 +2089,7 @@
         "high_school"
       ],
       "use_cases_contains": [],
-      "text": "Shopper: High school student (or a parent buying for them). Budget-conscious. Needs to survive a full school day.\nEmphasize: Battery life (8+ hours for school), how light and easy it is to carry, screen quality for reading and note-taking. A 2-in-1 or stylus support is a bonus.\nTone: Simple and reassuring \u2014 no jargon. Say 'lasts all day on one charge' not '60Wh'. Say 'easy to carry to school' not '1.4kg'. Mention homework, notes, and streaming.\nAvoid: Gaming GPU specs, benchmark numbers, enterprise language."
+      "text": "Shopper: High school student (or a parent buying for them). Budget-conscious. Needs to survive a full school day.\nEmphasize: Battery life (8+ hours for school), how light and easy it is to carry, screen quality for reading and note-taking. A 2-in-1 or stylus support is a bonus.\nTone: Simple and reassuring — no jargon. Say 'lasts all day on one charge' not '60Wh'. Say 'easy to carry to school' not '1.4kg'. Mention homework, notes, and streaming.\nAvoid: Gaming GPU specs, benchmark numbers, enterprise language."
     },
     {
       "personas": [
@@ -2099,7 +2099,7 @@
         "university_general"
       ],
       "use_cases_contains": [],
-      "text": "Shopper: University student. Balances lectures, research, socializing, and light media. Moderate budget.\nEmphasize: Portability + build quality (campus life is rough), battery for lecture days, enough RAM (16 GB) for browser tabs + note-taking + the occasional assignment crunch. A good keyboard matters.\nTone: Relatable and encouraging \u2014 say 'handles 20 browser tabs and Zoom at the same time without breaking a sweat'. Mention real uni workflows (Google Docs, research PDFs, Netflix between classes).\nAvoid: Heavy workstation specs. Keep it practical and fun."
+      "text": "Shopper: University student. Balances lectures, research, socializing, and light media. Moderate budget.\nEmphasize: Portability + build quality (campus life is rough), battery for lecture days, enough RAM (16 GB) for browser tabs + note-taking + the occasional assignment crunch. A good keyboard matters.\nTone: Relatable and encouraging — say 'handles 20 browser tabs and Zoom at the same time without breaking a sweat'. Mention real uni workflows (Google Docs, research PDFs, Netflix between classes).\nAvoid: Heavy workstation specs. Keep it practical and fun."
     },
     {
       "personas": [
@@ -2110,7 +2110,7 @@
         "computer_science_student"
       ],
       "use_cases_contains": [],
-      "text": "Shopper: Engineering / CS / architecture student. Runs simulation, CAD, or ML workloads that push hardware.\nEmphasize: RAM (32 GB strongly preferred \u2014 MATLAB, Docker, multiple VMs), dedicated GPU (even mid-range helps with CUDA / rendering), fast storage (SSD for large projects), build quality.\nTone: Technically literate but outcome-focused \u2014 say 'compiles large projects 3\u00d7 faster' not 'Intel i7-13700H at 4.9 GHz'. Reference real tools: MATLAB, SolidWorks, Docker, VS Code with containers.\nAvoid: Generic 'fast processor' language. These students know what CUDA cores do."
+      "text": "Shopper: Engineering / CS / architecture student. Runs simulation, CAD, or ML workloads that push hardware.\nEmphasize: RAM (32 GB strongly preferred — MATLAB, Docker, multiple VMs), dedicated GPU (even mid-range helps with CUDA / rendering), fast storage (SSD for large projects), build quality.\nTone: Technically literate but outcome-focused — say 'compiles large projects 3× faster' not 'Intel i7-13700H at 4.9 GHz'. Reference real tools: MATLAB, SolidWorks, Docker, VS Code with containers.\nAvoid: Generic 'fast processor' language. These students know what CUDA cores do."
     },
     {
       "personas": [
@@ -2120,7 +2120,7 @@
         "data_science"
       ],
       "use_cases_contains": [],
-      "text": "Shopper: Data scientist / AI-ML engineer. Trains models, runs Jupyter notebooks, maybe fine-tunes LLMs locally.\nEmphasize: GPU VRAM (12 GB+ for training), RAM (32-64 GB for large datasets), fast NVMe (dataset I/O), CUDA support (NVIDIA). A big display helps with notebooks.\nTone: Peer-level technical \u2014 say '12 GB VRAM lets you fine-tune 7B-param models locally', 'enough RAM to keep your entire dataset in memory'. Reference PyTorch, HuggingFace, Jupyter.\nAvoid: Basic office specs. This shopper needs GPU horsepower."
+      "text": "Shopper: Data scientist / AI-ML engineer. Trains models, runs Jupyter notebooks, maybe fine-tunes LLMs locally.\nEmphasize: GPU VRAM (12 GB+ for training), RAM (32-64 GB for large datasets), fast NVMe (dataset I/O), CUDA support (NVIDIA). A big display helps with notebooks.\nTone: Peer-level technical — say '12 GB VRAM lets you fine-tune 7B-param models locally', 'enough RAM to keep your entire dataset in memory'. Reference PyTorch, HuggingFace, Jupyter.\nAvoid: Basic office specs. This shopper needs GPU horsepower."
     },
     {
       "personas": [
@@ -2131,7 +2131,7 @@
         "content_creat",
         "video_edit"
       ],
-      "text": "Shopper: Content creator / video editor. Works in Premiere Pro, DaVinci Resolve, or After Effects. Color-accuracy matters.\nEmphasize: Color-accurate display (100% sRGB / DCI-P3), GPU for timeline preview (dedicated GPU strongly preferred), 32+ GB RAM (timeline scrubbing with effects), fast storage (proxy + export).\nTone: Creative-pro \u2014 say 'scrubs 4K timelines without dropping frames', 'colors you can trust for client work'. Mention real workflows: color grading, multicam, After Effects compositions.\nAvoid: Gaming-focused language (refresh rate, FPS). These shoppers care about color, not frames."
+      "text": "Shopper: Content creator / video editor. Works in Premiere Pro, DaVinci Resolve, or After Effects. Color-accuracy matters.\nEmphasize: Color-accurate display (100% sRGB / DCI-P3), GPU for timeline preview (dedicated GPU strongly preferred), 32+ GB RAM (timeline scrubbing with effects), fast storage (proxy + export).\nTone: Creative-pro — say 'scrubs 4K timelines without dropping frames', 'colors you can trust for client work'. Mention real workflows: color grading, multicam, After Effects compositions.\nAvoid: Gaming-focused language (refresh rate, FPS). These shoppers care about color, not frames."
     },
     {
       "personas": [
@@ -2141,7 +2141,7 @@
       "use_cases_contains": [
         "gaming"
       ],
-      "text": "Shopper: Gamer. Performance per dollar is king. Wants smooth frame rates in the titles they play.\nEmphasize: GPU tier (name the chip and what it means for their games \u2014 e.g. '4060 handles 1080p high settings at 80+ FPS in most titles'), high-refresh display (120+ Hz), thermal design (sustained performance, not throttling). RAM 16 GB is the sweet spot.\nTone: Enthusiast but practical \u2014 say 'runs Cyberpunk at 60 FPS on High' not just 'RTX 4070'. Translate specs into FPS/resolution outcomes. Mention specific popular games if the query names them.\nAvoid: Battery life focus (gamers usually plug in). Avoid enterprise/office language."
+      "text": "Shopper: Gamer. Performance per dollar is king. Wants smooth frame rates in the titles they play.\nEmphasize: GPU tier (name the chip and what it means for their games — e.g. '4060 handles 1080p high settings at 80+ FPS in most titles'), high-refresh display (120+ Hz), thermal design (sustained performance, not throttling). RAM 16 GB is the sweet spot.\nTone: Enthusiast but practical — say 'runs Cyberpunk at 60 FPS on High' not just 'RTX 4070'. Translate specs into FPS/resolution outcomes. Mention specific popular games if the query names them.\nAvoid: Battery life focus (gamers usually plug in). Avoid enterprise/office language."
     },
     {
       "personas": [
@@ -2153,7 +2153,7 @@
         "office_executive"
       ],
       "use_cases_contains": [],
-      "text": "Shopper: Business professional / corporate user. Productivity, reliability, and security trump raw performance.\nEmphasize: Reliability and build quality (ThinkPad-tier), manageability (TPM, vPro if relevant), battery for meeting-to-meeting days, keyboard comfort, display clarity for spreadsheets and presentations.\nTone: Professional and outcome-focused \u2014 say 'reliable enough you'll never miss a deadline', 'crisp display for hours of spreadsheet work'. Mention Teams, Outlook, multi-monitor setups.\nAvoid: Gaming specs, RGB lighting references. This is a tool purchase, not a toy."
+      "text": "Shopper: Business professional / corporate user. Productivity, reliability, and security trump raw performance.\nEmphasize: Reliability and build quality (ThinkPad-tier), manageability (TPM, vPro if relevant), battery for meeting-to-meeting days, keyboard comfort, display clarity for spreadsheets and presentations.\nTone: Professional and outcome-focused — say 'reliable enough you'll never miss a deadline', 'crisp display for hours of spreadsheet work'. Mention Teams, Outlook, multi-monitor setups.\nAvoid: Gaming specs, RGB lighting references. This is a tool purchase, not a toy."
     },
     {
       "personas": [],
@@ -2164,7 +2164,7 @@
         "finance",
         "accounting"
       ],
-      "text": "Shopper: Finance / accounting professional. Lives in Excel, ERP systems, and multi-monitor setups.\nEmphasize: Keyboard comfort (numbers entry for hours), display clarity (dense spreadsheets), multi-monitor support (Thunderbolt/USB-C docking), 32 GB RAM (large workbooks with pivot tables + Power Query).\nTone: Efficiency-focused \u2014 say 'handles your largest workbooks without lag', 'connects to dual monitors with a single cable'. Mention Excel, Power BI, ERP systems.\nAvoid: GPU/gaming language. A discrete GPU is wasted spend here."
+      "text": "Shopper: Finance / accounting professional. Lives in Excel, ERP systems, and multi-monitor setups.\nEmphasize: Keyboard comfort (numbers entry for hours), display clarity (dense spreadsheets), multi-monitor support (Thunderbolt/USB-C docking), 32 GB RAM (large workbooks with pivot tables + Power Query).\nTone: Efficiency-focused — say 'handles your largest workbooks without lag', 'connects to dual monitors with a single cable'. Mention Excel, Power BI, ERP systems.\nAvoid: GPU/gaming language. A discrete GPU is wasted spend here."
     },
     {
       "personas": [],
@@ -2172,7 +2172,7 @@
         "medical_student"
       ],
       "use_cases_contains": [],
-      "text": "Shopper: Medical student. Long study sessions, anatomy software, and clinical placement demands.\nEmphasize: Battery life (clinical placements without outlets), portability (ward rounds), display quality (anatomy diagrams and imaging), reliability.\nTone: Supportive and practical \u2014 say 'lasts through a full day on the ward', 'clear enough for detailed anatomy diagrams'. Mention Anki, anatomy apps, clinical databases.\nAvoid: Gaming specs. A discrete GPU is unnecessary for med school."
+      "text": "Shopper: Medical student. Long study sessions, anatomy software, and clinical placement demands.\nEmphasize: Battery life (clinical placements without outlets), portability (ward rounds), display quality (anatomy diagrams and imaging), reliability.\nTone: Supportive and practical — say 'lasts through a full day on the ward', 'clear enough for detailed anatomy diagrams'. Mention Anki, anatomy apps, clinical databases.\nAvoid: Gaming specs. A discrete GPU is unnecessary for med school."
     },
     {
       "personas": [],
@@ -2180,7 +2180,7 @@
         "law_student"
       ],
       "use_cases_contains": [],
-      "text": "Shopper: Law student. Case briefs, legal research databases, long reading/writing sessions. Pure productivity.\nEmphasize: Battery life (long library sessions), keyboard comfort (typing-heavy work \u2014 briefs, essays, memos), display clarity (reading-heavy), reliability.\nTone: No-nonsense and direct. Say 'handles long case brief sessions without slowing down', 'comfortable to type on for hours'. Pure productivity focus.\nAvoid: GPU/gaming specs. A discrete GPU is wasted spend for a law student."
+      "text": "Shopper: Law student. Case briefs, legal research databases, long reading/writing sessions. Pure productivity.\nEmphasize: Battery life (long library sessions), keyboard comfort (typing-heavy work — briefs, essays, memos), display clarity (reading-heavy), reliability.\nTone: No-nonsense and direct. Say 'handles long case brief sessions without slowing down', 'comfortable to type on for hours'. Pure productivity focus.\nAvoid: GPU/gaming specs. A discrete GPU is wasted spend for a law student."
     },
     {
       "personas": [
@@ -2198,7 +2198,7 @@
       ],
       "use_cases": [],
       "use_cases_contains": [],
-      "text": "Shopper: Job hunter or career changer. Starting a new chapter \u2014 needs something professional-looking, reliable, and interview-ready.\nEmphasize: Professional build and appearance (makes an impression), reliability, webcam and microphone quality (video interviews), keyboard comfort.\nTone: Encouraging and practical. Say 'professional build for interviews and the first day on the job', 'reliable enough that it never lets you down in a crucial moment'.\nAvoid: Gaming specs. Focus on professionalism, reliability, and first impressions."
+      "text": "Shopper: Job hunter or career changer. Starting a new chapter — needs something professional-looking, reliable, and interview-ready.\nEmphasize: Professional build and appearance (makes an impression), reliability, webcam and microphone quality (video interviews), keyboard comfort.\nTone: Encouraging and practical. Say 'professional build for interviews and the first day on the job', 'reliable enough that it never lets you down in a crucial moment'.\nAvoid: Gaming specs. Focus on professionalism, reliability, and first impressions."
     }
   ],
   "_identity_comment": "ADAPTER (product identity / image+text): brand/product-type/form-factor/cpu keyword maps + spec regexes for identify_product_from_text. Excised VERBATIM from product_identity_agent. Verticals without these slots do not parse images through laptop identity fields (no bleed).",
@@ -2401,7 +2401,7 @@
   },
   "_product_identity_prompt_comment": "ADAPTER: vision-LLM prompt/schema for identify_product_from_image. Electronics laptop schema; a vertical without this slot gets a generic identify prompt (no laptop-schema bleed).",
   "product_identity_prompt": "You are a product identification specialist for an ecommerce platform.\nAnalyze this product image and extract structured specifications.\nReturn ONLY valid JSON (no markdown, no prose).\nSchema:\n{\n  \"identified\": true|false,\n  \"product_type\": \"laptop|desktop|tablet|phone|monitor|accessory|other\",\n  \"brand\": \"string or null\",\n  \"model\": \"string or null\",\n  \"cpu_tier\": \"budget|midrange|performance|workstation|unknown\",\n  \"cpu_hint\": \"e.g. i5-13th, Ryzen 7, M2 Pro, or null\",\n  \"ram_gb_hint\": 8|16|32|null,\n  \"gpu_hint\": \"e.g. RTX 4060, integrated, or null\",\n  \"display_inches_hint\": 14|15.6|16|null,\n  \"form_factor\": \"ultrabook|standard|gaming|workstation|2-in-1|unknown\",\n  \"price_tier\": \"budget|midrange|premium|flagship|unknown\",\n  \"confidence\": 0.0 to 1.0,\n  \"notes\": \"short free-text\"\n}\nRules:\n- Identify from visible branding, form factor, bezels, keyboard layout, chassis design.\n- If you see visible text (model label, spec sticker), use it.\n- If uncertain about a field, use null or unknown.\n- confidence reflects overall identification certainty.\n",
-  "_external_research_allowlist_comment": "ADAPTER: per-vertical web-research domain allowlist (illustrative \u2014 configure per deployment). Resolved per-request by recommend.py via profile_slot; safe internet search never reaches a domain outside this list.",
+  "_external_research_allowlist_comment": "ADAPTER: per-vertical web-research domain allowlist (illustrative — configure per deployment). Resolved per-request by recommend.py via profile_slot; safe internet search never reaches a domain outside this list.",
   "external_research_allowlist": [
     "notebookcheck.net",
     "pcmag.com",
@@ -2472,27 +2472,27 @@
   },
   "supplier_message_templates": {
     "reorder": {
-      "subject": "Reorder request \u2014 {item}",
+      "subject": "Reorder request — {item}",
       "body": "Hello {supplier_name},\n\nWe would like to reorder {item}{details}. Please confirm availability, unit price, and lead time.\n\nThis is a draft prepared for review before sending.\n\nRegards,\n{sender_name}"
     },
     "price_query": {
-      "subject": "Pricing enquiry \u2014 {item}",
+      "subject": "Pricing enquiry — {item}",
       "body": "Hello {supplier_name},\n\nCould you confirm current trade pricing and any volume breaks for {item}? {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
     },
     "stock_check": {
-      "subject": "Stock availability \u2014 {item}",
+      "subject": "Stock availability — {item}",
       "body": "Hello {supplier_name},\n\nPlease confirm on-hand stock and next restock date for {item}. {details}\n\nDraft for review.\n\nRegards,\n{sender_name}"
     }
   },
   "_supplier_rfq_comment": "Structured RFQ template + commercial-term DATA (fulfillment/draft). The body has the not-a-PO footer + no price/commitment (the send-cage enforces this). Line-slots (ship_to_line/warranty_line/payment_terms_line/volume_discount_ask) are full lines or empty, built deterministically from case+catalog+these slots. rfq_required_fields drives the completeness check.",
   "supplier_rfq": {
-    "subject": "RFQ \u2014 {item_label} x {quantity} (ref {case_ref})",
+    "subject": "RFQ — {item_label} x {quantity} (ref {case_ref})",
     "body": "Hello {supplier_name},\n\n{supplier_context}We would like to request a quote for the following:\n\n- Item: {sku_description}\n- Quantity: {quantity}\n- Required by: {deadline_date}\n{ship_to_line}\n{requirements_block}Please include in your reply:\n- Unit price{volume_discount_ask}\n- Lead time to dispatch\n{warranty_line}{payment_terms_line}- How long the quote is valid (we require at least {quote_validity_days} days)\n\n{urgency_note}\n\nThis request does not constitute a purchase order.\n\nRegards,\nProcurement"
   },
   "rfq_quote_validity_days": 14,
   "rfq_warranty_preference": "Required warranty/support: 3-year next-business-day onsite preferred",
   "rfq_payment_terms_ask": "Your payment terms and minimum order quantity",
-  "rfq_ship_to_region": "Australia \u2014 metro",
+  "rfq_ship_to_region": "Australia — metro",
   "rfq_bulk_threshold": 5,
   "rfq_required_fields": [
     "sku_description",
@@ -2500,9 +2500,9 @@
     "ship_to",
     "quantity"
   ],
-  "_default_fulfillment_location_comment": "the buyer's default store (location_id) when they don't name one \u2014 drives the multi-location transfer view (fulfil from the warehouse to the buyer's store before sourcing externally). Must match a location_id seeded in inventory_level.",
+  "_default_fulfillment_location_comment": "the buyer's default store (location_id) when they don't name one — drives the multi-location transfer view (fulfil from the warehouse to the buyer's store before sourcing externally). Must match a location_id seeded in inventory_level.",
   "default_fulfillment_location": "sydney",
-  "_supplier_routing_comment": "demo seed-time routing: a product's sku-prefix/attribute tokens \u2192 eligible supplier_id(s). The RULES (vertical vocabulary) live here so core stays vertical-blind; first matching rule wins, else supplier_routing_default. Ranking still picks the winner among eligible suppliers.",
+  "_supplier_routing_comment": "demo seed-time routing: a product's sku-prefix/attribute tokens → eligible supplier_id(s). The RULES (vertical vocabulary) live here so core stays vertical-blind; first matching rule wins, else supplier_routing_default. Ranking still picks the winner among eligible suppliers.",
   "supplier_routing_rules": [
     {
       "supplier_id": "SUP-APPLE",
@@ -2630,12 +2630,19 @@
       ]
     }
   ],
-  "_delivery_policy_comment": "Agnostic delivery economics \u2014 each store sets its own. Drives split-fulfillment (ship-now + backorder-later) fees + free-shipping threshold.",
+  "_delivery_policy_comment": "Agnostic delivery economics — each store sets its own. Drives split-fulfillment (ship-now + backorder-later) fees + free-shipping threshold.",
   "delivery_policy": {
     "currency": "USD",
     "base_fee_cents": 1500,
     "split_shipment_fee_cents": 900,
     "free_shipping_threshold_cents": 500000,
     "backorder_enabled": true
+  },
+  "_policy_faq_comment": "Pre-sales policy answers (agnostic slot: each store writes its own terms; core never invents policy content — a missing key means 'a teammate will confirm').",
+  "policy_faq": {
+    "warranty": "All laptops and electronics include a 12-month manufacturer warranty; business orders can add extended coverage (24/36 months) at checkout. Warranty claims are handled with a photo triage first — most are resolved within 2 business days.",
+    "returns": "30-day returns on unopened items; change-of-mind on opened items within 14 days with a 10% restocking fee. Faulty items are always replaced or refunded in full.",
+    "shipping": "Free delivery on orders over $5,000. Standard delivery $15 (2-4 business days); split shipments for backordered units are $9 for the follow-up leg. Bulk orders show a delivery plan with real supplier lead times before payment.",
+    "price_match": "We match any verified in-stock price from an authorised local retailer at the time of order."
   }
 }

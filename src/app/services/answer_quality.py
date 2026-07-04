@@ -84,6 +84,42 @@ def is_support_claim(query: str) -> bool:
     return bool(_POLICY_WORD_RE.search(q) and _POST_PURCHASE_RE.search(q))
 
 
+_POLICY_TOPIC_RES = {
+    "warranty": re.compile(r"\bwarrant\w*\b"),
+    "returns": re.compile(r"\breturns?\b|\brefunds?\b|\bchange of mind\b"),
+    "shipping": re.compile(r"\bshipping\b|\bdelivery\b|\bship\b|\bfreight\b"),
+    "price_match": re.compile(r"\bprice\s*match\w*\b|\bbeat\s+(?:the\s+)?price\b"),
+}
+
+
+def policy_faq_answer(query: str) -> Optional[str]:
+    """Answer a PRE-SALES policy question from the StoreProfile's ``policy_faq`` slot — content is DATA
+    the store wrote, never invented by core (prohibited-claims discipline). Returns the matched topics'
+    text, or an honest "a teammate will confirm" line when the store hasn't filled the slot, or None when
+    the query isn't a policy question at all (caller proceeds normally). Post-purchase claims are NOT
+    handled here — is_support_claim() owns those."""
+    q = str(query or "").strip().lower()
+    if not q or is_support_claim(q):
+        return None
+    topics = [t for t, rx in _POLICY_TOPIC_RES.items() if rx.search(q)]
+    # only claim clearly policy-shaped asks: a topic word + a question/policy cue
+    if not topics or not re.search(r"\bpolic\w+\b|\bwhat(?:'s| is| are)\b|\bhow\b|\bdo you\b|\bwhat do you\b|\?", q):
+        return None
+    try:
+        from src.app.platform.store_profile import profile_slot
+        slot = profile_slot("policy_faq", default=None)
+    except Exception:
+        slot = None
+    if not isinstance(slot, dict) or not slot:
+        return ("Good pre-purchase question — I don't want to guess policy terms, so I've flagged it for a "
+                "teammate to confirm the specifics. Meanwhile I can keep helping with products.")
+    parts = [str(slot[t]) for t in topics if slot.get(t)]
+    if not parts:
+        return ("That policy detail isn't in my approved answers yet — a teammate will confirm it. "
+                "Meanwhile I can keep helping with products.")
+    return " ".join(parts)
+
+
 def decompose_intent_and_questions(
     *,
     query: str,

@@ -1270,6 +1270,21 @@ async def chat_query(
     uid = _resolve_uid(payload, request)
     session_id = str((payload or {}).get("session_id") or "")[:128] or None
     source_ip = request.client.host if request and request.client else ""
+    # TEXT prompt-injection tally (ledger-only, no behavior change): classic override phrasings are
+    # already harmless here (they fall through to a normal product turn — the LLM never sees them as
+    # instructions), but every attempt is RECORDED as a refused_request so security/QA see the pressure.
+    try:
+        if re.search(r"\b(?:ignore|disregard|forget|override)\b.{0,40}\b(?:instructions?|prompts?|rules?|polic\w+|previous|above)\b"
+                     r"|\byou\s+are\s+now\b|\bsystem\s+prompt\b|\bjailbreak\b|\bdeveloper\s+mode\b", q, re.I):
+            from src.app.services.capability_gap import GAP_REFUSED_REQUEST, record_gap
+            from src.app.deps import hash_uid as _huid
+            from src.app.models.db import db_session as _db_session
+            with _db_session() as _idb:
+                record_gap(_idb, category=GAP_REFUSED_REQUEST, utterance=str(q)[:300],
+                           refusal_reason="prompt_injection_suspected", surface="chat",
+                           uid_hash=_huid(uid) if uid else None)
+    except Exception as _inj_exc:
+        logger.debug("injection ledger write failed: %s", _inj_exc)
     turn_intent = _classify_turn_intent(q)
     copywriting_requested = bool((payload or {}).get("copywriting_enabled") is True)
     copy_profile_id = str((payload or {}).get("copy_profile_id") or "").strip() or None
@@ -2253,6 +2268,19 @@ async def chat_query(
     _refusal = str(data.get("refusal_note") or "").strip()
     if _refusal and _refusal not in str(assistant_message or ""):
         assistant_message = f"{_refusal}\n\n{assistant_message}" if assistant_message else _refusal
+    # PRE-SALES policy answer (StoreProfile policy_faq slot — store-written content, never invented):
+    # a mixed ask ("gaming laptop… what warranty?") gets products PLUS the policy paragraph; a pure
+    # policy question replaces the useless "no match" with the actual answer.
+    try:
+        from src.app.services.answer_quality import policy_faq_answer
+        _pol = policy_faq_answer(q)
+        if _pol:
+            if products:
+                assistant_message = f"{assistant_message}\n\n📋 {_pol}" if assistant_message else f"📋 {_pol}"
+            else:
+                assistant_message = f"📋 {_pol}"
+    except Exception as _pol_exc:
+        logger.debug("policy_faq compose failed: %s", _pol_exc)
     copy_meta = copy_out.get("meta") if isinstance(copy_out.get("meta"), dict) else {}
     try:
         if decision_trace_id and (bool(copy_meta.get("applied")) or bool(copywriting_requested)):
