@@ -4982,6 +4982,15 @@ def suggest(
             if p.get("requested_quantity") is None and _early_bulk_qty:
                 p["requested_quantity"] = _early_bulk_qty
         return p
+    _seg_last = [time.perf_counter()]
+
+    def _ckpt(name: str) -> None:
+        """Segment checkpoint: converts the DARK middle into named timing_breakdown entries
+        (seg_<name>_ms = time since the previous checkpoint). Measure -> extract, never guess."""
+        now = time.perf_counter()
+        timing_breakdown[f"seg_{name}_ms"] = round((now - _seg_last[0]) * 1000, 1)
+        _seg_last[0] = now
+
     def _log_early_decision(status: str, proposed_action: Dict[str, Any], agent_chain: list[Dict[str, Any]] | None = None, retrieved_context: Dict[str, Any] | None = None, execution_status: str = "executed") -> None:
         if not _decision_log_writes_enabled(flags):
             return
@@ -8240,6 +8249,7 @@ def suggest(
         logging.info(f"recommend.suggest: retrieved {retrieved_count} candidates (ms={retrieve_ms})")
         if _is_laptop_focused_query(query_effective, constraints):
             before_family = len(candidates or [])
+            _ckpt("retrieve")
             narrowed = [c for c in (candidates or []) if _candidate_looks_like_laptop(c)]
             candidates = narrowed
             try:
@@ -9246,6 +9256,7 @@ def suggest(
                 pass
 
         # Inventory agent evaluation WITH quantity check for bulk orders — extracted to
+        _ckpt("filter_cascades")
         # recommend_inventory_handoff_stage (the stage owns the nested try/except: pass; non-blocking).
         # Side-effecting collaborators are injected so the stage stays vertical-blind + unit-testable.
         requested_qty = constraints.get("quantity") or 1
@@ -9417,6 +9428,7 @@ def suggest(
             )
         except Exception:
             pass
+        _ckpt("inventory_handoff")
         # Tier 2 retrieval mode (RECOMMEND_RETRIEVAL_MODE) extracted to
         # recommend_retriever_stage.run_retrieval_mode_stage: fuse/swap V2 candidates BEFORE ranking
         # so they never bypass the downstream guards. Route keeps the trace wrapper.
@@ -9529,6 +9541,13 @@ def suggest(
             _delta_by_sku = {}
         rerank_ms = int((time.perf_counter() - _rerank_t0) * 1000)
         timing_breakdown["rerank_ms"] = rerank_ms
+        _ckpt("rerank")
+        # OUTPUT-security analysis submitted EARLY on the shared executor: its ~200ms fixed observer cost
+        # now overlaps the decision-log/annotation work between here and the join. The verdict is still
+        # consumed at the SAME gate point below — ordering and blocking semantics are unchanged.
+        _output_sec_future = _SECURITY_EXECUTOR.submit(analyze_payload, {
+            "result_skus": [c.get("sku") for c in ranked[:8] if c.get("sku")],
+        })
         cb_record(redis, "recommend", True, degradation_cfg)
         try:
             log_trace_event(
@@ -9865,10 +9884,15 @@ def suggest(
     # MITRE/OWASP tag strings ("supply_chain", "LLM05:SupplyChainVulnerabilities", etc.)
     # that would self-trigger false-positive security signals and block safe queries.
     # Only scan user-facing content: SKUs and names.
+    _ckpt("decision_log_and_annotation")
     with tracer.start_as_current_span("recommend.security_analyze_output"):
-        output_analysis = analyze_payload({
-            "result_skus": [c.get("sku") for c in ranked[:8] if c.get("sku")],
-        })
+        try:
+            output_analysis = _output_sec_future.result(timeout=8)
+        except Exception as _osec_exc:  # fail CLOSED to a fresh synchronous pass — never skip the gate
+            _record_partial_failure("output_security_join", _osec_exc, trace_id=trace_id)
+            output_analysis = analyze_payload({
+                "result_skus": [c.get("sku") for c in ranked[:8] if c.get("sku")],
+            })
     try:
         # Respect optional test skip list
         skip_list = os.getenv("SKIP_OBSERVER_ENDPOINTS", "")
@@ -10326,6 +10350,7 @@ def suggest(
     # Post-results intelligence stage (extracted): E0 attribution capture · market-intelligence inject
     # (recall + gated findings) · reversible experiment-gated nudge. Each flag-gated + fire-and-forget;
     # returns the (possibly nudged) results and mutates payload/kv in place.
+    _ckpt("output_security_and_prep")
     from src.app.services.recommend_intelligence_stage import IntelligenceStageState, run_intelligence_stage
     results = run_intelligence_stage(
         IntelligenceStageState(
@@ -10334,6 +10359,7 @@ def suggest(
         ),
         mem=mem,
     )
+    _ckpt("intelligence_stage")
     # Safe internet search (EXTERNAL_RESEARCH_ENABLED, off by default): a SEPARATE labeled source.
     # NullFetcher = no network until a real allowlisted httpx adapter is wired -> stays 'empty' even
     # if enabled. NEVER merged into owned `results`/cart (external items have sku=None -> structurally
@@ -10782,6 +10808,7 @@ def suggest(
         # and fall back to deterministic prose. Extracted to apply_product_claim_guard.
         from src.app.services.recommend_narration_stage import apply_product_claim_guard as _apply_claim_guard
         _pre_guard_msg = assistant_message
+        _ckpt("narration")
         assistant_message = _apply_claim_guard(
             assistant_message, query=query, results=results, constraints=constraints,
             brand_budget_answer=brand_budget_answer, trace_id=trace_id,
@@ -11255,6 +11282,7 @@ def suggest(
     except Exception:
         pass
     # ── Post-processing pipeline (extracted to recommend_post_pipeline.run_post_pipeline) ──
+    _ckpt("decoration_and_stock")
     from src.app.services.recommend_post_pipeline import (
         run_post_pipeline as _run_post_pipeline,
         PostPipelineInput as _PostPipelineInput,
