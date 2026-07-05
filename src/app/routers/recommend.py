@@ -905,16 +905,12 @@ def _top_up_image_results(
     }
 
 
-def _coerce_specs(raw_specs: Any) -> Dict[str, Any]:
-    if isinstance(raw_specs, dict):
-        return raw_specs
-    if isinstance(raw_specs, str) and raw_specs.strip():
-        try:
-            parsed = json.loads(raw_specs)
-            return parsed if isinstance(parsed, dict) else {}
-        except Exception:
-            return {}
-    return {}
+# Extracted to the agnostic core (services/catalog_scoring.py): shared scorer + candidate
+# assembly for the fast path. The old in-file scorer hardcoded one vertical's category words;
+# the core version anchors the category boost on the active profile's category_keywords groups.
+from src.app.services.catalog_scoring import build_candidate as _build_fast_path_candidate
+from src.app.services.catalog_scoring import coerce_specs as _coerce_specs
+from src.app.services.catalog_scoring import score_candidate as _score_fast_path_candidate
 
 
 def _fast_path_product_score(
@@ -926,71 +922,9 @@ def _fast_path_product_score(
     budget_max: Optional[int],
     use_case_fit: Optional[Dict[str, Any]] = None,
 ) -> float:
-    name = str(row.get("name") or "").lower()
-    specs = row.get("specs") if isinstance(row.get("specs"), dict) else {}
-    spec_text = json.dumps(specs, ensure_ascii=False).lower()
-    haystack = f"{name} {spec_text}"
-    q = str(query or "").lower()
-    price_cents = int(row.get("price_cents") or 0)
-    price = cents_to_dollars(price_cents)
-
-    score = 0.0
-    if "laptop" in haystack or "notebook" in haystack:
-        score += 30.0
-    # Use-case suitability comes from the vertical adapter (electronics: GPU tier +
-    # spec floors), NOT a keyword regex. A laptop that actually MEETS the resolved
-    # use-case (e.g. discrete GPU + 144Hz for gaming) is boosted; one that misses a
-    # hard requirement (Intel-Arc 60Hz for "gaming") is penalised so it can never
-    # outrank a genuine match. Generic queries (no use-case) get a mild
-    # discrete-GPU nudge only.
     fit = use_case_fit if use_case_fit is not None else _use_case_fit(row, query)
-    if fit.get("use_case"):
-        if fit.get("meets"):
-            score += 35.0
-        else:
-            score += 4.0
-            if any(str(g).startswith("needs_discrete_gpu") for g in (fit.get("gaps") or [])):
-                score -= 14.0
-    elif fit.get("tier") in ("entry", "mid", "high"):
-        score += 8.0
-    # Soft/exclusion adjustment from the adapter (B2B/fleet: business-class boost, consumer-gaming demote).
-    # Profile-driven number; core stays agnostic. Keeps "work laptops" off the gaming SKUs even when both
-    # MEET (a use-case with no hard floor, e.g. office, otherwise scores every laptop identically at +35).
-    _fit_adj = fit.get("score_adjustment")
-    if _fit_adj:
-        score += float(_fit_adj)
-    for brand in safe_hints.get("brand_hints") or []:
-        if brand and brand in haystack:
-            score += 22.0
-    # Brand list is vertical flavour -> read from the active store profile, not hardcoded.
-    try:
-        from src.app.platform.store_profile import profile_slot as _ps
-        _known_brands = _ps("known_brands", default=()) or ()
-    except Exception:
-        _known_brands = ()
-    for token in _known_brands:
-        token = str(token).lower()
-        if token and token in q and token in haystack:
-            score += 12.0
-    if budget_min is not None and price >= float(budget_min):
-        score += 8.0
-    if budget_max is not None and price <= float(budget_max):
-        score += 10.0
-    # Budget-band truth: an over-budget unit is DEMOTED with a dominating penalty so no use-case/brand
-    # score can lift it above an in-budget one (the $4.5k-for-$1,900 trust bug). 'stretch'/'under' are
-    # mild; 'in' is neutral. Single source of truth in recommend_budget_band.
-    try:
-        from src.app.services.recommend_budget_band import band_status, budget_rank_penalty
-        score += budget_rank_penalty(band_status(price_cents, budget_min, budget_max))
-    except Exception:
-        if budget_max is not None and price > float(budget_max):
-            score -= min(20.0, (price - float(budget_max)) / 100.0)
-    try:
-        if int(row.get("stock") or 0) > 0:
-            score += 6.0
-    except Exception:
-        pass
-    return score
+    return _score_fast_path_candidate(row, query, safe_hints=safe_hints,
+                                      budget_min=budget_min, budget_max=budget_max, use_case_fit=fit)
 
 
 def _parse_fast_path_image_inputs(
@@ -1103,32 +1037,11 @@ def _fast_path_catalog_recommendation(
             "stock": int(row.get("stock") or 0),
             "specs": specs,
         }
-        _fit = _use_case_fit(item, query)
-        item["score"] = _fast_path_product_score(
-            row=item,
-            query=query,
-            safe_hints=safe_hints,
-            budget_min=budget_min,
-            budget_max=budget_max,
-            use_case_fit=_fit,
-        )
-        item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
-        _price = cents_to_dollars(item.get("price_cents"))
-        # Use-case reason codes (e.g. gaming_use_case_match, discrete_gpu) come from the
-        # adapter and are emitted ONLY when the candidate actually meets the use-case.
-        item["factors"] = {
-            "positive": list(filter(None, [
-                "price_fit" if (budget_max is not None and _price <= float(budget_max)) else (
-                    "query_match" if any(tok in str(item.get("name") or "").lower() for tok in str(query or "").lower().split()) else "catalog_match"
-                ),
-                "safe_image_brand_hint" if safe_hints.get("brand_hints") else None,
-                *(_fit.get("reasons") or []),
-                "in_stock" if item.get("stock", 0) > 0 else None,
-            ]))[:4],
-            "negative": list(_fit.get("gaps") or [])[:2],
-        }
-        item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
-        candidates.append(item)
+        # score/confidence/factors/score_norm assembly is shared with the fallback loop (core).
+        candidates.append(_build_fast_path_candidate(
+            item, query, safe_hints=safe_hints, budget_min=budget_min, budget_max=budget_max,
+            use_case_fit_fn=_use_case_fit,
+        ))
 
     candidates.sort(key=lambda x: (-float(x.get("score") or 0.0), int(x.get("price_cents") or 0), str(x.get("name") or "")))
     query_elapsed_ms = int((time.perf_counter() - query_t0) * 1000)
@@ -1148,27 +1061,12 @@ def _fast_path_catalog_recommendation(
                 continue
             if budget_max is not None and item["price_cents"] > int((float(budget_max) + 400.0) * 100):
                 continue
-            item = dict(item)
-            _fb_fit = _use_case_fit(item, query)
-            item["score"] = _fast_path_product_score(
-                row=item,
-                query=query,
-                safe_hints=safe_hints,
-                budget_min=budget_min,
-                budget_max=budget_max,
-                use_case_fit=_fb_fit,
+            item = _build_fast_path_candidate(
+                dict(item), query, safe_hints=safe_hints, budget_min=budget_min,
+                budget_max=budget_max, use_case_fit_fn=_use_case_fit,
             )
-            item["confidence"] = round(max(0.15, min(0.99, item["score"] / 100.0)), 6)
-            _fb_price = cents_to_dollars(item.get("price_cents"))
-            item["factors"] = {
-                "positive": list(filter(None, [
-                    "price_fit" if (budget_max is not None and _fb_price <= float(budget_max)) else "query_match",
-                    *(_fb_fit.get("reasons") or []),
-                    "in_stock" if item.get("stock", 0) > 0 else None,
-                ]))[:3],
-                "negative": ["catalog_query_timeout"] if query_elapsed_ms > 2500 else list(_fb_fit.get("gaps") or [])[:2],
-            }
-            item["score_norm"] = round(max(1.0, min(99.0, item["score"])), 3)
+            if query_elapsed_ms > 2500:  # fallback-specific honesty marker survives the dedup
+                item["factors"]["negative"] = ["catalog_query_timeout"]
             candidates.append(item)
         candidates.sort(key=lambda x: (-float(x.get("score") or 0.0), int(x.get("price_cents") or 0), str(x.get("name") or "")))
     # Collapse the same product listed under multiple SKUs (keeps the best record),

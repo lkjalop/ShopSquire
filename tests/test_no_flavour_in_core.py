@@ -83,6 +83,9 @@ _CORE_MODULES = [
     # append-only payment ledger: order/intent ids + cents + event kinds only — no product
     # vocabulary. The governed refund two-step folds over these events.
     "src/app/services/payment_ledger.py",
+    # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
+    # profile's category_keywords groups; brands from the profile — no product vocabulary.
+    "src/app/services/catalog_scoring.py",
     # adaptive agent budgets: tier/risk/event-signal → per-agent tool+token budget, agent names
     # only (no product vocabulary). Extracted from orchestrator.
     "src/app/services/agent_budgets.py",
