@@ -104,6 +104,9 @@ _CORE_MODULES = [
     # email action policy (extracted from email_security): findings → bounded enforceable action
     # policy; opaque action names, no product vocabulary.
     "src/app/security/email_action_policy.py",
+    # email structured-findings builder + pre-agent-gate + agent-runs audit (extracted from
+    # email_security): composes finding helpers + passive-payload classifier — no product vocabulary.
+    "src/app/security/email_structured_findings.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
