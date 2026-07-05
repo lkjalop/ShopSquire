@@ -101,6 +101,9 @@ _CORE_MODULES = [
     # email business-bundle + drilldown + structured-finding decoration (extracted from
     # email_security): composes email_findings helpers over finding dicts — no product vocabulary.
     "src/app/security/email_business_bundle.py",
+    # email action policy (extracted from email_security): findings → bounded enforceable action
+    # policy; opaque action names, no product vocabulary.
+    "src/app/security/email_action_policy.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
