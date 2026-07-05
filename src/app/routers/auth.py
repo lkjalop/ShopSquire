@@ -169,6 +169,15 @@ def _ensure_auth_tables():
             )
             """
         )
+        # email_verified: native /register starts unverified until the emailed link is clicked
+        # (OAuth already sets it). Idempotent add for existing DBs. SAVEPOINT-wrapped: on Postgres a
+        # failed ALTER (column already exists) aborts the whole transaction — the nested savepoint
+        # isolates that failure so the CREATE TABLEs below still run. SQLite supports savepoints too.
+        try:
+            with db.begin_nested():
+                db.execute("ALTER TABLE user_accounts ADD COLUMN email_verified INTEGER DEFAULT 0")
+        except Exception:
+            pass
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS session_tokens (
@@ -386,6 +395,39 @@ def _jwt_decode_hs256(token: str, secret: str, *, issuer: str, audience: str) ->
         )
     except (pyjwt.InvalidTokenError, pyjwt.ExpiredSignatureError, Exception):
         return None
+
+
+def _issue_email_verification_token(user_id: str, email: str) -> str:
+    """A stateless, signed email-verification token (no token table needed): a JWT with
+    purpose=email_verify + 24h expiry, over the standard issuer/audience so _jwt_decode_hs256
+    validates it. Empty string when the JWT secret isn't configured."""
+    secret = _jwt_secret()
+    if not secret:
+        return ""
+    now = int(time.time())
+    ttl = int(os.getenv("EMAIL_VERIFY_TTL_SECONDS", "86400") or 86400)
+    claims = {"sub": user_id, "email": email, "purpose": "email_verify",
+              "iss": _jwt_issuer(), "aud": _jwt_audience(), "iat": now, "exp": now + ttl}
+    return _jwt_encode_hs256(claims, secret)
+
+
+def _send_verification_email(email: str, token: str) -> None:
+    """Emit the verification link. Real SMTP at deploy (via the DLP-guarded outbound path); in dev
+    the link is logged so the flow is exercisable without SMTP secrets. Best-effort; never raises."""
+    base = str(os.getenv("PUBLIC_BASE_URL", "http://localhost:8080")).rstrip("/")
+    link = f"{base}/api/v1/auth/verify-email?token={token}"
+    try:
+        env = str(os.getenv("APP_ENV", "local") or "local").lower()
+        if env in ("local", "dev", "development", "test", "testing"):
+            logging.getLogger("shopsquire.auth").info("EMAIL VERIFY LINK for %s: %s", email, link)
+            return
+        from src.app.services.email_providers import get_default_email_provider
+        get_default_email_provider().send(
+            email, "Verify your ShopSquire account",
+            f"Welcome to ShopSquire. Confirm your email to activate your account:\n\n{link}\n",
+            agent_id="Auth_Verification")
+    except Exception as exc:
+        logging.getLogger("shopsquire.auth").warning("verification email send failed: %s", exc)
 
 
 def _issue_access_jwt(*, user_id: str, email: str | None, role: str) -> Dict:
@@ -663,7 +705,43 @@ def register(payload: RegisterPayload, request: Request, response: Response) -> 
             set_csrf_cookie(response.headers, generate_csrf_token(), secure=_is_https_request(request))
         except Exception:
             pass
-        return {"user_id": user_id, "email": email, "name": payload.name, **token, **jwt_pair}
+        # Email verification: emit a signed link (native register starts unverified). Non-blocking.
+        try:
+            _send_verification_email(email, _issue_email_verification_token(user_id, email))
+        except Exception:
+            pass
+        return {"user_id": user_id, "email": email, "name": payload.name,
+                "email_verified": False, "verification_email_sent": True, **token, **jwt_pair}
+
+
+@router.get("/verify-email")
+@router.post("/verify-email")
+def verify_email(token: str) -> Dict:
+    """Validate the emailed verification token and mark the account verified. Also promotes any
+    GUEST orders placed with this email to the now-verified member (bulk guest->member merge by
+    email hash) — the complement to /account/claim-order's single-order path."""
+    secret = _jwt_secret()
+    claims = _jwt_decode_hs256(token, secret, issuer=_jwt_issuer(), audience=_jwt_audience()) if secret else None
+    if not claims or str(claims.get("purpose") or "") != "email_verify":
+        raise HTTPException(status_code=400, detail="invalid_or_expired_verification_token")
+    user_id = str(claims.get("sub") or "")
+    email = str(claims.get("email") or "").strip().lower()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="invalid_verification_token")
+    _ensure_auth_tables()
+    merged = 0
+    with db_session() as db:
+        db.execute(sql_text("UPDATE user_accounts SET email_verified = 1 WHERE id = :id"), {"id": user_id})
+        # bulk guest->member merge: claim any unclaimed guest orders that match this email hash.
+        try:
+            res = db.execute(sql_text(
+                "UPDATE orders SET customer_id = :cid WHERE customer_id IS NULL AND guest_email_hash = :h"),
+                {"cid": user_id, "h": pii_hash(email)})
+            merged = int(getattr(res, "rowcount", 0) or 0)
+        except Exception:
+            merged = 0
+        db.commit()
+    return {"verified": True, "user_id": user_id, "email": email, "guest_orders_merged": merged}
 
 
 @router.post("/login")
