@@ -153,6 +153,15 @@ def _ensure_auth_tables():
                 )
                 """
             )
+            # email_verified safety-net on the migration-managed table (same runtime-compat pattern
+            # as the tables above). SAVEPOINT-isolated so a duplicate-column failure on Postgres
+            # doesn't abort this transaction. On a migrated DB user_accounts exists; this adds the
+            # column if the migration predates the feature.
+            try:
+                with db.begin_nested():
+                    db.execute("ALTER TABLE user_accounts ADD COLUMN email_verified INTEGER DEFAULT 0")
+            except Exception:
+                pass
             db.commit()
         return
 
