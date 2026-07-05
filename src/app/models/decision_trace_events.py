@@ -53,6 +53,17 @@ def ensure_decision_trace_events_table():
                 db.execute(sql_text("ALTER TABLE decision_trace_events ADD COLUMN seq INTEGER"))
             except Exception:
                 pass
+            # Read-path indexes: with ~70k rows and NO secondary index, every campaign-correlator
+            # query (event_type + created_at, measured 121ms per security scan) and every
+            # DecisionTrace-panel read (trace_id) was a full-table scan.
+            for _idx in (
+                "CREATE INDEX IF NOT EXISTS ix_dte_type_created ON decision_trace_events(event_type, created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_dte_trace ON decision_trace_events(trace_id)",
+            ):
+                try:
+                    db.execute(sql_text(_idx))
+                except Exception:
+                    pass
             db.commit()
     except Exception:
         pass

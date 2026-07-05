@@ -70,6 +70,16 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
     decision_id = inp.decision_id
     flags = inp.flags
 
+    # Segment checkpoints for the post-payload path — this pipeline runs on the redacted copy, so
+    # the in-route _ckpt() can't see it; these named the formerly-unattributed ~1.1s tail.
+    _pp_last = [time.perf_counter()]
+    _pp_segs: Dict[str, float] = {}
+
+    def _pp(name: str) -> None:
+        now = time.perf_counter()
+        _pp_segs[f"seg_{name}_ms"] = round((now - _pp_last[0]) * 1000, 1)
+        _pp_last[0] = now
+
     # ── Policy ────────────────────────────────────────────────────────────────
     policy = hooks.get_policy("recommend")
     inp.payload["policy_version"] = policy.get("version", inp.payload.get("policy_version"))
@@ -109,6 +119,8 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
     except Exception:
         pass
 
+    _pp("post_policy")
+
     # ── Redaction ─────────────────────────────────────────────────────────────
     redacted, changes, pci = hooks.redact_payload(payload_policy)
     try:
@@ -122,6 +134,8 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
             )
     except Exception:
         pass
+
+    _pp("post_redaction")
 
     # ── Model watermark ───────────────────────────────────────────────────────
     try:
@@ -155,6 +169,8 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
             redacted["status"] = redacted.get("status") or "review_required"
     except Exception:
         pass
+
+    _pp("post_watermark_theft_probe")
 
     # ── Billing meter ─────────────────────────────────────────────────────────
     try:
@@ -203,6 +219,8 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
     except Exception:
         pass
 
+    _pp("post_output_security")
+
     # ── Final incident review ─────────────────────────────────────────────────
     try:
         hooks.auto_create_incident_for_review(
@@ -216,6 +234,8 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
     except Exception:
         pass
 
+    _pp("post_incident_review")
+
     # ── Checkout handoff ──────────────────────────────────────────────────────
     redacted = hooks.apply_checkout_handoff(
         redacted,
@@ -225,7 +245,9 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
     # ── Final transforms ──────────────────────────────────────────────────────
     redacted = hooks.compose_compound_if_needed(redacted, redacted.get("trace_id"))
     redacted = hooks.finalize_response_payload(redacted)
+    _pp("post_final_transforms")
     timing = redacted.setdefault("timing_breakdown", {})
+    timing.update(_pp_segs)
     timing.setdefault("compound_needed", False)
     timing.setdefault("compound_ms", 0)
     if inp.started_at is not None:

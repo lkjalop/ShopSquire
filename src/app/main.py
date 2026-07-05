@@ -275,6 +275,39 @@ def create_app() -> FastAPI:
             init_tracer("shopsquire-api", app=app)
         except Exception:
             pass
+        # Pre-warm the decision-log/audit path OFF-THREAD: the first request otherwise pays a
+        # ~2.7s cold spike in decision_log_and_annotation (metadata create + column introspection
+        # + trace-table init + first hash-chain write, in aggregate). One synthetic-but-honest
+        # 'service_started' decision row absorbs all of it before any buyer arrives.
+        try:
+            import threading as _th
+
+            def _prewarm_decision_log() -> None:
+                try:
+                    from src.app.models.decision_trace_events import ensure_decision_trace_events_table
+                    from src.app.models.init_db import ensure_metadata
+                    from src.app.services.decision_log import log_decision
+                    ensure_metadata()
+                    ensure_decision_trace_events_table()
+                    log_decision(
+                        agent_name="system_startup",
+                        input_data={"event": "service_started"},
+                        retrieved_context={},
+                        proposed_action={"action": "prewarm_decision_log"},
+                        agent_reasoning="startup pre-warm: absorb first-write init cost before user traffic",
+                        policy_version="v1",
+                        approval_required=False,
+                        execution_status="executed",
+                    )
+                    import logging as _pl
+                    _pl.getLogger("shopsquire.startup").info("decision-log pre-warm complete")
+                except Exception as _pw_exc:
+                    import logging as _pl
+                    _pl.getLogger("shopsquire.startup").warning("decision-log pre-warm failed: %s", _pw_exc)
+
+            _th.Thread(target=_prewarm_decision_log, name="decision-log-prewarm", daemon=True).start()
+        except Exception:
+            pass
         try:
             from sqlalchemy import text as _sql_text
             from scripts.seed_demo_data import seed_products

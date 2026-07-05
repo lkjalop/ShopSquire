@@ -60,9 +60,12 @@ def embed_text_ollama(
     base = (base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
     mdl = model or os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
     url = f"{base}/api/embeddings"
+    # keep_alive: the embed model is tiny but its RELOAD is not (measured 2.8–6.1s when the big
+    # chat models evict it). Pin it resident so embeds never pay the reload; override per-env.
+    keep_alive = os.getenv("OLLAMA_EMBED_KEEP_ALIVE", "60m")
     try:
         with httpx.Client(timeout=timeout) as client:
-            resp = client.post(url, json={"model": mdl, "prompt": text or ""})
+            resp = client.post(url, json={"model": mdl, "prompt": text or "", "keep_alive": keep_alive})
             resp.raise_for_status()
             data = resp.json()
             emb = data.get("embedding") or []

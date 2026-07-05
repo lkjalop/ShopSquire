@@ -8,6 +8,10 @@
 $env:OLLAMA_DEFAULT_MODEL      = "qwen3:14b"
 $env:OLLAMA_SMALL_MODEL        = "qwen3:14b"     # recommendation/procurement narration uses 14b (was 8b-vl)
 $env:OLLAMA_SUMMARY_MODEL      = "qwen3:14b"
+$env:OLLAMA_EMBED_KEEP_ALIVE   = "60m"           # pin nomic-embed resident (reload costs 2.8-6.1s when evicted)
+# NOTE (Ollama SERVER config, set where `ollama serve` runs — not here): to stop embeds queuing
+# behind 14b generations, set OLLAMA_NUM_PARALLEL=2 and OLLAMA_MAX_LOADED_MODELS=3 in the Ollama
+# service environment, then restart Ollama. App-side keep_alive above only prevents the reload.
 # vision/CV/security/OCR intentionally left as configured (qwen3-vl:8b / glm-ocr / llama-guard3)
 
 $env:FULFILLMENT_DEMO_ENABLED          = "1"      # enables replay Reset/Advance + demo supplier reply
