@@ -98,6 +98,9 @@ _CORE_MODULES = [
     # email finding normalization/ranking/compliance-mapping (extracted from email_security): pure
     # over finding dicts + control-registry lookup — opaque finding types, no product vocabulary.
     "src/app/security/email_findings.py",
+    # email business-bundle + drilldown + structured-finding decoration (extracted from
+    # email_security): composes email_findings helpers over finding dicts — no product vocabulary.
+    "src/app/security/email_business_bundle.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
