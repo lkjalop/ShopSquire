@@ -42,18 +42,28 @@ def plan_turn(
 
     lines: List[Dict[str, Any]] = []
 
-    # 1) prior lines carried forward — apply a "__last__" amendment to the LAST prior item's quantity
+    # 1) prior lines carried forward — apply a "__last__" amendment to a prior item's quantity.
     amend_qty: Optional[int] = None
     for a in intents.amendments:
         if a.ref == "__last__":
             amend_qty = a.new_qty
+    # Target selection: a bare "make it 15" with MULTIPLE prior lines used to blindly amend the LAST
+    # line — which broke when the last line was already at that qty (e.g. cart = [Lenovo 25, Apple 15]
+    # and "make it 15" amended Apple, a no-op on the wrong laptop). Prefer the LAST prior line whose
+    # qty actually CHANGES; fall back to the last line only if every line already matches.
+    amend_idx: int = len(prior) - 1
+    if amend_qty is not None and len(prior) > 1:
+        changing = [i for i, p in enumerate(prior)
+                    if int((p or {}).get("requested_qty") or 0) != int(amend_qty)]
+        if changing:
+            amend_idx = changing[-1]
     for i, p in enumerate(prior):
         row = dict(p)
         row["scope"] = "prior"
         # `amended` is True ONLY for the line this turn actually changed the qty of. A carried-forward,
         # unchanged prior line must NOT be presented as an amendment (else the UI shows a spurious
         # "Change X quantity to N" and confirming it would apply/add an item the buyer never asked to change).
-        row["amended"] = bool(amend_qty is not None and i == len(prior) - 1)
+        row["amended"] = bool(amend_qty is not None and i == amend_idx)
         if row["amended"]:
             row["requested_qty"] = amend_qty            # 20 → 15 on the chosen laptop
         lines.append(row)

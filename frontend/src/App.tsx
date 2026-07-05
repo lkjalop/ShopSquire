@@ -748,11 +748,18 @@ export default function App() {
     // "asked for 30, cart got 1".
     const bulkQty = qty <= 1 && pendingBulkQty && pendingBulkQty > 1 ? pendingBulkQty : null;
     if (bulkQty) {
+      // Stale-cart preflight: disclose pre-existing lines (other SKUs) AT the moment of the bulk add,
+      // so accumulated items from an earlier turn/session never surprise the buyer in the total.
+      const priorOther = (cart?.items || []).filter((i: any) => i.sku && i.sku !== sku);
+      const priorUnits = priorOther.reduce((s: number, i: any) => s + (Number(i.quantity) || 1), 0);
       await setCartQty(sku, bulkQty, true);
       switchRightPanelMode('cart');
       setChatOpen(true);
       const addedProduct = products.find((p) => p.sku === sku);
-      const bulkMsg = `Added **${bulkQty} × ${addedProduct?.name || sku}** to your cart (from your request). Any shortfall vs stock will be sourced from a supplier — check the delivery plan in the cart.`;
+      const staleNote = priorOther.length > 0
+        ? ` Your cart already had **${priorOther.length} other item${priorOther.length !== 1 ? 's' : ''} (${priorUnits} unit${priorUnits !== 1 ? 's' : ''})** from earlier — say **"clear my cart"** if you want just this.`
+        : '';
+      const bulkMsg = `Added **${bulkQty} × ${addedProduct?.name || sku}** to your cart (from your request). Any shortfall vs stock will be sourced from a supplier — check the delivery plan in the cart.${staleNote}`;
       setMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last && last.role === 'assistant' && last.content === bulkMsg) return prev;
@@ -1929,7 +1936,7 @@ export default function App() {
                            feedback: "looks clunky — maybe a separate output box"). Question text is a
                            heading, its options are compact chips beneath; capped at 2 questions. */
                         <div data-testid="nqe-card" style={{
-                          marginTop: 10, border: '1px solid #c7d2fe', background: '#f8faff',
+                          marginTop: 10, border: '1px solid #e5e7eb', background: '#f9fafb',
                           borderRadius: 10, padding: '10px 12px',
                         }}>
                           <div style={{ fontSize: 12, fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 }}>
@@ -1955,7 +1962,9 @@ export default function App() {
                               </div>
                               {Array.isArray(nq.options) && nq.options.length > 0 && (
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 5 }}>
-                                  {nq.options.map((opt) => (
+                                  {/* cap at 3 option chips per question — the full list was a clunky wall
+                                      (a business question surfaced 5-6). Top 3 keeps the card scannable. */}
+                                  {nq.options.slice(0, 3).map((opt) => (
                                     <button
                                       key={`${nq.id}:${opt.id}`}
                                       type="button"

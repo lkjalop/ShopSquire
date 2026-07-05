@@ -61,3 +61,32 @@ def test_no_prior_selection_amendment_becomes_a_note_not_a_wrong_qty():
     # no prior item → the amendment is a note, not a silent qty change; nothing to amend
     assert out["intents"]["amendments"] == []
     assert any("no prior selection" in n for n in out["intents"]["notes"])
+
+
+def test_bare_qty_amendment_targets_the_line_that_actually_changes():
+    """cart = [Lenovo 25, Apple 15]; a bare 'make it 15' must amend LENOVO (the line whose qty
+    changes), NOT blindly the LAST line (Apple, already 15 → wrong laptop + no-op). Regression for
+    the demo screenshot where 'make it 15' amended the Apple line."""
+    prior = [
+        {"ref": "LAP-LENOVO", "category": "laptops", "requested_qty": 25,
+         "results": [{"name": "Lenovo IdeaPad", "price_cents": 159900}]},
+        {"ref": "LAP-APPLE", "category": "laptops", "requested_qty": 15,
+         "results": [{"name": "Apple MacBook Air", "price_cents": 179900}]},
+    ]
+    out = plan_turn("actually make it 15 instead", prior_lines=prior, search_fn=_good_search)
+    amended = [l for l in out["plan"] if l.get("amended")]
+    assert len(amended) == 1, f"exactly one line amended, got {amended}"
+    assert amended[0]["ref"] == "LAP-LENOVO", "must target the changing line, not the last"
+    assert amended[0]["requested_qty"] == 15
+    # Apple line carried forward UNCHANGED (not spuriously marked amended)
+    apple = next(l for l in out["plan"] if l.get("ref") == "LAP-APPLE")
+    assert not apple.get("amended") and apple["requested_qty"] == 15
+
+
+def test_bare_qty_amendment_falls_back_to_last_when_all_match():
+    """If every prior line already equals the requested qty, keep the old behavior (amend the last)."""
+    prior = [{"ref": "A", "category": "laptops", "requested_qty": 15},
+             {"ref": "B", "category": "laptops", "requested_qty": 15}]
+    out = plan_turn("actually make it 15 instead", prior_lines=prior, search_fn=_good_search)
+    amended = [l for l in out["plan"] if l.get("amended")]
+    assert len(amended) == 1 and amended[0]["ref"] == "B"  # last line
