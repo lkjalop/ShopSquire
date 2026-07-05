@@ -311,10 +311,33 @@ def _nfkc(s: str) -> str:
         return s
 
 
+# Invisible/deception characters that NFKC does NOT remove: zero-width joins/space, BOM, and the
+# bidi overrides used to hide a real address behind a rendered one (e.g. "…gpal@evil.com" that
+# renders as "…moc.live@lapg"). Stripped at intake; their PRESENCE is reported so a detector can
+# score it (a legitimate email almost never carries a bidi override).
+_ZERO_WIDTH_CHARS = "​‌‍⁠﻿"          # ZWSP, ZWNJ, ZWJ, word-joiner, BOM
+_BIDI_OVERRIDE_CHARS = "‪‫‬‭‮⁦⁧⁨⁩"  # LRE/RLE/PDF/LRO/RLO/isolates
+_OBFUSCATION_STRIP_RE = re.compile("[" + _ZERO_WIDTH_CHARS + _BIDI_OVERRIDE_CHARS + "]")
+
+
+def scan_obfuscation(s: Any) -> Dict[str, bool]:
+    """Report invisible-character deception in raw text WITHOUT mutating it: zero-width chars and
+    bidi overrides. Pure; never raises."""
+    try:
+        t = str(s or "")
+    except Exception:
+        return {"zero_width": False, "bidi_override": False}
+    return {
+        "zero_width": any(c in t for c in _ZERO_WIDTH_CHARS),
+        "bidi_override": any(c in t for c in _BIDI_OVERRIDE_CHARS),
+    }
+
+
 def _clean_text(s: str, *, max_len: int = 200_000) -> str:
     # This is intentionally "intake only": normalize + trim. No scoring/routing here.
     s = str(s or "")
     s = s.replace("\x00", "")
+    s = _OBFUSCATION_STRIP_RE.sub("", s)  # drop zero-width + bidi overrides NFKC leaves intact
     s = _nfkc(s)
     s = s.strip()
     if len(s) > max_len:
@@ -330,6 +353,14 @@ def normalize_email_intake(email: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[
     src = dict(email or {})
     out = dict(src)
     changes = []
+
+    # Scan the RAW fields for invisible-char deception BEFORE _clean_text strips it.
+    _obf_zero_width = False
+    _obf_bidi = False
+    for _k in ("from_addr", "reply_to", "subject", "body", "message_id"):
+        _scan = scan_obfuscation(src.get(_k))
+        _obf_zero_width = _obf_zero_width or _scan["zero_width"]
+        _obf_bidi = _obf_bidi or _scan["bidi_override"]
 
     def _set(k: str, v: Any, *, max_len: int = 50_000) -> None:
         nonlocal out, changes
@@ -362,6 +393,8 @@ def normalize_email_intake(email: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[
         "gate": "intake_only",
         "unicode_nfkc_applied": True,
         "changed_fields": sorted(set([c for c in changes if c])),
+        "obfuscation_zero_width": bool(_obf_zero_width),
+        "obfuscation_bidi_override": bool(_obf_bidi),
     }
     return out, meta
 

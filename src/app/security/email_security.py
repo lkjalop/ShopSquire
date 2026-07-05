@@ -3261,6 +3261,16 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         email, intake_meta = normalize_email_intake(email)
     except Exception:
         intake_meta = {"gate": "intake_only", "error": "normalize_failed"}
+    # Invisible-char deception surfaced by intake → typed indicators. A bidi override in an address
+    # or subject is a strong spoof signal (hides the real address behind a rendered one); zero-width
+    # is a weaker obfuscation marker. The indicators fold into the verdict below.
+    _intake_obf_indicators = []
+    if intake_meta.get("obfuscation_bidi_override"):
+        _intake_obf_indicators.append({"type": "obfuscation_bidi_override", "severity": "high",
+                                       "detail": "bidi override characters hide the rendered text direction"})
+    if intake_meta.get("obfuscation_zero_width"):
+        _intake_obf_indicators.append({"type": "obfuscation_zero_width", "severity": "medium",
+                                       "detail": "zero-width characters embedded in email fields"})
 
     # Live DNS verification of SPF/DMARC/DKIM — non-authoritative, adds discrepancy indicators.
     dns_auth_result: dict[str, Any] = {}
@@ -3399,6 +3409,9 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         extracted.setdefault("meta", {})["content_classification"] = content_classification
     except Exception:
         pass
+    # Fold the intake obfuscation indicators (zero-width / bidi override) into the indicator set.
+    if _intake_obf_indicators:
+        extracted["indicators"] = list(extracted.get("indicators") or []) + _intake_obf_indicators
     # Fold steg signals from hydrated attachments into extracted indicators so
     # they propagate into verdict, framework_correlation, DREAD, and playbook.
     try:
