@@ -3484,6 +3484,29 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
         extracted.setdefault("meta", {})["semantic_bec"] = semantic_bec
     except Exception:
         pass
+    # AI-authored / synthetic-text stylometry — SHADOW by default (computed + logged, NOT scored)
+    # because it false-positives on legitimate templated/formal vendor mail. Only when
+    # EMAIL_AI_TEXT_ENFORCED is set AND another BEC-ish signal is present does it become a scoring
+    # indicator — never a standalone escalation. Calibrate in shadow before flipping.
+    try:
+        import os as _os_ai
+        from src.app.security.email_ai_authorship import score_ai_authorship
+        _ai_auth = score_ai_authorship(str(email.get("body") or ""))
+        extracted.setdefault("meta", {})["ai_authorship"] = _ai_auth
+        _ai_enforce = str(_os_ai.getenv("EMAIL_AI_TEXT_ENFORCED", "0")).strip().lower() in ("1", "true", "yes", "on")
+        _bec_context = bool(semantic_bec.get("detected")) or any(
+            str((i or {}).get("type") or "") in ("bank_change_request", "reply_to_mismatch", "lookalike_domain",
+                                                 "urgency", "invoice_redirect")
+            for i in (extracted.get("indicators") or [])
+        )
+        if _ai_enforce and bool(_ai_auth.get("detected")) and _bec_context:
+            extracted["indicators"] = list(extracted.get("indicators") or []) + [{
+                "type": "ai_generated_text_signal",
+                "value": float(_ai_auth.get("score") or 0.0),
+                "reason": f"AI-authored stylometry {float(_ai_auth.get('score') or 0.0):.2f} alongside BEC context",
+            }]
+    except Exception:
+        pass
     thread_graph: Dict[str, Any] = {
         "thread_key": None,
         "sender_domain": None,
@@ -3785,6 +3808,14 @@ def evaluate_email_security(email: Dict[str, Any], tenant_id: str | None = None)
             v["reasons"] = list(dict.fromkeys((v.get("reasons") or []) + ["semantic_bec_review_threshold"]))
             v["tags"] = list(dict.fromkeys((v.get("tags") or []) + ["semantic_bec", "semantic_bec:review"]))
         v["semantic_bec_score"] = round(sem_score, 4)
+    except Exception:
+        pass
+    # Lift the shadow AI-authorship reading to the top-level result (observable even when it does
+    # not score the verdict) — same pattern as semantic_bec_score.
+    try:
+        _ai = (extracted.get("meta") or {}).get("ai_authorship")
+        if isinstance(_ai, dict):
+            v["ai_authorship"] = _ai
     except Exception:
         pass
     try:

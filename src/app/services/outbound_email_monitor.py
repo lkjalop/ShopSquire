@@ -81,6 +81,30 @@ def _ensure_tables() -> None:
         pass
 
 
+def scan_outbound_content_dlp(subject: str, body: str) -> Dict[str, Any]:
+    """Content DLP on OUTBOUND mail: scan subject+body for SECRETS (credentials/keys/tokens) and
+    PII using the shared dlp_export patterns. The outbound monitor was behavioral-only (entropy,
+    timing) — it never looked at content, so PII/secrets could leave undetected.
+
+    A secret leaving is unambiguous → action='block'. PII is a softer flag → action='review'
+    (a lot of legitimate mail carries a name/phone). Returns
+    {secret_hits, pii_hits, action, categories}. Never raises."""
+    try:
+        from src.app.security.dlp_export import dlp_scrub_pii, dlp_scrub_text
+        blob = f"{subject or ''}\n{body or ''}"
+        _, secret_hits = dlp_scrub_text(blob)
+        _, pii_hits = dlp_scrub_pii(blob)
+    except Exception:
+        return {"secret_hits": 0, "pii_hits": 0, "action": "allow", "categories": []}
+    categories: List[str] = []
+    if secret_hits:
+        categories.append("secret")
+    if pii_hits:
+        categories.append("pii")
+    action = "block" if secret_hits > 0 else ("review" if pii_hits > 0 else "allow")
+    return {"secret_hits": int(secret_hits), "pii_hits": int(pii_hits), "action": action, "categories": categories}
+
+
 def record_outbound_email_event(
     *,
     tenant_id: str | None,
@@ -104,6 +128,11 @@ def record_outbound_email_event(
         dom = None
     subj = str(subject or "")
     bod = str(body or "")
+    # Content DLP scan — fold the finding into the event meta so it persists + surfaces on the trace.
+    dlp = scan_outbound_content_dlp(subj, bod)
+    _meta = dict(meta or {})
+    if dlp.get("action") != "allow":
+        _meta["dlp_content"] = dlp
     row = {
         "id": ev_id,
         "tenant_id": tenant_id,
@@ -116,7 +145,7 @@ def record_outbound_email_event(
         "subject_len": int(len(subj)),
         "body_len": int(len(bod)),
         "created_at": now,
-        "meta_json": json.dumps(meta or {}, ensure_ascii=False),
+        "meta_json": json.dumps(_meta, ensure_ascii=False),
     }
     try:
         with db_session() as db:
@@ -155,7 +184,8 @@ def record_outbound_email_event(
             )
     except Exception:
         pass
-    return {"id": ev_id, **{k: row[k] for k in ("tenant_id", "agent_id", "to_domain_hash", "thread_id_hash", "subject_entropy", "body_entropy", "created_at")}}
+    return {"id": ev_id, "dlp": dlp,
+            **{k: row[k] for k in ("tenant_id", "agent_id", "to_domain_hash", "thread_id_hash", "subject_entropy", "body_entropy", "created_at")}}
 
 
 def _recent_events(*, agent_id: str, minutes: int = 60, now_ts: int | None = None) -> List[Dict[str, Any]]:

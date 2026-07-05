@@ -96,6 +96,7 @@ class EmailEvaluateResponse(BaseModel):
     action_policy: Optional[Dict[str, Any]] = None
     human_gate: Optional[Dict[str, Any]] = None
     semantic_bec_score: Optional[float] = None
+    ai_authorship: Optional[Dict[str, Any]] = None
     coverage_limits: Optional[Dict[str, Any]] = None
     explainability_card: Optional[Dict[str, Any]] = None
     threat_hunter_leads: Optional[List[Dict[str, Any]]] = None

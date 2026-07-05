@@ -66,6 +66,17 @@ class SendGridProvider(BaseEmailProvider):
                 decision_id=decision_id,
                 meta={"provider": "sendgrid"},
             )
+            # Outbound content DLP ENFORCEMENT: a SECRET leaving the boundary is blocked outright
+            # (unambiguous). PII is flagged in the event but not blocked by default (legit mail
+            # carries names/phones). OUTBOUND_DLP_BLOCK_PII=1 hardens it to block PII too.
+            _dlp = (ev or {}).get("dlp") or {}
+            _dlp_block = bool(_dlp.get("action") == "block") or (
+                _dlp.get("action") == "review"
+                and str(os.getenv("OUTBOUND_DLP_BLOCK_PII", "0")).strip().lower() in ("1", "true", "yes", "on")
+            )
+            if _dlp_block:
+                return {"ok": False, "blocked": True, "error": "dlp_content_block",
+                        "agent_id": agent_id, "capability": "email_send", "dlp": _dlp}
             analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
             store_outbound_anomaly(tenant_id=tenant_id, agent_id=agent_id, event_id=str(ev.get("id") or ""), analysis=analysis, severity=("high" if analysis.get("anomalous") else "info"))
             try:
