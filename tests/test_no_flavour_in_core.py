@@ -89,6 +89,9 @@ _CORE_MODULES = [
     # shipping-address validation: format/postcode plausibility, ISO country→regex reference data —
     # no product vocabulary.
     "src/app/services/address_validation.py",
+    # unified customer purchases + tracking read model: unions consumer orders + procurement cases;
+    # order/case ids + cents + opaque statuses only — no product vocabulary.
+    "src/app/services/account_purchases.py",
     # DMARC aggregate-report parsing + BEC heuristics (extracted from email_security): XML/zip parse +
     # SPF/DKIM counts + generic risky-word/homograph heuristics — no product vocabulary.
     "src/app/security/email_dmarc.py",

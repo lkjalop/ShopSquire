@@ -8,6 +8,7 @@ from pydantic import BaseModel, EmailStr
 
 from src.app.models.db import db_session
 from src.app.routers.auth import _ensure_auth_tables, _user_from_token
+from src.app.services.account_purchases import order_tracking, unified_purchases
 
 
 router = APIRouter(prefix="/api/v1/account", tags=["account"])
@@ -55,6 +56,33 @@ def orders(token: str, limit: int = 20, offset: int = 0) -> Dict:
                 for r in rows
             ]
         }
+
+
+@router.get("/purchases")
+def purchases(token: str, limit: int = 20) -> Dict:
+    """ONE newest-first timeline of the customer's consumer orders AND procurement/RFQ cases — the
+    unified view /orders can't give (it shows consumer orders only). Each entry carries status +
+    tracking. This is the customer-facing complement to the internal order→dispatch→ship spine."""
+    row = _require_user(token)
+    user_id = row[0]
+    with db_session() as db:
+        items = unified_purchases(db, uid=user_id, customer_id=user_id, limit=limit)
+    return {"orders": sum(1 for i in items if i.get("kind") == "order"),
+            "procurement_cases": sum(1 for i in items if i.get("kind") == "procurement"),
+            "items": items}
+
+
+@router.get("/orders/{order_id}/tracking")
+def order_tracking_view(token: str, order_id: str) -> Dict:
+    """Shipment tracking for ONE of the customer's orders (status + tracking number + carrier),
+    scoped to the requester — 404 if the order isn't theirs."""
+    row = _require_user(token)
+    user_id = row[0]
+    with db_session() as db:
+        rec = order_tracking(db, order_id, uid=user_id, customer_id=user_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="order_not_found_for_requester")
+    return rec
 
 
 @router.get("/payment-methods")
