@@ -92,6 +92,9 @@ _CORE_MODULES = [
     # DMARC aggregate-report parsing + BEC heuristics (extracted from email_security): XML/zip parse +
     # SPF/DKIM counts + generic risky-word/homograph heuristics — no product vocabulary.
     "src/app/security/email_dmarc.py",
+    # email forensics snapshots (extracted from email_security): attachment/sender/baseline/visual
+    # pure builders over the email dict — opaque domains/attachments, no product vocabulary.
+    "src/app/security/email_forensics_snapshots.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
