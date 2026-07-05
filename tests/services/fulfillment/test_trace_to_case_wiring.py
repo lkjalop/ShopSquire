@@ -50,3 +50,34 @@ def test_most_recent_case_wins_for_a_trace(db):
     _seed_case(db, case_id="CASE-NEW", trace_id="trace-x")
     # newest updated_at wins (the buyer's latest sourcing for this decision)
     assert case_id_by_trace(db, "trace-x") in ("CASE-NEW", "CASE-OLD")  # ordering by updated_at DESC
+
+
+def test_backfill_repairs_null_trace_so_case_becomes_resolvable(db):
+    # A case first materialized without a trace (source_trace_id NULL) is unreachable by-trace. A later
+    # confirm that carries a trace must backfill it so the Procurement tab resolves — the A2 demo blocker.
+    from src.app.services.fulfillment.repository import backfill_source_trace_id, case_id_by_trace
+    _seed_case(db, case_id="CASE-NULL", trace_id=None)
+    assert case_id_by_trace(db, "trace-late") is None  # before repair: not resolvable
+
+    n = backfill_source_trace_id(db, ["CASE-NULL"], "trace-late")
+    assert n == 1
+    assert case_id_by_trace(db, "trace-late") == "CASE-NULL"  # after repair: resolvable
+
+
+def test_backfill_never_rebinds_a_case_that_already_has_a_trace(db):
+    # Idempotent + non-destructive: a case already stamped with a trace must NOT be overwritten (that
+    # would break the original trace's by-trace link). Backfill only fills NULLs.
+    from src.app.services.fulfillment.repository import backfill_source_trace_id, case_id_by_trace
+    _seed_case(db, case_id="CASE-HASTRACE", trace_id="trace-original")
+
+    n = backfill_source_trace_id(db, ["CASE-HASTRACE"], "trace-different")
+    assert n == 0                                                    # nothing repaired
+    assert case_id_by_trace(db, "trace-original") == "CASE-HASTRACE"  # original link intact
+    assert case_id_by_trace(db, "trace-different") is None           # never rebound
+
+
+def test_backfill_is_noop_on_empty_or_missing_trace(db):
+    from src.app.services.fulfillment.repository import backfill_source_trace_id
+    _seed_case(db, case_id="CASE-Z", trace_id=None)
+    assert backfill_source_trace_id(db, ["CASE-Z"], "") == 0     # no trace to stamp
+    assert backfill_source_trace_id(db, [], "trace-y") == 0      # no cases

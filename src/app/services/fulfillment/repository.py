@@ -14,12 +14,15 @@ Vertical-blind: state/state_json/evidence are opaque. Best-effort reads; never r
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 DEFAULT_TENANT = "default"
@@ -358,3 +361,36 @@ def case_id_by_trace(db, trace_id: str, tenant_id: str = DEFAULT_TENANT) -> Opti
         return row[0] if row else None
     except Exception:
         return None
+
+
+def backfill_source_trace_id(db, case_ids: List[str], trace_id: str,
+                             tenant_id: str = DEFAULT_TENANT) -> int:
+    """Repair the agent-trace link on already-materialized cases. When an order's cases were first
+    created WITHOUT a decision trace (``source_trace_id`` NULL — a trace-less or pre-fix first confirm)
+    and a LATER confirm DOES carry one, stamp it — but ONLY on rows still NULL, so we never rebind a
+    case that already has a trace (that would break the original trace's by-trace link). Scoped to the
+    given case ids + tenant. Without this, ``case_id_by_trace`` can never resolve those cases and the
+    Decision Trace -> Procurement tab 404s forever (re-confirming the order does not self-heal it).
+    Best-effort; commits its own repair; returns the number of rows actually repaired."""
+    if db is None or not trace_id or not case_ids:
+        return 0
+    repaired = 0
+    try:
+        ensure_tables(db)
+        tid = _tid(tenant_id)
+        now = _now_iso(None)
+        for cid in case_ids:
+            res = db.execute(
+                text("UPDATE fulfillment_case SET source_trace_id=:s, updated_at=:n "
+                     "WHERE id=:i AND tenant_id=:t AND source_trace_id IS NULL"),
+                {"s": str(trace_id), "n": now, "i": str(cid), "t": tid},
+            )
+            repaired += int(getattr(res, "rowcount", 0) or 0)
+        db.commit()
+    except Exception as exc:
+        logger.debug("backfill_source_trace_id failed for %s: %s", case_ids, exc)
+        try:
+            db.rollback()
+        except Exception as rb_exc:
+            logger.debug("backfill_source_trace_id rollback failed: %s", rb_exc)
+    return repaired

@@ -271,6 +271,13 @@ def materialize_cases_for_order(db, *, order_id: str, lines: List[Dict[str, Any]
 
     existing = _already_materialized(db, group_id, tenant_id=tenant_id)
     if existing:
+        # Repair the agent-trace link BEFORE returning: if these cases were first materialized without a
+        # trace (a trace-less/pre-fix first confirm) and THIS confirm carries one, stamp source_trace_id
+        # on the still-NULL rows so the Decision Trace -> Procurement tab can resolve them by-trace.
+        # Only fills NULLs (never rebinds an existing trace); covers both return branches below.
+        if trace_id:
+            from src.app.services.fulfillment.repository import backfill_source_trace_id
+            backfill_source_trace_id(db, existing, trace_id, tenant_id=tenant_id)
         # this order already materialized — distinguish a double-submit from a real amendment.
         incoming_sig = _line_signature((l.get("item_ref"), l.get("requested_qty")) for l in sourcing)
         existing_sig = _materialized_signature(db, existing, tenant_id=tenant_id)
