@@ -3218,6 +3218,34 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             <div style={{ marginTop: 8, fontSize: 13 }}>
                               <div className={styles.kvRow}><span>To (supplier)</span><span data-testid="proc-rfq-recipient">{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
                               {draft.recipient_email && <div className={styles.kvRow}><span>Contact</span><span className={styles.mono}>{draft.recipient_email}</span></div>}
+                              {draft.channel_plan && (
+                                <div className={styles.kvRow} data-testid="proc-supplier-channel"><span>Preferred channel</span><span>
+                                  <strong>{String(draft.channel_plan.channel || 'email')}</strong>
+                                  {draft.channel_plan.requires_human
+                                    ? ' · human-only (no automated outreach)'
+                                    : draft.channel_plan.integration_kind
+                                      ? ` · ${String(draft.channel_plan.integration_kind).toUpperCase()} integration handoff`
+                                      : draft.channel_plan.agent_may_draft
+                                        ? ' · agent drafts · human sends (GATE 2)'
+                                        : ''}
+                                </span></div>
+                              )}
+                              {draft.channel_plan?.rationale && (
+                                <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{draft.channel_plan.rationale}</span></div>
+                              )}
+                              {draft.supplier_terms && (draft.supplier_terms.moq != null || draft.supplier_terms.lead_time_days != null || (draft.supplier_terms.price_breaks || []).length > 0 || draft.supplier_terms.contract_status) && (
+                                <div className={styles.kvRow} data-testid="proc-supplier-terms"><span>Ordering terms</span><span>
+                                  {[
+                                    draft.supplier_terms.moq != null ? `MOQ ${draft.supplier_terms.moq}` : null,
+                                    draft.supplier_terms.lead_time_days != null ? `${draft.supplier_terms.lead_time_days}d lead` : null,
+                                    draft.supplier_terms.min_order_value_cents ? `min $${Math.round(draft.supplier_terms.min_order_value_cents / 100)}` : null,
+                                    draft.supplier_terms.contract_status ? String(draft.supplier_terms.contract_status) : null,
+                                    (draft.supplier_terms.price_breaks || []).length
+                                      ? `breaks: ${(draft.supplier_terms.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(', ')}`
+                                      : null,
+                                  ].filter(Boolean).join(' · ')}
+                                </span></div>
+                              )}
                               <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
                               {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
                               {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{String(draft.send_gate?.status || draft.send_gate || draft.gate)}</span></div>}

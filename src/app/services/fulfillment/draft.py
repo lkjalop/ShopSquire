@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -29,6 +30,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from src.app.services.fulfillment import workflow
 from src.app.services.fulfillment.domain import Actor
+
+logger = logging.getLogger(__name__)
 
 # A generic, claim-free default template (real templates come from StoreProfile.supplier_message_templates).
 # No product vocabulary, no price, no commitment language — just slots.
@@ -830,6 +833,18 @@ def draft_and_record(db, *, case_id: str, actor: Actor, item_ref: str, quantity:
     # the operator sees allow / needs_info / block before approving. Does not change the transition.
     draft_dict = draft.to_dict()
     draft_dict["send_gate"] = draft_send_gate(draft_dict)
+    # Attach the supplier's PREFERRED COMMUNICATION channel + ORDERING terms onto the persisted draft so the
+    # operator (Decision Trace → Procurement) sees, beside the drafted email, HOW this supplier is reached
+    # (email = agent drafts, human sends GATE 2 · phone/portal = human-only · edi/cxml/api = integration
+    # handoff) and on WHAT terms (MOQ, lead time, min-order value, price breaks, contract status). The channel
+    # router + terms already exist; this surfaces them where the tab looks (the case's own draft state).
+    try:
+        from src.app.services.fulfillment.supplier_channel import channel_plan_for_supplier
+        from src.app.services.supplier_catalog import supplier_terms
+        draft_dict["channel_plan"] = channel_plan_for_supplier(db, draft.recipient_ref).as_dict()
+        draft_dict["supplier_terms"] = supplier_terms(db, draft.recipient_ref, item_ref, tenant_id=tenant_id) or {}
+    except Exception as exc:
+        logger.debug("draft channel/terms enrichment skipped for %s: %s", draft.recipient_ref, exc)
     trace_for_selection = trace_id or (cur.source_trace_id if cur else None)
     _emit_supplier_selection_trace(trace_id=trace_for_selection, case_id=case_id, draft=draft, tenant_id=tenant_id)
     res = workflow.transition(

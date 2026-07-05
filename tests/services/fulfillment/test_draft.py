@@ -241,6 +241,47 @@ def test_draft_and_record_attaches_advisory_send_gate(db):
     assert gate.get("decision") in ("allow", "needs_info", "block")
 
 
+def test_draft_and_record_attaches_supplier_channel_and_ordering_terms(db):
+    # The persisted draft must carry the supplier's PREFERRED COMMUNICATION channel + ORDERING terms so the
+    # Decision Trace → Procurement tab shows them beside the drafted RFQ (the "how each supplier is reached +
+    # on what terms" demo showcase). SUP-7 is the recipient _rank_ok returns; give it a NON-default channel
+    # (phone → human-only) and real per-SKU terms, and assert both surface on the persisted draft.
+    from sqlalchemy import text
+    from src.app.services.supplier_catalog import ensure_tables as ensure_supplier_tables
+    ensure_supplier_tables(db)
+    db.execute(text("INSERT INTO suppliers (id, name, preferred_channel) VALUES ('SUP-7','TechData Procurement','phone')"))
+    db.execute(text("INSERT INTO supplier_products (supplier_id, sku, moq, min_order_value_cents, lead_time_days, "
+                    "region, contract_status, price_breaks, active) VALUES "
+                    "(:s,:k,:moq,:mov,:lt,:rg,:cs,:pb,1)"),
+               {"s": "SUP-7", "k": "SKU-1", "moq": 20, "mov": 150000, "lt": 4, "rg": "AU-metro",
+                "cs": "preferred", "pb": '[{"min_qty":50,"discount_pct":8}]'})
+    db.commit()
+    cid = _committed_case(db)
+    res, draft = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                    rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert res.ok and draft is not None
+    persisted = wf.repository.current_version(db, cid).state_json.get("draft") or {}
+    cp = persisted.get("channel_plan") or {}
+    assert cp.get("channel") == "phone" and cp.get("requires_human") is True   # supplier's preferred comms
+    assert "human" in (cp.get("rationale") or "").lower()
+    terms = persisted.get("supplier_terms") or {}
+    assert terms.get("moq") == 20 and terms.get("lead_time_days") == 4          # ordering preference
+    assert terms.get("contract_status") == "preferred"
+    assert terms.get("price_breaks")                                            # volume discount surfaced
+
+
+def test_draft_and_record_channel_defaults_to_email_when_supplier_row_absent(db):
+    # No suppliers row for the recipient → channel_plan defaults to email (agent drafts, human sends) and
+    # supplier_terms is an (empty) dict; the enrichment never blocks the draft on missing supplier data.
+    cid = _committed_case(db)
+    res, _ = D.draft_and_record(db, case_id=cid, actor=AG(), item_ref="SKU-1", quantity=6,
+                                rank_fn=_rank_ok, allowlist_fn=_allow, now_iso="2026-06-26 09:05:10")
+    assert res.ok
+    persisted = wf.repository.current_version(db, cid).state_json.get("draft") or {}
+    assert (persisted.get("channel_plan") or {}).get("channel") == "email"
+    assert isinstance(persisted.get("supplier_terms"), dict)
+
+
 # ── way-1: buyer requirements cited in the RFQ (budget stays internal) ──
 def test_requirements_block_renders_buyer_constraints_excluding_budget(db):
     cs = {"availability": {"shortfall": 6, "requested_qty": 10},
