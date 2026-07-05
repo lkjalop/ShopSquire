@@ -86,6 +86,9 @@ _CORE_MODULES = [
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
+    # Dispatch_Agent: governed buyer-facing dispatch (propose → threshold-gated human approval →
+    # execute); carrier labels + cents + profile delivery_policy only — no product vocabulary.
+    "src/app/services/dispatch_agent.py",
     # adaptive agent budgets: tier/risk/event-signal → per-agent tool+token budget, agent names
     # only (no product vocabulary). Extracted from orchestrator.
     "src/app/services/agent_budgets.py",

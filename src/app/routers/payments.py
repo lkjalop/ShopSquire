@@ -590,43 +590,43 @@ def _ledger_txn_for_intent(intent_id: str, kind: str, amount_cents: int | None =
 
 
 def _dispatch_paid_order(intent_id: str) -> None:
-    """P0-C: paid → dispatch. Assigns a tracking ref and enqueues the dispatch through the durable
-    outbound queue (retry/backoff/dead-letter/idempotency already built for supplier sends — reused
-    here; sandbox transport by default). This is what finally gives the inbound carrier webhooks a
-    tracking_number to match, un-orphaning shipped/delivered transitions. Idempotent per order."""
-    import json as _json
-    import secrets as _s
-    from src.app.services.fulfillment.outbound_queue import enqueue as _enqueue
+    """P0-C, now GOVERNED: paid → Dispatch_Agent. Proposes carrier/service from the profile
+    delivery_policy + provider readiness; auto-executes under the approval threshold and HOLDS
+    above it for a human owner (POST /dispatch/{order_id}/approve) — the RFQ bounded-autonomy
+    mold applied to buyer-facing dispatch."""
+    from src.app.services.dispatch_agent import dispatch_for_paid_order
     with db_session() as db:
         row = db.execute(
-            text("SELECT id, tracking_number FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
+            text("SELECT id, total_cents FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
             {"iid": intent_id},
         ).fetchone()
         if not row:
             return
-        oid = str(row[0])
-        tracking = str(row[1] or "") or f"TRK-{_s.token_hex(6).upper()}"
-        carrier = os.environ.get("DISPATCH_DEFAULT_CARRIER", "sandbox")
-        if not row[1]:
-            db.execute(
-                text("UPDATE orders SET tracking_number = :tn, carrier = :c, updated_at = CURRENT_TIMESTAMP WHERE id = :oid"),
-                {"tn": tracking, "c": carrier, "oid": oid},
-            )
-        _enqueue(
-            db,
-            case_id=f"order:{oid}",
-            recipient=f"dispatch:{carrier}",
-            subject=f"Dispatch order {oid}",
-            body=_json.dumps({"order_id": oid, "tracking_number": tracking, "carrier": carrier}),
-            idempotency_key=f"dispatch:{oid}",
-            transition_event="shipment_plan_created",
-        )
-        try:
-            from src.app.services.payment_ledger import KIND_DISPATCH_QUEUED, record_txn
-            record_txn(db, order_id=oid, kind=KIND_DISPATCH_QUEUED, intent_id=intent_id,
-                       provider=carrier, reason=f"tracking={tracking}")
-        except Exception as _l_exc:
-            _log.warning("dispatch ledger write failed for %s: %s", oid, _l_exc)
+        out = dispatch_for_paid_order(db, order_id=str(row[0]), intent_id=intent_id,
+                                      total_cents=int(row[1] or 0))
         db.commit()
-    _log.info("stripe_webhook: dispatch queued for order %s (tracking=%s, carrier=%s)", oid, tracking, carrier)
+    _log.info("stripe_webhook: dispatch %s for order %s (carrier=%s)",
+              out.get("outcome"), row[0], out.get("carrier"))
+
+
+@router.post("/dispatch/{order_id}/approve")
+def dispatch_approve(
+    order_id: str,
+    role: str = Depends(require_role([ROLE_OWNER])),  # HUMAN owner only — GATE-2 invariant
+) -> Dict:
+    """Approve + execute a HELD dispatch (order total met the approval threshold)."""
+    from src.app.services.dispatch_agent import execute_dispatch, pending_dispatch, propose_dispatch
+    with db_session() as db:
+        held = pending_dispatch(db, order_id)
+        if not held:
+            raise HTTPException(status_code=409, detail="no_dispatch_pending_approval")
+        row = db.execute(text("SELECT total_cents, stripe_intent_id FROM orders WHERE id = :o LIMIT 1"),
+                         {"o": order_id}).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="order_not_found")
+        proposal = propose_dispatch(order_id=order_id, total_cents=int(row[0] or 0))
+        out = execute_dispatch(db, order_id=order_id, intent_id=(str(row[1]) if row[1] else None),
+                               proposal=proposal, actor=role)
+        db.commit()
+    return {"order_id": order_id, "status": "dispatch_approved", **out}
 

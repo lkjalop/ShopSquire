@@ -100,3 +100,40 @@ def test_no_items_no_order_still_demo_confirms(client):
     d = r.json()
     assert d["status"] == "demo_confirmed" and d["stripe_intent_id"] is None
     assert str(d["order_id"]).startswith("DEMO-")
+
+
+def test_high_value_dispatch_held_then_owner_approves(client, monkeypatch):
+    """Dispatch_Agent bounded autonomy: an order at/above DISPATCH_APPROVAL_THRESHOLD_CENTS is
+    HELD (no outbound row, ledger dispatch_pending_approval) until a HUMAN owner approves —
+    then tracking is assigned and the dispatch queues. Merchant key cannot approve."""
+    import os as _os
+    MERCHANT = {"x-api-key": _os.getenv("MERCHANT_API_KEY", "local-merchant-key")}
+    OWNER = {"x-api-key": _os.getenv("OWNER_API_KEY", "local-owner-key")}
+    from src.app.models.db import db_session
+    from sqlalchemy import text as _t
+    from src.app.services.fulfillment import outbound_queue as _oq
+    with db_session() as db:
+        db.execute(_t(_oq._DDL))  # table must exist to prove it stays EMPTY while held
+        db.execute(_t("INSERT INTO orders (id, total_cents, currency, status, stripe_intent_id) "
+                      "VALUES ('ORD-BIG', 500000, 'USD', 'created', 'pi_demo_big')"))
+        db.commit()
+    r = client.post("/api/v1/payments/webhook",
+                    content=json.dumps({"type": "payment_intent.succeeded",
+                                        "data": {"object": {"id": "pi_demo_big"}}}),
+                    headers={"Content-Type": "application/json"})
+    assert r.status_code == 200
+    with db_session() as db:
+        row = db.execute(_t("SELECT status, tracking_number FROM orders WHERE id='ORD-BIG'")).fetchone()
+        q = db.execute(_t("SELECT id FROM outbound_message WHERE idempotency_key='dispatch:ORD-BIG'")).fetchone()
+        held = db.execute(_t("SELECT COUNT(*) FROM payment_transactions WHERE order_id='ORD-BIG' "
+                             "AND kind='dispatch_pending_approval'")).scalar()
+    assert row[0] == "paid" and not row[1], "HELD: paid but no tracking assigned yet"
+    assert q is None and held == 1
+    # merchant cannot approve; owner can
+    assert client.post("/api/v1/payments/dispatch/ORD-BIG/approve", headers=MERCHANT).status_code == 403
+    r2 = client.post("/api/v1/payments/dispatch/ORD-BIG/approve", headers=OWNER)
+    assert r2.status_code == 200 and r2.json()["tracking_number"].startswith("TRK-")
+    assert client.post("/api/v1/payments/dispatch/ORD-BIG/approve", headers=OWNER).status_code == 409
+    with db_session() as db:
+        q2 = db.execute(_t("SELECT id FROM outbound_message WHERE idempotency_key='dispatch:ORD-BIG'")).fetchone()
+    assert q2 is not None
