@@ -67,6 +67,20 @@ def _transition_order(tracking_number: str, new_status: str, carrier: str) -> bo
     return bool(changed)
 
 
+def _require_secret_outside_dev(carrier: str, secret: str) -> None:
+    """Fail CLOSED in non-dev when a carrier webhook secret is unset: an unsigned carrier event can
+    transition orders (shipped/delivered), so accepting it unverified in production is an order-state
+    forgery vector. Dev/test keeps the warn-and-accept path so flows run without carrier credentials."""
+    if secret:
+        return
+    env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+    if env not in ("local", "dev", "development", "test", "testing"):
+        _log.error("%s_webhook: webhook secret not configured in %s — rejecting unverified event (fail closed)",
+                   carrier, env)
+        raise HTTPException(status_code=503, detail=f"{carrier} webhook signature verification not configured")
+    _log.warning("%s_webhook: webhook secret not set — skipping verification (dev only)", carrier)
+
+
 def _verify_easypost_hmac(body: bytes, sig_header: str, secret: str) -> bool:
     if not secret:
         return True  # verification skipped — logged below
@@ -86,7 +100,7 @@ async def easypost_webhook(request: Request) -> Dict[str, Any]:
         _log.warning("easypost_webhook: invalid HMAC signature")
         raise HTTPException(status_code=400, detail="Invalid EasyPost webhook signature")
     elif not secret:
-        _log.warning("easypost_webhook: EASYPOST_WEBHOOK_SECRET not set — skipping verification")
+        _require_secret_outside_dev("easypost", secret)
 
     try:
         event = json.loads(body)
@@ -133,7 +147,7 @@ async def shipstation_webhook(request: Request) -> Dict[str, Any]:
             _log.warning("shipstation_webhook: invalid HMAC signature")
             raise HTTPException(status_code=400, detail="Invalid ShipStation webhook signature")
     else:
-        _log.warning("shipstation_webhook: SHIPSTATION_WEBHOOK_SECRET not set — skipping verification")
+        _require_secret_outside_dev("shipstation", secret)
 
     try:
         event = json.loads(body)
@@ -192,7 +206,7 @@ async def _handle_auspost_event(request: Request, carrier_name: str) -> Dict[str
             _log.warning("%s_webhook: invalid signature", carrier_name)
             raise HTTPException(status_code=400, detail=f"Invalid {carrier_name} webhook signature")
     else:
-        _log.warning("%s_webhook: webhook secret not set — skipping verification", carrier_name)
+        _require_secret_outside_dev(carrier_name, secret)
 
     try:
         event = json.loads(body)

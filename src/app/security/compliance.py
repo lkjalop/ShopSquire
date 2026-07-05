@@ -43,6 +43,22 @@ class ComplianceMiddleware:
             ],
             "last_checked_at": __import__("datetime").datetime.utcnow().isoformat(),
         })
+        # PCI DSS 4.0.1 Req 4.2.1 — in production, TLS on the payment surface is ASSERTED, not
+        # observed: a payment request that is neither https nor proxy-forwarded-as-https is
+        # rejected (override with REQUIRE_TLS_FOR_PAYMENTS=0 only deliberately). Dev stays open.
+        try:
+            env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+            enforce_tls = str(os.getenv("REQUIRE_TLS_FOR_PAYMENTS", "1")).lower() in ("1", "true", "yes")
+            if (env in ("production", "prod") and enforce_tls
+                    and path.startswith("/api/v1/payments")
+                    and not https_hint and str(scope.get("scheme") or "").lower() != "https"):
+                resp = Response(
+                    content=json.dumps({"detail": "tls_required", "message": "Payment endpoints require TLS"}),
+                    status_code=403, media_type="application/json")
+                await resp(scope, receive, send)
+                return
+        except Exception:
+            pass
         # Detect PCI patterns on payment endpoints
         downstream_receive = receive
         try:
@@ -80,6 +96,13 @@ class ComplianceMiddleware:
                     # Emit compliance telemetry (best-effort)
                     try:
                         telemetry_emit({"path": path, "compliance": comp}, severity="warn", sourcetype="shopsquire:compliance")
+                    except Exception:
+                        pass
+                    # PCI DSS 4.0.1 Req 12.10.7: PAN found where it must never be is an INCIDENT
+                    # with a response procedure, not a log line. Best-effort; the 422 still fires.
+                    try:
+                        from src.app.observability.metrics import record_incident_alert
+                        record_incident_alert("pci_pan_in_request", "p1")
                     except Exception:
                         pass
                     # Short-circuit with 422 to prevent leakage

@@ -12,7 +12,12 @@ class AdminMfaMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
         try:
-            self.enabled = str(os.getenv("ADMIN_MFA_ENABLED", "0")).lower() in ("1", "true", "yes")
+            # PCI DSS 4.0.1 Req 8.3/8.4: MFA for ALL admin access into the CDE-adjacent surface —
+            # default ON in production (override with ADMIN_MFA_ENABLED=0 only deliberately);
+            # dev/test stays opt-in so local flows and demos are not gated.
+            env = str(os.getenv("APP_ENV", "local") or "local").strip().lower()
+            default = "1" if env in ("production", "prod") else "0"
+            self.enabled = str(os.getenv("ADMIN_MFA_ENABLED", default)).lower() in ("1", "true", "yes")
         except Exception:
             self.enabled = False
 
