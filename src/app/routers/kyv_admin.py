@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from src.app.security import kyv_registry as kyv
 from src.app.security.auth import ROLE_DEVELOPER, ROLE_OWNER, require_role
+from src.app.security.dual_control import require_dual_control
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/v1/admin/kyv", tags=["kyv"])
@@ -48,10 +49,16 @@ class ContactEmailBody(BaseModel):
 
 
 @router.post("/vendors")
-def register_vendor(body: RegisterVendorBody, role: str = Depends(require_role(_ADMIN)),
-                    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id")) -> Dict[str, Any]:
+def register_vendor(body: RegisterVendorBody, request: Request, role: str = Depends(require_role(_ADMIN)),
+                    x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+                    x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
+                    x_approver_token: Optional[str] = Header(default=None, alias="x-approver-token")) -> Dict[str, Any]:
     """Register a vendor (status starts 'pending' unless KYV_AUTO_VERIFY + a valid registration). Returns
-    the created record or a 400 with the validation reason (e.g. an invalid ABN/ACN)."""
+    the created record or a 400 with the validation reason (e.g. an invalid ABN/ACN).
+
+    DUAL-CONTROL: an upsert sets/overwrites the verified_domain + contact_email that the RFQ recipient
+    resolves from — a single compromised admin could repoint every autonomous RFQ. Second approver required."""
+    require_dual_control(request, role, x_api_key, x_approver_token, action_label="kyv_register_vendor")
     res = kyv.register_vendor(
         tenant_id=_tenant(x_tenant_id), legal_name=body.legal_name,
         registration_number=body.registration_number, registration_type=body.registration_type,
@@ -78,9 +85,14 @@ def vendor_by_domain(domain: str, role: str = Depends(require_role(_ADMIN)),
 
 
 @router.post("/vendors/{vendor_id}/verify")
-def verify_vendor(vendor_id: str, role: str = Depends(require_role(_ADMIN)),
-                  x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id")) -> Dict[str, Any]:
-    """Mark a vendor verified — the prerequisite for the autonomous-send trust gate to accept its domain."""
+def verify_vendor(vendor_id: str, request: Request, role: str = Depends(require_role(_ADMIN)),
+                  x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+                  x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
+                  x_approver_token: Optional[str] = Header(default=None, alias="x-approver-token")) -> Dict[str, Any]:
+    """Mark a vendor verified — the prerequisite for the autonomous-send trust gate to accept its domain.
+
+    DUAL-CONTROL: granting trust is exactly the escalation a single compromised admin would abuse."""
+    require_dual_control(request, role, x_api_key, x_approver_token, action_label="kyv_verify_vendor")
     ok = kyv.update_vendor_status(tenant_id=_tenant(x_tenant_id), vendor_id=vendor_id, status="verified")
     if not ok:
         raise HTTPException(status_code=404, detail="vendor_not_found_or_invalid_status")
@@ -88,9 +100,14 @@ def verify_vendor(vendor_id: str, role: str = Depends(require_role(_ADMIN)),
 
 
 @router.post("/vendors/{vendor_id}/status")
-def set_vendor_status(vendor_id: str, body: StatusBody, role: str = Depends(require_role(_ADMIN)),
-                      x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id")) -> Dict[str, Any]:
-    """Transition status (e.g. suspend/revoke a vendor → instantly removes autonomous-send trust)."""
+def set_vendor_status(vendor_id: str, body: StatusBody, request: Request, role: str = Depends(require_role(_ADMIN)),
+                      x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+                      x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
+                      x_approver_token: Optional[str] = Header(default=None, alias="x-approver-token")) -> Dict[str, Any]:
+    """Transition status. DUAL-CONTROL only when GRANTING trust (→ verified) — suspend/revoke REDUCE
+    the attack surface and must stay single-actor + fast for incident response."""
+    if str(body.status or "").strip().lower() == "verified":
+        require_dual_control(request, role, x_api_key, x_approver_token, action_label="kyv_status_verified")
     ok = kyv.update_vendor_status(tenant_id=_tenant(x_tenant_id), vendor_id=vendor_id,
                                   status=body.status, notes=body.notes)
     if not ok:
@@ -99,9 +116,15 @@ def set_vendor_status(vendor_id: str, body: StatusBody, role: str = Depends(requ
 
 
 @router.post("/vendors/contact-email")
-def set_contact_email(body: ContactEmailBody, role: str = Depends(require_role(_ADMIN)),
-                      x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id")) -> Dict[str, Any]:
-    """Backfill a vendor's contact email (matched by domain) so the RFQ resolves a real recipient address."""
+def set_contact_email(body: ContactEmailBody, request: Request, role: str = Depends(require_role(_ADMIN)),
+                      x_tenant_id: Optional[str] = Header(default=None, alias="X-Tenant-Id"),
+                      x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
+                      x_approver_token: Optional[str] = Header(default=None, alias="x-approver-token")) -> Dict[str, Any]:
+    """Set a vendor's contact email (matched by domain) so the RFQ resolves a real recipient address.
+
+    DUAL-CONTROL: this literally sets WHERE the RFQ is sent — the exact 'repoint the destination'
+    attack the outbound integrity guard cannot cover. Second approver required."""
+    require_dual_control(request, role, x_api_key, x_approver_token, action_label="kyv_set_contact_email")
     ok = kyv.set_vendor_contact_email(tenant_id=_tenant(x_tenant_id), domain=body.domain,
                                       contact_email=body.contact_email)
     return {"ok": bool(ok), "domain": body.domain.strip().lower()}
