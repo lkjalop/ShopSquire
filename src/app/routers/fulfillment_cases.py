@@ -470,6 +470,14 @@ def confirm_cart(body: ConfirmCartBody, request: Request = None) -> Dict[str, An
     # backend is down (the limiter itself degrades gracefully); over-limit → 429.
     if not consume_fixed_window_limit(key=f"confirm_cart:{body.uid}", limit=_CONFIRM_RATE_PER_MIN, window_sec=60):
         raise HTTPException(status_code=429, detail="confirm_cart_rate_limited")
+    # Address validation at GATE 1: a supplier RFQ that carries an unshippable ship_to produces a
+    # case that can never fulfil. Reject an unusable ship_to here (only when one is supplied).
+    _ship_to = (body.requirements or {}).get("ship_to") if isinstance(body.requirements, dict) else None
+    if _ship_to:
+        from src.app.services.address_validation import validate_address
+        _sv = validate_address(_ship_to)
+        if _sv.get("severity") == "reject":
+            raise HTTPException(status_code=422, detail={"message": "invalid_ship_to", "reason": _sv.get("reason")})
     raw_lines = ([x.model_dump() for x in body.lines] if body.lines
                  else fos.parse_order_lines(body.query or ""))
     if not raw_lines:

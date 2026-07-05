@@ -231,6 +231,16 @@ def checkout_initiate(
     flags = load_feature_flags(settings.feature_flags_path)
     amount_cents = max(0, int(body.amount_cents or 0))
     currency = str(body.currency or "USD").upper()[:3]
+    # Address validation: reject an UNUSABLE shipping address (empty/gibberish → an order that can
+    # never ship + a dispatch that dead-letters at the carrier); a weak-but-plausible one warns and
+    # is stamped on the response. Only enforced when an address is provided (guest/direct flows omit it).
+    _addr_verdict = None
+    if body.shipping_address is not None:
+        from src.app.services.address_validation import validate_address
+        _addr_verdict = validate_address(body.shipping_address)
+        if _addr_verdict.get("severity") == "reject":
+            raise HTTPException(status_code=422, detail={"message": "invalid_shipping_address",
+                                                         "reason": _addr_verdict.get("reason")})
     assert_autonomy_allowed(
         "payments",
         flags=flags,
@@ -379,6 +389,7 @@ def checkout_initiate(
         "amount_cents": amount_cents,
         "currency": currency,
         "demo_mode": True,
+        "address_warning": (_addr_verdict.get("reason") if _addr_verdict and _addr_verdict.get("severity") == "warn" else None),
     }
 
 

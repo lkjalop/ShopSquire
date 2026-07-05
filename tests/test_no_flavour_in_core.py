@@ -86,6 +86,9 @@ _CORE_MODULES = [
     # outbound-DLP quarantine + human-release queue: opaque subject/body/dlp findings, owner-gated —
     # no product vocabulary.
     "src/app/services/outbound_dlp_quarantine.py",
+    # shipping-address validation: format/postcode plausibility, ISO country→regex reference data —
+    # no product vocabulary.
+    "src/app/services/address_validation.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
