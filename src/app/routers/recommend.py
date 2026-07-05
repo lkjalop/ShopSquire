@@ -11822,8 +11822,12 @@ def nqe_feedback_summary(
     role: str = Depends(require_role([ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict[str, Any]:
     days = max(1, min(int(days or 30), 365))
-    where = "WHERE datetime(created_at) >= datetime('now', :window_expr)"
-    params: Dict[str, Any] = {"window_expr": f"-{days} days"}
+    # Portable: compute the cutoff in Python (naive-UTC ISO) rather than SQLite-only datetime('now',…),
+    # so the summary works on Postgres too (the created_at column is an ISO/timestamp string).
+    from datetime import datetime as _dt, timedelta as _td
+    _cutoff = (_dt.utcnow() - _td(days=days)).isoformat()
+    where = "WHERE created_at >= :cutoff"
+    params: Dict[str, Any] = {"cutoff": _cutoff}
     if tenant_id:
         where += " AND tenant_id = :tenant_id"
         params["tenant_id"] = tenant_id
