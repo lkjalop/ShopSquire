@@ -18,12 +18,20 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy import text as _sql
 
 from src.app.models.db import db_session
 from src.app.services.intent_decomposer import decompose_turn
+
+# Genuine amendment cues for the empty-cart fallback gate. Deliberately EXCLUDES the ambiguous
+# "i need"/"i want" that intent_decomposer._AMEND_RE carries — those also fit a FRESH search ("I need
+# 25 laptops"), which must NOT bind a prior shortlist. Verb + strong-lexical cues only.
+_FALLBACK_AMEND_CUE_RE = re.compile(
+    r"\b(?:instead|actually|make\s+it|change\s+(?:it|that|to)|rather|nah|scratch\s+that|"
+    r"on\s+second\s+thought|reduce|lower|drop|cut|bump|bring\s+it|down\s+to|halve|double)\b", re.I)
 from src.app.services.multi_intent_planner import plan_turn
 from src.app.services.scatter_gather_guard import _matches_category
 
@@ -149,8 +157,12 @@ def plan_live(query: str, uid: str, *, limit: int = 6,
                 "needs_confirmation": True, "objection_angle": None,
                 "warnings": [f"multi_intent catalog load failed: {str(exc)[:120]}"]}
 
-    # Cart empty → fall back to the recent shortlist's top pick so an amendment still has a target.
-    if not prior and fallback_prior_skus:
+    # Cart empty → fall back to the recent shortlist's top pick so an amendment still has a target —
+    # but ONLY when the query is genuinely AMENDMENT-shaped ("actually make it 15 instead"). A FRESH
+    # search ("what laptops for work? I need about 25") has no amendment cue: binding a prior shortlist
+    # there makes the decomposer read "need 25" as an amendment and surface a spurious MultiIntentCard
+    # on a plain new search (the demo regression). No cue → no fallback → fresh search stays fresh.
+    if not prior and fallback_prior_skus and _FALLBACK_AMEND_CUE_RE.search(str(query or "")):
         for sku in fallback_prior_skus:
             prod = by_sku.get(str(sku))
             if prod:

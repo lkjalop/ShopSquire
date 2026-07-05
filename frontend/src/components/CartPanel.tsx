@@ -156,7 +156,10 @@ export default function CartPanel({
       }
       if ((res.case_count ?? 0) > 0) {
         setSourcingNote(`${res.case_count} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
-        if ((res as any).order_group_id) onTraceId?.(String((res as any).order_group_id));
+        // Do NOT overwrite the decision trace id with order_group_id here: the Procurement tab
+        // resolves the case via /cases/by-trace/{source_trace_id}, and order_group_id is NEVER a
+        // source_trace_id → the lookup would 404. Keeping traceId = the trace we just stored on the
+        // case (via confirmCartSourcing above) is exactly what makes the by-trace lookup resolve.
       }
     } catch { /* best-effort — the delivery-plan confirm itself still stands */ }
   };

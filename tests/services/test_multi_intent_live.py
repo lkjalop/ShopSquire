@@ -57,3 +57,29 @@ def test_plan_turn_keeps_laptop_amends_qty_and_scopes_new_lines():
     assert res["verdict"]["ok"] is True                     # adversarial guard clean
     assert res["needs_confirmation"] is True                # money/qty change → confirm, never guess
     assert res["objection_angle"] == "value"                # price objection → value reframe
+
+
+def test_fresh_bulk_query_with_shortlist_does_not_fabricate_amendment(monkeypatch):
+    """A FRESH search ('what laptops for work? I need about 25') with a prior shortlist but NO amendment
+    cue must NOT bind the shortlist and surface a spurious MultiIntentCard — 'I need 25' is a search
+    quantity, not a cart amendment. Regression for the demo screenshot where a fresh bulk query showed
+    an amendment card. An empty cart + a genuine cue ('actually make it 15') still binds the fallback."""
+    from src.app.services import multi_intent_live as mil
+
+    # stub the catalog + empty cart so only the cue-gate decides
+    monkeypatch.setattr(mil, "_load_catalog", lambda db: [
+        {"sku": "LAP-1", "name": "Lenovo", "price_cents": 159900, "category": "laptops", "type": "laptop", "tags": []}])
+    monkeypatch.setattr(mil, "_prior_lines_from_cart", lambda db, uid, by_sku: [])
+
+    class _FakeCtx:
+        def __enter__(self): return object()
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(mil, "db_session", lambda: _FakeCtx())
+
+    # fresh search, no amendment cue → no fallback bind → decomposer sees no prior → returns None
+    fresh = mil.plan_live("what laptops for work? I need about 25", "u1", fallback_prior_skus=["LAP-1"])
+    assert fresh is None, f"fresh search must not surface multi_intent, got {fresh}"
+
+    # a genuine amendment cue with an empty cart DOES bind the fallback (amendment still lands)
+    amend = mil.plan_live("actually make it 15 instead", "u1", fallback_prior_skus=["LAP-1"])
+    assert amend is not None and amend.get("plan"), "an amendment cue must still bind the fallback shortlist"

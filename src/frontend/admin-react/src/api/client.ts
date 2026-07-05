@@ -11,7 +11,11 @@ let VOLATILE_API_KEY = (() => { try { return sessionStorage.getItem('shopsquire_
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export function apiBase(): string {
-  return API_BASE.replace(/\/$/, '');
+  // Every domain path hardcodes its own `/api/v1` prefix, so the base must NOT also end in one —
+  // otherwise the join doubles to `/api/v1/api/v1/...` (a real 404 when VITE_API_BASE is set to
+  // `http://host:8080/api/v1`). Strip a trailing `/api/v1` and any trailing slash so BOTH
+  // `http://host:8080` and `http://host:8080/api/v1` resolve correctly.
+  return API_BASE.replace(/\/$/, '').replace(/\/api\/v1$/, '');
 }
 
 function getCsrfToken(): string {

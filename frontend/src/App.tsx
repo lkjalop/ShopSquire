@@ -860,6 +860,9 @@ export default function App() {
     try {
       const j = await clearCart(uid);
       setCart(j);
+      // Once the buyer explicitly clears, they own the cart — suppress the "previous session" stale
+      // notice for the rest of the session so items they add next are never mislabeled as carried over.
+      staleCartNoticeShown.current = true;
     } catch {
       // ignore
     }
@@ -2149,7 +2152,13 @@ export default function App() {
                     <div className={styles.procurementPanelSlot}>
                       <MultiIntentCard
                         plan={multiIntent}
-                        onAmendQty={(sku, qty) => setCartQty(sku, qty, true)}
+                        onAmendQty={async (sku, qty) => {
+                          await setCartQty(sku, qty, true);
+                          // Amendment applied → dismiss the card and show the updated cart, so the
+                          // stale plan/prose (e.g. "…25") isn't left hanging beside the new quantity.
+                          setMultiIntent(null);
+                          switchRightPanelMode('cart');
+                        }}
                         onAddItem={(sku, qty) => addToCart(sku, qty)}
                         onDismiss={() => setMultiIntent(null)}
                       />
