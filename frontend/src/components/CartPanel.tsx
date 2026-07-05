@@ -31,6 +31,7 @@ export default function CartPanel({
   onClear,
   onAdd,
   onSetQty,
+  traceId,
   onTraceId,
 }: {
   uid: string;
@@ -40,6 +41,7 @@ export default function CartPanel({
   onClear: () => Promise<void>;
   onAdd: (sku: string) => Promise<void>;
   onSetQty?: (sku: string, qty: number) => Promise<void>;
+  traceId?: string | null;
   onTraceId?: (traceId: string | null) => void;
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
@@ -144,8 +146,10 @@ export default function CartPanel({
   const confirmPlanSourcing = async () => {
     try {
       if (!cart?.cart_id || !items.length) return;
+      // Pass the current decision trace so the sourcing case records source_trace_id — the Decision
+      // Trace → Procurement tab resolves the drafted RFQ by-trace (was null → 404 → empty tab).
       const res = await confirmCartSourcing(uid, cart.cart_id,
-        items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })));
+        items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })), traceId || undefined);
       const cases = res.cases || [];
       for (const c of cases) {
         try { await commitFulfillmentCase((c as any).case_id, uid); } catch { /* case stays uncommitted */ }
@@ -175,7 +179,7 @@ export default function CartPanel({
     try {
       if (cart?.cart_id && items.length) {
         const res = await confirmCartSourcing(uid, cart.cart_id,
-          items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })));
+          items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })), traceId || undefined);
         if ((res.case_count ?? 0) > 0) {
           setSourcingNote(`${res.case_count} item group(s) are short on stock — a sourcing request was created (no supplier contacted yet). In-stock items can check out now.`);
           setCheckingSourcing(false);

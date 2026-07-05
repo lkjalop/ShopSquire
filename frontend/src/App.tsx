@@ -2480,6 +2480,7 @@ export default function App() {
                         onClear={clearCartAll}
                         onAdd={addToCart}
                         onSetQty={setCartQty}
+                        traceId={traceId}
                         onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
                       />
                     ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (

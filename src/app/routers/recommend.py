@@ -2799,15 +2799,14 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
                     "contrastive_why": contrastive,
                 })
             if top_products:
-                security_route = str(
-                    (response.get("security") or {}).get("policy_route")
-                    or (response.get("security") or {}).get("route")
-                    or ""
-                )
-                match_basis = ["visual_identity", "brand_match"] if security_route else ["query_match", "budget_fit"]
+                # An IMAGE was actually processed only when cv_signals are present. The old gate keyed on
+                # security_route being non-empty, but that is ALWAYS set ("visual_sanitized" for a flagged
+                # image, else "allow") — so a plain TEXT query wrongly rendered "Matched to your image."
+                _image_present = bool((response.get("security") or {}).get("cv_signals"))
+                match_basis = ["visual_identity", "brand_match"] if _image_present else ["query_match", "budget_fit"]
                 # A concise, COMPLETE basis line — not a truncated dump of the chat message (which bled into
                 # the card and cut off mid-word, e.g. "…comparison? On"). The full prose stays in the chat.
-                summary = ("Matched to your image by brand and form factor." if security_route
+                summary = ("Matched to your image by brand and form factor." if _image_present
                            else "Matched to your query and budget.")
                 rp["anchor_sections"] = [{
                     "title": "Top Recommendations",
