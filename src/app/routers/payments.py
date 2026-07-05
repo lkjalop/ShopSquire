@@ -545,14 +545,40 @@ def refund_approve(
         if len(requests) <= len(approvals):
             raise HTTPException(status_code=409, detail="no_open_refund_request")
         open_req = requests[len(approvals)]
+        _amount = open_req.get("amount_cents")
+        _currency = open_req.get("currency") or "USD"
+        _intent_id = db.execute(text("SELECT stripe_intent_id FROM orders WHERE id = :o LIMIT 1"),
+                                {"o": order_id}).scalar()
         record_txn(db, order_id=order_id, kind=KIND_REFUND_APPROVED,
-                   amount_cents=open_req.get("amount_cents"), currency=open_req.get("currency") or "USD",
+                   amount_cents=_amount, currency=_currency,
                    actor_type="role", actor_id=role, reason="approved", commit=True)
-    _log.info("refund approved for order %s (%s cents) by role=%s", order_id, open_req.get("amount_cents"), role)
-    # Honest execution note: StripeClient has no refund API wired — the approval AUTHORIZES the
-    # provider-side refund; charge.refunded settles + reconciles it here when it lands.
+    _log.info("refund approved for order %s (%s cents) by role=%s", order_id, _amount, role)
+
+    # EXECUTE the refund at the provider when Stripe is live AND the order carries a real intent
+    # (demo intents pi_demo_* have no provider-side charge). The approval above is the authorization;
+    # this is the execution. charge.refunded still reconciles the ledger when the webhook lands.
+    settings = get_settings()
+    _intent = str(_intent_id or "")
+    if _stripe_key_live(settings.stripe_api_key) and _intent and not _intent.startswith("pi_demo_"):
+        try:
+            client = StripeClient(settings.stripe_api_key)
+            refund = client.create_refund(
+                payment_intent_id=_intent, amount_cents=(int(_amount) if _amount is not None else None),
+                reason="requested_by_customer", idempotency_key=f"refund:{order_id}:{len(approvals)}")
+            return {"order_id": order_id, "status": "refund_executed",
+                    "amount_cents": _amount, "provider_execution": "stripe",
+                    "provider_refund_id": refund.get("id"), "provider_status": refund.get("status"),
+                    "settled_by": "charge.refunded webhook"}
+        except Exception as exc:
+            # Approval is recorded; execution failed — surface it so an operator retries. The ledger
+            # shows an approved-but-unsettled refund (refund_state.approved > settled) until resolved.
+            _log.warning("refund execution failed for order %s: %s", order_id, exc)
+            raise HTTPException(status_code=502, detail={"message": "refund_provider_execution_failed",
+                                                         "error": str(exc)[:160], "order_id": order_id})
+    # No live Stripe / demo intent → the approval AUTHORIZES a manual/dashboard refund; the webhook
+    # settles + reconciles it here when it lands.
     return {"order_id": order_id, "status": "refund_approved",
-            "amount_cents": open_req.get("amount_cents"),
+            "amount_cents": _amount,
             "provider_execution": "manual_or_webhook", "settled_by": "charge.refunded webhook"}
 
 

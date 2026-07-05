@@ -124,3 +124,52 @@ def test_refund_guards(client):
         db.commit()
     assert client.post("/api/v1/payments/refunds/request", headers=MERCHANT,
                        json={"order_id": "ORD-L3", "amount_cents": 900}).status_code == 409
+
+
+def test_refund_approve_executes_via_stripe_when_live(client, monkeypatch):
+    """Live Stripe key + real intent → refund_approve EXECUTES stripe.Refund.create (not just
+    authorizes). Idempotency key prevents a double refund on retry."""
+    _seed_paid_order(oid="ORD-EXEC", total=40000, intent="pi_real_live1")
+    r1 = client.post("/api/v1/payments/refunds/request", headers=MERCHANT,
+                     json={"order_id": "ORD-EXEC", "amount_cents": 40000, "reason": "damaged"})
+    assert r1.status_code == 200
+
+    calls = []
+
+    class _FakeStripeClient:
+        def __init__(self, key):
+            self.key = key
+        def create_refund(self, *, payment_intent_id, amount_cents=None, reason=None, idempotency_key=None):
+            calls.append({"pi": payment_intent_id, "amount": amount_cents, "idem": idempotency_key})
+            return {"id": "re_123", "payment_intent": payment_intent_id, "amount": amount_cents,
+                    "currency": "usd", "status": "succeeded"}
+
+    import src.app.routers.payments as pay
+    monkeypatch.setattr(pay, "StripeClient", _FakeStripeClient)
+    monkeypatch.setattr(pay, "_stripe_key_live", lambda k: True)
+    monkeypatch.setattr(pay, "get_settings", lambda: type("S", (), {"stripe_api_key": "sk_live_real"})())
+
+    r2 = client.post("/api/v1/payments/refunds/ORD-EXEC/approve", headers=OWNER)
+    assert r2.status_code == 200, r2.text
+    d = r2.json()
+    assert d["status"] == "refund_executed" and d["provider_execution"] == "stripe"
+    assert d["provider_refund_id"] == "re_123"
+    assert calls == [{"pi": "pi_real_live1", "amount": 40000, "idem": "refund:ORD-EXEC:0"}]
+
+
+def test_refund_approve_demo_intent_stays_manual(client, monkeypatch):
+    """A demo intent (pi_demo_*) has no provider charge → approval stays manual/webhook even with a
+    live key. Never calls create_refund."""
+    _seed_paid_order(oid="ORD-DEMO", total=1000, intent="pi_demo_x1")
+    client.post("/api/v1/payments/refunds/request", headers=MERCHANT,
+                json={"order_id": "ORD-DEMO", "amount_cents": 1000})
+    import src.app.routers.payments as pay
+    monkeypatch.setattr(pay, "_stripe_key_live", lambda k: True)
+    monkeypatch.setattr(pay, "get_settings", lambda: type("S", (), {"stripe_api_key": "sk_live_real"})())
+
+    class _Boom:
+        def __init__(self, k): raise AssertionError("must not construct StripeClient for a demo intent")
+    monkeypatch.setattr(pay, "StripeClient", _Boom)
+
+    r = client.post("/api/v1/payments/refunds/ORD-DEMO/approve", headers=OWNER)
+    assert r.status_code == 200 and r.json()["provider_execution"] == "manual_or_webhook"
