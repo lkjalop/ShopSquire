@@ -2644,5 +2644,42 @@
     "returns": "30-day returns on unopened items; change-of-mind on opened items within 14 days with a 10% restocking fee. Faulty items are always replaced or refunded in full.",
     "shipping": "Free delivery on orders over $5,000. Standard delivery $15 (2-4 business days); split shipments for backordered units are $9 for the follow-up leg. Bulk orders show a delivery plan with real supplier lead times before payment.",
     "price_match": "We match any verified in-stock price from an authorised local retailer at the time of order."
+  },
+  "support_playbooks": {
+    "default_issue": "device_issue",
+    "intro": "This looks like a damaged device. I can help with repair, warranty, or return steps.",
+    "intro_found_suffix": "I found account order history to review next.",
+    "intro_unknown_suffix": "Upload a receipt or order reference if you have one.",
+    "summary_template": "Support flow active for {issue}.",
+    "cards": [
+      {
+        "id": "warranty_status",
+        "title": "Warranty/Coverage",
+        "status_from": "warranty",
+        "message": "Sign in and provide order details to verify coverage."
+      },
+      {
+        "id": "repair_return",
+        "title": "Repair / Return Path",
+        "status": "review",
+        "message": "Upload clear device and receipt photos to determine repair, return, or in-store diagnostics."
+      }
+    ],
+    "faq_playbooks": [
+      {
+        "id": "faq_cracked_screen",
+        "title": "Physical damage claims",
+        "steps": [
+          "Capture damage close-up",
+          "Capture serial/label",
+          "Attach receipt or order reference"
+        ]
+      }
+    ],
+    "parallel_agents": [
+      "CV_Triage_Agent",
+      "Warranty_Agent",
+      "Support_Playbook_Agent"
+    ]
   }
 }

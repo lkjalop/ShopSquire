@@ -1,17 +1,51 @@
-"""Clarify-turn payload builders, extracted from suggest()'s early-return block.
+"""Clarify-turn payload builders (agnostic CORE), extracted from suggest()'s early-return block.
 
 Two payload shapes when the turn ends WITHOUT retrieval:
-  * support-claim  — post-purchase damage/warranty routing (support cards + playbooks);
+  * support-claim  — post-purchase support routing (cards + playbooks);
   * NQE clarify    — ask 1-2 narrowing questions before running the catalog.
 
-Pure builders over explicit inputs (no closure reads, no I/O) so the shapes are testable and
-suggest() sheds ~120 lines of dict literal. NOT registered in _CORE_MODULES yet: the support
-copy ("damaged device", playbook steps) is vertical flavour that belongs in a future profile
-``support_playbooks`` slot — extraction first, vocabulary migration when that slot lands.
+Pure builders over explicit inputs. The support-claim COPY (intro line, card titles, playbook
+steps, agent names) is vertical flavour read from the active profile's ``support_playbooks`` slot;
+core carries only a vertical-NEUTRAL default so a profile without the slot still answers honestly.
+No product vocabulary in this module — it lives in the profile JSON.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+
+# Vertical-neutral default: used when a profile carries no ``support_playbooks`` slot. Deliberately
+# generic ("item", not "device") so it is honest in ANY store; electronics.json overrides it with
+# device-specific copy.
+_DEFAULT_SUPPORT_PLAYBOOK: Dict[str, Any] = {
+    "default_issue": "order_issue",
+    "intro": "It looks like you need help with an order or item. I can help with returns, "
+             "replacements, or warranty/coverage steps.",
+    "intro_found_suffix": "I found account order history to review next.",
+    "intro_unknown_suffix": "Share a receipt or order reference if you have one.",
+    "summary_template": "Support flow active for {issue}.",
+    "cards": [
+        {"id": "coverage_status", "title": "Coverage / Warranty", "status_from": "warranty",
+         "message": "Sign in and provide order details to verify coverage."},
+        {"id": "resolution_path", "title": "Return / Replace Path", "status": "review",
+         "message": "Provide order details and any photos so we can determine the best resolution."},
+    ],
+    "faq_playbooks": [
+        {"id": "faq_general_claim", "title": "Order/item claims",
+         "steps": ["Describe the issue", "Attach any photos", "Attach receipt or order reference"]},
+    ],
+    "parallel_agents": ["Support_Routing_Agent", "Warranty_Agent", "Support_Playbook_Agent"],
+}
+
+
+def _support_playbook() -> Dict[str, Any]:
+    try:
+        from src.app.platform.store_profile import profile_slot
+        slot = profile_slot("support_playbooks", default=None)
+        if isinstance(slot, dict) and slot:
+            return {**_DEFAULT_SUPPORT_PLAYBOOK, **slot}
+    except Exception:
+        pass
+    return _DEFAULT_SUPPORT_PLAYBOOK
 
 
 def _common_tail(*, question_plan: Dict[str, Any], view_hint: Dict[str, Any],
@@ -55,7 +89,18 @@ def build_support_clarify_payload(
     referents: Any,
     memory_confidence: float,
 ) -> Dict[str, Any]:
-    issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
+    pb = _support_playbook()
+    issue = str(constraints.get("issue_type") or pb["default_issue"]).strip().lower() or pb["default_issue"]
+    warranty_found = str(warranty.get("status") or "").strip().lower() == "found"
+    # Cards from the playbook; a card with status_from='warranty' binds the live warranty result.
+    support_cards: List[Dict[str, Any]] = []
+    for card in pb.get("cards") or []:
+        c = {k: v for k, v in card.items() if k != "status_from"}
+        if card.get("status_from") == "warranty":
+            c["status"] = warranty.get("status") or "unknown"
+            c["message"] = warranty.get("message") or card.get("message")
+            c["order_ref"] = warranty.get("order_ref")
+        support_cards.append(c)
     payload: Dict[str, Any] = {
         "results": [],
         "proposal": {"decision_mode": "support", "ranked_skus": []},
@@ -64,17 +109,13 @@ def build_support_clarify_payload(
         "intent_execution_plan": intent_execution_plan,
         "policy_version": policy_version,
         "assistant_message": (
-            "This looks like a damaged device. I can help with repair, warranty, or return steps. "
-            + (
-                "I found account order history to review next."
-                if str(warranty.get("status") or "").strip().lower() == "found"
-                else "Upload a receipt or order reference if you have one."
-            )
+            str(pb["intro"]) + " "
+            + (str(pb["intro_found_suffix"]) if warranty_found else str(pb["intro_unknown_suffix"]))
         ),
         "right_panel": {
             "mode": "support",
             "show_tiers": False,
-            "summary": f"Support flow active for {(issue or 'device issue').replace('_', ' ')}.",
+            "summary": str(pb["summary_template"]).format(issue=(issue or "").replace("_", " ")),
             "image_untrusted": bool(image_reupload_reasons),
             "image_degraded_mode": bool(image_reupload_reasons),
             "security_route": "visual_sanitized" if image_reupload_reasons else "allow",
@@ -83,33 +124,9 @@ def build_support_clarify_payload(
                 if image_reupload_reasons
                 else None
             ),
-            "support_cards": [
-                {
-                    "id": "warranty_status",
-                    "title": "Warranty/Coverage",
-                    "status": warranty.get("status") or "unknown",
-                    "message": warranty.get("message") or "Sign in and provide order details to verify coverage.",
-                    "order_ref": warranty.get("order_ref"),
-                },
-                {
-                    "id": "repair_return",
-                    "title": "Repair / Return Path",
-                    "status": "review",
-                    "message": "Upload clear device and receipt photos to determine repair, return, or in-store diagnostics.",
-                },
-            ],
-            "faq_playbooks": [
-                {
-                    "id": "faq_cracked_screen",
-                    "title": "Physical damage claims",
-                    "steps": ["Capture damage close-up", "Capture serial/label", "Attach receipt or order reference"],
-                },
-            ],
-            "parallel_agents": [
-                "CV_Triage_Agent",
-                "Warranty_Agent",
-                "Support_Playbook_Agent",
-            ],
+            "support_cards": support_cards,
+            "faq_playbooks": pb.get("faq_playbooks") or [],
+            "parallel_agents": pb.get("parallel_agents") or [],
         },
         "next_questions": [],
         "needs_disambiguation": False,

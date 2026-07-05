@@ -89,6 +89,9 @@ _CORE_MODULES = [
     # Dispatch_Agent: governed buyer-facing dispatch (propose → threshold-gated human approval →
     # execute); carrier labels + cents + profile delivery_policy only — no product vocabulary.
     "src/app/services/dispatch_agent.py",
+    # clarify-turn payload builders: support copy read from the profile support_playbooks slot,
+    # core carries only a vertical-neutral default — no product vocabulary.
+    "src/app/services/recommend_clarify_payloads.py",
     # adaptive agent budgets: tier/risk/event-signal → per-agent tool+token budget, agent names
     # only (no product vocabulary). Extracted from orchestrator.
     "src/app/services/agent_budgets.py",
