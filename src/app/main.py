@@ -336,6 +336,12 @@ def create_app() -> FastAPI:
                             # for stale local demo DBs without putting vertical logic in core scoring.
                             from scripts.seed_gaming_laptops import ensure_gaming_catalog
                             ensure_gaming_catalog(db)
+                        elif profile_id and profile_id != "electronics" and local_default:
+                            # Non-electronics vertical (fashion/pharmacy/…): seed its OWN profile catalog
+                            # into products+inventory so the switched store runs real DB retrieval, not
+                            # just the zero-result fallback. Agnostic: the seeder reads the profile slot.
+                            from scripts.seed_profile_catalog import seed_profile_catalog
+                            seed_profile_catalog(db, profile_id)
                         # Supplier coverage tracks the catalog (profile-agnostic) so a recommended SKU
                         # resolves an approved supplier instead of dead-ending at NO_APPROVED_SUPPLIER.
                         raw_suppliers_seed = os.getenv("AUTO_SEED_SUPPLIERS_ON_START")

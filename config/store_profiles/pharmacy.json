@@ -908,6 +908,93 @@
       "currency": "USD",
       "stock": 25,
       "id": "PHM-CLD-005"
+    },
+    {
+      "id": "PHM-VIT-006",
+      "sku": "PHM-VIT-006",
+      "name": "Vitamin C 1000mg (100 tablets)",
+      "price_cents": 1400,
+      "currency": "USD",
+      "category": "vitamin",
+      "stock": 30,
+      "specs": {
+        "count": 100,
+        "strength_mg": 1000
+      }
+    },
+    {
+      "id": "PHM-VIT-007",
+      "sku": "PHM-VIT-007",
+      "name": "Multivitamin Daily (90 capsules)",
+      "price_cents": 2200,
+      "currency": "USD",
+      "category": "vitamin",
+      "stock": 28,
+      "specs": {
+        "count": 90
+      }
+    },
+    {
+      "id": "PHM-PAI-008",
+      "sku": "PHM-PAI-008",
+      "name": "Paracetamol 500mg (100 pack)",
+      "price_cents": 900,
+      "currency": "USD",
+      "category": "pain relief",
+      "stock": 36,
+      "specs": {
+        "strength_mg": 500,
+        "count": 100
+      }
+    },
+    {
+      "id": "PHM-SKN-009",
+      "sku": "PHM-SKN-009",
+      "name": "Moisturising Cream 500ml",
+      "price_cents": 1800,
+      "currency": "USD",
+      "category": "skincare",
+      "stock": 26,
+      "specs": {
+        "volume_ml": 500
+      }
+    },
+    {
+      "id": "PHM-ALG-010",
+      "sku": "PHM-ALG-010",
+      "name": "Antihistamine Allergy Relief (30 tablets)",
+      "price_cents": 1300,
+      "currency": "USD",
+      "category": "allergy",
+      "stock": 30,
+      "specs": {
+        "count": 30
+      }
+    },
+    {
+      "id": "PHM-DIG-011",
+      "sku": "PHM-DIG-011",
+      "name": "Digital Thermometer",
+      "price_cents": 2400,
+      "currency": "USD",
+      "category": "device",
+      "stock": 22,
+      "specs": {
+        "type": "digital"
+      }
+    },
+    {
+      "id": "PHM-HYG-012",
+      "sku": "PHM-HYG-012",
+      "name": "Hand Sanitiser 500ml (70% alcohol)",
+      "price_cents": 800,
+      "currency": "USD",
+      "category": "hygiene",
+      "stock": 50,
+      "specs": {
+        "volume_ml": 500,
+        "alcohol_pct": 70
+      }
     }
   ],
   "delivery_policy": {

@@ -900,6 +900,79 @@
       "currency": "USD",
       "stock": 25,
       "id": "FSH-TOP-006"
+    },
+    {
+      "id": "FSH-KNT-007",
+      "sku": "FSH-KNT-007",
+      "name": "Merino Wool Crew Knit",
+      "price_cents": 9900,
+      "currency": "USD",
+      "category": "knitwear",
+      "stock": 24,
+      "specs": {
+        "material": "merino wool"
+      }
+    },
+    {
+      "id": "FSH-COT-008",
+      "sku": "FSH-COT-008",
+      "name": "Wool Blend Overcoat",
+      "price_cents": 24900,
+      "currency": "USD",
+      "category": "coat",
+      "stock": 18,
+      "specs": {
+        "material": "wool blend"
+      }
+    },
+    {
+      "id": "FSH-SKT-009",
+      "sku": "FSH-SKT-009",
+      "name": "Pleated Midi Skirt",
+      "price_cents": 8400,
+      "currency": "USD",
+      "category": "skirt",
+      "stock": 24,
+      "specs": {
+        "fit": "pleated"
+      }
+    },
+    {
+      "id": "FSH-DRS-010",
+      "sku": "FSH-DRS-010",
+      "name": "Floral Summer Maxi Dress",
+      "price_cents": 13900,
+      "currency": "USD",
+      "category": "dress",
+      "stock": 30,
+      "specs": {
+        "material": "cotton",
+        "fit": "maxi"
+      }
+    },
+    {
+      "id": "FSH-SHO-011",
+      "sku": "FSH-SHO-011",
+      "name": "Suede Ankle Boots",
+      "price_cents": 16900,
+      "currency": "USD",
+      "category": "shoe",
+      "stock": 20,
+      "specs": {
+        "material": "suede"
+      }
+    },
+    {
+      "id": "FSH-ACC-012",
+      "sku": "FSH-ACC-012",
+      "name": "Silk Neck Scarf",
+      "price_cents": 4500,
+      "currency": "USD",
+      "category": "accessory",
+      "stock": 40,
+      "specs": {
+        "material": "silk"
+      }
     }
   ],
   "delivery_policy": {
