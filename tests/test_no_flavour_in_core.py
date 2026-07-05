@@ -95,6 +95,9 @@ _CORE_MODULES = [
     # email forensics snapshots (extracted from email_security): attachment/sender/baseline/visual
     # pure builders over the email dict — opaque domains/attachments, no product vocabulary.
     "src/app/security/email_forensics_snapshots.py",
+    # email finding normalization/ranking/compliance-mapping (extracted from email_security): pure
+    # over finding dicts + control-registry lookup — opaque finding types, no product vocabulary.
+    "src/app/security/email_findings.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
