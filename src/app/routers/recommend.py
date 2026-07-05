@@ -7903,123 +7903,33 @@ def suggest(
                 )
         except Exception:
             pass
+        from src.app.services.recommend_clarify_payloads import (build_nqe_clarify_payload,
+                                                                 build_support_clarify_payload)
+        _clarify_common = dict(
+            constraints=constraints, followup_contract=followup_contract,
+            intent_execution_plan=intent_execution_plan,
+            policy_version=flags.get("POLICY_VERSION", "v1"), question_plan=question_plan,
+            view_hint=view_hint, strategy_corr=strategy_corr, llm_model=llm_model,
+            model_tier=model_tier, complexity_signals=complexity_signals,
+            nqe_selection_applied=nqe_selection_applied, turn_type=turn_type,
+            referents=referents, memory_confidence=memory_confidence,
+        )
         if str(turn_intent or "").upper() == "SUPPORT_CLAIM":
-            _issue = str(constraints.get("issue_type") or "device_issue").strip().lower() or "device_issue"
-            _warranty = _infer_account_warranty_status(uid)
-            payload = {
-                "results": [],
-                "proposal": {"decision_mode": "support", "ranked_skus": []},
-                "constraints_used": constraints,
-                "followup_contract": followup_contract,
-                "intent_execution_plan": intent_execution_plan,
-                "policy_version": flags.get("POLICY_VERSION", "v1"),
-                "assistant_message": (
-                    "This looks like a damaged device. I can help with repair, warranty, or return steps. "
-                    + (
-                        "I found account order history to review next."
-                        if str(_warranty.get("status") or "").strip().lower() == "found"
-                        else "Upload a receipt or order reference if you have one."
-                    )
-                ),
-                "right_panel": {
-                    "mode": "support",
-                    "show_tiers": False,
-                    "summary": f"Support flow active for {(_issue or 'device issue').replace('_', ' ')}.",
-                    "image_untrusted": bool(image_reupload_reasons),
-                    "image_degraded_mode": bool(image_reupload_reasons),
-                    "security_route": "visual_sanitized" if image_reupload_reasons else "allow",
-                    "security_summary": (
-                        "Image flagged; using text-only fallback until a clean product photo is uploaded."
-                        if image_reupload_reasons
-                        else None
-                    ),
-                    "support_cards": [
-                        {
-                            "id": "warranty_status",
-                            "title": "Warranty/Coverage",
-                            "status": _warranty.get("status") or "unknown",
-                            "message": _warranty.get("message") or "Sign in and provide order details to verify coverage.",
-                            "order_ref": _warranty.get("order_ref"),
-                        },
-                        {
-                            "id": "repair_return",
-                            "title": "Repair / Return Path",
-                            "status": "review",
-                            "message": "Upload clear device and receipt photos to determine repair, return, or in-store diagnostics.",
-                        },
-                    ],
-                    "faq_playbooks": [
-                        {
-                            "id": "faq_cracked_screen",
-                            "title": "Physical damage claims",
-                            "steps": ["Capture damage close-up", "Capture serial/label", "Attach receipt or order reference"],
-                        },
-                    ],
-                    "parallel_agents": [
-                        "CV_Triage_Agent",
-                        "Warranty_Agent",
-                        "Support_Playbook_Agent",
-                    ],
-                },
-                "next_questions": [],
-                "question_plan": question_plan,
-                "confidence_band": question_plan.get("confidence_band"),
-                "ambiguity_reason": question_plan.get("ambiguity_reason"),
-                "needs_disambiguation": False,
-                "view_mode": view_hint.get("view_mode"),
-                "view_reason": view_hint.get("view_reason"),
-                "agent_chain": [
-                    {"agent": "Support_Routing_Agent", "confidence": 0.94, "duration_ms": None},
-                ],
-                "trace_tags": strategy_corr.get("tags") or [],
-                "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
-                "llm_model": llm_model,
-                "model_tier": model_tier,
-                "complexity_signals": complexity_signals,
-                "nqe_selection_applied": nqe_selection_applied,
-                "turn_type": turn_type,
-                "referents": referents,
-                "memory_confidence": round(float(memory_confidence), 4),
-            }
+            payload = build_support_clarify_payload(
+                warranty=_infer_account_warranty_status(uid),
+                image_reupload_reasons=image_reupload_reasons,
+                **_clarify_common,
+            )
         else:
-            payload = {
-                "results": [],
-                "proposal": {"decision_mode": "rules", "ranked_skus": []},
-                "constraints_used": constraints,
-                "followup_contract": followup_contract,
-                "intent_execution_plan": intent_execution_plan,
-                "policy_version": flags.get("POLICY_VERSION", "v1"),
-                # the honest qty refusal (99999/0/negative — set at the early parse) must survive THIS
-                # early-return payload too, not just the main narration path.
-                "refusal_note": _qty_refusal_note,
-                "assistant_message": (
-                    (f"{_qty_refusal_note}\n\n" if _qty_refusal_note else "")
-                    + "I can narrow this quickly with one or two details. "
-                    "If you skip details, I'll assume sensible defaults and show constrained alternatives."
-                ),
-                "next_questions": next_questions,
-                "question_plan": question_plan,
-                "confidence_band": question_plan.get("confidence_band"),
-                "ambiguity_reason": question_plan.get("ambiguity_reason"),
-                "needs_disambiguation": _compute_needs_disambiguation(
+            payload = build_nqe_clarify_payload(
+                qty_refusal_note=_qty_refusal_note,
+                next_questions=next_questions,
+                needs_disambiguation=_compute_needs_disambiguation(
                     question_plan=question_plan,
                     next_questions=next_questions,
                 ),
-                "view_mode": view_hint.get("view_mode"),
-                "view_reason": view_hint.get("view_reason"),
-                "agent_chain": [
-                    {"agent": "NQE_Agent", "confidence": None, "duration_ms": None},
-                ],
-                "trace_tags": strategy_corr.get("tags") or [],
-                "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
-                "llm_model": llm_model,
-                "model_tier": model_tier,
-                "complexity_signals": complexity_signals,
-                "nqe_selection_applied": nqe_selection_applied,
-                "turn_type": turn_type,
-                "referents": referents,
-                "memory_confidence": round(float(memory_confidence), 4),
-            }
+                **_clarify_common,
+            )
         _log_early_decision(
             status="clarifying_questions",
             proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
