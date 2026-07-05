@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import styles from './CartPanel.module.css';
 import type { Product } from '../App';
 import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase } from '../lib/api';
+import { sourcedCasesFrom, sourcedCaseCountFrom } from '../lib/sourcing';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 import SplitFulfillmentCard from './SplitFulfillmentCard';
 
@@ -116,8 +117,13 @@ export default function CartPanel({
   }, [API_KEY, uid, upsellQuery, cartSkus]);
 
   useEffect(() => {
-    onTraceId?.(upsellTraceId);
-  }, [upsellTraceId, onTraceId]);
+    // Do NOT let the checkout-upsell trace REPLACE the main recommendation/procurement decision trace:
+    // the Decision Trace the buyer opens must stay pinned to the laptop/bulk decision, not accessory
+    // upsells — otherwise Events / Why-Recommended / the Procurement tab tell the wrong story. Only
+    // surface the upsell trace upward when there is NO main trace to preserve (the upsell trace id is
+    // still shown inline below regardless).
+    if (upsellTraceId && !traceId) onTraceId?.(upsellTraceId);
+  }, [upsellTraceId, traceId, onTraceId]);
 
   const items = cart?.items || [];
   const bundle = cart?.bundle_savings;
@@ -140,26 +146,43 @@ export default function CartPanel({
     setSplitHasSplit(hasSplit);
     setSplitConfirmed(confirmed);
   };
+  // Confirm sourcing for the CURRENT cart, transparently SUPERSEDING when the cart CHANGED since a prior
+  // confirm of this same order. Without this the backend returns `amend_required` + the STALE cases (the
+  // previous order's SKUs/qty), and the Procurement tab would open the OLD RFQ — the wrong story for a
+  // demo. On amend we re-source with supersede=true so the returned (nested `created`) cases match the
+  // current cart. Returns null when a supplier was already engaged (past the send gate) — that is an
+  // operator-driven amendment and must not be auto-superseded.
+  const sourceCurrentCart = async () => {
+    const cid = cart?.cart_id;
+    if (!cid) return null;
+    // Pass the current decision trace so the sourcing case records source_trace_id — the Decision Trace
+    // → Procurement tab resolves the drafted RFQ by-trace (was null → 404 → empty tab).
+    const lines = items.map((i) => ({ item_ref: i.sku, quantity: i.quantity }));
+    let res = await confirmCartSourcing(uid, cid, lines, traceId || undefined);
+    if (res.amend_required) {
+      res = await confirmCartSourcing(uid, cid, lines, traceId || undefined, true);
+    }
+    return res.status === 'operator_required' ? null : res;
+  };
   // GATE 1 on "Confirm delivery plan": committing the plan IS the buyer commitment — it creates the
   // sourcing cases and auto-drafts the supplier RFQs (human-gated, never sent). Payment capture is a
   // LATER, PCI-gated step — a demo can show the drafted RFQ without ever touching payment credentials.
   const confirmPlanSourcing = async () => {
     try {
       if (!cart?.cart_id || !items.length) return;
-      // Pass the current decision trace so the sourcing case records source_trace_id — the Decision
-      // Trace → Procurement tab resolves the drafted RFQ by-trace (was null → 404 → empty tab).
-      const res = await confirmCartSourcing(uid, cart.cart_id,
-        items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })), traceId || undefined);
-      const cases = res.cases || [];
-      for (const c of cases) {
+      const res = await sourceCurrentCart();
+      if (!res) {
+        setSourcingNote('This order changed after a supplier was already engaged — an operator must amend it. Nothing was re-sent.');
+        return;
+      }
+      for (const c of sourcedCasesFrom(res)) {
         try { await commitFulfillmentCase((c as any).case_id, uid); } catch { /* case stays uncommitted */ }
       }
-      if ((res.case_count ?? 0) > 0) {
-        setSourcingNote(`${res.case_count} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
-        // Do NOT overwrite the decision trace id with order_group_id here: the Procurement tab
-        // resolves the case via /cases/by-trace/{source_trace_id}, and order_group_id is NEVER a
-        // source_trace_id → the lookup would 404. Keeping traceId = the trace we just stored on the
-        // case (via confirmCartSourcing above) is exactly what makes the by-trace lookup resolve.
+      const caseCount = sourcedCaseCountFrom(res);
+      if (caseCount > 0) {
+        setSourcingNote(`${caseCount} sourcing request(s) committed — supplier RFQ(s) drafted for human review (nothing sent). Open Decision Trace → Procurement to see the drafts + audit.`);
+        // Do NOT overwrite the decision trace id with order_group_id here: the Procurement tab resolves
+        // the case via /cases/by-trace/{source_trace_id}; traceId already IS that trace.
       }
     } catch { /* best-effort — the delivery-plan confirm itself still stands */ }
   };
@@ -181,10 +204,15 @@ export default function CartPanel({
     setCheckingSourcing(true);
     try {
       if (cart?.cart_id && items.length) {
-        const res = await confirmCartSourcing(uid, cart.cart_id,
-          items.map((i) => ({ item_ref: i.sku, quantity: i.quantity })), traceId || undefined);
-        if ((res.case_count ?? 0) > 0) {
-          setSourcingNote(`${res.case_count} item group(s) are short on stock — a sourcing request was created (no supplier contacted yet). In-stock items can check out now.`);
+        const res = await sourceCurrentCart();  // amend-aware: supersedes stale cases if the cart changed
+        if (!res) {
+          setSourcingNote('This order changed after a supplier was already engaged — an operator must amend it before checkout.');
+          setCheckingSourcing(false);
+          return;
+        }
+        const caseCount = sourcedCaseCountFrom(res);
+        if (caseCount > 0) {
+          setSourcingNote(`${caseCount} item group(s) are short on stock — a sourcing request was created (no supplier contacted yet). In-stock items can check out now.`);
           setCheckingSourcing(false);
           return;
         }
