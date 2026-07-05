@@ -89,6 +89,9 @@ _CORE_MODULES = [
     # shipping-address validation: format/postcode plausibility, ISO country→regex reference data —
     # no product vocabulary.
     "src/app/services/address_validation.py",
+    # DMARC aggregate-report parsing + BEC heuristics (extracted from email_security): XML/zip parse +
+    # SPF/DKIM counts + generic risky-word/homograph heuristics — no product vocabulary.
+    "src/app/security/email_dmarc.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",
