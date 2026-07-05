@@ -201,6 +201,24 @@ def dispatch_supplier_message(
         out["reason"] = "recipient domain not on trusted-supplier allowlist"
         return out
 
+    # 2b) Outbound INTEGRITY scan of the DRAFTED content — we must never RELAY a poisoned payload
+    # (injected instructions, exfil/C2, links) or LEAK secrets to a supplier, becoming a threat
+    # vector ourselves. block → do not send; review → hold for a human.
+    try:
+        from src.app.services.fulfillment.outbound_integrity import scan_outbound_supplier_message
+        integrity = scan_outbound_supplier_message(draft.subject, draft.body, recipient=draft.supplier_email)
+    except Exception:
+        integrity = {"action": "allow", "findings": [], "categories": []}
+    out["integrity"] = integrity
+    if integrity.get("action") == "block":
+        out["status"] = "blocked_content"
+        out["reason"] = "drafted supplier message failed the outbound integrity scan (data leak or relayed payload)"
+        return out
+    if integrity.get("action") == "review":
+        out["status"] = "held_for_review"
+        out["reason"] = "drafted supplier message flagged by the outbound integrity scan"
+        return out
+
     # 3) Send via the injected mailer (default NullMailer sends nothing).
     mailer = mailer or NullMailer()
     result: Dict[str, Any] = {"ok": False, "status": "not_sent"}

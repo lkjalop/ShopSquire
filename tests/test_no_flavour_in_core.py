@@ -242,6 +242,9 @@ _CORE_MODULES = [
     "src/app/services/fulfillment/three_way_match.py",
     # reliable outbound queue: durable send + retry/backoff/dead-letter/855-ack — opaque to/subject/body, no product vocab.
     "src/app/services/fulfillment/outbound_queue.py",
+    # outbound integrity guard: scan drafted supplier mail for relayed payloads + data leaks; regex over
+    # opaque text, no product vocabulary.
+    "src/app/services/fulfillment/outbound_integrity.py",
     # governance pulse: read-only Step-11 visibility — counts/rates over opaque audit labels, no product vocab.
     "src/app/services/governance_pulse.py",
     # procurement-request identity: PR/CASE/PO naming + rotation policy — opaque ids/dates/counts, no product vocab.

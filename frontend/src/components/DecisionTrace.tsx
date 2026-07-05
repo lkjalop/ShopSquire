@@ -3103,12 +3103,40 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         || sidl.includes('procurement') || sidl.includes('split') || sidl.includes('supplier') || sidl.includes('sourcing')
                         || et.startsWith('bulk_') || et.startsWith('procurement_') || et.startsWith('alternatives_')
                         || et.includes('availability') || et.includes('buyer_qualif') || et.includes('supplier')
-                        || et.includes('split') || et.includes('sourc') || et.includes('channel');
+                        || et.includes('split') || et.includes('sourc') || et.includes('channel')
+                        || et.includes('integrity') || sidl.includes('integrity');  // outbound integrity guard
                     });
+                    // Outbound integrity blocks — the platform quarantining its OWN drafted supplier mail
+                    // before send (poisoned payload / data leak). Surfaced prominently: bounded autonomy
+                    // contained ShopSquire's own potential blast radius.
+                    const integrityBlocks = (src || []).filter((e) =>
+                      String(e.event_type || '').toLowerCase().includes('outbound_integrity'));
                     const draft: any = (procCase?.state_json?.draft) || null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     return (
                       <>
+                        {integrityBlocks.length > 0 && (
+                          <div data-testid="proc-integrity-guard" style={{ border: '1px solid #16a34a', background: '#f0fdf4', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 4, color: '#166534' }}>
+                              🛡 Outbound integrity guard — {integrityBlocks.length} supplier message{integrityBlocks.length > 1 ? 's' : ''} quarantined before send
+                            </div>
+                            <div style={{ color: '#166534', marginBottom: 6 }}>
+                              ShopSquire scanned its OWN drafted supplier email and did NOT relay it — bounded autonomy contained the blast radius so the platform can't become a threat vector into a supplier's inbox.
+                            </div>
+                            {integrityBlocks.map((e, i) => {
+                              const p: any = (e as any).payload || {};
+                              const findings: string[] = Array.isArray(p.findings) ? p.findings : [];
+                              const action = String(p.action || 'block');
+                              return (
+                                <div key={i} style={{ paddingLeft: 6, borderLeft: `3px solid ${action === 'block' ? '#dc2626' : '#f59e0b'}`, marginBottom: 4 }}>
+                                  <span style={{ fontWeight: 600, color: action === 'block' ? '#b91c1c' : '#92400e' }}>{action === 'block' ? 'BLOCKED' : 'HELD FOR REVIEW'}</span>
+                                  {p.recipient_domain ? <span style={{ color: '#6b7280' }}> → {p.recipient_domain}</span> : null}
+                                  {findings.length ? <span style={{ color: '#374151' }}> · {findings.join(', ')}</span> : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                         {procEvents.length === 0 && !procCase && pendingSplit?.split ? (
                           <div data-testid="proc-pending-plan" style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
                             <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ Pending sourcing plan — nothing confirmed, no supplier contacted</div>

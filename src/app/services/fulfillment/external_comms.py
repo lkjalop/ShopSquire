@@ -118,6 +118,32 @@ def _transmit_current_draft(db, *, case_id: str, cur, draft: Dict[str, Any], act
     body = str(draft.get("body") or "")
     content_hash = str(draft.get("content_hash") or "")
     transport_detail = ""
+
+    # OUTBOUND INTEGRITY GATE — the single chokepoint for BOTH human and autonomous send. Destination
+    # allowlisting + GATE-2 already stop the WRONG place; this stops the WRONG CONTENT — the platform
+    # must never RELAY a poisoned payload (injected instructions, exfil/C2, links) or LEAK a secret to a
+    # supplier and become a threat vector itself. block → do not transmit, hold for review; the finding
+    # is TRACED (keyed to the case) so bounded-autonomy safety is visible on the Procurement tab.
+    try:
+        from src.app.services.fulfillment.outbound_integrity import scan_outbound_supplier_message
+        _integrity = scan_outbound_supplier_message(subject, body, recipient=recipient)
+    except Exception:
+        _integrity = {"action": "allow", "findings": [], "categories": []}
+    if _integrity.get("action") in ("block", "review"):
+        try:
+            from src.app.services.decision_log import log_trace_event as _lte
+            _lte(trace_id=(trace_id or f"case:{case_id}"), event_type="outbound_integrity_block",
+                 source_type="agent", source_id="Outbound_Integrity_Guard", target_type="supplier_message",
+                 target_id=case_id, payload={
+                     "action": _integrity.get("action"), "findings": _integrity.get("findings"),
+                     "categories": _integrity.get("categories"),
+                     "recipient_domain": (recipient.split("@", 1)[1].lower() if "@" in recipient else recipient),
+                     "note": "drafted supplier message quarantined before send — platform did not relay it"})
+        except Exception as _trace_exc:
+            import logging as _l
+            _l.getLogger("shopsquire.fulfillment").debug("integrity trace emit failed: %s", _trace_exc)
+        _rc = "blocked_content" if _integrity.get("action") == "block" else "held_for_content_review"
+        return workflow.TransitionResult(False, case_id, cur.state, _rc, http_status=422)
     if _outbound_queue_enabled():
         # RELIABLE path: durably enqueue (idempotent on content_hash) + attempt once. A transient failure
         # leaves the message PENDING for the background processor to retry — the human can re-dispatch (deduped,

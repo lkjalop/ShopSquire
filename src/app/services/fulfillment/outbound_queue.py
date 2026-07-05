@@ -176,6 +176,33 @@ def process_pending(db, *, transport: Optional[Any] = None, tenant_id: str = "de
             continue  # another worker claimed it first
         out["processed"] += 1
         new_attempts = int(attempts or 0) + 1
+        # OUTBOUND INTEGRITY GATE: scan the drafted content right before it leaves so the platform
+        # never RELAYS a poisoned payload or LEAKS a secret to a supplier (becoming a threat vector).
+        # A 'block' quarantines the row (never transmitted); the finding is traced for the
+        # Procurement tab so bounded-autonomy safety is visible.
+        _integrity = {"action": "allow", "findings": [], "categories": []}
+        try:
+            from src.app.services.fulfillment.outbound_integrity import scan_outbound_supplier_message
+            _integrity = scan_outbound_supplier_message(subject, body, recipient=recipient)
+        except Exception:
+            pass
+        if _integrity.get("action") == "block":
+            try:
+                db.execute(text("UPDATE outbound_message SET status='blocked_content', last_error=:e, updated_at=:ts "
+                                "WHERE id=:i"), {"e": ("integrity:" + ",".join(_integrity.get("findings") or []))[:200],
+                                                 "ts": ts, "i": mid})
+                db.commit()
+                from src.app.services.decision_log import log_trace_event as _lte
+                _lte(trace_id=f"case:{case_id}", event_type="outbound_integrity_block", source_type="agent",
+                     source_id="Outbound_Integrity_Guard", target_type="supplier_message", target_id=mid,
+                     payload={"action": "block", "findings": _integrity.get("findings"),
+                              "categories": _integrity.get("categories"),
+                              "recipient_domain": (str(recipient).split("@", 1)[1].lower() if "@" in str(recipient) else None)})
+            except Exception as _blk_exc:
+                logger.debug("integrity block record failed for %s: %s", mid, _blk_exc)
+            out.setdefault("blocked_content", 0)
+            out["blocked_content"] += 1
+            continue  # never transmit a blocked message
         try:
             res = tx.send(to=recipient, subject=subject, body=body, idempotency_key=str(idem or ""))
             status = getattr(res, "status", "failed")
