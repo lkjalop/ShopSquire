@@ -74,9 +74,19 @@ class SendGridProvider(BaseEmailProvider):
                 _dlp.get("action") == "review"
                 and str(os.getenv("OUTBOUND_DLP_BLOCK_PII", "0")).strip().lower() in ("1", "true", "yes", "on")
             )
-            if _dlp_block:
+            # A released item (owner judged the flag a false positive) BYPASSES the block once.
+            if _dlp_block and not kwargs.get("_dlp_release"):
+                _qid = None
+                try:
+                    from src.app.services.outbound_dlp_quarantine import quarantine_blocked_send
+                    _qid = quarantine_blocked_send(tenant_id=tenant_id, agent_id=agent_id, to=to,
+                                                   subject=subject, body=body, dlp=_dlp)
+                except Exception:
+                    _qid = None
                 return {"ok": False, "blocked": True, "error": "dlp_content_block",
-                        "agent_id": agent_id, "capability": "email_send", "dlp": _dlp}
+                        "agent_id": agent_id, "capability": "email_send", "dlp": _dlp,
+                        "quarantine_id": _qid,
+                        "release_via": (f"/api/v1/email/outbound/quarantine/{_qid}/release" if _qid else None)}
             analysis = analyze_agent_outbound_email(agent_id=agent_id, minutes=int(os.getenv("OUTBOUND_MONITOR_WINDOW_MIN", "60") or 60))
             store_outbound_anomaly(tenant_id=tenant_id, agent_id=agent_id, event_id=str(ev.get("id") or ""), analysis=analysis, severity=("high" if analysis.get("anomalous") else "info"))
             try:

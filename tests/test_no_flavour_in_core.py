@@ -83,6 +83,9 @@ _CORE_MODULES = [
     # append-only payment ledger: order/intent ids + cents + event kinds only — no product
     # vocabulary. The governed refund two-step folds over these events.
     "src/app/services/payment_ledger.py",
+    # outbound-DLP quarantine + human-release queue: opaque subject/body/dlp findings, owner-gated —
+    # no product vocabulary.
+    "src/app/services/outbound_dlp_quarantine.py",
     # fast-path catalog scorer + candidate assembly: category boost is query-anchored against the
     # profile's category_keywords groups; brands from the profile — no product vocabulary.
     "src/app/services/catalog_scoring.py",

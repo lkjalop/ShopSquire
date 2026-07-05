@@ -1941,6 +1941,13 @@ def create_app() -> FastAPI:
         import logging
 
         logging.getLogger("shopsquire.startup").exception("failed to include admin_email router: %s", e)
+    # Outbound-DLP quarantine (owner human-release queue)
+    try:
+        from src.app.routers.outbound_email_quarantine import router as outbound_quarantine_router
+        app.include_router(outbound_quarantine_router)
+    except Exception as e:
+        import logging
+        logging.getLogger("shopsquire.startup").exception("failed to include outbound_email_quarantine router: %s", e)
     # Inventory sync/admin endpoints (Phase 5 MVP)
     try:
         from src.app.routers.admin_inventory import router as admin_inventory_router
