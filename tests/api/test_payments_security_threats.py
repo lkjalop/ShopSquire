@@ -14,6 +14,11 @@ def _write_flags(flags):
 
 
 def test_paypal_intent_blocked_on_unauthorized_pattern():
+    # Reset the in-process velocity windows so this is DETERMINISTIC regardless of suite order —
+    # a suspicious 'stolen card testing' description now hard-blocks (403) on its own via the
+    # transaction firewall's explicit-block floor, independent of accumulated counters.
+    from src.app.security.payment_threats import reset_counters
+    reset_counters()
     app = create_app()
     client = TestClient(app, headers=default_headers())
     _write_flags({"CAPABILITIES": {"paypal": {"enabled": True}}})
@@ -26,13 +31,9 @@ def test_paypal_intent_blocked_on_unauthorized_pattern():
             "idempotency_key": "k-pay-risk-1",
         },
     )
-    # 401 step-up / 403 block / 202 manual review — all are "not processed unchallenged".
-    # (202 appears when shared velocity counters — real Redis, same client IP across the suite —
-    # shift the classification from hard_block to manual_review; the action list below always
-    # accepted manual_review, the status list was out of sync with it.)
-    assert r.status_code in (401, 403, 202)
+    assert r.status_code == 403, r.text  # explicit fraud description → hard block
     detail = r.json().get("detail") or {}
     if isinstance(detail, dict):
         sec = detail.get("security") or {}
         if sec:
-            assert sec.get("action") in ("step_up_mfa", "hard_block", "manual_review")
+            assert sec.get("action") == "hard_block"

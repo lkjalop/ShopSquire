@@ -27,6 +27,14 @@ def _trim(q: Deque[Tuple[float, int]], now: float) -> None:
         q.popleft()
 
 
+def reset_counters() -> None:
+    """Clear the in-process velocity windows. For test isolation (these module-level counters
+    otherwise accumulate across tests in one process and shift a classification order-dependently)
+    and for an ops reset lever."""
+    _UID_ATTEMPTS.clear()
+    _IP_ATTEMPTS.clear()
+
+
 def evaluate_payment_threat(
     *,
     provider: str,
