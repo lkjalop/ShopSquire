@@ -12,10 +12,15 @@ Extracted from the tail of recommend.py suggest() to reduce the monolith body.
 """
 from __future__ import annotations
 
+import concurrent.futures as _futures
 import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+# Later-join pool for the output-side security analysis: submitted right after redaction, joined
+# at the gate — overlapping watermark/theft/billing work it previously blocked behind.
+_OUTSEC_EXECUTOR = _futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="outsec")
 
 
 @dataclass
@@ -137,6 +142,25 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
 
     _pp("post_redaction")
 
+    # LATER-JOIN: submit the output-side security analysis as soon as the redacted content
+    # exists, join it at the gate below — it overlaps watermark/theft/billing instead of
+    # blocking after them. Fail-closed: a failed/None future falls back to a synchronous pass.
+    _outsec_future = None
+    if not inp.skip_recommend_observer:
+        try:
+            _outsec_future = _OUTSEC_EXECUTOR.submit(hooks.analyze_payload, {
+                "uid": inp.uid,
+                "assistant_message": redacted.get("assistant_message"),
+                "next_questions": redacted.get("next_questions") or [],
+                "results": [
+                    {"sku": r.get("sku"), "name": r.get("name"), "price": r.get("price")}
+                    for r in (redacted.get("results") or [])
+                    if isinstance(r, dict)
+                ][:8],
+            })
+        except Exception:
+            _outsec_future = None
+
     # ── Model watermark ───────────────────────────────────────────────────────
     try:
         wm = hooks.build_model_watermark(
@@ -189,23 +213,31 @@ def run_post_pipeline(inp: PostPipelineInput, hooks: PostPipelineHooks) -> Dict[
     except Exception:
         pass
 
-    # ── Security output analysis ──────────────────────────────────────────────
+    # ── Security output analysis (join of the post-redaction submit above) ───────
     with hooks.tracer.start_as_current_span("recommend.security_analyze_output_final"):
         if inp.skip_recommend_observer:
             final_out = {"severity": "info", "details": {"signals": {}, "reason": "observer_skipped"}}
         else:
-            final_out = hooks.analyze_payload(
-                {
-                    "uid": inp.uid,
-                    "assistant_message": redacted.get("assistant_message"),
-                    "next_questions": redacted.get("next_questions") or [],
-                    "results": [
-                        {"sku": r.get("sku"), "name": r.get("name"), "price": r.get("price")}
-                        for r in (redacted.get("results") or [])
-                        if isinstance(r, dict)
-                    ][:8],
-                }
-            )
+            final_out = None
+            if _outsec_future is not None:
+                try:
+                    final_out = _outsec_future.result(timeout=8)
+                except Exception:
+                    final_out = None
+            if not isinstance(final_out, dict):
+                # fail CLOSED to a fresh synchronous pass — the gate is never skipped
+                final_out = hooks.analyze_payload(
+                    {
+                        "uid": inp.uid,
+                        "assistant_message": redacted.get("assistant_message"),
+                        "next_questions": redacted.get("next_questions") or [],
+                        "results": [
+                            {"sku": r.get("sku"), "name": r.get("name"), "price": r.get("price")}
+                            for r in (redacted.get("results") or [])
+                            if isinstance(r, dict)
+                        ][:8],
+                    }
+                )
     try:
         if not inp.skip_recommend_observer:
             hooks.emit_security_event(

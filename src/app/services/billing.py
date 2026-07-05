@@ -22,7 +22,15 @@ def _dialect(db) -> str:
         return ""
 
 
+_billing_tables_ready = False
+
+
 def _ensure_billing_tables() -> None:
+    # Once per process: this runs on EVERY request's billing-meter write, and re-issuing 4 DDL
+    # statements against a contended live DB was a measurable chunk of the post-payload latency.
+    global _billing_tables_ready
+    if _billing_tables_ready:
+        return
     try:
         with db_session() as db:
             db.execute(
@@ -87,6 +95,7 @@ def _ensure_billing_tables() -> None:
                 )
             )
             db.commit()
+        _billing_tables_ready = True
     except Exception:
         pass
 

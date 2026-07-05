@@ -939,5 +939,6 @@
     "returns": "For safety, medicines can't be returned once dispatched unless faulty; unopened non-medicinal items within 30 days.",
     "shipping": "Free delivery over $75; standard $7. Pharmacist-only lines may need extra verification time.",
     "warranty": "All products are sourced from licensed wholesalers with full batch traceability."
-  }
+  },
+  "budget_floor": 5
 }

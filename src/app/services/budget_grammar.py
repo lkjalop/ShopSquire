@@ -54,9 +54,23 @@ def _to_int(num: str, suffix: Optional[str]) -> Optional[int]:
     return int(v)
 
 
+def _min_plausible_budget() -> int:
+    """The smallest number treated as money rather than a spec ("15 inch"). 50 fit high-ticket
+    verticals but starved low-ticket ones (pharmacy "under 25" never parsed) — so the floor is a
+    profile slot, ``budget_floor``, defaulting to 50. Threshold DATA lives in the StoreProfile;
+    the guard MECHANISM stays here."""
+    try:
+        from src.app.platform.store_profile import profile_slot
+        v = int(profile_slot("budget_floor", default=50) or 50)
+        return v if v > 0 else 50
+    except Exception:
+        return 50
+
+
 def parse_budget(text: str) -> Optional[BudgetParse]:
     """Parse ONE budget expression from free text. Ordered most-specific-first; every branch applies the
     spec-unit guard so "under 2 kg" / "16 gb" never becomes money. Returns None when nothing matches."""
+    _floor = _min_plausible_budget()
     q = str(text or "").lower()
     if not q:
         return None
@@ -89,7 +103,7 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     m = re.search(rf"{_CUR}?\s*{_NUM}\s*(?:each\b|a\s?piece\b|apiece\b|per\s+[a-z]+)", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
-        if v is not None and v >= 50:
+        if v is not None and v >= _floor:
             return BudgetParse(None, v, "per_unit")
 
     # 4) ceiling — "under 1500", "below $2k", "up to 5 grand", "no more than 1200", "1500 max"
@@ -97,14 +111,14 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
          or re.search(rf"{_CUR}?\s*{_NUM}\s+max\b", q))
     if m:
         v = _to_int(m.group(1), m.group(2))
-        if v is not None and v >= 50:
+        if v is not None and v >= _floor:
             return BudgetParse(None, v, "ceiling")
 
     # 5) floor — "over 1000", "at least $800", "minimum 500"
     m = re.search(rf"\b(?:over|above|at least|more than|minimum(?:\s+of)?|starting\s+at)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
-        if v is not None and v >= 50:
+        if v is not None and v >= _floor:
             return BudgetParse(v, None, "floor")
 
     # 6) budget-anchored single value BEFORE the around-band — "can spend about $2000" is a stated
@@ -112,14 +126,14 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
     m = re.search(rf"\b(?:budget|spend|afford\w*)\b[^\d$€£]{{0,18}}{_CUR}?\s*{_NUM}{_UNIT_GUARD}(?!\s*(?:-|–|—|to|and)\s*[\$€£]?\d)", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
-        if v is not None and v >= 50:
+        if v is not None and v >= _floor:
             return BudgetParse(None, v, "ceiling")
 
     # 7) around — "around 1500", "about $2k", "roughly 1200" → ±20% band
     m = re.search(rf"\b(?:around|about|roughly|approx\w*|~)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
     if m:
         v = _to_int(m.group(1), m.group(2))
-        if v is not None and v >= 50:
+        if v is not None and v >= _floor:
             return BudgetParse(int(v * 0.8), int(v * 1.2), "around")
 
     return None
