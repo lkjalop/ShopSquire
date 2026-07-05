@@ -3195,7 +3195,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                 return (
                                   <tr key={i}>
                                     <td>{(e as any).source_id || '—'}</td>
-                                    <td>{e.event_type}</td>
+                                    <td>{displayEventType(e)}</td>
                                     <td>{detail || getSummary(e)}</td>
                                   </tr>
                                 );
