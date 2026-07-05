@@ -86,7 +86,7 @@ def propose_dispatch(*, order_id: str, total_cents: int) -> Dict[str, Any]:
     }
 
 
-def _log_dispatch_decision(proposal: Dict[str, Any], *, status: str, actor: str = "system") -> None:
+def log_dispatch_decision(proposal: Dict[str, Any], *, status: str, actor: str = "system") -> None:
     # Deliberately a TRACE event, not log_decision: the full decision-log pipeline runs the
     # verifier cascade (fact-verifier, review routing → tickets/escalations) — measured 21.9s on
     # a dispatch approval and it spammed ticketing for a legitimate human action. The ledger rows
@@ -146,7 +146,9 @@ def execute_dispatch(db, *, order_id: str, intent_id: Optional[str], proposal: D
                    reason=f"tracking={tracking};service={proposal.get('service_level')}")
     except Exception as exc:
         logger.warning("dispatch ledger write failed for %s: %s", order_id, exc)
-    _log_dispatch_decision(proposal, status="executed", actor=actor)
+    # NOTE: the dispatch_decision trace event is written by the CALLER after db.commit() —
+    # writing it here (second connection, same-process open transaction) self-deadlocked on
+    # SQLite's lock for the full 30s busy timeout, measured live.
     return {"dispatched": True, "tracking_number": tracking, "carrier": carrier}
 
 
@@ -164,7 +166,6 @@ def dispatch_for_paid_order(db, *, order_id: str, intent_id: Optional[str],
                        reason=proposal["reason"])
         except Exception as exc:
             logger.warning("dispatch hold ledger write failed for %s: %s", order_id, exc)
-        _log_dispatch_decision(proposal, status="pending")
         logger.info("dispatch HELD for human approval: order %s (total %s cents)", order_id, total_cents)
         return {**proposal, "outcome": "held_for_approval"}
     out = execute_dispatch(db, order_id=order_id, intent_id=intent_id, proposal=proposal)

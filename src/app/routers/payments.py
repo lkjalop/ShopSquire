@@ -594,7 +594,7 @@ def _dispatch_paid_order(intent_id: str) -> None:
     delivery_policy + provider readiness; auto-executes under the approval threshold and HOLDS
     above it for a human owner (POST /dispatch/{order_id}/approve) — the RFQ bounded-autonomy
     mold applied to buyer-facing dispatch."""
-    from src.app.services.dispatch_agent import dispatch_for_paid_order
+    from src.app.services.dispatch_agent import dispatch_for_paid_order, log_dispatch_decision
     with db_session() as db:
         row = db.execute(
             text("SELECT id, total_cents FROM orders WHERE stripe_intent_id = :iid LIMIT 1"),
@@ -605,6 +605,8 @@ def _dispatch_paid_order(intent_id: str) -> None:
         out = dispatch_for_paid_order(db, order_id=str(row[0]), intent_id=intent_id,
                                       total_cents=int(row[1] or 0))
         db.commit()
+    # trace event AFTER commit — inside the transaction it self-deadlocks on the SQLite lock
+    log_dispatch_decision(out, status=("pending" if out.get("outcome") == "held_for_approval" else "executed"))
     _log.info("stripe_webhook: dispatch %s for order %s (carrier=%s)",
               out.get("outcome"), row[0], out.get("carrier"))
 
@@ -615,7 +617,8 @@ def dispatch_approve(
     role: str = Depends(require_role([ROLE_OWNER])),  # HUMAN owner only — GATE-2 invariant
 ) -> Dict:
     """Approve + execute a HELD dispatch (order total met the approval threshold)."""
-    from src.app.services.dispatch_agent import execute_dispatch, pending_dispatch, propose_dispatch
+    from src.app.services.dispatch_agent import (execute_dispatch, log_dispatch_decision,
+                                                 pending_dispatch, propose_dispatch)
     with db_session() as db:
         held = pending_dispatch(db, order_id)
         if not held:
@@ -628,5 +631,6 @@ def dispatch_approve(
         out = execute_dispatch(db, order_id=order_id, intent_id=(str(row[1]) if row[1] else None),
                                proposal=proposal, actor=role)
         db.commit()
+    log_dispatch_decision(proposal, status="executed", actor=role)  # after commit — see agent note
     return {"order_id": order_id, "status": "dispatch_approved", **out}
 
