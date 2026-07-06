@@ -477,6 +477,30 @@ def purge_retention(days: int = 90, role: str = Depends(require_role([ROLE_OWNER
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/retention/sweep")
+def sweep_retention(
+    dry_run: bool = False,
+    redis=Depends(get_redis),
+    role: str = Depends(require_role([ROLE_OWNER])),
+) -> Dict:
+    """Uniform data-retention sweep (storage limitation, GDPR Art. 5(1)(e)): soft-expire then hard-purge
+    idle draft carts, age out conversation, and set TTLs on Redis session keys. Complements
+    /retention/purge (which ages security logs) — different surfaces, no overlap.
+
+    UNIFORM by design — NOT gated on IP / GeoIP / ASN (see config/retention_policy.json). This is the
+    storage-limitation half; on-request erasure (right to be forgotten) is DELETE /data/{uid}.
+
+    dry_run=1 reports what WOULD be swept without mutating anything.
+    """
+    from src.app.services.retention_sweeper import run_sweep
+    try:
+        with db_session() as db:
+            report = run_sweep(db, redis, dry_run=bool(dry_run))
+        return {"status": "swept", **report}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/optout/{uid}")
 def opt_out_automated_decisions(uid: str, redis=Depends(get_redis), role: str = Depends(require_role([ROLE_OWNER, ROLE_MERCHANT]))) -> Dict:
     """GDPR Article 21: Opt-out of automated decision-making.

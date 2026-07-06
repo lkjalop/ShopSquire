@@ -281,6 +281,21 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "args": (),
         }
 
+    # Data-retention sweep — UNIFORM storage-limitation (idle draft carts, stale conversation, TTL-less
+    # Redis session keys). Default-OFF; NEVER IP/geo gated. Windows in config/retention_policy.json.
+    retention_sweep_enabled = str(os.getenv("RETENTION_SWEEP_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    retention_sweep_min = max(5, min(1440, int(float(os.getenv("RETENTION_SWEEP_INTERVAL_MINUTES", "60") or 60))))
+    if retention_sweep_enabled:
+        if retention_sweep_min < 60:
+            _retention_sched = crontab(minute=f"*/{retention_sweep_min}")
+        else:
+            _retention_sched = crontab(minute=0, hour=f"*/{max(1, retention_sweep_min // 60)}")
+        beat_schedule["retention-sweep"] = {
+            "task": "src.app.tasks.retention_tasks.run_retention_sweep",
+            "schedule": _retention_sched,
+            "args": (),
+        }
+
     # Auth token expiry cleanup — prune expired session_tokens + refresh_tokens daily.
     # Without this, both tables grow unboundedly and auth query latency degrades over months.
     beat_schedule["auth-token-prune"] = {
@@ -404,6 +419,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.human_feedback_tasks",
             "src.app.tasks.shadow_action_tasks",
             "src.app.tasks.experiment_ops_tasks",
+            "src.app.tasks.retention_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,
