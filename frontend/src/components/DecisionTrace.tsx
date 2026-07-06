@@ -3128,6 +3128,16 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const mi: any = miEvent?.payload || null;
                     const draft: any = (procCase?.state_json?.draft) || null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
+                    const sendGateLabel = (gate: any): string => {
+                      if (!gate) return '';
+                      if (typeof gate === 'string') return gate;
+                      if (typeof gate === 'object') {
+                        const decision = gate.decision || gate.status || gate.action;
+                        const blocking = Array.isArray(gate.blocking) ? gate.blocking.length : 0;
+                        return `${decision || 'recorded'}${blocking ? ` · ${blocking} blocker${blocking === 1 ? '' : 's'}` : ''}`;
+                      }
+                      return String(gate);
+                    };
                     return (
                       <>
                         {integrityBlocks.length > 0 && (
@@ -3367,9 +3377,15 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                   ].filter(Boolean).join(' · ')}
                                 </span></div>
                               )}
+                              {draft.commercial_scope?.quantity != null && (
+                                <div className={styles.kvRow}><span>RFQ quantity</span><span>{draft.commercial_scope.quantity} supplier-shortfall unit(s)</span></div>
+                              )}
+                              {procCase?.state_json?.availability?.requested_qty != null && (
+                                <div className={styles.kvRow}><span>Cart demand</span><span>{procCase.state_json.availability.requested_qty} requested · {procCase.state_json.availability.in_stock ?? 0} in stock · {procCase.state_json.availability.shortfall ?? draft.commercial_scope?.quantity ?? 0} sourced</span></div>
+                              )}
                               <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
                               {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
-                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{String(draft.send_gate?.status || draft.send_gate || draft.gate)}</span></div>}
+                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{sendGateLabel(draft.send_gate || draft.gate)}</span></div>}
                               <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
                               <pre data-testid="proc-rfq-body" style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
                             </div>
@@ -3542,7 +3558,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     </div>
   );
 }
-
 
 
 
