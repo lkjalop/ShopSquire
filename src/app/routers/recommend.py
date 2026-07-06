@@ -6002,6 +6002,11 @@ def suggest(
                 constraints["use_case_tags"] = _accumulated["use_case_tags"]
             if _accumulated.get("gpu_preference") and not constraints.get("gpu_preference"):
                 constraints["gpu_preference"] = _accumulated["gpu_preference"]
+                # Provenance: carried from a PRIOR turn's NQE answers, not stated now. If this turn's
+                # use-case says a GPU is NOT needed (office/business), the use-case enrichment drops it —
+                # a gaming-era "with_discrete" slot once hard-filtered a work-laptop turn down to the one
+                # discrete-GPU unit in budget (context rot: "clear my cart" clears the cart, not the kv).
+                constraints["_gpu_pref_from_session"] = True
     except Exception:
         pass
     # Confirmed slots (chat turn-end contract): reload at turn start.
@@ -6018,6 +6023,11 @@ def suggest(
                 constraints["brands"] = list(_confirmed_slots.get("brands"))[:8]
             if not (constraints.get("specs") or []) and isinstance(_confirmed_slots.get("specs"), list):
                 constraints["specs"] = list(_confirmed_slots.get("specs"))[:12]
+                # Provenance marker: these specs were CARRIED from session state, not stated this turn.
+                # The spec filter uses this to relax when stale specs from a prior intent (e.g. a gaming
+                # exploration) would collapse the candidate pool under a NEW use-case ("work laptops") —
+                # the context-rot class: "clear my cart" clears the cart, not the kv-state.
+                constraints["_specs_from_session"] = True
             if not constraints.get("availability") and _confirmed_slots.get("availability"):
                 constraints["availability"] = _confirmed_slots.get("availability")
             if not constraints.get("condition") and _confirmed_slots.get("condition"):
@@ -6747,6 +6757,23 @@ def suggest(
                     constraints["gpu_preference"] = "with_discrete"
                     if _uc_key not in _soft_spec_use_cases and not gpu_pref_inferred:
                         constraints["must_have_gpu"] = True
+                elif (_uc_spec.get("gpu_needed") is False and constraints.get("_gpu_pref_from_session")
+                        and str(constraints.get("gpu_preference") or "") == "with_discrete"):
+                    # CONTEXT-ROT GUARD: a session-carried GPU slot (prior gaming exploration) conflicts
+                    # with THIS turn's resolved use-case (gpu_needed=False, e.g. office_general). The
+                    # stale slot would hard-filter the pool to discrete-GPU units only (once: 48→1) and
+                    # the office-vs-gaming conflict ranking would never see a choice. Drop it — visibly.
+                    constraints.pop("gpu_preference", None)
+                    constraints.pop("must_have_gpu", None)
+                    constraints.pop("_gpu_pref_from_session", None)
+                    log_trace_event(
+                        trace_id=trace_id, event_type="session_constraint_dropped", source_type="agent",
+                        source_id="Use_Case_Advisor_Agent", target_type="system", target_id=None,
+                        payload={"dropped": "gpu_preference:with_discrete", "use_case": _uc_key,
+                                 "reason": "carried from a prior turn; this use-case does not need a "
+                                           "discrete GPU — pool must not collapse to GPU-only units",
+                                 "execution": "deterministic"},
+                    )
                 if (
                     _uc_key not in _soft_spec_use_cases
                     and _uc_spec.get("min_storage_gb")
@@ -8748,7 +8775,31 @@ def suggest(
                 filtered_spec = [c for c in candidates if _match_spec(c)]
             except Exception:
                 filtered_spec = candidates
-            if filtered_spec:
+            # CONTEXT-ROT GUARD (graduated relaxation): specs CARRIED from session state (never stated
+            # this turn) must not collapse the pool under an active use_case — a gaming-era "144Hz/FHD"
+            # slot surviving into a "work laptops" turn once filtered 48 candidates down to 1 gaming SKU,
+            # so the use-case conflict ranking (−12 gaming-chassis-for-office) never had a choice. When
+            # carried specs leave < 3 of a >3 pool, DROP them and let ranking decide; the relaxation is
+            # a visible trace event, not silent. Specs typed in THIS query are never relaxed.
+            _relax_spec_filter = bool(
+                constraints.get("_specs_from_session") and constraints.get("use_case")
+                and len(filtered_spec) < 3 and len(candidates) > max(3, len(filtered_spec))
+            )
+            if _relax_spec_filter:
+                constraints["specs"] = []          # stale slot is dead for the rest of this turn
+                constraints.pop("_specs_from_session", None)
+                try:
+                    log_trace_event(
+                        trace_id=trace_id, event_type="spec_filter_relaxed", source_type="agent",
+                        source_id="Spec_Filter_Agent", target_type="system", target_id=None,
+                        payload={"carried_specs": specs, "use_case": constraints.get("use_case"),
+                                 "pool_before": len(candidates), "pool_if_filtered": len(filtered_spec),
+                                 "reason": "session-carried specs from a prior intent collapsed the pool; "
+                                           "use-case ranking decides instead", "execution": "deterministic"},
+                    )
+                except Exception:
+                    pass
+            elif filtered_spec:
                 candidates = filtered_spec
                 filter_spec_applied = True
                 filter_meta_spec = {
