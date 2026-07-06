@@ -60,6 +60,58 @@ def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payloa
         record_partial_failure("trace_emit", exc, trace_id=trace_id)
 
 
+def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, Any]) -> Dict[str, str]:
+    """Deterministic, explainable finding→action synthesis (NO LLM, NO product vocabulary). Maps the
+    strongest active market finding to a bounded recommendation for the operator's procurement decision.
+    Honest default when there is no external signal — and the shortfall recommendation is real either way."""
+    types = {str(f.get("finding_type") or "").lower() for f in (findings or [])}
+    try:
+        short = int(avail.get("shortfall") or 0)
+    except (TypeError, ValueError):
+        short = 0
+    if "competitor_undercut" in types:
+        return {"action": "review pricing before promoting",
+                "rationale": "a competitor is priced below our list for this line — hold margin, favour bundles over blunt discounting"}
+    if "demand_shift" in types or "demand_forecast" in types:
+        return {"action": "secure inventory ahead of demand",
+                "rationale": "demand is trending up for this line — reorder ahead of the curve and raise its prominence"}
+    if "seasonal_demand" in types:
+        return {"action": "time the reorder to the season",
+                "rationale": "a seasonal pattern is active — align supplier lead time with the upcoming peak"}
+    if "inventory_demand_mismatch" in types or short > 0:
+        return {"action": "source the shortfall now",
+                "rationale": f"{short} unit(s) short of the requested quantity — open a supplier RFQ to close the gap"}
+    return {"action": "no market action — proceed on inventory + supplier terms",
+            "rationale": "no active external market signal for this line (internal-only mode)"}
+
+
+def _emit_market_intelligence(*, trace_id: Optional[str], query: Optional[str], avail: Dict[str, Any]) -> None:
+    """GENUINE market-intelligence step for a bulk-procurement decision: read the analysis engine's REAL
+    active findings (demand / competitor / seasonal / mismatch), scope them to this line, and emit an
+    actionable, human-readable recommendation. Distinct from the inventory-availability step. Best-effort;
+    honest 'internal_only' when the finding store is empty (no external feed configured)."""
+    if not trace_id:
+        return
+    try:
+        from src.app.models.db import db_session as _mi_db
+        from src.app.services.market_analysis import load_recent_findings
+        from src.app.services.market_intelligence_agent import _finding_dict, _scope_findings, _tokenize
+        sku = str(avail.get("sku") or "")
+        with _mi_db() as _mdb:
+            raw = load_recent_findings(_mdb, limit=24)
+        scoped = _scope_findings(raw, query_tokens=_tokenize(query), result_skus=[sku] if sku else [])[:4]
+        findings = [_finding_dict(f) for f in scoped]
+        rec = _recommend_market_action(findings, avail)
+        _emit_trace(trace_id, "market_intelligence_assessed", "Market_Intelligence_Agent",
+                    {"sku": sku or None, "signal_count": len(findings),
+                     "signals": [{"type": f.get("finding_type"), "severity": f.get("severity"),
+                                  "confidence": f.get("confidence"), "summary": f.get("summary")} for f in findings],
+                     "recommendation": rec["action"], "rationale": rec["rationale"],
+                     "mode": "live" if findings else "internal_only"})
+    except Exception as exc:
+        record_partial_failure("market_intelligence_step", exc, trace_id=trace_id)
+
+
 def run_fulfillment_stage(
     *,
     results: List[Dict[str, Any]],
@@ -161,9 +213,12 @@ def run_fulfillment_stage(
     # even before procurement cases are enabled) → fixes the blank-trace "market intelligence" gap.
     if is_bulk:
         _av = payload.get("availability") or {}
-        _emit_trace(trace_id, "bulk_availability_assessed", "Market_Intelligence_Agent",
+        # HONEST labels: inventory availability is an INVENTORY step (was mislabelled Market_Intelligence);
+        # the genuine market-intelligence step is emitted separately from the real analysis engine below.
+        _emit_trace(trace_id, "bulk_availability_assessed", "Inventory_Availability_Agent",
                     {"sku": _av.get("sku"), "order_qty": qty, "in_stock": _av.get("in_stock"),
                      "shortfall": _av.get("shortfall"), "network": _av.get("network")})
+        _emit_market_intelligence(trace_id=trace_id, query=query, avail=_av)
         if not _primary_over_budget:
             _attach_alternatives(payload=payload, avail=_av, qty=qty, constraints=constraints, trace_id=trace_id)
     _maybe_open_case(payload=payload, avail=payload.get("availability") or {}, order_qty=qty,

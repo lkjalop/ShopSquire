@@ -202,3 +202,22 @@ def test_bulk_alternatives_attached_on_shortfall(monkeypatch):
     types = {o["type"] for o in opts}
     assert "source_shortfall" in types and "substitute" in types  # supplier path + the alternative
     assert "fulfillment_case" not in payload  # flag off → still no case (alternatives are pre-commitment)
+
+
+def test_recommend_market_action_maps_findings_to_bounded_actions():
+    """The market-intelligence step's recommendation is DETERMINISTIC + explainable (no LLM). Each finding
+    type maps to a bounded, honest action; an empty finding set with a shortfall still recommends sourcing;
+    a truly empty context is honest about internal-only mode. Earns the Market_Intelligence_Agent name."""
+    from src.app.services.recommend_fulfillment_stage import _recommend_market_action as rec
+
+    assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {})["action"]
+    assert "inventory" in rec([{"finding_type": "demand_shift"}], {})["action"]
+    assert "season" in rec([{"finding_type": "seasonal_demand"}], {})["action"].lower()
+    # no findings but a real shortfall → still actionable (source it)
+    short = rec([], {"shortfall": 6})
+    assert "source" in short["action"] and "6" in short["rationale"]
+    # nothing at all → HONEST internal-only default, not a fake signal
+    empty = rec([], {"shortfall": 0})
+    assert "no market action" in empty["action"] and "internal-only" in empty["rationale"]
+    # competitor_undercut dominates a co-occurring shortfall (strongest-signal priority)
+    assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {"shortfall": 9})["action"]

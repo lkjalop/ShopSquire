@@ -863,6 +863,9 @@ export default function App() {
       // Once the buyer explicitly clears, they own the cart — suppress the "previous session" stale
       // notice for the rest of the session so items they add next are never mislabeled as carried over.
       staleCartNoticeShown.current = true;
+      // A cleared cart has no procurement story — release the sticky sourcing-trace pin so the Decision
+      // Trace no longer resolves the (now-abandoned) bulk order's Procurement tab.
+      setSourcingTraceId(null);
     } catch {
       // ignore
     }
@@ -2546,7 +2549,7 @@ export default function App() {
       {/* Open the trace on the SOURCING turn's trace when a procurement context exists, so the Procurement
           tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
       {traceOpen && <DecisionTrace
-        traceId={procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0))}
+        traceId={procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
         onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} />}
 
       {/* Escalation Room Modal */}
