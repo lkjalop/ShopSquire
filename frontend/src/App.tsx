@@ -1131,14 +1131,38 @@ export default function App() {
     // items in my cart" match both) and does NOT require the word "cart" (the live miss: this phrasing
     // fell through to product search).
     if (/\b(?:clear|remove|delete|drop|get\s+rid\s+of)\b.{0,40}\b(?:old|previous|prior|earlier)\b.{0,40}\b(?:items?|units?|session|cart|stuff)\b/i.test(q)) {
-      const n = priorCartSkus.length;
+      // The buyer can ask this before the first cart refresh has populated `initialCartSkus`.
+      // In that case, read the backend cart now and treat those already-present lines as the
+      // carried-over set; otherwise the phrase falsely replies "nothing carried" and leaves
+      // stale items in place.
+      const latestCart = cart || await getCart(uid).catch(() => null);
+      const currentSkus = (latestCart?.items || []).map((i: any) => String(i.sku)).filter(Boolean);
+      if (initialCartSkus.current === null) initialCartSkus.current = currentSkus;
+      const carriedSkus = priorCartSkus.length > 0 ? priorCartSkus : previousSessionSkus(currentSkus, initialCartSkus.current);
+      const n = carriedSkus.length;
+      if (n > 0) {
+        if (carriedSkus.length === currentSkus.length) {
+          await clearCart(uid).catch(() => null);
+        } else {
+          // SEQUENTIAL, not Promise.all: the backend cart remove is a read-modify-write with no lock
+          // (cart.py remove_item), so parallel deletes race — two concurrent removes both read the same
+          // cart and the second save clobbers the first, silently leaving one item behind. Awaiting each
+          // in turn is correct; a few extra round-trips on a handful of items is negligible.
+          for (const sku of carriedSkus) {
+            await removeCartItem(uid, sku).catch(() => null);
+          }
+        }
+        const refreshed = await getCart(uid).catch(() => null);
+        setCart(refreshed);
+        initialCartSkus.current = [];
+        staleCartNoticeShown.current = true;
+      }
       setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
         { role: 'assistant', content: n > 0
             ? `🧹 Done — removed the ${n} item(s) carried over from your previous session. Everything you added this session is still in the cart.`
             : 'There are no items carried over from a previous session — everything in the cart was added this session. Say "clear my cart" if you want to start completely fresh.',
           timestamp: new Date() }]);
       setInputValue('');
-      if (n > 0) await clearPriorCartItems();
       switchRightPanelMode('cart');
       return;
     }

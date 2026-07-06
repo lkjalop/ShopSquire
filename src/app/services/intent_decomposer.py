@@ -343,7 +343,14 @@ def _needs_llm_binding(intents: TurnIntents, ql: str, has_prior_selection: bool)
         return True
     if has_prior_selection and _CHANGE_VERB_RE.search(ql) and not intents.amendments:
         return True
-    if _ADD_VERB_RE.search(ql) and not intents.new_lines:
+    add_probe = ql
+    # "get rid of X" is a removal, not an add. Mask removal clauses before testing add-cues, otherwise the
+    # live path needlessly calls the LLM on a fully parsed deterministic removal/amendment command.
+    for m in list(_REMOVE_VERB_RE.finditer(ql)):
+        stop = _REMOVE_STOP_RE.search(ql, m.end())
+        span_end = stop.start() if stop else len(ql)
+        add_probe = add_probe[:m.start()] + (" " * (span_end - m.start())) + add_probe[span_end:]
+    if _ADD_VERB_RE.search(add_probe) and not intents.new_lines:
         return True
     return False
 

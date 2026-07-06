@@ -109,6 +109,17 @@ def test_compound_removals_and_named_qty_all_parse():
     assert any("ideapad" in r and n == 20 for r, n in ops), "IdeaPad qty-20 missing"
 
 
+def test_fully_parsed_get_rid_command_does_not_need_llm_binding():
+    """The word 'get' inside 'get rid of' is not an add cue. This keeps the live cart-op path deterministic
+    and avoids a slow model call when the grammar already captured every removal/amendment."""
+    from src.app.services.intent_decomposer import decompose_turn, _needs_llm_binding
+    q = ('can we get rid off the HP Envy x360 14-fc0189TU 14" WUXGA and Lenovo ThinkPad L13 Gen 6 13.3" '
+         'WUXGA reduce Lenovo IdeaPad Slim 3i 15.3" 2K Laptop to 20 instead?')
+    t = decompose_turn(q, has_prior_selection=True)
+    assert len(t.amendments) == 3
+    assert _needs_llm_binding(t, q.lower(), True) is False
+
+
 def test_removal_needs_a_prior_selection():
     from src.app.services.intent_decomposer import decompose_turn
     t = decompose_turn("remove the monitor", has_prior_selection=False)
