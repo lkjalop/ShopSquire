@@ -1,0 +1,23 @@
+{
+  "_comment": "Competitor price sources (EDGE data, not core code). Per-SKU product-page URLs — deterministic, low-volume, no search scraping. The fetcher honours robots.txt, rate-limits, validates the page matches OUR product (brand + MPN/title tokens) before recording, and labels provenance jsonld:<domain>. Fill product_urls with the pages you'd open in a browser; leave enabled=false until then.",
+  "enabled": false,
+  "user_agent": "ShopSquireDemo/0.1 (portfolio project; polite: 1 req / 2.5s, daily)",
+  "min_request_interval_sec": 2.5,
+  "timeout_sec": 10,
+  "product_urls": {
+    "LAP-01B48B57": {
+      "jbhifi.com.au": "",
+      "binglee.com.au": ""
+    },
+    "LAP-A9A67AB9": {
+      "jbhifi.com.au": ""
+    },
+    "LAP-433AB371": {
+      "jbhifi.com.au": "",
+      "binglee.com.au": ""
+    },
+    "LAP-75988087": {
+      "jbhifi.com.au": ""
+    }
+  }
+}
