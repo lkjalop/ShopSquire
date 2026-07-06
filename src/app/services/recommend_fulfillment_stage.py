@@ -66,16 +66,33 @@ def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payloa
         record_partial_failure("trace_emit", exc, trace_id=trace_id)
 
 
+def _signal_scope(entity_ref: Any, sku: str) -> str:
+    """How close a finding is to THIS line — the tier the MI card sorts and labels by.
+    'this_item' = entity is exactly this SKU; 'market' = no entity or a short market-level label
+    (search / payment / a channel); 'related' = a multi-token free-text entity (another query/phrase) —
+    the noise class a reviewer flagged as 'unrelated' when it crowds a per-SKU procurement card."""
+    ent = str(entity_ref or "").strip().lower()
+    if sku and ent == sku.lower():
+        return "this_item"
+    if not ent or len(ent.split()) <= 2:
+        return "market"
+    return "related"
+
+
 def _recommend_market_action(findings: List[Dict[str, Any]], avail: Dict[str, Any]) -> Dict[str, str]:
     """Deterministic, explainable finding→action synthesis (NO LLM, NO product vocabulary). Maps the
     strongest active market finding to a bounded recommendation for the operator's procurement decision.
-    Honest default when there is no external signal — and the shortfall recommendation is real either way."""
+    Honest default when there is no external signal — and the shortfall recommendation is real either way.
+    SKU-SPECIFIC actions (pricing review) require a this_item signal: an undercut on a DIFFERENT product
+    must not drive a pricing recommendation for this line."""
     types = {str(f.get("finding_type") or "").lower() for f in (findings or [])}
+    item_types = {str(f.get("finding_type") or "").lower() for f in (findings or [])
+                  if f.get("scope") in (None, "this_item")}   # None = caller didn't scope (tests/legacy)
     try:
         short = int(avail.get("shortfall") or 0)
     except (TypeError, ValueError):
         short = 0
-    if "competitor_undercut" in types:
+    if "competitor_undercut" in item_types:
         return {"action": "review pricing before promoting",
                 "rationale": "a competitor is priced below our list for this line — hold margin, favour bundles over blunt discounting"}
     if "demand_shift" in types or "demand_forecast" in types:
@@ -106,17 +123,24 @@ def _emit_market_intelligence(*, trace_id: Optional[str], query: Optional[str], 
         with _mi_db() as _mdb:
             raw = load_recent_findings(_mdb, limit=24)
         scoped = _scope_findings(raw, query_tokens=_tokenize(query), result_skus=[sku] if sku else [])
-        # For a PER-LINE procurement decision, findings on THIS exact SKU outrank store-wide ones (a 7%
-        # competitor undercut on the line beats a global demand signal) — stable sort keeps the shared
-        # scoper's severity×confidence order within each group.
-        if sku:
-            scoped.sort(key=lambda f: 0 if str(getattr(f, "entity_ref", "") or "").strip().lower() == sku.lower() else 1)
-        findings = [_finding_dict(f) for f in scoped[:4]]
+        # TIERED scoping for a PER-LINE procurement decision (reviewer: "exact SKU first, market second,
+        # related last"): this_item findings always lead; market-level fills the card; 'related' findings
+        # (free-text entities from OTHER queries) are last-resort context ONLY when the card would
+        # otherwise be near-empty — they were the noise crowding out the per-SKU story. Stable sort keeps
+        # the shared scoper's severity×confidence order within each tier.
+        _tier_rank = {"this_item": 0, "market": 1, "related": 2}
+        annotated = [(f, _signal_scope(getattr(f, "entity_ref", None), sku)) for f in scoped]
+        annotated.sort(key=lambda fs: _tier_rank[fs[1]])
+        picked = [fs for fs in annotated if fs[1] != "related"][:4]
+        if len(picked) < 2:   # near-empty card → allow up to 2 related items as honest context
+            picked += [fs for fs in annotated if fs[1] == "related"][: 2 - len(picked)]
+        findings = [{**_finding_dict(f), "scope": scope} for f, scope in picked]
         rec = _recommend_market_action(findings, avail)
         _emit_trace(trace_id, "market_intelligence_assessed", "Market_Intelligence_Agent",
                     {"sku": sku or None, "signal_count": len(findings),
                      "signals": [{"type": f.get("finding_type"), "severity": f.get("severity"),
-                                  "confidence": f.get("confidence"), "summary": f.get("summary")} for f in findings],
+                                  "confidence": f.get("confidence"), "summary": f.get("summary"),
+                                  "scope": f.get("scope")} for f in findings],
                      "recommendation": rec["action"], "rationale": rec["rationale"],
                      "mode": "live" if findings else "internal_only"})
     except Exception as exc:

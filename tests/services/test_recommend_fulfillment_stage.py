@@ -221,3 +221,30 @@ def test_recommend_market_action_maps_findings_to_bounded_actions():
     assert "no market action" in empty["action"] and "internal-only" in empty["rationale"]
     # competitor_undercut dominates a co-occurring shortfall (strongest-signal priority)
     assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {"shortfall": 9})["action"]
+
+
+def test_signal_scope_tiers_this_item_market_related():
+    """Tiered MI scoping: exact SKU = this_item; empty/short market labels = market; multi-token
+    free-text entities (another query's phrase) = related — the noise class that must not crowd a
+    per-SKU procurement card."""
+    from src.app.services.recommend_fulfillment_stage import _signal_scope as scope
+    assert scope("LAP-1", "LAP-1") == "this_item"
+    assert scope("lap-1", "LAP-1") == "this_item"            # case-insensitive
+    assert scope(None, "LAP-1") == "market"                   # global finding
+    assert scope("search", "LAP-1") == "market"               # short market-level label
+    assert scope("google/cpc", "LAP-1") == "market"
+    assert scope("can i get help with 15 work laptops", "LAP-1") == "related"   # free-text query entity
+
+
+def test_sku_specific_action_requires_this_item_signal():
+    """An undercut on a DIFFERENT product must not drive a pricing recommendation for this line —
+    the action falls through to the demand/shortfall branches instead."""
+    from src.app.services.recommend_fulfillment_stage import _recommend_market_action as rec
+    other_sku_undercut = [{"finding_type": "competitor_undercut", "scope": "related"},
+                          {"finding_type": "demand_shift", "scope": "market"}]
+    out = rec(other_sku_undercut, {"shortfall": 5})
+    assert "inventory" in out["action"]                       # demand wins; pricing NOT recommended
+    this_sku_undercut = [{"finding_type": "competitor_undercut", "scope": "this_item"}]
+    assert "pricing" in rec(this_sku_undercut, {})["action"]  # exact-SKU undercut still decisive
+    # unscoped findings (legacy/test callers) keep the old behaviour
+    assert "pricing" in rec([{"finding_type": "competitor_undercut"}], {})["action"]

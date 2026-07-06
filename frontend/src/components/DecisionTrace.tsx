@@ -3,6 +3,7 @@ import styles from './DecisionTrace.module.css';
 import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
 import FulfilmentTraceLink from './FulfilmentTraceLink';
+import { explainProcEvent } from '../lib/procEventExplain';
 
 type TraceEvent = {
   id?: string;
@@ -3175,6 +3176,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               <div>
                                 {mi.signals.map((s: any, i: number) => (
                                   <div key={i} style={{ paddingLeft: 6, borderLeft: `3px solid ${String(s.severity) === 'critical' ? '#dc2626' : '#f59e0b'}`, marginBottom: 3, color: '#374151' }}>
+                                    {/* scope chip: this item / market / related — the tiered scoping made visible */}
+                                    {s.scope && (
+                                      <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 7, marginRight: 5,
+                                                     background: s.scope === 'this_item' ? '#dcfce7' : s.scope === 'market' ? '#e0e7ff' : '#f3f4f6',
+                                                     color: s.scope === 'this_item' ? '#166534' : s.scope === 'market' ? '#3730a3' : '#6b7280' }}>
+                                        {s.scope === 'this_item' ? 'THIS ITEM' : String(s.scope).toUpperCase()}
+                                      </span>
+                                    )}
                                     <span className={styles.mono} style={{ fontSize: 11 }}>{String(s.type || '')}</span>
                                     {s.summary ? <span> — {String(s.summary)}</span> : null}
                                   </div>
@@ -3272,6 +3281,18 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                       <tr data-testid={`proc-event-drill-${i}`}>
                                         <td></td>
                                         <td colSpan={5}>
+                                          {(() => {
+                                            // human-readable first ("what happened / why", derived ONLY from
+                                            // recorded fields); the raw JSON stays below as the evidence.
+                                            const ex = explainProcEvent(displayEventType(e), p);
+                                            return ex ? (
+                                              <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6,
+                                                            padding: '6px 10px', margin: '4px 0', fontSize: 12 }}>
+                                                <div><span style={{ fontWeight: 700 }}>What happened:</span> {ex.what}</div>
+                                                {ex.why && <div style={{ marginTop: 2 }}><span style={{ fontWeight: 700 }}>Why:</span> {ex.why}</div>}
+                                              </div>
+                                            ) : null;
+                                          })()}
                                           <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb',
                                                         borderRadius: 6, padding: 8, margin: '4px 0', maxHeight: 220, overflow: 'auto',
                                                         fontSize: 11 }}>{JSON.stringify(drill, null, 2)}</pre>
