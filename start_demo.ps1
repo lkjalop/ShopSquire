@@ -17,6 +17,8 @@ $env:OLLAMA_EMBED_KEEP_ALIVE   = "60m"           # pin nomic-embed resident (rel
 $env:FULFILLMENT_DEMO_ENABLED          = "1"      # enables replay Reset/Advance + demo supplier reply
 $env:FULFILLMENT_AUTO_DRAFT_ON_COMMIT  = "1"      # a confirmed cart auto-drafts the supplier RFQ (email body to show)
 $env:HIPPOGRAPH_FEEDBACK_ENABLED       = "shadow" # market-intel appears in the decision trace, does NOT steer the buyer
+$env:MARKET_PIPELINE_ENABLED           = "1"      # operator "Refresh live data" runs the REAL market pipeline
+$env:COMMERCE_CATALOG_ENABLED          = "1"      # price_book joins power competitor-undercut findings
 # Supplier comms stay SAFE for the demo (no real email): sandbox transport + autonomy OFF.
 $env:FULFILLMENT_SUPPLIER_TRANSPORT = "sandbox"
 $env:FULFILLMENT_AUTONOMOUS_RFQ     = "0"
