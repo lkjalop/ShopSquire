@@ -12,7 +12,7 @@ import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
 import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
-import { previousSessionSkus } from './lib/cartSession';
+import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -1130,6 +1130,42 @@ export default function App() {
     // items, keep what was added this session. Checked before the full clear (phrases like "clear the old
     // items in my cart" match both) and does NOT require the word "cart" (the live miss: this phrasing
     // fell through to product search).
+    // KEEP-scoped clear: "clear the cart but keep the latest / this one / the ThinkPad" → remove everything
+    // EXCEPT the item to keep. Distinct from "clear the OLD items", and MUST be caught before BOTH the
+    // old-items scoped clear and the full clear below — otherwise "clear cart but keep the latest" falls
+    // through to clearCartAll() and wipes the very item the buyer asked to keep (the live recording bug).
+    // When the keep intent is clear but WHICH item is ambiguous, we ASK rather than clear anything — the
+    // one thing we must never do is guess-then-wipe.
+    {
+      const keepRes = keepAfterClear(q, (cart?.items as any[]) || [], initialCartSkus.current);
+      if (keepRes.isKeepClear) {
+        const items = (cart?.items as any[]) || [];
+        if (items.length === 0) {
+          setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+            { role: 'assistant', content: 'Your cart is already empty — nothing to keep or clear.', timestamp: new Date() }]);
+          setInputValue(''); switchRightPanelMode('cart'); return;
+        }
+        if (keepRes.keepSkus.length === 0) {
+          setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+            { role: 'assistant', content: 'I can clear the cart but keep one item — which should I keep? Name it (or say "keep the latest") and I\'ll remove the rest.', timestamp: new Date() }]);
+          setInputValue(''); switchRightPanelMode('cart'); return;
+        }
+        const keepSet = new Set(keepRes.keepSkus.map(String));
+        const toRemove = items.filter((i) => !keepSet.has(String(i.sku)));
+        // SEQUENTIAL, not Promise.all — the backend cart remove is a lock-free read-modify-write
+        // (cart.py remove_item); parallel deletes race and silently leave an item behind.
+        for (const it of toRemove) {
+          await removeCartItem(uid, String(it.sku)).catch(() => null);
+        }
+        const refreshed = await getCart(uid).catch(() => null);
+        setCart(refreshed);
+        const keptItem = items.find((i) => keepSet.has(String(i.sku)));
+        const keptName = (keptItem && productShortLabel(keptItem as any)) || keepRes.keepSkus[0];
+        setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+          { role: 'assistant', content: `🧹 Done — removed ${toRemove.length} item(s) and kept **${keptName}**. That's what's left in your cart.`, timestamp: new Date() }]);
+        setInputValue(''); switchRightPanelMode('cart'); return;
+      }
+    }
     if (/\b(?:clear|remove|delete|drop|get\s+rid\s+of)\b.{0,40}\b(?:old|previous|prior|earlier)\b.{0,40}\b(?:items?|units?|session|cart|stuff)\b/i.test(q)) {
       // The buyer can ask this before the first cart refresh has populated `initialCartSkus`.
       // In that case, read the backend cart now and treat those already-present lines as the
