@@ -263,6 +263,41 @@ def seed_demo(db, *, tenant_id: str = DEFAULT_TENANT, commit: bool = True) -> Di
     return {"prices": n_p, "inventory": n_i}
 
 
+def backfill_price_book_from_products(db, *, tenant_id: str = DEFAULT_TENANT,
+                                      overwrite: bool = False, commit: bool = True) -> Dict[str, int]:
+    """Backfill price_book_entry from the products table (sku · price_cents) so EVERY active SKU has an
+    'our retail' row. Without this the competitor-undercut join (market_signal_adapters 'competitor'
+    source LEFT JOINs price_book_entry) yields our_price_cents=NULL for unseeded SKUs and the detector
+    silently skips them. By default only fills GAPS (source='catalog'); overwrite=True refreshes existing
+    catalog-sourced rows too — never touches rows priced by another source (a human/ops price wins).
+    Vertical-blind (sku + cents only). Returns {seen, written, skipped}."""
+    if db is None:
+        return {"seen": 0, "written": 0, "skipped": 0}
+    ensure_tables(db)
+    tid = str(tenant_id).strip() or DEFAULT_TENANT
+    rows = db.execute(text(
+        "SELECT sku, price_cents FROM products WHERE COALESCE(active,1)=1 "
+        "AND sku IS NOT NULL AND price_cents IS NOT NULL")).fetchall()
+    existing = {str(r[0]): str(r[1] or "") for r in db.execute(text(
+        "SELECT sku, source FROM price_book_entry WHERE tenant_id=:t AND channel='default' "
+        "AND currency='AUD'"), {"t": tid}).fetchall()}
+    written = skipped = 0
+    for sku, cents in rows:
+        sku = str(sku)
+        if sku in existing and not (overwrite and existing[sku] == "catalog"):
+            skipped += 1
+            continue
+        if upsert_price(db, sku=sku, list_cents=cents, channel="default", currency="AUD",
+                        source="catalog", tenant_id=tid):
+            written += 1
+    if commit:
+        try:
+            db.commit()
+        except Exception as exc:
+            logger.debug("price_book backfill commit failed: %s", exc)
+    return {"seen": len(rows), "written": written, "skipped": skipped}
+
+
 def _int(x: Any) -> Optional[int]:
     try:
         return int(x)

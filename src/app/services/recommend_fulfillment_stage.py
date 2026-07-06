@@ -99,8 +99,13 @@ def _emit_market_intelligence(*, trace_id: Optional[str], query: Optional[str], 
         sku = str(avail.get("sku") or "")
         with _mi_db() as _mdb:
             raw = load_recent_findings(_mdb, limit=24)
-        scoped = _scope_findings(raw, query_tokens=_tokenize(query), result_skus=[sku] if sku else [])[:4]
-        findings = [_finding_dict(f) for f in scoped]
+        scoped = _scope_findings(raw, query_tokens=_tokenize(query), result_skus=[sku] if sku else [])
+        # For a PER-LINE procurement decision, findings on THIS exact SKU outrank store-wide ones (a 7%
+        # competitor undercut on the line beats a global demand signal) — stable sort keeps the shared
+        # scoper's severity×confidence order within each group.
+        if sku:
+            scoped.sort(key=lambda f: 0 if str(getattr(f, "entity_ref", "") or "").strip().lower() == sku.lower() else 1)
+        findings = [_finding_dict(f) for f in scoped[:4]]
         rec = _recommend_market_action(findings, avail)
         _emit_trace(trace_id, "market_intelligence_assessed", "Market_Intelligence_Agent",
                     {"sku": sku or None, "signal_count": len(findings),

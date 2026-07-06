@@ -3118,6 +3118,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     // contained ShopSquire's own potential blast radius.
                     const integrityBlocks = (src || []).filter((e) =>
                       String(e.event_type || '').toLowerCase().includes('outbound_integrity'));
+                    // The GENUINE market-intelligence step (real findings + a bounded, deterministic
+                    // recommendation) — surfaced as a card so the intelligence is seen, not just logged.
+                    const miEvent: any = [...(src || [])].reverse().find((e: any) =>
+                      String(e?.payload?._original_event_type || e.event_type) === 'market_intelligence_assessed'
+                      && e?.payload?.recommendation);
+                    const mi: any = miEvent?.payload || null;
                     const draft: any = (procCase?.state_json?.draft) || null;
                     const money = (c: any) => (typeof c === 'number' ? `$${(c / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}` : null);
                     return (
@@ -3142,6 +3148,30 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                 </div>
                               );
                             })}
+                          </div>
+                        )}
+                        {mi && (
+                          <div data-testid="proc-market-intel" style={{ border: '1px solid #6366f1', background: '#eef2ff', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
+                            <div style={{ fontWeight: 700, color: '#3730a3', marginBottom: 4 }}>
+                              📊 Market Intelligence — {String(mi.mode) === 'live' ? `${mi.signal_count} active signal${mi.signal_count === 1 ? '' : 's'}` : 'internal-only (no external signal)'}
+                            </div>
+                            <div style={{ marginBottom: 6 }}>
+                              <span style={{ fontWeight: 700 }}>Recommended action:</span> {String(mi.recommendation || '—')}
+                              <div style={{ color: '#4b5563', marginTop: 2 }}>{String(mi.rationale || '')}</div>
+                            </div>
+                            {Array.isArray(mi.signals) && mi.signals.length > 0 && (
+                              <div>
+                                {mi.signals.map((s: any, i: number) => (
+                                  <div key={i} style={{ paddingLeft: 6, borderLeft: `3px solid ${String(s.severity) === 'critical' ? '#dc2626' : '#f59e0b'}`, marginBottom: 3, color: '#374151' }}>
+                                    <span className={styles.mono} style={{ fontSize: 11 }}>{String(s.type || '')}</span>
+                                    {s.summary ? <span> — {String(s.summary)}</span> : null}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ marginTop: 6, fontSize: 11, color: '#6b7280' }}>
+                              Deterministic finding→action synthesis (no LLM) over the market-analysis engine's persisted findings — advisory only; the human decides at the send gate.
+                            </div>
                           </div>
                         )}
                         {procEvents.length === 0 && !procCase && pendingSplit?.split ? (

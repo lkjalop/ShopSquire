@@ -88,3 +88,40 @@ def test_seed_demo_populates_and_is_idempotent(db):
     # re-seed updates in place — no row growth
     cc.seed_demo(db)
     assert db.execute(text("SELECT COUNT(*) FROM price_book_entry")).scalar() == 3
+
+
+# ── full-catalog backfill (A1 of the competitor-intel plan) ──────────────────
+def _seed_products(db, rows):
+    db.execute(text("CREATE TABLE IF NOT EXISTS products (sku TEXT PRIMARY KEY, name TEXT, "
+                    "price_cents INTEGER, active INTEGER DEFAULT 1)"))
+    for sku, cents, active in rows:
+        db.execute(text("INSERT INTO products (sku, price_cents, active) VALUES (:s,:c,:a)"),
+                   {"s": sku, "c": cents, "a": active})
+    db.commit()
+
+
+def test_backfill_covers_every_active_priced_product(db):
+    # Without full price_book coverage, the competitor-undercut LEFT JOIN yields our_price=NULL and the
+    # detector silently skips the SKU — so EVERY active priced product must get an 'our retail' row.
+    _seed_products(db, [("LAP-A", 100000, 1), ("LAP-B", 200000, 1), ("LAP-OFF", 300000, 0),
+                        ("LAP-NOPRICE", None, 1)])
+    out = cc.backfill_price_book_from_products(db)
+    assert out == {"seen": 2, "written": 2, "skipped": 0}   # inactive + unpriced excluded
+    assert cc.retail_unit_cents(db, "LAP-A") == 100000
+    assert cc.retail_unit_cents(db, "LAP-B") == 200000
+    assert cc.retail_unit_cents(db, "LAP-OFF") is None
+
+
+def test_backfill_is_idempotent_and_never_clobbers_human_prices(db):
+    _seed_products(db, [("LAP-A", 100000, 1), ("LAP-B", 200000, 1)])
+    cc.upsert_price(db, sku="LAP-A", list_cents=95000, source="ops_override")  # a human priced this
+    out1 = cc.backfill_price_book_from_products(db)
+    assert out1["written"] == 1 and out1["skipped"] == 1     # only the gap; the human row untouched
+    assert cc.retail_unit_cents(db, "LAP-A") == 95000
+    out2 = cc.backfill_price_book_from_products(db)          # re-run → pure no-op
+    assert out2["written"] == 0 and out2["skipped"] == 2
+    # overwrite refreshes catalog-sourced rows ONLY — the ops override still wins
+    db.execute(text("UPDATE products SET price_cents=210000 WHERE sku='LAP-B'")); db.commit()
+    out3 = cc.backfill_price_book_from_products(db, overwrite=True)
+    assert cc.retail_unit_cents(db, "LAP-B") == 210000
+    assert cc.retail_unit_cents(db, "LAP-A") == 95000
