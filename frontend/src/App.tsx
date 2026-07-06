@@ -84,6 +84,7 @@ type ChatMessage = {
   nqeSelectionApplied?: Record<string, any>;  // echoed back from backend on assistant msgs
   agentStepsReadable?: string[];         // human-readable agent step summaries from ResponseNormalizer
   narrationJobId?: string;               // async-narration handoff: poll /narration/{id} → replace content
+  undoClear?: { items: { sku: string; quantity: number; name?: string }[] };  // "Undo" chip after a clear → re-add these
 };
 type PendingImageContext = {
   labels: string[];
@@ -880,6 +881,29 @@ export default function App() {
     }
   };
 
+  // UNDO a clear: re-add the items that were just removed — the reversible "put them back" for a buyer who
+  // changed their mind. Sequential re-adds (the backend cart write is lock-free); the removal freed the
+  // stock so they normally succeed. A since-sold-out line is skipped and reported, never silently dropped.
+  const restoreClearedItems = async (items: { sku: string; quantity: number; name?: string }[]) => {
+    let restored = 0;
+    for (const it of items) {
+      try {
+        await addCartItem(uid, String(it.sku), Math.max(1, Math.floor(Number(it.quantity) || 1)));
+        restored += 1;
+      } catch {
+        // keep going; partial restore is surfaced below
+      }
+    }
+    const refreshed = await getCart(uid).catch(() => null);
+    setCart(refreshed);
+    staleCartNoticeShown.current = true;   // buyer is actively managing the cart — don't re-nag
+    setMessages(prev => [...prev, { role: 'assistant' as const,
+      content: restored === items.length
+        ? `↩️ Restored ${restored} item(s) to your cart.`
+        : `↩️ Restored ${restored} of ${items.length} item(s). The rest couldn't be re-added (likely now out of stock) — tell me what you need and I'll re-source them.`,
+      timestamp: new Date() }]);
+  };
+
   // Snapshot the cart's SKUs on the FIRST cart read of the session: those are the "previous session"
   // items. Lets the cart offer "Clear previous (N)" — drop the carried-over items WITHOUT losing what
   // the buyer just added (the two-choice clear from the demo review). Empty first read → nothing is
@@ -1169,7 +1193,9 @@ export default function App() {
         const keptItem = items.find((i) => keepSet.has(String(i.sku)));
         const keptName = (keptItem && productShortLabel(keptItem as any)) || keepRes.keepSkus[0];
         setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
-          { role: 'assistant', content: `🧹 Done — removed ${toRemove.length} item(s) and kept **${keptName}**. That's what's left in your cart.`, timestamp: new Date() }]);
+          { role: 'assistant', content: `🧹 Done — removed ${toRemove.length} item(s) and kept **${keptName}**. That's what's left in your cart.`,
+            undoClear: { items: toRemove.map((i) => ({ sku: String(i.sku), quantity: Number(i.quantity) || 1, name: i.name })) },
+            timestamp: new Date() }]);
         setInputValue(''); switchRightPanelMode('cart'); return;
       }
     }
@@ -1183,6 +1209,10 @@ export default function App() {
       if (initialCartSkus.current === null) initialCartSkus.current = currentSkus;
       const carriedSkus = priorCartSkus.length > 0 ? priorCartSkus : previousSessionSkus(currentSkus, initialCartSkus.current);
       const n = carriedSkus.length;
+      // Capture the removed lines BEFORE deleting, so the Undo chip can put them back.
+      const carriedSet = new Set(carriedSkus.map(String));
+      const removedItems = (latestCart?.items || []).filter((i: any) => carriedSet.has(String(i.sku)))
+        .map((i: any) => ({ sku: String(i.sku), quantity: Number(i.quantity) || 1, name: i.name }));
       if (n > 0) {
         if (carriedSkus.length === currentSkus.length) {
           await clearCart(uid).catch(() => null);
@@ -1204,14 +1234,19 @@ export default function App() {
         { role: 'assistant', content: n > 0
             ? `🧹 Done — removed the ${n} item(s) carried over from your previous session. Everything you added this session is still in the cart.`
             : 'There are no items carried over from a previous session — everything in the cart was added this session. Say "clear my cart" if you want to start completely fresh.',
+          ...(n > 0 && removedItems.length ? { undoClear: { items: removedItems } } : {}),
           timestamp: new Date() }]);
       setInputValue('');
       switchRightPanelMode('cart');
       return;
     }
     if (/\b(?:clear|empty|wipe|reset)\b.{0,20}\bcart\b|\bcart\b.{0,12}\b(?:clear|empty)\b/i.test(q)) {
+      // Capture the whole cart BEFORE the wipe so the Undo chip can restore it.
+      const removedItems = ((cart?.items as any[]) || []).map((i) => ({ sku: String(i.sku), quantity: Number(i.quantity) || 1, name: i.name }));
       setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
-        { role: 'assistant', content: '🧹 Done — your cart is now empty. Tell me what you need and I\'ll help you rebuild it.', timestamp: new Date() }]);
+        { role: 'assistant', content: '🧹 Done — your cart is now empty. Tell me what you need and I\'ll help you rebuild it.',
+          ...(removedItems.length ? { undoClear: { items: removedItems } } : {}),
+          timestamp: new Date() }]);
       setInputValue('');
       await clearCartAll();
       switchRightPanelMode('cart');
@@ -2128,6 +2163,23 @@ export default function App() {
                     {/* Disambiguation buttons for assistant */}
                     {msg.disambiguation && msg.disambiguationOptions && msg.disambiguationOptions.length > 0 && (
                       <DisambiguationButtons options={msg.disambiguationOptions} onSelect={handleDisambiguationSelect} />
+                    )}
+                    {msg.undoClear && msg.undoClear.items.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.filterBtn}
+                          onClick={() => {
+                            const items = msg.undoClear!.items;
+                            // consume: drop the chip so it can't be double-applied, then restore
+                            setMessages(prev => prev.map(m => m === msg ? { ...m, undoClear: undefined } : m));
+                            void restoreClearedItems(items);
+                          }}
+                          title="Put the cleared items back"
+                        >
+                          ↩️ Undo — restore {msg.undoClear.items.length} item(s)
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
