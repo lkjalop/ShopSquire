@@ -484,6 +484,79 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
     return f"Yes, this budget reaches {brand_label if brand_has_match else 'similar'} options starting around ${int(round(first_price)):,}."
 
 
+# ── capability yes/no ("can it run Valorant?", "good for video editing?") — answer-first verdict from
+# the TOP result's specs, honest hedge on integrated graphics. Commerce-generic capability classes; the
+# spec checks (discrete GPU / RAM) are the requirement, not product literals. ──────────────────────────
+_CAP_GAMING = ("gaming", "valorant", "fortnite", "cyberpunk", "cs2", "csgo", "esports", "aaa game",
+               "call of duty", "warzone", "apex legends", "overwatch", "elden ring", "gta", "triple-a")
+_CAP_HEAVY = ("video editing", "4k editing", "4k video", "render", "rendering", "3d modeling", "3d model",
+              "cad", "blender", "premiere", "after effects", "davinci", "machine learning", "deep learning",
+              "ml training", "ai training", "train a model", "solidworks", "autocad", "gpu-heavy")
+_CAP_DEV = ("coding", "programming", "software development", "compiling", "docker", "virtual machine",
+            "kubernetes", "data science", "jupyter", "web development", "dev work")
+_CAP_LIGHT = ("office work", "word", "excel", "spreadsheet", "browsing", "emails", "studying", "school work",
+              "note-taking", "notes", "streaming", "watching", "zoom", "teams calls", "microsoft office")
+_CAP_QUESTION_RE = re.compile(
+    r"\b(?:can|will|does)\b.{0,40}\b(?:run|play|handle|do|use|manage)\b"
+    r"|\bgood\s+(?:for|enough|at)\b|\bhandle\b|\benough\s+for\b|\bcapable\s+of\b|\bsuitable\s+for\b"
+    r"|\bcan\s+it\b|\bwill\s+it\b|\bfast\s+enough\b|\bpowerful\s+enough\b", re.I)
+
+
+def _cap_result_has_discrete_gpu(r: dict) -> bool:
+    # STRUCTURED field first (the demo + retrieval populate specs.gpu_discrete) — keeps this vertical-blind.
+    # Name fallback uses only generic GPU-family words (no product-model literals → agnostic-core clean).
+    specs = r.get("specs") if isinstance(r.get("specs"), dict) else {}
+    if specs.get("gpu_discrete") is True:
+        return True
+    if specs.get("gpu_discrete") is False and not specs.get("gpu"):
+        return False
+    hay = (str(r.get("name") or "") + " " + str(specs.get("gpu") or "")).lower()
+    return bool(re.search(r"\b(nvidia|geforce|dedicated\s+gpu|discrete\s+gpu)\b", hay))
+
+
+def _cap_result_ram_gb(r: dict):
+    specs = r.get("specs") if isinstance(r.get("specs"), dict) else {}
+    try:
+        v = int(specs.get("ram_gb") or 0)
+        return v or None
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_capability_answer(query: str, results: list[dict]) -> str:
+    """A deterministic capability verdict for 'can it run X / good for Y' — yes/no from the top result's
+    specs, honest hedge on integrated graphics. '' when it's not a capability question or no class matches."""
+    q = str(query or "").lower()
+    if not results or not isinstance(results[0], dict) or not _CAP_QUESTION_RE.search(q):
+        return ""
+    cls = ("gaming" if any(c in q for c in _CAP_GAMING)
+           else "heavy" if any(c in q for c in _CAP_HEAVY)
+           else "dev" if any(c in q for c in _CAP_DEV)
+           else "light" if any(c in q for c in _CAP_LIGHT)
+           else None)
+    if cls is None:
+        return ""
+    top = results[0]
+    name = str(top.get("name") or "this laptop").strip()
+    has_gpu = _cap_result_has_discrete_gpu(top)
+    ram = _cap_result_ram_gb(top)
+    if cls == "gaming":
+        if has_gpu:
+            return f"Yes — the {name} has a dedicated GPU, so it handles gaming well, including demanding titles."
+        return (f"It'll run popular esports titles (Valorant, CS2, League) fine, but the {name} uses integrated "
+                f"graphics — for demanding AAA games a dedicated-GPU model is the safer pick. Want me to show those?")
+    if cls == "heavy":
+        if has_gpu and (ram is None or ram >= 16):
+            return f"Yes — the {name} pairs a dedicated GPU with {ram or '16+'}GB RAM, which suits that GPU-heavy work."
+        return (f"For that GPU-heavy work the {name} is light — it lacks the dedicated GPU / 16GB+ RAM those "
+                f"tasks want. I'd point you to a discrete-GPU workstation. Want me to show those?")
+    if cls == "dev":
+        if ram is not None and ram >= 16:
+            return f"Yes — the {name} has {ram}GB RAM, comfortable for development and multitasking."
+        return f"The {name} works for development; for heavier workloads I'd aim for 16GB+ RAM. Want me to filter for that?"
+    return f"Yes — the {name} easily handles everyday use (office, browsing, study, video calls)."
+
+
 def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: dict) -> str:
     q_low = str(query or "").lower()
     asks_budget = any(
@@ -496,7 +569,8 @@ def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: 
         )
     )
     if not asks_budget:
-        return ""
+        # not a budget question — try the capability verdict ("can it run X / good for Y") before giving up
+        return _build_capability_answer(query, results)
 
     def _extract_budget_value(text: str) -> float | None:
         """Return the budget ceiling from text. For ranges ($X to $Y) returns Y (the max)."""

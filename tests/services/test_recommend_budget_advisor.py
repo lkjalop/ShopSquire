@@ -133,3 +133,35 @@ def test_router_reexports_same_objects():
     assert r._budget_reasoning_requested is _budget_reasoning_requested
     assert r._persona_summary_label is _persona_summary_label
     assert r._USE_CASE_BUDGET_FLOORS is _USE_CASE_BUDGET_FLOORS
+
+
+# ── capability yes/no verdicts ("can it run X", "good for Y") — answer-first from the top result's specs ──
+_GPU = [{"name": "Asus TUF Gaming F15 RTX 4060", "specs": {"gpu_discrete": True, "gpu": "RTX 4060", "ram_gb": 16}}]
+_IGPU16 = [{"name": "Lenovo ThinkPad T14", "specs": {"gpu_discrete": False, "ram_gb": 16}}]
+_IGPU8 = [{"name": "Acer Aspire 3", "specs": {"gpu_discrete": False, "ram_gb": 8}}]
+
+
+def test_capability_gaming_verdict_by_gpu():
+    from src.app.services.recommend_budget_advisor import _build_capability_answer as cap
+    assert cap("can it run valorant?", _GPU).lower().startswith("yes")
+    # integrated GPU → honest hedge, not a false yes, and offers the discrete-GPU alternative
+    hedge = cap("can it run cyberpunk?", _IGPU16).lower()
+    assert "integrated" in hedge and "dedicated" in hedge
+
+
+def test_capability_heavy_and_dev_and_light():
+    from src.app.services.recommend_budget_advisor import _build_capability_answer as cap
+    assert cap("good for 4k rendering?", _GPU).lower().startswith("yes")
+    assert "light" in cap("is this good for video editing?", _IGPU16).lower()   # integrated → not suited
+    assert cap("is it good for coding?", _IGPU16).lower().startswith("yes")      # 16GB ok for dev
+    assert "16gb" in cap("good for coding?", _IGPU8).lower()                     # 8GB → recommend more
+    assert cap("good for office work and browsing?", _IGPU16).lower().startswith("yes")
+
+
+def test_capability_returns_empty_for_non_capability_or_budget_turns():
+    from src.app.services.recommend_budget_advisor import _build_capability_answer as cap, _build_brand_budget_answer_v2 as v2
+    assert cap("gaming laptop under 2000", _GPU) == ""     # a search, not a capability question
+    assert cap("hello", _GPU) == ""
+    assert cap("can it run valorant?", []) == ""            # no results → no verdict
+    # v2 still answers budget questions (capability path must not shadow the budget path)
+    assert v2("is 1800 enough for gaming?", _GPU, {"budget_max": 1800}).lower().startswith(("yes", "no"))
