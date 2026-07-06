@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './CartPanel.module.css';
 import type { Product } from '../App';
 import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase } from '../lib/api';
@@ -146,6 +146,10 @@ export default function CartPanel({
     setSplitHasSplit(hasSplit);
     setSplitConfirmed(confirmed);
   };
+  // The delivery-plan card is the real CTA; the footer "Confirm delivery plan first" is a helper that
+  // scrolls to it (rather than a dead disabled button that looks broken).
+  const splitCardRef = useRef<HTMLDivElement>(null);
+  const scrollToPlan = () => splitCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   // Confirm sourcing for the CURRENT cart, transparently SUPERSEDING when the cart CHANGED since a prior
   // confirm of this same order. Without this the backend returns `amend_required` + the STALE cases (the
   // previous order's SKUs/qty), and the Procurement tab would open the OLD RFQ — the wrong story for a
@@ -327,8 +331,10 @@ export default function CartPanel({
             </div>
           ))}
 
-          <SplitFulfillmentCard uid={uid} refreshKey={splitKey} nameFor={nameForSku} onSplitState={onSplitState}
-                                onConfirmed={confirmPlanSourcing} />
+          <div ref={splitCardRef}>
+            <SplitFulfillmentCard uid={uid} refreshKey={splitKey} nameFor={nameForSku} onSplitState={onSplitState}
+                                  onConfirmed={confirmPlanSourcing} />
+          </div>
 
           <div className={styles.row}>
             <div className={styles.rowLeft}>
@@ -343,12 +349,17 @@ export default function CartPanel({
                 {sourcingNote
                   ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-proceed"
                             onClick={proceedToCheckout}>Continue to checkout</button>
-                  : <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-checkout"
-                            disabled={checkingSourcing || splitBlocksCheckout} onClick={goToCheckout}
-                            title={splitBlocksCheckout ? 'Confirm the delivery plan first' : undefined}>
-                      {checkingSourcing ? 'Checking stock…'
-                        : splitBlocksCheckout ? 'Confirm delivery plan first' : 'Checkout'}
-                    </button>}
+                  : splitBlocksCheckout
+                    // NOT the primary CTA and NOT a dead disabled button — a secondary helper that jumps to
+                    // the real "Confirm delivery plan" control above so the buyer knows what to do next.
+                    ? <button className={styles.btn} data-testid="cart-confirm-plan-first" onClick={scrollToPlan}
+                              title="Jump to the delivery plan above and confirm it to unlock checkout">
+                        ↑ Confirm delivery plan first
+                      </button>
+                    : <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-checkout"
+                              disabled={checkingSourcing} onClick={goToCheckout}>
+                        {checkingSourcing ? 'Checking stock…' : 'Checkout'}
+                      </button>}
               </div>
             </div>
           </div>
