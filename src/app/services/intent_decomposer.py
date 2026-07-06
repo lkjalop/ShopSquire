@@ -56,15 +56,38 @@ _NUM = r"(\d[\d,]{0,6})"
 # amendment/new-line is what triggers the LLM binding fallback (the "trap" cases like "reduce to 10 and get
 # 40 mice" or "make it 15 and add a docking station" that the regex verb set misses).
 _CHANGE_VERB_RE = re.compile(
-    r"\b(?:reduce|lower|drop|cut|bump|bring|only|down\s+to|make\s+it|change|instead|halve|double)\b", re.I)
+    r"\b(?:reduce|lower|drop|cut|bump|bring|only|down\s+to|make\s+it|change|instead|halve|double|"
+    r"remove|get\s+rid|delete|take\s+out|ditch|scrap)\b", re.I)
+
+# REMOVAL of a named cart line ("get rid of the Alpha X1 and the Beta Pro", "remove the monitor"). The verb
+# starts the capture; the object runs to the next boundary (punctuation / a change-verb starting the next
+# clause). "get rid off" (common typo) is covered by of+.
+_REMOVE_VERB_RE = re.compile(
+    r"\b(?:remove|get\s+rid\s+of+|delete|take\s+out|take\s+off|ditch|scrap|do\s+away\s+with)\b", re.I)
+_REMOVE_STOP_RE = re.compile(
+    r"[,;?!]|\b(?:reduce|change|set|make|lower|bump|cut|increase|update|add|get\s+me|then|instead|please)\b", re.I)
+# NAMED quantity amendment ("reduce the Alpha Slim 3 to 20") - binds the qty to a PRODUCT-NAME
+# reference instead of the positional __last__.
+_NAMED_QTY_RE = re.compile(
+    r"\b(?:reduce|change|set|make|lower|bump|cut|increase|update|bring)\s+(?:the\s+|that\s+|my\s+)?"
+    r"(?P<obj>[^,;?!]{3,70}?)\s+(?:down\s+|up\s+)?to\s+(?P<n>\d[\d,]{0,6})\b", re.I)
+# referents that are NOT a product-name reference (those fall back to the positional __last__ path)
+_REF_PRONOUNS = {"it", "that", "this", "them", "those", "these", "the order", "order", "quantity", "qty",
+                 "the quantity", "the qty", "everything", "all", "budget", "the budget"}
+
+
+def _clean_ref(text: str) -> str:
+    """A free-text product-name reference, trimmed of leading articles/fillers. Opaque - no vocabulary."""
+    t = re.sub(r"^(?:the|that|this|those|these|my|our|a|an)\s+", "", str(text or "").strip(), flags=re.I)
+    return t.strip(" \t-")[:80]
 _ADD_VERB_RE = re.compile(
     r"\b(?:add|get|grab|throw\s+in|include|also|plus|as\s+well|toss\s+in|chuck\s+in)\b", re.I)
 
 
 @dataclass(frozen=True)
 class Amendment:
-    ref: str          # "__last__" (the last chosen/shortlisted item) — resolved by the caller
-    new_qty: int
+    ref: str          # "__last__" (positional) OR a free-text product-name reference - resolved by the caller
+    new_qty: int      # 0 = REMOVE the referenced line (executed as qty-0 by the human-confirmed card)
 
 
 @dataclass(frozen=True)
@@ -139,12 +162,53 @@ def _decompose_deterministic(query: str, has_prior_selection: bool) -> TurnInten
 
     # ── amendment: an amendment cue + a BARE number that is NOT a new-line qty and NOT the budget ──────
     amendments: List[Amendment] = []
+    consumed: List[Tuple[int, int]] = []   # spans claimed by removals/named refs; bare numbers inside are NOT quantities
+
+    # (a) REMOVALS: "get rid of the Alpha X1 and the Beta Pro" -> one qty-0 amendment per named object.
+    for m in _REMOVE_VERB_RE.finditer(q):
+        stop = _REMOVE_STOP_RE.search(q, m.end())
+        span_end = stop.start() if stop else len(q)
+        chunk = q[m.end():span_end]
+        if not chunk.strip():
+            continue
+        consumed.append((m.start(), span_end))
+        for part in re.split(r"\band\b|,|&", chunk, flags=re.I):
+            ref = _clean_ref(part)
+            if len(ref) < 3 or not re.search(r"[a-z]", ref, re.I) or ref.lower() in _REF_PRONOUNS:
+                continue
+            if has_prior_selection:
+                amendments.append(Amendment(ref=ref, new_qty=0))
+            else:
+                notes.append(f"remove '{ref[:40]}' ignored: no prior selection/cart to remove from.")
+            if len(amendments) >= 4:
+                break
+
+    # (b) NAMED quantity: "reduce the Alpha Slim 3 to 20" -> qty amendment bound to the name reference.
+    for m in _NAMED_QTY_RE.finditer(q):
+        n = _to_int(m.group("n"))
+        ref = _clean_ref(m.group("obj"))
+        if n is None or not (1 <= n <= 500):
+            continue
+        if budget_span and budget_span[0] <= m.start("n") < budget_span[1]:
+            continue  # that number is the budget
+        consumed.append((m.start(), m.end()))
+        if ref.lower() in _REF_PRONOUNS or len(ref) < 3:
+            continue  # "make it 15" style stays on the bare-number/__last__ path below
+        if has_prior_selection:
+            amendments.append(Amendment(ref=ref, new_qty=n))
+        else:
+            notes.append(f"amend '{ref[:40]}'-to-{n} ignored: no prior selection to amend.")
+
+    # (c) bare-number fallback ("actually make it 15") - positional __last__; numbers inside claimed
+    # spans are skipped. One bare amendment per turn.
     for m in re.finditer(r"\b" + _NUM + r"\b", ql):
         n = _to_int(m.group(1))
         if n is None or not (1 <= n <= 500):
             continue
         if budget_span and budget_span[0] <= m.start() < budget_span[1]:
             continue  # this number IS the budget, not a quantity
+        if any(a <= m.start() < b for a, b in consumed):
+            continue  # claimed by a removal/named amendment above
         before = ql[max(0, m.start() - 30):m.start()]
         after = ql[m.end():m.end() + 18]
         # a quantity amendment: an amend cue precedes it AND it isn't immediately followed by a category noun
@@ -153,7 +217,8 @@ def _decompose_deterministic(query: str, has_prior_selection: bool) -> TurnInten
                 amendments.append(Amendment(ref="__last__", new_qty=n))
             else:
                 notes.append(f"amend-to-{n} ignored: no prior selection to amend (ask which item).")
-            break  # one amendment per turn (the buyer changes their mind once)
+            break  # one BARE amendment per turn (the buyer changes their mind once)
+    amendments = amendments[:6]
 
     # ── gate new lines to a genuinely MULTI-intent "add-on" turn ─────────────────────────────────────
     # A new line only means something when the buyer is ADDING on top of something: there must be a prior
@@ -286,14 +351,15 @@ def _needs_llm_binding(intents: TurnIntents, ql: str, has_prior_selection: bool)
 _LLM_BINDING_PROMPT = (
     "You extract a shopper's shopping intents from ONE message into STRICT JSON. Output ONLY the JSON object,"
     " no prose. Schema:\n"
-    '{"amendments":[{"ref":"__last__","new_qty":<int>}],'
+    '{"amendments":[{"ref":"__last__ or a short product-name reference","new_qty":<int, 0 = remove>}],'
     '"new_lines":[{"category":"<short generic plural noun>","qty":<int or null>}],'
     '"budget_scopes":[{"applies_to":["__new__"],"budget_min":<int or null>,"budget_max":<int or null>}],'
     '"objection":"price" or null}\n'
     "Rules:\n"
-    "- amendments: ONLY when the shopper changes the QUANTITY of the item they already chose (e.g. 'make it"
-    " 15', 'reduce to 10', 'lower to 20', 'bump to 30', 'only 5'). ref is always '__last__'. Omit if the"
-    " quantity of the prior item is not changed. has_prior_selection={prior}; if false, emit NO amendment.\n"
+    "- amendments: when the shopper changes the QUANTITY of an item they already have ('make it 15',"
+    " 'reduce the Alpha Slim to 20') or REMOVES one ('get rid of the Alpha X1' -> new_qty 0). ref: '__last__'"
+    " for it/that; else the product-name words they used (max 8 words, verbatim). One entry per item;"
+    " up to 6. has_prior_selection={prior}; if false, emit NO amendment.\n"
     "- new_lines: each DISTINCT additional product category the shopper wants, with its quantity if stated"
     " ('3 monitors' -> qty 3; 'some headsets' -> qty null; 'a docking station' -> qty 1). Use short GENERIC"
     " category nouns (plural), never brands or models. qty must be 1..500 or null.\n"
@@ -327,6 +393,13 @@ def _bind_with_llm(query: str, has_prior_selection: bool, llm_fn: LLMFn,
             bits.append(f"budget up to {int(prior_context['budget_max'])}")
         if bits:
             ctx = "Prior selection: " + ", ".join(bits) + ".\n"
+        # the full cart (name x qty) lets the model bind NAMED refs to the right line, not just __last__
+        lines = prior_context.get("lines")
+        if isinstance(lines, list) and len(lines) > 1:
+            rows = "; ".join(f"'{str(l.get('name'))[:50]}' x{l.get('qty')}"
+                             for l in lines[:6] if isinstance(l, dict) and l.get("name"))
+            if rows:
+                ctx += "Cart lines: " + rows + ".\n"
     prompt = (_LLM_BINDING_PROMPT
               .replace("{prior}", "true" if has_prior_selection else "false")
               .replace("{context}", ctx)
@@ -359,12 +432,22 @@ def _parse_llm_intents(raw: Any, has_prior_selection: bool) -> Optional[TurnInte
         return None
 
     amendments: List[Amendment] = []
-    for a in (data.get("amendments") or [])[:1]:   # one amendment per turn (the buyer changes their mind once)
+    seen_refs: set = set()
+    for a in (data.get("amendments") or [])[:6]:   # up to 6 line-ops per turn (removals + qty changes)
         if not isinstance(a, dict):
             continue
         nq = _to_int(a.get("new_qty"))
-        if nq is not None and 1 <= nq <= 500 and has_prior_selection:
-            amendments.append(Amendment(ref="__last__", new_qty=nq))
+        ref = _clean_ref(str(a.get("ref") or "__last__"))
+        if not ref or ref.lower() in ("__last__", "last", "it", "that"):
+            ref = "__last__"
+        # 0 (removal) is valid; anything else re-checked against the same 1..500 rule as the grammar
+        if nq is None or not (0 <= nq <= 500) or not has_prior_selection:
+            continue
+        key = (ref.lower(), nq)
+        if key in seen_refs:
+            continue
+        seen_refs.add(key)
+        amendments.append(Amendment(ref=ref, new_qty=nq))
 
     new_lines: List[NewLine] = []
     seen: set = set()

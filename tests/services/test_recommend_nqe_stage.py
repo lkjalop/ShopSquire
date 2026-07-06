@@ -91,3 +91,21 @@ def test_router_reexports_same_objects():
     assert r.RecommendStageState is RecommendStageState
     assert r.RecommendNQEHooks is RecommendNQEHooks
     assert r.run_recommend_nqe_stage is run_recommend_nqe_stage
+
+
+def test_persona_fallback_never_reasks_a_known_use_case():
+    """The live complaint: the buyer clicked Gaming, yet low persona-confidence re-injected
+    "what will you mostly do?". With use_case_known the fallback must not insert ask_use_case —
+    and must STRIP one that is already present (empty list = nothing left to ask, which is correct)."""
+    from src.app.services.recommend_nqe_helpers import apply_persona_confidence_fallback as fb
+
+    qs = [{"id": "ask_budget", "text": "What's your budget?"}]
+    # unknown use_case + low confidence → fallback inserts ask_use_case at the front (old behaviour)
+    out = fb(qs, persona=None, persona_confidence=0.0)
+    assert any(q["id"] == "ask_use_case" for q in out)
+    # KNOWN use_case → never inserted, other questions untouched
+    out2 = fb(qs, persona=None, persona_confidence=0.0, use_case_known=True)
+    assert [q["id"] for q in out2] == ["ask_budget"]
+    # KNOWN use_case strips a pre-existing ask_use_case too — even down to an empty list
+    out3 = fb([{"id": "ask_use_case", "text": "?"}], persona=None, persona_confidence=0.0, use_case_known=True)
+    assert out3 == []

@@ -423,6 +423,7 @@ def run_recommend_nqe_stage(
                 next_questions,
                 persona=state.constraints.get("buyer_persona") or state.constraints.get("buyer_persona_candidate"),
                 persona_confidence=state.constraints.get("buyer_persona_confidence"),
+                use_case_known=bool(state.constraints.get("use_case")),
             )
             next_questions = hooks.adapt_nqe_questions_for_sentiment(
                 next_questions,
@@ -505,6 +506,7 @@ def run_recommend_nqe_stage(
             state.payload.get("next_questions"),
             persona=state.constraints.get("buyer_persona") or state.constraints.get("buyer_persona_candidate"),
             persona_confidence=state.constraints.get("buyer_persona_confidence"),
+            use_case_known=bool(state.constraints.get("use_case")),
         )
         state.payload["next_questions"] = prioritize_domain_refinement_questions(
             state.payload.get("next_questions")
@@ -521,6 +523,7 @@ def run_recommend_nqe_stage(
     if (
         str(state.turn_intent or "").upper() in {"SEARCH", "FILTER"}
         and not state.followup_explain
+        and not state.constraints.get("use_case")  # NEVER re-ask a use-case the session already knows
         and isinstance(state.payload.get("next_questions"), list)
         and len(state.payload.get("next_questions") or []) == 0
     ):

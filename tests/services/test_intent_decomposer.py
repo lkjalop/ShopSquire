@@ -92,3 +92,35 @@ def test_new_lines_survive_with_an_add_cue_or_prior_or_scope():
                            has_prior_selection=True)
     assert b.amendments and b.amendments[0].new_qty == 15
     assert {n.category for n in b.new_lines} == {"headsets", "hard drives"}
+
+
+# ── cart-operation grammar: removals + named refs + multi-amendment (the live compound command) ──
+def test_compound_removals_and_named_qty_all_parse():
+    """The live regression verbatim: two removals + a named qty change in ONE turn. Previously this fell
+    through to product search (no removal grammar, one __last__ amendment max)."""
+    from src.app.services.intent_decomposer import decompose_turn
+    q = ('can we get rid off the HP Envy x360 14-fc0189TU 14" WUXGA and Lenovo ThinkPad L13 Gen 6 13.3" '
+         'WUXGA reduce Lenovo IdeaPad Slim 3i 15.3" 2K Laptop to 20 instead? do i have to redo delivery plan?')
+    t = decompose_turn(q, has_prior_selection=True)
+    ops = [(a.ref.lower(), a.new_qty) for a in t.amendments]
+    assert len(ops) == 3, ops
+    assert any("envy" in r and n == 0 for r, n in ops), "HP Envy removal missing"
+    assert any("thinkpad" in r and n == 0 for r, n in ops), "ThinkPad removal missing"
+    assert any("ideapad" in r and n == 20 for r, n in ops), "IdeaPad qty-20 missing"
+
+
+def test_removal_needs_a_prior_selection():
+    from src.app.services.intent_decomposer import decompose_turn
+    t = decompose_turn("remove the monitor", has_prior_selection=False)
+    assert not t.amendments and any("no prior selection" in n for n in t.notes)
+
+
+def test_bare_last_amendment_still_single_and_unclaimed_numbers_only():
+    """'make it 15' keeps the positional __last__ path; numbers inside removal/named spans are never
+    double-counted as bare amendments."""
+    from src.app.services.intent_decomposer import decompose_turn
+    t = decompose_turn("actually make it 15 instead", has_prior_selection=True)
+    assert [(a.ref, a.new_qty) for a in t.amendments] == [("__last__", 15)]
+    t2 = decompose_turn("reduce the ideapad slim to 20", has_prior_selection=True)
+    assert len(t2.amendments) == 1 and t2.amendments[0].new_qty == 20
+    assert t2.amendments[0].ref != "__last__"

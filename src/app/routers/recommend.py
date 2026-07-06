@@ -2572,9 +2572,11 @@ def _apply_persona_confidence_fallback(
     *,
     persona: str | None,
     persona_confidence: float | None,
+    use_case_known: bool = False,
 ) -> list[dict]:
     return _apply_persona_confidence_fallback_impl(
         questions, persona=persona, persona_confidence=persona_confidence,
+        use_case_known=use_case_known,
     )
 
 
@@ -7869,6 +7871,7 @@ def suggest(
             next_questions,
             persona=constraints.get("buyer_persona") or constraints.get("buyer_persona_candidate"),
             persona_confidence=constraints.get("buyer_persona_confidence"),
+            use_case_known=bool(constraints.get("use_case")),
         )
         next_questions = prioritize_domain_refinement_questions(next_questions)
         next_questions = _adapt_nqe_questions_for_sentiment(

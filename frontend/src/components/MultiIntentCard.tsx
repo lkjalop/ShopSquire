@@ -21,16 +21,28 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
   onDismiss: () => void;
 }) {
   const lines = plan?.plan || [];
-  // Only show an amendment row for a line THIS turn actually changed (amended === true) and to a real
-  // positive qty — never for a carried-forward/unchanged prior line (that would be a spurious confirm that
-  // adds/changes an item the buyer didn't ask about) nor for qty<=0 (which would silently remove the line).
+  // Only show rows for lines THIS turn actually changed (amended === true) — never for a carried-forward
+  // unchanged prior line (a spurious confirm that changes an item the buyer didn't ask about). qty >= 1 is
+  // a quantity change; qty === 0 is an explicit REMOVAL row ("get rid of the HP Envy") — still confirmed
+  // by a click, never silently applied.
   const amendments = lines.filter(
     (l) => l.scope === 'prior' && l.ref && l.amended === true && typeof l.requested_qty === 'number' && (l.requested_qty as number) >= 1,
   );
+  const removals = lines.filter(
+    (l) => l.scope === 'prior' && l.ref && l.amended === true && typeof l.requested_qty === 'number' && (l.requested_qty as number) === 0,
+  );
   const newLines = lines.filter((l) => l.scope === 'new');
   const hasNewPicks = newLines.some((l) => (l.results?.length ?? 0) > 0);
+  const actionable = amendments.length + removals.length;
   // Nothing to confirm → render nothing (a plain single-intent turn never reaches here anyway).
-  if (!amendments.length && !hasNewPicks) return null;
+  if (!actionable && !hasNewPicks) return null;
+  const applyAll = async () => {
+    // one click applies every line-op in the plan (removals first, then qty changes) — each is still an
+    // explicit cart API call; the plan itself was human-reviewed on this card.
+    for (const l of [...removals, ...amendments]) {
+      await onAmendQty(l.ref as string, l.requested_qty as number);
+    }
+  };
 
   return (
     <section data-testid="multi-intent-card"
@@ -43,6 +55,20 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
           💰 You mentioned budget — these picks lead on value, not just sticker price.
         </div>
       )}
+
+      {/* explicit removals ("get rid of the HP Envy") — confirmed by click, executed as qty-0 */}
+      {removals.map((l) => (
+        <div key={`rm-${l.ref}`} data-testid={`multi-intent-remove-${l.ref}`}
+             style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '4px 0' }}>
+          <span style={{ fontSize: 14 }}>
+            Remove <strong>{l.name || l.ref}</strong> from the cart
+          </span>
+          <button onClick={() => onAmendQty(l.ref as string, 0)}
+                  style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>
+            Remove
+          </button>
+        </div>
+      ))}
 
       {/* qty amendment on the already-chosen item — confirm, never auto-apply */}
       {amendments.map((l) => (
@@ -86,7 +112,13 @@ export default function MultiIntentCard({ plan, onAmendQty, onAddItem, onDismiss
         );
       })}
 
-      <div style={{ marginTop: 10, textAlign: 'right' }}>
+      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' }}>
+        {actionable > 1 && (
+          <button data-testid="multi-intent-apply-all" onClick={applyAll}
+                  style={{ background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontWeight: 700 }}>
+            Apply all {actionable} changes
+          </button>
+        )}
         <button onClick={onDismiss}
                 style={{ background: 'transparent', color: '#6b7280', border: 'none', cursor: 'pointer', fontSize: 13 }}>
           Dismiss

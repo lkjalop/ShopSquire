@@ -64,12 +64,14 @@ def verify_plan(lines: List[Dict[str, Any]], *, must_survive: Optional[List[str]
         scope = str(l.get("scope") or "new")
         results = l.get("results") if isinstance(l.get("results"), list) else []
 
-        # 3) quantity sanity
+        # 3) quantity sanity — 0 is valid ONLY as an explicit REMOVAL on an amended prior line (the
+        # human-confirmed card executes it as qty-0 → line delete); anywhere else 0 is still a violation.
         q = l.get("requested_qty")
         if q is not None:
             try:
                 qi = int(q)
-                if not (1 <= qi <= 500):
+                is_removal = qi == 0 and scope == "prior" and bool(l.get("amended"))
+                if not is_removal and not (1 <= qi <= 500):
                     violations.append(f"quantity out of range: {qi} for '{cat or l.get('ref')}'")
             except (TypeError, ValueError):
                 violations.append(f"quantity not a number for '{cat or l.get('ref')}'")

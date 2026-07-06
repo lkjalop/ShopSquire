@@ -16,10 +16,45 @@ budget only ever attaches to NEW lines — the guard proves it.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+import re
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.app.services.intent_decomposer import decompose_turn
 from src.app.services.scatter_gather_guard import verify_plan
+
+# tokens too generic to identify a product line on their own (units/form words, no product vocabulary)
+_GENERIC_REF_TOKENS = {"the", "that", "this", "and", "for", "with", "inch", "unit",
+                       "units", "item", "items", "one", "ones", "gen", "pro", "plus", "new"}
+
+
+def _ref_tokens(text: str) -> set:
+    return {t for t in re.findall(r"[a-z0-9][a-z0-9\-]{1,}", str(text or "").lower())
+            if t not in _GENERIC_REF_TOKENS}
+
+
+def _resolve_named_ref(ref: str, prior: List[Dict[str, Any]]) -> Optional[int]:
+    """Bind a free-text product reference ("the Alpha X1", "Beta Slim 3") to ONE prior line by
+    distinctive-token overlap. Requires a real signal (>=1 shared token of len>=3 AND >=34% of the ref's
+    tokens) and a UNIQUE best line — an ambiguous or unmatched ref returns None so the caller warns
+    instead of guessing (a wrong-line amendment is worse than a question)."""
+    toks = _ref_tokens(ref)
+    if not toks:
+        return None
+    scored: List[Tuple[float, int]] = []
+    for i, p in enumerate(prior):
+        hay = _ref_tokens(str((p or {}).get("name") or "") + " " + str((p or {}).get("ref") or ""))
+        inter = toks & hay
+        if not any(len(t) >= 3 for t in inter):
+            continue
+        scored.append((len(inter) / len(toks), i))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    if scored[0][0] < 0.34:
+        return None
+    if len(scored) > 1 and abs(scored[0][0] - scored[1][0]) < 1e-9:
+        return None   # tie — ambiguous, don't guess
+    return scored[0][1]
 
 
 def plan_turn(
@@ -41,31 +76,39 @@ def plan_turn(
         intents = decompose_turn(query, has_prior_selection=bool(prior), llm_fn=llm_fn)
 
     lines: List[Dict[str, Any]] = []
+    warnings: List[str] = []
 
-    # 1) prior lines carried forward — apply a "__last__" amendment to a prior item's quantity.
-    amend_qty: Optional[int] = None
+    # 1) prior lines carried forward — resolve EVERY amendment to its target line. Named refs bind by
+    # distinctive-token match ("get rid of the Alpha X1" → that line, qty 0 = removal); "__last__" keeps
+    # the positional heuristic (prefer the last line whose qty actually CHANGES — the bare "make it 15"
+    # with [item-A 25, item-B 15] must not no-op the wrong line). Unresolved refs become a WARNING and
+    # force the confirmation card — never a guess on a money-changing turn.
+    amend_by_idx: Dict[int, int] = {}
     for a in intents.amendments:
         if a.ref == "__last__":
-            amend_qty = a.new_qty
-    # Target selection: a bare "make it 15" with MULTIPLE prior lines used to blindly amend the LAST
-    # line — which broke when the last line was already at that qty (e.g. cart = [Lenovo 25, Apple 15]
-    # and "make it 15" amended Apple, a no-op on the wrong laptop). Prefer the LAST prior line whose
-    # qty actually CHANGES; fall back to the last line only if every line already matches.
-    amend_idx: int = len(prior) - 1
-    if amend_qty is not None and len(prior) > 1:
-        changing = [i for i, p in enumerate(prior)
-                    if int((p or {}).get("requested_qty") or 0) != int(amend_qty)]
-        if changing:
-            amend_idx = changing[-1]
+            idx = len(prior) - 1
+            if len(prior) > 1:
+                changing = [i for i, p in enumerate(prior)
+                            if int((p or {}).get("requested_qty") or 0) != int(a.new_qty)]
+                if changing:
+                    idx = changing[-1]
+            if idx >= 0:
+                amend_by_idx[idx] = a.new_qty
+        else:
+            idx = _resolve_named_ref(a.ref, prior)
+            if idx is None:
+                warnings.append(f"couldn't match '{str(a.ref)[:48]}' to a cart line — not applied (please confirm which item)")
+            else:
+                amend_by_idx[idx] = a.new_qty
     for i, p in enumerate(prior):
         row = dict(p)
         row["scope"] = "prior"
-        # `amended` is True ONLY for the line this turn actually changed the qty of. A carried-forward,
-        # unchanged prior line must NOT be presented as an amendment (else the UI shows a spurious
-        # "Change X quantity to N" and confirming it would apply/add an item the buyer never asked to change).
-        row["amended"] = bool(amend_qty is not None and i == amend_idx)
+        # `amended` is True ONLY for lines this turn actually changed. A carried-forward, unchanged prior
+        # line must NOT be presented as an amendment (else the UI shows a spurious "Change X quantity to N"
+        # and confirming it would apply/add an item the buyer never asked to change). qty 0 = removal row.
+        row["amended"] = i in amend_by_idx
         if row["amended"]:
-            row["requested_qty"] = amend_qty            # 20 → 15 on the chosen laptop
+            row["requested_qty"] = amend_by_idx[i]
         lines.append(row)
 
     # 2) the scoped budget applies to NEW lines only (the prior laptop keeps its own budget)
@@ -76,7 +119,6 @@ def plan_turn(
             scoped_max, scoped_min = b.budget_max, b.budget_min
 
     # 3+4) scatter over the new category lines, gather results within the scoped budget
-    warnings: List[str] = []
     for nl in intents.new_lines:
         try:
             results = search_fn(nl.category, scoped_max) or []

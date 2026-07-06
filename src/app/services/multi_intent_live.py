@@ -182,7 +182,10 @@ def plan_live(query: str, uid: str, *, limit: int = 6,
     prior_ctx = None
     if prior:
         _last = prior[-1]
-        prior_ctx = {"qty": _last.get("requested_qty"), "name": _last.get("name")}
+        prior_ctx = {"qty": _last.get("requested_qty"), "name": _last.get("name"),
+                     # ALL cart lines (name + qty), so the model can bind NAMED refs ("get rid of the HP
+                     # Envy") to the right line in a multi-product cart — not just the last one.
+                     "lines": [{"qty": p.get("requested_qty"), "name": p.get("name")} for p in prior[-6:]]}
     probe = decompose_turn(query, has_prior_selection=bool(prior), llm_fn=llm_fn, prior_context=prior_ctx)
     if not probe.amendments and not probe.new_lines:
         return None

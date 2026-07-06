@@ -90,3 +90,40 @@ def test_bare_qty_amendment_falls_back_to_last_when_all_match():
     out = plan_turn("actually make it 15 instead", prior_lines=prior, search_fn=_good_search)
     amended = [l for l in out["plan"] if l.get("amended")]
     assert len(amended) == 1 and amended[0]["ref"] == "B"  # last line
+
+
+# ── named-ref resolution + removals (the compound cart-op) ──
+def _three_line_cart():
+    return [
+        {"ref": "SKU-HP", "name": 'HP Envy x360 14" WUXGA 2-in-1 Laptop', "requested_qty": 25, "category": "laptops"},
+        {"ref": "SKU-TP", "name": 'Lenovo ThinkPad L13 Gen 6 13.3" Laptop', "requested_qty": 30, "category": "laptops"},
+        {"ref": "SKU-IP", "name": 'Lenovo IdeaPad Slim 3i 15.3" 2K Laptop', "requested_qty": 40, "category": "laptops"},
+    ]
+
+
+def test_compound_removals_and_named_qty_resolve_to_the_right_lines():
+    from src.app.services.multi_intent_planner import plan_turn
+    out = plan_turn('get rid of the HP Envy and the ThinkPad L13, reduce the IdeaPad Slim to 20',
+                    prior_lines=_three_line_cart(), search_fn=lambda c, b: [])
+    by_ref = {l["ref"]: l for l in out["plan"] if l.get("scope") == "prior"}
+    assert by_ref["SKU-HP"]["amended"] and by_ref["SKU-HP"]["requested_qty"] == 0
+    assert by_ref["SKU-TP"]["amended"] and by_ref["SKU-TP"]["requested_qty"] == 0
+    assert by_ref["SKU-IP"]["amended"] and by_ref["SKU-IP"]["requested_qty"] == 20
+    assert out["verdict"]["ok"], out["verdict"]         # guard allows qty-0 ONLY as an amended removal
+    assert not out["warnings"]
+
+
+def test_unmatched_named_ref_warns_and_never_guesses():
+    from src.app.services.multi_intent_planner import plan_turn
+    out = plan_turn("remove the macbook pro", prior_lines=_three_line_cart(), search_fn=lambda c, b: [])
+    assert any("couldn't match" in w for w in out["warnings"])
+    assert not [l for l in out["plan"] if l.get("amended")]      # nothing touched
+    assert out["needs_confirmation"] is True                      # warning forces the card
+
+
+def test_ambiguous_ref_is_not_applied():
+    # "the Lenovo" matches BOTH Lenovo lines equally → tie → warn, don't pick one
+    from src.app.services.multi_intent_planner import plan_turn
+    out = plan_turn("remove the lenovo", prior_lines=_three_line_cart(), search_fn=lambda c, b: [])
+    assert not [l for l in out["plan"] if l.get("amended")]
+    assert any("couldn't match" in w for w in out["warnings"])

@@ -279,10 +279,17 @@ def apply_persona_confidence_fallback(
     *,
     persona: str | None,
     persona_confidence: float | None,
+    use_case_known: bool = False,
 ) -> list[dict]:
     out = [dict(q) for q in (questions or []) if isinstance(q, dict)]
     if not out:
         return out
+    # NEVER re-ask "what will you mainly use it for" when the session already KNOWS the use-case
+    # (constraints/answered fields) — low persona confidence is not a license to re-interrogate a buyer
+    # who already answered; that redundancy was the live complaint ("I already said gaming").
+    if use_case_known:
+        # also strip any ask_use_case already present (an empty list is CORRECT — nothing left to ask)
+        return [q for q in out if str((q or {}).get("id") or "").strip().lower() != "ask_use_case"]
     conf = float(persona_confidence or 0.0)
     min_conf = float(os.getenv("PERSONA_CONFIDENCE_MIN", "0.34") or 0.34)
     if conf >= min_conf:
