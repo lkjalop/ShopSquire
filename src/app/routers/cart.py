@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -49,6 +50,12 @@ class CartItemPayload(BaseModel):
 # Per-line quantity ceiling (matches scatter_gather_guard's 1..500 sanity). Bounds the allow_sourcing path
 # so lifting the STOCK gate can't push an unbounded qty into the cart from a single request.
 _MAX_LINE_QTY = 500
+
+
+def _now_ts() -> str:
+    """UTC 'YYYY-MM-DD HH:MM:SS' — same format as draft_orders.updated_at, so per-line added_at and the
+    cart's updated_at compare cleanly (see services/cart_ttl.py)."""
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _load_items(raw) -> List[Dict]:
@@ -116,6 +123,10 @@ def _hydrate(items: List[Dict]) -> Dict:
             "name": product.name,
             "specs": product.specs if isinstance(product.specs, dict) else None,
         }
+        # Per-line age: when this line was first added. Lets the UI resolve "the latest unit" exactly
+        # (most-recent added_at) instead of guessing from array order, and feeds future per-line TTL.
+        if it.get("added_at"):
+            row["added_at"] = it.get("added_at")
         # Carry the procurement-shortfall markers through so the "X will be sourced" state is DURABLE
         # across GET /cart (not just the one PUT echo) — the UI reads them to badge the line.
         if it.get("sourcing_required"):
@@ -367,7 +378,7 @@ def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_ME
                 found = True
                 break
         if not found:
-            items.append({"sku": payload.sku, "quantity": requested_qty})
+            items.append({"sku": payload.sku, "quantity": requested_qty, "added_at": _now_ts()})
         _save_cart(cart_id, items)
         # S3 human-correction learning: adding a SKU to cart is an acceptance signal for that product
         # (gated by HUMAN_FEEDBACK_CAPTURE_ENABLED; inert + best-effort by default).
@@ -450,7 +461,8 @@ def replace_items(payload: CartItemsPayload, role: str = Depends(require_role([R
         cart_id, _, _ = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.replace_items", signal=signal)
         # Use aggregated quantities (deduped) as the canonical line items.
-        items = [{"sku": sku, "quantity": qty} for sku, qty in aggregated.items()]
+        _ts = _now_ts()
+        items = [{"sku": sku, "quantity": qty, "added_at": _ts} for sku, qty in aggregated.items()]
         _save_cart(cart_id, items)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
@@ -516,7 +528,7 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
                     found = True
                     break
             if not found:
-                line: Dict[str, Any] = {"sku": sku, "quantity": target, "sourcing_required": bool(shortfall_meta)}
+                line: Dict[str, Any] = {"sku": sku, "quantity": target, "sourcing_required": bool(shortfall_meta), "added_at": _now_ts()}
                 if shortfall_meta:
                     line["shortfall"] = shortfall_meta["shortfall"]
                     line["available_now"] = shortfall_meta["available_now"]

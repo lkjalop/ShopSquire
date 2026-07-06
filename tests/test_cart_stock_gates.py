@@ -181,6 +181,19 @@ def test_cart_age_warm_when_carried_over(client_with_stock):
     assert "hour" in age["label"]
 
 
+# ── per-line added_at (Phase 2: exact "latest" + future per-line TTL) ─────────
+
+def test_added_at_stamped_and_surfaced(client_with_stock):
+    """Each cart line carries an added_at timestamp, surfaced on GET so the UI can find the newest line."""
+    resp = client_with_stock.post("/api/v1/cart/items", json={"uid": "added-at-user", "sku": "SKU-INSTOCK-5", "quantity": 1})
+    line = next(it for it in resp.json()["items"] if it["sku"] == "SKU-INSTOCK-5")
+    assert line.get("added_at"), "add_item response line should carry added_at"
+    # durable across GET (not just the add echo)
+    got = client_with_stock.get("/api/v1/cart", params={"uid": "added-at-user"}).json()
+    persisted = next(it for it in got["items"] if it["sku"] == "SKU-INSTOCK-5")
+    assert persisted.get("added_at") == line["added_at"]
+
+
 def test_add_item_quantity_exceeds_stock(client_with_stock):
     """Requesting more than available stock must be rejected."""
     resp = client_with_stock.post(
