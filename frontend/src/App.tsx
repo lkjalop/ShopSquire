@@ -1126,6 +1126,22 @@ export default function App() {
 
     // CART ACTIONS the assistant can genuinely do — executed client-side against the real cart API, with
     // an honest confirmation ("clear my cart" used to silently do nothing; the demo's top complaint).
+    // SCOPED clear first: "clear the old items from the previous session" — drop ONLY the carried-over
+    // items, keep what was added this session. Checked before the full clear (phrases like "clear the old
+    // items in my cart" match both) and does NOT require the word "cart" (the live miss: this phrasing
+    // fell through to product search).
+    if (/\b(?:clear|remove|delete|drop|get\s+rid\s+of)\b.{0,40}\b(?:old|previous|prior|earlier)\b.{0,40}\b(?:items?|units?|session|cart|stuff)\b/i.test(q)) {
+      const n = priorCartSkus.length;
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content: n > 0
+            ? `🧹 Done — removed the ${n} item(s) carried over from your previous session. Everything you added this session is still in the cart.`
+            : 'There are no items carried over from a previous session — everything in the cart was added this session. Say "clear my cart" if you want to start completely fresh.',
+          timestamp: new Date() }]);
+      setInputValue('');
+      if (n > 0) await clearPriorCartItems();
+      switchRightPanelMode('cart');
+      return;
+    }
     if (/\b(?:clear|empty|wipe|reset)\b.{0,20}\bcart\b|\bcart\b.{0,12}\b(?:clear|empty)\b/i.test(q)) {
       setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
         { role: 'assistant', content: '🧹 Done — your cart is now empty. Tell me what you need and I\'ll help you rebuild it.', timestamp: new Date() }]);

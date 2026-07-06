@@ -19,6 +19,13 @@ $env:FULFILLMENT_AUTO_DRAFT_ON_COMMIT  = "1"      # a confirmed cart auto-drafts
 $env:HIPPOGRAPH_FEEDBACK_ENABLED       = "shadow" # market-intel appears in the decision trace, does NOT steer the buyer
 $env:MARKET_PIPELINE_ENABLED           = "1"      # operator "Refresh live data" runs the REAL market pipeline
 $env:COMMERCE_CATALOG_ENABLED          = "1"      # price_book joins power competitor-undercut findings
+# Multi-intent orchestration (amendments/mixed orders in chat): deterministic grammar FIRST, then the
+# schema-constrained local-LLM binding for phrasings the regex misses ("get rid of the HP and reduce the
+# IdeaPad to 20"). Without these the planner is DEAD and cart commands fall through to product search.
+$env:MULTI_INTENT_PLANNER_ENABLED      = "1"
+$env:MULTI_INTENT_LLM_BINDING_ENABLED  = "1"
+$env:MULTI_INTENT_LLM_MODEL            = "qwen3:14b"   # the resident model — no swap latency
+$env:MULTI_INTENT_LLM_TIMEOUT_SEC      = "30"
 # Supplier comms stay SAFE for the demo (no real email): sandbox transport + autonomy OFF.
 $env:FULFILLMENT_SUPPLIER_TRANSPORT = "sandbox"
 $env:FULFILLMENT_AUTONOMOUS_RFQ     = "0"

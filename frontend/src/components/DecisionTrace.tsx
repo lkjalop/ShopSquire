@@ -3283,7 +3283,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                         <td colSpan={5}>
                                           {(() => {
                                             // human-readable first ("what happened / why", derived ONLY from
-                                            // recorded fields); the raw JSON stays below as the evidence.
+                                            // recorded fields); the raw JSON evidence sits behind its own
+                                            // disclosure so the demo reads a sentence, not a wall of JSON.
                                             const ex = explainProcEvent(displayEventType(e), p);
                                             return ex ? (
                                               <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6,
@@ -3293,9 +3294,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                               </div>
                                             ) : null;
                                           })()}
-                                          <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb',
-                                                        borderRadius: 6, padding: 8, margin: '4px 0', maxHeight: 220, overflow: 'auto',
-                                                        fontSize: 11 }}>{JSON.stringify(drill, null, 2)}</pre>
+                                          <details style={{ margin: '4px 0' }}>
+                                            <summary style={{ cursor: 'pointer', fontSize: 11, color: '#6b7280' }}>
+                                              Raw recorded payload (evidence)
+                                            </summary>
+                                            <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb',
+                                                          borderRadius: 6, padding: 8, margin: '4px 0', maxHeight: 220, overflow: 'auto',
+                                                          fontSize: 11 }}>{JSON.stringify(drill, null, 2)}</pre>
+                                          </details>
                                         </td>
                                       </tr>
                                     )}
