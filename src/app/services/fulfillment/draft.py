@@ -776,16 +776,19 @@ def _emit_supplier_selection_trace(
     }
     try:
         from src.app.services.decision_log import log_trace_event
+        # execution: supplier ranking + channel routing are pure rules/scoring — stamped so the trace can
+        # PROVE these money-touching decisions are deterministic (LLM only ever polishes the email body).
         log_trace_event(trace_id=trace_id, event_type="supplier_selected", source_type="agent",
                         source_id="Supplier_Selection_Agent", target_type="fulfillment_case",
-                        target_id=case_id, payload=payload, durable=True)
+                        target_id=case_id, payload={**payload, "execution": "deterministic"}, durable=True)
         # Distinct channel-routing event so the procurement journey shows HOW this supplier is reached
         # (email → agent drafts · phone/portal → human-only task · edi/cxml/api → integration handoff).
         if channel_plan:
             log_trace_event(trace_id=trace_id, event_type="supplier_channel_resolved", source_type="agent",
                             source_id="Supplier_Channel_Agent", target_type="fulfillment_case",
                             target_id=case_id,
-                            payload={"case_id": case_id, "supplier_ref": draft.recipient_ref, **channel_plan},
+                            payload={"case_id": case_id, "supplier_ref": draft.recipient_ref, **channel_plan,
+                                     "execution": "deterministic"},
                             durable=True)
     except Exception:
         return

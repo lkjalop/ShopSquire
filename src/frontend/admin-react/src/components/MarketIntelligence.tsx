@@ -9,9 +9,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   experimentEvaluate, experimentPromote, experimentRevert, experimentState,
-  governancePulse, marketState, refreshMarket, replayAdvance, replayReset, replayState,
+  governancePulse, marketDigest, marketState, refreshMarket, replayAdvance, replayReset, replayState,
   supportResponse,
-  type ExperimentState, type GovernancePulse, type ReplayState, type SupportResponse,
+  type ExperimentState, type GovernancePulse, type MarketDigest, type ReplayState, type SupportResponse,
 } from '../api';
 
 const SEV_COLOR: Record<string, string> = { critical: 'crimson', warn: 'darkorange', info: 'gray' };
@@ -77,6 +77,17 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
       .catch(() => setGovNote('Governance visibility unavailable — check your API key / role (operator access required).'));
   }, [govTenant]);
   useEffect(() => { if (authReady) loadPulse(); }, [loadPulse, st, exp, authVersion, authReady]);
+
+  // ── Market digest (deck M3 summarization) — on-demand operator brief. Deterministic facts; the
+  //    flag-gated local-LLM only rewrites wording. Advisory-only: read-only projection, executes nothing. ──
+  const [digest, setDigest] = useState<MarketDigest | null>(null);
+  const [digestBusy, setDigestBusy] = useState(false);
+  const loadDigest = async () => {
+    setDigestBusy(true); setError(null);
+    try { setDigest(await marketDigest()); }
+    catch (e: any) { setError(e?.message || 'digest failed'); }
+    finally { setDigestBusy(false); }
+  };
 
   // ── M5 SUPPORT lane — the pre-sales angle to counter the dominant buyer objection (price→value, etc.).
   //    Recommends an APPROVED angle from support_response_policy; no free-form copy. Refreshes with the
@@ -175,6 +186,35 @@ export function MarketIntelligence({ authVersion = 0, authReady = true }:
           <li><em>no active findings — {mode === 'live' ? 'refresh live data' : 'advance the replay'}</em></li>
         )}
       </ul>
+
+      {/* Market digest (deck M3 summarization): the operator's brief. Deterministic facts always; the
+          flag-gated local-LLM only rewrites the narrative wording. Advisory-only — executes nothing. */}
+      <section data-testid="mi-digest" style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
+        <h4 style={{ margin: '0 0 6px' }}>Market digest (operator brief)</h4>
+        <button disabled={digestBusy || busy} onClick={loadDigest} data-testid="mi-digest-generate">
+          {digestBusy ? 'Generating…' : (digest ? 'Regenerate digest' : 'Generate digest')}
+        </button>
+        {digest && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 8, padding: '10px 12px' }}>
+              <div data-testid="mi-digest-narrative">{digest.narrative}</div>
+              <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+                {digest.finding_count} finding(s) · {Object.entries(digest.by_severity).map(([s, n]) => `${n} ${s}`).join(' · ') || 'none'}
+                {' · '}
+                {digest.mode === 'llm_rewrite'
+                  ? 'narrative wording by local LLM — facts deterministic'
+                  : 'fully deterministic (no LLM)'}
+                {' · advisory only — nothing executes from this brief'}
+              </div>
+            </div>
+            {digest.suggested_focus.length > 0 && (
+              <ul data-testid="mi-digest-focus" style={{ marginTop: 8 }}>
+                {digest.suggested_focus.map((f, i) => <li key={i}>{f}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* Live-adaptation console: arm/observe/evaluate/revert the reversible ranking experiment.
           Arming only flips status — the nudge still needs RANKING_NUDGE_EXPERIMENT_ENABLED to fire. */}

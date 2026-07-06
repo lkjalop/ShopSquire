@@ -12,6 +12,7 @@ import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
 import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
+import { previousSessionSkus } from './lib/cartSession';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -863,11 +864,36 @@ export default function App() {
       // Once the buyer explicitly clears, they own the cart — suppress the "previous session" stale
       // notice for the rest of the session so items they add next are never mislabeled as carried over.
       staleCartNoticeShown.current = true;
+      initialCartSkus.current = [];   // nothing "previous" remains after a full clear
       // A cleared cart has no procurement story — release the sticky sourcing-trace pin so the Decision
       // Trace no longer resolves the (now-abandoned) bulk order's Procurement tab.
       setSourcingTraceId(null);
     } catch {
       // ignore
+    }
+  };
+
+  // Snapshot the cart's SKUs on the FIRST cart read of the session: those are the "previous session"
+  // items. Lets the cart offer "Clear previous (N)" — drop the carried-over items WITHOUT losing what
+  // the buyer just added (the two-choice clear from the demo review). Empty first read → nothing is
+  // ever labelled previous.
+  const initialCartSkus = useRef<string[] | null>(null);
+  useEffect(() => {
+    if (initialCartSkus.current === null && cart) {
+      initialCartSkus.current = (cart.items || []).map((i: any) => String(i.sku));
+    }
+  }, [cart]);
+  const priorCartSkus = previousSessionSkus(
+    (cart?.items || []).map((i: any) => String(i.sku)), initialCartSkus.current);
+  const clearPriorCartItems = async () => {
+    try {
+      for (const sku of priorCartSkus) {
+        await removeFromCart(sku);
+      }
+      initialCartSkus.current = [];          // the carried-over set is gone; the rest is this session's
+      staleCartNoticeShown.current = true;   // and no longer worth nagging about
+    } catch {
+      // best-effort — whatever was removed stays removed; Refresh shows the truth
     }
   };
 
@@ -2503,6 +2529,8 @@ export default function App() {
                         onSetQty={setCartQty}
                         traceId={traceId}
                         onTraceId={(tid) => setTraceId(normalizeTraceId(tid))}
+                        priorSkus={priorCartSkus}
+                        onClearPrior={clearPriorCartItems}
                       />
                     ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
                       <div className={styles.emptyProductState}>

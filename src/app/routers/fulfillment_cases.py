@@ -1057,6 +1057,16 @@ def market_state(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]
         return mp.state(db)
 
 
+@router.get("/market/digest")
+def market_digest(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
+    """The operator's market brief — severity/type rollups + suggested focus from ACTIVE findings.
+    Deterministic facts always; the (flag-gated, local-LLM) narrative only rewrites wording. Advisory
+    only: read-only projection, nothing executes from it (deck M3 summarization within the LLM boundary)."""
+    from src.app.services.market_digest import build_digest
+    with db_session() as db:
+        return build_digest(db)
+
+
 @router.get("/market/traffic-sources")
 def market_traffic_sources(role: str = Depends(require_role(_OPERATOR))) -> Dict[str, Any]:
     """Marketing-BI: visits + conversions + conversion-rate PER CHANNEL (traffic source), plus the

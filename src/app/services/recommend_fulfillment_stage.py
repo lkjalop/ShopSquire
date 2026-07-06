@@ -45,9 +45,14 @@ def _safe_int(v: Any) -> Optional[int]:
         return None  # observable: callers treat None as "not stated"
 
 
-def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payload_obj: Dict[str, Any]) -> None:
+def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payload_obj: Dict[str, Any],
+                execution: str = "deterministic") -> None:
     """Emit one decision-trace agent step (best-effort) so the bulk-procurement journey is visible in the
-    Decision Trace. Dormant for non-bulk turns. Never raises into the recommend flow."""
+    Decision Trace. Dormant for non-bulk turns. Never raises into the recommend flow.
+
+    ``execution`` stamps HOW the step was computed — "deterministic" (rules/SQL/scoring, the default for
+    every step this stage emits) or "llm:<model>" for a model-assisted step — so the trace can PROVE
+    which decisions are deterministic and where an LLM was involved (the agentic-transparency badge)."""
     if not trace_id:
         return
     try:
@@ -55,7 +60,8 @@ def _emit_trace(trace_id: Optional[str], event_type: str, source_id: str, payloa
         # durable=True so the procurement-journey / market-intel / alternatives steps PERSIST and show in
         # the Decision Trace Events tab (not just the live stream) — the blank-trace annotation.
         log_trace_event(trace_id=trace_id, event_type=event_type, source_type="agent", source_id=source_id,
-                        target_type="system", target_id=None, payload=payload_obj, durable=True)
+                        target_type="system", target_id=None,
+                        payload={**payload_obj, "execution": execution}, durable=True)
     except Exception as exc:
         record_partial_failure("trace_emit", exc, trace_id=trace_id)
 

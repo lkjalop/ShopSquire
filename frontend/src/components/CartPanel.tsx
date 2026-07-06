@@ -34,6 +34,8 @@ export default function CartPanel({
   onSetQty,
   traceId,
   onTraceId,
+  priorSkus,
+  onClearPrior,
 }: {
   uid: string;
   cart: CartState | null;
@@ -44,6 +46,8 @@ export default function CartPanel({
   onSetQty?: (sku: string, qty: number) => Promise<void>;
   traceId?: string | null;
   onTraceId?: (traceId: string | null) => void;
+  priorSkus?: string[];                    // items carried over from a previous session (App snapshots)
+  onClearPrior?: () => Promise<void>;      // remove ONLY those, keeping what was added this session
 }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   const [upsells, setUpsells] = useState<Product[]>([]);
@@ -346,6 +350,14 @@ export default function CartPanel({
               <div className={styles.btnRow}>
                 <button className={styles.btn} onClick={() => onRefresh()}>Refresh</button>
                 <button className={styles.btn} onClick={() => onClear()}>Clear</button>
+                {(priorSkus?.length ?? 0) > 0 && onClearPrior && (
+                  // the two-choice clear: drop ONLY the items carried over from a previous session,
+                  // keeping everything the buyer added this session
+                  <button className={styles.btn} data-testid="cart-clear-prior" onClick={() => onClearPrior()}
+                          title="Remove only the items carried over from your previous session — keeps what you added just now">
+                    Clear previous ({priorSkus!.length})
+                  </button>
+                )}
                 {sourcingNote
                   ? <button className={`${styles.btn} ${styles.btnPrimary}`} data-testid="cart-proceed"
                             onClick={proceedToCheckout}>Continue to checkout</button>

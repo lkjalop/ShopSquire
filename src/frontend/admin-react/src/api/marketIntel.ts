@@ -34,6 +34,21 @@ export const experimentRevert = () => http<ExperimentState>(`${_exp}/revert`, { 
 export const experimentEvaluate = (min_samples = 30) =>
   http<any>(`${_exp}/evaluate`, { method: 'POST', body: JSON.stringify({ min_samples }) });
 
+// Market digest (deck M3 summarization) — the operator's brief from ACTIVE findings. Deterministic
+// facts always; the flag-gated local-LLM only rewrites the narrative wording. Advisory-only.
+export interface MarketDigest {
+  mode: 'deterministic' | 'llm_rewrite';
+  finding_count: number;
+  by_severity: Record<string, number>;
+  by_type: Record<string, number>;
+  top_findings: Array<{ finding_type: string; severity: string; entity_ref?: string | null;
+                        confidence?: number; summary?: string | null }>;
+  suggested_focus: string[];
+  narrative: string;
+  advisory_only: boolean;
+}
+export const marketDigest = () => http<MarketDigest>(`/api/v1/fulfillment/market/digest`);
+
 // M5 SUPPORT lane — the pre-sales phrasing angle to counter the dominant buyer objection (deck: price
 // objections → shift to lifetime VALUE). Operator-only; recommends an APPROVED angle, never free-form copy.
 export interface SupportResponse {

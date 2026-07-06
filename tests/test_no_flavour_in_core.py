@@ -145,6 +145,9 @@ _CORE_MODULES = [
     # market analysis engine (M3): market_signal → typed findings via deterministic detectors;
     # finding_type/entity_ref/evidence are opaque — no product vocabulary.
     "src/app/services/market_analysis.py",
+    # market digest (M3 summarization): findings → operator brief; deterministic facts, flag-gated
+    # LLM only rewrites wording; advisory-only — finding types/entities are opaque labels.
+    "src/app/services/market_digest.py",
     # experiment + rollback framework (M6b): assignment/uplift/anti-Goodhart decision math; metrics
     # and variants are opaque labels — no product vocabulary.
     "src/app/services/experiments.py",

@@ -302,6 +302,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // (a normal shopper never sees it — blind-ship stays intact).
   const [procCase, setProcCase] = useState<any | null>(null);
   const [procCases, setProcCases] = useState<any[]>([]);  // ALL cases for the trace (multi-supplier → N RFQs)
+  // Procurement agent-row drill-down: row index → expanded (the payload is the evidence — one click deep).
+  const [procExpanded, setProcExpanded] = useState<Record<number, boolean>>({});
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
@@ -3206,7 +3208,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                           <div className={styles.empty}>No procurement / supplier-selection / market-intelligence activity in this trace (not a bulk or sourcing turn).</div>
                         ) : (
                           <table className={styles.table}>
-                            <thead><tr><th>Agent</th><th>Event</th><th>Detail</th></tr></thead>
+                            <thead><tr><th></th><th>Agent</th><th>Event</th><th>Mode</th><th>Detail</th><th>When</th></tr></thead>
                             <tbody>
                               {procEvents.map((e, i) => {
                                 const p: any = (e as any).payload || {};
@@ -3229,12 +3231,44 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                                   p.channel && p.agent_may_draft === true && 'agent drafts · human sends',
                                   p.case_id && `case ${String(p.case_id).slice(0, 8)}`,
                                 ].filter(Boolean).join(' · ');
+                                // deterministic-vs-LLM provenance chip: stamped by the backend emitters —
+                                // proves which steps are pure rules/scoring vs model-assisted.
+                                const exec = String(p.execution || '');
+                                const isLlm = exec.startsWith('llm');
+                                const when = String((e as any).created_at || '').replace('T', ' ').slice(11, 19);
+                                const isOpen = !!procExpanded[i];
+                                // payload for the drill-down, minus envelope/meta keys (the _-prefixed ones)
+                                const drill = Object.fromEntries(Object.entries(p).filter(([k]) => !k.startsWith('_')));
                                 return (
-                                  <tr key={i}>
-                                    <td>{(e as any).source_id || '—'}</td>
-                                    <td>{displayEventType(e)}</td>
-                                    <td>{detail || getSummary(e)}</td>
-                                  </tr>
+                                  <Fragment key={i}>
+                                    <tr data-testid={`proc-event-row-${i}`} style={{ cursor: 'pointer' }}
+                                        onClick={() => setProcExpanded((prev) => ({ ...prev, [i]: !prev[i] }))}
+                                        title="Click to inspect this step's full recorded payload">
+                                      <td style={{ width: 18, color: '#9ca3af' }}>{isOpen ? '▾' : '▸'}</td>
+                                      <td>{(e as any).source_id || '—'}</td>
+                                      <td>{displayEventType(e)}</td>
+                                      <td>{exec ? (
+                                        <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                                                       background: isLlm ? '#f3e8ff' : '#f3f4f6',
+                                                       color: isLlm ? '#7e22ce' : '#374151',
+                                                       border: `1px solid ${isLlm ? '#d8b4fe' : '#d1d5db'}` }}>
+                                          {isLlm ? exec : 'deterministic'}
+                                        </span>
+                                      ) : <span style={{ color: '#d1d5db' }}>—</span>}</td>
+                                      <td>{detail || getSummary(e)}</td>
+                                      <td className={styles.mono} style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{when || '—'}</td>
+                                    </tr>
+                                    {isOpen && (
+                                      <tr data-testid={`proc-event-drill-${i}`}>
+                                        <td></td>
+                                        <td colSpan={5}>
+                                          <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb',
+                                                        borderRadius: 6, padding: 8, margin: '4px 0', maxHeight: 220, overflow: 'auto',
+                                                        fontSize: 11 }}>{JSON.stringify(drill, null, 2)}</pre>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </Fragment>
                                 );
                               })}
                             </tbody>
