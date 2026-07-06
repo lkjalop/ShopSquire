@@ -3,6 +3,7 @@ import styles from './CartPanel.module.css';
 import type { Product } from '../App';
 import { apiUrl, safeJson, confirmCartSourcing, commitFulfillmentCase } from '../lib/api';
 import { sourcedCasesFrom, sourcedCaseCountFrom } from '../lib/sourcing';
+import { withRetry } from '../lib/retry';
 import { productDisplayName, productSubtitle } from '../lib/productDisplay';
 import SplitFulfillmentCard from './SplitFulfillmentCard';
 
@@ -184,7 +185,10 @@ export default function CartPanel({
         return;
       }
       for (const c of sourcedCasesFrom(res)) {
-        try { await commitFulfillmentCase((c as any).case_id, uid); } catch { /* case stays uncommitted */ }
+        // retry once: a multi-case commit burst can hit a transient write lock — without the retry one
+        // supplier's case silently stays uncommitted and its RFQ is never drafted (observed live).
+        try { await withRetry(() => commitFulfillmentCase((c as any).case_id, uid)); }
+        catch { /* case stays uncommitted after retries — visible in the case queue, never silent-lost */ }
       }
       const caseCount = sourcedCaseCountFrom(res);
       if (caseCount > 0) {
