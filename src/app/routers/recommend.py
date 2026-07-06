@@ -1649,7 +1649,7 @@ _OFF_DOMAIN_PATTERNS = [
     re.compile(r"(?i)\b(who\s+won|the\s+score|match\s+last\s+night|football|cricket|nba|nfl|world\s+cup)\b"),
     re.compile(r"(?i)\b(tell\s+me\s+a\s+joke|knock\s+knock|sing\s+me|write\s+me\s+a\s+poem)\b"),
     re.compile(r"(?i)\b(capital\s+of|who\s+is\s+the\s+president|meaning\s+of\s+life|what\s+year\s+did)\b"),
-    re.compile(r"(?i)^\s*(?:what|whats|what's|calculate)\s+is\s+\d+\s*[-+*x/]\s*\d+"),   # "what is 15 x 32"
+    re.compile(r"(?i)^\s*(?:what|whats|what's|calculate)\s+is\s+\d+\s*(?:[-+*x/]|times|plus|minus|divided\s+by)\s*\d+"),   # "what is 15 x 32" / "15 times 32"
 ]
 
 # GREETING / META — a bare greeting or "what can you do" is NOT a product search. Anchored to the WHOLE

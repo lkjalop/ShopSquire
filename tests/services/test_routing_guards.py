@@ -28,7 +28,7 @@ def test_product_queries_are_not_greetings(q):
 @pytest.mark.parametrize("q", [
     "what's the weather?", "will it rain today", "recipe for pasta", "how to cook rice",
     "who won the game last night", "the football score", "tell me a joke", "write me a poem",
-    "what is the capital of france", "who is the president", "what is 15 x 32",
+    "what is the capital of france", "who is the president", "what is 15 x 32", "what is 15 times 32", "calculate 8 plus 7",
 ])
 def test_off_domain_is_caught(q):
     assert _query_signals_off_domain(q) is True
