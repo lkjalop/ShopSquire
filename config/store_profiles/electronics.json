@@ -2643,7 +2643,9 @@
     "warranty": "All laptops and electronics include a 12-month manufacturer warranty; business orders can add extended coverage (24/36 months) at checkout. Warranty claims are handled with a photo triage first — most are resolved within 2 business days.",
     "returns": "30-day returns on unopened items; change-of-mind on opened items within 14 days with a 10% restocking fee. Faulty items are always replaced or refunded in full.",
     "shipping": "Free delivery on orders over $5,000. Standard delivery $15 (2-4 business days); split shipments for backordered units are $9 for the follow-up leg. Bulk orders show a delivery plan with real supplier lead times before payment.",
-    "price_match": "We match any verified in-stock price from an authorised local retailer at the time of order."
+    "price_match": "We match any verified in-stock price from an authorised local retailer at the time of order.",
+    "payment": "We accept Visa, Mastercard, Amex, PayPal, and buy-now-pay-later (Afterpay/Zip). Business accounts can pay by invoice on approved terms.",
+    "contact": "You can reach our team via the in-app support chat or the Contact page; business/bulk enquiries get a dedicated account contact."
   },
   "support_playbooks": {
     "default_issue": "device_issue",

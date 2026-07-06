@@ -1202,6 +1202,25 @@ export default function App() {
       return;
     }
 
+    // BARE price objection ("too expensive", "over my budget") with no search/budget cue → a governed,
+    // margin-SAFE value reframe (never an invented discount): value-first, offer lower-priced in-budget
+    // options, and the honest escalation path (a human-approved volume discount that stays within pricing
+    // policy — never below the margin floor). "too expensive, show cheaper / under $1500" is NOT caught —
+    // that carries a search cue and routes to a normal (cheaper) search.
+    if (/\b(?:too\s+(?:expensive|much|pricey|dear|costly)|over\s+(?:my\s+)?budget|can'?t\s+afford|out\s+of\s+(?:my\s+)?budget|way\s+too\s+much|bit\s+(?:pricey|steep))\b/i.test(q)
+        && !/\b(?:show|find|cheaper|lower|under|below|instead|options?|alternatives?|else|other|what\s+about)\b|\$\s?\d|\b\d{3,}\b/i.test(q)) {
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant', content:
+          "I hear you — price matters. These picks lead on value: warranty, longevity, and total cost of "
+          + "ownership, not just the sticker. If your budget's firm, tell me your cap and I'll show lower-priced "
+          + "options that still cover what you need. For a larger or bulk order I can also flag a volume discount "
+          + "for a teammate to approve — I keep any pricing within policy and never below our margin floor. "
+          + "Want me to show cheaper options, or set a budget?",
+          timestamp: new Date() }]);
+      setInputValue('');
+      return;
+    }
+
     const userMsg: ChatMessage = {
       role: 'user', content: q, timestamp: new Date(), images: [...attachedThumbs], voiceUsed: stt.source !== null,
       ...(opts?.nqeSelection ? { nqeSelection: { questionId: opts.nqeSelection.question_id, questionText: '', optionId: opts.nqeSelection.option_id, optionLabel: opts.nqeSelection.option_label, optionValue: opts.nqeSelection.option_value, ts: Date.now() } } : {}),

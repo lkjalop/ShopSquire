@@ -72,3 +72,14 @@ def test_cv_hard_block_still_answers_text_path():
     assert "1-2 min triage" in msg
     assert "eta_to_resolve" in (cov.get("covered") or [])
 
+
+
+def test_payment_and_contact_are_policy_faq_topics():
+    """Payment-methods and contact questions route to the FAQ answerer, not product search (gap fix).
+    They resolve from the store's policy_faq slot; product queries still return None (proceed to search)."""
+    from src.app.services.answer_quality import policy_faq_answer
+    for q in ("what payment methods do you accept?", "how can i pay?", "do you take paypal?",
+              "how do i contact support?", "whats your phone number?"):
+        assert policy_faq_answer(q), f"{q!r} should get a policy answer"
+    assert policy_faq_answer("gaming laptop under 2000") is None
+    assert policy_faq_answer("show me lenovo laptops") is None

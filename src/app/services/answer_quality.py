@@ -89,6 +89,11 @@ _POLICY_TOPIC_RES = {
     "returns": re.compile(r"\breturns?\b|\brefunds?\b|\bchange of mind\b"),
     "shipping": re.compile(r"\bshipping\b|\bdelivery\b|\bship\b|\bfreight\b"),
     "price_match": re.compile(r"\bprice\s*match\w*\b|\bbeat\s+(?:the\s+)?price\b"),
+    "payment": re.compile(r"\bpayment\s+(?:method|option)\w*\b|\bhow\s+(?:can|do)\s+i\s+pay\b|"
+                          r"\bpay(?:ment)?\s+(?:with|by|via)\b|\baccept\s+(?:paypal|afterpay|visa|"
+                          r"mastercard|amex|klarna|zip)\b|\bpaypal\b|\bafterpay\b|\binstalments?\b|\binstallments?\b"),
+    "contact": re.compile(r"\bcontact\s+(?:you|support|us|customer\s+service)\b|\bget\s+in\s+touch\b|"
+                          r"\bphone\s+number\b|\bemail\s+(?:address|you)\b|\bcustomer\s+(?:service|support)\b"),
 }
 
 
