@@ -151,6 +151,36 @@ def test_add_item_no_inventory_row_rejected(client_with_stock):
     assert resp.json().get("detail", {}).get("error") == "out_of_stock"
 
 
+# ── GET /api/v1/cart — cart AGE (Phase 1 TTL labelling) ───────────────────────
+
+def test_cart_age_fresh_when_just_added(client_with_stock):
+    """A cart just touched this session reads as FRESH — never nagged as 'previous session'."""
+    client_with_stock.post("/api/v1/cart/items", json={"uid": "age-fresh-user", "sku": "SKU-INSTOCK-5", "quantity": 1})
+    body = client_with_stock.get("/api/v1/cart", params={"uid": "age-fresh-user"}).json()
+    age = body.get("age")
+    assert age is not None, body
+    assert age["tier"] == "fresh"
+    assert age["is_carried"] is False
+
+
+def test_cart_age_warm_when_carried_over(client_with_stock):
+    """Backdate the cart's last-touch 4h → it reads as WARM/carried with a truthful label (the demo case)."""
+    from datetime import datetime, timedelta
+    from src.app.models.db import db_session
+
+    uid = "age-carried-user"
+    client_with_stock.post("/api/v1/cart/items", json={"uid": uid, "sku": "SKU-INSTOCK-5", "quantity": 1})
+    ts = (datetime.utcnow() - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")
+    with db_session() as db:
+        db.execute("UPDATE draft_orders SET updated_at = :ts WHERE customer_id = :uid", {"ts": ts, "uid": uid})
+        db.commit()
+
+    age = client_with_stock.get("/api/v1/cart", params={"uid": uid}).json()["age"]
+    assert age["tier"] == "warm"
+    assert age["is_carried"] is True
+    assert "hour" in age["label"]
+
+
 def test_add_item_quantity_exceeds_stock(client_with_stock):
     """Requesting more than available stock must be rejected."""
     resp = client_with_stock.post(

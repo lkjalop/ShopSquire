@@ -17,6 +17,7 @@ from src.app.security.commerce_request_guard import inspect_commerce_request
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
 from src.app.services.bundle_approvals import bind_bundle_approval_state
 from src.app.services.bundle_pricing import evaluate_bundle_savings
+from src.app.services.cart_ttl import classify_updated_at
 from src.app.services.decision_log import log_trace_event
 
 
@@ -64,21 +65,23 @@ def _load_items(raw) -> List[Dict]:
     return []
 
 
-def _get_or_create_cart(uid: str) -> tuple[str, List[Dict]]:
+def _get_or_create_cart(uid: str) -> tuple[str, List[Dict], Optional[str]]:
+    """Returns (cart_id, items, updated_at). updated_at is the last-touched timestamp used for cart-age
+    labelling; None for a brand-new empty cart (no meaningful age to report yet)."""
     with db_session() as db:
         row = db.execute(
-            "SELECT id, line_items FROM draft_orders WHERE customer_id = :uid AND status = 'draft' ORDER BY created_at DESC LIMIT 1",
+            "SELECT id, line_items, updated_at FROM draft_orders WHERE customer_id = :uid AND status = 'draft' ORDER BY created_at DESC LIMIT 1",
             {"uid": uid},
         ).fetchone()
         if row:
-            return row[0], _load_items(row[1])
+            return row[0], _load_items(row[1]), row[2]
         cart_id = str(uuid.uuid4())
         db.execute(
             "INSERT INTO draft_orders (id, customer_id, line_items, status) VALUES (:id, :uid, :items, 'draft')",
             {"id": cart_id, "uid": uid, "items": json.dumps([])},
         )
         db.commit()
-        return cart_id, []
+        return cart_id, [], None
 
 
 def _save_cart(cart_id: str, items: List[Dict]) -> None:
@@ -192,11 +195,15 @@ def _with_bundle_state(*, cart_id: str, uid: str, role: str, hydrated: Dict) -> 
 def get_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.get"):
         signal = _guard_cart_request(surface="cart.get", uid=uid, sku_values=[], quantity_values=[])
-        cart_id, items = _get_or_create_cart(uid)
+        cart_id, items, updated_at = _get_or_create_cart(uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.get", signal=signal)
         with tracer.start_as_current_span("cart.hydrate"):
             hydrated = _hydrate(items)
         hydrated = _with_bundle_state(cart_id=cart_id, uid=uid, role=role, hydrated=hydrated)
+        # Cart age (truth, not a frontend guess): idle delta since last touch -> tier + human label the UI
+        # trusts for the "carried over" nudge. Only meaningful when the cart has items.
+        hydrated["updated_at"] = updated_at
+        hydrated["age"] = classify_updated_at(updated_at) if (hydrated.get("items")) else classify_updated_at(None)
         return {"cart_id": cart_id, **hydrated}
 
 
@@ -212,7 +219,7 @@ def split_offer(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_
     from src.app.services.supplier_catalog import lead_times_for_skus
 
     with tracer.start_as_current_span("cart.split_offer"):
-        cart_id, items = _get_or_create_cart(uid)
+        cart_id, items, _ = _get_or_create_cart(uid)
         hydrated = _hydrate(items)
         rows = hydrated.get("items") or []
         if not rows:
@@ -351,7 +358,7 @@ def add_item(payload: CartItemPayload, role: str = Depends(require_role([ROLE_ME
                 },
             )
         # Stock validated — now get-or-create the cart and persist.
-        cart_id, items = _get_or_create_cart(payload.uid)
+        cart_id, items, _ = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.add_item", signal=signal)
         found = False
         for it in items:
@@ -440,7 +447,7 @@ def replace_items(payload: CartItemsPayload, role: str = Depends(require_role([R
                     },
                 )
 
-        cart_id, _ = _get_or_create_cart(payload.uid)
+        cart_id, _, _ = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.replace_items", signal=signal)
         # Use aggregated quantities (deduped) as the canonical line items.
         items = [{"sku": sku, "quantity": qty} for sku, qty in aggregated.items()]
@@ -455,7 +462,7 @@ def replace_items(payload: CartItemsPayload, role: str = Depends(require_role([R
 def remove_item(sku: str, uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.remove_item"):
         signal = _guard_cart_request(surface="cart.remove_item", uid=uid, sku_values=[sku], quantity_values=[1])
-        cart_id, items = _get_or_create_cart(uid)
+        cart_id, items, _ = _get_or_create_cart(uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.remove_item", signal=signal)
         items = [it for it in items if it.get("sku") != sku]
         _save_cart(cart_id, items)
@@ -491,7 +498,7 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
                 # procurement amendment — let the line hold the full requested qty; the shortfall sources at
                 # confirm-cart. Metadata is durable on the line + echoed so the UI can say "X will be sourced".
                 shortfall_meta = {"available_now": int(stock), "shortfall": int(target - stock), "requested": int(target)}
-        cart_id, items = _get_or_create_cart(payload.uid)
+        cart_id, items, _ = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.set_item_quantity", signal=signal)
         if target <= 0:
             items = [it for it in items if it.get("sku") != sku]
@@ -529,7 +536,7 @@ def set_item_quantity(sku: str, payload: CartItemPayload,
 def clear_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.clear"):
         signal = _guard_cart_request(surface="cart.clear", uid=uid, sku_values=[], quantity_values=[])
-        cart_id, _ = _get_or_create_cart(uid)
+        cart_id, _, _ = _get_or_create_cart(uid)
         _log_cart_security_scan(trace_id=_cart_trace_id(cart_id), source_id="cart.clear", signal=signal)
         _save_cart(cart_id, [])
         # A cleared cart is a NEW shopping intent — yesterday's approved bundle discount must not ride
@@ -823,7 +830,7 @@ def apply_voucher(
             sku_values=[],
             quantity_values=[],
         )
-        cart_id, items = _get_or_create_cart(payload.uid)
+        cart_id, items, _ = _get_or_create_cart(payload.uid)
         _log_cart_security_scan(
             trace_id=_cart_trace_id(cart_id),
             source_id="cart.apply_voucher",

@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Data retention / TTL windows. Read by services/cart_ttl.py (cart-age labels) and the retention",
+    "sweeper (session/cart/conversation expiry).",
+    "",
+    "DELIBERATE DESIGN DECISION — retention is UNIFORM across every user. It is NOT gated on IP, GeoIP,",
+    "ASN, or inferred country. GDPR scope is set by where the controller is established and by the",
+    "targeting test (Art. 3), NOT by a request's IP geolocation: an EU resident is protected whether they",
+    "connect from Paris or Bali, and a VPN egress in Frankfurt does not make a non-EU person an EU data",
+    "subject. IP-geo gating would under-protect travelling/VPN'd EU users, over-apply to non-EU users on",
+    "EU exits, and — worst — force us to process MORE personal data (IP/ASN/geo) just to decide who gets",
+    "privacy. So: one policy for everyone. Do not add a geo gate here.",
+    "",
+    "The on-demand right-to-erasure (Art. 17) is a SEPARATE mechanism — see routers/privacy.py",
+    "(DELETE /data/{uid} + create_privacy_request). TTL expiry serves storage-limitation (Art. 5(1)(e));",
+    "erasure serves the right to be forgotten. Keep both; they are not substitutes.",
+    "",
+    "Windows below are engineering defaults and want legal/counsel sign-off before they are treated as",
+    "final. They are configurable so that is a one-line change."
+  ],
+  "cart_age_tiers": {
+    "fresh_max_seconds": 3600,
+    "warm_max_seconds": 28800
+  },
+  "sweeper": {
+    "cart_soft_expire_seconds": 28800,
+    "cart_hard_purge_seconds": 2592000,
+    "session_ttl_seconds": 86400,
+    "conversation_ttl_seconds": 86400,
+    "opted_in_multiplier": 4
+  }
+}

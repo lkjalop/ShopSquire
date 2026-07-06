@@ -602,18 +602,25 @@ export default function App() {
   }, [rightPanelMode, rightPanelPrevMode]);
   const [cart, setCart] = useState<any | null>(null);
   // Session hygiene: a PRIOR session's cart must never silently shape this conversation (stale items were
-  // inflating totals in the demo). On first chat open with a non-empty cart, disclose it + how to clear.
+  // inflating totals in the demo). On first chat open, disclose a CARRIED cart + how to clear — but only
+  // when the backend age says it's genuinely carried (idle > 1h). The old code called ANY non-empty cart
+  // "from a previous session", so a cart built moments ago got mislabeled and, on "clear previous", wiped.
+  // Now the label is the truth (backend `cart.age` = now − updated_at), and a fresh working cart is left
+  // alone. Unknown age (no timestamp) → stay silent rather than guess.
   useEffect(() => {
     if (!chatOpen || staleCartNoticeShown.current) return;
     const items: any[] = cart?.items || [];
     if (items.length === 0) return;
+    const age = cart?.age || null;
+    if (!age || !age.is_carried) return;   // fresh this-session cart → not "previous", do not nag
     staleCartNoticeShown.current = true;
     const units = items.reduce((s: number, i: any) => s + (Number(i.quantity) || 1), 0);
-    setMessages(prev => [...prev, {
-      role: 'assistant' as const,
-      content: `🛒 Heads up — your cart already has **${items.length} item${items.length !== 1 ? 's' : ''} (${units} unit${units !== 1 ? 's' : ''})** from a previous session. If that's not intentional, just say **"clear my cart"** and we'll start fresh; otherwise I'll factor it in.`,
-      timestamp: new Date(),
-    }]);
+    const countStr = `**${items.length} item${items.length !== 1 ? 's' : ''} (${units} unit${units !== 1 ? 's' : ''})**`;
+    const when = age.label ? ` (last touched ${age.label})` : '';
+    const content = age.suggest_clear
+      ? `🛒 Heads up — your cart has ${countStr} carried over from an earlier session${when}. Say **"clear my cart"** to start fresh, or **"clear the old items but keep the latest"** to keep only what you just added — otherwise I'll factor it in.`
+      : `🛒 Heads up — your cart has ${countStr}${when}. If some of that is stale, say **"clear my cart"** or **"clear the old items but keep the latest"**; otherwise I'll factor it in.`;
+    setMessages(prev => [...prev, { role: 'assistant' as const, content, timestamp: new Date() }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatOpen, cart]);
   const [showLogin, setShowLogin] = useState(false);
