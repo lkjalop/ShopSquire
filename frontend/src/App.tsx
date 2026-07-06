@@ -1177,7 +1177,17 @@ export default function App() {
     // HONEST REFUSAL + capability-gap ledger: actions the assistant genuinely can't execute yet get a
     // truthful "not yet" (never silence), and the ask is RECORDED so QA can mine the ledger for the
     // roadmap — a bounded platform getting smarter without getting looser.
-    const unsupported = /\b(cancel|refund|return)\b.{0,24}\border\b|\btrack\b.{0,20}\b(order|package|delivery)\b|\b(change|update)\b.{0,20}\b(address|shipping address|payment)\b|\bapply\b.{0,16}\b(coupon|voucher|discount code)\b/i.exec(q);
+    const unsupported = (
+      // cancel / refund / return (with or without the literal "order": "I want a refund", "refund me",
+      // "money back", "cancel it/my purchase/subscription", "return this")
+      /\b(?:cancel|refund|return)\b.{0,24}\b(?:order|purchase|subscription|it|this)\b|\b(?:refund|money\s+back)\b|\bcancel\s+(?:it|this|that|my)\b/i.exec(q)
+      // order status / tracking ("where is my order", "order status", "has it shipped", "when will it arrive")
+      || /\b(?:track|where('?s| is)|status of)\b.{0,24}\b(?:order|package|delivery|shipment|parcel)\b|\border\s+status\b|\b(?:has|have)\b.{0,20}\b(?:shipped|arrived|delivered|dispatched)\b|\bwhen\b.{0,24}\b(?:arrive|delivered|ship|get\s+here)\b/i.exec(q)
+      // change/update address, payment, or contact info
+      || /\b(?:change|update|edit)\b.{0,24}\b(?:address|shipping|delivery\s+address|payment|card|email|phone)\b/i.exec(q)
+      // vouchers / promo / gift cards ("apply/use/redeem/enter my coupon", "promo code", "gift card")
+      || /\b(?:apply|use|redeem|enter|add|have)\b.{0,20}\b(?:coupon|voucher|discount\s+code|promo(?:\s+code)?|gift\s+card)\b|\bpromo\s+code\b|\bgift\s+card\b/i.exec(q)
+    );
     if (unsupported) {
       setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
         { role: 'assistant', content: `I can't do that from chat yet ("${unsupported[0]}") — a human teammate can via the admin console. I've logged your request so we prioritize building it. Meanwhile I can help you find products, manage cart quantities, or plan a bulk order.`, timestamp: new Date() }]);

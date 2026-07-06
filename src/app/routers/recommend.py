@@ -1641,7 +1641,25 @@ _OFF_DOMAIN_PATTERNS = [
     re.compile(r"(?i)\b(can i get your number|what(?:'s| is) your number|give me your number)\b"),
     re.compile(r"(?i)\b(big\s*mac|burger|fries|mcdonalds)\b"),
     re.compile(r"(?i)\b(date me|go out with me|sexy|hot)\b"),
+    # clearly non-commerce categories that never overlap with electronics shopping (a shopping AI that
+    # product-searches "what's the weather" reads as broken). Conservative denylist — no shopping query
+    # contains these tokens. A full positive domain-relevance gate is the follow-up refactor.
+    re.compile(r"(?i)\b(weather|forecast|is\s+it\s+raining|going\s+to\s+rain|will\s+it\s+rain)\b"),
+    re.compile(r"(?i)\b(recipe|how\s+to\s+cook|how\s+to\s+bake|pasta|pizza|lasagne|sandwich)\b"),
+    re.compile(r"(?i)\b(who\s+won|the\s+score|match\s+last\s+night|football|cricket|nba|nfl|world\s+cup)\b"),
+    re.compile(r"(?i)\b(tell\s+me\s+a\s+joke|knock\s+knock|sing\s+me|write\s+me\s+a\s+poem)\b"),
+    re.compile(r"(?i)\b(capital\s+of|who\s+is\s+the\s+president|meaning\s+of\s+life|what\s+year\s+did)\b"),
+    re.compile(r"(?i)^\s*(?:what|whats|what's|calculate)\s+is\s+\d+\s*[-+*x/]\s*\d+"),   # "what is 15 x 32"
 ]
+
+# GREETING / META — a bare greeting or "what can you do" is NOT a product search. Anchored to the WHOLE
+# query so "help me find a laptop" (has product tokens) never matches; "help" / "hi" / "what can you do?"
+# alone do. Routed to a capability intro instead of "No in-stock match — raise your budget".
+_GREETING_RE = re.compile(
+    r"^\s*(?:hi+|hey+|hello+|helo|yo|sup|hiya|howdy|greetings|good\s+(?:morning|afternoon|evening)|"
+    r"help|menu|start|get\s+started|what\s+can\s+you\s+do|what\s+do\s+you\s+do|who\s+are\s+you|"
+    r"what\s+are\s+you|what\s+is\s+this|how\s+(?:do|does)\s+(?:you|this|it)\s+work|"
+    r"what\s+can\s+i\s+(?:do|ask)|can\s+you\s+help(?:\s+me)?)(?:\s+there|\s+friend)?\s*[?!.]*\s*$", re.I)
 
 
 def _now_iso() -> str:
@@ -2191,6 +2209,11 @@ def _query_signals_off_domain(query: str | None) -> bool:
     if not text:
         return False
     return any(p.search(text) for p in _OFF_DOMAIN_PATTERNS)
+
+
+def _query_signals_greeting(query: str | None) -> bool:
+    """A bare greeting or 'what can you do' — anchored to the whole query, so product asks never match."""
+    return bool(_GREETING_RE.match(str(query or "").strip()))
 
 
 def _is_laptop_focused_query(query: str | None, constraints: Dict[str, Any] | None = None) -> bool:
@@ -7527,6 +7550,45 @@ def suggest(
             )
         except Exception:
             pass
+    if _query_signals_greeting(query):
+        _greet_msg = (
+            "👋 Hi! I'm ShopSquire — I help you find the right electronics, compare options, plan bulk "
+            "orders, and answer product, warranty, and returns questions. Try one of these to start:"
+        )
+        payload = {
+            "status": "greeting",
+            "results": [],
+            "proposal": {"decision_mode": "rules", "ranked_skus": []},
+            "constraints_used": constraints,
+            "followup_contract": followup_contract,
+            "intent_execution_plan": intent_execution_plan,
+            "policy_version": flags.get("POLICY_VERSION", "v1"),
+            "assistant_message": _greet_msg,
+            "next_questions": [
+                {"id": "starter_budget", "text": "Find me a laptop under $1500", "goal": "start"},
+                {"id": "starter_bulk", "text": "I need 20 laptops for my team", "goal": "start"},
+                {"id": "starter_policy", "text": "What's your returns policy?", "goal": "start"},
+            ],
+            "view_mode": view_hint.get("view_mode"),
+            "view_reason": view_hint.get("view_reason"),
+            "agent_chain": [
+                {"agent": "Intent_Guard_Agent", "confidence": 0.99, "duration_ms": None, "decision_mode": "rules"},
+            ],
+            "trace_tags": strategy_corr.get("tags") or [],
+            "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+            "llm_model": llm_model,
+            "model_tier": model_tier,
+            "complexity_signals": complexity_signals,
+        }
+        _log_early_decision(
+            status="greeting",
+            proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
+            agent_chain=payload.get("agent_chain") or [],
+            retrieved_context={"query": query, "constraints": constraints},
+            execution_status="executed",
+        )
+        payload = _ensure_trace_response(payload, trace_id, flags)
+        return _with_trace(_finalize_payload(payload), trace_id)
     if _query_signals_off_domain(query):
         try:
             log_trace_event(
