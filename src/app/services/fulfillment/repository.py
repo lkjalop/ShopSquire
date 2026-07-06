@@ -363,6 +363,24 @@ def case_id_by_trace(db, trace_id: str, tenant_id: str = DEFAULT_TENANT) -> Opti
         return None
 
 
+def case_ids_by_trace(db, trace_id: str, tenant_id: str = DEFAULT_TENANT) -> List[str]:
+    """ALL cases opened from a given decision trace_id, newest-first. A multi-supplier order opens ONE case
+    per supplier group, all sharing the same source_trace_id — so a read-only trace view can show every
+    drafted RFQ, not just the newest (which is all ``case_id_by_trace`` returns). Best-effort; [] if none."""
+    if db is None or not trace_id:
+        return []
+    try:
+        ensure_tables(db)
+        rows = db.execute(
+            text("SELECT id FROM fulfillment_case WHERE tenant_id=:t AND source_trace_id=:s "
+                 "ORDER BY updated_at DESC"),
+            {"t": _tid(tenant_id), "s": str(trace_id)},
+        ).fetchall()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+
 def backfill_source_trace_id(db, case_ids: List[str], trace_id: str,
                              tenant_id: str = DEFAULT_TENANT) -> int:
     """Repair the agent-trace link on already-materialized cases. When an order's cases were first

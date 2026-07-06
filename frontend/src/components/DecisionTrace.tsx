@@ -301,6 +301,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   // drafted RFQ carries a supplier contact, so it's shown ONLY when an owner/operator key is configured
   // (a normal shopper never sees it — blind-ship stays intact).
   const [procCase, setProcCase] = useState<any | null>(null);
+  const [procCases, setProcCases] = useState<any[]>([]);  // ALL cases for the trace (multi-supplier → N RFQs)
   const [procJourney, setProcJourney] = useState<any[] | null>(null);
   // PENDING sourcing plan (pre-GATE-1): when no case is bound to this trace yet but the buyer's cart
   // splits, show WHAT WOULD happen — the per-supplier backorder groups + each supplier's reorder channel —
@@ -513,12 +514,18 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     setProcLoading(true);
     try {
       const headers = effectiveApiKey ? { 'x-api-key': effectiveApiKey } : undefined;
-      const caseView: any = await fetch(
-        apiUrl(`/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}?view=operator`),
+      // Read-only: resolve EVERY case opened from this trace — a multi-supplier bulk order opens one case
+      // per supplier group (each with its own drafted RFQ), so the Procurement tab shows all N, not just the
+      // newest. Falls back gracefully to an empty list; the primary case (cases[0]) drives the audit journey.
+      const allView: any = await fetch(
+        apiUrl(`/api/v1/fulfillment/cases/by-trace/${encodeURIComponent(effectiveTraceId)}/all?view=operator`),
         { credentials: 'include', headers },
       ).then(safeJson).catch(() => null);
-      setProcCase(caseView && (caseView.case_id || caseView.state) ? caseView : null);
-      const cid = (caseView && caseView.case_id) || procurementCaseId;
+      const cases: any[] = Array.isArray(allView?.cases) ? allView.cases : [];
+      setProcCases(cases);
+      const primary = cases[0] || null;
+      setProcCase(primary && (primary.case_id || primary.state) ? primary : null);
+      const cid = (primary && primary.case_id) || procurementCaseId;
       if (cid) {
         const jr: any = await fetch(
           apiUrl(`/api/v1/fulfillment/cases/${encodeURIComponent(cid)}/journey`),
@@ -3206,10 +3213,60 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
 
                         {procLoading && <div className={styles.empty} style={{ marginTop: 8 }}>Loading the procurement case…</div>}
 
+                        {/* MULTI-SUPPLIER: a bulk order that splits across suppliers opens one case per supplier,
+                            each with its OWN drafted RFQ. Show them all (read-only proof) so "3 suppliers → where
+                            are the emails?" is answered in-place. Single-supplier orders fall through to the rich
+                            single card below. */}
+                        {procCases.length > 1 && (
+                          <div data-testid="proc-multi-rfq" style={{ marginTop: 10 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                              📧 {procCases.length} supplier RFQs drafted — one per supplier · human-gated · nothing sent
+                            </div>
+                            {procCases.map((c: any, idx: number) => {
+                              const d: any = c?.state_json?.draft || {};
+                              const cp: any = d.channel_plan || {};
+                              const tm: any = d.supplier_terms || {};
+                              const chLabel = cp.requires_human
+                                ? `${String(cp.channel || '').toUpperCase()} · human-only`
+                                : cp.integration_kind
+                                  ? `${String(cp.integration_kind).toUpperCase()} integration handoff`
+                                  : `${String(cp.channel || 'email')} · agent drafts · human sends (GATE 2)`;
+                              const terms = [
+                                tm.moq != null ? `MOQ ${tm.moq}` : null,
+                                tm.lead_time_days != null ? `${tm.lead_time_days}d lead` : null,
+                                tm.contract_status ? String(tm.contract_status) : null,
+                                (tm.price_breaks || []).length ? `breaks ${(tm.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(',')}` : null,
+                              ].filter(Boolean).join(' · ');
+                              return (
+                                <details key={c.case_id || idx} data-testid={`proc-rfq-${idx}`} style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px', marginBottom: 6 }} open={idx === 0}>
+                                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                                    Supplier {idx + 1} of {procCases.length} — {d.recipient_ref || '—'}
+                                    <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>{chLabel}</span>
+                                  </summary>
+                                  <div style={{ marginTop: 8, fontSize: 13 }}>
+                                    {d.recipient_domain && <div className={styles.kvRow}><span>Domain</span><span className={styles.mono}>{d.recipient_domain}</span></div>}
+                                    {terms && <div className={styles.kvRow}><span>Ordering terms</span><span>{terms}</span></div>}
+                                    {cp.rationale && <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{cp.rationale}</span></div>}
+                                    <div className={styles.kvRow}><span>Subject</span><span>{d.subject || '—'}</span></div>
+                                    {canSeeOperatorDraft ? (
+                                      <>
+                                        <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (quote request — no price is ever stated to the supplier)</div>
+                                        <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 220, overflow: 'auto' }}>{d.body || '(not drafted yet)'}</pre>
+                                      </>
+                                    ) : (
+                                      <div className={styles.empty} style={{ marginTop: 6 }}>Human-gated — sign in with an operator key to view the drafted email.</div>
+                                    )}
+                                  </div>
+                                </details>
+                              );
+                            })}
+                          </div>
+                        )}
+
                         {/* Drafted supplier RFQ — the "how it's made" artefact, inline + collapsed so the demo
                             never leaves this tab. Human-gated: shown only with an owner/operator key; a normal
                             shopper never sees a supplier contact (blind-ship stays intact). It is NOT sent. */}
-                        {procCase && draft && canSeeOperatorDraft && (
+                        {procCases.length <= 1 && procCase && draft && canSeeOperatorDraft && (
                           <details data-testid="proc-drafted-rfq" style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
                             <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
                               📧 Drafted supplier RFQ — {String(procCase.state || '').replace(/_/g, ' ').toLowerCase()}
@@ -3254,8 +3311,17 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             </div>
                           </details>
                         )}
-                        {procCase && draft && !canSeeOperatorDraft && (
+                        {procCases.length <= 1 && procCase && draft && !canSeeOperatorDraft && (
                           <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order (human-gated). Sign in with an operator key to view it.</div>
+                        )}
+                        {/* Read-only proof surface: any change to the supplier or the drafted email happens in the
+                            operator console (admin), where edits re-lock the send gate — never from this trace. */}
+                        {(procCases.length > 0 || (procCase && draft)) && (
+                          <div data-testid="proc-readonly-note" style={{ marginTop: 8, fontSize: 12, color: '#6b7280', borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
+                            🔒 Read-only trace — this is the audit view. To change the supplier or edit the RFQ, an
+                            authorised operator does that in the admin console; any edit voids the prior approval and
+                            re-locks the send gate (GATE 2). Nothing is ever sent from here.
+                          </div>
                         )}
 
                         {/* Audit trail — the case's own bitemporal journey (state · actor · reason · time),

@@ -81,3 +81,16 @@ def test_backfill_is_noop_on_empty_or_missing_trace(db):
     _seed_case(db, case_id="CASE-Z", trace_id=None)
     assert backfill_source_trace_id(db, ["CASE-Z"], "") == 0     # no trace to stamp
     assert backfill_source_trace_id(db, [], "trace-y") == 0      # no cases
+
+
+def test_case_ids_by_trace_returns_all_cases_for_a_multi_supplier_order(db):
+    # A multi-supplier bulk order opens ONE case per supplier group, all sharing the trace. case_id_by_trace
+    # returns only the newest (single-supplier view); case_ids_by_trace returns ALL so the read-only trace
+    # can show every drafted RFQ. Regression for "3 suppliers, where are the emails?".
+    from src.app.services.fulfillment.repository import case_ids_by_trace, case_id_by_trace
+    _seed_case(db, case_id="CASE-BIZ", trace_id="trace-multi")
+    _seed_case(db, case_id="CASE-APPLE", trace_id="trace-multi")
+    ids = case_ids_by_trace(db, "trace-multi")
+    assert set(ids) == {"CASE-BIZ", "CASE-APPLE"}          # ALL cases surfaced
+    assert case_id_by_trace(db, "trace-multi") in ids       # single-resolver still returns one of them
+    assert case_ids_by_trace(db, "trace-none") == []        # unknown trace → empty, not error

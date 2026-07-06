@@ -10,7 +10,7 @@ from __future__ import annotations
 from src.app.feature_flags import get_flags as _ff_get_flags
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -174,6 +174,29 @@ def get_case_by_trace(trace_id: str, view: str = Query("buyer")) -> Dict[str, An
         if not cid:
             raise HTTPException(status_code=404, detail="no case for trace")
         return {"trace_id": trace_id, **_case_view(db, cid, for_operator=(view != "buyer"))}
+
+
+@router.get("/cases/by-trace/{trace_id}/all")
+def get_cases_by_trace_all(trace_id: str, view: str = Query("buyer")) -> Dict[str, Any]:
+    """READ-ONLY: every ACTIVE case opened from a decision trace — a multi-supplier bulk order opens one
+    case per supplier group, all sharing the trace, so the Decision Trace → Procurement tab can show ALL
+    the drafted RFQs (one per supplier), not just the newest. Superseded cases are excluded (they belong to
+    a prior amendment). Proof surface only; it never mutates or sends. Empty list (not 404) when none."""
+    with db_session() as db:
+        cids = fwf.repository.case_ids_by_trace(db, trace_id)
+        cases: List[Dict[str, Any]] = []
+        order_group_id: Optional[str] = None
+        for cid in cids:
+            try:
+                cv = _case_view(db, cid, for_operator=(view != "buyer"))
+            except HTTPException:
+                continue
+            if str(cv.get("state") or "").upper() == "SUPERSEDED":
+                continue  # a prior amendment's retired case — not part of the current order
+            order_group_id = order_group_id or (cv.get("state_json") or {}).get("order_group_id")
+            cases.append(cv)
+        return {"trace_id": trace_id, "order_group_id": order_group_id,
+                "case_count": len(cases), "cases": cases}
 
 
 @router.get("/cases/{case_id}/journey")
