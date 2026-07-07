@@ -482,6 +482,36 @@ def _compose_compound_if_needed(payload: Dict[str, Any], trace_id: str | None) -
     return payload
 
 
+def _maybe_attach_evidence(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
+    """R2 — plan-driven evidence scatter-gather: the decomposed plan selects which evidence legs this
+    turn needs (market/policy/availability/purchase-history/image), legs run bounded + concurrent, and
+    the labeled evidence + citations attach to the response and the trace. Flag-gated default-OFF;
+    never raises; a failed/timed-out leg reports itself instead of vanishing."""
+    try:
+        from src.app.services.evidence_orchestrator import gather_evidence, orchestrator_enabled
+        if not orchestrator_enabled() or payload.get("evidence") is not None:
+            return payload
+        _kq = _KNOWLEDGE_QUERY_CTX.get()
+        plan = (_kq or {}).get("plan") if isinstance(_kq, dict) else None
+        if plan is None:
+            return payload
+        ev = gather_evidence(plan, query=str((_kq or {}).get("query") or ""),
+                             uid=(_kq or {}).get("uid"),
+                             image_identity=(_kq or {}).get("image_identity"))
+        if ev.get("selected"):
+            payload["evidence"] = ev
+            try:
+                log_trace_event(trace_id, "evidence_gathered", "agent", "Evidence_Orchestrator",
+                                "system", None,
+                                {"selected": ev.get("selected"), "ms": ev.get("ms"),
+                                 "found": [c.get("source") for c in ev.get("citations") or []]})
+            except Exception as exc:
+                logger.debug("evidence trace-event emit failed: %s", exc)
+    except Exception as exc:
+        logger.debug("evidence orchestration skipped: %s", exc)
+    return payload
+
+
 def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]:
     try:
         payload = security_sanitize(payload or {})
@@ -489,6 +519,8 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
         payload = payload or {}
     # WS2.2 — comparison/knowledge conceptual answer (covers all early returns).
     _maybe_inject_knowledge_answer(payload, trace_id)
+    # R2 — plan-selected evidence legs (flag-gated, additive: structured block + trace only).
+    _maybe_attach_evidence(payload, trace_id)
     try:
         locale = (
             payload.get("locale")
@@ -4432,7 +4464,10 @@ def suggest(
                     "system", None, {"filled_fields": _filled, "intent": _top_plan.intent,
                                      "decomposition_confidence": getattr(_top_plan, "decomposition_confidence", None)},
                 )
-        _KNOWLEDGE_QUERY_CTX.set({"query": query, "plan": _top_plan})
+        # uid + image identity ride along so the evidence orchestrator (R2) can select legs in the
+        # return wrapper without re-deriving them; existing readers only .get("plan")/"query".
+        _KNOWLEDGE_QUERY_CTX.set({"query": query, "plan": _top_plan, "uid": uid,
+                                  "image_identity": _img_identity})
         if fast_path_enabled and getattr(_top_plan, "answer_without_products", False):
             fast_path_enabled = False
         # Bulk/B2B + availability asks need the full path (the Availability_Agent runs there) — the
