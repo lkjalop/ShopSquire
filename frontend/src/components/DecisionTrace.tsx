@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react';
+import { evidenceRows } from '../lib/evidenceDisplay';
 import styles from './DecisionTrace.module.css';
 import { apiUrl, wsUrl, getApiBase, safeJson, getSplitOffer, type SplitOfferResult } from '../lib/api';
 import { getOwnerApiKey } from '../lib/browserSession';
@@ -278,7 +279,7 @@ function getLinkedArtifactUrl(sigs: Record<string, any>): string | null {
   return /^https?:\/\//i.test(candidate) ? candidate : null;
 }
 
-export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string }) {
+export default function DecisionTrace({ traceId, onClose, imageTriage, initialTab, evidence }: { traceId: string | null; onClose: () => void; imageTriage?: any[]; initialTab?: string; evidence?: any }) {
   const API_KEY = ((import.meta as any).env?.VITE_API_KEY as string | undefined) || '';
   // No hardcoded key fallback — a bundled 'local-merchant-key' would ship a credential in the frontend.
   // The key comes ONLY from the build env (VITE_API_KEY / .env.local) or the saved owner key.
@@ -289,8 +290,8 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
   const [explain, setExplain] = useState<any | null>(null);
   const [replay, setReplay] = useState<any | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const _TABS = ['events', 'summary', 'why', 'intent', 'multimodal', 'complexity', 'memory', 'security', 'procurement', 'audit', 'raw'] as const;
-  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'audit' | 'raw'>(
+  const _TABS = ['events', 'summary', 'why', 'intent', 'multimodal', 'complexity', 'memory', 'security', 'procurement', 'evidence', 'audit', 'raw'] as const;
+  const [activeTab, setActiveTab] = useState<'events' | 'summary' | 'why' | 'intent' | 'multimodal' | 'complexity' | 'memory' | 'security' | 'procurement' | 'evidence' | 'audit' | 'raw'>(
     (initialTab && (_TABS as readonly string[]).includes(initialTab)) ? (initialTab as typeof _TABS[number]) : 'events');
   // When this decision opened a procurement journey, badge the Procurement tab so the operator sees it
   // exists instead of having to click through blind. FulfilmentTraceLink resolves the case; it reports up.
@@ -1439,6 +1440,11 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
               <button className={activeTab === 'procurement' ? styles.activeTab : ''} onClick={() => setActiveTab('procurement')}>
                 Procurement{hasProcurementSignal ? <span title="Procurement activity is present in this decision (open to see the drafted RFQ + audit)" style={{ marginLeft: 5, color: '#059669', fontWeight: 700 }}>●</span> : null}
               </button>
+              {evidence && Array.isArray(evidence?.selected) && evidence.selected.length > 0 && (
+                <button className={activeTab === 'evidence' ? styles.activeTab : ''} onClick={() => setActiveTab('evidence')}>
+                  Evidence <span style={{ marginLeft: 4, fontWeight: 700 }}>{(evidence.citations || []).length}</span>
+                </button>
+              )}
               <button className={activeTab === 'audit' ? styles.activeTab : ''} onClick={() => {
                 setActiveTab('audit');
                 if (!auditTrail && traceIdText && !auditLoading) {
@@ -1748,6 +1754,50 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                 </div>
               )}
 
+              {activeTab === 'evidence' && (
+                <div style={{ padding: '12px 14px' }}>
+                  {/* N1 (2026-07-07): the trust hierarchy IS the layout — trusted store records first
+                      as flat rows; external evidence (web) rendered as bordered, badged quotes. */}
+                  {(() => {
+                    const rows = evidenceRows(evidence);
+                    if (rows.length === 0) return <div style={{ color: '#6b7280' }}>No evidence legs ran for this decision.</div>;
+                    const trusted = rows.filter(r => r.trusted);
+                    const external = rows.filter(r => !r.trusted);
+                    return (
+                      <div>
+                        <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                          Why this answer — {rows.length} source{rows.length !== 1 ? 's' : ''} consulted
+                          {typeof evidence?.ms === 'number' ? <span style={{ color: '#6b7280', fontWeight: 400 }}> · gathered in {evidence.ms}ms</span> : null}
+                        </div>
+                        {trusted.map(r => (
+                          <div key={r.key} style={{ padding: '8px 10px', marginBottom: 6, background: '#f8fafc', borderRadius: 8 }}>
+                            <div style={{ fontWeight: 600 }}>
+                              {r.icon} {r.label} <span style={{ fontSize: 11, color: '#059669', marginLeft: 6 }}>trusted store record</span>
+                              {!r.found && <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 6 }}>— nothing found</span>}
+                            </div>
+                            {r.summary && <div style={{ fontSize: 13, marginTop: 3 }}>{r.summary}</div>}
+                            {r.error && <div style={{ fontSize: 12, color: '#b45309', marginTop: 3 }}>⚠ {r.error}</div>}
+                          </div>
+                        ))}
+                        {external.map(r => (
+                          <div key={r.key} style={{ padding: '10px 12px', marginBottom: 6, border: '1.5px solid #f59e0b', borderRadius: 8 }}>
+                            <div style={{ fontWeight: 600 }}>
+                              {r.icon} {r.label} <span style={{ fontSize: 11, color: '#b45309', marginLeft: 6 }}>external — verified evidence, never authority</span>
+                            </div>
+                            {r.summary && <div style={{ fontSize: 13, marginTop: 4, fontStyle: 'italic' }}>"{r.summary}"</div>}
+                            {r.error && <div style={{ fontSize: 12, color: '#b45309', marginTop: 3 }}>⚠ {r.error}</div>}
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>⚖ used to inform wording only — never to rank, price or approve</div>
+                          </div>
+                        ))}
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#6b7280' }}>Raw recorded payload (evidence)</summary>
+                          <pre style={{ fontSize: 11, overflowX: 'auto' }}>{JSON.stringify(evidence, null, 2)}</pre>
+                        </details>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
               {activeTab === 'why' && (
                 <div className={styles.summaryPane}>
                   {Array.isArray(whyAnchorSections) && whyAnchorSections.length > 0 ? (

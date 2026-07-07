@@ -32,6 +32,10 @@ $env:MULTI_INTENT_LLM_TIMEOUT_SEC      = "30"
 $env:LLM_PLANNER_ENABLED               = "1"
 $env:LLM_PLANNER_TIMEOUT_SEC           = "20"    # qwen3:14b measures 4-7s on planner prompts
 $env:OLLAMA_KEEP_ALIVE                 = "30m"    # pin generate/vision models resident (P0 lever)
+# Evidence orchestrator (N1): plan-selected legs (market/policy/availability/history/image) feed the
+# Evidence tab + source chips. Legs are bounded (2.5s) and additive — message text is untouched.
+$env:EVIDENCE_ORCHESTRATOR_ENABLED     = "1"
+$env:EVIDENCE_LEG_BUDGET_SEC           = "2.5"
 # Supplier comms stay SAFE for the demo (no real email): sandbox transport + autonomy OFF.
 $env:FULFILLMENT_SUPPLIER_TRANSPORT = "sandbox"
 $env:FULFILLMENT_AUTONOMOUS_RFQ     = "0"

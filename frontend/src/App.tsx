@@ -13,6 +13,7 @@ import RightPanelExtras from './components/RightPanelExtras';
 import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
+import { citationChips } from './lib/evidenceDisplay';
 import AttachmentButton from './components/AttachmentButton';
 import DisambiguationButtons from './components/DisambiguationButtons';
 import { useDualSTT } from './hooks/useDualSTT';
@@ -85,6 +86,7 @@ type ChatMessage = {
   agentStepsReadable?: string[];         // human-readable agent step summaries from ResponseNormalizer
   narrationJobId?: string;               // async-narration handoff: poll /narration/{id} → replace content
   undoClear?: { items: { sku: string; quantity: number; name?: string }[] };  // "Undo" chip after a clear → re-add these
+  evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
 };
 type PendingImageContext = {
   labels: string[];
@@ -357,6 +359,7 @@ export default function App() {
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [traceInitialTab, setTraceInitialTab] = useState<string | undefined>(undefined);
+  const [traceEvidence, setTraceEvidence] = useState<any | null>(null);  // N1: evidence block for the trace popup's Evidence tab
   // Bulk-order carry-through: the conversation's parsed unit count ("15 work laptops" → 15). Add buttons
   // land THIS qty (sourcing-aware) instead of a silent 1. Cleared/updated on every chat turn.
   const [pendingBulkQty, setPendingBulkQty] = useState<number | null>(null);
@@ -1716,6 +1719,7 @@ export default function App() {
         const budgetAdvice = (budgetViability?.status === 'low' && typeof budgetViability?.advice === 'string') ? budgetViability.advice.trim() : null;
         const panelContract = (data.right_panel && typeof data.right_panel === 'object') ? data.right_panel as RightPanelContract : null;
         setRightPanelContract(panelContract);
+        setTraceEvidence(data.evidence || null);
         const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
         // Pin the sourcing trace to THIS turn only when this turn produced a sourcing preview; otherwise
         // leave the previously-pinned one intact so a later plain query doesn't unlink the confirm.
@@ -1769,6 +1773,7 @@ export default function App() {
             complexity,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(data.evidence ? { evidence: data.evidence } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
         } else if (prods.length > 0) {
@@ -1794,6 +1799,7 @@ export default function App() {
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(data.evidence ? { evidence: data.evidence } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
@@ -1815,6 +1821,7 @@ export default function App() {
             nextQuestions: normalizedNextQuestions,
             ...(backendApplied && Object.keys(backendApplied).length > 0 ? { nqeSelectionApplied: backendApplied } : {}),
             ...(agentStepsReadable ? { agentStepsReadable } : {}),
+            ...(data.evidence ? { evidence: data.evidence } : {}),
             ...(narrationJobId ? { narrationJobId } : {}),
           };
           setMessages(prev => [...prev, assistantMsg]);
@@ -2163,6 +2170,23 @@ export default function App() {
                     {/* Disambiguation buttons for assistant */}
                     {msg.disambiguation && msg.disambiguationOptions && msg.disambiguationOptions.length > 0 && (
                       <DisambiguationButtons options={msg.disambiguationOptions} onSelect={handleDisambiguationSelect} />
+                    )}
+                    {msg.evidence && Array.isArray(msg.evidence.citations) && msg.evidence.citations.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: '#6b7280' }}>Sources:</span>
+                        {citationChips(msg.evidence).map((chip) => (
+                          <button
+                            key={chip.key}
+                            type="button"
+                            className={styles.filterBtn}
+                            style={chip.trusted ? undefined : { border: '1.5px solid #f59e0b' }}
+                            title={chip.trusted ? 'Trusted store record — open the Evidence tab' : 'External evidence (verified, never authority) — open the Evidence tab'}
+                            onClick={() => { setTraceEvidence(msg.evidence); setTraceInitialTab('evidence'); setTraceOpen(true); }}
+                          >
+                            {chip.icon} {chip.label}
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {msg.undoClear && msg.undoClear.items.length > 0 && (
                       <div style={{ marginTop: 8 }}>
@@ -2742,7 +2766,7 @@ export default function App() {
           tab/badge resolves — otherwise a later upsell turn's trace would show no journey. (See lib/trace.) */}
       {traceOpen && <DecisionTrace
         traceId={procurementAwareTraceId(traceId, sourcingTraceId, Boolean(sourcingIntent || fulfilmentCase || bulkAlternatives.length > 0 || sourcingTraceId))}
-        onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} />}
+        onClose={() => setTraceOpen(false)} imageTriage={imageTriageRaw} initialTab={traceInitialTab} evidence={traceEvidence} />}
 
       {/* Escalation Room Modal */}
       {escalationOpen && escalationIncidentId && (
