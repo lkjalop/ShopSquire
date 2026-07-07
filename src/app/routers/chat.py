@@ -1945,7 +1945,38 @@ async def chat_query(
         import traceback as _tb
         _detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         logger.warning("chat.recommend_call_failed detail=%s tb=%s", _detail, _tb.format_exc()[-500:])
-        raise HTTPException(status_code=502, detail=f"recommend_unavailable: {_detail}")
+        # N7 (2026-07-07): a hiccup on the internal recommend hop used to surface to the BUYER as a
+        # raw HTTP 502 — a broken chat experience. Degrade GRACEFULLY instead: a friendly retry
+        # message + a traceable id, HTTP 200. The operator still sees the warning log above and the
+        # error trace below; the shopper sees a recoverable prompt, never a stack-status code.
+        _degraded_trace = f"chat-degraded-{uuid.uuid4().hex[:12]}"
+        try:
+            log_trace_event(
+                trace_id=_degraded_trace, event_type="system_error", source_type="agent",
+                source_id="Chat_Delegation", target_type="system", target_id=None,
+                payload={"stage": "recommend_hop", "error": _detail[:300], "route": "graceful_degrade"},
+            )
+        except Exception:
+            pass
+        return {
+            "products": [],
+            "view_mode": "cards",
+            "confidence": None,
+            "decision_trace_id": _degraded_trace,
+            "trace_id": _degraded_trace,
+            "assistant_message": (
+                "I hit a brief hiccup pulling that together — nothing's lost. Please send that once "
+                "more, or add the main use-case in one line (e.g. 'for gaming' or 'for my team')."
+            ),
+            "next_questions": [
+                {"id": "retry_last", "text": "Try that again", "goal": "retry_search"},
+                {"id": "add_use_case", "text": "Add the main use-case in one line", "goal": "clarify_details"},
+            ],
+            "blocked": False,
+            "degraded": True,
+            "needs_human_review": False,
+            "security_route": "allow",
+        }
 
     # Map results into canonical product shape
     results = data.get("results") or []
