@@ -189,7 +189,9 @@ def plan_with_llm(
         return None
     type_list, uc_list = _profile_vocab(profile_id)
     prompt = _build_prompt(q, type_list, uc_list, image_identity=image_identity)
-    budget = float(timeout_sec if timeout_sec is not None else os.getenv("LLM_PLANNER_TIMEOUT_SEC", "6.0") or 6.0)
+    # 2026-07-07 R1: default was 6.0s but qwen3:14b measures 4-7s on these prompts — the planner
+    # raced the timeout and silently lost most calls. 15s default; demo env sets 20s.
+    budget = float(timeout_sec if timeout_sec is not None else os.getenv("LLM_PLANNER_TIMEOUT_SEC", "15.0") or 15.0)
     fn = llm_fn or _default_llm_fn
     try:
         raw = fn(prompt, budget)
