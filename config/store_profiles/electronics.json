@@ -2685,5 +2685,220 @@
       "Warranty_Agent",
       "Support_Playbook_Agent"
     ]
+  },
+  "capability_classes": {
+    "gaming": [
+      "gaming",
+      "valorant",
+      "fortnite",
+      "cyberpunk",
+      "cs2",
+      "csgo",
+      "esports",
+      "aaa game",
+      "aaa titles",
+      "play games",
+      "game on it"
+    ],
+    "heavy": [
+      "video editing",
+      "4k editing",
+      "4k video",
+      "render",
+      "rendering",
+      "3d modeling",
+      "3d model",
+      "cad",
+      "blender",
+      "premiere",
+      "after effects",
+      "davinci",
+      "machine learning",
+      "deep learning",
+      "ml training",
+      "ai training",
+      "train a model",
+      "solidworks",
+      "autocad",
+      "gpu-heavy",
+      "llm",
+      "language model",
+      "model training",
+      "training models",
+      "training llm",
+      "large model",
+      "fine-tune",
+      "fine tuning",
+      "finetune",
+      "pytorch",
+      "tensorflow"
+    ],
+    "dev": [
+      "coding",
+      "programming",
+      "software development",
+      "compiling",
+      "docker",
+      "virtual machine",
+      "vms",
+      "ide",
+      "development work"
+    ],
+    "light": [
+      "office work",
+      "word",
+      "excel",
+      "spreadsheet",
+      "browsing",
+      "emails",
+      "studying",
+      "school work",
+      "note taking",
+      "netflix",
+      "youtube",
+      "video calls"
+    ]
+  },
+  "capability_verdicts": {
+    "gaming_yes": "Yes — the {name} has a dedicated GPU, so it handles gaming well, including demanding titles.",
+    "gaming_hedge": "It'll run popular esports titles (Valorant, CS2, League) fine, but the {name} uses integrated graphics — for demanding AAA games a dedicated-GPU model is the safer pick. Want me to show those?",
+    "heavy_yes_vram": "Yes — the {name} has {gpu_mem}GB GPU memory and {ram}GB RAM, genuinely suited to heavy model training and sustained GPU compute.",
+    "heavy_hedge_vram": "Partly — the {name} has a dedicated GPU, but {gpu_mem}GB of GPU memory is entry-level for model training: fine for smaller/quantized models, fine-tunes and inference, while sustained training of larger models wants 16GB+ GPU memory (or cloud GPUs). Want me to show the higher-GPU-memory options?",
+    "heavy_yes": "Yes — the {name} pairs a dedicated GPU with {ram}GB RAM, which suits that GPU-heavy work.",
+    "heavy_light": "For that GPU-heavy work the {name} is light — it lacks the dedicated GPU / 16GB+ RAM those tasks want. I'd point you to a discrete-GPU workstation. Want me to show those?",
+    "dev_yes": "Yes — the {name} has {ram}GB RAM, comfortable for development and multitasking.",
+    "dev_hedge": "The {name} works for development; for heavier workloads I'd aim for 16GB+ RAM. Want me to filter for that?",
+    "light_yes": "Yes — the {name} easily handles everyday use (office, browsing, study, video calls).",
+    "budget_step_hedge": " Honest note for model training: the in-budget picks carry {gpu_mem}GB GPU memory — good for smaller/quantized models and fine-tuning; sustained training of larger models wants 16GB+ GPU memory (or cloud GPUs)."
+  },
+  "spec_strength_tokens": {
+    "gpu": [
+      "rtx",
+      "radeon",
+      "geforce",
+      "arc",
+      "nvidia"
+    ],
+    "cpu": [
+      "i7",
+      "i9",
+      "ryzen 7",
+      "ryzen 9",
+      "ultra 7",
+      "ultra 9"
+    ]
+  },
+  "premium_brand_aliases": [
+    "macbook",
+    "mac book",
+    "apple"
+  ],
+  "brand_fallback_order": [
+    "msi",
+    "asus",
+    "lenovo",
+    "dell",
+    "hp",
+    "alienware",
+    "microsoft"
+  ],
+  "budget_floor_hints": [
+    {
+      "tokens": [
+        "gaming",
+        "esports",
+        "rtx",
+        "fps"
+      ],
+      "floor": 900,
+      "label": "gaming laptop"
+    },
+    {
+      "tokens": [
+        "creator",
+        "video editing",
+        "render",
+        "3d",
+        "cad",
+        "architecture",
+        "engineering",
+        "ai",
+        "ml"
+      ],
+      "floor": 1200,
+      "label": "creator or engineering laptop"
+    },
+    {
+      "tokens": [
+        "school",
+        "student",
+        "high school",
+        "university",
+        "college"
+      ],
+      "floor": 700,
+      "label": "school laptop"
+    },
+    {
+      "tokens": [
+        "business",
+        "office",
+        "corporate",
+        "work"
+      ],
+      "floor": 800,
+      "label": "business laptop"
+    },
+    {
+      "tokens": [],
+      "floor": 600,
+      "label": "laptop"
+    }
+  ],
+  "step_up_spec": {
+    "field": "gpu_vram_gb",
+    "label": "GPU memory",
+    "unit": "GB",
+    "strong_min": 16
+  },
+  "persona_labels": {
+    "university_general": "uni work",
+    "student": "student work",
+    "high_school": "schoolwork",
+    "office_general": "office work",
+    "office_finance": "finance work",
+    "office_executive": "professional work",
+    "content_creator": "creative work",
+    "content_creation": "creative work",
+    "gaming": "gaming",
+    "gaming_light": "light gaming",
+    "gaming_competitive": "competitive gaming",
+    "gaming_aaa_heavy": "AAA gaming",
+    "ai_ml_workstation": "AI and coding work",
+    "data_science_student": "coding and analysis",
+    "engineering_student": "engineering work",
+    "architecture_student": "design work",
+    "medical_student": "study and research",
+    "law_student": "study and reading"
+  },
+  "spec_extraction_patterns": {
+    "gpu_regex": "\b(?:GeForce\\s+)?(RTX|GTX)\\s*(\\d{4})\b",
+    "radeon_regex": "\bRadeon\\s+(?:RX\\s*)?(\\d{4}[A-Z]*)\b",
+    "vram_gb_by_model": {
+      "3050": 6,
+      "3060": 6,
+      "3070": 8,
+      "3080": 8,
+      "4050": 6,
+      "4060": 8,
+      "4070": 8,
+      "4080": 12,
+      "4090": 16,
+      "5050": 8,
+      "5060": 8,
+      "5070": 8,
+      "5080": 16,
+      "5090": 24
+    }
   }
 }

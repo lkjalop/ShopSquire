@@ -27,6 +27,17 @@ import pytest
 
 # Modules that are CORE (agnostic mechanism) and must contain zero laptop flavour.
 _CORE_MODULES = [
+    # GRADUATED 2026-07-07 (baseline 4 -> 0): capability classes/verdicts, persona labels, spec-strength
+    # tokens, brand fallbacks, budget-floor hints and step-up spec all moved to StoreProfile slots —
+    # the advisor now reads named fields + profile vocabulary only.
+    "src/app/services/recommend_budget_advisor.py",
+    # ENROLLED 2026-07-07 while clean (P/R-wave modules — time math, policy windows, ledger, evidence
+    # orchestration: mechanisms only, no product vocabulary).
+    "src/app/services/evidence_orchestrator.py",
+    "src/app/services/claim_policy.py",
+    "src/app/services/cart_ttl.py",
+    "src/app/services/retention_sweeper.py",
+    "src/app/services/refund_requests.py",
     "src/app/services/recommend_response_finalizer.py",
     "src/app/platform/store_profile.py",
     "src/app/policy/execution_gate.py",
@@ -319,6 +330,9 @@ _CORE_MODULES = [
 _FLAVOUR_RE = re.compile(
     r"\b(rtx|gtx|vivobook|macbook|thinkpad|zenbook|ideapad|alienware|aspire|"
     r"predator|omen|spectre|pavilion|victus|katana|legion|"
+    # canary WIDENED 2026-07-07 (next literal generation: vendors, chips, game/display words) —
+    # affected baselines re-frozen at true counts the same day; the only-move-down rule resumes there.
+    r"geforce|nvidia|radeon|ryzen|valorant|fortnite|vram|oled|"
     r"gaming laptop|refresh_hz|\d{3} ?hz|tgp)\b",
     re.IGNORECASE,
 )
@@ -363,16 +377,15 @@ def test_lint_actually_detects_flavour():
 #   recommend_nqe_helpers / query_decomposer / *_agent / *_parsing / use_case_advisor / vision_stage
 #                           → spec-key + brand/gpu literals → profile spec/keyword slots.
 _PENDING_EXCISION: dict[str, int] = {
-    "src/app/routers/recommend.py": 14,
-    "src/app/routers/chat.py": 13,  # chat router: clarify-text + brand-alias literals → profile slots
+    "src/app/routers/recommend.py": 20,  # re-frozen 2026-07-07 canary widening
+    "src/app/routers/chat.py": 17,  # re-frozen 2026-07-07 canary widening  # chat router: clarify-text + brand-alias literals → profile slots
     "src/app/services/recommend_image_hints.py": 13,
-    "src/app/services/recommend_budget_advisor.py": 4,
-    "src/app/services/recommend_nqe_helpers.py": 3,
+    "src/app/services/recommend_nqe_helpers.py": 8,  # re-frozen 2026-07-07 canary widening
     # query_decomposer.py GRADUATED to _CORE_MODULES 2026-06-24 (NEW-2) — spec logic excised to profile.
-    "src/app/services/product_ranking_agent.py": 2,
+    "src/app/services/product_ranking_agent.py": 5,  # re-frozen 2026-07-07 canary widening
     "src/app/services/recommend_vision_stage.py": 2,
-    "src/app/services/recommend_budget_parsing.py": 1,
-    "src/app/services/use_case_advisor.py": 1,
+    "src/app/services/recommend_budget_parsing.py": 4,  # re-frozen 2026-07-07 canary widening
+    "src/app/services/use_case_advisor.py": 2,  # re-frozen 2026-07-07 canary widening
     "src/app/services/product_identity_agent.py": 1,
     "src/app/services/product_classifier.py": 1,
 }

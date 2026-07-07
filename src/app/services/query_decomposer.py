@@ -97,7 +97,7 @@ _COMPARISON_RE = re.compile(
 # Knowledge: conceptual question answerable WITHOUT a product list.
 _KNOWLEDGE_RE = re.compile(
     r"(what'?s the difference|what is the difference|"
-    r"\bdo i (really )?need\b|\bhow much (ram|vram|storage|memory)\b|"
+    r"\bdo i (really )?need\b|\bhow much (\w?ram|storage|memory)\b|"
     r"\bis (an? )?\w+ (enough|better|worth)\b|\bwhat does .+ mean\b|"
     r"\bwhich (gpu|cpu|processor|ram|ssd|screen|panel) (is|should)\b|"
     r"\bwhat'?s? (better|the best) .* (for|between)\b)",
@@ -126,7 +126,7 @@ _PRODUCT_LISTY_RE = re.compile(
 # loaded from config/store_profiles/<vertical>.json so a pharmacy store decomposes with
 # pharmacy use-cases, not laptop gaming/GPU assumptions.
 _USE_CASE_PATTERNS_FALLBACK: Dict[str, "re.Pattern"] = {
-    "gaming": re.compile(r"\b(gaming|gamer|esports|fps|valorant|fortnite|cyberpunk|aaa|triple ?a|ray ?tracing)\b", re.I),
+    "gaming": re.compile(r"\b(gaming|gamer|esports|fps|aaa|triple ?a|ray ?tracing)\b", re.I),  # game TITLES live in profile patterns (canary 2026-07-07)
     "video_editing": re.compile(r"\b(video edit\w*|premiere|davinci|resolve|4k edit\w*|content creat\w*|youtub\w*|streaming|render\w*)\b", re.I),
     "programming": re.compile(r"\b(coding|programming|developer|software dev|docker|compile|android studio|xcode|ide)\b", re.I),
     "ml_ai": re.compile(r"\b(machine learning|deep learning|ai training|train\w* (a )?model|llm|cuda|tensor|pytorch|data science)\b", re.I),

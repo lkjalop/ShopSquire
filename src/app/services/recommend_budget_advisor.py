@@ -5,11 +5,11 @@ budget/brand verdict ("Yes, $1,800 covers these…", "No, that's short for gamin
 human-readable assistant message — never copywriting, always derived from the actual result
 prices + use-case floors. Pure builders: no DB, no request locals, no LLM.
 
-ADAPTER (flavour): use-case price floors are now sourced from the active StoreProfile
-(`use_case_budget_floors` slot) — see _use_case_budget_floors. The persona labels and the gpu/spec
-vocabulary in _build_minimum_recommended_tiers remain inline electronics flavour, which is why this
-module is still NOT on the no-flavour-in-core lint — profile-backing those is the remaining Phase-2
-work here.
+ADAPTER (flavour): GRADUATED 2026-07-07 — every vocabulary surface now reads from StoreProfile slots
+(use_case_budget_floors, capability_classes, capability_verdicts, persona_labels, spec_strength_tokens,
+premium_brand_aliases, brand_fallback_order, budget_floor_hints, step_up_spec). Vertical-EXCLUSIVE:
+a profile without a slot gets no verdict/label rather than inheriting electronics wording. This module
+IS on the no-flavour-in-core lint at zero tolerance; keep every new word in the profile, not here.
 """
 from __future__ import annotations
 
@@ -47,6 +47,20 @@ def _use_case_budget_floors(profile_id: str | None = None) -> dict[str, int]:
     return {}
 
 
+def _profile_slot_dict(slot: str) -> dict:
+    """Vertical-EXCLUSIVE dict slot from the active StoreProfile — {} when absent (a non-electronics
+    vertical must NOT inherit electronics vocabulary). profile_slot is defensive; never raises."""
+    from src.app.platform.store_profile import profile_slot
+    val = profile_slot(slot, default=None)
+    return val if isinstance(val, dict) else {}
+
+
+def _profile_slot_list(slot: str) -> list:
+    from src.app.platform.store_profile import profile_slot
+    val = profile_slot(slot, default=None)
+    return val if isinstance(val, list) else []
+
+
 # Back-compat alias: the inline fallback IS the electronics floor table. Existing re-exports /
 # call-sites that reference the electronics table directly keep working; the profile-preferred
 # live source is _use_case_budget_floors().
@@ -55,26 +69,7 @@ _USE_CASE_BUDGET_FLOORS = _use_case_budget_floors("electronics")
 
 def _persona_summary_label(persona: str | None, use_case: str | None) -> str:
     key = str(use_case or persona or "").strip().lower()
-    labels = {
-        "university_general": "uni work",
-        "student": "student work",
-        "high_school": "schoolwork",
-        "office_general": "office work",
-        "office_finance": "finance work",
-        "office_executive": "professional work",
-        "content_creator": "creative work",
-        "content_creation": "creative work",
-        "gaming": "gaming",
-        "gaming_light": "light gaming",
-        "gaming_competitive": "competitive gaming",
-        "gaming_aaa_heavy": "AAA gaming",
-        "ai_ml_workstation": "AI and coding work",
-        "data_science_student": "coding and analysis",
-        "engineering_student": "engineering work",
-        "architecture_student": "design work",
-        "medical_student": "study and research",
-        "law_student": "study and reading",
-    }
+    labels = _profile_slot_dict("persona_labels")
     if key in labels:
         return labels[key]
     if key.startswith("office_"):
@@ -173,11 +168,12 @@ def _build_minimum_recommended_tiers(
                 score += 0.6
         except Exception:
             pass
+        _sst = _profile_slot_dict("spec_strength_tokens")
         gpu = str(specs.get("gpu") or "").lower()
-        if any(tok in gpu for tok in ("rtx", "radeon", "geforce", "arc")):
+        if any(str(tok).lower() in gpu for tok in (_sst.get("gpu") or [])):
             score += 1.5
         cpu = str(specs.get("cpu") or "").lower()
-        if any(tok in cpu for tok in ("i7", "i9", "ryzen 7", "ryzen 9", "ultra 7", "ultra 9")):
+        if any(str(tok).lower() in cpu for tok in (_sst.get("cpu") or [])):
             score += 1.0
         try:
             s = float(r.get("score_norm") or 0.0) / 100.0
@@ -276,21 +272,24 @@ def _build_budget_reasoning_note(query: str | None, results: list[dict], constra
     # up a structured spec, say exactly what the extra money buys; the canned line is only the
     # fallback when nothing above budget is materially better.
     step_up_txt = ""
+    _sus = _profile_slot_dict("step_up_spec")
+    _su_label = str(_sus.get("label") or "").strip()
+    _su_unit = str(_sus.get("unit") or "").strip()
     try:
         _ups = _above_budget_step_ups(budget_cap, _top_vram_gb(results))
-        if _ups:
+        if _ups and _su_label:
             step_up_txt = " Going higher has a real payoff here: " + "; ".join(
-                f"~${int(round(p)):,} steps up to {v}GB GPU memory ({_short_name(n)})" for n, p, v in _ups
+                f"~${int(round(p)):,} steps up to {v}{_su_unit} {_su_label} ({_short_name(n)})" for n, p, v in _ups
             ) + "."
     except Exception:
         step_up_txt = ""
     vram_hedge = ""
     try:
         _tv = _top_vram_gb(results)
-        if _tv and _tv < 16 and any(t in label.lower() for t in ("ai", "ml", "machine", "deep", "data")):
-            vram_hedge = (f" Honest note for model training: the in-budget picks carry {_tv}GB GPU memory — "
-                          "good for smaller/quantized models and fine-tuning; sustained training of larger "
-                          "models wants 16GB+ GPU memory (or cloud GPUs).")
+        _strong = int(_sus.get("strong_min") or 16)
+        if _tv and _tv < _strong and any(t in label.lower() for t in ("ai", "ml", "machine", "deep", "data")):
+            _tpl = (_profile_slot_dict("capability_verdicts") or {}).get("budget_step_hedge")
+            vram_hedge = str(_tpl).format(gpu_mem=_tv) if _tpl else ""
     except Exception:
         vram_hedge = ""
 
@@ -327,7 +326,8 @@ def _top_vram_gb(results: list) -> int | None:
     try:
         top = results[0] if results and isinstance(results[0], dict) else {}
         specs = top.get("specs") if isinstance(top.get("specs"), dict) else {}
-        v = int(specs.get("gpu_vram_gb") or 0)
+        _field = str((_profile_slot_dict("step_up_spec") or {}).get("field") or "gpu_vram_gb")
+        v = int(specs.get(_field) or 0)
         return v or None
     except (TypeError, ValueError, IndexError):
         return None
@@ -356,7 +356,8 @@ def _above_budget_step_ups(budget_cap: float, min_vram_above: int | None) -> lis
             if not isinstance(specs, dict) or specs.get("gpu_discrete") is not True:
                 continue
             try:
-                v = int(specs.get("gpu_vram_gb") or 0)
+                _field = str((_profile_slot_dict("step_up_spec") or {}).get("field") or "gpu_vram_gb")
+                v = int(specs.get(_field) or 0)
             except (TypeError, ValueError):
                 v = 0
             if v > int(min_vram_above or 0) and v not in seen_tiers:
@@ -468,16 +469,17 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
                 break
     if brand_hint not in _SUPPORTED_IMAGE_BRAND_HINTS:
         result_names = " ".join(str((row or {}).get("name") or "") for row in (results or [])[:3]).lower()
-        if any(tok in q_low for tok in ("macbook", "mac book", "apple")) or "macbook" in result_names:
+        _prem = [str(t).lower() for t in _profile_slot_list("premium_brand_aliases")]
+        if _prem and (any(tok in q_low for tok in _prem) or any(tok in result_names for tok in _prem)):
             brand_hint = "apple"
         else:
-            for fallback_brand in ("msi", "asus", "lenovo", "dell", "hp", "alienware", "microsoft"):
+            for fallback_brand in [str(b).lower() for b in _profile_slot_list("brand_fallback_order")]:
                 if fallback_brand in q_low or fallback_brand in result_names:
                     brand_hint = fallback_brand
                     break
     if brand_hint not in _SUPPORTED_IMAGE_BRAND_HINTS:
         # ── Generic budget answer when no brand is identified ──
-        # e.g. "Is $1,800 enough for a gaming laptop?" → yes/no based on result prices
+        # e.g. "Is $1,800 enough for one?" → yes/no based on result prices
         budget_max_generic = (
             constraints.get("budget_max")
             or constraints.get("_request_budget_max")
@@ -565,22 +567,12 @@ def _build_brand_budget_answer(query: str, results: list[dict], constraints: dic
     return f"Yes, this budget reaches {brand_label if brand_has_match else 'similar'} options starting around ${int(round(first_price)):,}."
 
 
-# ── capability yes/no ("can it run Valorant?", "good for video editing?") — answer-first verdict from
+# ── capability yes/no ("can it run <title>?", "good for video editing?") — answer-first verdict from
 # the TOP result's specs, honest hedge on integrated graphics. Commerce-generic capability classes; the
 # spec checks (discrete GPU / RAM) are the requirement, not product literals. ──────────────────────────
-_CAP_GAMING = ("gaming", "valorant", "fortnite", "cyberpunk", "cs2", "csgo", "esports", "aaa game",
-               "call of duty", "warzone", "apex legends", "overwatch", "elden ring", "gta", "triple-a")
-_CAP_HEAVY = ("video editing", "4k editing", "4k video", "render", "rendering", "3d modeling", "3d model",
-              "cad", "blender", "premiere", "after effects", "davinci", "machine learning", "deep learning",
-              "ml training", "ai training", "train a model", "solidworks", "autocad", "gpu-heavy",
-              # 2026-07-07: the live miss — "training llm models" matched NOTHING here, so the
-              # capability verdict never fired and the buyer got the generic budget line instead.
-              "llm", "language model", "model training", "training models", "training llm",
-              "large model", "fine-tune", "fine tuning", "finetune", "pytorch", "tensorflow")
-_CAP_DEV = ("coding", "programming", "software development", "compiling", "docker", "virtual machine",
-            "kubernetes", "data science", "jupyter", "web development", "dev work")
-_CAP_LIGHT = ("office work", "word", "excel", "spreadsheet", "browsing", "emails", "studying", "school work",
-              "note-taking", "notes", "streaming", "watching", "zoom", "teams calls", "microsoft office")
+# Capability-class vocabulary + verdict templates live in the StoreProfile (capability_classes /
+# capability_verdicts slots) — vertical-EXCLUSIVE: a profile without them gets no capability
+# verdicts rather than inheriting electronics wording. The MECHANISM below is vertical-blind.
 _CAP_QUESTION_RE = re.compile(
     r"\b(?:can|will|does)\b.{0,40}\b(?:run|play|handle|do|use|manage)\b"
     r"|\bgood\s+(?:for|enough|at)\b|\bhandle\b|\benough\s+for\b|\bcapable\s+of\b|\bsuitable\s+for\b"
@@ -596,7 +588,12 @@ def _cap_result_has_discrete_gpu(r: dict) -> bool:
     if specs.get("gpu_discrete") is False and not specs.get("gpu"):
         return False
     hay = (str(r.get("name") or "") + " " + str(specs.get("gpu") or "")).lower()
-    return bool(re.search(r"\b(nvidia|geforce|dedicated\s+gpu|discrete\s+gpu)\b", hay))
+    # Vendor/family vocabulary comes from the profile's spec_strength_tokens.gpu (DATA);
+    # "dedicated/discrete gpu" are generic mechanism words and stay in code.
+    _gpu_toks = [str(t).lower() for t in (_profile_slot_dict("spec_strength_tokens").get("gpu") or [])]
+    if any(tok in hay for tok in _gpu_toks):
+        return True
+    return bool(re.search(r"\b(dedicated\s+gpu|discrete\s+gpu)\b", hay))
 
 
 def _cap_result_ram_gb(r: dict):
@@ -610,49 +607,53 @@ def _cap_result_ram_gb(r: dict):
 
 def _build_capability_answer(query: str, results: list[dict]) -> str:
     """A deterministic capability verdict for 'can it run X / good for Y' — yes/no from the top result's
-    specs, honest hedge on integrated graphics. '' when it's not a capability question or no class matches."""
+    structured specs. Class vocabulary + verdict templates come from the StoreProfile; missing slots →
+    '' (vertical-exclusive). GPU-memory-aware for the heavy class (2026-07-07 "not smart" fix)."""
     q = str(query or "").lower()
     if not results or not isinstance(results[0], dict) or not _CAP_QUESTION_RE.search(q):
         return ""
-    cls = ("gaming" if any(c in q for c in _CAP_GAMING)
-           else "heavy" if any(c in q for c in _CAP_HEAVY)
-           else "dev" if any(c in q for c in _CAP_DEV)
-           else "light" if any(c in q for c in _CAP_LIGHT)
-           else None)
+    classes = _profile_slot_dict("capability_classes")
+    cls = next((k for k in ("gaming", "heavy", "dev", "light")
+                if any(str(c).lower() in q for c in (classes.get(k) or []))), None)
     if cls is None:
         return ""
+    verdicts = _profile_slot_dict("capability_verdicts")
+
+    def _say(key: str, **kw) -> str:
+        tpl = verdicts.get(key)
+        if not tpl:
+            return ""
+        try:
+            return str(tpl).format(**kw)
+        except (KeyError, IndexError, ValueError):
+            return ""
+
     top = results[0]
-    name = str(top.get("name") or "this laptop").strip()
+    name = str(top.get("name") or "this item").strip()
     has_gpu = _cap_result_has_discrete_gpu(top)
     ram = _cap_result_ram_gb(top)
+    ram_disp = ram or "16+"
     if cls == "gaming":
-        if has_gpu:
-            return f"Yes — the {name} has a dedicated GPU, so it handles gaming well, including demanding titles."
-        return (f"It'll run popular esports titles (Valorant, CS2, League) fine, but the {name} uses integrated "
-                f"graphics — for demanding AAA games a dedicated-GPU model is the safer pick. Want me to show those?")
+        return _say("gaming_yes", name=name) if has_gpu else _say("gaming_hedge", name=name)
     if cls == "heavy":
-        # VRAM-aware (2026-07-07 "not smart" fix): a dedicated GPU alone is NOT a yes for model
-        # training — GPU MEMORY is the binding constraint. 16GB+ = genuine yes; below = honest hedge
-        # naming what it CAN do (fine-tunes, quantized inference) and what it can't (sustained
-        # training of larger models). Unknown VRAM falls back to the old discrete+RAM heuristic.
-        vram = _top_vram_gb([top])
-        if has_gpu and vram and vram >= 16 and (ram is None or ram >= 16):
-            return (f"Yes — the {name} has {vram}GB GPU memory and {ram or '16+'}GB RAM, genuinely suited "
-                    f"to heavy model training and sustained GPU compute.")
-        if has_gpu and vram and vram < 16:
-            return (f"Partly — the {name} has a dedicated GPU, but {vram}GB of GPU memory is entry-level for "
-                    f"model training: fine for smaller/quantized models, fine-tunes and inference, while "
-                    f"sustained training of larger models wants 16GB+ GPU memory (or cloud GPUs). "
-                    f"Want me to show the higher-GPU-memory options?")
+        gpu_mem = _top_vram_gb([top])
+        strong_min = 16
+        try:
+            strong_min = int((_profile_slot_dict("step_up_spec") or {}).get("strong_min") or 16)
+        except (TypeError, ValueError):
+            strong_min = 16
+        if has_gpu and gpu_mem and gpu_mem >= strong_min and (ram is None or ram >= 16):
+            return _say("heavy_yes_vram", name=name, gpu_mem=gpu_mem, ram=ram_disp)
+        if has_gpu and gpu_mem and gpu_mem < strong_min:
+            return _say("heavy_hedge_vram", name=name, gpu_mem=gpu_mem, ram=ram_disp)
         if has_gpu and (ram is None or ram >= 16):
-            return f"Yes — the {name} pairs a dedicated GPU with {ram or '16+'}GB RAM, which suits that GPU-heavy work."
-        return (f"For that GPU-heavy work the {name} is light — it lacks the dedicated GPU / 16GB+ RAM those "
-                f"tasks want. I'd point you to a discrete-GPU workstation. Want me to show those?")
+            return _say("heavy_yes", name=name, ram=ram_disp)
+        return _say("heavy_light", name=name)
     if cls == "dev":
         if ram is not None and ram >= 16:
-            return f"Yes — the {name} has {ram}GB RAM, comfortable for development and multitasking."
-        return f"The {name} works for development; for heavier workloads I'd aim for 16GB+ RAM. Want me to filter for that?"
-    return f"Yes — the {name} easily handles everyday use (office, browsing, study, video calls)."
+            return _say("dev_yes", name=name, ram=ram)
+        return _say("dev_hedge", name=name)
+    return _say("light_yes", name=name)
 
 
 def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: dict) -> str:
@@ -700,16 +701,19 @@ def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: 
         return None
 
     def _generic_budget_floor(use_case_text: str, query_text: str) -> tuple[int, str]:
+        # Vocabulary + floors live in the StoreProfile budget_floor_hints slot (ordered; an entry with
+        # empty tokens is the vertical's default). Code is vertical-blind.
         combined = f"{use_case_text} {query_text}".strip().lower()
-        if any(tok in combined for tok in ("gaming", "esports", "rtx", "fps")):
-            return 900, "gaming laptop"
-        if any(tok in combined for tok in ("creator", "video editing", "render", "3d", "cad", "architecture", "engineering", "ai", "ml")):
-            return 1200, "creator or engineering laptop"
-        if any(tok in combined for tok in ("school", "student", "high school", "university", "college")):
-            return 700, "school laptop"
-        if any(tok in combined for tok in ("business", "office", "corporate", "work")):
-            return 800, "business laptop"
-        return 600, "laptop"
+        for hint in _profile_slot_list("budget_floor_hints"):
+            if not isinstance(hint, dict):
+                continue
+            toks = [str(t).lower() for t in (hint.get("tokens") or [])]
+            if not toks or any(tok in combined for tok in toks):
+                try:
+                    return int(hint.get("floor") or 600), str(hint.get("label") or "item")
+                except (TypeError, ValueError):
+                    break
+        return 600, "item"
 
     budget_max_generic = (
         constraints.get("budget_max")
@@ -871,7 +875,7 @@ def _deterministic_assistant_message(query: str, results: list[dict], constraint
             return str((row or {}).get("name") or "").strip()
 
         # When we present a clean use-case fit, the "Best fits for X" picks must ACTUALLY fit the use case.
-        # A gaming laptop that merely lands in the budget band (high raw score, no use-case match) must not
+        # A high-scoring item that merely lands in the budget band (high raw score, no use-case match) must not
         # be paraded as a "best fit for office work". Prefer rows carrying a positive use_case_match marker;
         # fall back to the top rows only when NONE carry it, so the line never silently disappears.
         def _positively_fits_use_case(row: dict) -> bool:

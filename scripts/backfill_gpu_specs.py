@@ -30,6 +30,24 @@ _GPU_RE = re.compile(r"\b(?:GeForce\s+)?(RTX|GTX)\s*(\d{4})\b", re.I)
 _RADEON_RE = re.compile(r"\bRadeon\s+(?:RX\s*)?(\d{4}[A-Z]*)\b", re.I)
 
 
+def _load_profile_patterns() -> None:
+    """Prefer the StoreProfile's spec_extraction_patterns (single source of vertical truth shared
+    with seeding); the module literals above remain only as a profile-less fallback."""
+    global _GPU_RE, _RADEON_RE, _VRAM_GB
+    try:
+        from src.app.platform.store_profile import profile_slot
+        pat = profile_slot("spec_extraction_patterns", default=None)
+        if isinstance(pat, dict):
+            if pat.get("gpu_regex"):
+                _GPU_RE = re.compile(str(pat["gpu_regex"]), re.I)
+            if pat.get("radeon_regex"):
+                _RADEON_RE = re.compile(str(pat["radeon_regex"]), re.I)
+            if isinstance(pat.get("vram_gb_by_model"), dict):
+                _VRAM_GB = {str(k): int(v) for k, v in pat["vram_gb_by_model"].items()}
+    except Exception:
+        pass
+
+
 def extract_gpu(name: str):
     """(gpu_label, vram_gb|None) from a product name, or (None, None)."""
     m = _GPU_RE.search(name or "")
@@ -50,6 +68,7 @@ def main() -> int:
     from sqlalchemy import text
     from src.app.models.db import db_session
 
+    _load_profile_patterns()
     changed = 0
     with db_session() as db:
         rows = db.execute(text("SELECT sku, name, specs FROM products WHERE active = 1")).fetchall()

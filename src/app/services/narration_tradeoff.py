@@ -3,7 +3,7 @@
 The per-product spec line shown to the LLM (and usable for tradeoff narration) is built from the
 ACTIVE StoreProfile's ``narration_spec_dimensions`` slot — NOT hardcoded electronics specs. Each
 dimension is ``{"label": str, "variants": [{"key": str, "unit": str?}]}``; the first variant whose
-key is present in the product's ``specs`` wins (so e.g. GPU model falls back to VRAM for electronics,
+key is present in the product's ``specs`` wins (so e.g. GPU model falls back to GPU memory for electronics,
 while pharmacy surfaces active ingredient / strength / form). This keeps the narration vocabulary
 vertical-blind in core: a fashion or pharmacy vertical describes its OWN tradeoffs with zero code
 change, and recommend.py stops hardcoding GPU/refresh/RAM.
