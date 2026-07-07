@@ -214,9 +214,14 @@ def load_capability_kb() -> dict:
         return _CAPABILITY_KB_CACHE or {}
     try:
         import json as _json
+        # 2026-07-07 N4 audit: "../..", from src/app/services resolves to src/config (does not
+        # exist) — the KB loaded as {} FOREVER and capability_preface was silently dead. Three ups
+        # reach the repo root; the CWD-relative fallback covers packaged/docker layouts.
         _kb_path = os.path.normpath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "config", "use_case_kb.json")
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "use_case_kb.json")
         )
+        if not os.path.exists(_kb_path):
+            _kb_path = os.path.join("config", "use_case_kb.json")
         with open(_kb_path, "r", encoding="utf-8") as _f:
             _CAPABILITY_KB_CACHE = _json.load(_f)
     except Exception:

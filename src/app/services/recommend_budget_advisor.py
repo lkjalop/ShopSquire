@@ -658,6 +658,17 @@ def _build_capability_answer(query: str, results: list[dict]) -> str:
 
 def _build_brand_budget_answer_v2(query: str, results: list[dict], constraints: dict) -> str:
     q_low = str(query or "").lower()
+    # N4 challenge-defense: "are you sure? why would it be good for X?" gets a spec-vs-requirement
+    # justification (KB-grounded, gaps admitted) instead of a re-pasted pitch. Checked FIRST — a
+    # challenged buyer wants the defense, not another budget summary.
+    try:
+        from src.app.services.recommend_justification import build_challenge_justification
+        _just = build_challenge_justification(query, results, constraints)
+        if _just:
+            return _just
+    except Exception as _exc:
+        import logging as _lg
+        _lg.getLogger(__name__).debug("challenge justification skipped: %s", _exc)
     asks_budget = any(
         tok in q_low for tok in (
             "enough", "budget", "under $", "between $", "can i get one for", "is $",

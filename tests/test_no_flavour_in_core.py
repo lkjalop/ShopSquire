@@ -38,6 +38,9 @@ _CORE_MODULES = [
     "src/app/services/cart_ttl.py",
     "src/app/services/retention_sweeper.py",
     "src/app/services/refund_requests.py",
+    # challenge-defense justification (N4): walks <field>_min KB keys vs specs[field] — all words
+    # come from use_case_kb.json + the product row; mechanism only.
+    "src/app/services/recommend_justification.py",
     "src/app/services/recommend_response_finalizer.py",
     "src/app/platform/store_profile.py",
     "src/app/policy/execution_gate.py",
