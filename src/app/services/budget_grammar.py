@@ -114,6 +114,17 @@ def parse_budget(text: str) -> Optional[BudgetParse]:
         if v is not None and v >= _floor:
             return BudgetParse(None, v, "ceiling")
 
+    # 4b) NEGATED floor = ceiling — "nothing over 2k", "not above 1500", "don't go over 1800",
+    #     "never more than 900". Without this, the floor rule below read these as MINIMUMS and
+    #     inverted the buyer's budget (2026-07-07 audit: "nothing over 2k" -> budget_min=2000).
+    m = re.search(rf"\b(?:nothing|not|no|don'?t|won'?t|never|without\s+going)\s+"
+                  rf"(?:go(?:ing)?\s+|to\s+go\s+|want(?:\s+to)?\s+go\s+)?"
+                  rf"(?:over|above|past|beyond|more\s+than|exceeding)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
+    if m:
+        v = _to_int(m.group(1), m.group(2))
+        if v is not None and v >= _floor:
+            return BudgetParse(None, v, "ceiling")
+
     # 5) floor — "over 1000", "at least $800", "minimum 500"
     m = re.search(rf"\b(?:over|above|at least|more than|minimum(?:\s+of)?|starting\s+at)\s*{_CUR}?\s*{_NUM}{_UNIT_GUARD}", q)
     if m:

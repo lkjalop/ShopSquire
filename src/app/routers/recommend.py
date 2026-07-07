@@ -7611,10 +7611,15 @@ def suggest(
     # Policy/FAQ lane: "what's your returns policy?" gets the store's APPROVED answer from the
     # StoreProfile policy_faq slot — previously only chat.py had this; the /suggest lane fell through
     # to product search and answered a policy question with laptops (2026-07-07 audit).
+    # PURE policy questions only: a MIXED ask ("gaming laptop under 1400. also what warranty?") must
+    # keep its product half, so anything that also reads as a standalone product search skips the lane
+    # and lets the main pipeline answer both parts.
     _faq_answer = None
     try:
         from src.app.services.answer_quality import policy_faq_answer as _pfa
         _faq_answer = _pfa(query or "")
+        if _faq_answer and _query_is_standalone_search(query):
+            _faq_answer = None
     except Exception:
         _faq_answer = None
     if _faq_answer:
