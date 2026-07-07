@@ -310,6 +310,8 @@ class VisionReasoningService:
                     "prompt": prompt,
                     "images": [b64],
                     "stream": False,
+                    # keep the VLM resident between damage-triage calls (cold reload = 2.8-6.1s each)
+                    "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                     "options": {"temperature": 0},
                 },
             )

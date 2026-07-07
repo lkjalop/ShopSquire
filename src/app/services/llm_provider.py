@@ -368,6 +368,9 @@ async def ollama_generate(model: str, prompt: str, options: Dict | None = None, 
         "model": model,
         "prompt": prompt,
         "stream": False,
+        # Pin the model resident between calls (like embeddings' OLLAMA_EMBED_KEEP_ALIVE already does) —
+        # without this every generate pays a 2.8-6.1s model reload after Ollama's 5-min default unload.
+        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": {
             "temperature": 0.2,
             "num_predict": _num_predict,

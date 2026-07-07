@@ -176,6 +176,8 @@ def identify_product_from_image(
                         "prompt": prompt,
                         "images": [img_b64],
                         "stream": False,
+                        # keep the VLM resident between identity calls (cold reload = 2.8-6.1s each)
+                        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                         "options": {"temperature": 0.0},
                     },
                     timeout=max(1.0, min(float(timeout_s), _remaining)),
