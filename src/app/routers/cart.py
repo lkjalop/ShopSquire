@@ -16,6 +16,7 @@ from src.app.observability.tracing import get_tracer
 from src.app.repositories.catalog import CatalogRepository
 from src.app.security.commerce_request_guard import inspect_commerce_request
 from src.app.security.auth import require_role, ROLE_DEVELOPER, ROLE_MERCHANT, ROLE_OWNER
+from src.app.deps import get_redis
 from src.app.services.bundle_approvals import bind_bundle_approval_state
 from src.app.services.bundle_pricing import evaluate_bundle_savings
 from src.app.services.cart_ttl import classify_updated_at
@@ -147,6 +148,35 @@ def _cart_trace_id(cart_id: str) -> str:
     return f"cart:{str(cart_id or '').strip()}"
 
 
+# ── Reload-durable UNDO: a cleared cart is stashed in Redis so "put them back" survives a page reload.
+# This is a SEPARATE snapshot (not a tombstone inside line_items), so it never touches the cart read paths.
+def _undo_key(uid: str) -> str:
+    return f"session:{str(uid or '').strip()}:cart_undo"
+
+
+def _undo_ttl() -> int:
+    """Grace window (seconds) for restoring a cleared cart. Default 1h; override via CART_UNDO_TTL_SECONDS."""
+    try:
+        return max(60, min(86400, int(float(os.getenv("CART_UNDO_TTL_SECONDS", "3600") or 3600))))
+    except (TypeError, ValueError):
+        return 3600
+
+
+def _undo_available(redis, uid: str) -> Dict[str, Any]:
+    """Is there a restorable snapshot for this uid? Returns {available, count} (best-effort; never raises)."""
+    try:
+        raw = redis.get(_undo_key(uid)) if redis is not None else None
+    except Exception:
+        raw = None
+    if not raw:
+        return {"available": False, "count": 0}
+    try:
+        snap = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+        return {"available": True, "count": len(snap.get("items") or [])}
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return {"available": False, "count": 0}
+
+
 def _log_cart_security_scan(*, trace_id: str, source_id: str, signal: Dict) -> None:
     log_trace_event(
         trace_id=trace_id,
@@ -203,7 +233,8 @@ def _with_bundle_state(*, cart_id: str, uid: str, role: str, hydrated: Dict) -> 
 
 
 @router.get("")
-def get_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+def get_cart(uid: str, redis=Depends(get_redis),
+            role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
     with tracer.start_as_current_span("cart.get"):
         signal = _guard_cart_request(surface="cart.get", uid=uid, sku_values=[], quantity_values=[])
         cart_id, items, updated_at = _get_or_create_cart(uid)
@@ -215,7 +246,78 @@ def get_cart(uid: str, role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWN
         # trusts for the "carried over" nudge. Only meaningful when the cart has items.
         hydrated["updated_at"] = updated_at
         hydrated["age"] = classify_updated_at(updated_at) if (hydrated.get("items")) else classify_updated_at(None)
+        # Reload-durable undo: expose whether a just-cleared cart can still be restored, so the Undo
+        # affordance survives a page reload (the local chip lives only in React state).
+        hydrated["undo"] = _undo_available(redis, uid)
         return {"cart_id": cart_id, **hydrated}
+
+
+class UndoStashPayload(BaseModel):
+    uid: str
+    items: List[CartItemIn]
+
+
+@router.post("/undo/stash")
+def stash_cart_undo(payload: UndoStashPayload, redis=Depends(get_redis),
+                    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+    """Persist the lines a client-side clear just removed, so 'undo' survives a reload. Best-effort — a
+    Redis hiccup degrades to the in-session chip, never blocks the clear."""
+    _guard_cart_request(surface="cart.undo_stash", uid=payload.uid, sku_values=[], quantity_values=[])
+    lines = [{"sku": str(it.sku), "quantity": max(1, int(it.quantity or 1))} for it in payload.items if it.sku]
+    if not lines:
+        return {"stashed": False, "count": 0}
+    try:
+        redis.setex(_undo_key(payload.uid), _undo_ttl(), json.dumps({"items": lines, "saved_at": _now_ts()}))
+    except Exception:
+        return {"stashed": False, "count": 0}
+    return {"stashed": True, "count": len(lines), "ttl_seconds": _undo_ttl()}
+
+
+@router.post("/undo")
+def undo_cart_clear(uid: str, redis=Depends(get_redis),
+                    role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER]))) -> Dict:
+    """Restore the most-recently cleared cart from its Redis snapshot (within the grace window). Merges the
+    stashed lines back into the current cart and consumes the snapshot. 404 if nothing is restorable."""
+    _guard_cart_request(surface="cart.undo", uid=uid, sku_values=[], quantity_values=[])
+    key = _undo_key(uid)
+    try:
+        raw = redis.get(key)
+    except Exception:
+        raw = None
+    if not raw:
+        raise HTTPException(status_code=404, detail="no_undo_available")
+    try:
+        snap = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="no_undo_available")
+
+    cart_id, items, _ = _get_or_create_cart(uid)
+    by_sku = {it.get("sku"): it for it in items}
+    ts = _now_ts()
+    restored = 0
+    for line in (snap.get("items") or []):
+        sku = line.get("sku")
+        qty = max(1, int(line.get("quantity") or 1))
+        if not sku:
+            continue
+        # Restore = re-instate exactly what was cleared, bypassing the stock gate (the removal freed the
+        # stock, and this is the buyer's own cart being put back — any true shortfall is caught at checkout).
+        if sku in by_sku:
+            by_sku[sku]["quantity"] = int(by_sku[sku].get("quantity") or 0) + qty
+        else:
+            new_line = {"sku": sku, "quantity": qty, "added_at": ts}
+            items.append(new_line)
+            by_sku[sku] = new_line
+        restored += 1
+    _save_cart(cart_id, items)
+    try:
+        redis.delete(key)
+    except Exception:
+        pass
+    hydrated = _hydrate(items)
+    hydrated = _with_bundle_state(cart_id=cart_id, uid=uid, role=role, hydrated=hydrated)
+    hydrated["undo"] = {"available": False, "count": 0}
+    return {"cart_id": cart_id, "restored": restored, **hydrated}
 
 
 @router.get("/split-offer")

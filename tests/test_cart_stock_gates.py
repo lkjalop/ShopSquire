@@ -194,6 +194,54 @@ def test_added_at_stamped_and_surfaced(client_with_stock):
     assert persisted.get("added_at") == line["added_at"]
 
 
+# ── reload-durable UNDO (Phase 2c: Redis snapshot survives page reload) ───────
+
+class _FakeRedis:
+    def __init__(self):
+        self.store = {}
+    def setex(self, k, ttl, v):
+        self.store[k] = v
+        return True
+    def get(self, k):
+        return self.store.get(k)
+    def delete(self, k):
+        return 1 if self.store.pop(k, None) is not None else 0
+
+
+def test_cart_undo_roundtrip(client_with_stock):
+    """Stash a cleared line -> GET reports undo available -> POST /undo restores it -> snapshot consumed."""
+    from src.app.deps import get_redis
+    fake = _FakeRedis()
+    client_with_stock.app.dependency_overrides[get_redis] = lambda: fake
+    try:
+        r = client_with_stock.post("/api/v1/cart/undo/stash",
+                                   json={"uid": "undo-user", "items": [{"sku": "SKU-INSTOCK-5", "quantity": 2}]})
+        assert r.json()["stashed"] is True
+
+        got = client_with_stock.get("/api/v1/cart", params={"uid": "undo-user"}).json()
+        assert got["undo"]["available"] is True and got["undo"]["count"] == 1
+
+        u = client_with_stock.post("/api/v1/cart/undo", params={"uid": "undo-user"}).json()
+        assert u["restored"] == 1
+        assert any(it["sku"] == "SKU-INSTOCK-5" and it["quantity"] == 2 for it in u["items"])
+
+        # snapshot consumed — no second undo
+        after = client_with_stock.get("/api/v1/cart", params={"uid": "undo-user"}).json()
+        assert after["undo"]["available"] is False
+        assert client_with_stock.post("/api/v1/cart/undo", params={"uid": "undo-user"}).status_code == 404
+    finally:
+        client_with_stock.app.dependency_overrides.pop(get_redis, None)
+
+
+def test_cart_undo_nothing_to_restore_is_404(client_with_stock):
+    from src.app.deps import get_redis
+    client_with_stock.app.dependency_overrides[get_redis] = lambda: _FakeRedis()
+    try:
+        assert client_with_stock.post("/api/v1/cart/undo", params={"uid": "empty-undo"}).status_code == 404
+    finally:
+        client_with_stock.app.dependency_overrides.pop(get_redis, None)
+
+
 def test_add_item_quantity_exceeds_stock(client_with_stock):
     """Requesting more than available stock must be rejected."""
     resp = client_with_stock.post(
