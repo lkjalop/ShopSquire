@@ -1700,6 +1700,10 @@ async def chat_query(
     params = {"uid": uid, "query": q}
     if turn_intent and turn_intent != "SEARCH":
         params["turn_intent"] = turn_intent
+    # N3 Mode-B consent passthrough: the chip's explicit per-turn opt-in rides to the evidence
+    # orchestrator's web leg. Absent/falsy -> the leg can never fire.
+    if bool((payload or {}).get("external_research_consent")):
+        params["external_research_consent"] = "true"
     nqe_selection = (payload or {}).get("nqe_selection") or {}
     confirmed_slots = (payload or {}).get("confirmed_slots") if isinstance((payload or {}).get("confirmed_slots"), dict) else {}
     if not confirmed_slots:

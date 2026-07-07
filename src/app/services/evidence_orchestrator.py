@@ -41,9 +41,15 @@ def _leg_budget_s() -> float:
 
 
 def select_legs(plan: Any, *, query: str = "", uid: Optional[str] = None,
-                image_identity: Optional[Dict[str, Any]] = None) -> List[str]:
+                image_identity: Optional[Dict[str, Any]] = None,
+                web_consent: bool = False) -> List[str]:
     """Which evidence legs does THIS turn need? Driven by the (possibly LLM-filled) plan — the whole
-    point of R2: the reader decides the scatter, so simple turns fan out to nothing."""
+    point of R2: the reader decides the scatter, so simple turns fan out to nothing.
+
+    The WEB leg is CONSENT-GATED (N3, Mode B): it is never selected from query content alone — the
+    buyer must have explicitly accepted the "check an approved external source" chip this turn
+    (web_consent=True), AND the operator flag/allowlist must resolve enabled. A user typing "search
+    the web for X" therefore cannot force a fetch; the imperative only surfaces the consent chip."""
     legs: List[str] = []
     intent = str(getattr(plan, "intent", "") or "").lower()
     if getattr(plan, "needs_market_evidence", False):
@@ -56,7 +62,22 @@ def select_legs(plan: Any, *, query: str = "", uid: Optional[str] = None,
         legs.append("purchase_history")
     if isinstance(image_identity, dict) and any(image_identity.get(k) for k in ("brand", "model", "category")):
         legs.append("image")
+    if web_consent and str(os.getenv("EXTERNAL_RESEARCH_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on"):
+        legs.append("web")
     return legs
+
+
+def _templated_web_query(plan: Any) -> str:
+    """Outbound query built ONLY from controlled vocabulary — plan slots whose values come from the
+    profile/KB, never free user text. The user influences WHETHER a lookup happens; never the bytes
+    on the wire (N3 exfiltration/SSRF posture)."""
+    parts: List[str] = []
+    for uc in (getattr(plan, "use_cases", []) or [])[:2]:
+        parts.append(str(uc).replace("_", " "))
+    if getattr(plan, "category", None):
+        parts.append(str(plan.category))
+    parts.append("buying guide requirements")
+    return " ".join(p for p in parts if p).strip()
 
 
 # ── Leg implementations (deterministic reads; each independently best-effort) ──
@@ -117,24 +138,66 @@ def _leg_image(plan: Any, query: str, uid: Optional[str], image_identity: Option
             "summary": ("photo identified as " + " ".join(bits)) if bits else "", "data": dict(ident)}
 
 
+def _leg_web(plan: Any, query: str, uid: Optional[str]) -> Dict[str, Any]:
+    """Governed external research leg (N3). Reuses the SSRF-safe guardrailed service end-to-end
+    (allowlist from profile, size-bounded single-endpoint fetch, cache). Adds the inbound-content
+    governance this leg owes on top: every snippet is injection-scanned (same detector as OCR text);
+    flagged snippets are DROPPED and counted — the scan verdict is part of the evidence, never
+    hidden. The outbound query is TEMPLATED from plan slots (zero user tokens)."""
+    from src.app.services.external_product_research_service import run_external_research_stage
+    templated = _templated_web_query(plan)
+    res = run_external_research_stage(query=templated, results=None)
+    if res is None:
+        return {"source": "external_web", "found": False, "summary": "", "data": {"disabled": True}}
+    items = res.get("items") or []
+    try:
+        from src.app.security.image_threat_signals import detect_ocr_prompt_injection as _inj
+    except Exception:
+        _inj = None
+    clean, dropped = [], 0
+    for it in items:
+        text = f"{it.get('title') or ''} {it.get('snippet') or ''}"
+        if _inj is not None and _inj(text):
+            dropped += 1          # instruction-like web text is an ATTACK ARTIFACT, not evidence
+            continue
+        clean.append(it)
+    top = clean[0] if clean else {}
+    summary = (f"{top.get('snippet') or top.get('title') or ''}"[:300] +
+               (f" — {top.get('source_domain')}" if top.get("source_domain") else "")) if clean else ""
+    return {
+        "source": "external_web",
+        "found": bool(clean),
+        "summary": summary,
+        "data": {
+            "query_templated": templated,       # provable: no user tokens on the wire
+            "items": clean[:4],
+            "injection_scan": {"checked": len(items), "dropped": dropped,
+                               "verdict": "CLEAN" if dropped == 0 else f"{dropped} snippet(s) dropped"},
+            "authority": "informs wording only — never ranks, prices or approves",
+        },
+    }
+
+
 _LEG_FNS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "market": _leg_market,
     "policy": _leg_policy,
     "availability": _leg_availability,
     "purchase_history": _leg_purchase_history,
     "image": _leg_image,
+    "web": _leg_web,
 }
 
 
 def gather_evidence(plan: Any, *, query: str = "", uid: Optional[str] = None,
                     image_identity: Optional[Dict[str, Any]] = None,
                     leg_fns: Optional[Dict[str, Callable[..., Dict[str, Any]]]] = None,
-                    budget_s: Optional[float] = None) -> Dict[str, Any]:
+                    budget_s: Optional[float] = None,
+                    web_consent: bool = False) -> Dict[str, Any]:
     """Run the selected legs concurrently under a per-leg budget. Returns
     {selected, legs: {name: leg_dict}, citations: [{source, summary}], ms}. Never raises;
     a timed-out/failed leg reports found=False with an error note instead of vanishing silently."""
     t0 = time.perf_counter()
-    selected = select_legs(plan, query=query, uid=uid, image_identity=image_identity)
+    selected = select_legs(plan, query=query, uid=uid, image_identity=image_identity, web_consent=web_consent)
     out: Dict[str, Any] = {"selected": selected, "legs": {}, "citations": [], "ms": 0}
     if not selected:
         return out

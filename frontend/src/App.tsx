@@ -87,6 +87,7 @@ type ChatMessage = {
   narrationJobId?: string;               // async-narration handoff: poll /narration/{id} → replace content
   undoClear?: { items: { sku: string; quantity: number; name?: string }[] };  // "Undo" chip after a clear → re-add these
   evidence?: any;                        // N1: evidence block from the orchestrator → source chips + Evidence tab
+  webConsentPrompt?: { query: string };  // N3 Mode-B: consent chip — never auto-search on an imperative
 };
 type PendingImageContext = {
   labels: string[];
@@ -1137,7 +1138,7 @@ export default function App() {
     }
   };
 
-  const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string } }) => {
+  const handleSend = async (opts?: { queryOverride?: string; nqeSelection?: { question_id: string; option_id: string; option_label: string; option_value?: string }; externalResearchConsent?: boolean }) => {
     const q = String(opts?.queryOverride ?? inputValue).trim();
     if (!q) return;
     try {
@@ -1158,6 +1159,20 @@ export default function App() {
       return;
     }
 
+    // N3 Mode-B: an explicit web-search imperative is a CONSENT REQUEST, not a command — the fetch
+    // only happens if the buyer clicks the chip (which re-sends WITH external_research_consent).
+    // This is simultaneously the UX and the trigger-forcing mitigation: prompt-crafted imperatives
+    // cannot make the platform touch the network.
+    if (opts?.externalResearchConsent === undefined   // chip answers (true OR false) bypass — no loop
+        && /(?:search|check|look(?:\s+it)?\s+up|google|browse).{0,20}(?:the\s+)?(?:web|online|internet)/i.test(q)) {
+      setMessages(prev => [...prev, { role: 'user', content: q, timestamp: new Date() },
+        { role: 'assistant',
+          content: 'I can check an APPROVED external source for that (curated allowlist, nothing about you or your order is sent). Want me to?',
+          webConsentPrompt: { query: q },
+          timestamp: new Date() }]);
+      setInputValue('');
+      return;
+    }
     // CART ACTIONS the assistant can genuinely do — executed client-side against the real cart API, with
     // an honest confirmation ("clear my cart" used to silently do nothing; the demo's top complaint).
     // SCOPED clear first: "clear the old items from the previous session" — drop ONLY the carried-over
@@ -1530,6 +1545,7 @@ export default function App() {
         if (copyProfileId) chatPayload.copy_profile_id = copyProfileId;
         if (copyBrandName) chatPayload.brand_name = copyBrandName;
         chatPayload.copy_surface = 'storefront';
+        if (opts?.externalResearchConsent) chatPayload.external_research_consent = true;
         if (opts?.nqeSelection) {
           chatPayload.nqe_selection = opts.nqeSelection;
         }
@@ -2170,6 +2186,26 @@ export default function App() {
                     {/* Disambiguation buttons for assistant */}
                     {msg.disambiguation && msg.disambiguationOptions && msg.disambiguationOptions.length > 0 && (
                       <DisambiguationButtons options={msg.disambiguationOptions} onSelect={handleDisambiguationSelect} />
+                    )}
+                    {msg.webConsentPrompt && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                        <button type="button" className={styles.filterBtn} style={{ border: '1.5px solid #f59e0b' }}
+                          onClick={() => {
+                            const wq = msg.webConsentPrompt!.query;
+                            setMessages(prev => prev.map(m => m === msg ? { ...m, webConsentPrompt: undefined } : m));
+                            void handleSend({ queryOverride: wq, externalResearchConsent: true });
+                          }}>
+                          🌐 Check approved sources
+                        </button>
+                        <button type="button" className={styles.filterBtn}
+                          onClick={() => {
+                            const wq = msg.webConsentPrompt!.query;
+                            setMessages(prev => prev.map(m => m === msg ? { ...m, webConsentPrompt: undefined } : m));
+                            void handleSend({ queryOverride: wq, externalResearchConsent: false });
+                          }}>
+                          Use store data only
+                        </button>
+                      </div>
                     )}
                     {msg.evidence && Array.isArray(msg.evidence.citations) && msg.evidence.citations.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' }}>

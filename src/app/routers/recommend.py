@@ -497,7 +497,8 @@ def _maybe_attach_evidence(payload: Dict[str, Any], trace_id: str | None) -> Dic
             return payload
         ev = gather_evidence(plan, query=str((_kq or {}).get("query") or ""),
                              uid=(_kq or {}).get("uid"),
-                             image_identity=(_kq or {}).get("image_identity"))
+                             image_identity=(_kq or {}).get("image_identity"),
+                             web_consent=bool((_kq or {}).get("web_consent")))
         if ev.get("selected"):
             payload["evidence"] = ev
             try:
@@ -4296,6 +4297,7 @@ def suggest(
     image_cv_signals: Optional[str] = None,
     fast_path: Optional[bool] = None,
     include_summary: Optional[bool] = None,
+    external_research_consent: Optional[bool] = None,
     copywriting_enabled: Optional[bool] = None,
     copywriting_profile: Optional[str] = None,
     response: Response = None,
@@ -4496,7 +4498,10 @@ def suggest(
         # uid + image identity ride along so the evidence orchestrator (R2) can select legs in the
         # return wrapper without re-deriving them; existing readers only .get("plan")/"query".
         _KNOWLEDGE_QUERY_CTX.set({"query": query, "plan": _top_plan, "uid": uid,
-                                  "image_identity": _img_identity})
+                                  "image_identity": _img_identity,
+                                  # N3 Mode-B consent: explicit per-turn opt-in from the chip; the web
+                                  # evidence leg NEVER fires without it (and the operator flag).
+                                  "web_consent": bool(external_research_consent)})
         if fast_path_enabled and getattr(_top_plan, "answer_without_products", False):
             fast_path_enabled = False
         # Bulk/B2B + availability asks need the full path (the Availability_Agent runs there) — the
