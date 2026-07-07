@@ -26,6 +26,11 @@ $env:MULTI_INTENT_PLANNER_ENABLED      = "1"
 $env:MULTI_INTENT_LLM_BINDING_ENABLED  = "1"
 $env:MULTI_INTENT_LLM_MODEL            = "qwen3:14b"   # the resident model — no swap latency
 $env:MULTI_INTENT_LLM_TIMEOUT_SEC      = "30"
+# LLM planner fallback (R1 2026-07-07): low-confidence decompositions ("something quiet for my
+# startup") escalate to ONE schema-forced LLM call that fills the gaps (profile-vocab clamped,
+# never overrides a rule extraction). Also carries image identity so "like this but cheaper" works.
+$env:LLM_PLANNER_ENABLED               = "1"
+$env:OLLAMA_KEEP_ALIVE                 = "30m"    # pin generate/vision models resident (P0 lever)
 # Supplier comms stay SAFE for the demo (no real email): sandbox transport + autonomy OFF.
 $env:FULFILLMENT_SUPPLIER_TRANSPORT = "sandbox"
 $env:FULFILLMENT_AUTONOMOUS_RFQ     = "0"

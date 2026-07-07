@@ -90,15 +90,26 @@ def _build_prompt(query: str, type_list: List[str], uc_list: List[str],
 
 
 def _default_llm_fn(prompt: str, timeout: float) -> str:
-    """Best-effort platform LLM call (tier-1/fast). Returns a value (never a silent pass)."""
+    """Best-effort LOCAL Ollama call (same sync schema-forced pattern as the multi-intent binder).
+
+    2026-07-07 R1 finding: this previously called llm_router.generate_text(tier=1), which routes to
+    CLOUD providers (Mistral et al) and returns an error dict without an API key — so the planner was
+    silently dead even with LLM_PLANNER_ENABLED=1 (the error dict has no text/response key → "").
+    """
     try:
-        from src.app.services.llm_router import generate_text
-        res = generate_text(prompt, tier=1)
-        if isinstance(res, dict):
-            return str(res.get("text") or res.get("content") or res.get("response") or res.get("message") or "")
-        return str(res or "")
+        import httpx
+        url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        model = (os.getenv("LLM_PLANNER_MODEL") or os.getenv("MULTI_INTENT_LLM_MODEL")
+                 or os.getenv("OLLAMA_SMALL_MODEL") or os.getenv("OLLAMA_DEFAULT_MODEL") or "qwen3:14b")
+        payload = {"model": model, "prompt": prompt, "stream": False, "format": "json",
+                   "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+                   "options": {"temperature": 0, "num_predict": 384}}
+        if "qwen3" in model.lower():
+            payload["think"] = False   # qwen3 + format:json without think=False returns "{}"
+        r = httpx.post(f"{url}/api/generate", json=payload, timeout=max(2.0, float(timeout or 6.0)))
+        return str((r.json() or {}).get("response", "") or "")
     except Exception:
-        return ""
+        return ""   # deterministic parse stands (flag-gated best-effort contract)
 
 
 def _validate_plan(raw: Any, type_list: List[str], uc_list: List[str]) -> Optional[Dict[str, Any]]:
