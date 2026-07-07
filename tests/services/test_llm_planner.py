@@ -107,3 +107,39 @@ def test_validate_swaps_inverted_budget_and_floors_tiny_budgets():
     assert out["budget_min"] == 800 and out["budget_max"] == 2000
     out2 = _validate_plan({"budget_max": 3}, [], [])
     assert out2 is None or "budget_max" not in out2   # $3 budget = extraction error, dropped
+
+
+# ── P6/A5: image facts as decomposition input ──
+
+def test_seed_plan_from_image_fills_category_gap():
+    from src.app.services.llm_planner import seed_plan_from_image
+    p = _PlanStub("something like this but cheaper")
+    p.has_image = False
+    filled = seed_plan_from_image(p, {"brand": "Lenovo", "model": "ThinkPad L13", "category": "laptop"})
+    assert "category" in filled and p.category == "laptop"
+    assert p.has_image is True
+
+
+def test_seed_plan_never_overrides_text_category():
+    from src.app.services.llm_planner import seed_plan_from_image
+    p = _PlanStub("show me monitors like this", category="monitor")
+    filled = seed_plan_from_image(p, {"category": "laptop"})
+    assert p.category == "monitor" and "category" not in filled
+
+
+def test_planner_prompt_carries_image_identity():
+    from src.app.services.llm_planner import plan_with_llm
+    seen = {}
+    def fn(prompt, timeout):
+        seen["prompt"] = prompt
+        return '{"category": null}'
+    plan_with_llm("something like this but cheaper", llm_fn=fn,
+                  image_identity={"brand": "Lenovo", "model": "ThinkPad L13", "category": "laptop"})
+    assert "ATTACHED A PHOTO" in seen["prompt"] and "ThinkPad L13" in seen["prompt"]
+
+
+def test_seed_plan_garbage_identity_is_noop():
+    from src.app.services.llm_planner import seed_plan_from_image
+    p = _PlanStub("whatever")
+    assert seed_plan_from_image(p, None) == []
+    assert seed_plan_from_image(p, {"category": ""}) == []

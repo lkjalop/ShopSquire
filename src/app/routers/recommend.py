@@ -4403,10 +4403,29 @@ def suggest(
         # new silent-except is introduced.
         from src.app.services.llm_planner import (
             llm_planner_enabled as _lpe, is_low_confidence as _ilc,
-            plan_with_llm as _pwl, merge_llm_plan as _mlp,
+            plan_with_llm as _pwl, merge_llm_plan as _mlp, seed_plan_from_image as _spi,
         )
+        # P6/A5 — image facts become decomposition INPUT: the CV-identified product seeds the plan
+        # (gap-fill, profile-clamped) BEFORE the LLM fallback, and rides the planner prompt so
+        # "something like this but cheaper" resolves "this" to the photographed product. Previously
+        # identity was only applied to retrieval constraints AFTER decomposition.
+        _img_identity = None
+        try:
+            if image_product_identity:
+                _img_identity = json.loads(image_product_identity)
+                if not isinstance(_img_identity, dict):
+                    _img_identity = None
+        except (json.JSONDecodeError, TypeError, ValueError):
+            _img_identity = None
+        if _img_identity:
+            _seeded = _spi(_top_plan, _img_identity)
+            if _seeded and trace_id:
+                log_trace_event(
+                    trace_id, "plan_seeded_from_image", "agent", "Product_Identity_Agent",
+                    "system", None, {"filled_fields": _seeded, "category": _top_plan.category},
+                )
         if _lpe() and _ilc(_top_plan):
-            _filled = _mlp(_top_plan, _pwl(query))
+            _filled = _mlp(_top_plan, _pwl(query, image_identity=_img_identity))
             if _filled and trace_id:
                 log_trace_event(
                     trace_id, "llm_planner_fallback", "agent", "LLM_Planner",

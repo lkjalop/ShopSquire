@@ -66,10 +66,22 @@ def _profile_vocab(profile_id: Optional[str] = None) -> Tuple[List[str], List[st
     return type_list[:30], uc_list[:40]
 
 
-def _build_prompt(query: str, type_list: List[str], uc_list: List[str]) -> str:
+def _build_prompt(query: str, type_list: List[str], uc_list: List[str],
+                  image_identity: Optional[Dict[str, Any]] = None) -> str:
+    # When the buyer attached a photo, the CV-identified product IS part of the intent: "something
+    # like this but cheaper" is undecomposable from text alone — the identity line resolves "this".
+    img_line = ""
+    if isinstance(image_identity, dict) and any(image_identity.get(k) for k in ("brand", "model", "category")):
+        img_line = (
+            "The buyer ATTACHED A PHOTO identified as: "
+            f"brand={image_identity.get('brand') or 'unknown'}, model={image_identity.get('model') or 'unknown'}, "
+            f"category={image_identity.get('category') or 'unknown'}. Words like 'this'/'it'/'like this' refer to "
+            "that product.\n"
+        )
     return (
         "Extract a structured shopping plan as STRICT JSON (no prose). Use ONLY this store's "
         f"vocabulary.\nproduct types: {type_list}\nuse_cases: {uc_list}\n"
+        + img_line +
         "Keys: intent (one of product_search|comparison|knowledge|availability), category (one product "
         "type or null), use_cases (subset list), budget_min (int|null), budget_max (int|null), "
         "quantity (int|null).\n"
@@ -127,12 +139,37 @@ def _validate_plan(raw: Any, type_list: List[str], uc_list: List[str]) -> Option
     return out or None
 
 
+def seed_plan_from_image(plan: Any, image_identity: Optional[Dict[str, Any]],
+                         profile_id: Optional[str] = None) -> List[str]:
+    """Gap-fill the deterministic plan from the CV-identified product BEFORE any LLM runs — image
+    facts become decomposition INPUT, not a post-hoc constraint patch (2026-07-07 lever A5/P6).
+    Same contract as merge_llm_plan: fills only gaps, clamps category to the profile vocabulary,
+    mutates plan, returns the filled field names for tracing. Never raises."""
+    if not isinstance(image_identity, dict):
+        return []
+    filled: List[str] = []
+    try:
+        if hasattr(plan, "has_image") and not getattr(plan, "has_image", False):
+            plan.has_image = True
+        cat = str(image_identity.get("category") or "").strip().lower()
+        if cat and not getattr(plan, "category", None):
+            type_list, _ = _profile_vocab(profile_id)
+            types_lc = {t.lower() for t in type_list}
+            if not types_lc or cat in types_lc or cat.rstrip("s") in types_lc:
+                plan.category = cat.rstrip("s") if (types_lc and cat not in types_lc) else cat
+                filled.append("category")
+    except Exception:
+        return filled
+    return filled
+
+
 def plan_with_llm(
     query: str,
     *,
     profile_id: Optional[str] = None,
     llm_fn: Optional[Callable[[str, float], str]] = None,
     timeout_sec: Optional[float] = None,
+    image_identity: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Ask the LLM for a validated structured plan. Returns a clean dict (whitelisted + vocab-clamped)
     or None. Never raises. llm_fn(prompt, timeout) -> JSON string (injected for tests)."""
@@ -140,7 +177,7 @@ def plan_with_llm(
     if not q:
         return None
     type_list, uc_list = _profile_vocab(profile_id)
-    prompt = _build_prompt(q, type_list, uc_list)
+    prompt = _build_prompt(q, type_list, uc_list, image_identity=image_identity)
     budget = float(timeout_sec if timeout_sec is not None else os.getenv("LLM_PLANNER_TIMEOUT_SEC", "6.0") or 6.0)
     fn = llm_fn or _default_llm_fn
     try:
