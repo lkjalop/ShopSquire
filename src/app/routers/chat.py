@@ -2258,6 +2258,17 @@ async def chat_query(
         brand_name=None,
     )
     assistant_message = aq_out.get("assistant_message")
+    # N6 prose citations, re-applied on the /chat path: recommend.suggest appends a "_Sources:_" line,
+    # but chat re-derives the message through apply_answer_quality (which drops it). Re-append here on
+    # the FINAL message so provenance reads in the chat text, matching the chips/Evidence tab.
+    try:
+        _ev = data.get("evidence") if isinstance(data, dict) else None
+        _cites = [str(c.get("source") or "").replace("_", " ")
+                  for c in ((_ev or {}).get("citations") or []) if c.get("source")]
+        if _cites and assistant_message and "_Sources:" not in assistant_message:
+            assistant_message = assistant_message.rstrip() + "\n\n_Sources: " + " / ".join(_cites[:4]) + "_"
+    except Exception:
+        pass
     aq_intent = aq_out.get("intent_decomposed") if isinstance(aq_out.get("intent_decomposed"), dict) else {}
     aq_template = aq_out.get("template_selected") if isinstance(aq_out.get("template_selected"), dict) else {}
     aq_coverage = aq_out.get("answer_coverage_scored") if isinstance(aq_out.get("answer_coverage_scored"), dict) else {}
@@ -2501,6 +2512,10 @@ async def chat_query(
         "complexity": complexity_result,
         "intent_routing": intent_routing_result,
         "turn_intent": turn_intent,
+        # N1/N6 forward-through: the evidence orchestrator's block (legs/citations) is produced in
+        # recommend.suggest but was DROPPED here — so the frontend (which hits /chat/query, not
+        # /suggest) never saw it and the Evidence tab + Source chips stayed empty. Forward it.
+        "evidence": data.get("evidence"),
         # Async narration handoff: when recommend ran in async/skip mode it returns the deterministic
         # grounded answer now + a job id for the richer LLM prose. Forward both so the storefront can
         # poll /api/v1/recommend/narration/{job_id} and replace the message in place (no blocking wait).

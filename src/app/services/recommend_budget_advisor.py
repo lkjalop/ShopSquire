@@ -92,6 +92,18 @@ def _assess_budget_fitness(
     profile_floors = _use_case_budget_floors()
     floor = profile_floors.get(use_case_key)
     if not floor and profile_floors:
+        # id-drift resolve (2026-07-07 live-audit): the incoming use_case ("ml_ai") and the floor key
+        # ("ai_ml_workstation") can differ. Token-overlap binds them so budget fitness — and the whole
+        # GPU-memory/step-up defense that hangs off its status — isn't lost to a naming mismatch.
+        _toks = {t for t in use_case_key.replace("-", "_").split("_") if len(t) >= 2}
+        _best, _best_n = None, 0
+        for _k in profile_floors:
+            _n = len(_toks & {t for t in _k.split("_") if len(t) >= 2})
+            if _n > _best_n:
+                _best, _best_n = _k, _n
+        if _best and _best_n >= 2:
+            floor = profile_floors[_best]
+    if not floor and profile_floors:
         return {"status": "unknown"}
     floor = floor or get_use_case_min_price_floor(use_case_key)
     if not floor:
@@ -239,20 +251,39 @@ def _budget_reasoning_requested(query: str | None) -> bool:
     )
 
 
+def _resolve_budget_max(constraints: dict) -> float:
+    """Budget cap from ALL the keys it can land in — an EXPLICIT ?budget_max= param lands in
+    'budget_max', but a TEXT-extracted budget ("is 3500 enough") lands in '_request_budget_max' /
+    '_price_filter_meta.budget_max'. Reading only 'budget_max' (2026-07-07 live-audit bug) meant the
+    GPU-memory/step-up defense fired via /suggest?budget_max=... but VANISHED on the /chat path where the
+    budget is only in the query text — exactly screenshot-26's failure mode through the real UI."""
+    raw = (constraints.get("budget_max")
+           or constraints.get("_request_budget_max")
+           or ((constraints.get("_price_filter_meta") or {}).get("budget_max")
+               if isinstance(constraints.get("_price_filter_meta"), dict) else None))
+    try:
+        return float(raw) if raw is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _build_budget_reasoning_note(query: str | None, results: list[dict], constraints: dict) -> str:
     if not _budget_reasoning_requested(query):
         return ""
-    budget_max = constraints.get("budget_max")
-    try:
-        budget_cap = float(budget_max) if budget_max is not None else 0.0
-    except Exception:
-        budget_cap = 0.0
+    budget_cap = _resolve_budget_max(constraints)
     if budget_cap <= 0:
         return ""
 
     use_case = str(constraints.get("use_case") or "").strip().replace("_", " ")
     bf = constraints.get("budget_fitness") if isinstance(constraints.get("budget_fitness"), dict) else {}
     status = str(bf.get("status") or "").strip().lower()
+    # Self-sufficient (2026-07-07 live-audit): the upstream budget_fitness is frequently stored as
+    # {"status": "unknown"} (computed before the budget/use-case were fully resolved). Recompute here
+    # from the resolved cap + use-case whenever it isn't a USABLE status — not only when it's empty —
+    # else "unknown" falls through and the whole note (GPU-memory hedge + step-ups) silently returns "".
+    if status not in ("high", "ok", "low"):
+        bf = _assess_budget_fitness(constraints.get("use_case"), None, budget_cap) or {}
+        status = str(bf.get("status") or "").strip().lower()
     floor = bf.get("floor")
     try:
         floor_val = float(floor) if floor is not None else 0.0

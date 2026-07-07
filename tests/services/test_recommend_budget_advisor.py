@@ -208,3 +208,42 @@ def test_step_ups_come_from_catalog(monkeypatch):
                                            [_r("Alpha X1", 3499, vram=8, ram=32)], constraints)
     assert "real payoff" in ans and "16GB" in ans and "24GB" in ans
     assert "8GB GPU memory" in ans   # the honesty hedge for ai/ml at <16GB
+
+
+# ── 2026-07-07 live-audit: VRAM defense vanished on the /chat path (text budget + id-drift use_case) ──
+
+def test_budget_note_fires_with_text_budget_key():
+    from src.app.services.recommend_budget_advisor import _build_budget_reasoning_note
+    # /chat lands the budget in _request_budget_max, NOT budget_max — the note must still resolve it
+    note = _build_budget_reasoning_note(
+        "is 3500 enough for ml? what if i go higher?",
+        [_r("Alpha", 3499, vram=8, ram=32)],
+        {"use_case": "ai_ml_workstation", "_request_budget_max": 3500})
+    assert note and "GPU memory" in note
+
+
+def test_budget_fitness_resolves_use_case_id_drift():
+    from src.app.services.recommend_budget_advisor import _assess_budget_fitness
+    # "ml_ai" (planner id) must bind to the "ai_ml_workstation" floor key by token overlap
+    assert _assess_budget_fitness("ml_ai", None, 3500).get("status") == "ok"
+    assert _assess_budget_fitness("ai_ml_workstation", None, 3500).get("status") == "ok"
+
+
+def test_budget_note_full_chat_path_has_vram_and_stepup():
+    from src.app.services.recommend_budget_advisor import _build_budget_reasoning_note
+    note = _build_budget_reasoning_note(
+        "training llm models, is 3500 enough? if i go higher what then?",
+        [_r("Alpha", 3499, vram=8, ram=32)],
+        {"use_case": "ml_ai", "_request_budget_max": 3500})   # BOTH bugs at once (chat's real shape)
+    assert note and "GPU memory" in note and "16GB+" in note
+
+
+def test_budget_note_recomputes_over_stale_unknown_fitness():
+    """The live /chat shape: budget_max set + canonical use_case, but budget_fitness pre-stored as
+    {status: unknown} (computed too early upstream). The note must RECOMPUTE, not fall through to ''."""
+    from src.app.services.recommend_budget_advisor import _build_budget_reasoning_note
+    note = _build_budget_reasoning_note(
+        "training llm models, is 3500 enough? if i go higher what then?",
+        [_r("Alpha", 3499, vram=8, ram=32)],
+        {"use_case": "ai_ml_workstation", "budget_max": 3500, "budget_fitness": {"status": "unknown"}})
+    assert note and "GPU memory" in note
