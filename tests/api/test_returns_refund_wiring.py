@@ -33,9 +33,13 @@ def _seed_purchase(uid: str, sku: str, total_cents: int = 199900, status: str = 
         db.execute(text("INSERT INTO draft_orders (id, customer_id, line_items, status) "
                         "VALUES (:d, :u, :li, 'committed')"),
                    {"d": did, "u": uid, "li": json.dumps([{"sku": sku, "quantity": 1}])})
-        db.execute(text("INSERT INTO orders (id, draft_order_id, customer_id, total_cents, currency, status) "
-                        "VALUES (:o, :d, :u, :t, 'USD', :st)"),
-                   {"o": oid, "d": did, "u": uid, "t": total_cents, "st": status})
+        # Backdated 2 days: a purchase-then-claim gap is the realistic case; seeding at
+        # CURRENT_TIMESTAMP made every test claim fire the (correct) claim_too_soon signal.
+        from datetime import datetime, timedelta
+        _purchased = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        db.execute(text("INSERT INTO orders (id, draft_order_id, customer_id, total_cents, currency, status, created_at) "
+                        "VALUES (:o, :d, :u, :t, 'USD', :st, :ca)"),
+                   {"o": oid, "d": did, "u": uid, "t": total_cents, "st": status, "ca": _purchased})
         db.commit()
     return oid
 
