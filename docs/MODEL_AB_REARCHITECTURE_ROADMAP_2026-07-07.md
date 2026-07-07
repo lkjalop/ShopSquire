@@ -146,3 +146,55 @@ LANE 3  SOURCES AS TOOLS  — catalog DB · pgvector · graph · inventory · po
 
 Everything here is reversible and shadow-able. Nothing forces a big-bang rewrite — the orchestrator lane runs
 beside the deterministic one until it's provably better, then the deterministic narration is deleted piece by piece.
+
+---
+
+## PHASE 0 — RESULTS (run 2026-07-07, 4 of 6 models; phi4 + gemma3:12b were still pulling)
+
+Aggregate auto-flags (10 cases each; ⚠️ hallucinated_price counts answers that invented a $-figure not in
+the given catalog):
+
+| model | honest-neg | names VRAM ceiling | names off-catalog | ⚠️ HALLUCINATED price | avg latency | avg words |
+|---|---|---|---|---|---|---|
+| **qwen3:14b** (current) | 4/10 | 4 | 4 | **2** | 12.5s | 66 |
+| mistral-small3.2:24b | 3/10 | 7 | 6 | 2 | **31.9s** | 75 |
+| granite4:micro | 2/10 | 6 | 2 | **3** | 6.2s | 70 |
+| deepseek-r1:14b | 0/10 | 1 | 1 | 1 | 19.5s | **13 (broken)** |
+
+Qualitative read of the decisive `grounded_fit` + `tool_planning` cases:
+
+- **qwen3:14b — best-balanced, and BETTER than the platform's hand-coded narration.** grounded_fit: correctly
+  picks the $3,499 Alienware (meets minimums), *honestly* flags "8GB may struggle with real training," offers
+  the 16GB/$4,499 and 24GB/$5,999 step-ups, **zero hallucinated prices.** tool_planning: names the cheapest
+  floor-MEETER (Alienware), correctly rejects the LOQ (RAM/storage short), names the sources to check. This is
+  exactly the honest, grounded answer we've been *hand-coding badly.*
+- **mistral-small3.2:24b — best reasoner, wrong latency.** Richest honesty ("tight but doable," "LOQ falls
+  short on RAM/storage," off-catalog "wait for sales") — but **31–35s/answer** (offloading on 12GB; needs
+  16GB+) and one invented "$300." The pick IF VRAM grows, or as a non-interactive "hard tier."
+- **granite4:micro — fast but the LEAST reliable.** Oversold the 8GB Alienware as *"ideal… good for training
+  LLM models"* (the exact oversell we're killing), hallucinated "$4,000–$5,000," and in tool_planning picked
+  the **LOQ as "cheapest meeting requirements" — WRONG** (it fails the RAM+storage floors). Fast ≠ correct. Out.
+- **deepseek-r1:14b — unusable as configured.** Returns ~13 words ("Your budget") — R1's thinking format is
+  suppressed by `think=False`; needs proper thinking handling to test fairly. Skip for now.
+
+### The finding that reframes everything
+**The model was never the bottleneck.** Grounded `qwen3:14b` — the model you already run — produces a MORE
+honest, better-grounded answer than the platform's deterministic narration does. The platform is *suppressing*
+its own model's good reasoning with hand-coded templates (`_deterministic_assistant_message`, capability
+verdicts, the "$3,500 covers these workstation options" flattening).
+
+**Implication for the roadmap:** Phase 2 (let the grounded model narrate, delete the templates) is now the
+clear #1 — and it needs **no new model** to be a large win; qwen3:14b already clears the bar. A stronger brain
+is an *upgrade*, not a prerequisite. Re-order:
+1. **RK1 grounding correctness** (feed the model TRUE fit facts — the KB floors).
+2. **Phase 2b/2c orchestrator lane with qwen3:14b narrating grounded**, shadow → route hard tier. This alone
+   should kill the "dumb."
+3. **Model upgrade optional:** test phi4 + gemma3:12b when pulled; adopt mistral-small3.2:24b only with 16GB+
+   VRAM or as a latency-tolerant hard tier; **drop granite4:micro** (hallucinates + oversells).
+
+### To finish the matrix
+```bash
+ollama pull phi4 && ollama pull gemma3:12b      # if not already done
+python -m scripts.model_ab_harness              # re-runs; auto-includes the new ones
+# deepseek fair test needs a think-aware variant of _ask() (parse <think>…</think>, keep the final answer)
+```
