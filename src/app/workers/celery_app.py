@@ -285,6 +285,18 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
     # Redis session keys). Default-OFF; NEVER IP/geo gated. Windows in config/retention_policy.json.
     retention_sweep_enabled = str(os.getenv("RETENTION_SWEEP_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
     retention_sweep_min = max(5, min(1440, int(float(os.getenv("RETENTION_SWEEP_INTERVAL_MINUTES", "60") or 60))))
+    # Vision-cache prewarm — the process-local sha cache goes cold on every restart; warm the demo
+    # image set on a cadence. Default-OFF; interval bounded 15min..24h.
+    vision_prewarm_enabled = str(os.getenv("VISION_PREWARM_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+    vision_prewarm_min = max(15, min(1440, int(float(os.getenv("VISION_PREWARM_INTERVAL_MINUTES", "60") or 60))))
+    if vision_prewarm_enabled:
+        beat_schedule["vision-cache-prewarm"] = {
+            "task": "src.app.tasks.vision_prewarm_tasks.prewarm_vision_cache",
+            "schedule": crontab(minute=f"*/{vision_prewarm_min}") if vision_prewarm_min < 60
+                        else crontab(minute=0, hour=f"*/{max(1, vision_prewarm_min // 60)}"),
+            "args": (),
+        }
+
     if retention_sweep_enabled:
         if retention_sweep_min < 60:
             _retention_sched = crontab(minute=f"*/{retention_sweep_min}")
@@ -420,6 +432,7 @@ def make_celery(app_name: str = "shopsquire") -> Celery:
             "src.app.tasks.shadow_action_tasks",
             "src.app.tasks.experiment_ops_tasks",
             "src.app.tasks.retention_tasks",
+            "src.app.tasks.vision_prewarm_tasks",
         ),
         beat_schedule=beat_schedule,
         task_create_missing_queues=False,

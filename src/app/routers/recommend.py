@@ -501,6 +501,15 @@ def _maybe_attach_evidence(payload: Dict[str, Any], trace_id: str | None) -> Dic
                              web_consent=bool((_kq or {}).get("web_consent")))
         if ev.get("selected"):
             payload["evidence"] = ev
+            # N6 — prose citations: one compact "Sources:" sentence so provenance reads in the MESSAGE
+            # too, not only the chips/tab. Only when legs actually found something; additive, never
+            # replaces the answer.
+            _cites = [str(c.get("source") or "").replace("_", " ") for c in (ev.get("citations") or []) if c.get("source")]
+            if _cites and payload.get("assistant_message"):
+                payload["assistant_message"] = (str(payload["assistant_message"]).rstrip() +
+                                                chr(10) + chr(10) + "_Sources: " + " / ".join(_cites[:4]) + "_")
+                if payload.get("message"):
+                    payload["message"] = payload["assistant_message"]
             try:
                 log_trace_event(trace_id, "evidence_gathered", "agent", "Evidence_Orchestrator",
                                 "system", None,

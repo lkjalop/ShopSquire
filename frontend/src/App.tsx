@@ -10,7 +10,7 @@ import ExternalResearchPanel, { type ExternalResearchItem } from './components/E
 import DecisionTrace from './components/DecisionTrace';
 import EscalationRoom from './components/EscalationRoom';
 import RightPanelExtras from './components/RightPanelExtras';
-import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
+import { apiUrl, safeJson, getCart, addCartItem, removeCartItem, setCartItemQty, clearCart, undoCartClear, emitConsumerSignal, emitPageView, type SourcingIntent, type MultiIntentPlan } from './lib/api';
 import { procurementAwareTraceId } from './lib/trace';
 import { previousSessionSkus, keepAfterClear } from './lib/cartSession';
 import { citationChips } from './lib/evidenceDisplay';
@@ -2742,7 +2742,22 @@ export default function App() {
                       </table>
                     </div>
                   ) : (
-                    rightPanelMode === 'cart' ? (
+                    rightPanelMode === 'cart' ? (<>
+                      {cart?.undo?.available && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                                      background: '#fef3c7', borderRadius: 8, margin: '0 0 8px 0', fontSize: 13 }}>
+                          <span>🧹 You recently cleared {cart.undo.count} item(s) — restorable for a limited time.</span>
+                          <button type="button" className={styles.filterBtn}
+                            onClick={async () => {
+                              try {
+                                const j = await undoCartClear(uid);
+                                setCart(j);
+                              } catch { /* snapshot expired — banner disappears on next refresh */ }
+                            }}>
+                            ↩️ Restore
+                          </button>
+                        </div>
+                      )}
                       <CartPanel
                         uid={uid}
                         cart={cart}
@@ -2756,7 +2771,7 @@ export default function App() {
                         priorSkus={priorCartSkus}
                         onClearPrior={clearPriorCartItems}
                       />
-                    ) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
+                    </>) : filteredDisplayProducts.length === 0 && ['grid', 'list', 'compare'].includes(rightPanelMode) ? (
                       <div className={styles.emptyProductState}>
                         <div className={styles.emptyProductIcon}>🔍</div>
                         <div className={styles.emptyProductTitle}>No products found</div>

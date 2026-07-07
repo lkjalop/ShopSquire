@@ -420,6 +420,16 @@ export async function removeCartItem(uid: string, sku: string) {
   return j;
 }
 
+export async function undoCartClear(uid: string) {
+  // N5: restore the most-recently cleared cart from its server-side snapshot (survives reload).
+  const u = new URL(apiUrl('/api/v1/cart/undo'), window.location.href);
+  u.searchParams.set('uid', uid || 'demo-user');
+  const r = await fetch(u.toString(), { method: 'POST', credentials: 'include', headers: authHeaders({}, true) });
+  const j = await safeJson(r);
+  if (!r.ok || !j) throw new Error((j && (j as any).detail) ? String((j as any).detail) : `cart_undo_failed (${r.status})`);
+  return j;
+}
+
 export async function clearCart(uid: string) {
   const u = new URL(apiUrl('/api/v1/cart/clear'), window.location.href);
   u.searchParams.set('uid', uid || 'demo-user');
