@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Returns/warranty claim-policy windows + score deltas (tenant-overridable via TenantConfigStore",
+    "key 'returns_policy'). Consumed by services/claim_policy.py.",
+    "ACL NOTE (Australian Consumer Law): these signals NEVER auto-deny a claim. Consumer guarantees",
+    "outlast warranty windows ('reasonable durability'), so an out-of-window claim is ROUTED TO A HUMAN",
+    "(score bump -> require_human), not rejected. Do not add an auto-deny rule here."
+  ],
+  "return_window_days": 30,
+  "warranty_window_days": 365,
+  "outside_return_window_delta": 25,
+  "outside_warranty_window_delta": 40,
+  "claimed_value_exceeds_order_delta": 20,
+  "off_topic_evidence_delta": 30,
+  "serial_returner_window_days": 30,
+  "serial_returner_threshold": 3,
+  "serial_returner_delta": 25
+}

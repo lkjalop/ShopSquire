@@ -87,6 +87,27 @@ def test_no_purchase_record_downgrades_auto_approve(tmp_path):
     assert "auto_approve_downgraded" in sigs
 
 
+def test_stale_purchase_routes_to_human_not_auto_refund(tmp_path):
+    """P2: a claim on a purchase far outside the return window scores into require_human — the ACL
+    posture is human assessment, never auto-deny AND never auto-refund."""
+    client = _mk_client(tmp_path)
+    uid, sku = "buyer-stale", "LAP-STALE"
+    oid = _seed_purchase(uid, sku)
+    from src.app.models.db import db_session
+    with db_session() as db:
+        db.execute(text("UPDATE orders SET created_at = '2026-01-01 00:00:00' WHERE id = :o"), {"o": oid})
+        db.commit()
+
+    r = client.post("/api/v1/returns/submit", json={"sku": sku, "uid": uid, "description": "broke"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    sigs = [s.get("signal") for s in body["score"].get("signals", [])]
+    assert "outside_warranty_window" in sigs or "outside_return_window" in sigs
+    assert body["mode"] in ("require_human", "escalate_security")   # routed to a human, not refunded, not denied
+    assert body["refund"] is None
+    assert len(_refund_requested_rows(oid)) == 0
+
+
 def test_clamp_amount_to_refundable(tmp_path):
     _mk_client(tmp_path)  # bootstraps schema on the tmp DB
     from src.app.models.db import db_session

@@ -209,10 +209,13 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
             pass
         return {"evidence_id": None, "decision_id": dec_id, "mode": mode, "tier0": gate.details, "missing_views": gate.missing_views, "reasons": gate.reasons}
 
-    # Create a lightweight ReturnCase so evidence can be linked consistently
+    # Create a lightweight ReturnCase so evidence can be linked consistently.
+    # customer_id was previously None — the case never recorded WHO claimed (2026-07-07 audit), which
+    # both lost the claimant from the audit trail and made serial-returner detection impossible.
     case_id = None
     try:
-        case_id = create_case(order_id=None, issue_type="return", description=body.get("description") or "", tenant_id=tenant_id)
+        case_id = create_case(order_id=None, issue_type="return", description=body.get("description") or "",
+                              customer_id=uid, tenant_id=tenant_id)
     except Exception:
         case_id = None
 
@@ -245,6 +248,30 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
             score.setdefault("signals", []).append(
                 {"signal": "order_corroboration", "delta": corroboration["fraud_score_delta"], "detail": corroboration["detail"]}
             )
+    except Exception:
+        pass
+
+    # ── Claim-policy signals: return/warranty windows, price sanity, evidence relevance, serial
+    # returner (config/rules/returns_policy.json; tenant-overridable). ACL posture: these raise the
+    # score toward human review — they NEVER auto-deny. ──
+    try:
+        from src.app.services.claim_policy import evaluate_claim_policy
+        _cvres = pkg.get("cv_result") or pkg.get("triage") or {}
+        policy_signals = evaluate_claim_policy(
+            corroboration=pkg.get("order_corroboration") or {},
+            claimed_value_cents=_value_cents_from_body(body),
+            labels=(_cvres.get("raw_labels") or pkg.get("labels") or []),
+            ocr_text=str(_cvres.get("extracted_text") or ""),
+            uid=uid,
+            tenant_id=tenant_id,
+            profile_id=pack_id,
+            has_images=bool(images),
+        )
+        for sig in policy_signals:
+            score["score"] = float(score.get("score") or 0) + float(sig.get("delta") or 0)
+            score.setdefault("signals", []).append(sig)
+        if policy_signals:
+            pkg["claim_policy_signals"] = policy_signals
     except Exception:
         pass
 
