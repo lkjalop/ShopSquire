@@ -83,3 +83,14 @@ def test_payment_and_contact_are_policy_faq_topics():
         assert policy_faq_answer(q), f"{q!r} should get a policy answer"
     assert policy_faq_answer("gaming laptop under 2000") is None
     assert policy_faq_answer("show me lenovo laptops") is None
+
+
+def test_repair_and_store_location_are_policy_faq_topics():
+    """P3: repair (with ACL repair notices) and store-visit questions get approved answers too."""
+    from src.app.services.answer_quality import policy_faq_answer
+    a = policy_faq_answer("how do repairs work?")
+    assert a and "refurbished" in a.lower() and "back up" in a.lower()   # ACL repair notices present
+    b = policy_faq_answer("can i visit a store?")
+    assert b and "optional" in b.lower()   # store-first is OFFERED, never mandated (ACL barrier rule)
+    # a repair CLAIM (no policy-question cue) still goes to the support flow, not FAQ
+    assert policy_faq_answer("my screen is cracked, start a repair claim for order 123") is None

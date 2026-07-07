@@ -2645,7 +2645,9 @@
     "shipping": "Free delivery on orders over $5,000. Standard delivery $15 (2-4 business days); split shipments for backordered units are $9 for the follow-up leg. Bulk orders show a delivery plan with real supplier lead times before payment.",
     "price_match": "We match any verified in-stock price from an authorised local retailer at the time of order.",
     "payment": "We accept Visa, Mastercard, Amex, PayPal, and buy-now-pay-later (Afterpay/Zip). Business accounts can pay by invoice on approved terms.",
-    "contact": "You can reach our team via the in-app support chat or the Contact page; business/bulk enquiries get a dedicated account contact."
+    "contact": "You can reach our team via the in-app support chat or the Contact page; business/bulk enquiries get a dedicated account contact.",
+    "repair": "Repairs: manufacturing faults are repaired free under warranty within a reasonable time. Please note (repair notice): repaired goods may be replaced with refurbished goods of the same type, and repairs may result in loss of user data — back up your device first. You can also get a quote from our authorised third-party repairer, and for major faults you can choose a refund or replacement instead — your consumer-law rights always apply.",
+    "store_locations": "You're welcome to visit us in-store for a hands-on product assessment or to drop off a repair/return — our team can inspect the item on the spot. A store visit is optional: every claim can also be handled entirely online with photos, and choosing the online path never delays your remedy."
   },
   "support_playbooks": {
     "default_issue": "device_issue",

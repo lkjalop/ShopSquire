@@ -7589,6 +7589,46 @@ def suggest(
         )
         payload = _ensure_trace_response(payload, trace_id, flags)
         return _with_trace(_finalize_payload(payload), trace_id)
+    # Policy/FAQ lane: "what's your returns policy?" gets the store's APPROVED answer from the
+    # StoreProfile policy_faq slot — previously only chat.py had this; the /suggest lane fell through
+    # to product search and answered a policy question with laptops (2026-07-07 audit).
+    _faq_answer = None
+    try:
+        from src.app.services.answer_quality import policy_faq_answer as _pfa
+        _faq_answer = _pfa(query or "")
+    except Exception:
+        _faq_answer = None
+    if _faq_answer:
+        payload = {
+            "status": "policy_faq",
+            "results": [],
+            "proposal": {"decision_mode": "rules", "ranked_skus": []},
+            "constraints_used": constraints,
+            "followup_contract": followup_contract,
+            "intent_execution_plan": intent_execution_plan,
+            "policy_version": flags.get("POLICY_VERSION", "v1"),
+            "assistant_message": _faq_answer,
+            "next_questions": [],
+            "view_mode": view_hint.get("view_mode"),
+            "view_reason": view_hint.get("view_reason"),
+            "agent_chain": [
+                {"agent": "Policy_FAQ_Agent", "confidence": 0.95, "duration_ms": None, "decision_mode": "rules"},
+            ],
+            "trace_tags": strategy_corr.get("tags") or [],
+            "drilldown_hidden_tags": strategy_corr.get("hidden") or {},
+            "llm_model": llm_model,
+            "model_tier": model_tier,
+            "complexity_signals": complexity_signals,
+        }
+        _log_early_decision(
+            status="policy_faq",
+            proposed_action=payload.get("proposal") or {"decision_mode": "rules", "ranked_skus": []},
+            agent_chain=payload.get("agent_chain") or [],
+            retrieved_context={"query": query, "constraints": constraints},
+            execution_status="executed",
+        )
+        payload = _ensure_trace_response(payload, trace_id, flags)
+        return _with_trace(_finalize_payload(payload), trace_id)
     if _query_signals_off_domain(query):
         try:
             log_trace_event(
@@ -8040,6 +8080,18 @@ def suggest(
     ):
         _warranty = _infer_account_warranty_status(uid)
         _q_lower = str(query or "").lower()
+        # Policy TEXT comes from the StoreProfile policy_faq slot (single source of truth) — the prose
+        # below previously hardcoded terms that CONTRADICTED the profile's approved answers (e.g. a 15%
+        # restocking fee here vs 10% in the profile; 2026-07-07 audit). Legacy strings remain only as
+        # fallback for profiles without the slot.
+        _pol = {}
+        try:
+            from src.app.platform.store_profile import profile_slot as _pslot
+            _pol = _pslot("policy_faq", default=None) or {}
+            if not isinstance(_pol, dict):
+                _pol = {}
+        except Exception:
+            _pol = {}
         _cv_damage = (
             float(image_cv_signals_parsed.get("damage_score") or 0.0) > 0.4
             or bool(image_cv_signals_parsed.get("intent_cv_triage"))
@@ -8060,29 +8112,31 @@ def suggest(
         elif any(w in _q_lower for w in ("return", "refund", "sent back", "send back")):
             _support_title = "Return Request"
             _support_msg = (
-                "To start a return: locate your order confirmation email, confirm the item is within the 30-day return window, "
-                "and submit via the Returns Portal or reply here with your order number. "
-                "Unopened items get a full refund; opened items may incur a 15% restocking fee."
+                (_pol.get("returns") or
+                 "To start a return: locate your order confirmation email, confirm the item is within the return window, "
+                 "and submit via the Returns Portal or reply here with your order number.")
+                + " To proceed, reply with your order number (a receipt, order email, or bank statement all work as proof of purchase)."
             )
             _playbook_id = "faq_return_policy"
-            _playbook_steps = ["Locate order confirmation", "Check return window (30 days)", "Submit return via portal or order number"]
+            _playbook_steps = ["Locate order confirmation", "Check return window", "Submit return via portal or order number"]
         elif any(w in _q_lower for w in ("cracked", "broken screen", "shattered", "screen damage", "black lines", "dead pixel")):
             _support_title = "Screen Damage Claim"
             _support_msg = (
-                "Physical screen damage (cracks, dead pixels, black lines) is typically not covered under standard warranty. "
-                "Options: accidental damage protection claim if you purchased it, third-party repair quote (avg $150–$300), "
-                "or trade-in with discounted replacement. Upload a clear damage photo and serial label to start the assessment."
+                "Physical screen damage (cracks, dead pixels, black lines) usually points to accidental damage rather than a "
+                "manufacturing fault — but that's assessed, not assumed. "
+                + (_pol.get("repair") or "Repair, replacement, or refund options depend on the assessment.")
+                + " Upload a clear damage photo and serial label to start the assessment."
             )
             _playbook_id = "faq_cracked_screen"
             _playbook_steps = ["Capture damage close-up photo", "Capture serial/label", "Attach receipt or order reference", "Upload via CV Triage for damage score"]
         elif any(w in _q_lower for w in ("warranty", "covered", "under warranty", "repair", "faulty", "not working", "bsod", "blue screen", "stop code")):
             _support_title = "Warranty / Repair Claim"
             _support_msg = (
-                "Standard warranty covers manufacturing defects for 1–2 years from purchase date. "
-                "Physical/liquid damage and accidental breakage are not covered. "
-                f"Account warranty status: {_warranty.get('status', 'unknown')}. "
+                (_pol.get("warranty") or "Your purchase is covered for manufacturing defects for the stated warranty period.")
+                + f" Account warranty status: {_warranty.get('status', 'unknown')}. "
                 "To open a claim: share your order number and a description of the fault. "
-                "For BSOD/software faults, try a Windows Reset (Settings → Recovery) before claiming."
+                "For blue-screen/software faults, try the built-in OS recovery/reset first — if it persists, it may be a hardware "
+                "fault and your claim proceeds either way."
             )
             _playbook_id = "faq_warranty_claim"
             _playbook_steps = ["Describe fault", "Share order number", "Try software reset for OS issues", "Submit claim for hardware faults"]

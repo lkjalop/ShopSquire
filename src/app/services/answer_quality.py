@@ -94,6 +94,9 @@ _POLICY_TOPIC_RES = {
                           r"mastercard|amex|klarna|zip)\b|\bpaypal\b|\bafterpay\b|\binstalments?\b|\binstallments?\b"),
     "contact": re.compile(r"\bcontact\s+(?:you|support|us|customer\s+service)\b|\bget\s+in\s+touch\b|"
                           r"\bphone\s+number\b|\bemail\s+(?:address|you)\b|\bcustomer\s+(?:service|support)\b"),
+    "repair": re.compile(r"\brepairs?\b|\bfix\s+(?:my|the|it)\b|\brepairer\b|\bservice\s+cent(?:re|er)\b"),
+    "store_locations": re.compile(r"\bstore\s+location\w*\b|\bphysical\s+store\b|\bbrick\s*(?:and|&)\s*mortar\b|"
+                                  r"\bvisit\s+(?:a\s+|your\s+)?store\b|\bin\s*-?store\b|\bshowroom\b"),
 }
 
 
