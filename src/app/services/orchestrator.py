@@ -1259,13 +1259,31 @@ class Orchestrator:
                 from src.app.services.cv_triage_basic import BasicCVTriage
                 from src.app.services.vision_reasoning import VisionReasoningService
                 t_agent_start = time.time()
-                labels, text, *_ = _run_async_safe(ManagedCVProvider().get_labels_and_text(images[0]))
-                cv_analysis = _run_async_safe(BasicCVTriage().analyze(labels, text))
+
+                # Labels/OCR and the product-identity VLM are INDEPENDENT — run them concurrently
+                # inside ONE event loop instead of three serial _run_async_safe round-trips (each of
+                # which paid its own loop spin-up AND full model latency back-to-back; a major slice
+                # of the 52-86s image path). Triage still waits on labels (real dependency); the
+                # vision task overlaps both. cv_provider's blocking HTTP now runs via to_thread, so
+                # the gather genuinely overlaps rather than serializing on the loop.
+                async def _cv_phase(_img):
+                    import asyncio as _aio
+                    _vision = VisionReasoningService()
+                    _vision_task = _aio.create_task(_vision.analyze_product(_img)) if _vision.available else None
+                    _labels, _text, *_rest = await ManagedCVProvider().get_labels_and_text(_img)
+                    _triage = await BasicCVTriage().analyze(_labels, _text)
+                    _pv = None
+                    if _vision_task is not None:
+                        try:
+                            _pv = await _vision_task
+                        except Exception:
+                            _pv = None   # vision failure must not kill triage (same contract as before)
+                    return _labels, _text, _triage, _pv
+
+                labels, text, cv_analysis, _product_vision_res = _run_async_safe(_cv_phase(images[0]))
                 try:
-                    vision = VisionReasoningService()
-                    if vision.available:
-                        product_vision = _run_async_safe(vision.analyze_product(images[0]))
-                        if product_vision and not product_vision.error:
+                    product_vision = _product_vision_res
+                    if product_vision and not product_vision.error:
                             if not isinstance(cv_analysis, dict):
                                 cv_analysis = {}
                             cv_analysis["product_vision"] = product_vision.to_dict()

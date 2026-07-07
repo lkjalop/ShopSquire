@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import base64
@@ -97,7 +98,7 @@ class ManagedCVProvider:
                 from google.cloud import vision  # type: ignore
                 client = vision.ImageAnnotatorClient()
                 image = vision.Image(content=image_bytes)
-                response = client.annotate_image(
+                response = await asyncio.to_thread(client.annotate_image,
                     {
                         "image": image,
                         "features": [
@@ -120,7 +121,7 @@ class ManagedCVProvider:
                 pass
         if self.provider == "ollama":
             try:
-                labels, text, product_identity = self._ollama_labels_and_text(image_bytes, mode=mode)
+                labels, text, product_identity = await asyncio.to_thread(self._ollama_labels_and_text, image_bytes, mode=mode)
                 self._set_last_ocr_meta(
                     ocr_confidence=None,
                     ocr_engine="ollama_vision",
@@ -141,7 +142,7 @@ class ManagedCVProvider:
                 logging.getLogger(__name__).exception("cv_provider.ollama_failed")
         # Degradation path: if managed providers fail/misconfigured, use local OCR (tesseract)
         try:
-            text = self._tesseract_text(image_bytes)
+            text = await asyncio.to_thread(self._tesseract_text, image_bytes)
             if text:
                 return [], text, None
         except Exception:
@@ -210,6 +211,7 @@ class ManagedCVProvider:
                         "prompt": prompt,
                         "images": [img_b64],
                         "stream": False,
+                        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                     }
                 ).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
