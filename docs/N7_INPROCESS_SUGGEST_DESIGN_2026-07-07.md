@@ -73,9 +73,16 @@ def _resolve_suggest_deps(request):
     from src.app.security.auth import get_role_from_key
     api_key = request.headers.get("x-api-key") if request else None
     redis = get_redis()
-    db = get_db_for_request(request)            # real session bound to this request
+    # get_db_for_request is a GENERATOR (yields the session, closes on exhaustion) — NOT a plain
+    # return. Drive it manually and CLOSE it in a finally after suggest() returns.
+    db_gen = get_db_for_request(request)
+    db = next(db_gen)
     role = get_role_from_key(api_key) or "merchant"   # chat already auth'd; forward the same key
-    return redis, db, role
+    return redis, db, db_gen, role
+# usage:
+#   redis, db, db_gen, role = _resolve_suggest_deps(request)
+#   try:      data = await asyncio.to_thread(suggest, ..., db=db, ...)
+#   finally:  db_gen.close()      # runs the generator's teardown (session.close())
 ```
 
 ### 3.2 Typed-param mapping (chat's `params` dict → suggest kwargs)
