@@ -519,27 +519,26 @@ def refund_request(
     body: _RefundRequestBody,
     role: str = Depends(require_role([ROLE_MERCHANT, ROLE_OWNER, ROLE_DEVELOPER])),
 ) -> Dict:
-    from src.app.services.payment_ledger import KIND_REFUND_REQUESTED, record_txn, refund_state
+    # Core extracted to services/refund_requests.py so the returns/claims pipeline can open a request on
+    # the SAME governed rail programmatically. This endpoint keeps its exact HTTP semantics.
+    from src.app.services.refund_requests import create_refund_request
     with db_session() as db:
-        row = db.execute(text("SELECT status, total_cents, currency FROM orders WHERE id = :o LIMIT 1"),
-                         {"o": body.order_id}).fetchone()
-        if not row:
+        result = create_refund_request(db, order_id=body.order_id, amount_cents=body.amount_cents,
+                                       reason=body.reason, actor_type="role", actor_id=role)
+    if not result.get("ok"):
+        err = result.get("error")
+        if err == "order_not_found":
             raise HTTPException(status_code=404, detail="order_not_found")
-        if str(row[0]) not in ("paid", "shipped", "delivered"):
-            raise HTTPException(status_code=409, detail={"message": "order_not_refundable", "status": row[0]})
-        state = refund_state(db, body.order_id)
-        if state["open_request"]:
+        if err == "order_not_refundable":
+            raise HTTPException(status_code=409, detail={"message": "order_not_refundable",
+                                                         "status": result.get("order_status")})
+        if err == "refund_request_already_open":
             raise HTTPException(status_code=409, detail="refund_request_already_open")
-        refundable = int(state["captured_cents"] or row[1] or 0) - int(state["settled_cents"] or 0)
-        amount = int(body.amount_cents) if body.amount_cents is not None else refundable
-        if amount <= 0 or amount > refundable:
-            raise HTTPException(status_code=422, detail={"message": "invalid_refund_amount",
-                                                         "refundable_cents": refundable})
-        record_txn(db, order_id=body.order_id, kind=KIND_REFUND_REQUESTED, amount_cents=amount,
-                   currency=str(row[2] or "USD"), actor_type="role", actor_id=role,
-                   reason=body.reason, commit=True)
-    return {"order_id": body.order_id, "status": "refund_requested", "amount_cents": amount,
-            "approval_required": True, "approve_via": f"/api/v1/payments/refunds/{body.order_id}/approve"}
+        raise HTTPException(status_code=422, detail={"message": "invalid_refund_amount",
+                                                     "refundable_cents": result.get("refundable_cents")})
+    return {"order_id": result["order_id"], "status": "refund_requested",
+            "amount_cents": result["amount_cents"], "approval_required": True,
+            "approve_via": result["approve_via"]}
 
 
 @router.post("/refunds/{order_id}/approve")
