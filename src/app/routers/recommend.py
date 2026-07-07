@@ -2557,6 +2557,35 @@ def _infer_account_warranty_status(uid: str | None) -> dict[str, Any]:
                     "message": "Protection-plan signals were found in your recent basket/order data.",
                     "order_ref": str((latest_order[0] if latest_order else (session_link[0] if session_link else "")) or ""),
                 }
+            if latest_order:
+                # R3 (2026-07-07): WINDOW ARITHMETIC — with a purchase on record the old code could
+                # only say "needs_verification"; now the purchase date is compared to the configured
+                # warranty window. ACL wording: an expired window NEVER reads as "no rights" —
+                # consumer guarantees (reasonable durability) outlast it.
+                try:
+                    from datetime import datetime as _dt
+                    from src.app.rules.config_defaults import returns_policy_defaults as _rpd
+                    from src.app.services.cart_ttl import parse_timestamp as _pts
+                    _pd = _pts(latest_order[2] if len(latest_order) > 2 else None)
+                    _win = int((_rpd() or {}).get("warranty_window_days", 365) or 365)
+                    if _pd is not None:
+                        _age = max(0, (_dt.utcnow() - _pd).days)
+                        if _age <= _win:
+                            return {
+                                "status": "in_warranty_window",
+                                "message": f"Your latest purchase is {_age} day(s) old — inside the {_win}-day warranty window.",
+                                "order_ref": str(latest_order[0] or ""),
+                                "purchase_age_days": _age,
+                            }
+                        return {
+                            "status": "window_expired_guarantees_may_apply",
+                            "message": (f"Your latest purchase is {_age} day(s) old — beyond the {_win}-day warranty window, "
+                                        "but consumer-law guarantees can still apply (durability is assessed, not capped by the window)."),
+                            "order_ref": str(latest_order[0] or ""),
+                            "purchase_age_days": _age,
+                        }
+                except Exception as _exc:
+                    logger.debug("warranty window arithmetic skipped: %s", _exc)
             if latest_order or session_link:
                 return {
                     "status": "needs_verification",

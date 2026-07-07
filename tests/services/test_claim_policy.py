@@ -69,3 +69,33 @@ def test_no_off_topic_check_without_images():
 def test_unknown_purchase_date_no_window_signal():
     s = evaluate_claim_policy(corroboration={"order_found": False}, claimed_value_cents=0, now=NOW)
     assert s == []
+
+
+# ── R3: ACL major/minor failure severity → lawful remedy options ──
+
+def test_major_failure_consumer_chooses():
+    from src.app.services.claim_policy import classify_failure_severity
+    s = classify_failure_severity(description="it wont turn on at all, completely dead")
+    assert s["severity"] == "major"
+    assert s["consumer_chooses"] is True
+    assert set(s["remedy_options"]) == {"refund", "replacement", "repair"}
+
+
+def test_safety_signal_is_major_with_flag():
+    from src.app.services.claim_policy import classify_failure_severity
+    s = classify_failure_severity(description="battery started swelling and smells like burning")
+    assert s["severity"] == "major" and s["safety_risk"] is True
+
+
+def test_minor_failure_repair_path():
+    from src.app.services.claim_policy import classify_failure_severity
+    s = classify_failure_severity(description="small scratch on the lid, cosmetic only")
+    assert s["severity"] == "minor"
+    assert s["consumer_chooses"] is False
+    assert s["remedy_options"] == ["repair"]
+
+
+def test_unknown_severity_goes_to_assessment_never_denial():
+    from src.app.services.claim_policy import classify_failure_severity
+    s = classify_failure_severity(description="it seems off sometimes")
+    assert s["severity"] == "unknown" and s["remedy_options"] == ["assessment"]

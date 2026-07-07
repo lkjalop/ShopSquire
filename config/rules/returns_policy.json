@@ -14,5 +14,45 @@
   "off_topic_evidence_delta": 30,
   "serial_returner_window_days": 30,
   "serial_returner_threshold": 3,
-  "serial_returner_delta": 25
+  "serial_returner_delta": 25,
+  "claim_contradicted_delta": 25,
+  "safety_terms": [
+    "smoke",
+    "fire",
+    "burning",
+    "burnt",
+    "swollen",
+    "swelling",
+    "sparks",
+    "electric shock",
+    "overheat",
+    "melted"
+  ],
+  "major_failure_terms": [
+    "wont turn on",
+    "won't turn on",
+    "not turning on",
+    "won't boot",
+    "wont boot",
+    "no power",
+    "dead on arrival",
+    "completely dead",
+    "bricked",
+    "unusable",
+    "doesn't work at all",
+    "doesnt work at all",
+    "stopped working",
+    "total failure"
+  ],
+  "minor_failure_terms": [
+    "scratch",
+    "scuff",
+    "cosmetic",
+    "small dent",
+    "loose",
+    "sticky key",
+    "rattle",
+    "squeak",
+    "minor mark"
+  ]
 }

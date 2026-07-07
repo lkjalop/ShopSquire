@@ -275,6 +275,42 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
     except Exception:
         pass
 
+    # ── Claim grounding + ACL failure severity (R3 2026-07-07): claim_grounding.ground_claim was
+    # designed for exactly this and sat UNWIRED — evidence-reliability verdicts influenced nothing.
+    # A contradicted claim (text says X, CV evidence says otherwise) now raises the score toward
+    # human review; severity classifies major/minor so the LAWFUL remedy options render (major →
+    # consumer chooses refund/replacement/repair; minor → repair). Proposes only — humans confirm.
+    grounding = None
+    failure_severity = None
+    try:
+        from src.app.services.claim_grounding import ground_claim
+        from src.app.services.claim_policy import classify_failure_severity
+        _cvres = (pkg.get("cv_result") or pkg.get("triage") or {}) if isinstance(pkg, dict) else {}
+        _corr = pkg.get("order_corroboration") or {}
+        grounding = ground_claim(
+            str(body.get("description") or ""),
+            cv_evidence=({"damage_type": _cvres.get("damage_type"),
+                          "confidence": float(_cvres.get("confidence") or _cvres.get("damage_confidence") or 0.0)}
+                         if _cvres.get("damage_type") else None),
+            receipt_evidence={"verified": bool(_corr.get("order_found")),
+                              "confidence": 0.9 if _corr.get("order_id") else 0.5},
+        ).to_dict()
+        pkg["claim_grounding"] = grounding
+        if grounding.get("verdict") == "contradicted":
+            from src.app.rules.config_defaults import returns_policy_defaults as _rpd
+            _delta = int((_rpd(tenant_id=tenant_id) or {}).get("claim_contradicted_delta", 25) or 25)
+            score["score"] = float(score.get("score") or 0) + _delta
+            score.setdefault("signals", []).append(
+                {"signal": "claim_contradicted_by_evidence", "delta": _delta,
+                 "detail": f"grounding verdict=contradicted ({', '.join(grounding.get('evidence_sources') or [])})"})
+        failure_severity = classify_failure_severity(
+            description=str(body.get("description") or ""),
+            damage_type=str(_cvres.get("damage_type") or ""), tenant_id=tenant_id)
+        pkg["failure_severity"] = failure_severity
+    except Exception as _exc:
+        import logging as _lg
+        _lg.getLogger(__name__).warning("claim grounding/severity skipped: %s", _exc)
+
     # ── Multi-image mismatch detection ──
     # submit_return is a sync def; asyncio.run() creates a fresh event loop
     # in the thread-pool worker — safe for sync FastAPI handlers under uvicorn.
@@ -524,6 +560,12 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
                     "uid": uid,
                     "order_id": corroboration.get("order_id"),
                     "decision_mode": mode,
+                    # R3: the reviewer opens the room already knowing the grounding verdict and which
+                    # remedies are LAWFUL to offer (major → buyer chooses; minor → repair path).
+                    "grounding_verdict": (grounding or {}).get("verdict"),
+                    "failure_severity": (failure_severity or {}).get("severity"),
+                    "remedy_options": (failure_severity or {}).get("remedy_options"),
+                    "safety_risk": (failure_severity or {}).get("safety_risk"),
                 },
                 created_by="returns.agent",
                 severity=("critical" if mode == "escalate_security" else "warn"),
@@ -539,6 +581,8 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
         "mode": mode,
         "score": score,
         "refund": refund,
+        "grounding": grounding,
+        "failure_severity": failure_severity,
         "human_review": human_review,
         "fusion": fusion,
         "thresholds": {"auto_approve_max_score": auto_approve_max, "human_review_max_score": human_review_max, "escalate_security_min_score": escalate_min},

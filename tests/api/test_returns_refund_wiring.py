@@ -118,3 +118,20 @@ def test_clamp_amount_to_refundable(tmp_path):
         res = create_refund_request(db, order_id=oid, amount_cents=999999, reason="t",
                                     actor_type="agent", actor_id="test", clamp=True)
     assert res["ok"] is True and res["amount_cents"] == 50000
+
+
+def test_grounding_and_severity_on_claim_response(tmp_path):
+    """R3: the claim response carries the grounding verdict + ACL severity/remedies, and the
+    escalation context would receive them (major failure -> consumer chooses)."""
+    client = _mk_client(tmp_path)
+    uid, sku = "buyer-r3", "LAP-R3"
+    _seed_purchase(uid, sku)
+    r = client.post("/api/v1/returns/submit",
+                    json={"sku": sku, "uid": uid, "description": "laptop wont turn on at all, no power"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body.get("grounding") is not None
+    assert body["grounding"]["verdict"] in ("supported", "needs_evidence", "contradicted")
+    sev = body.get("failure_severity")
+    assert sev and sev["severity"] == "major" and sev["consumer_chooses"] is True
+    assert "refund" in sev["remedy_options"]

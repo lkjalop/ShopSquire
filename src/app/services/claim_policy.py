@@ -26,6 +26,46 @@ def _cfg_int(cfg: Dict[str, Any], key: str, default: int) -> int:
         return default
 
 
+def classify_failure_severity(*, description: str = "", damage_type: str = "",
+                              tenant_id: Optional[str] = None) -> Dict[str, Any]:
+    """ACL major/minor failure classification → which remedy OPTIONS the buyer may be shown.
+
+    Under the Australian Consumer Law a MAJOR failure means the CONSUMER chooses the remedy
+    (refund / replacement / repair); a MINOR failure lets the supplier repair within a reasonable
+    time. This classifier proposes; a human confirms on anything binding. Term lists live in
+    config/rules/returns_policy.json (tenant-overridable DATA) — severity semantics, no vertical
+    vocabulary in code. Safety signals always classify MAJOR and flag safety_risk.
+    """
+    cfg = returns_policy_defaults(tenant_id=tenant_id) or {}
+    text = f"{description or ''} {damage_type or ''}".lower()
+
+    def _hits(key: str) -> List[str]:
+        return [t for t in (cfg.get(key) or []) if str(t).lower() in text]
+
+    safety = _hits("safety_terms")
+    major = _hits("major_failure_terms")
+    minor = _hits("minor_failure_terms")
+    if safety:
+        return {"severity": "major", "safety_risk": True, "consumer_chooses": True,
+                "remedy_options": ["refund", "replacement", "repair"],
+                "matched_terms": safety[:4],
+                "rationale": "safety signal — treated as major failure; stop-use advice + human review"}
+    if major:
+        return {"severity": "major", "safety_risk": False, "consumer_chooses": True,
+                "remedy_options": ["refund", "replacement", "repair"],
+                "matched_terms": major[:4],
+                "rationale": "total/functional failure — consumer chooses the remedy (ACL major failure)"}
+    if minor:
+        return {"severity": "minor", "safety_risk": False, "consumer_chooses": False,
+                "remedy_options": ["repair"],
+                "matched_terms": minor[:4],
+                "rationale": "cosmetic/minor fault — supplier may repair within a reasonable time"}
+    return {"severity": "unknown", "safety_risk": False, "consumer_chooses": False,
+            "remedy_options": ["assessment"],
+            "matched_terms": [],
+            "rationale": "severity not determinable from the claim text — assessment first"}
+
+
 def evaluate_claim_policy(
     *,
     corroboration: Dict[str, Any],
