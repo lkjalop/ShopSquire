@@ -376,6 +376,11 @@ async def ollama_generate(model: str, prompt: str, options: Dict | None = None, 
             "num_predict": _num_predict,
         },
     }
+    # Context-window sizing lever (unset = Ollama default). Oversizing wastes VRAM/latency; undersizing
+    # truncates long prompts silently — so it's an explicit operator choice, never a hardcoded value.
+    _num_ctx = os.getenv("OLLAMA_NUM_CTX", "").strip()
+    if _num_ctx.isdigit():
+        payload["options"]["num_ctx"] = int(_num_ctx)
     if "qwen3" in model.lower():
         payload["think"] = _use_think
     if options:
