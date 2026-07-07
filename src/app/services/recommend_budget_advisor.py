@@ -270,22 +270,103 @@ def _build_budget_reasoning_note(query: str | None, results: list[dict], constra
     strongest = _result_price_dollars((results or [None])[0]) or cheapest
     label = use_case or "this use case"
 
+    # 2026-07-07 fix ("not smart" screenshot): "going higher buys nicer build quality" was a CANNED
+    # line that contradicted the store's own catalog (higher tiers with 2-3x the GPU memory were in
+    # stock). The go-higher clause is now CATALOG-AWARE: if products above the budget genuinely step
+    # up a structured spec, say exactly what the extra money buys; the canned line is only the
+    # fallback when nothing above budget is materially better.
+    step_up_txt = ""
+    try:
+        _ups = _above_budget_step_ups(budget_cap, _top_vram_gb(results))
+        if _ups:
+            step_up_txt = " Going higher has a real payoff here: " + "; ".join(
+                f"~${int(round(p)):,} steps up to {v}GB GPU memory ({_short_name(n)})" for n, p, v in _ups
+            ) + "."
+    except Exception:
+        step_up_txt = ""
+    vram_hedge = ""
+    try:
+        _tv = _top_vram_gb(results)
+        if _tv and _tv < 16 and any(t in label.lower() for t in ("ai", "ml", "machine", "deep", "data")):
+            vram_hedge = (f" Honest note for model training: the in-budget picks carry {_tv}GB GPU memory — "
+                          "good for smaller/quantized models and fine-tuning; sustained training of larger "
+                          "models wants 16GB+ GPU memory (or cloud GPUs).")
+    except Exception:
+        vram_hedge = ""
+
     if status == "high":
         return (
             f"Yes, ${int(budget_cap):,} is more than enough for {label}. "
-            f"A strong fit is already available around ${int(round(strongest)):,}, so going higher is mostly about premium headroom rather than necessity."
+            f"A strong fit is already available around ${int(round(strongest)):,}."
+            + vram_hedge
+            + (step_up_txt or " Going higher is mostly about premium headroom rather than necessity.")
         )
     if status == "ok":
         if floor_val and budget_cap >= floor_val * 1.45:
             return (
                 f"Yes, ${int(budget_cap):,} is a strong budget for {label}. "
-                f"You already have viable options from about ${int(round(cheapest)):,}, and going higher would mostly buy extra performance headroom or nicer build/display quality."
+                f"You already have viable options from about ${int(round(cheapest)):,}."
+                + vram_hedge
+                + (step_up_txt or " Going higher would mostly buy extra performance headroom or nicer build/display quality.")
             )
         return (
             f"Yes, ${int(budget_cap):,} is workable for {label}. "
-            f"The current shortlist starts around ${int(round(cheapest)):,}; going a bit higher would mainly help if you want more long-term headroom."
+            f"The current shortlist starts around ${int(round(cheapest)):,}."
+            + vram_hedge
+            + (step_up_txt or " Going a bit higher would mainly help if you want more long-term headroom.")
         )
     return ""
+
+
+def _short_name(name: str, max_words: int = 4) -> str:
+    return " ".join(str(name or "").split()[:max_words])
+
+
+def _top_vram_gb(results: list) -> int | None:
+    """Structured GPU-memory of the top result (specs.gpu_vram_gb) — vertical-blind field read."""
+    try:
+        top = results[0] if results and isinstance(results[0], dict) else {}
+        specs = top.get("specs") if isinstance(top.get("specs"), dict) else {}
+        v = int(specs.get("gpu_vram_gb") or 0)
+        return v or None
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _above_budget_step_ups(budget_cap: float, min_vram_above: int | None) -> list:
+    """Catalog rows ABOVE the budget whose gpu_vram_gb beats the in-budget best — the honest
+    'what does going higher buy' answer, from the store's own stock. Up to 2, distinct tiers,
+    cheapest first. Best-effort: any failure returns [] and the caller keeps its fallback line."""
+    try:
+        import json as _json
+        from sqlalchemy import text as _sqltext
+        from src.app.models.db import db_session
+        with db_session() as db:
+            rows = db.execute(
+                _sqltext("SELECT name, price_cents, specs FROM products "
+                         "WHERE active = 1 AND price_cents > :b ORDER BY price_cents ASC LIMIT 40"),
+                {"b": int(float(budget_cap) * 100)},
+            ).fetchall()
+        out, seen_tiers = [], set()
+        for name, pc, raw in rows:
+            try:
+                specs = _json.loads(raw) if raw else {}
+            except (TypeError, ValueError):
+                specs = {}
+            if not isinstance(specs, dict) or specs.get("gpu_discrete") is not True:
+                continue
+            try:
+                v = int(specs.get("gpu_vram_gb") or 0)
+            except (TypeError, ValueError):
+                v = 0
+            if v > int(min_vram_above or 0) and v not in seen_tiers:
+                seen_tiers.add(v)
+                out.append((str(name), float(pc) / 100.0, v))
+            if len(out) >= 2:
+                break
+        return out
+    except Exception:
+        return []
 
 
 def _build_brand_budget_answer(query: str, results: list[dict], constraints: dict) -> str:
@@ -491,7 +572,11 @@ _CAP_GAMING = ("gaming", "valorant", "fortnite", "cyberpunk", "cs2", "csgo", "es
                "call of duty", "warzone", "apex legends", "overwatch", "elden ring", "gta", "triple-a")
 _CAP_HEAVY = ("video editing", "4k editing", "4k video", "render", "rendering", "3d modeling", "3d model",
               "cad", "blender", "premiere", "after effects", "davinci", "machine learning", "deep learning",
-              "ml training", "ai training", "train a model", "solidworks", "autocad", "gpu-heavy")
+              "ml training", "ai training", "train a model", "solidworks", "autocad", "gpu-heavy",
+              # 2026-07-07: the live miss — "training llm models" matched NOTHING here, so the
+              # capability verdict never fired and the buyer got the generic budget line instead.
+              "llm", "language model", "model training", "training models", "training llm",
+              "large model", "fine-tune", "fine tuning", "finetune", "pytorch", "tensorflow")
 _CAP_DEV = ("coding", "programming", "software development", "compiling", "docker", "virtual machine",
             "kubernetes", "data science", "jupyter", "web development", "dev work")
 _CAP_LIGHT = ("office work", "word", "excel", "spreadsheet", "browsing", "emails", "studying", "school work",
@@ -546,6 +631,19 @@ def _build_capability_answer(query: str, results: list[dict]) -> str:
         return (f"It'll run popular esports titles (Valorant, CS2, League) fine, but the {name} uses integrated "
                 f"graphics — for demanding AAA games a dedicated-GPU model is the safer pick. Want me to show those?")
     if cls == "heavy":
+        # VRAM-aware (2026-07-07 "not smart" fix): a dedicated GPU alone is NOT a yes for model
+        # training — GPU MEMORY is the binding constraint. 16GB+ = genuine yes; below = honest hedge
+        # naming what it CAN do (fine-tunes, quantized inference) and what it can't (sustained
+        # training of larger models). Unknown VRAM falls back to the old discrete+RAM heuristic.
+        vram = _top_vram_gb([top])
+        if has_gpu and vram and vram >= 16 and (ram is None or ram >= 16):
+            return (f"Yes — the {name} has {vram}GB GPU memory and {ram or '16+'}GB RAM, genuinely suited "
+                    f"to heavy model training and sustained GPU compute.")
+        if has_gpu and vram and vram < 16:
+            return (f"Partly — the {name} has a dedicated GPU, but {vram}GB of GPU memory is entry-level for "
+                    f"model training: fine for smaller/quantized models, fine-tunes and inference, while "
+                    f"sustained training of larger models wants 16GB+ GPU memory (or cloud GPUs). "
+                    f"Want me to show the higher-GPU-memory options?")
         if has_gpu and (ram is None or ram >= 16):
             return f"Yes — the {name} pairs a dedicated GPU with {ram or '16+'}GB RAM, which suits that GPU-heavy work."
         return (f"For that GPU-heavy work the {name} is light — it lacks the dedicated GPU / 16GB+ RAM those "

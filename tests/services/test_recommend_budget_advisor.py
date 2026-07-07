@@ -165,3 +165,46 @@ def test_capability_returns_empty_for_non_capability_or_budget_turns():
     assert cap("can it run valorant?", []) == ""            # no results → no verdict
     # v2 still answers budget questions (capability path must not shadow the budget path)
     assert v2("is 1800 enough for gaming?", _GPU, {"budget_max": 1800}).lower().startswith(("yes", "no"))
+
+
+# ── 2026-07-07 "not smart" fixes: VRAM-aware verdicts + catalog-aware go-higher ──
+
+def _r(name, price, vram=None, ram=None, gpu=True):
+    specs = {"gpu_discrete": gpu}
+    if vram: specs["gpu_vram_gb"] = vram
+    if ram: specs["ram_gb"] = ram
+    return {"name": name, "price_cents": price * 100, "specs": specs}
+
+
+def test_heavy_verdict_low_vram_hedges_honestly():
+    from src.app.services.recommend_budget_advisor import _build_capability_answer
+    ans = _build_capability_answer("would it be good for training llm models?",
+                                   [_r("Alpha X1", 1199, vram=8, ram=16)])
+    assert "Partly" in ans and "8GB" in ans and "16GB+" in ans   # names the limit AND the bar
+
+
+def test_heavy_verdict_high_vram_confident_yes():
+    from src.app.services.recommend_budget_advisor import _build_capability_answer
+    ans = _build_capability_answer("good for training large models?",
+                                   [_r("Omega Max", 5999, vram=24, ram=64)])
+    assert ans.startswith("Yes") and "24GB" in ans
+
+
+def test_heavy_verdict_unknown_vram_keeps_legacy_heuristic():
+    from src.app.services.recommend_budget_advisor import _build_capability_answer
+    ans = _build_capability_answer("can it handle ml training?",
+                                   [_r("Beta Pro", 1799, vram=None, ram=32)])
+    assert ans.startswith("Yes")   # no vram data → old discrete+RAM behavior, no false hedge
+
+
+def test_step_ups_come_from_catalog(monkeypatch):
+    import src.app.services.recommend_budget_advisor as adv
+    monkeypatch.setattr(adv, "_above_budget_step_ups",
+                        lambda cap, mv: [("Omega Max 16 OLED Galaxy", 4499.0, 16), ("Titan Ultra", 5999.0, 24)])
+    # drive the ok-status budget answer path
+    constraints = {"use_case": "ai ml workstation", "budget_max": 3500,
+                   "budget_fitness": {"status": "ok", "floor": 1500}}
+    ans = adv._build_budget_reasoning_note("is 3500 enough? what if i go higher?",
+                                           [_r("Alpha X1", 3499, vram=8, ram=32)], constraints)
+    assert "real payoff" in ans and "16GB" in ans and "24GB" in ans
+    assert "8GB GPU memory" in ans   # the honesty hedge for ai/ml at <16GB
