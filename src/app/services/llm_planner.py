@@ -29,11 +29,24 @@ def llm_planner_enabled() -> bool:
 
 
 def is_low_confidence(plan: Any) -> bool:
-    """True when the deterministic plan extracted nothing useful from a NON-TRIVIAL query — the
-    residual the rules miss. Cheap + deterministic; short queries are left to the (correct) rules."""
+    """True when the deterministic plan extracted little from a NON-TRIVIAL query — the residual the
+    rules miss. Cheap + deterministic; short queries are left to the (correct) rules.
+
+    Primary signal: the decomposer's own ``decomposition_confidence`` (0..1, a count of the structured
+    fields the rules pulled out) — computed since WS2 but previously UNCONSUMED here (2026-07-07 audit):
+    the old no-category-AND-no-use-case rule missed the "category found but everything else vague"
+    residual. Threshold via LLM_PLANNER_CONF_THRESHOLD (default 0.45); the legacy rule stays as the
+    fallback for plans without the attribute."""
     q = str(getattr(plan, "query", "") or "")
     if len(q.split()) < 4:
         return False
+    try:
+        conf = float(getattr(plan, "decomposition_confidence"))
+        thr = float(os.getenv("LLM_PLANNER_CONF_THRESHOLD", "0.45") or 0.45)
+        if conf < thr:
+            return True
+    except (TypeError, ValueError, AttributeError):
+        pass
     cat = getattr(plan, "category", None)
     ucs = getattr(plan, "use_cases", None) or []
     return (not cat) and (not ucs)
@@ -104,7 +117,13 @@ def _validate_plan(raw: Any, type_list: List[str], uc_list: List[str]) -> Option
     for k in ("budget_min", "budget_max", "quantity"):
         v = data.get(k)
         if isinstance(v, (int, float)) and 0 < v <= 1_000_000:
+            # budgets share the grammar's >=50 sanity floor (a "$3 budget" is an extraction error)
+            if k.startswith("budget") and v < 50:
+                continue
             out[k] = int(v)
+    # a min above max is an LLM slip, not a signal — swap rather than ship an impossible band
+    if out.get("budget_min") is not None and out.get("budget_max") is not None and out["budget_min"] > out["budget_max"]:
+        out["budget_min"], out["budget_max"] = out["budget_max"], out["budget_min"]
     return out or None
 
 

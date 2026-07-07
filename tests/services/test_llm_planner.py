@@ -71,3 +71,39 @@ def test_disabled_by_default():
     import os
     os.environ.pop("LLM_PLANNER_ENABLED", None)
     assert lp.llm_planner_enabled() is False
+
+
+# ── 2026-07-07 A1 upgrades: confidence-signal consumption + budget sanity ──
+
+class _PlanStub:
+    def __init__(self, query, category=None, use_cases=None, confidence=None):
+        self.query = query
+        self.category = category
+        self.use_cases = use_cases or []
+        if confidence is not None:
+            self.decomposition_confidence = confidence
+
+
+def test_low_confidence_uses_decomposition_confidence_signal():
+    from src.app.services.llm_planner import is_low_confidence
+    # category found but everything else vague → conf below threshold → NOW escalates
+    # (the legacy no-cat-AND-no-uc rule said False here)
+    p = _PlanStub("some quiet reliable thing for my little startup", category="laptop", confidence=0.32)
+    assert is_low_confidence(p) is True
+    # confident parse → no escalation even with the same words
+    p2 = _PlanStub("some quiet reliable thing for my little startup", category="laptop", confidence=0.9)
+    assert is_low_confidence(p2) is False
+
+
+def test_low_confidence_legacy_rule_still_works_without_attribute():
+    from src.app.services.llm_planner import is_low_confidence
+    p = _PlanStub("something nice for doing stuff maybe")   # no confidence attr, no cat, no ucs
+    assert is_low_confidence(p) is True
+
+
+def test_validate_swaps_inverted_budget_and_floors_tiny_budgets():
+    from src.app.services.llm_planner import _validate_plan
+    out = _validate_plan({"budget_min": 2000, "budget_max": 800}, [], [])
+    assert out["budget_min"] == 800 and out["budget_max"] == 2000
+    out2 = _validate_plan({"budget_max": 3}, [], [])
+    assert out2 is None or "budget_max" not in out2   # $3 budget = extraction error, dropped

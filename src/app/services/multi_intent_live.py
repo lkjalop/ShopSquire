@@ -210,6 +210,7 @@ def _binding_llm_fn() -> Optional[Callable[[str], str]]:
             import httpx
             r = httpx.post(f"{url}/api/generate",
                            json={"model": model, "prompt": prompt, "stream": False, "format": "json",
+                                 "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
                                  "options": {"temperature": 0, "num_predict": 512}},
                            timeout=timeout)
             return str((r.json() or {}).get("response", "") or "")
