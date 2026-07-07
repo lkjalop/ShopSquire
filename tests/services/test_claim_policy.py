@@ -99,3 +99,44 @@ def test_unknown_severity_goes_to_assessment_never_denial():
     from src.app.services.claim_policy import classify_failure_severity
     s = classify_failure_severity(description="it seems off sometimes")
     assert s["severity"] == "unknown" and s["remedy_options"] == ["assessment"]
+
+
+# ── R4: FraudScorer unification — photo forensics + claim velocity ──
+
+def test_photo_predating_purchase_flags(monkeypatch):
+    import src.app.services.claim_policy as cp
+    # photo "taken" 100 days before the purchase date — impossible evidence for THIS purchase
+    monkeypatch.setattr(cp, "_photo_datetimes", lambda imgs: [NOW - timedelta(days=105)])
+    s = cp.evaluate_claim_policy(corroboration=_corr(5), claimed_value_cents=0, now=NOW,
+                                 has_images=True, images=[("a.jpg", b"x")])
+    assert "photo_predates_purchase" in _names(s)
+
+
+def test_photo_after_purchase_clean(monkeypatch):
+    import src.app.services.claim_policy as cp
+    monkeypatch.setattr(cp, "_photo_datetimes", lambda imgs: [NOW - timedelta(days=2)])
+    s = cp.evaluate_claim_policy(corroboration=_corr(5), claimed_value_cents=0, now=NOW,
+                                 has_images=True, images=[("a.jpg", b"x")])
+    assert "photo_predates_purchase" not in _names(s)
+
+
+def test_stripped_exif_is_never_a_signal(monkeypatch):
+    import src.app.services.claim_policy as cp
+    monkeypatch.setattr(cp, "_photo_datetimes", lambda imgs: [])
+    s = cp.evaluate_claim_policy(corroboration=_corr(5), claimed_value_cents=0, now=NOW,
+                                 has_images=True, images=[("a.jpg", b"x")])
+    assert "photo_predates_purchase" not in _names(s)
+
+
+def test_claim_within_an_hour_of_purchase_flags():
+    corr = {"order_found": True, "order_id": "O", "total_cents": 1000,
+            "purchased_at": (NOW - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")}
+    s = evaluate_claim_policy(corroboration=corr, claimed_value_cents=0, now=NOW)
+    assert "claim_too_soon" in _names(s)
+
+
+def test_claim_next_day_not_too_soon():
+    corr = {"order_found": True, "order_id": "O", "total_cents": 1000,
+            "purchased_at": (NOW - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")}
+    s = evaluate_claim_policy(corroboration=corr, claimed_value_cents=0, now=NOW)
+    assert "claim_too_soon" not in _names(s)

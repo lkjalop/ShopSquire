@@ -266,6 +266,7 @@ def submit_return(body: Dict[str, Any], request: Request = None, role: str = Dep
             tenant_id=tenant_id,
             profile_id=pack_id,
             has_images=bool(images),
+            images=images,
         )
         for sig in policy_signals:
             score["score"] = float(score.get("score") or 0) + float(sig.get("delta") or 0)

@@ -66,6 +66,31 @@ def classify_failure_severity(*, description: str = "", damage_type: str = "",
             "rationale": "severity not determinable from the claim text — assessment first"}
 
 
+def _photo_datetimes(images: List) -> List[datetime]:
+    """EXIF capture times (DateTimeOriginal/DateTime) from (filename, bytes) evidence images.
+    Best-effort: stripped/absent EXIF yields nothing (absence is never a signal). Monkeypatchable
+    in tests so forensics logic is testable without crafting EXIF blobs."""
+    out: List[datetime] = []
+    try:
+        import io
+        from PIL import Image
+    except ImportError:
+        return out
+    for item in images or []:
+        try:
+            blob = item[1] if isinstance(item, (list, tuple)) and len(item) > 1 else item
+            exif = Image.open(io.BytesIO(blob)).getexif()
+            for tag in (36867, 306):   # DateTimeOriginal, DateTime
+                raw = exif.get(tag)
+                if raw:
+                    dt = datetime.strptime(str(raw).strip(), "%Y:%m:%d %H:%M:%S")
+                    out.append(dt)
+                    break
+        except Exception:
+            continue
+    return out
+
+
 def evaluate_claim_policy(
     *,
     corroboration: Dict[str, Any],
@@ -77,6 +102,7 @@ def evaluate_claim_policy(
     profile_id: Optional[str] = None,
     now: Optional[datetime] = None,
     has_images: bool = False,
+    images: Optional[List] = None,
 ) -> List[Dict[str, Any]]:
     """Evaluate policy signals for a claim against its corroborated purchase. Pure except the
     serial-returner count (cases table) — every sub-check is independently best-effort."""
@@ -132,6 +158,32 @@ def evaluate_claim_policy(
                 })
         except Exception:
             pass  # relevance is an enhancement — never block claim intake on it
+
+    # ── 3b. Photo-timestamp forensics (R4 — FraudScorer's claim_before_delivery analog, fed with
+    #        REAL inputs at last): an EXIF capture time BEFORE the purchase is physically impossible
+    #        evidence for THIS purchase. Best-effort (EXIF is often stripped — absence proves nothing).
+    if images and purchased_at is not None:
+        try:
+            photo_times = _photo_datetimes(images)
+            if any(pt < purchased_at for pt in photo_times):
+                signals.append({
+                    "signal": "photo_predates_purchase",
+                    "delta": _cfg_int(cfg, "photo_predates_purchase_delta", 40),
+                    "detail": "evidence photo EXIF timestamp predates the corroborated purchase date",
+                })
+        except Exception:
+            pass  # forensics are an enhancement — never block claim intake
+
+    # ── 3c. Claim velocity: a claim within an hour of purchase is a classic abuse tempo (config) ──
+    if purchased_at is not None:
+        too_soon_h = _cfg_int(cfg, "claim_too_soon_hours", 1)
+        age_h = (now - purchased_at).total_seconds() / 3600.0
+        if 0 <= age_h < too_soon_h:
+            signals.append({
+                "signal": "claim_too_soon",
+                "delta": _cfg_int(cfg, "claim_too_soon_delta", 15),
+                "detail": f"claim {age_h:.1f}h after purchase (< {too_soon_h}h)",
+            })
 
     # ── 4. Serial returner: N return cases for this customer inside the rolling window ──
     if uid:

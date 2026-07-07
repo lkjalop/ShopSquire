@@ -54,5 +54,8 @@
     "rattle",
     "squeak",
     "minor mark"
-  ]
+  ],
+  "claim_too_soon_hours": 1,
+  "claim_too_soon_delta": 15,
+  "photo_predates_purchase_delta": 40
 }
