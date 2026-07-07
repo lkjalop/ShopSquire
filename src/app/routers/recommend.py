@@ -6150,6 +6150,18 @@ def suggest(
             constraints["budget_max"] = _fresh_budget.get("budget_max")
     except Exception:
         pass
+    # R6 (2026-07-07): the LLM planner's SEMANTIC use-case inference feeds NQE — "for my startup"
+    # fills plan.use_cases with a profile-known id even though no keyword matched, so the slot is
+    # KNOWN and ask_use_case must not fire. Without this the planner's inference evaporated here.
+    try:
+        if not constraints.get("use_case"):
+            _kqp = (_KNOWLEDGE_QUERY_CTX.get() or {})
+            _kplan = _kqp.get("plan") if isinstance(_kqp, dict) else None
+            _pucs = list(getattr(_kplan, "use_cases", []) or []) if _kplan is not None else []
+            if _pucs:
+                constraints["use_case"] = str(_pucs[0])
+    except Exception as _exc:
+        logger.debug("planner use-case propagation skipped: %s", _exc)
     try:
         _existing_nqe = dict(
             (structured_state.get("nqe_answered_fields") or kv.get("nqe_answered_fields") or {})
