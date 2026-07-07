@@ -48,13 +48,51 @@ def _resolve_named_ref(ref: str, prior: List[Dict[str, Any]]) -> Optional[int]:
             continue
         scored.append((len(inter) / len(toks), i))
     if not scored:
-        return None
+        return _resolve_ref_semantic(ref, prior)   # R5: paraphrase fallback ("the Lenovo one")
     scored.sort(reverse=True)
     if scored[0][0] < 0.34:
-        return None
+        return _resolve_ref_semantic(ref, prior)
     if len(scored) > 1 and abs(scored[0][0] - scored[1][0]) < 1e-9:
         return None   # tie — ambiguous, don't guess
     return scored[0][1]
+
+
+def _resolve_ref_semantic(ref: str, prior: List[Dict[str, Any]]) -> Optional[int]:
+    """R5 (2026-07-07): EMBEDDING fallback when lexical token-overlap can't bind — "the Lenovo one"
+    shares no distinctive token with an unrelated line name but is semantically unambiguous. Same
+    fail-safe contract as the lexical pass: accept only a CLEARLY best line (>= MIN_SIM and a real
+    margin over the runner-up), else None -> the caller asks the human instead of guessing. Flag-gated
+    (MULTI_INTENT_SEMANTIC_REF_ENABLED, default OFF) — embeddings cost one call per candidate line."""
+    import os
+    if str(os.getenv("MULTI_INTENT_SEMANTIC_REF_ENABLED", "0")).strip().lower() not in ("1", "true", "yes", "on"):
+        return None
+    if not str(ref or "").strip() or len(prior) < 1:
+        return None
+    try:
+        from src.app.services.embeddings import cosine_dense, embed_text_dense
+        ref_vec, _ = embed_text_dense(str(ref))
+        if not ref_vec:
+            return None
+        sims: List[Tuple[float, int]] = []
+        for i, p in enumerate(prior):
+            name = str((p or {}).get("name") or (p or {}).get("ref") or "")
+            if not name.strip():
+                continue
+            vec, _ = embed_text_dense(name)
+            if vec:
+                sims.append((cosine_dense(ref_vec, vec), i))
+        if not sims:
+            return None
+        sims.sort(reverse=True)
+        min_sim = float(os.getenv("MULTI_INTENT_SEMANTIC_REF_MIN_SIM", "0.55") or 0.55)
+        margin = float(os.getenv("MULTI_INTENT_SEMANTIC_REF_MARGIN", "0.07") or 0.07)
+        if sims[0][0] < min_sim:
+            return None
+        if len(sims) > 1 and (sims[0][0] - sims[1][0]) < margin:
+            return None   # not clearly best — ask, don't guess
+        return sims[0][1]
+    except Exception:
+        return None   # embeddings unavailable -> identical behavior to before (ask the human)
 
 
 def plan_turn(

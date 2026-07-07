@@ -127,3 +127,44 @@ def test_ambiguous_ref_is_not_applied():
     out = plan_turn("remove the lenovo", prior_lines=_three_line_cart(), search_fn=lambda c, b: [])
     assert not [l for l in out["plan"] if l.get("amended")]
     assert any("couldn't match" in w for w in out["warnings"])
+
+
+# ── R5: embedding fallback for paraphrase refs (flag-gated, fail-safe preserved) ──
+
+def test_semantic_fallback_off_by_default(monkeypatch):
+    monkeypatch.delenv("MULTI_INTENT_SEMANTIC_REF_ENABLED", raising=False)
+    from src.app.services.multi_intent_planner import _resolve_named_ref
+    prior = [{"name": "Alpha X1 Gaming 16", "requested_qty": 2},
+             {"name": "Beta Pro 14", "requested_qty": 1}]
+    # no shared distinctive token AND flag off -> None (ask the human), exactly as before
+    assert _resolve_named_ref("the cheap one", prior) is None
+
+
+def test_semantic_fallback_binds_clear_winner(monkeypatch):
+    monkeypatch.setenv("MULTI_INTENT_SEMANTIC_REF_ENABLED", "1")
+    import src.app.services.multi_intent_planner as mip
+    import src.app.services.embeddings as emb
+    # deterministic fake embeddings: "the gaming machine" ≈ line 0
+    vecs = {"the gaming machine": [1.0, 0.0], "Alpha X1 Gaming 16": [0.98, 0.2], "Beta Office 14": [0.0, 1.0]}
+    monkeypatch.setattr(emb, "embed_text_dense", lambda t: (vecs.get(t, [0.5, 0.5]), "fake"))
+    prior = [{"name": "Alpha X1 Gaming 16"}, {"name": "Beta Office 14"}]
+    assert mip._resolve_named_ref("the gaming machine", prior) == 0
+
+
+def test_semantic_fallback_ambiguous_stays_none(monkeypatch):
+    monkeypatch.setenv("MULTI_INTENT_SEMANTIC_REF_ENABLED", "1")
+    import src.app.services.multi_intent_planner as mip
+    import src.app.services.embeddings as emb
+    monkeypatch.setattr(emb, "embed_text_dense", lambda t: ([1.0, 0.0], "fake"))  # everything identical
+    prior = [{"name": "Alpha X1"}, {"name": "Alpha X2"}]
+    assert mip._resolve_named_ref("the newer machine", prior) is None   # no margin -> ask, don't guess
+
+
+def test_semantic_fallback_embeddings_down_is_safe(monkeypatch):
+    monkeypatch.setenv("MULTI_INTENT_SEMANTIC_REF_ENABLED", "1")
+    import src.app.services.multi_intent_planner as mip
+    import src.app.services.embeddings as emb
+    def boom(t):
+        raise RuntimeError("ollama down")
+    monkeypatch.setattr(emb, "embed_text_dense", boom)
+    assert mip._resolve_named_ref("the shiny one", [{"name": "Alpha X1"}]) is None
