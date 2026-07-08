@@ -146,3 +146,34 @@ Two layers:
 **Net:** the deterministic FACTS + ACTIONS stay (fast, correct). The deterministic NARRATION is replaced by
 grounded model narration. New buyer intents are absorbed by the orchestrator + one-line capability
 declarations — **not** new screenshots and new `if` branches. The treadmill stops.
+
+---
+
+## 9. v2 addendum — requirements PROVEN by the brain-on A/B (rounds 3-4, 2026-07-08)
+
+The four rounds of model A/B (`MODEL_AB_FINAL_VERDICT_2026-07-08.md`) converted four design
+hypotheses above into evidence-backed requirements:
+
+1. **Per-ROLE model assignment, certified per DEPLOYMENT CONFIG.** Round 3: the binder parse
+   differs per model (18 vs 22 results, different budget bands) — planning and narrating are
+   different jobs. Round 4: two individually-fine 12-14B models are jointly UNRUNNABLE on 12GB
+   VRAM (swap-thrash → constant ~26s planner timeouts). The model descriptor therefore carries
+   `certified_roles` AND `resident_footprint_gb`; certification tests the resident SET, not the
+   single model.
+2. **Capability registry is model-independent and urgent.** Every model in every round fabricated
+   payment-plan availability (qwen3 "many retailers offer…", phi4 "check Best Buy or Dell",
+   granite "YES"). No narrator can be honest about a fact it was never handed. §3 is the fix.
+3. **The claim guard is load-bearing — fix scope, never delete.** With the guard off, phi4 invented
+   catalog SKUs twice ("Dell UltraSharp U2720Q", "U2723QE ($399)" — invented price included).
+   Production: guard ON, scope = results + preamble facts (kills mute-layer-7 without losing the
+   protection).
+4. **Async draft-then-refine is the production narration mode.** Warm qwen3 narration runs 6-20s —
+   too slow for blocking, invisible if the deterministic answer renders instantly and prose
+   replaces it. `RECOMMEND_NARRATION_MODE=async` + frontend swap-in; blocking stays an
+   experiment/cert-harness mode. Timeouts come from the model descriptor, never hardcoded (the
+   seven-layer lesson, `bb4cd0a`).
+
+Model decision at v2: **qwen3:14b all roles (default)**; gemma3:12b-all-roles as challenger config
+via the cert harness; granite4:micro eligible ONLY as schema-validated planner in a future
+small-planner split; phi4 cut. BYO-model onboarding = the certification pipeline
+(connect → profile → certify → scorecard → assign roles → re-certify on model/catalog change).
