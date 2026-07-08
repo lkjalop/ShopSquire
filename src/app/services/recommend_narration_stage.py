@@ -121,14 +121,16 @@ def run_narration(
     llm_summary_job_id: Optional[str] = None
 
     if m == "blocking":
-        # Latency bound (GPT-5.5: blocking Ollama narration measured at 21-32s). Cap the LLM wait at
-        # RECOMMEND_NARRATION_TIMEOUT_SEC (default 8s); on timeout fall back to the deterministic
-        # grounded message (now guard-truthful) instead of blocking the whole response. This bounds
-        # p95 WITHOUT flipping the narration mode (LLM prose still returned when it's fast enough).
-        import os as _os
+        # Latency bound. Cap the LLM wait; on timeout fall back to the deterministic grounded
+        # message (now guard-truthful) instead of blocking the whole response. This bounds p95
+        # WITHOUT flipping the narration mode (LLM prose still returned when it's fast enough).
+        # Budget resolution (B3): env RECOMMEND_NARRATION_TIMEOUT_SEC -> model descriptor
+        # (config/model_profiles.json) -> 8s. The old hardcoded 8s was mute-layer 3 (bb4cd0a):
+        # smaller than EVERY model's think latency, so prose was always silently discarded.
         try:
-            _budget = float(_os.getenv("RECOMMEND_NARRATION_TIMEOUT_SEC", "8") or 8)
-        except (TypeError, ValueError):
+            from src.app.services.model_profiles import narration_timeout_s as _mp_narr_timeout
+            _budget = _mp_narr_timeout(summ_model)
+        except Exception:
             _budget = 8.0
         with StageTimer(timing_breakdown, "summary_ms"):  # time the dominant LLM cost
             if _budget > 0 and executor is not None:

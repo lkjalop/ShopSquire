@@ -3419,10 +3419,11 @@ def _build_knowledge_answer(
         if _is_q3:
             payload["think"] = False
         from src.app.services.dependency_resilience import call_with_resilience
+        from src.app.services.model_profiles import summary_timeout_s as _mp_summary_timeout
         data = call_with_resilience(
             "ollama.knowledge",
             lambda: _llm_generate_payload(payload),
-            timeout_s=float(os.getenv("OLLAMA_SUMMARY_TIMEOUT_S", "25")),
+            timeout_s=_mp_summary_timeout(_km),
             retries=1,
         )
         if isinstance(data, dict):
@@ -3825,8 +3826,10 @@ def _summarize_results(
         # needs 2048+ tokens, so reserve it for queries that actually need
         # reasoning (yes/no, why, compare, "is it enough/worth it"). Simple
         # "show me X" lookups run no-think with a 512-token budget → much faster.
-        # OLLAMA_SUMMARY_THINK=always|never|auto (default auto) overrides this.
-        _think_mode = os.getenv("OLLAMA_SUMMARY_THINK", "auto").strip().lower()
+        # Resolution: env OLLAMA_SUMMARY_THINK -> model descriptor -> auto (B3: per-model
+        # physics live in config/model_profiles.json, never hardcoded — bb4cd0a lesson).
+        from src.app.services.model_profiles import think_mode as _mp_think_mode
+        _think_mode = _mp_think_mode(_llm_model)
         if _think_mode in ("1", "true", "yes", "always", "on"):
             _needs_think = _is_qwen3
         elif _think_mode in ("0", "false", "no", "never", "off"):
@@ -3855,11 +3858,12 @@ def _summarize_results(
         if _is_qwen3:
             payload["think"] = bool(_needs_think)
         from src.app.services.dependency_resilience import call_with_resilience
+        from src.app.services.model_profiles import summary_timeout_s as _mp_summary_timeout
 
         data = call_with_resilience(
             "ollama.summary",
             lambda: _llm_generate_payload(payload),
-            timeout_s=float(os.getenv("OLLAMA_SUMMARY_TIMEOUT_S", "25")),
+            timeout_s=_mp_summary_timeout(_llm_model),
             retries=1,
         )
         if isinstance(data, dict):

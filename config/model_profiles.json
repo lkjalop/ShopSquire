@@ -1,0 +1,52 @@
+{
+  "_comment": "MODEL DESCRIPTORS (B3, 2026-07-08). Per-model operating physics + certified roles, measured by the platform A/B (docs/MODEL_AB_FINAL_VERDICT_2026-07-08.md). This file institutionalizes the seven-layer-mute lesson (bb4cd0a): hardcoded one-model timeouts (8s narration / 25s summary) silently discarded every model's prose. Resolution order everywhere: env override (ops) -> this descriptor -> conservative fallback. resident_footprint_gb feeds config-level certification: two models whose SUM exceeds the GPU budget must never be co-resident (round 4: qwen3+gemma3 on 12GB = swap-thrash = constant ~26s planner timeouts). This is also the output format of the BYO-model onboarding profiler: connect -> profile -> certify -> scorecard -> assign roles.",
+  "_default": {
+    "resident_footprint_gb": 10,
+    "summary_timeout_s": 25,
+    "narration_timeout_s": 30,
+    "think_mode": "auto",
+    "keep_alive": "30m",
+    "certified_roles": [],
+    "warm_latency_class": "unknown"
+  },
+  "qwen3:14b": {
+    "resident_footprint_gb": 9.5,
+    "summary_timeout_s": 45,
+    "narration_timeout_s": 45,
+    "think_mode": "off",
+    "keep_alive": "30m",
+    "certified_roles": ["narrator", "planner", "binder", "knowledge"],
+    "warm_latency_class": "6-20s",
+    "notes": "DEFAULT all roles. 4-round A/B: only config with zero flow breakage on 12GB; no invented products. think auto-fires on enough/why/compare (30-60s) so think stays off for narration; cold load ~20-40s -> warm on deploy."
+  },
+  "gemma3:12b": {
+    "resident_footprint_gb": 8.5,
+    "summary_timeout_s": 45,
+    "narration_timeout_s": 45,
+    "think_mode": "off",
+    "keep_alive": "30m",
+    "certified_roles": ["narrator"],
+    "warm_latency_class": "7-26s",
+    "notes": "CHALLENGER config (all-roles, single-resident only — cannot co-reside with qwen3:14b on 12GB). Most honest narrator of the A/B (IT-DEPENDS hedging, correct specs, best challenge-defense)."
+  },
+  "granite4:micro": {
+    "resident_footprint_gb": 2.5,
+    "summary_timeout_s": 20,
+    "narration_timeout_s": 20,
+    "think_mode": "off",
+    "keep_alive": "30m",
+    "certified_roles": [],
+    "warm_latency_class": "5-15s",
+    "notes": "NARRATOR-CUT (hallucinated specs twice, contradicted own grounding preamble). Candidate for schema-validated planner/binder role in a small-planner split — needs its own cert round before certified_roles gains planner."
+  },
+  "phi4": {
+    "resident_footprint_gb": 9.0,
+    "summary_timeout_s": 45,
+    "narration_timeout_s": 45,
+    "think_mode": "off",
+    "keep_alive": "30m",
+    "certified_roles": [],
+    "warm_latency_class": "6-26s",
+    "notes": "CUT — invented catalog SKUs in two consecutive rounds (Dell UltraSharp U2720Q; U2723QE with invented $399 price). Fabrication with confident detail is the worst commerce failure mode."
+  }
+}
