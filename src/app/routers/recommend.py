@@ -10889,6 +10889,7 @@ def suggest(
             build_context_preamble=_build_context_preamble,
             trace_to_context_summary=_trace_to_context_summary,
             image_security_preamble_note=_image_security_preamble_note,
+            query=query,
         )
         # S2 — supply structured market evidence to narration (default-OFF, behavior-changing). When
         # the intelligence stage gathered query-scoped findings (HIPPOGRAPH_FEEDBACK_ENABLED), prepend

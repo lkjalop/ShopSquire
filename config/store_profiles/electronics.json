@@ -2900,5 +2900,27 @@
       "5080": 16,
       "5090": 24
     }
+  },
+  "_capabilities_comment": "CAPABILITY REGISTRY (B1, 2026-07-08). The store's declared boundary: what it does NOT offer, the autonomy ceiling, and backorder policy. capability_registry.py turns the query-relevant subset into an authoritative narration-preamble note so ANY model answers honestly for infinite phrasings (model A/B rounds 3-4: every model fabricated payment plans because this fact was never handed to it). Declarative: a new gap = one line here, not a new if-branch in recommend.py. `custom` entries are vertical-specific {slug: {pattern, statement}}; universal slugs (payment_plans/in_house_financing/leasing/trade_in) are detected by the agnostic core.",
+  "capabilities": {
+    "does_not_offer": [
+      "payment_plans",
+      "in_house_financing",
+      "leasing",
+      "trade_in"
+    ],
+    "payment_methods": [
+      "credit/debit card",
+      "PayPal",
+      "bank transfer (business orders)"
+    ],
+    "autonomy_limits": {
+      "max_autonomous_order_value_usd": 20000
+    },
+    "fulfilment": {
+      "backorder": true,
+      "typical_reorder_days": 7
+    },
+    "custom": {}
   }
 }

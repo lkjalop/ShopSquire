@@ -1027,5 +1027,30 @@
     "shipping": "Free delivery over $75; standard $7. Pharmacist-only lines may need extra verification time.",
     "warranty": "All products are sourced from licensed wholesalers with full batch traceability."
   },
-  "budget_floor": 5
+  "budget_floor": 5,
+  "_capabilities_comment": "CAPABILITY REGISTRY (B1, 2026-07-08). The store's declared boundary: what it does NOT offer, the autonomy ceiling, and backorder policy. capability_registry.py turns the query-relevant subset into an authoritative narration-preamble note so ANY model answers honestly for infinite phrasings (model A/B rounds 3-4: every model fabricated payment plans because this fact was never handed to it). Declarative: a new gap = one line here, not a new if-branch in recommend.py. `custom` entries are vertical-specific {slug: {pattern, statement}}; universal slugs (payment_plans/in_house_financing/leasing/trade_in) are detected by the agnostic core.",
+  "capabilities": {
+    "does_not_offer": [
+      "payment_plans",
+      "in_house_financing",
+      "leasing",
+      "trade_in"
+    ],
+    "payment_methods": [
+      "credit/debit card",
+      "HICAPS (health fund)"
+    ],
+    "autonomy_limits": {
+      "max_autonomous_order_value_usd": 2000
+    },
+    "fulfilment": {
+      "backorder": false
+    },
+    "custom": {
+      "prescription_required": {
+        "pattern": "prescription|scheduled|pharmacist[- ]only",
+        "statement": "Prescription and pharmacist-only items require verification before dispatch; the assistant cannot waive this."
+      }
+    }
+  }
 }

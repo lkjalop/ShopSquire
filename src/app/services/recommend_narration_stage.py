@@ -190,6 +190,7 @@ def build_narration_preamble(
     build_context_preamble: Callable[..., Any],
     trace_to_context_summary: Callable[..., Any],
     image_security_preamble_note: Callable[..., Any],
+    query: Optional[str] = None,
 ) -> Tuple[Optional[str], Any]:
     """Assemble the LLM narration preamble and resolve the summary model.
 
@@ -257,6 +258,18 @@ def build_narration_preamble(
                    "Recommendations will be based on the text query only."
             )
             combined = (combined + "\n\n" + off_note) if combined else off_note
+    except Exception:
+        pass
+
+    # Capability registry (B1): the store's declared boundary (no payment plans, autonomy
+    # ceiling, backorder consent) as authoritative facts, only when the query makes them
+    # relevant. Without this the narrator fabricates offerings (A/B rounds 3-4: all models).
+    try:
+        if query:
+            from src.app.services.capability_registry import capability_preamble_note
+            cap_note = capability_preamble_note(query)
+            if cap_note:
+                combined = (combined + "\n\n" + cap_note) if combined else cap_note
     except Exception:
         pass
 
