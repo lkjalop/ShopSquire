@@ -303,12 +303,17 @@ def apply_product_claim_guard(
     guard_enabled_fn: Optional[Callable[[], bool]] = None,
     verify_fn: Optional[Callable[..., Any]] = None,
     log_fn: Optional[Callable[..., Any]] = None,
+    combined_preamble: Optional[str] = None,
 ) -> Optional[str]:
     """Grounded narration guard (flag COMMERCE_NARRATION_GUARD). The LLM is a narrator over evidence,
     not a source of truth: if it invents a product/price/spec or parrots a quarantined payload, reject
     the prose and fall back to deterministic grounded copy (and trace the rejection). Returns the
     (possibly replaced) assistant_message. Flag-off / no message / no results -> unchanged. The
-    deterministic copy generator is injected; never raises."""
+    deterministic copy generator is injected; never raises.
+
+    ``combined_preamble`` widens the guard's evidence scope to the platform-authored narration
+    context (step-up facts, capability registry, market evidence) so honest citations of the
+    platform's OWN facts are not rejected — the mute-layer-7 scope fix (bb4cd0a)."""
     _status = "disabled"
     try:
         if guard_enabled_fn is None or verify_fn is None:
@@ -318,11 +323,20 @@ def apply_product_claim_guard(
         if guard_enabled_fn():
             _status = "passed" if (assistant_message and results) else "skipped"
         if guard_enabled_fn() and assistant_message and results:
-            gr = verify_fn(
-                assistant_message, results,
-                budget_min=(constraints or {}).get("budget_min"),
-                budget_max=(constraints or {}).get("budget_max"),
-            )
+            try:
+                gr = verify_fn(
+                    assistant_message, results,
+                    budget_min=(constraints or {}).get("budget_min"),
+                    budget_max=(constraints or {}).get("budget_max"),
+                    preamble=combined_preamble,
+                )
+            except TypeError:
+                # injected verify_fn predating the preamble kwarg (tests/callers) — results-only scope
+                gr = verify_fn(
+                    assistant_message, results,
+                    budget_min=(constraints or {}).get("budget_min"),
+                    budget_max=(constraints or {}).get("budget_max"),
+                )
             if not getattr(gr, "grounded", True):
                 _status = "fell_back_to_deterministic"
                 assistant_message = deterministic_fn(

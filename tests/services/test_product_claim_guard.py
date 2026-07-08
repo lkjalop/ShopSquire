@@ -91,3 +91,46 @@ def test_vocab_is_config_driven_agnostic(monkeypatch, tmp_path):
     finally:
         sp.reset_cache()
         g.reset_vocab_cache()
+
+
+# ── Layer-7 scope fix (bb4cd0a): the platform's OWN preamble facts are legitimate evidence ──
+
+_PREAMBLE = (
+    "Step-up option outside current results: Asus ProArt 16 (RTX 5070, 16GB VRAM) at $5,999.\n"
+    "STORE CAPABILITY FACTS: Orders at or above $20,000 require a human account manager."
+)
+
+
+def test_preamble_stepup_brand_and_price_now_grounded():
+    # Round-3/4 failure mode: honest prose citing the platform's own step-up fact was rejected
+    # (fell_back_to_deterministic) because the guard verified against results only.
+    prose = "If you can stretch, the Asus ProArt 16 at $5,999 adds 16GB of VRAM for real training."
+    r = verify_product_narration(prose, _RESULTS, budget_min=1300, budget_max=1800)
+    assert not r.grounded  # results-only scope still rejects (old behavior preserved sans preamble)
+    r2 = verify_product_narration(prose, _RESULTS, budget_min=1300, budget_max=1800, preamble=_PREAMBLE)
+    assert r2.grounded, r2.violations
+
+
+def test_preamble_capability_amount_grounded():
+    prose = "Since this order is over $20,000, I'll bring in a human account manager."
+    r = verify_product_narration(prose, _RESULTS, budget_min=1300, budget_max=1800, preamble=_PREAMBLE)
+    assert r.grounded, r.violations
+
+
+def test_truly_invented_claims_still_rejected_with_preamble():
+    # The widened scope must NOT weaken the guard against genuine fabrication
+    # (phi4's invented "Dell UltraSharp U2720Q ($399)" class).
+    prose = "Also consider the Razer Blade 16 at $2,499 with an RTX 4090."
+    r = verify_product_narration(prose, _RESULTS, budget_min=1300, budget_max=1800, preamble=_PREAMBLE)
+    assert not r.grounded
+    joined = " ".join(r.violations)
+    assert "ungrounded_product:razer" in joined
+    assert "ungrounded_price:2499" in joined
+    assert "4090" in joined
+
+
+def test_quarantined_url_still_rejected_with_preamble():
+    prose = "See https://evil.example/refund for details."
+    r = verify_product_narration(prose, _RESULTS, preamble=_PREAMBLE)
+    assert not r.grounded
+    assert any(v.startswith("ungrounded_url") for v in r.violations)

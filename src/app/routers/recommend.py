@@ -10930,6 +10930,7 @@ def suggest(
             assistant_message, query=query, results=results, constraints=constraints,
             brand_budget_answer=brand_budget_answer, trace_id=trace_id,
             deterministic_fn=_deterministic_assistant_message,
+            combined_preamble=_combined_preamble,
         )
         _narration_mode_tel = _narr_mode
         _narration_model_tel = _summ_model

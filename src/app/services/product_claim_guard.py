@@ -144,12 +144,21 @@ def verify_product_narration(
     *,
     budget_min: int | None = None,
     budget_max: int | None = None,
+    preamble: str | None = None,
 ) -> GuardResult:
     """Reject narration that asserts a product/price/spec not in the evidence,
     or that parrots a quarantined QR/URL/injection payload.
 
     budget_min/budget_max are in DOLLARS (matching the prose '$' amounts and the
     dollar-converted product prices), or None.
+
+    ``preamble`` is the platform-authored narration context (step-up facts, capability
+    registry, market evidence) and counts as legitimate evidence: the guard's job is to
+    catch what the MODEL invented, not to punish it for citing facts the platform itself
+    supplied. (Scope mismatch here was mute-layer 7 of the narration mute stack, bb4cd0a:
+    results-only verification rejected every answer that honestly cited its own step-up
+    facts — i.e. exactly the nuanced answers on hard queries.) The preamble is
+    platform-assembled and image-payload-quarantined upstream, never raw user/image text.
     """
     violations: list[str] = []
     text = prose or ""
@@ -157,10 +166,11 @@ def verify_product_narration(
     ev_text = _evidence_text(results)
     ev_brands = _evidence_brands(results)
     ev_prices = _evidence_prices(results)
+    pre_low = (preamble or "").lower()
 
     # 1. Quarantined payload must never appear in narration (URLs / injection markers).
     for url in _URL_RE.findall(text):
-        if url.lower() not in ev_text:
+        if url.lower() not in ev_text and url.lower() not in pre_low:
             violations.append(f"ungrounded_url:{url[:40]}")
     if _INJECTION_RE.search(text):
         violations.append("injection_marker")
@@ -168,7 +178,11 @@ def verify_product_narration(
     # 2. Invented product: a known brand named in prose but not in the evidence.
     _vocab = _load_store_vocab()
     for b in _vocab["brands"]:
-        if re.search(rf"\b{re.escape(b)}\b", low) and b not in ev_brands:
+        if (
+            re.search(rf"\b{re.escape(b)}\b", low)
+            and b not in ev_brands
+            and not re.search(rf"\b{re.escape(b)}\b", pre_low)
+        ):
             violations.append(f"ungrounded_product:{b}")
 
     # 3. Invented price: a $ amount that is neither a product price nor in budget.
@@ -185,6 +199,10 @@ def verify_product_narration(
         if lo is not None and hi is not None and lo <= val <= hi:
             continue
         if hi is not None and lo is None and val <= hi:
+            continue
+        # allow if the platform's own preamble stated this amount (step-up price,
+        # capability autonomy limit) — with or without thousands separators
+        if pre_low and (f"{val:,}" in pre_low or str(val) in pre_low.replace(",", "")):
             continue
         violations.append(f"ungrounded_price:{val}")
 
@@ -203,12 +221,19 @@ def verify_product_narration(
         # match the bare number too (e.g. "4070" from "rtx 4070")
         if t in ev_text or re.search(rf"\b{re.escape(t)}\b", ev_text):
             continue
+        if pre_low and (t in pre_low or re.search(rf"\b{re.escape(t)}\b", pre_low)):
+            continue
         violations.append(f"ungrounded_spec:{t}")
 
     # 5. Unsupported performance claims: GPU/display specs do not prove game
     # FPS, ray-tracing, or settings-level benchmark claims. Those need explicit
-    # benchmark/performance evidence in the product data.
-    if _PERFORMANCE_CLAIM_RE.search(text) and not _PERFORMANCE_EVIDENCE_RE.search(ev_text):
+    # benchmark/performance evidence in the product data (or platform-supplied
+    # preamble evidence, e.g. the market-intelligence note).
+    if (
+        _PERFORMANCE_CLAIM_RE.search(text)
+        and not _PERFORMANCE_EVIDENCE_RE.search(ev_text)
+        and not (pre_low and _PERFORMANCE_EVIDENCE_RE.search(pre_low))
+    ):
         violations.append("unsupported_performance_claim")
 
     return GuardResult(grounded=not violations, violations=violations)
