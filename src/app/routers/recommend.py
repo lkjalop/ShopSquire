@@ -10847,7 +10847,12 @@ def suggest(
     _use_case_str = str(constraints.get("use_case") or "").lower()
     _has_budget_range = (constraints.get("budget_min") is not None and constraints.get("budget_max") is not None)
     _llm_force = (
-        _complexity_score >= 4                              # medium-tier or above
+        # EXPERIMENT SWITCH (2026-07-08 brain-on A/B): force grounded LLM narration on every
+        # non-fast-path turn regardless of complexity signals. Default OFF. The A/B proved all 4
+        # models produce byte-identical template answers because narration almost never fires —
+        # this is the measured unmute lever, not the final policy.
+        str(os.getenv("RECOMMEND_NARRATION_FORCE", "")).strip().lower() in ("1", "true", "yes", "on")
+        or _complexity_score >= 4                           # medium-tier or above
         or bool(_signals.get("use_case_specific"))         # gaming/creative/engineering
         or bool(_signals.get("budget_question"))           # "is $X enough?"
         or bool(_signals.get("comparison_keywords"))       # "vs", "compare", "which one"
