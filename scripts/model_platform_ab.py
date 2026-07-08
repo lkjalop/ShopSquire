@@ -25,6 +25,15 @@ BASE = "http://127.0.0.1:8080"
 H = {**default_headers(), "Content-Type": "application/json"}
 MODELS = os.getenv("PLAT_AB_MODELS", "qwen3:14b,gemma3:12b,phi4,granite4:micro").split(",")
 SCRATCH = os.getenv("SCRATCHPAD_DIR", os.path.join(os.environ.get("TEMP", "."), "model_ab"))
+# Round-4 learnings baked in as knobs:
+#   PLAT_AB_PIN_PLANNER=qwen3:14b -> role-split: structured stages (multi-intent binder + query planner)
+#     stay pinned while ONLY the narrator varies. Round 3 showed the binder parse differs per model
+#     (18 vs 22 results, $899 vs $629 budget band) — vary one role at a time or the A/B measures both.
+#   PLAT_AB_FLOWS=fit_honest,challenge -> subset filter (deterministic-only flows waste restarts).
+#   PLAT_AB_TAG=round4 -> suffix for report/json so successive rounds don't clobber each other.
+PIN_PLANNER = os.getenv("PLAT_AB_PIN_PLANNER", "").strip()
+FLOW_FILTER = [f.strip() for f in os.getenv("PLAT_AB_FLOWS", "").split(",") if f.strip()]
+TAG = os.getenv("PLAT_AB_TAG", "").strip()
 
 # LLM-dependent flows the user named. Two-turn flows carry recent_messages so the amendment planner sees prior context.
 FLOWS = [
@@ -87,8 +96,27 @@ def launch(model: str) -> subprocess.Popen:
     for k in ("OLLAMA_SMALL_MODEL", "OLLAMA_MEDIUM_MODEL", "OLLAMA_BIG_MODEL", "OLLAMA_EXPERT_MODEL",
               "OLLAMA_SUMMARY_MODEL", "OLLAMA_DEFAULT_MODEL", "MULTI_INTENT_LLM_MODEL", "LLM_PLANNER_MODEL"):
         env[k] = model
+    if PIN_PLANNER:  # role-split: candidate narrates, pinned model does the structured parsing
+        env["MULTI_INTENT_LLM_MODEL"] = PIN_PLANNER
+        env["LLM_PLANNER_MODEL"] = PIN_PLANNER
     return subprocess.Popen([sys.executable, "-m", "uvicorn", "src.app.main:app", "--host", "127.0.0.1", "--port", "8080"],
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def warm(model: str):
+    """Round-3 confound: each model's FIRST flow ate its ollama cold-load (20-60s for 12-14B) and the
+    inner narration stage timed out into the platform hiccup fallback — scoring load time as model
+    failure. Pre-load every model this restart will touch before probing."""
+    targets = {model, PIN_PLANNER} - {""}
+    for m in targets:
+        t0 = time.time()
+        try:
+            httpx.post("http://127.0.0.1:11434/api/generate",
+                       json={"model": m, "prompt": "ok", "stream": False, "keep_alive": "30m"},
+                       timeout=180)
+            print(f"[info] warmed {m} in {time.time()-t0:.0f}s")
+        except Exception as exc:
+            print(f"[warn] warmup {m} failed: {str(exc)[:80]}")
 
 
 def wait_health(timeout=120) -> bool:
@@ -131,19 +159,22 @@ def main() -> int:
     except Exception:
         pass
     models = [m for m in MODELS if any(m == h or h.startswith(m + ":") for h in have)]
+    flows = [(n, t) for n, t in FLOWS if not FLOW_FILTER or n in FLOW_FILTER]
     print(f"[info] models to test through platform: {models}")
+    print(f"[info] flows: {[n for n, _ in flows]}" + (f" | planner pinned: {PIN_PLANNER}" if PIN_PLANNER else ""))
 
     for model in models:
         print(f"\n[info] === {model}: restarting backend ===")
         kill_8080()
+        warm(model)
         proc = launch(model)
         if not wait_health():
             print(f"[error] {model} backend did not come up; skipping")
             proc.kill()
             continue
-        print(f"[info] {model} up — running {len(FLOWS)} flows")
+        print(f"[info] {model} up — running {len(flows)} flows")
         results[model] = {}
-        for name, turns in FLOWS:
+        for name, turns in flows:
             out = run_flow(f"ab-{model.replace(':','_')}-{name}", turns)
             results[model][name] = {
                 "msg": (out.get("assistant_message") or out.get("_error") or f"[{out.get('_status')}]")[:900],
@@ -154,11 +185,13 @@ def main() -> int:
         proc.kill()
         kill_8080()
 
-    with open(os.path.join(SCRATCH, "model_platform_ab_results.json"), "w", encoding="utf-8") as f:
+    suffix = f"_{TAG}" if TAG else ""
+    with open(os.path.join(SCRATCH, f"model_platform_ab_results{suffix}.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
     # side-by-side report
-    lines = ["# Platform-integrated model A/B", "", f"Models: {', '.join(results.keys())}", ""]
-    for name, _ in FLOWS:
+    lines = ["# Platform-integrated model A/B" + (f" — {TAG}" if TAG else ""), "",
+             f"Models: {', '.join(results.keys())}" + (f" | planner pinned: {PIN_PLANNER}" if PIN_PLANNER else ""), ""]
+    for name, _ in flows:
         lines.append(f"## {name}")
         for m in results:
             a = results[m].get(name, {})
@@ -166,9 +199,10 @@ def main() -> int:
             lines.append("> " + str(a.get("msg", "")).replace("\n", "\n> "))
             lines.append("")
         lines.append("**Winner: ____  (honesty / correctness / grounding / concision)**\n")
-    with open(os.path.join(SCRATCH, "model_platform_ab_report.md"), "w", encoding="utf-8") as f:
+    report_path = os.path.join(SCRATCH, f"model_platform_ab_report{suffix}.md")
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"\n[done] report: {os.path.join(SCRATCH, 'model_platform_ab_report.md')}")
+    print(f"\n[done] report: {report_path}")
     print("[note] backend is DOWN — relaunch qwen3:14b when ready.")
     return 0
 
