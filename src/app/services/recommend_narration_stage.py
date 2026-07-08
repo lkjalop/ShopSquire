@@ -164,10 +164,51 @@ def run_narration(
             except Exception:
                 submit_fn = None
         if submit_fn is not None:
+            # B4: the async job must pass the SAME claim guard as the blocking path — otherwise
+            # ungrounded prose (invented SKUs/prices, the phi4 A/B failure class) reaches the buyer
+            # through the out-of-band swap-in with no verification. On rejection the job yields no
+            # message, so the frontend simply keeps the deterministic grounded answer it already
+            # rendered — the swap only ever upgrades truthful prose.
+            _results_snapshot = list(results or [])
+            _constraints_snapshot = dict(constraints or {})
+
+            def _guarded_summarize(*a: Any, **k: Any) -> Any:
+                out = summarize_fn(*a, **k)
+                msg = out[0] if isinstance(out, tuple) else out
+                if isinstance(msg, str) and msg.strip() and _results_snapshot:
+                    try:
+                        from src.app.services.product_claim_guard import guard_enabled, verify_product_narration
+                        if guard_enabled():
+                            gr = verify_product_narration(
+                                msg, _results_snapshot,
+                                budget_min=_constraints_snapshot.get("budget_min"),
+                                budget_max=_constraints_snapshot.get("budget_max"),
+                                preamble=combined_preamble,
+                            )
+                            if not getattr(gr, "grounded", True):
+                                _viol = list(getattr(gr, "violations", []))[:6]
+                                try:
+                                    from src.app.services.decision_log import log_trace_event
+                                    log_trace_event(
+                                        trace_id=trace_id, event_type="narration_guard_rejected",
+                                        source_type="agent", source_id="Product_Claim_Guard",
+                                        target_type="system", target_id=None,
+                                        payload={"violations": _viol,
+                                                 "used_llm": False, "fallback_reason": "ungrounded_async_narration"},
+                                    )
+                                except Exception:
+                                    pass
+                                # third element rides into the job record: a no-prose outcome
+                                # must be diagnosable from the poll endpoint, never silent
+                                return None, None, {"guard": "rejected", "violations": _viol}
+                    except Exception:
+                        pass
+                return out
+
             try:
                 llm_summary_job_id = submit_fn(
-                    executor, redis, summarize_fn,
-                    query, list(results or []), dict(constraints or {}), summ_model, trace_id,
+                    executor, redis, _guarded_summarize,
+                    query, _results_snapshot, _constraints_snapshot, summ_model, trace_id,
                     context_preamble=combined_preamble, narration_inputs=narration_inputs,
                 )
             except Exception:

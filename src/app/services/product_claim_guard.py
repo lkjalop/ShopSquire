@@ -216,12 +216,43 @@ def verify_product_narration(
     )
     spec_tokens = [f"{n}{u}".lower() for n, u in _vocab["spec_unit_re"].findall(text)] if _has_spec_evidence else []
     spec_tokens += _vocab["gpu_re"].findall(text) if _has_spec_evidence else []
+    # Structure-aware spec matching (layer 7b, 2026-07-08): evidence specs render as
+    # "gpu_vram_gb 8" / "ram_gb 32" (unit in the KEY, number in the VALUE) while prose says
+    # "8GB" — a literal token match rejects every HONEST spec citation, so the guard was
+    # silently discarding nearly all grounded prose. Squash punctuation/whitespace and also
+    # try the reversed unit+number form ("8gb" -> "gb8" matches "gpuvramgb8").
+    _squash = lambda s: re.sub(r"[^a-z0-9]", "", s)
+    ev_squash = _squash(ev_text)
+    pre_squash = _squash(pre_low)
+    _num_unit = re.compile(r"^(\d+(?:\.\d+)?)([a-z]+)$")
+
+    def _spec_grounded(t: str) -> bool:
+        for hay_text, hay_squash in ((ev_text, ev_squash), (pre_low, pre_squash)):
+            if not hay_text:
+                continue
+            if t in hay_text or re.search(rf"\b{re.escape(t)}\b", hay_text):
+                return True
+            if t and t in hay_squash:
+                return True
+            m2 = _num_unit.match(t)
+            if m2:
+                num, unit = m2.group(1), m2.group(2)
+                if f"{unit}{num}" in hay_squash:
+                    return True
+                # TB claims vs GB evidence ("1TB SSD" vs "storage_gb 1024"): try both
+                # decimal and binary conversions, in both number-unit orders.
+                if unit == "tb":
+                    try:
+                        for gb in (int(float(num) * 1000), int(float(num) * 1024)):
+                            if f"{gb}gb" in hay_squash or f"gb{gb}" in hay_squash:
+                                return True
+                    except ValueError:
+                        pass
+        return False
+
     for tok in spec_tokens:
         t = str(tok).lower()
-        # match the bare number too (e.g. "4070" from "rtx 4070")
-        if t in ev_text or re.search(rf"\b{re.escape(t)}\b", ev_text):
-            continue
-        if pre_low and (t in pre_low or re.search(rf"\b{re.escape(t)}\b", pre_low)):
+        if _spec_grounded(t):
             continue
         violations.append(f"ungrounded_spec:{t}")
 

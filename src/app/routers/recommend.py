@@ -3903,9 +3903,14 @@ def _summarize_results(
             return llm_response, None
         return None, None
     except Exception as e:
-        # surface LLM/summary errors into trace for observability
+        # surface LLM/summary errors into trace for observability — with the REAL trace_id
+        # (was hardcoded None, which made async-worker failures completely invisible: the job
+        # reported done+no-prose and nothing anywhere said why)
         try:
-            log_trace_event(None, "llm_error", "llm", model or None, "system", None, {"error": str(e), "stage": "summary"})
+            import traceback as _tb
+            log_trace_event(trace_id, "llm_error", "llm", model or None, "system", None,
+                            {"error": str(e)[:200], "stage": "summary",
+                             "where": _tb.format_exc(limit=3)[-400:]})
         except Exception:
             pass
         return None, None
@@ -10851,11 +10856,15 @@ def suggest(
     _use_case_str = str(constraints.get("use_case") or "").lower()
     _has_budget_range = (constraints.get("budget_min") is not None and constraints.get("budget_max") is not None)
     _llm_force = (
-        # EXPERIMENT SWITCH (2026-07-08 brain-on A/B): force grounded LLM narration on every
-        # non-fast-path turn regardless of complexity signals. Default OFF. The A/B proved all 4
-        # models produce byte-identical template answers because narration almost never fires —
-        # this is the measured unmute lever, not the final policy.
-        str(os.getenv("RECOMMEND_NARRATION_FORCE", "")).strip().lower() in ("1", "true", "yes", "on")
+        # B4 (was the brain-on A/B experiment switch, now production policy): force grounded LLM
+        # narration on every non-fast-path turn — env wins, then feature_flags.json. Mute-layer 1
+        # (bb4cd0a) was this gate scoring hard queries complexity 2 < 4; with narration mode
+        # "async" the cost is out-of-band (deterministic answer renders instantly, guarded prose
+        # swaps in), so the complexity gate no longer needs to ration a blocking cost.
+        str(
+            os.getenv("RECOMMEND_NARRATION_FORCE", "")
+            or (flags.get("RECOMMEND_NARRATION_FORCE") if isinstance(flags, dict) else "")
+        ).strip().lower() in ("1", "true", "yes", "on")
         or _complexity_score >= 4                           # medium-tier or above
         or bool(_signals.get("use_case_specific"))         # gaming/creative/engineering
         or bool(_signals.get("budget_question"))           # "is $X enough?"

@@ -30,11 +30,14 @@ def _key(job_id: str) -> str:
     return _KEY.format(job_id=str(job_id))
 
 
-def put_narration(redis: Any, job_id: str, *, status: str, message: Optional[str]) -> None:
+def put_narration(redis: Any, job_id: str, *, status: str, message: Optional[str], meta: Optional[Dict[str, Any]] = None) -> None:
     if redis is None:
         return
+    record: Dict[str, Any] = {"status": status, "assistant_message": message}
+    if meta:
+        record.update(meta)
     with contextlib.suppress(Exception):
-        redis.setex(_key(job_id), _TTL_SECONDS, json.dumps({"status": status, "assistant_message": message}))
+        redis.setex(_key(job_id), _TTL_SECONDS, json.dumps(record))
 
 
 def get_narration(redis: Any, job_id: str) -> Optional[Dict[str, Any]]:
@@ -55,14 +58,18 @@ def get_narration(redis: Any, job_id: str) -> Optional[Dict[str, Any]]:
 
 
 def run_narration_job(redis: Any, job_id: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
-    """Run the narration fn in this worker and persist its result. fn returns (message, _) or str."""
+    """Run the narration fn in this worker and persist its result. fn returns (message, _) or str,
+    optionally with a third meta dict (e.g. guard-rejection violations) that rides in the job
+    record so a no-prose outcome is DEBUGGABLE from the poll endpoint, never silent."""
     try:
         out = fn(*args, **kwargs)
         msg = out[0] if isinstance(out, tuple) else out
-        put_narration(redis, job_id, status="done", message=msg if isinstance(msg, str) else None)
+        meta = out[2] if isinstance(out, tuple) and len(out) > 2 and isinstance(out[2], dict) else None
+        put_narration(redis, job_id, status="done", message=msg if isinstance(msg, str) else None, meta=meta)
     except Exception as exc:
         logger.debug("run_narration_job failed: %s", exc)
-        put_narration(redis, job_id, status="error", message=None)
+        put_narration(redis, job_id, status="error", message=None,
+                      meta={"error": str(exc)[:200]})
 
 
 def submit_narration(executor: Any, redis: Any, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> str:

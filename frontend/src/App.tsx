@@ -1864,11 +1864,13 @@ export default function App() {
                       : m));
                   return;
                 }
-                if (status === 'error' || tries >= 12) return;  // give up; keep the deterministic answer
+                // done-with-no-prose = claim guard rejected the LLM draft: the deterministic
+                // grounded answer already shown IS the final answer — stop polling now.
+                if (status === 'done' || status === 'error' || tries >= 36) return;
               } catch {
-                if (tries >= 12) return;
+                if (tries >= 36) return;
               }
-              setTimeout(tick, 1250);  // ~15s total budget
+              setTimeout(tick, 1250);  // ~45s total budget (matches model-descriptor narration timeouts)
             };
             setTimeout(tick, 1250);
           });

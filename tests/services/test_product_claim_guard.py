@@ -134,3 +134,31 @@ def test_quarantined_url_still_rejected_with_preamble():
     r = verify_product_narration(prose, _RESULTS, preamble=_PREAMBLE)
     assert not r.grounded
     assert any(v.startswith("ungrounded_url") for v in r.violations)
+
+
+def test_real_specs_in_key_value_form_are_grounded():
+    # Layer 7b: evidence renders "gpu_vram_gb 8" / "ram_gb 32"; prose says "8GB VRAM and 32GB RAM".
+    # Literal token match rejected every honest spec citation (live rejection: ungrounded_spec:8gb).
+    results = [{"sku": "AW-1", "name": "Alienware 16 Aurora", "brand": "Dell",
+                "price_cents": 191900, "specs": {"gpu": "RTX 5060", "gpu_vram_gb": 8, "ram_gb": 32}}]
+    prose = "The Alienware 16 Aurora has 8GB VRAM and 32GB RAM for fine-tuning smaller models."
+    r = verify_product_narration(prose, results, budget_min=1500, budget_max=3500)
+    assert r.grounded, r.violations
+
+
+def test_offcatalog_gpu_number_still_rejected():
+    results = [{"sku": "AW-1", "name": "Alienware 16 Aurora", "brand": "Dell",
+                "price_cents": 191900, "specs": {"gpu": "RTX 5060", "gpu_vram_gb": 8, "ram_gb": 32}}]
+    prose = "For real training, step up to an RTX 6000 Ada workstation card."
+    r = verify_product_narration(prose, results, budget_min=1500, budget_max=3500)
+    assert not r.grounded
+    assert any("6000" in v for v in r.violations)
+
+
+def test_tb_claim_grounds_against_gb_evidence():
+    # Live rejection (job record): "1TB SSD" vs "storage_gb 1024" -> ungrounded_spec:1tb
+    results = [{"sku": "AW-1", "name": "Alienware 16 Aurora", "brand": "Dell",
+                "price_cents": 191900, "specs": {"gpu": "RTX 5060", "storage_gb": 1024, "ram_gb": 32}}]
+    prose = "The Alienware 16 Aurora includes a fast 1TB SSD and 32GB RAM."
+    r = verify_product_narration(prose, results, budget_min=1500, budget_max=3500)
+    assert r.grounded, r.violations
