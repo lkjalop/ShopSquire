@@ -56,6 +56,11 @@ DEMO_ENV = {
     "LLM_PLANNER_ENABLED": "1", "LLM_PLANNER_TIMEOUT_SEC": "25",
     "EVIDENCE_ORCHESTRATOR_ENABLED": "1", "EVIDENCE_LEG_BUDGET_SEC": "2.5",
     "RECOMMEND_NARRATION_FORCE": "1",   # brain ON — the whole point of this A/B
+    "RECOMMEND_NARRATION_MODE": "blocking",  # MASTER SWITCH: flags file says "skip" (global mute!) — env wins
+    "RECOMMEND_NARRATION_TIMEOUT_SEC": "100", # layer-3 mute: default 8s < model 12-30s -> prose ALWAYS timed out
+    "OLLAMA_SUMMARY_TIMEOUT_S": "45",         # layer-6 mute: inner resilience timeout 25s+retry killed think-mode runs
+    "OLLAMA_SUMMARY_THINK": "off",            # think auto-fires on "enough/why/compare" -> 30-60s; off = latency-fair A/B
+    "COMMERCE_NARRATION_GUARD": "0",          # layer-7 mute: guard rejects prose citing the PREAMBLE'S own step-up facts (scope mismatch) — off for raw-prose A/B
     "FULFILLMENT_SUPPLIER_TRANSPORT": "sandbox", "FULFILLMENT_AUTONOMOUS_RFQ": "0", "PYTHONIOENCODING": "utf-8",
 }
 

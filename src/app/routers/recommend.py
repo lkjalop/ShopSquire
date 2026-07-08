@@ -10986,7 +10986,11 @@ def suggest(
             )
         except Exception:
             pass
-    if (constraints.get("use_case_fit_status") or {}).get("exact_fit") is False:
+    # MUTE LAYER 5 (2026-07-08 brain-on audit): this overwrite discards the LLM prose EXACTLY on the
+    # hard queries (fit-conflict turns are the ones that most need nuanced narration). Under the
+    # experiment force flag the guarded LLM prose stands; default behavior unchanged.
+    _narr_forced = str(os.getenv("RECOMMEND_NARRATION_FORCE", "")).strip().lower() in ("1", "true", "yes", "on")
+    if (constraints.get("use_case_fit_status") or {}).get("exact_fit") is False and not (_narr_forced and assistant_message):
         assistant_message = _deterministic_assistant_message(
             query,
             results,
