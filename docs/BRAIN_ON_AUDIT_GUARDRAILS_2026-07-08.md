@@ -112,6 +112,32 @@ RESPONSE (suggest() assembly) so deterministic/knowledge/prose lanes are equally
 policy belongs in ONE resolver. This is also the suggest()-shrinking direction: every lane-level
 patch we avoid is a branch recommend.py doesn't grow.
 
+## 5a. Sweep addendum (phase-3 gap finder, post-verification)
+
+17. **Knowledge lane is a missed mode-consumer** (recommend.py:280/291): resolves
+    RECOMMEND_NARRATION_MODE env-only (default blocking) with a 3.0s outer clamp while the inner
+    call now runs to the 45s descriptor — knowledge injection ALWAYS times out, and each abandoned
+    future leaves a 45-90s thread occupying the shared 2-worker executor. Fix: same env→flags
+    resolution + clamp from the descriptor + retries=0, or route through the async job lane.
+18. **Capability note single-point failure** (capability_registry.py:96): custom-entry loop
+    catches re.error only; a non-dict custom value raises AttributeError → caller's blanket
+    except drops the WHOLE note. Fix: per-entry try/except Exception.
+19. **Performance rule blanket-disable** (product_claim_guard.py:266): any 'fps'-class token in
+    the preamble (including the user's own words in the session excerpt) waives ALL benchmark
+    claims. Fix: per-claim attribution against platform-authored evidence only (same provenance
+    channel as §2.3).
+20. **llm_error trace payload** (recommend.py:3911): format_exc(limit=3) keeps the OUTERMOST
+    frames (misses the raise site) and writes absolute paths into UI-visible trace events. Fix:
+    `traceback.format_exception_only` + exception class, or tail-frames via limit=-3.
+21. **Harness warm() gaps** (scripts/model_platform_ab.py:114): hardcoded 127.0.0.1:11434 ignores
+    OLLAMA_URL; warm order of {candidate, pinned} is hash-random → on a VRAM-tight GPU whichever
+    warms LAST is resident, re-introducing the cold-load confound run-to-run.
+22. **Tests pin ops-tunable config** (tests/services/test_model_profiles.py:23 +
+    test_capability_registry.py:87): exact 45.0/20000/[] assertions break CI on the INTENDED
+    workflow (retuning after a cert round); no mp._cache reset hook → order-dependent poisoning.
+    Fix: assert shapes/relations (env beats descriptor; descriptor beats fallback), not values;
+    add cache-reset fixture.
+
 ## 5. What the supplier-gap failure teaches (Phase C priority)
 
 The $80k A100-server turn needs, in order: (a) off-catalog CATEGORY detection (query category ∉
