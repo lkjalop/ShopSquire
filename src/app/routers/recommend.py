@@ -11278,6 +11278,28 @@ def suggest(
         explicit_constraint_update=explicit_constraint_update,
     )
     referents = _extract_referents(query=query, prior_shortlist=prior_shortlist, current_results=results or [])
+    # ── W4 second chance: at the W4 point the right_panel step-up tiers don't exist yet, so a
+    # hard-floor zero-result turn (Cyberpunk under $1,900) had no pool to verdict. By here the
+    # panels are built — verdict the step-up products so the payload still carries WHY
+    # ("meets minimum, misses recommended") instead of a bare no-match.
+    try:
+        if _fit_note is None and not payload.get("workload_fit"):
+            _wf_floors2 = (_workload_ctx.get("floors") or {}) if isinstance(_workload_ctx, dict) else {}
+            _rp2 = payload.get("right_panel") if isinstance(payload.get("right_panel"), dict) else {}
+            _pool2 = []
+            for _sec in ("higher_tier", "lower_tier"):
+                _items2 = (_rp2.get(_sec) or {}).get("items") if isinstance(_rp2.get(_sec), dict) else None
+                _pool2.extend([x for x in (_items2 or []) if isinstance(x, dict)])
+            if _wf_floors2 and _pool2:
+                from src.app.services.workload_fit import fit_verdicts as _fv2
+                _v2 = _fv2(_wf_floors2, _pool2[:5])
+                if _v2:
+                    payload["workload_fit"] = {
+                        "entities": list(_workload_ctx.get("games") or []) + list(_workload_ctx.get("software") or []),
+                        "floors": _wf_floors2, "verdicts": _v2, "pool": "step_up_panel",
+                    }
+    except Exception as _e_wf2:
+        _record_partial_failure("workload_fit_second_chance", _e_wf2, trace_id=trace_id)
     # ── W3 override: off-catalog hardware class -> category honesty + supplier-ask, never a
     # confident laptop sale ("$80k A100 servers -> gaming laptops", both audits' headline).
     # Whatever retrieval pattern-matched is noise: clear products, suppress the prose swap.
