@@ -2877,6 +2877,25 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
         )
     if "counterfactual" not in response:
         response["counterfactual"] = "Different budget/spec constraints or stock availability could change top recommendations."
+    # N1 (2026-07-09): early-return payloads (clarify/blocked/degraded) bypass main assembly and
+    # lost the workload context entirely — the golden cyber query asked its clarifying question
+    # WITHOUT showing the game requirements it had already computed. Attach requirements (and
+    # verdicts when this payload carries products) from the request-scoped stash.
+    try:
+        if "workload_fit" not in response:
+            from src.app.services.recommend_workload_stage import current_workload_ctx
+            _wctx = current_workload_ctx()
+            _wfloors = (_wctx or {}).get("floors") or {}
+            if _wfloors:
+                from src.app.services.workload_fit import fit_verdicts
+                _wpool = [r for r in (response.get("results") or response.get("products") or []) if isinstance(r, dict)]
+                response["workload_fit"] = {
+                    "entities": list(_wctx.get("games") or []) + list(_wctx.get("software") or []),
+                    "floors": _wfloors,
+                    "verdicts": fit_verdicts(_wfloors, _wpool) if _wpool else [],
+                }
+    except Exception:
+        pass
     # Ensure right_panel.anchor_sections is populated from results so the
     # "Why Recommended" tab in DecisionTrace never shows an empty state.
     # This runs on every return path, including security-gated / early-exit ones.
@@ -4581,6 +4600,13 @@ def suggest(
             image_cv_signals=_fast_path_image_cv_signals,
             started_at=route_t0,
         ), trace_id)
+    # N1: clear the request-scoped workload stash — uvicorn reuses worker threads, and an early
+    # return BEFORE the workload stage must not inherit the previous request's game floors.
+    try:
+        from src.app.services.recommend_workload_stage import _LAST_WORKLOAD_CTX as _wl_var
+        _wl_var.set(None)
+    except Exception:
+        pass
     _guard_t0 = time.perf_counter()
     guard_image_ocr_text = None if fast_path_enabled else image_ocr_text
     guard = inspect_commerce_request(
@@ -8306,6 +8332,15 @@ def suggest(
         # Drop off-category peripherals early so ranking, the budget answer (min price),
         # and results all use the clean set (fixes "starting from $45" accessory min).
         candidates = _demote_off_category(candidates, query_effective)
+        # X1: primary-device intent -> drop generic-fallback (foreign-vertical) items
+        from src.app.services.recommend_response_finalizer import drop_untyped_for_primary_intent
+        candidates = drop_untyped_for_primary_intent(
+            candidates,
+            primary_intent=bool(
+                (_workload_ctx.get("floors") if isinstance(_workload_ctx, dict) else None)
+                or constraints.get("must_have_gpu") or constraints.get("use_case")
+            ),
+        )
         retrieved_count = len(candidates or [])
         logging.info(f"recommend.suggest: retrieved {retrieved_count} candidates (ms={retrieve_ms})")
         if _is_laptop_focused_query(query_effective, constraints):
@@ -11432,6 +11467,10 @@ def suggest(
                         _r["stock_status"] = "in_stock"
                 results = sorted(results, key=lambda r: float(r.get("_rank_penalty") or 0.0))
                 results = _demote_off_category(results, query)  # drop router-for-laptop etc.
+                from src.app.services.recommend_response_finalizer import drop_untyped_for_primary_intent as _dufpi
+                results = _dufpi(results, primary_intent=bool(
+                    (_workload_ctx.get("floors") if isinstance(_workload_ctx, dict) else None)
+                    or constraints.get("must_have_gpu") or constraints.get("use_case")))
                 payload["results"] = results
                 payload["products"] = results
     except Exception:

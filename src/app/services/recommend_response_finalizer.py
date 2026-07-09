@@ -164,6 +164,34 @@ def _demote_off_category(results: list, query: str | None) -> list:
         return results
 
 
+def drop_untyped_for_primary_intent(results: list, *, primary_intent: bool) -> list:
+    """X1 (2026-07-09): cross-vertical retrieval bleed — 'fine tune a 7b model under 2500'
+    returned HAND SANITISER and paracetamol (pharmacy demo SKUs): nothing in the query matched
+    electronics tokens, and _demote_off_category keeps everything when NO primaries exist.
+    Discriminator: foreign-vertical items fall into the GENERIC 'accessory' fallback (no
+    specific type rule matches), while real catalog items get specific types (laptop/monitor/
+    bag/...). When the turn has PRIMARY-DEVICE INTENT (workload floors / use-case /
+    must_have_gpu), drop generic-fallback items — an honest empty result beats selling
+    sanitiser to an AI engineer. Specific accessory types (monitor, bag, headset) survive;
+    only the unclassifiable are removed. Never raises."""
+    try:
+        if not primary_intent or not isinstance(results, list) or not results:
+            return results
+        from src.app.services.product_classifier import classify_product_type
+        kept = []
+        for r in results:
+            if not isinstance(r, dict):
+                kept.append(r)
+                continue
+            specs = r.get("specs") if isinstance(r.get("specs"), dict) else None
+            t = classify_product_type(str(r.get("name") or ""), specs)
+            if str(t or "accessory") != "accessory":
+                kept.append(r)
+        return kept
+    except Exception:
+        return results
+
+
 def _annotate_type_and_price_integrity(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Tag every result with product_type and run the price-anomaly (poisoning) guard.
 
@@ -175,6 +203,17 @@ def _annotate_type_and_price_integrity(payload: Dict[str, Any]) -> Dict[str, Any
     ['data_integrity'] for the admin trace / source_statuses. Never raises."""
     try:
         from src.app.services.product_classifier import annotate_product
+        # X1 choke point (2026-07-09): several retrieval lanes never pass the in-suggest drop
+        # sites, so foreign-vertical items (pharmacy SKUs on an AI query) survived to the
+        # response. This wrapper runs on EVERY path; when the turn carries workload floors
+        # (primary-device intent by definition), remove generic-fallback items here.
+        try:
+            if (payload.get("workload_fit") or {}).get("floors"):
+                for _k in ("results", "products"):
+                    if isinstance(payload.get(_k), list) and payload[_k]:
+                        payload[_k] = drop_untyped_for_primary_intent(payload[_k], primary_intent=True)
+        except Exception:
+            pass
         results = payload.get("results")
         if not isinstance(results, list) or not results:
             return payload

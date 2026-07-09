@@ -624,10 +624,14 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       }
     };
 
-    // Streaming ladder: WS → SSE → poll. The fallback MUST engage on ASYNC failure (5 s timeout /
-    // onerror / a WS that 404s or closes after construction), not only when `new WebSocket()` throws
-    // synchronously — the old code set up SSE/poll while `ws` was still truthy, so an async WS failure
-    // left the trace with no live updates AND no fallback (the stale-trace / "WS noise" GPT-5.5 flagged).
+    // Streaming ladder: SSE → poll by DEFAULT; WS → SSE → poll only when explicitly opted in
+    // (localStorage 'ss_trace_ws' === '1'). The WS handshake 404s on most deployments and the
+    // browser logs an uncatchable console error on EVERY open before the fallback engages — the
+    // "WS 404 noise" the GPT-5.5 audit flagged — so WS must never be the default transport.
+    // When opted in, the fallback MUST engage on ASYNC failure (5 s timeout / onerror / a WS that
+    // 404s or closes after construction), not only when `new WebSocket()` throws synchronously —
+    // the old code set up SSE/poll while `ws` was still truthy, so an async WS failure left the
+    // trace with no live updates AND no fallback.
     let fallbackStarted = false;
     const startPoll = () => {
       if (!mounted || pollIv !== null) return;
@@ -656,45 +660,52 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
       startPoll();
     };
 
-    // Try WS first; give it 5 s to connect before degrading.
+    // WS is OPT-IN only (it 404s + logs console noise on most deployments — see ladder comment above).
+    let wsOptIn = false;
+    try { wsOptIn = window.localStorage.getItem('ss_trace_ws') === '1'; } catch {}
     let wsConnectTimer: ReturnType<typeof setTimeout> | null = null;
-    try {
-      const url = wsUrl(`/api/v1/decisions/${currentTraceId}/events/ws`);
-      ws = new WebSocket(url);
-      wsConnectTimer = setTimeout(() => {
-        if (ws && ws.readyState !== WebSocket.OPEN) {
-          try { ws.close(); } catch {}
+    if (!wsOptIn) {
+      startFallback();     // default transport: SSE (poll when EventSource is unavailable)
+    } else {
+      // Opted-in WS path — preserved verbatim: give it 5 s to connect before degrading.
+      try {
+        const url = wsUrl(`/api/v1/decisions/${currentTraceId}/events/ws`);
+        ws = new WebSocket(url);
+        wsConnectTimer = setTimeout(() => {
+          if (ws && ws.readyState !== WebSocket.OPEN) {
+            try { ws.close(); } catch {}
+            ws = null;
+            startFallback();   // WS never opened → degrade
+          }
+        }, 5000);
+        ws.onopen = () => {
+          if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+          if (mounted) setStreamMode('ws');
+        };
+        ws.onmessage = (ev: MessageEvent) => {
+          try {
+            const data = JSON.parse(ev.data);
+            const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
+            mergeEvents(incoming);
+          } catch {}
+        };
+        ws.onerror = () => {
+          if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+          try { ws?.close(); } catch {} ws = null;
+          startFallback();   // WS errored (incl. 404/close) → degrade cleanly
+        };
+        ws.onclose = () => {
+          // A CLEAN server close (code 1000) fires onclose but NOT onerror, so without this the trace would
+          // silently stop with no fallback. startFallback is idempotent + guarded on `mounted`, so this is a
+          // no-op on intentional teardown (cleanup sets mounted=false first) and after an onerror already ran.
+          if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
           ws = null;
-          startFallback();   // WS never opened → degrade
-        }
-      }, 5000);
-      ws.onopen = () => {
-        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
-        if (mounted) setStreamMode('ws');
-      };
-      ws.onmessage = (ev: MessageEvent) => {
-        try {
-          const data = JSON.parse(ev.data);
-          const incoming = Array.isArray(data) ? data : (Array.isArray(data.events) ? data.events : [data]);
-          mergeEvents(incoming);
-        } catch {}
-      };
-      ws.onerror = () => {
-        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
-        try { ws?.close(); } catch {} ws = null;
-        startFallback();   // WS errored (incl. 404/close) → degrade cleanly
-      };
-      ws.onclose = () => {
-        // A CLEAN server close (code 1000) fires onclose but NOT onerror, so without this the trace would
-        // silently stop with no fallback. startFallback is idempotent + guarded on `mounted`, so this is a
-        // no-op on intentional teardown (cleanup sets mounted=false first) and after an onerror already ran.
-        if (wsConnectTimer !== null) { clearTimeout(wsConnectTimer); wsConnectTimer = null; }
+          startFallback();
+        };
+      } catch {
         ws = null;
-        startFallback();
-      };
-    } catch {
-      ws = null;
-      startFallback();     // WS construction threw → degrade
+        startFallback();     // WS construction threw → degrade
+      }
     }
 
     // Always load the initial snapshot immediately, independent of the streaming transport.
@@ -3191,6 +3202,129 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     };
                     return (
                       <>
+                        {/* RFQ-FIRST: the drafted supplier RFQ is the first-class object of this tab (GPT-5.5
+                            audit: "The RFQ/email card should be the first-class object") — the card(s) render
+                            first, the event table is demoted below, and raw JSON stays behind the per-event
+                            "Raw recorded payload" disclosure. */}
+                        {procLoading && <div className={styles.empty} style={{ marginBottom: 12 }}>Loading the procurement case…</div>}
+
+                        {/* MULTI-SUPPLIER: a bulk order that splits across suppliers opens one case per supplier,
+                            each with its OWN drafted RFQ. Show them all (read-only proof) so "3 suppliers → where
+                            are the emails?" is answered in-place. Single-supplier orders fall through to the rich
+                            single card below. */}
+                        {procCases.length > 1 && (
+                          <div data-testid="proc-multi-rfq" style={{ marginBottom: 12 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                              📧 {procCases.length} supplier RFQs drafted — one per supplier · human-gated · nothing sent
+                            </div>
+                            {procCases.map((c: any, idx: number) => {
+                              const d: any = c?.state_json?.draft || {};
+                              const cp: any = d.channel_plan || {};
+                              const tm: any = d.supplier_terms || {};
+                              const chLabel = cp.requires_human
+                                ? `${String(cp.channel || '').toUpperCase()} · human-only`
+                                : cp.integration_kind
+                                  ? `${String(cp.integration_kind).toUpperCase()} integration handoff`
+                                  : `${String(cp.channel || 'email')} · agent drafts · human sends (GATE 2)`;
+                              const terms = [
+                                tm.moq != null ? `MOQ ${tm.moq}` : null,
+                                tm.lead_time_days != null ? `${tm.lead_time_days}d lead` : null,
+                                tm.contract_status ? String(tm.contract_status) : null,
+                                (tm.price_breaks || []).length ? `breaks ${(tm.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(',')}` : null,
+                              ].filter(Boolean).join(' · ');
+                              return (
+                                <details key={c.case_id || idx} data-testid={`proc-rfq-${idx}`} style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px', marginBottom: 6 }} open={idx === 0}>
+                                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                                    Supplier {idx + 1} of {procCases.length} — {d.recipient_ref || '—'}
+                                    <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>{chLabel}</span>
+                                  </summary>
+                                  <div style={{ marginTop: 8, fontSize: 13 }}>
+                                    {d.recipient_domain && <div className={styles.kvRow}><span>Domain</span><span className={styles.mono}>{d.recipient_domain}</span></div>}
+                                    {terms && <div className={styles.kvRow}><span>Ordering terms</span><span>{terms}</span></div>}
+                                    {cp.rationale && <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{cp.rationale}</span></div>}
+                                    <div className={styles.kvRow}><span>Subject</span><span>{d.subject || '—'}</span></div>
+                                    {canSeeOperatorDraft ? (
+                                      <>
+                                        <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (quote request — no price is ever stated to the supplier)</div>
+                                        <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 220, overflow: 'auto' }}>{d.body || '(not drafted yet)'}</pre>
+                                      </>
+                                    ) : (
+                                      <div className={styles.empty} style={{ marginTop: 6 }}>Human-gated — sign in with an operator key to view the drafted email.</div>
+                                    )}
+                                  </div>
+                                </details>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Drafted supplier RFQ — the "how it's made" artefact, promoted to the tab's first-class
+                            card (always expanded). Human-gated: shown only with an owner/operator key; a normal
+                            shopper never sees a supplier contact (blind-ship stays intact). It is NOT sent. */}
+                        {procCases.length <= 1 && procCase && draft && canSeeOperatorDraft && (
+                          <div data-testid="proc-drafted-rfq" style={{ border: '1px solid #d1d5db', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
+                            <div style={{ fontWeight: 700 }}>
+                              📧 Drafted supplier RFQ — {String(procCase.state || '').replace(/_/g, ' ').toLowerCase()}
+                              <span style={{ marginLeft: 8, fontWeight: 600, color: '#b45309', fontSize: 12 }}>human-gated · not sent</span>
+                            </div>
+                            <div style={{ marginTop: 8, fontSize: 13 }}>
+                              <div className={styles.kvRow}><span>To (supplier)</span><span data-testid="proc-rfq-recipient">{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
+                              {draft.recipient_email && <div className={styles.kvRow}><span>Contact</span><span className={styles.mono}>{draft.recipient_email}</span></div>}
+                              {draft.channel_plan && (
+                                <div className={styles.kvRow} data-testid="proc-supplier-channel"><span>Preferred channel</span><span>
+                                  <strong>{String(draft.channel_plan.channel || 'email')}</strong>
+                                  {draft.channel_plan.requires_human
+                                    ? ' · human-only (no automated outreach)'
+                                    : draft.channel_plan.integration_kind
+                                      ? ` · ${String(draft.channel_plan.integration_kind).toUpperCase()} integration handoff`
+                                      : draft.channel_plan.agent_may_draft
+                                        ? ' · agent drafts · human sends (GATE 2)'
+                                        : ''}
+                                </span></div>
+                              )}
+                              {draft.channel_plan?.rationale && (
+                                <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{draft.channel_plan.rationale}</span></div>
+                              )}
+                              {draft.supplier_terms && (draft.supplier_terms.moq != null || draft.supplier_terms.lead_time_days != null || (draft.supplier_terms.price_breaks || []).length > 0 || draft.supplier_terms.contract_status) && (
+                                <div className={styles.kvRow} data-testid="proc-supplier-terms"><span>Ordering terms</span><span>
+                                  {[
+                                    draft.supplier_terms.moq != null ? `MOQ ${draft.supplier_terms.moq}` : null,
+                                    draft.supplier_terms.lead_time_days != null ? `${draft.supplier_terms.lead_time_days}d lead` : null,
+                                    draft.supplier_terms.min_order_value_cents ? `min $${Math.round(draft.supplier_terms.min_order_value_cents / 100)}` : null,
+                                    draft.supplier_terms.contract_status ? String(draft.supplier_terms.contract_status) : null,
+                                    (draft.supplier_terms.price_breaks || []).length
+                                      ? `breaks: ${(draft.supplier_terms.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(', ')}`
+                                      : null,
+                                  ].filter(Boolean).join(' · ')}
+                                </span></div>
+                              )}
+                              {draft.commercial_scope?.quantity != null && (
+                                <div className={styles.kvRow}><span>RFQ quantity</span><span>{draft.commercial_scope.quantity} supplier-shortfall unit(s)</span></div>
+                              )}
+                              {procCase?.state_json?.availability?.requested_qty != null && (
+                                <div className={styles.kvRow}><span>Cart demand</span><span>{procCase.state_json.availability.requested_qty} requested · {procCase.state_json.availability.in_stock ?? 0} in stock · {procCase.state_json.availability.shortfall ?? draft.commercial_scope?.quantity ?? 0} sourced</span></div>
+                              )}
+                              <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
+                              {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
+                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{sendGateLabel(draft.send_gate || draft.gate)}</span></div>}
+                              <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
+                              <pre data-testid="proc-rfq-body" style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
+                            </div>
+                          </div>
+                        )}
+                        {procCases.length <= 1 && procCase && draft && !canSeeOperatorDraft && (
+                          <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order (human-gated). Sign in with an operator key to view it.</div>
+                        )}
+                        {/* Read-only proof surface: any change to the supplier or the drafted email happens in the
+                            operator console (admin), where edits re-lock the send gate — never from this trace. */}
+                        {(procCases.length > 0 || (procCase && draft)) && (
+                          <div data-testid="proc-readonly-note" style={{ marginTop: 8, marginBottom: 12, fontSize: 12, color: '#6b7280', borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
+                            🔒 Read-only trace — this is the audit view. To change the supplier or edit the RFQ, an
+                            authorised operator does that in the admin console; any edit voids the prior approval and
+                            re-locks the send gate (GATE 2). Nothing is ever sent from here.
+                          </div>
+                        )}
+
                         {integrityBlocks.length > 0 && (
                           <div data-testid="proc-integrity-guard" style={{ border: '1px solid #16a34a', background: '#f0fdf4', borderRadius: 10, padding: '10px 12px', fontSize: 13, marginBottom: 12 }}>
                             <div style={{ fontWeight: 700, marginBottom: 4, color: '#166534' }}>
@@ -3360,125 +3494,6 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                               })}
                             </tbody>
                           </table>
-                        )}
-
-                        {procLoading && <div className={styles.empty} style={{ marginTop: 8 }}>Loading the procurement case…</div>}
-
-                        {/* MULTI-SUPPLIER: a bulk order that splits across suppliers opens one case per supplier,
-                            each with its OWN drafted RFQ. Show them all (read-only proof) so "3 suppliers → where
-                            are the emails?" is answered in-place. Single-supplier orders fall through to the rich
-                            single card below. */}
-                        {procCases.length > 1 && (
-                          <div data-testid="proc-multi-rfq" style={{ marginTop: 10 }}>
-                            <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                              📧 {procCases.length} supplier RFQs drafted — one per supplier · human-gated · nothing sent
-                            </div>
-                            {procCases.map((c: any, idx: number) => {
-                              const d: any = c?.state_json?.draft || {};
-                              const cp: any = d.channel_plan || {};
-                              const tm: any = d.supplier_terms || {};
-                              const chLabel = cp.requires_human
-                                ? `${String(cp.channel || '').toUpperCase()} · human-only`
-                                : cp.integration_kind
-                                  ? `${String(cp.integration_kind).toUpperCase()} integration handoff`
-                                  : `${String(cp.channel || 'email')} · agent drafts · human sends (GATE 2)`;
-                              const terms = [
-                                tm.moq != null ? `MOQ ${tm.moq}` : null,
-                                tm.lead_time_days != null ? `${tm.lead_time_days}d lead` : null,
-                                tm.contract_status ? String(tm.contract_status) : null,
-                                (tm.price_breaks || []).length ? `breaks ${(tm.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(',')}` : null,
-                              ].filter(Boolean).join(' · ');
-                              return (
-                                <details key={c.case_id || idx} data-testid={`proc-rfq-${idx}`} style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px', marginBottom: 6 }} open={idx === 0}>
-                                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-                                    Supplier {idx + 1} of {procCases.length} — {d.recipient_ref || '—'}
-                                    <span style={{ marginLeft: 8, fontSize: 12, color: '#6b7280' }}>{chLabel}</span>
-                                  </summary>
-                                  <div style={{ marginTop: 8, fontSize: 13 }}>
-                                    {d.recipient_domain && <div className={styles.kvRow}><span>Domain</span><span className={styles.mono}>{d.recipient_domain}</span></div>}
-                                    {terms && <div className={styles.kvRow}><span>Ordering terms</span><span>{terms}</span></div>}
-                                    {cp.rationale && <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{cp.rationale}</span></div>}
-                                    <div className={styles.kvRow}><span>Subject</span><span>{d.subject || '—'}</span></div>
-                                    {canSeeOperatorDraft ? (
-                                      <>
-                                        <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (quote request — no price is ever stated to the supplier)</div>
-                                        <pre style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 220, overflow: 'auto' }}>{d.body || '(not drafted yet)'}</pre>
-                                      </>
-                                    ) : (
-                                      <div className={styles.empty} style={{ marginTop: 6 }}>Human-gated — sign in with an operator key to view the drafted email.</div>
-                                    )}
-                                  </div>
-                                </details>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {/* Drafted supplier RFQ — the "how it's made" artefact, inline + collapsed so the demo
-                            never leaves this tab. Human-gated: shown only with an owner/operator key; a normal
-                            shopper never sees a supplier contact (blind-ship stays intact). It is NOT sent. */}
-                        {procCases.length <= 1 && procCase && draft && canSeeOperatorDraft && (
-                          <details data-testid="proc-drafted-rfq" style={{ marginTop: 10, border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 10px' }} open>
-                            <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
-                              📧 Drafted supplier RFQ — {String(procCase.state || '').replace(/_/g, ' ').toLowerCase()}
-                              <span style={{ marginLeft: 8, fontWeight: 600, color: '#b45309', fontSize: 12 }}>human-gated · not sent</span>
-                            </summary>
-                            <div style={{ marginTop: 8, fontSize: 13 }}>
-                              <div className={styles.kvRow}><span>To (supplier)</span><span data-testid="proc-rfq-recipient">{draft.recipient_ref || '—'}{draft.recipient_domain ? ` · ${draft.recipient_domain}` : ''}</span></div>
-                              {draft.recipient_email && <div className={styles.kvRow}><span>Contact</span><span className={styles.mono}>{draft.recipient_email}</span></div>}
-                              {draft.channel_plan && (
-                                <div className={styles.kvRow} data-testid="proc-supplier-channel"><span>Preferred channel</span><span>
-                                  <strong>{String(draft.channel_plan.channel || 'email')}</strong>
-                                  {draft.channel_plan.requires_human
-                                    ? ' · human-only (no automated outreach)'
-                                    : draft.channel_plan.integration_kind
-                                      ? ` · ${String(draft.channel_plan.integration_kind).toUpperCase()} integration handoff`
-                                      : draft.channel_plan.agent_may_draft
-                                        ? ' · agent drafts · human sends (GATE 2)'
-                                        : ''}
-                                </span></div>
-                              )}
-                              {draft.channel_plan?.rationale && (
-                                <div className={styles.kvRow}><span>Why this channel</span><span style={{ color: '#6b7280' }}>{draft.channel_plan.rationale}</span></div>
-                              )}
-                              {draft.supplier_terms && (draft.supplier_terms.moq != null || draft.supplier_terms.lead_time_days != null || (draft.supplier_terms.price_breaks || []).length > 0 || draft.supplier_terms.contract_status) && (
-                                <div className={styles.kvRow} data-testid="proc-supplier-terms"><span>Ordering terms</span><span>
-                                  {[
-                                    draft.supplier_terms.moq != null ? `MOQ ${draft.supplier_terms.moq}` : null,
-                                    draft.supplier_terms.lead_time_days != null ? `${draft.supplier_terms.lead_time_days}d lead` : null,
-                                    draft.supplier_terms.min_order_value_cents ? `min $${Math.round(draft.supplier_terms.min_order_value_cents / 100)}` : null,
-                                    draft.supplier_terms.contract_status ? String(draft.supplier_terms.contract_status) : null,
-                                    (draft.supplier_terms.price_breaks || []).length
-                                      ? `breaks: ${(draft.supplier_terms.price_breaks || []).map((b: any) => `${b.min_qty}→${b.discount_pct}%`).join(', ')}`
-                                      : null,
-                                  ].filter(Boolean).join(' · ')}
-                                </span></div>
-                              )}
-                              {draft.commercial_scope?.quantity != null && (
-                                <div className={styles.kvRow}><span>RFQ quantity</span><span>{draft.commercial_scope.quantity} supplier-shortfall unit(s)</span></div>
-                              )}
-                              {procCase?.state_json?.availability?.requested_qty != null && (
-                                <div className={styles.kvRow}><span>Cart demand</span><span>{procCase.state_json.availability.requested_qty} requested · {procCase.state_json.availability.in_stock ?? 0} in stock · {procCase.state_json.availability.shortfall ?? draft.commercial_scope?.quantity ?? 0} sourced</span></div>
-                              )}
-                              <div className={styles.kvRow}><span>Subject</span><span data-testid="proc-rfq-subject">{draft.subject || '—'}</span></div>
-                              {draft.content_hash && <div className={styles.kvRow}><span>Content hash</span><span className={styles.mono}>{draft.content_hash}</span></div>}
-                              {(draft.send_gate || draft.gate) && <div className={styles.kvRow}><span>Send gate</span><span>{sendGateLabel(draft.send_gate || draft.gate)}</span></div>}
-                              <div style={{ marginTop: 6, fontWeight: 600, color: '#6b7280' }}>Body (a quote request — no price is ever stated to the supplier)</div>
-                              <pre data-testid="proc-rfq-body" style={{ whiteSpace: 'pre-wrap', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 8, marginTop: 4, maxHeight: 260, overflow: 'auto' }}>{draft.body || '(not drafted yet)'}</pre>
-                            </div>
-                          </details>
-                        )}
-                        {procCases.length <= 1 && procCase && draft && !canSeeOperatorDraft && (
-                          <div className={styles.empty} style={{ marginTop: 8 }}>A supplier RFQ was drafted for this order (human-gated). Sign in with an operator key to view it.</div>
-                        )}
-                        {/* Read-only proof surface: any change to the supplier or the drafted email happens in the
-                            operator console (admin), where edits re-lock the send gate — never from this trace. */}
-                        {(procCases.length > 0 || (procCase && draft)) && (
-                          <div data-testid="proc-readonly-note" style={{ marginTop: 8, fontSize: 12, color: '#6b7280', borderTop: '1px dashed #e5e7eb', paddingTop: 6 }}>
-                            🔒 Read-only trace — this is the audit view. To change the supplier or edit the RFQ, an
-                            authorised operator does that in the admin console; any edit voids the prior approval and
-                            re-locks the send gate (GATE 2). Nothing is ever sent from here.
-                          </div>
                         )}
 
                         {/* Audit trail — the case's own bitemporal journey (state · actor · reason · time),

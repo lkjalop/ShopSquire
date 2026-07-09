@@ -83,16 +83,24 @@ def _chat(q: str, uid: str) -> dict:
 
 
 @live
-@pytest.mark.xfail(
-    reason="W4 gap (2026-07-09): this query routes to the NQE DISAMBIGUATION payload shape "
-    "(proposal/question_plan — no products/right_panel), which bypasses the main assembly "
-    "where workload_fit attaches. Fix: attach fit verdicts on the proposal branch too.",
-    strict=False,
-)
-def test_golden_gaming_fit_carries_verdicts():
+def test_golden_gaming_fit_carries_requirements_even_on_clarify():
+    # Standalone "can this run X" legitimately clarifies (no product referent yet) — but the
+    # clarify payload must still SHOW the game requirements it computed (N1: early-return
+    # payloads bypassed main assembly and lost the workload context entirely).
     b = _chat("can this run cyberpunk 2077 and fortnite under 1900", "gm-cyber")
     wf = b.get("workload_fit") or {}
-    assert wf.get("verdicts"), "gaming answer must carry min-vs-recommended verdicts, not lose them"
+    assert wf.get("floors"), "even a clarifying answer must carry the computed game requirement floors"
+
+
+@live
+def test_golden_gaming_fit_verdicts_on_product_turn():
+    # A product-bearing gaming turn must carry per-product verdicts. Valorant's light floors
+    # fit the catalog under budget (cyberpunk's 32GB-recommended floor legitimately zeroes
+    # retrieval at $1,900 — that case needs the step-up-panel verdict path, tracked for E1).
+    b = _chat("gaming laptop for valorant under 1900", "gm-valo")
+    wf = b.get("workload_fit") or {}
+    assert wf.get("floors"), "product turn must carry requirement floors"
+    assert wf.get("verdicts"), "product turn must carry min-vs-recommended verdicts"
 
 
 @live
@@ -121,3 +129,21 @@ def test_golden_workload_queries_answer_without_error(q, uid):
         blob = (msg + " " + str(b.get("workload_fit") or "")).lower()
         assert any(t in blob for t in ("vram", "gpu", "16gb", "cloud")), \
             "AI workload answer must engage GPU/VRAM reality"
+
+
+def test_untyped_drop_unit():
+    # X1: pharmacy SKUs (generic 'accessory' fallback) drop under primary-device intent
+    from src.app.services.recommend_response_finalizer import drop_untyped_for_primary_intent
+    R = [{"name": "Hand Sanitiser 500ml (70% alcohol)", "specs": {}},
+         {"name": "Dell 15 DC15255 15.6\" FHD Laptop", "specs": {}}]
+    out = drop_untyped_for_primary_intent(list(R), primary_intent=True)
+    assert [r["name"][:4] for r in out] == ["Dell"]
+    assert len(drop_untyped_for_primary_intent(list(R), primary_intent=False)) == 2
+
+
+@live
+def test_golden_finetune_never_sells_pharmacy():
+    # X1 live: the AI query that returned hand sanitiser must return electronics or nothing
+    b = _chat("i want to fine tune a 7b model locally under 2500", "gm-ft2")
+    names = " ".join((p.get("name") or "") for p in (b.get("products") or [])).lower()
+    assert "sanitiser" not in names and "paracetamol" not in names and "sanitizer" not in names

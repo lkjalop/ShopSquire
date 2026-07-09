@@ -14,7 +14,22 @@ owns sequencing, not flavour.
 """
 from __future__ import annotations
 
+import contextvars
 from typing import Any, Callable, Dict, Optional
+
+# Request-scoped stash (N1, 2026-07-09): suggest() has ~20 early-return branches (blocked /
+# degraded / NQE-clarify) that build their OWN payload dicts, bypassing main assembly — the
+# workload context died before reaching them (the golden cyber query routes to the clarify
+# payload). _ensure_trace_response runs on EVERY return path and reads this var to attach the
+# requirements, so even a clarifying question SHOWS the floors it already computed.
+_LAST_WORKLOAD_CTX: contextvars.ContextVar = contextvars.ContextVar("workload_ctx", default=None)
+
+
+def current_workload_ctx() -> Optional[Dict[str, Any]]:
+    try:
+        return _LAST_WORKLOAD_CTX.get()
+    except Exception:
+        return None
 
 
 def apply_workload_requirements(
@@ -148,4 +163,8 @@ def apply_workload_requirements(
         ctx["floors"] = floors
     except Exception:
         ctx["floors"] = {}
+    try:
+        _LAST_WORKLOAD_CTX.set(ctx)
+    except Exception:
+        pass
     return ctx
