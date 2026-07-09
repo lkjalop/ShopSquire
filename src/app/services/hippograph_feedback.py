@@ -25,6 +25,7 @@ def build_hippograph_insights(
     seed_terms: Optional[List[str]] = None,
     top_k: int = 8,
     limit: int = 2000,
+    coldstart_stats: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Reward-weighted entities related to this turn's seeds. Includes M3 ``finding`` nodes so a
     market finding tied to a surfaced product (or a query term) recalls alongside it — query-scoped
@@ -62,7 +63,17 @@ def build_hippograph_insights(
             ref = resolve_product(str(term), sku_pattern=_DEFAULT_SKU_PATTERN)
             if ref:
                 seeds.append(ref.id)
+        # COLD-START observability (Track B, 2026-07-09): a seed the graph doesn't know (a long-tail
+        # SKU with no trace/conversion history) is silently dropped — the feature is DARKEST exactly
+        # on the newest catalog. Record how many seeds survived so the darkness is MEASURABLE (the
+        # prerequisite to the catalog-edge cold-start fix). Populated even when recall succeeds.
+        _proposed = len(seeds)
         seeds = [s for s in seeds if s in graph.nodes]  # only seeds the graph actually knows
+        if isinstance(coldstart_stats, dict):
+            coldstart_stats.update({
+                "seeds_proposed": _proposed, "seeds_in_graph": len(seeds),
+                "graph_nodes": len(graph.nodes), "cold": bool(_proposed and not seeds),
+            })
         if not seeds:
             return []
         out: List[Dict[str, Any]] = []

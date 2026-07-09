@@ -136,6 +136,14 @@ def _market_intelligence(state: IntelligenceStageState, results: List[Dict[str, 
             persisted = mem.get_kv(state.uid) or {}
             persisted["hippograph_insights"] = insights
             mem.set_kv(state.uid, persisted)
+        elif mode == "shadow":
+            # Measurable shadow (2026-07-09, Track B graduation): write insights under a DISTINCT
+            # key no decision-consumer reads, so the counterfactual nudge can bench would-be uplift
+            # WITHOUT going live — the deck's Phase-2 "score + compare-to-actual, no execution".
+            if insights:
+                state.payload["hippograph_insights_shadow"] = insights
+            if findings:
+                state.payload["market_findings_shadow"] = findings
         # BOTH modes emit the observability trace — shadow logs the signals WITHOUT acting on them.
         log_trace_event(trace_id=state.trace_id, event_type="market_intelligence", source_type="agent",
                         source_id="Market_Intelligence_Agent", target_type="recommendation",
@@ -147,6 +155,42 @@ def _market_intelligence(state: IntelligenceStageState, results: List[Dict[str, 
                                                    if isinstance(i, dict) and i.get("label")]})
     except Exception as exc:
         record_partial_failure("market_intelligence", exc, trace_id=state.trace_id)
+
+
+def _shadow_counterfactual(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> None:
+    """Measurable shadow (Track B, 2026-07-09): compute what the hippograph ranking nudge WOULD
+    have done — on a COPY, never mutating results — and record the would-be impact. This is the
+    deck's Phase-2 rung: score the adaptation and compare against actual outcomes with NO live
+    execution, so uplift can be benched before the lever is flipped live. Runs only when shadow
+    insights exist (mode=='shadow'); a no-op otherwise. Never raises, never changes the buyer view."""
+    shadow = state.payload.get("hippograph_insights_shadow")
+    if not shadow or not results:
+        return
+    try:
+        from src.app.services.ranking_nudge import apply_experiment_nudge
+        recall_ids = [i.get("id") for i in shadow if isinstance(i, dict) and i.get("kind") == "product" and i.get("id")]
+        if not recall_ids:
+            return
+        import copy as _copy
+        before = [str(r.get("sku")) for r in results if isinstance(r, dict)]
+        # force treatment+live on a COPY to see the would-be reorder
+        cf = apply_experiment_nudge(_copy.deepcopy(list(results)), recall_ids=recall_ids,
+                                    assignment="treatment", live=True)
+        after = [str(r.get("sku")) for r in cf if isinstance(r, dict)]
+        moved = sum(1 for i, sku in enumerate(after) if i < len(before) and before[i] != sku)
+        boosted = [s for s in recall_ids if s in set(before)]
+        top_changed = bool(before and after and before[0] != after[0])
+        cf_impact = {
+            "would_boost": boosted[:5], "would_move_positions": moved,
+            "top_result_would_change": top_changed,
+            "recall_products": len(recall_ids), "in_result_set": len(boosted),
+        }
+        state.payload["hippograph_shadow_counterfactual"] = cf_impact
+        log_trace_event(trace_id=state.trace_id, event_type="hippograph_shadow_counterfactual",
+                        source_type="agent", source_id="Market_Intelligence_Agent",
+                        target_type="recommendation", target_id=state.decision_id, payload=cf_impact)
+    except Exception as exc:
+        record_partial_failure("shadow_counterfactual", exc, trace_id=state.trace_id)
 
 
 def _nudge(state: IntelligenceStageState, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -299,6 +343,7 @@ def run_intelligence_stage(state: IntelligenceStageState, *, mem) -> List[Dict[s
     the turn was exposed to — the exposure a later conversion attributes back to (M6 close-loop)."""
     results = state.results
     _market_intelligence(state, results, mem=mem)
+    _shadow_counterfactual(state, results)              # Track B: bench would-be uplift, no execution
     results = _nudge(state, results)                    # experiment (hippograph recall) nudge
     results = _sales_response_nudge(state, results)     # M5 demand-aware nudge (Phase-3)
     _capture(state, results)
