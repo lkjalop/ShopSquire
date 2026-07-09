@@ -177,7 +177,19 @@ def drop_untyped_for_primary_intent(results: list, *, primary_intent: bool) -> l
     try:
         if not primary_intent or not isinstance(results, list) or not results:
             return results
-        from src.app.services.product_classifier import classify_product_type
+        from src.app.services.product_classifier import classify_product_type, is_primary_product
+        # When a primary-device turn has ANY real device, keep it and drop only the generic-
+        # 'accessory' fallback noise (original behavior). But when a hard floor zeroed out every
+        # device (e.g. an AI query's 32GB-RAM floor eliminates all 16GB laptops) and ONLY
+        # accessories survived, those accessories are pure noise — an honest no-match beats
+        # selling a Wi-Fi extender or a laptop bag for AI training (2026-07-09).
+        has_primary = any(
+            isinstance(r, dict) and is_primary_product(
+                r.get("name"), r.get("specs") if isinstance(r.get("specs"), dict) else None)
+            for r in results
+        )
+        if not has_primary:
+            return []
         kept = []
         for r in results:
             if not isinstance(r, dict):
