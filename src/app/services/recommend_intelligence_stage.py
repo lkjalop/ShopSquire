@@ -93,8 +93,14 @@ def _mi_mode(flags: Dict[str, Any]) -> str:
       • 'shadow' — COMPUTE + LOG the signals (observability) but DO NOT mutate the buyer-facing decision —
                    the governed first rung: watch demand/competitor signals before trusting them;
       • 'off'    — skip entirely (default).
-    'shadow' is the safe rollout: signals appear in the decision trace, never in the buyer's response."""
-    raw = str(flags.get("HIPPOGRAPH_FEEDBACK_ENABLED", "") or "").strip().lower()
+    'shadow' is the safe rollout: signals appear in the decision trace, never in the buyer's response.
+
+    Resolution: env wins, then feature_flags.json (audit 2026-07-09: load_feature_flags merges
+    only ONE env override, so HIPPOGRAPH_FEEDBACK_ENABLED=shadow set as env NEVER reached this
+    gate — the mode was silently 'off' in every live run; same missed-consumer class as the
+    knowledge lane / mute-layer findings)."""
+    import os
+    raw = str(os.getenv("HIPPOGRAPH_FEEDBACK_ENABLED", "") or flags.get("HIPPOGRAPH_FEEDBACK_ENABLED", "") or "").strip().lower()
     if raw == "shadow":
         return "shadow"
     if raw in ("1", "true", "yes", "on", "live"):

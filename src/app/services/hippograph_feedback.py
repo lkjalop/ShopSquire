@@ -40,7 +40,13 @@ def build_hippograph_insights(
         # them); finding↔entity edges make a finding reachable from its product/term seed.
         # Human-correction learning folds in signed recall priors — opt-in (changes recall ordering).
         _hf_on = str(os.getenv("HIPPOGRAPH_HUMAN_FEEDBACK_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
-        graph = build_from_db(db, limit=limit, include_findings=True, include_human_feedback=_hf_on)
+        # Cold-start catalog edges (Track B step 2): default ON — without them a history-less SKU
+        # seed is not even a node and recall goes dark on the newest catalog. Low-weight
+        # (reachability, not reward); HIPPOGRAPH_CATALOG_EDGES=0 is the rollback since this
+        # builder is shared with the procurement-draft evidence path.
+        _cat_on = str(os.getenv("HIPPOGRAPH_CATALOG_EDGES", "1")).strip().lower() in ("1", "true", "yes", "on")
+        graph = build_from_db(db, limit=limit, include_findings=True, include_human_feedback=_hf_on,
+                              include_catalog=_cat_on)
         if not graph.nodes:
             return []
         seeds: List[str] = []

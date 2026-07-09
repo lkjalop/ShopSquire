@@ -45,6 +45,22 @@ def _maybe_project_human_feedback(db, graph: HippoGraph, *, limit: int, sku_patt
         return graph  # feedback is additive — degrade to the base graph, never break it
 
 
+def _maybe_project_catalog(db, graph: HippoGraph, *, alias_map, known, limit: int = 500) -> HippoGraph:
+    """Cold-start seeding (Track B, 2026-07-09): active-catalog product↔brand edges at LOW weight
+    so a history-less SKU is reachable (live diagnosis: current-catalog seeds had zero graph
+    presence). Additive; degrades to the base graph on any error."""
+    try:
+        from src.app.services.hippograph import project_catalog
+        rows = db.execute(
+            text("SELECT sku, name FROM products WHERE active = 1 ORDER BY id DESC LIMIT :lim"),
+            {"lim": int(limit)},
+        ).fetchall()
+        return project_catalog(graph, [{"sku": r[0], "name": r[1]} for r in rows],
+                               alias_map=alias_map, known=known)
+    except Exception:
+        return graph
+
+
 def build_from_db(
     db,
     *,
@@ -53,6 +69,7 @@ def build_from_db(
     sku_pattern: str = _DEFAULT_SKU_PATTERN,
     include_findings: bool = False,
     include_human_feedback: bool = False,
+    include_catalog: bool = False,
     anomaly_fn=None,
 ) -> HippoGraph:
     """Project the most recent ``limit`` trace + conversion rows into an in-memory hippograph. Set
@@ -109,4 +126,6 @@ def build_from_db(
         graph = _maybe_project_findings(db, graph, limit=limit, sku_pattern=sku_pattern, anomaly_fn=anomaly_fn)
     if include_human_feedback:
         graph = _maybe_project_human_feedback(db, graph, limit=limit, sku_pattern=sku_pattern)
+    if include_catalog:
+        graph = _maybe_project_catalog(db, graph, alias_map=alias_map, known=known)
     return graph

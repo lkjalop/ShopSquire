@@ -156,6 +156,48 @@ def _finding_attr(f: Any, name: str, default: Any = None) -> Any:
     return f.get(name, default) if isinstance(f, dict) else getattr(f, name, default)
 
 
+def project_catalog(
+    graph: HippoGraph,
+    product_rows: Optional[Iterable[Dict[str, Any]]],
+    *,
+    alias_map: Optional[Dict[str, str]] = None,
+    known: Optional[Iterable[str]] = None,
+    edge_weight: float = 0.25,
+) -> HippoGraph:
+    """COLD-START seeding (Track B step 2, 2026-07-09): catalog-backed product↔brand edges.
+
+    The trace/conversion projection only knows entities WITH HISTORY — a newly listed SKU is not
+    a node at all, so recall was darkest exactly on the long-tail catalog (live diagnosis:
+    seeds_proposed>0, seeds_in_graph=0 — current-catalog SKUs had zero history and no brand node
+    bridged them to the 259 history nodes). The CATALOG is platform truth, so its product↔brand
+    relation is legitimate graph structure: every active product becomes a node connected to its
+    brand, and a cold seed now recalls brand siblings (including ones carrying findings/reward).
+
+    ``edge_weight`` is deliberately LOW (0.25 vs 1.0 for history edges) so behavioral signal
+    still dominates recall ordering — catalog edges provide REACHABILITY, not reward. Additive
+    and read-only like every projection; never raises."""
+    for row in (product_rows or []):
+        try:
+            sku = str((row.get("sku") if isinstance(row, dict) else row[0]) or "").strip()
+            name = str((row.get("name") if isinstance(row, dict) else row[1]) or "").strip()
+        except Exception:
+            continue
+        if not sku:
+            continue
+        if sku not in graph.nodes:
+            graph.nodes[sku] = HippoNode(id=sku, kind="product", label=name or sku)
+        bref = resolve_brand(name, alias_map=alias_map, known=known) if name else None
+        if not bref:
+            continue
+        if bref.id not in graph.nodes:
+            graph.nodes[bref.id] = HippoNode(id=bref.id, kind="brand", label=bref.label)
+        key = (sku, bref.id)
+        graph.edges[key] = graph.edges.get(key, 0.0) + edge_weight
+        graph.adjacency.setdefault(sku, {})[bref.id] = graph.adjacency.setdefault(sku, {}).get(bref.id, 0.0) + edge_weight
+        graph.adjacency.setdefault(bref.id, {})[sku] = graph.adjacency.setdefault(bref.id, {}).get(sku, 0.0) + edge_weight * 0.5
+    return graph
+
+
 def project_findings(graph: HippoGraph, findings: Optional[Iterable[Any]], *, sku_pattern: Optional[str] = None) -> HippoGraph:
     """Add M3 findings as ``finding`` nodes (in place). Each finding becomes a node
     ``finding:<type>:<entity-or-global>`` whose weight is severity×confidence; when it names an
