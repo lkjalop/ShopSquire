@@ -2405,7 +2405,8 @@
   "external_research_allowlist": [
     "notebookcheck.net",
     "pcmag.com",
-    "rtings.com"
+    "rtings.com",
+    "store.steampowered.com"
   ],
   "_demo_fallback_catalog_comment": "ADAPTER: fast-path demo/fallback products used only when live retrieval is empty/slow. Excised from recommend._fast_path_catalog_recommendation so a non-electronics tenant does not get laptop products as a fallback (resolved per active profile).",
   "demo_fallback_catalog": [
@@ -2921,6 +2922,18 @@
       "backorder": true,
       "typical_reorder_days": 7
     },
-    "custom": {}
+    "custom": {},
+    "off_catalog_classes": [
+      {
+        "class": "datacenter_gpu_server",
+        "label": "rack-mount or datacenter GPU servers (A100/H100-class)",
+        "pattern": "rack[- ]?mount|\\bserver(s)?\\b.*\\b(gpu|a100|h100|ai|data)\\b|\\b(a100|h100|mi300|dgx)\\b|data\\s*center\\s*gpu|datacenter"
+      },
+      {
+        "class": "network_infrastructure",
+        "label": "enterprise networking gear (switches/routers/firewall appliances)",
+        "pattern": "\\b(core|enterprise)\\s+(switch|router)\\b|firewall\\s+appliance|\\b48[- ]port\\b"
+      }
+    ]
   }
 }

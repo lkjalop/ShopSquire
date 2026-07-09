@@ -611,7 +611,10 @@ def _with_trace(payload: Dict[str, Any], trace_id: str | None) -> Dict[str, Any]
 
             # Contract consistency guard:
             # if summary claims picks, avoid returning empty products[].
-            if not products_src and _claims_products(
+            # W3 exception: an off-catalog gate answer INTENTIONALLY carries zero products —
+            # reseeding right-panel laptops here would re-create the "$80k A100 -> gaming
+            # laptops" failure the gate exists to stop.
+            if not products_src and not payload.get("off_catalog") and _claims_products(
                 str(payload.get("assistant_message") or payload.get("message") or "")
             ):
                 rp = payload.get("right_panel") if isinstance(payload.get("right_panel"), dict) else {}
@@ -6961,80 +6964,29 @@ def suggest(
                 )
     except Exception as _e_uc_advisor:  # observability boundary
         _record_partial_failure("use_case_advisor_enrichment", _e_uc_advisor, trace_id=trace_id)
-    # ── Game/Software Requirements Enrichment ──
-    _detected_games_for_nqe: list = []
-    _detected_software_for_nqe: list = []
+    # ── Workload requirements stage (W2, extracted 2026-07-08 — was ~74 inline lines here).
+    # Constraint mutation is parity-identical; the NEW capability is the returned context:
+    # detected entities + requirement floors survive to fit verdicts, the response payload,
+    # the narration preamble, and guard evidence (the "detects games but loses the comparison
+    # before the final answer" fix, both audits 2026-07-08).
+    from src.app.services.recommend_workload_stage import apply_workload_requirements
+    _workload_ctx = apply_workload_requirements(
+        query_effective, constraints,
+        gpu_pref_inferred=gpu_pref_inferred,
+        record_failure=_record_partial_failure, trace_id=trace_id,
+    )
+    _detected_games_for_nqe: list = _workload_ctx.get("games") or []
+    _detected_software_for_nqe: list = _workload_ctx.get("software") or []
+    # ── Off-catalog capability gate (W3): a declared non-sold hardware class (rack-mount /
+    # A100-class servers) must produce category honesty + a supplier-RFQ offer, never a
+    # confident laptop sale. Flag now; the override happens at response assembly.
     try:
-        _detected_games_for_nqe = detect_games_in_text(query_effective)
-        _detected_software_for_nqe = detect_software_in_text(query_effective)
-        if _detected_games_for_nqe:
-            from src.app.services.use_case_advisor import match_game_requirements
-            _game_reqs = match_game_requirements(_detected_games_for_nqe)
-            if _game_reqs.get("recommended_ram_gb"):
-                constraints.setdefault("specs", [])
-                constraints["specs"].append(f"ram_gb_min:{_game_reqs['recommended_ram_gb']}")
-            if _game_reqs.get("gpu_needed"):
-                constraints["must_have_gpu"] = True
-                constraints["gpu_preference"] = "with_discrete"
-            if _game_reqs.get("recommended_gpu_vram_gb"):
-                constraints.setdefault("specs", [])
-                constraints["specs"].append(f"gpu_vram_gb_min:{_game_reqs['recommended_gpu_vram_gb']}")
-            if _game_reqs.get("min_refresh_hz", 60) > 60:
-                constraints.setdefault("specs", [])
-                constraints["specs"].append(f"refresh_hz_min:{_game_reqs['min_refresh_hz']}")
-        if _detected_software_for_nqe:
-            from src.app.services.use_case_advisor import match_software_requirements
-            _sw_reqs = match_software_requirements(_detected_software_for_nqe)
-            if _sw_reqs.get("recommended_ram_gb"):
-                constraints.setdefault("specs", [])
-                constraints["specs"].append(f"ram_gb_min:{_sw_reqs['recommended_ram_gb']}")
-            if _sw_reqs.get("gpu_needed"):
-                constraints["must_have_gpu"] = True
-                constraints["gpu_preference"] = "with_discrete"
-    except Exception as _e_game_sw:  # observability boundary
-        _record_partial_failure("game_software_requirements_enrichment", _e_game_sw, trace_id=trace_id)
-    try:
-        q_low = str(query_effective or "").lower()
-        uc_low = str(constraints.get("use_case") or "").lower()
-        generic_gaming = (
-            ("gaming" in q_low or uc_low in {"gaming", "gaming_casual", "gaming_competitive", "gaming_aaa_heavy", "gaming_light"})
-            and not _detected_games_for_nqe
-        )
-        if generic_gaming:
-            constraints.setdefault("specs", [])
-            existing_spec_keys = {str(s).split(":", 1)[0].strip().lower() for s in (constraints.get("specs") or [])}
-            # Entry-level gaming starts at 8GB RAM (e.g. MSI Thin A15 $1799).
-            # 16GB is preferred but using it as a hard floor excludes real gaming
-            # laptops in the $1500-$1900 range.  Use 8GB as the minimum.
-            if "ram_gb_min" not in existing_spec_keys:
-                constraints["specs"].append("ram_gb_min:8")
-            # storage_gb_min:512 filters out HP Victus (256GB) and other valid
-            # entry-level gaming picks.  Skip the storage floor — let budget and
-            # GPU preference do the heavy lifting.
-            if "refresh_hz_min" not in existing_spec_keys:
-                constraints["specs"].append("refresh_hz_min:60")
-            if constraints.get("gpu_preference") != "without_discrete":
-                constraints["gpu_preference"] = "with_discrete"
-                _derived_must_have = bool(float(constraints.get("budget_max") or 0) >= 850) if constraints.get("budget_max") is not None else False
-                constraints["must_have_gpu"] = _derived_must_have and not gpu_pref_inferred
-            if not constraints.get("use_case"):
-                constraints["use_case"] = "gaming"
-            # OS segregation: gaming queries are Windows ecosystem.
-            # Apple/macOS products do not carry discrete gaming GPUs (RTX/Radeon RX)
-            # in this catalog, so exclude them from gaming results unless the user
-            # explicitly requested Apple.
-            _current_brands = [str(b).lower() for b in (constraints.get("brands") or [])]
-            _request_brand_hint_low = str(constraints.get("_request_brand_hint") or "").lower()
-            _inferred_brand_low = str(constraints.get("_inferred_image_brand") or "").lower()
-            _any_apple_hint = (
-                "apple" in _current_brands
-                or "apple" in _request_brand_hint_low
-                or "apple" in _inferred_brand_low
-            )
-            if not _any_apple_hint and not constraints.get("_image_os_hint"):
-                constraints["_image_os_hint"] = "windows"
-    except Exception as _e_generic_gaming:  # observability boundary
-        _record_partial_failure("generic_gaming_defaults", _e_generic_gaming, trace_id=trace_id)
+        from src.app.services.off_catalog_gate import off_catalog_check
+        _off_catalog_hit = off_catalog_check(query_effective)
+        if _off_catalog_hit:
+            constraints["_off_catalog"] = _off_catalog_hit
+    except Exception:
+        _off_catalog_hit = None
     # ── Product Identity Agent: extract identity from image labels/OCR text ──
     _identity_constraints: Dict[str, Any] = {}
     _id_result: Dict[str, Any] = {}
@@ -10905,6 +10857,38 @@ def suggest(
             payload["summary_pending"] = True
         except Exception:
             pass
+    # ── W4: workload fit verdicts — the comparison the platform used to compute and lose.
+    # Rides the payload (UI), the narration preamble (model cites real numbers), and guard
+    # evidence (so those citations PASS verification instead of being rejected as invented).
+    _fit_note = None
+    try:
+        _wf_floors = (_workload_ctx.get("floors") or {}) if isinstance(_workload_ctx, dict) else {}
+        # When hard floors zeroed out results, verdicts against the pre-filter CANDIDATES still
+        # answer the buyer's real question ("closest options meet minimum but not recommended")
+        # instead of a bare no-match.
+        _wf_pool = results or [c for c in (candidates or []) if isinstance(c, dict)][:5]
+        if not _wf_pool and isinstance(payload.get("right_panel"), dict):
+            # hard floors can zero out BOTH results and candidates; the step-up tier panels
+            # still hold the nearest real products — verdict those so the buyer learns WHY
+            # ("meets minimum, misses recommended") instead of a bare no-match
+            _rp = payload["right_panel"]
+            for _sec in ("higher_tier", "lower_tier"):
+                _items = (_rp.get(_sec) or {}).get("items") if isinstance(_rp.get(_sec), dict) else None
+                for _it in (_items or []):
+                    if isinstance(_it, dict):
+                        _wf_pool.append(_it)
+            _wf_pool = _wf_pool[:5]
+        if _wf_floors and _wf_pool:
+            from src.app.services.workload_fit import fit_verdicts, fit_evidence_note
+            _wf_verdicts = fit_verdicts(_wf_floors, _wf_pool)
+            if _wf_verdicts:
+                _wf_entities = list(_workload_ctx.get("games") or []) + list(_workload_ctx.get("software") or [])
+                payload["workload_fit"] = {
+                    "entities": _wf_entities, "floors": _wf_floors, "verdicts": _wf_verdicts,
+                }
+                _fit_note = fit_evidence_note(_wf_entities, _wf_floors, _wf_verdicts)
+    except Exception as _e_wf:
+        _record_partial_failure("workload_fit_verdicts", _e_wf, trace_id=trace_id)
     # Telemetry split (#4): separate the INTENT-ROUTER model from the NARRATION model + mode +
     # claim-guard outcome, so a debug view never conflates "rule-based (escalate_to_big)" routing
     # with the prose model (e.g. qwen3:14b). Defaults cover skip/async/deterministic paths.
@@ -10942,6 +10926,12 @@ def suggest(
             if isinstance(constraints, dict):
                 _ge = constraints.get("_guard_evidence")
                 constraints["_guard_evidence"] = f"{_ge}\n\n{_ev_note}" if _ge else _ev_note
+        # W4: fit facts are platform-authored -> LLM preamble AND guard evidence
+        if _fit_note:
+            _combined_preamble = f"{_combined_preamble}\n\n{_fit_note}" if _combined_preamble else _fit_note
+            if isinstance(constraints, dict):
+                _ge0 = constraints.get("_guard_evidence")
+                constraints["_guard_evidence"] = f"{_ge0}\n\n{_fit_note}" if _ge0 else _fit_note
         _guard_evidence = constraints.get("_guard_evidence") if isinstance(constraints, dict) else None
         # Tier 1 — narration mode (RECOMMEND_NARRATION_MODE): blocking (default; LLM prose) | skip
         # (deterministic grounded answer only) | async (skip + enqueue prose out-of-band). LLM
@@ -11288,6 +11278,24 @@ def suggest(
         explicit_constraint_update=explicit_constraint_update,
     )
     referents = _extract_referents(query=query, prior_shortlist=prior_shortlist, current_results=results or [])
+    # ── W3 override: off-catalog hardware class -> category honesty + supplier-ask, never a
+    # confident laptop sale ("$80k A100 servers -> gaming laptops", both audits' headline).
+    # Whatever retrieval pattern-matched is noise: clear products, suppress the prose swap.
+    try:
+        _ocg = constraints.get("_off_catalog") if isinstance(constraints, dict) else None
+        if _ocg:
+            from src.app.services.off_catalog_gate import off_catalog_message
+            _ocg_msg = off_catalog_message(_ocg, query)
+            payload["assistant_message"] = _ocg_msg
+            assistant_message = _ocg_msg
+            payload["off_catalog"] = {**_ocg, "supplier_rfq_offer": True}
+            payload["products"] = []
+            payload["results"] = []
+            payload.pop("right_panel", None)  # tier panels would reseed laptop noise downstream
+            results = []
+            llm_summary_job_id = None
+    except Exception as _e_ocg:
+        _record_partial_failure("off_catalog_gate", _e_ocg, trace_id=trace_id)
     # HONESTY SUPPRESSION (audit 2026-07-08 #10, live-observed): when the deterministic answer
     # carries a refusal/contradiction the guard cannot arithmetically verify ("12 x $629 =
     # $7,548 — over your $1,500"), the async prose swap must NOT replace it — the swap may only

@@ -1,0 +1,204 @@
+{
+  "_comment": "Curated game system-requirements fixtures (Phase W5, steam_requirements connector). Fixture-first: CI and default runtime read THIS file, never the network. Values transcribed from the publisher's official requirements pages on retrieved_at. GPU strings are RAW DESKTOP parts exactly as the publisher states them — desktop→laptop translation lives in gpu_translation.json, NOT here. Non-Steam titles (Fortnite/Valorant/League of Legends/Minecraft) carry source 'publisher' and a null appid; they are cached here because buyers name them constantly.",
+  "version": "2026-07-01",
+  "games": [
+    {
+      "title": "Cyberpunk 2077",
+      "aliases": ["cp2077", "cyberpunk"],
+      "appid": 1091500,
+      "minimum": {
+        "ram_gb": 12,
+        "gpu": "GeForce GTX 1060 6GB / Radeon RX 580 8GB / Arc A380",
+        "storage_gb": 70,
+        "os": "Windows 10 64-bit (SSD required)"
+      },
+      "recommended": {
+        "ram_gb": 16,
+        "gpu": "GeForce RTX 2060 / Radeon RX 5700 XT / Arc A770",
+        "storage_gb": 70,
+        "os": "Windows 10 64-bit (SSD required)"
+      },
+      "tags": ["RPG", "Open World", "AAA"],
+      "review_summary": "Very Positive",
+      "source": "steam",
+      "source_url": "https://store.steampowered.com/app/1091500/Cyberpunk_2077/",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "Fortnite",
+      "aliases": [],
+      "appid": null,
+      "minimum": {
+        "ram_gb": 8,
+        "gpu": "Intel HD 4000 / AMD Radeon Vega 8",
+        "storage_gb": 30,
+        "os": "Windows 10 64-bit"
+      },
+      "recommended": {
+        "ram_gb": 16,
+        "gpu": "Nvidia GTX 1660 / AMD RX 590 (4GB VRAM)",
+        "storage_gb": 30,
+        "os": "Windows 10 64-bit"
+      },
+      "tags": ["Battle Royale", "Shooter", "Free to Play"],
+      "review_summary": null,
+      "source": "publisher",
+      "source_url": "https://www.epicgames.com/help/en-US/c-Category_Fortnite/c-Fortnite_TechnicalSupport/fortnites-system-requirements-a000084842",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "Valorant",
+      "aliases": [],
+      "appid": null,
+      "minimum": {
+        "ram_gb": 4,
+        "gpu": "Intel HD 4000 / Radeon R5 200",
+        "storage_gb": 30,
+        "os": "Windows 10 64-bit (TPM 2.0 and Secure Boot on Windows 11)"
+      },
+      "recommended": {
+        "ram_gb": 4,
+        "gpu": "GeForce GT 730 / Radeon R7 240",
+        "storage_gb": 30,
+        "os": "Windows 10 64-bit (TPM 2.0 and Secure Boot on Windows 11)"
+      },
+      "tags": ["FPS", "Esports", "Competitive", "Free to Play"],
+      "review_summary": null,
+      "source": "publisher",
+      "source_url": "https://playvalorant.com/en-us/specs/",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "Baldur's Gate 3",
+      "aliases": ["bg3", "baldurs gate"],
+      "appid": 1086940,
+      "minimum": {
+        "ram_gb": 8,
+        "gpu": "Nvidia GTX 970 / AMD RX 480 (4GB+ VRAM)",
+        "storage_gb": 150,
+        "os": "Windows 10 64-bit (SSD required)"
+      },
+      "recommended": {
+        "ram_gb": 16,
+        "gpu": "Nvidia RTX 2060 Super / AMD RX 5700 XT (8GB+ VRAM)",
+        "storage_gb": 150,
+        "os": "Windows 10 64-bit (SSD required)"
+      },
+      "tags": ["RPG", "CRPG", "Story Rich", "AAA"],
+      "review_summary": "Overwhelmingly Positive",
+      "source": "steam",
+      "source_url": "https://store.steampowered.com/app/1086940/Baldurs_Gate_3/",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "Counter-Strike 2",
+      "aliases": ["cs2", "csgo", "counter strike"],
+      "appid": 730,
+      "minimum": {
+        "ram_gb": 8,
+        "gpu": "1 GB VRAM, DirectX 11 compatible (GTX 750-class)",
+        "storage_gb": 85,
+        "os": "Windows 10 64-bit"
+      },
+      "recommended": {
+        "ram_gb": 16,
+        "gpu": "GeForce GTX 1060 / Radeon RX 580",
+        "storage_gb": 85,
+        "os": "Windows 10 64-bit"
+      },
+      "tags": ["FPS", "Esports", "Competitive", "Free to Play"],
+      "review_summary": "Very Positive",
+      "source": "steam",
+      "source_url": "https://store.steampowered.com/app/730/CounterStrike_2/",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "Elden Ring",
+      "aliases": [],
+      "appid": 1245620,
+      "minimum": {
+        "ram_gb": 12,
+        "gpu": "GeForce GTX 1060 3GB / Radeon RX 580 4GB",
+        "storage_gb": 60,
+        "os": "Windows 10 64-bit"
+      },
+      "recommended": {
+        "ram_gb": 16,
+        "gpu": "GeForce GTX 1070 8GB / Radeon RX Vega 56 8GB",
+        "storage_gb": 60,
+        "os": "Windows 10/11 64-bit"
+      },
+      "tags": ["Souls-like", "Open World", "AAA"],
+      "review_summary": "Very Positive",
+      "source": "steam",
+      "source_url": "https://store.steampowered.com/app/1245620/ELDEN_RING/",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "League of Legends",
+      "aliases": ["lol", "league"],
+      "appid": null,
+      "minimum": {
+        "ram_gb": 4,
+        "gpu": "GeForce 9600 GT / Intel HD 4600",
+        "storage_gb": 16,
+        "os": "Windows 10 64-bit"
+      },
+      "recommended": {
+        "ram_gb": 8,
+        "gpu": "GeForce GTX 560 / Intel UHD 630",
+        "storage_gb": 16,
+        "os": "Windows 10 64-bit"
+      },
+      "tags": ["MOBA", "Esports", "Free to Play"],
+      "review_summary": null,
+      "source": "publisher",
+      "source_url": "https://support-leagueoflegends.riotgames.com/hc/en-us/articles/201752654",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "Minecraft",
+      "aliases": ["minecraft java"],
+      "appid": null,
+      "minimum": {
+        "ram_gb": 4,
+        "gpu": "Intel HD 4000 / AMD Radeon R5 (integrated, OpenGL 4.4)",
+        "storage_gb": 4,
+        "os": "Windows 10 64-bit"
+      },
+      "recommended": {
+        "ram_gb": 8,
+        "gpu": "GeForce 700 series / AMD Radeon Rx 200 series (discrete, OpenGL 4.5)",
+        "storage_gb": 4,
+        "os": "Windows 10 64-bit"
+      },
+      "tags": ["Sandbox", "Survival", "Family Friendly"],
+      "review_summary": null,
+      "source": "publisher",
+      "source_url": "https://www.minecraft.net/en-us/get-minecraft",
+      "retrieved_at": "2026-07-01"
+    },
+    {
+      "title": "Call of Duty: Warzone",
+      "aliases": ["warzone", "cod warzone", "call of duty"],
+      "appid": 1962663,
+      "minimum": {
+        "ram_gb": 8,
+        "gpu": "GeForce GTX 960 / Radeon RX 470 (DirectX 12)",
+        "storage_gb": 175,
+        "os": "Windows 10 64-bit"
+      },
+      "recommended": {
+        "ram_gb": 16,
+        "gpu": "GeForce GTX 1080 / RTX 3060 / Radeon RX 6600 XT",
+        "storage_gb": 175,
+        "os": "Windows 10/11 64-bit"
+      },
+      "tags": ["FPS", "Battle Royale", "Free to Play"],
+      "review_summary": "Mixed",
+      "source": "steam",
+      "source_url": "https://store.steampowered.com/app/1962663/Call_of_Duty_Warzone/",
+      "retrieved_at": "2026-07-01"
+    }
+  ]
+}

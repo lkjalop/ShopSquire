@@ -2493,6 +2493,12 @@ async def chat_query(
         multi_intent = {"warnings": [f"multi_intent planner error: {str(_mi_exc)[:120]}"],
                         "needs_confirmation": True}
 
+    # W3: off-catalog gate answers pass through UNTOUCHED — chat's budget-band prepends and
+    # message recomposition would bury the category honesty under laptop framing.
+    if isinstance(data, dict) and data.get("off_catalog"):
+        assistant_message = data.get("assistant_message") or assistant_message
+        products = []
+
     out = {
         "products": products,
         "view_mode": view_mode,
@@ -2521,6 +2527,11 @@ async def chat_query(
         # poll /api/v1/recommend/narration/{job_id} and replace the message in place (no blocking wait).
         "llm_summary_job_id": data.get("llm_summary_job_id"),
         "summary_pending": bool(data.get("summary_pending") or data.get("llm_summary_job_id")),
+        # W3/W4 forward-through (2026-07-08): the off-catalog verdict and workload fit verdicts
+        # are computed in recommend.suggest — without forwarding, the frontend (which hits
+        # /chat/query, not /suggest) loses the comparison AGAIN.
+        "off_catalog": data.get("off_catalog"),
+        "workload_fit": data.get("workload_fit"),
         "voice_used": bool(voice_transcript),
         "budget_viability": budget_viability,
         "use_case_analysis": use_case_analysis,
