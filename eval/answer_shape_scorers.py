@@ -50,12 +50,19 @@ def score_faithfulness(
     *,
     budget_min: int | None = None,
     budget_max: int | None = None,
+    preamble: str | None = None,
 ) -> tuple[bool, list[str]]:
     """True when the answer invents no product/price/spec and parrots no quarantined
     payload. Delegates to the production claim-guard, run as a MEASUREMENT here
-    instead of a gate. Returns (grounded, violations)."""
+    instead of a gate. Returns (grounded, violations).
+
+    ``preamble`` is the platform-authored narration context (step-up facts, capability
+    registry) and counts as legitimate evidence, matching the guard's production scope
+    (layer-7 fix, bb4cd0a) — without it the eval penalizes exactly the honest answers
+    that cite the platform's own facts. Default None preserves results-only scoring."""
     from src.app.services.product_claim_guard import verify_product_narration
 
     gr = verify_product_narration(message or "", results or [],
-                                  budget_min=budget_min, budget_max=budget_max)
+                                  budget_min=budget_min, budget_max=budget_max,
+                                  preamble=preamble)
     return gr.grounded, list(gr.violations)

@@ -30,12 +30,34 @@ def _key(job_id: str) -> str:
     return _KEY.format(job_id=str(job_id))
 
 
+_RESERVED_KEYS = ("status", "assistant_message")
+
+
+def _redact_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """The job record is served VERBATIM to any client holding the job id, so meta must be
+    category-level only (audit 2026-07-08): violation strings can embed the first 40 chars of a
+    quarantined URL and error strings can embed internal hosts/paths. Reserved keys are dropped
+    so a producer's meta can never shadow the record's own lifecycle fields."""
+    out: Dict[str, Any] = {}
+    for k, v in meta.items():
+        if k in _RESERVED_KEYS:
+            continue
+        if k == "violations" and isinstance(v, list):
+            # keep the class before the ':' ("ungrounded_url:https://evil..." -> "ungrounded_url")
+            out[k] = sorted({str(x).split(":", 1)[0] for x in v})[:6]
+        elif k == "error":
+            out[k] = "narration_job_failed"
+        else:
+            out[k] = v
+    return out
+
+
 def put_narration(redis: Any, job_id: str, *, status: str, message: Optional[str], meta: Optional[Dict[str, Any]] = None) -> None:
     if redis is None:
         return
     record: Dict[str, Any] = {"status": status, "assistant_message": message}
     if meta:
-        record.update(meta)
+        record.update(_redact_meta(meta))
     with contextlib.suppress(Exception):
         redis.setex(_key(job_id), _TTL_SECONDS, json.dumps(record))
 

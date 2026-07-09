@@ -112,6 +112,60 @@ def _evidence_text(results: list[dict[str, Any]]) -> str:
     return " ".join(parts).lower()
 
 
+_DOLLAR_AMOUNT_RE = re.compile(r"\$\s*(\d[\d,]*)")
+_KEY_UNIT_RE = re.compile(r"(?:^|_)(gb|tb|hz|ghz|mhz|wh|inch(?:es)?)$")
+
+
+def _amounts_in(text: str) -> set[int]:
+    """$-prefixed amounts stated in platform-authored text, as a numeric set (audit 2026-07-08:
+    substring matching let any digit-subsequence of a larger preamble number 'ground' an
+    invented price). $-prefix required so '~7 days' never whitelists a $7 claim."""
+    out: set[int] = set()
+    for m in _DOLLAR_AMOUNT_RE.finditer(text or ""):
+        try:
+            out.add(int(m.group(1).replace(",", "")))
+        except ValueError:
+            continue
+    return out
+
+
+def _spec_unit_index(results: list[dict[str, Any]], preamble: str | None) -> set[tuple[float, str]]:
+    """Every (value, unit) pair the evidence actually states — from number+unit adjacency in
+    value strings ('512GB SSD' -> (512, gb)) and from unit-bearing keys ('ram_gb': 32 ->
+    (32, gb)) — plus platform-authored preamble facts ('16GB GPU memory'). Numeric membership
+    replaces all substring heuristics."""
+    vocab = _load_store_vocab()
+    pair_re = vocab["spec_unit_re"]
+    pairs: set[tuple[float, str]] = set()
+
+    def _add_text(s: str) -> None:
+        for n, u in pair_re.findall(s or ""):
+            try:
+                pairs.add((float(n), str(u).lower()))
+            except ValueError:
+                continue
+
+    for r in results or []:
+        if not isinstance(r, dict):
+            continue
+        _add_text(str(r.get("name") or ""))
+        specs = r.get("specs")
+        if isinstance(specs, dict):
+            for k, v in specs.items():
+                _add_text(str(v))
+                km = _KEY_UNIT_RE.search(str(k).lower())
+                if km:
+                    try:
+                        unit = km.group(1)
+                        pairs.add((float(v), "inch" if unit.startswith("inch") else unit))
+                    except (TypeError, ValueError):
+                        continue
+        elif specs:
+            _add_text(str(specs))
+    _add_text(preamble or "")
+    return pairs
+
+
 def _evidence_brands(results: list[dict[str, Any]]) -> set[str]:
     out: set[str] = set()
     for r in results or []:
@@ -167,6 +221,7 @@ def verify_product_narration(
     ev_brands = _evidence_brands(results)
     ev_prices = _evidence_prices(results)
     pre_low = (preamble or "").lower()
+    pre_amounts = _amounts_in(preamble or "")
 
     # 1. Quarantined payload must never appear in narration (URLs / injection markers).
     for url in _URL_RE.findall(text):
@@ -200,9 +255,10 @@ def verify_product_narration(
             continue
         if hi is not None and lo is None and val <= hi:
             continue
-        # allow if the platform's own preamble stated this amount (step-up price,
-        # capability autonomy limit) — with or without thousands separators
-        if pre_low and (f"{val:,}" in pre_low or str(val) in pre_low.replace(",", "")):
+        # allow if the platform's own preamble stated this amount (step-up price, capability
+        # autonomy limit) — NUMERIC set membership, never substring (audit 2026-07-08: the
+        # substring form let an invented $2,000 pass because "$20,000" was in the preamble)
+        if val in pre_amounts:
             continue
         violations.append(f"ungrounded_price:{val}")
 
@@ -215,44 +271,42 @@ def verify_product_narration(
         for r in (results or [])
     )
     spec_tokens = [f"{n}{u}".lower() for n, u in _vocab["spec_unit_re"].findall(text)] if _has_spec_evidence else []
-    spec_tokens += _vocab["gpu_re"].findall(text) if _has_spec_evidence else []
-    # Structure-aware spec matching (layer 7b, 2026-07-08): evidence specs render as
-    # "gpu_vram_gb 8" / "ram_gb 32" (unit in the KEY, number in the VALUE) while prose says
-    # "8GB" — a literal token match rejects every HONEST spec citation, so the guard was
-    # silently discarding nearly all grounded prose. Squash punctuation/whitespace and also
-    # try the reversed unit+number form ("8gb" -> "gb8" matches "gpuvramgb8").
-    _squash = lambda s: re.sub(r"[^a-z0-9]", "", s)
-    ev_squash = _squash(ev_text)
-    pre_squash = _squash(pre_low)
+    gpu_tokens = _vocab["gpu_re"].findall(text) if _has_spec_evidence else []
+    # STRUCTURED spec comparison (audit 2026-07-08, replaces the squash/reversed/TB string
+    # heuristics): the earlier substring matching leaked in both directions — evidence
+    # "gpu_vram_gb 8" rejected honest "8GB" prose, then the squash fix let invented "12GB"
+    # ground against "512GB SSD" and "gb10" against "gb1024". Specs are NUMBERS with UNITS:
+    # index every (value, unit) pair the evidence states — from value strings ("512GB SSD")
+    # AND from unit-bearing keys ("ram_gb": 32) — normalize tb→gb, and require exact numeric
+    # membership. No substrings anywhere.
+    ev_units = _spec_unit_index(results, preamble)
     _num_unit = re.compile(r"^(\d+(?:\.\d+)?)([a-z]+)$")
-
-    def _spec_grounded(t: str) -> bool:
-        for hay_text, hay_squash in ((ev_text, ev_squash), (pre_low, pre_squash)):
-            if not hay_text:
-                continue
-            if t in hay_text or re.search(rf"\b{re.escape(t)}\b", hay_text):
-                return True
-            if t and t in hay_squash:
-                return True
-            m2 = _num_unit.match(t)
-            if m2:
-                num, unit = m2.group(1), m2.group(2)
-                if f"{unit}{num}" in hay_squash:
-                    return True
-                # TB claims vs GB evidence ("1TB SSD" vs "storage_gb 1024"): try both
-                # decimal and binary conversions, in both number-unit orders.
-                if unit == "tb":
-                    try:
-                        for gb in (int(float(num) * 1000), int(float(num) * 1024)):
-                            if f"{gb}gb" in hay_squash or f"gb{gb}" in hay_squash:
-                                return True
-                    except ValueError:
-                        pass
-        return False
-
     for tok in spec_tokens:
         t = str(tok).lower()
-        if _spec_grounded(t):
+        m2 = _num_unit.match(t)
+        if not m2:
+            continue
+        try:
+            num = float(m2.group(1))
+        except ValueError:
+            continue
+        unit = m2.group(2)
+        candidates = {(num, unit)}
+        if unit == "tb":  # prose says TB, evidence may state GB
+            candidates |= {(num * 1000, "gb"), (num * 1024, "gb")}
+        if unit == "gb":  # prose says GB, evidence may state TB
+            for div in (1000.0, 1024.0):
+                candidates.add((num / div, "tb"))
+        if not (candidates & ev_units):
+            violations.append(f"ungrounded_spec:{t}")
+    # GPU model tokens ("rtx 4070" / bare "4070"): word-boundary match on the RAW haystacks —
+    # boundary-safe, and never against conversation text (preamble here is platform-authored
+    # guard evidence only; see verify caller).
+    for tok in gpu_tokens:
+        t = str(tok).lower()
+        if re.search(rf"\b{re.escape(t)}\b", ev_text):
+            continue
+        if pre_low and re.search(rf"\b{re.escape(t)}\b", pre_low):
             continue
         violations.append(f"ungrounded_spec:{t}")
 

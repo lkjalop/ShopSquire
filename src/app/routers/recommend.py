@@ -101,7 +101,11 @@ _VISION_EXECUTOR = _futures.ThreadPoolExecutor(
 # Module-level pool for async LLM narration (RECOMMEND_NARRATION_MODE=async): the deterministic
 # answer returns instantly; the slow LLM prose is computed here and fetched via /narration/{job_id}.
 _NARRATION_EXECUTOR = _futures.ThreadPoolExecutor(
-    max_workers=int(os.getenv("NARRATION_WORKER_THREADS", "2")),
+    # 4 (was 2, audit 2026-07-08 #14): force-on async narration submits a job per non-fast-path
+    # turn with up to ~90s worst-case occupancy (45s descriptor timeout x retry) — two slow jobs
+    # starved the queue past the frontend's poll budget, so guard-passed prose was computed and
+    # never shown.
+    max_workers=int(os.getenv("NARRATION_WORKER_THREADS", "4")),
     thread_name_prefix="narration_worker",
 )
 
@@ -274,10 +278,23 @@ def _bounded_knowledge_answer(
 ) -> str | None:
     timing = payload.setdefault("timing_breakdown", {})
     started = time.perf_counter()
+    # Audit 2026-07-08 #6: this lane resolved the mode env-ONLY (flags ignored) so the flags-file
+    # "async" flip left it BLOCKING, and its 3.0s clamp sat below every model's latency while the
+    # inner call ran to the 45s descriptor — every knowledge turn timed out AND parked a 45-90s
+    # abandoned thread in the shared narration executor. Same env->flags resolution as the main
+    # lane; the wait honors the model descriptor instead of a dead 3s cap.
+    _flag_mode = None
+    try:
+        from src.app.feature_flags import get_flags as _kn_flags
+        _flag_mode = (_kn_flags() or {}).get("RECOMMEND_NARRATION_MODE")
+    except Exception:
+        _flag_mode = None
     mode = str(
         payload.get("narration_mode")
         or timing.get("narration_mode")
-        or os.getenv("RECOMMEND_NARRATION_MODE", "blocking")
+        or os.getenv("RECOMMEND_NARRATION_MODE", "")
+        or _flag_mode
+        or "blocking"
     ).strip().lower()
     timing[f"{timing_prefix}_mode"] = mode
     if mode != "blocking":
@@ -285,10 +302,10 @@ def _bounded_knowledge_answer(
         timing[f"{timing_prefix}_ms"] = int((time.perf_counter() - started) * 1000)
         return None
     try:
-        narration_budget = float(os.getenv("RECOMMEND_NARRATION_TIMEOUT_SEC", "8") or 8)
-    except (TypeError, ValueError):
-        narration_budget = 8.0
-    budget = max(0.0, min(narration_budget, 3.0))
+        from src.app.services.model_profiles import narration_timeout_s as _kn_budget
+        budget = max(0.0, _kn_budget(model))
+    except Exception:
+        budget = 8.0
     future = _NARRATION_EXECUTOR.submit(
         _build_knowledge_answer,
         query,
@@ -3907,10 +3924,10 @@ def _summarize_results(
         # (was hardcoded None, which made async-worker failures completely invisible: the job
         # reported done+no-prose and nothing anywhere said why)
         try:
-            import traceback as _tb
+            # class + message only (audit #20): format_exc leaked absolute paths into UI-visible
+            # trace events and its head-limited frames missed the raise site anyway
             log_trace_event(trace_id, "llm_error", "llm", model or None, "system", None,
-                            {"error": str(e)[:200], "stage": "summary",
-                             "where": _tb.format_exc(limit=3)[-400:]})
+                            {"error": f"{type(e).__name__}: {str(e)[:160]}", "stage": "summary"})
         except Exception:
             pass
         return None, None
@@ -10855,16 +10872,22 @@ def suggest(
     _signals = _reason.get("signals") or {}
     _use_case_str = str(constraints.get("use_case") or "").lower()
     _has_budget_range = (constraints.get("budget_min") is not None and constraints.get("budget_max") is not None)
+    # ONE resolution of the narration-force policy (audit 2026-07-08 #5: this was parsed
+    # env-or-flags here but env-ONLY at the exact_fit overwrite below — so the shipped
+    # flags-driven config re-engaged mute-layer 5 on fit-conflict turns). Resolved once,
+    # consumed at BOTH sites.
+    _narr_forced = str(
+        os.getenv("RECOMMEND_NARRATION_FORCE", "")
+        or (flags.get("RECOMMEND_NARRATION_FORCE") if isinstance(flags, dict) else "")
+    ).strip().lower() in ("1", "true", "yes", "on")
     _llm_force = (
         # B4 (was the brain-on A/B experiment switch, now production policy): force grounded LLM
-        # narration on every non-fast-path turn — env wins, then feature_flags.json. Mute-layer 1
-        # (bb4cd0a) was this gate scoring hard queries complexity 2 < 4; with narration mode
-        # "async" the cost is out-of-band (deterministic answer renders instantly, guarded prose
-        # swaps in), so the complexity gate no longer needs to ration a blocking cost.
-        str(
-            os.getenv("RECOMMEND_NARRATION_FORCE", "")
-            or (flags.get("RECOMMEND_NARRATION_FORCE") if isinstance(flags, dict) else "")
-        ).strip().lower() in ("1", "true", "yes", "on")
+        # narration on every non-fast-path turn. Mute-layer 1 (bb4cd0a) was this gate scoring
+        # hard queries complexity 2 < 4; with narration mode "async" the cost is out-of-band
+        # (deterministic answer renders instantly, guarded prose swaps in), so the complexity
+        # gate no longer needs to ration a blocking cost. The signal clauses below are the
+        # flag-OFF fallback path.
+        _narr_forced
         or _complexity_score >= 4                           # medium-tier or above
         or bool(_signals.get("use_case_specific"))         # gaming/creative/engineering
         or bool(_signals.get("budget_question"))           # "is $X enough?"
@@ -10915,6 +10938,11 @@ def suggest(
         _ev_note = payload.get("market_evidence_note") if isinstance(payload, dict) else None
         if _ev_note and _ev_on:
             _combined_preamble = f"{_combined_preamble}\n\n{_ev_note}" if _combined_preamble else _ev_note
+            # market evidence is platform-authored -> also legitimate guard evidence
+            if isinstance(constraints, dict):
+                _ge = constraints.get("_guard_evidence")
+                constraints["_guard_evidence"] = f"{_ge}\n\n{_ev_note}" if _ge else _ev_note
+        _guard_evidence = constraints.get("_guard_evidence") if isinstance(constraints, dict) else None
         # Tier 1 — narration mode (RECOMMEND_NARRATION_MODE): blocking (default; LLM prose) | skip
         # (deterministic grounded answer only) | async (skip + enqueue prose out-of-band). LLM
         # narration was 85-91% of route latency; skip/async leave assistant_message None here so the
@@ -10933,6 +10961,7 @@ def suggest(
             combined_preamble=_combined_preamble, narration_inputs=narration_inputs,
             summarize_fn=_summarize_results,
             executor=_NARRATION_EXECUTOR, redis=redis,
+            guard_evidence=_guard_evidence,
         )
         # 0.4 Grounded narration guard (flag COMMERCE_NARRATION_GUARD) — reject ungrounded LLM claims
         # and fall back to deterministic prose. Extracted to apply_product_claim_guard.
@@ -10943,7 +10972,8 @@ def suggest(
             assistant_message, query=query, results=results, constraints=constraints,
             brand_budget_answer=brand_budget_answer, trace_id=trace_id,
             deterministic_fn=_deterministic_assistant_message,
-            combined_preamble=_combined_preamble,
+            # provenance-scoped: platform-authored facts only, never session/trace text
+            combined_preamble=_guard_evidence,
         )
         _narration_mode_tel = _narr_mode
         _narration_model_tel = _summ_model
@@ -11004,7 +11034,8 @@ def suggest(
     # MUTE LAYER 5 (2026-07-08 brain-on audit): this overwrite discards the LLM prose EXACTLY on the
     # hard queries (fit-conflict turns are the ones that most need nuanced narration). Under the
     # experiment force flag the guarded LLM prose stands; default behavior unchanged.
-    _narr_forced = str(os.getenv("RECOMMEND_NARRATION_FORCE", "")).strip().lower() in ("1", "true", "yes", "on")
+    # _narr_forced resolved ONCE above (env-or-flags) — audit 2026-07-08 #5: an env-only re-parse
+    # here silently re-engaged the mute-layer-5 overwrite in the shipped flags-driven config.
     if (constraints.get("use_case_fit_status") or {}).get("exact_fit") is False and not (_narr_forced and assistant_message):
         assistant_message = _deterministic_assistant_message(
             query,
@@ -11257,6 +11288,12 @@ def suggest(
         explicit_constraint_update=explicit_constraint_update,
     )
     referents = _extract_referents(query=query, prior_shortlist=prior_shortlist, current_results=results or [])
+    # HONESTY SUPPRESSION (audit 2026-07-08 #10, live-observed): when the deterministic answer
+    # carries a refusal/contradiction the guard cannot arithmetically verify ("12 x $629 =
+    # $7,548 — over your $1,500"), the async prose swap must NOT replace it — the swap may only
+    # ever upgrade phrasing, never downgrade truth.
+    if llm_summary_job_id and _qty_refusal_note:
+        llm_summary_job_id = None
     if llm_summary_job_id:
         payload["llm_summary_job_id"] = llm_summary_job_id
     try:

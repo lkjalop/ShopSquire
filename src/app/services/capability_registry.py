@@ -28,8 +28,10 @@ from src.app.platform.store_profile import profile_slot
 # declares it under does_not_offer — detection alone never asserts anything.
 _UNIVERSAL_TOPICS: Dict[str, str] = {
     "payment_plans": r"payment\s*plan|pay\s*(?:monthly|weekly|later|in\s*insta)|installment|instalment|afterpay|zip\s*pay|klarna|layby|lay-?away",
-    "in_house_financing": r"financ\w+|loan|credit\s*(?:terms|line|option)|lease-?to-?own",
-    "leasing": r"\bleas\w+|\brent\w*\b|\bhire\b",
+    "in_house_financing": r"financ\w+|\bloan\b|credit\s*(?:terms|line|option)|lease-?to-?own",
+    # audit 2026-07-08: \bleas\w+ matched "least" ("at least 16GB RAM" injected the whole
+    # does-not-offer list) — enumerate real lease forms only
+    "leasing": r"\bleas(?:e|es|ed|ing)\b|\brent(?:al|ing)?\b|\bhire\b",
     "trade_in": r"trade[\s-]?in|buy[\s-]?back|part[\s-]?exchange",
 }
 
@@ -40,13 +42,14 @@ _HUMAN_LABELS: Dict[str, str] = {
     "trade_in": "trade-in or buyback",
 }
 
-# Buyer phrasings that make the fulfilment/backorder fact relevant.
+# Buyer phrasings that make the fulfilment/backorder fact relevant. Audit 2026-07-08:
+# "how many"/"wait"/"availab\w+" injected reorder talk into port-count and feature questions —
+# require explicit stock/reorder vocabulary.
 _BACKORDER_TOPIC = re.compile(
-    r"back[\s-]?order|re-?order|restock|re-?stock|lead\s*time|in\s*stock|out\s*of\s*stock|availab\w+|how\s*many|wait\w*", re.I
+    r"back[\s-]?order|re-?order|restock|re-?stock|lead\s*time|in\s*stock|out\s*of\s*stock|"
+    r"stock\s*level|wait\s*(?:for|on)\s*(?:a\s*)?(?:re-?order|restock|re-?stock|stock|delivery|units)",
+    re.I,
 )
-
-# Money amounts for the autonomy-limit fact: "$25,000", "25000", "$25k", "25 k".
-_MONEY = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k\b)?", re.I)
 
 
 def get_capabilities(profile_id: Optional[str] = None) -> Dict[str, Any]:
@@ -56,16 +59,19 @@ def get_capabilities(profile_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 def _max_amount(query: str) -> float:
-    best = 0.0
-    for m in _MONEY.finditer(query):
-        try:
-            val = float(m.group(1).replace(",", ""))
-        except Exception:
-            continue
-        if m.group(2):
-            val *= 1000
-        best = max(best, val)
-    return best
+    """Largest MONEY amount in the query — via budget_grammar, the platform's ONE money parser
+    (audit 2026-07-08: a hand-rolled regex here was the sixth duplicate grammar and read
+    'i9-14900K' as $14,900,000 and '20000mAh' as $20,000, falsely triggering the autonomy note;
+    budget_grammar's unit guard rejects both)."""
+    try:
+        from src.app.services.budget_grammar import parse_budget
+        parsed = parse_budget(query)
+        if parsed is None:
+            return 0.0
+        vals = [v for v in (getattr(parsed, "budget_min", None), getattr(parsed, "budget_max", None)) if v]
+        return float(max(vals)) if vals else 0.0
+    except Exception:
+        return 0.0
 
 
 def capability_preamble_note(query: str, profile_id: Optional[str] = None) -> Optional[str]:
@@ -95,10 +101,15 @@ def capability_preamble_note(query: str, profile_id: Optional[str] = None) -> Op
         lines.append(line)
     for slug, spec in (custom or {}).items():
         try:
+            if not isinstance(spec, dict):
+                continue
             if re.search(str(spec.get("pattern") or ""), q) and spec.get("statement"):
                 lines.append(f"- {spec['statement']}")
-        except re.error:
-            continue  # malformed vertical pattern: skip fail-safe, never crash narration
+        except Exception:
+            # ANY malformed entry skips fail-safe (audit 2026-07-08: catching re.error only let a
+            # non-dict entry raise AttributeError, and the caller's blanket except then dropped
+            # the ENTIRE capability note — one bad line silently un-declared the whole boundary)
+            continue
 
     limits = caps.get("autonomy_limits") if isinstance(caps.get("autonomy_limits"), dict) else {}
     try:

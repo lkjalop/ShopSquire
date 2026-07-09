@@ -264,8 +264,13 @@ def eval_answer_shape() -> Dict[str, Any]:
         results = body.get("results") or []
         metrics[metric][1] += 1
         if metric == "faithfulness":
+            # Preamble = platform-authored evidence (case-supplied, or echoed by the API
+            # when exposed) so honest step-up/capability citations aren't scored as
+            # fabrication. None today -> identical to the old results-only scoring.
+            _preamble = r.get("preamble") or body.get("narration_preamble") or None
             grounded, viol = score_faithfulness(msg, results,
-                                                budget_min=r.get("budget_min"), budget_max=r.get("budget_max"))
+                                                budget_min=r.get("budget_min"), budget_max=r.get("budget_max"),
+                                                preamble=_preamble)
             ok = grounded
             if not ok:
                 misses.append(f"{r['id']} [faith]: {','.join(viol[:3])}")

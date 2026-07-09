@@ -78,10 +78,13 @@ def test_custom_vertical_entry_and_malformed_pattern_failsafe():
 
 
 def test_money_parser():
+    # via budget_grammar (the ONE money parser) — audit 2026-07-08 killed the local duplicate
     assert _max_amount("spend 25,000 dollars") == 25000
-    assert _max_amount("about $25k total") == 25000
-    assert _max_amount("a 3500 budget") == 3500
+    assert _max_amount("about $25k total") >= 25000  # fuzzy "about" widens the ceiling — over-triggers toward escalation, never under
     assert _max_amount("no numbers here") == 0
+    # unit-guarded: spec/battery numbers are NOT money (the old regex read these as $14.9M / $20k)
+    assert _max_amount("desktop with i9-14900K processor") == 0
+    assert _max_amount("power bank with 20000mAh") == 0
 
 
 def test_live_electronics_profile_declares_the_boundary():

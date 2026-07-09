@@ -184,14 +184,19 @@ def test_claim_guard_noop_when_disabled_or_empty():
     ) == "msg"
 
 
-def test_claim_guard_never_raises_on_verify_failure():
+def test_claim_guard_fails_closed_on_verify_failure():
+    # Audit 2026-07-08 #4/#13: a guard that cannot verify must NOT certify — the unverified LLM
+    # prose is replaced by deterministic grounded copy and telemetry says guard_error, never a
+    # false "passed". (Old contract kept the unverified prose = fail-open.)
     def _boom(*a, **k):
         raise RuntimeError("guard down")
+    constraints = {}
     out = apply_product_claim_guard(
-        "msg", query="q", results=[{"sku": "A"}], constraints={}, brand_budget_answer="", trace_id="t",
+        "msg", query="q", results=[{"sku": "A"}], constraints=constraints, brand_budget_answer="", trace_id="t",
         deterministic_fn=_det, guard_enabled_fn=lambda: True, verify_fn=_boom,
     )
-    assert out == "msg"  # failure swallowed, original kept
+    assert out == "DETERMINISTIC GROUNDED"
+    assert constraints["_claim_guard_status"] == "guard_error_fell_back"
 
 
 # ── prepare_narration ──

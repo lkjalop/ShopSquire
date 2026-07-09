@@ -148,6 +148,12 @@ type BackendDeviceLane = {
 const IMAGE_FAST_TRIAGE_TIMEOUT_MS = 3000;
 const IMAGE_DEEP_TRIAGE_DELAY_MS = 30000;
 
+// Async-narration poll registry: a job id is live while its poll chain is allowed to run.
+// tick() bails when its id is gone, so deleting from this Set is the cancellation mechanism
+// — without it every message spawned an un-cancellable setTimeout→fetch chain (zombie fetches
+// kept hitting /narration/{id} long after the message was replaced).
+const activeNarrationJobs = new Set<string>();
+
 type BackendStatus = {
   ok: boolean;
   latencyMs: number | null;
@@ -1846,8 +1852,20 @@ export default function App() {
         // — on timeout/error we keep the deterministic grounded answer already shown.
         if (narrationJobId) {
           const _poll = (() => {
+            activeNarrationJobs.add(narrationJobId);
             let tries = 0;
+            // Exponential backoff 1250 → 2500 → 5000ms (capped): ~12 ticks keeps roughly the
+            // old ~45s budget (matches model-descriptor narration timeouts) with a third of
+            // the fetches. Sibling jobs from earlier messages stay live — only this job's
+            // removal from activeNarrationJobs stops this chain.
+            const maxTries = 12;
+            const nextDelayMs = () => Math.min(1250 * Math.pow(2, tries), 5000);
             const tick = async () => {
+              // Cancelled (message content replaced / job cleared): stop the chain, no fetch.
+              if (!activeNarrationJobs.has(narrationJobId)) {
+                activeNarrationJobs.delete(narrationJobId);
+                return;
+              }
               tries += 1;
               try {
                 const nr = await fetch(apiUrl(`/api/v1/recommend/narration/${encodeURIComponent(narrationJobId)}`), {
@@ -1858,21 +1876,30 @@ export default function App() {
                 const prose = (nd && typeof nd.assistant_message === 'string') ? nd.assistant_message.trim() : '';
                 if (status === 'done' && prose) {
                   const polished = _stripTechnicalTokens(prose);
+                  // The mapper below clears narrationJobId from the message, so drop the job
+                  // from the registry with it — the id is dead once the content is swapped in.
                   setMessages(prev => prev.map(m =>
                     m.narrationJobId === narrationJobId
                       ? { ...m, content: polished, narrationJobId: undefined }
                       : m));
+                  activeNarrationJobs.delete(narrationJobId);
                   return;
                 }
                 // done-with-no-prose = claim guard rejected the LLM draft: the deterministic
                 // grounded answer already shown IS the final answer — stop polling now.
-                if (status === 'done' || status === 'error' || tries >= 36) return;
+                if (status === 'done' || status === 'error' || tries >= maxTries) {
+                  activeNarrationJobs.delete(narrationJobId);
+                  return;
+                }
               } catch {
-                if (tries >= 36) return;
+                if (tries >= maxTries) {
+                  activeNarrationJobs.delete(narrationJobId);
+                  return;
+                }
               }
-              setTimeout(tick, 1250);  // ~45s total budget (matches model-descriptor narration timeouts)
+              setTimeout(tick, nextDelayMs());
             };
-            setTimeout(tick, 1250);
+            setTimeout(tick, nextDelayMs());
           });
           _poll();
         }

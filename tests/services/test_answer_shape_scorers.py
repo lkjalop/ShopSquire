@@ -54,3 +54,27 @@ def test_faithfulness_invented_product_fails():
     grounded, viol = score_faithfulness("The Razer Blade is the top pick.", _RESULTS)
     assert not grounded
     assert any(v.startswith("ungrounded_product") for v in viol)
+
+
+_PREAMBLE = (
+    "Step-up option outside current results: Asus ProArt 16 (RTX 5070, 16GB VRAM) at $5,999.\n"
+    "STORE CAPABILITY FACTS: Orders at or above $20,000 require a human account manager."
+)
+
+
+def test_faithfulness_preamble_cited_fact_grounded_with_preamble_only():
+    # Layer-7 scope fix (bb4cd0a) threaded into the eval: an honest answer citing the
+    # platform's OWN step-up fact must not be certified as fabrication.
+    prose = "If you can stretch, the Asus ProArt 16 at $5,999 adds 16GB of VRAM."
+    grounded, _ = score_faithfulness(prose, _RESULTS, budget_min=1300, budget_max=1800)
+    assert not grounded  # default None preserves the old results-only scope
+    grounded2, viol2 = score_faithfulness(prose, _RESULTS, budget_min=1300, budget_max=1800,
+                                          preamble=_PREAMBLE)
+    assert grounded2, viol2
+
+
+def test_faithfulness_invented_product_still_fails_with_preamble():
+    grounded, viol = score_faithfulness("The Razer Blade is the top pick.", _RESULTS,
+                                        preamble=_PREAMBLE)
+    assert not grounded
+    assert any(v.startswith("ungrounded_product") for v in viol)

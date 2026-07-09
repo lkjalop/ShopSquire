@@ -99,6 +99,7 @@ def run_narration(
     executor: Any = None,
     redis: Any = None,
     submit_fn: Optional[Callable[..., Any]] = None,
+    guard_evidence: Any = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """Tier-1 narration latency control. Returns (assistant_message, llm_summary_job_id) and writes
     narration_mode / summary_ms / narration_pending into ``timing_breakdown``.
@@ -169,8 +170,15 @@ def run_narration(
             # through the out-of-band swap-in with no verification. On rejection the job yields no
             # message, so the frontend simply keeps the deterministic grounded answer it already
             # rendered — the swap only ever upgrades truthful prose.
-            _results_snapshot = list(results or [])
+            import copy as _copy
+            # deep-copy: the request thread keeps annotating these dicts (stock_level etc.)
+            # after submit — a shallow list share raced the worker's prompt build (audit #15)
+            try:
+                _results_snapshot = _copy.deepcopy(list(results or []))
+            except Exception:
+                _results_snapshot = list(results or [])
             _constraints_snapshot = dict(constraints or {})
+            _guard_evidence = guard_evidence
 
             def _guarded_summarize(*a: Any, **k: Any) -> Any:
                 out = summarize_fn(*a, **k)
@@ -183,7 +191,7 @@ def run_narration(
                                 msg, _results_snapshot,
                                 budget_min=_constraints_snapshot.get("budget_min"),
                                 budget_max=_constraints_snapshot.get("budget_max"),
-                                preamble=combined_preamble,
+                                preamble=_guard_evidence,
                             )
                             if not getattr(gr, "grounded", True):
                                 _viol = list(getattr(gr, "violations", []))[:6]
@@ -202,7 +210,9 @@ def run_narration(
                                 # must be diagnosable from the poll endpoint, never silent
                                 return None, None, {"guard": "rejected", "violations": _viol}
                     except Exception:
-                        pass
+                        # FAIL CLOSED (audit #4): a guard that crashes must never certify — the
+                        # deterministic answer stands and the record says verification errored.
+                        return None, None, {"guard": "error"}
                 return out
 
             try:
@@ -284,12 +294,19 @@ def build_narration_preamble(
     session_excerpt = (str(session_context_summary or "").strip())[:400] or None
     parts = [p for p in (ctx_preamble, trace_ctx, session_excerpt) if p]
     combined: Optional[str] = "\n\n".join(parts) if parts else None
+    # EVIDENCE PROVENANCE (audit 2026-07-08): the guard may only treat PLATFORM-AUTHORED text as
+    # legitimate evidence. session_excerpt and trace_ctx carry conversation-derived content — a
+    # URL the buyer typed, or their "120 fps" wish — and treating them as evidence let parroted
+    # quarantined URLs bypass the guard and user text disable the benchmark rule. ctx_preamble is
+    # platform-assembled (structured slots + prior CATALOG products) and stays in scope.
+    _guard_parts: list = [p for p in (ctx_preamble,) if p]
 
     # QR signal -> SANITIZED status only (never the decoded payload).
     try:
         qr_note = image_security_preamble_note(image_cv_signals_parsed)
         if qr_note:
             combined = (combined + "\n\n" + qr_note) if combined else qr_note
+            _guard_parts.append(qr_note)
     except Exception:
         pass
     # Off-topic image note (vertical-blind fallback text).
@@ -301,6 +318,7 @@ def build_narration_preamble(
                    "Recommendations will be based on the text query only."
             )
             combined = (combined + "\n\n" + off_note) if combined else off_note
+            _guard_parts.append(off_note)
     except Exception:
         pass
 
@@ -313,8 +331,25 @@ def build_narration_preamble(
             cap_note = capability_preamble_note(query)
             if cap_note:
                 combined = (combined + "\n\n" + cap_note) if combined else cap_note
+                _guard_parts.append(cap_note)
     except Exception:
         pass
+
+    # C2 knowledge pool (Lane-3 curated domain evidence): citable facts the narrator may state
+    # (VRAM tiers, gaming floors) — platform-authored, so guard-legitimate by construction.
+    try:
+        if query:
+            from src.app.services.knowledge_pool import knowledge_note
+            kn = knowledge_note(query, use_case=str((constraints or {}).get("use_case") or "") or None)
+            if kn:
+                combined = (combined + "\n\n" + kn) if combined else kn
+                _guard_parts.append(kn)
+    except Exception:
+        pass
+
+    # Publish the provenance-scoped guard evidence for BOTH guard paths (blocking + async job).
+    if isinstance(constraints, dict):
+        constraints["_guard_evidence"] = "\n\n".join(_guard_parts) if _guard_parts else None
 
     # Resolve a real model for the summary (llm_model may be a display name like
     # "rule-based (prefer_small)" when the intent rollout is off).
@@ -363,9 +398,13 @@ def apply_product_claim_guard(
             from src.app.services.product_claim_guard import guard_enabled as _ge, verify_product_narration as _vp
             guard_enabled_fn = guard_enabled_fn or _ge
             verify_fn = verify_fn or _vp
-        if guard_enabled_fn():
-            _status = "passed" if (assistant_message and results) else "skipped"
+        if guard_enabled_fn() and not (assistant_message and results):
+            _status = "skipped"
         if guard_enabled_fn() and assistant_message and results:
+            # Honest telemetry (audit #13): status flips to "passed" only AFTER verification
+            # returns; a verify crash lands in the outer except and reports guard_error — never
+            # a false "passed". No TypeError retry: it double-ran side-effecting verifiers and
+            # masked real TypeErrors as signature mismatches.
             try:
                 gr = verify_fn(
                     assistant_message, results,
@@ -373,15 +412,14 @@ def apply_product_claim_guard(
                     budget_max=(constraints or {}).get("budget_max"),
                     preamble=combined_preamble,
                 )
-            except TypeError:
-                # injected verify_fn predating the preamble kwarg (tests/callers) — results-only scope
-                gr = verify_fn(
-                    assistant_message, results,
-                    budget_min=(constraints or {}).get("budget_min"),
-                    budget_max=(constraints or {}).get("budget_max"),
-                )
-            if not getattr(gr, "grounded", True):
-                _status = "fell_back_to_deterministic"
+                _status = "passed"
+            except Exception:
+                # FAIL CLOSED: a guard that cannot verify must not certify — deterministic copy ships.
+                gr = None
+                _status = "guard_error_fell_back"
+            if gr is None or not getattr(gr, "grounded", True):
+                if gr is not None:
+                    _status = "fell_back_to_deterministic"
                 assistant_message = deterministic_fn(
                     query, results, constraints, brand_budget_answer=brand_budget_answer
                 )
@@ -392,7 +430,7 @@ def apply_product_claim_guard(
                         trace_id=trace_id, event_type="narration_guard_rejected",
                         source_type="agent", source_id="Product_Claim_Guard",
                         target_type="system", target_id=None,
-                        payload={"violations": list(getattr(gr, "violations", []))[:6],
+                        payload={"violations": list(getattr(gr, "violations", []))[:6] if gr is not None else ["guard_error"],
                                  "used_llm": False, "fallback_reason": "ungrounded_product_claim"},
                     )
                 except Exception:
