@@ -256,14 +256,52 @@ def load_feature_flags(path: str) -> dict:
         return None
 
     def _apply_toggle_overrides(flags: dict) -> dict:
+        """ENV WINS for every flag (the 9th-mute-layer class fix, 2026-07-09): this loader used
+        to merge exactly ONE env override, so a gate reading the flags dict never saw env-set
+        toggles — HIPPOGRAPH_FEEDBACK_ENABLED=shadow via start_demo/harness/docker silently
+        never reached _mi_mode and market intelligence was OFF in every live run of the arc.
+        Rule: any TOP-LEVEL SCALAR key present in the flags file, plus the curated runtime
+        gates below (modes that ship env-only, absent from the file), is overridable by an
+        identically-named env var. Values stay strings — every consumer already parses via
+        str(v).lower()/_safe_int, and env is the ops override channel platform-wide."""
         out = dict(flags or {})
-        override_map = {
-            "FULFILLMENT_DEFER_TO_CART": "FULFILLMENT_DEFER_TO_CART",
-        }
-        for key, env_key in override_map.items():
-            v = _env_bool(env_key)
-            if v is not None:
-                out[key] = bool(v)
+        _RUNTIME_GATES = (
+            "HIPPOGRAPH_FEEDBACK_ENABLED", "HIPPOGRAPH_CATALOG_EDGES",
+            "MARKET_ANALYSIS_ENABLED", "MARKET_PIPELINE_ENABLED",
+            "MARKET_EVIDENCE_IN_NARRATION",
+            "STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED", "STOREFRONT_EMPHASIS_CANARY_FRACTION",
+            "STOREFRONT_EMPHASIS_EXPERIMENT_ID",
+            "RANKING_NUDGE_EXPERIMENT_ENABLED", "RANKING_NUDGE_CANARY_FRACTION",
+            "SALES_RESPONSE_NUDGE_ENABLED",
+            "RECOMMEND_NARRATION_MODE", "RECOMMEND_NARRATION_FORCE",
+        )
+        candidates = {k for k in out if isinstance(out.get(k), (str, bool, int, float))}
+        candidates.update(_RUNTIME_GATES)
+        for key in candidates:
+            v = os.getenv(key)
+            if v is None or str(v).strip() == "":
+                continue
+            cur = out.get(key)
+            # TYPE-COERCE to the file value's type (live incident 2026-07-09: an ambient
+            # KILL_SWITCH='false' env string replaced the file's boolean False, and the autonomy
+            # governor's truthiness check read the non-empty string as ENGAGED — every recommend
+            # request 503'd. A bool flag must never become a string.)
+            if isinstance(cur, bool):
+                b = _env_bool(key)
+                if b is not None:
+                    out[key] = b
+            elif isinstance(cur, int) and not isinstance(cur, bool):
+                try:
+                    out[key] = int(str(v).strip())
+                except ValueError:
+                    pass
+            elif isinstance(cur, float):
+                try:
+                    out[key] = float(str(v).strip())
+                except ValueError:
+                    pass
+            else:  # string file values + runtime gates absent from the file (consumers parse)
+                out[key] = v
         return out
 
     def _defaults() -> dict:

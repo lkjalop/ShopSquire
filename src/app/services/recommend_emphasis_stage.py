@@ -22,7 +22,12 @@ _FLAG = "STOREFRONT_EMPHASIS_EXPERIMENT_ENABLED"
 
 
 def _flag_on(flags: Dict[str, Any], key: str) -> bool:
-    v = (flags or {}).get(key)
+    # env wins, then flags (2026-07-09 convention fix — the 9th-mute-layer class: flags-dict-only
+    # gates strand every env-driven deployment because load_feature_flags merges almost no env).
+    import os
+    v = os.getenv(key)
+    if v is None:
+        v = (flags or {}).get(key)
     if v is None:
         return False
     return str(v).strip().lower() in ("1", "true", "yes", "on")
@@ -56,7 +61,9 @@ def apply_storefront_emphasis(payload: Dict[str, Any], *, flags: Optional[Dict[s
         exp_id = str(flags.get("STOREFRONT_EMPHASIS_EXPERIMENT_ID") or DEFAULT_EXPERIMENT_ID)
         subject = str(uid_hash or uid or "")
         try:
-            canary = float(flags.get("STOREFRONT_EMPHASIS_CANARY_FRACTION") or 0.1)
+            import os as _os
+            canary = float(_os.getenv("STOREFRONT_EMPHASIS_CANARY_FRACTION")
+                           or flags.get("STOREFRONT_EMPHASIS_CANARY_FRACTION") or 0.1)
         except (TypeError, ValueError):
             canary = 0.1
         variant = canary_assignment(experiment_id=exp_id, subject=subject, canary_fraction=canary)
