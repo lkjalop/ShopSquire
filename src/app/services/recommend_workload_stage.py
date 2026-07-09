@@ -146,10 +146,62 @@ def apply_workload_requirements(
     except Exception:
         pass
 
+    # ── Steam publisher requirements (W5 consume, 2026-07-09): fixture-first, no network in the
+    # request path. Publisher-stated min/recommended specs become (a) requirement floors for the
+    # fit verdicts and (b) CITABLE guard evidence — so "can this run Cyberpunk?" is answered from
+    # what the publisher states, with desktop GPU names translated to laptop-equivalent tiers.
+    # Deliberately does NOT append constraints["specs"] (retrieval behavior unchanged; the
+    # use-case KB already owns retrieval floors) — Steam enriches truth, not filtering.
+    ctx["steam_reqs"] = {}
+    ctx["steam_note"] = None
+    try:
+        if ctx["games"]:
+            from src.app.services.connectors.steam_requirements import get_game_requirements
+            from src.app.services.gpu_translation import desktop_req_to_laptop_tier
+            _s_req: Dict[str, Any] = {}
+            _s_lines = []
+            for slug in ctx["games"][:3]:
+                r = get_game_requirements(str(slug).replace("_", " "))
+                if not r:
+                    continue
+                mn = r.get("minimum") or {}
+                rc = r.get("recommended") or {}
+                if mn.get("ram_gb"):
+                    _s_req["min_ram_gb"] = max(float(mn["ram_gb"]), float(_s_req.get("min_ram_gb") or 0))
+                if rc.get("ram_gb"):
+                    _s_req["recommended_ram_gb"] = max(float(rc["ram_gb"]), float(_s_req.get("recommended_ram_gb") or 0))
+                mn_t = desktop_req_to_laptop_tier(str(mn.get("gpu") or "")) or {}
+                rc_t = desktop_req_to_laptop_tier(str(rc.get("gpu") or "")) or {}
+                if mn_t.get("vram_gb_min"):
+                    _s_req["min_gpu_vram_gb"] = max(float(mn_t["vram_gb_min"]), float(_s_req.get("min_gpu_vram_gb") or 0))
+                if rc_t.get("vram_gb_min"):
+                    _s_req["recommended_gpu_vram_gb"] = max(float(rc_t["vram_gb_min"]), float(_s_req.get("recommended_gpu_vram_gb") or 0))
+                if (mn_t.get("tier") or 0) > 0 or (rc_t.get("tier") or 0) > 1:
+                    _s_req["gpu_needed"] = True
+                equiv = ", ".join((mn_t.get("laptop_equiv_min") or [])[:2])
+                bits = []
+                if mn.get("ram_gb"):
+                    bits.append(f"minimum {mn['ram_gb']}GB RAM")
+                if mn.get("gpu"):
+                    bits.append(f"minimum graphics {mn['gpu']}" + (f" (laptop-equivalent: {equiv})" if equiv else ""))
+                if rc.get("ram_gb"):
+                    bits.append(f"recommended {rc['ram_gb']}GB RAM")
+                if rc.get("gpu"):
+                    bits.append(f"recommended graphics {rc['gpu']}")
+                if bits:
+                    _s_lines.append(f"- {r.get('title') or slug}: {'; '.join(bits)}. [steam:{r.get('appid') or slug}]")
+            ctx["steam_reqs"] = _s_req
+            if _s_lines:
+                ctx["steam_note"] = (
+                    "PUBLISHER-STATED GAME REQUIREMENTS (Steam store pages — cite freely):\n" + "\n".join(_s_lines)
+                )
+    except Exception:
+        ctx["steam_reqs"] = {}
+
     # ── Merged requirement floors for downstream fit verdicts (NEW — the un-lost evidence) ──
     try:
         floors: Dict[str, Any] = {}
-        for src in (ctx["game_reqs"], ctx["sw_reqs"]):
+        for src in (ctx["game_reqs"], ctx["sw_reqs"], ctx["steam_reqs"]):
             if src.get("min_ram_gb"):
                 floors["min_ram_gb"] = max(float(src["min_ram_gb"]), float(floors.get("min_ram_gb") or 0))
             if src.get("recommended_ram_gb"):

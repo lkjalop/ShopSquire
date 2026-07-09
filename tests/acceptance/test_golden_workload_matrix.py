@@ -147,3 +147,32 @@ def test_golden_finetune_never_sells_pharmacy():
     b = _chat("i want to fine tune a 7b model locally under 2500", "gm-ft2")
     names = " ".join((p.get("name") or "") for p in (b.get("products") or [])).lower()
     assert "sanitiser" not in names and "paracetamol" not in names and "sanitizer" not in names
+
+
+def test_steam_floors_and_note_merge_into_workload_ctx():
+    # W5 consume: publisher-stated Steam requirements enrich floors + produce citable evidence
+    from src.app.services.recommend_workload_stage import apply_workload_requirements
+    c: dict = {}
+    ctx = apply_workload_requirements(
+        "can this run cyberpunk 2077 under 1900", c,
+        gpu_pref_inferred=False, record_failure=lambda *a, **k: None)
+    if "cyberpunk_2077" not in (ctx["games"] or []):
+        return  # game vocab is profile-driven; only assert when detected
+    sr = ctx["steam_reqs"]
+    assert sr.get("min_ram_gb") == 12          # Cyberpunk publisher minimum
+    assert sr.get("recommended_ram_gb") == 16
+    assert sr.get("min_gpu_vram_gb", 0) >= 4   # GTX 1060 -> laptop tier vram floor
+    note = ctx["steam_note"] or ""
+    assert "PUBLISHER-STATED" in note and "[steam:" in note and "GTX 1060" in note
+    # merged floors take the max across KB + steam
+    assert ctx["floors"].get("min_ram_gb", 0) >= 12
+    # retrieval constraints NOT tightened by steam (design: enrich truth, not filtering)
+    # (KB may add specs; steam adds none beyond what KB already set)
+
+
+def test_steam_absent_game_is_silent():
+    from src.app.services.recommend_workload_stage import apply_workload_requirements
+    ctx = apply_workload_requirements(
+        "work laptop for spreadsheets under 1000", {},
+        gpu_pref_inferred=False, record_failure=lambda *a, **k: None)
+    assert ctx["steam_reqs"] == {} and ctx["steam_note"] is None

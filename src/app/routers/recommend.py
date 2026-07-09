@@ -2894,6 +2894,8 @@ def _ensure_trace_response(response: Dict[str, Any], trace_id: str, flags: Dict[
                     "floors": _wfloors,
                     "verdicts": fit_verdicts(_wfloors, _wpool) if _wpool else [],
                 }
+                if _wctx.get("steam_note"):
+                    response["workload_fit"]["publisher_requirements"] = _wctx["steam_note"]
     except Exception:
         pass
     # Ensure right_panel.anchor_sections is populated from results so the
@@ -10900,6 +10902,9 @@ def suggest(
                 payload["workload_fit"] = {
                     "entities": _wf_entities, "floors": _wf_floors, "verdicts": _wf_verdicts,
                 }
+                _wf_steam = _workload_ctx.get("steam_note") if isinstance(_workload_ctx, dict) else None
+                if _wf_steam:
+                    payload["workload_fit"]["publisher_requirements"] = _wf_steam
                 _fit_note = fit_evidence_note(_wf_entities, _wf_floors, _wf_verdicts)
     except Exception as _e_wf:
         _record_partial_failure("workload_fit_verdicts", _e_wf, trace_id=trace_id)
@@ -10940,12 +10945,15 @@ def suggest(
             if isinstance(constraints, dict):
                 _ge = constraints.get("_guard_evidence")
                 constraints["_guard_evidence"] = f"{_ge}\n\n{_ev_note}" if _ge else _ev_note
-        # W4: fit facts are platform-authored -> LLM preamble AND guard evidence
-        if _fit_note:
-            _combined_preamble = f"{_combined_preamble}\n\n{_fit_note}" if _combined_preamble else _fit_note
-            if isinstance(constraints, dict):
-                _ge0 = constraints.get("_guard_evidence")
-                constraints["_guard_evidence"] = f"{_ge0}\n\n{_fit_note}" if _ge0 else _fit_note
+        # W4: fit facts are platform-authored -> LLM preamble AND guard evidence. The Steam note
+        # (publisher-stated min/rec, W5 consume) rides the same channel — citable by construction.
+        _steam_note = (_workload_ctx.get("steam_note") if isinstance(_workload_ctx, dict) else None)
+        for _note in (_fit_note, _steam_note):
+            if _note:
+                _combined_preamble = f"{_combined_preamble}\n\n{_note}" if _combined_preamble else _note
+                if isinstance(constraints, dict):
+                    _ge0 = constraints.get("_guard_evidence")
+                    constraints["_guard_evidence"] = f"{_ge0}\n\n{_note}" if _ge0 else _note
         _guard_evidence = constraints.get("_guard_evidence") if isinstance(constraints, dict) else None
         # Tier 1 — narration mode (RECOMMEND_NARRATION_MODE): blocking (default; LLM prose) | skip
         # (deterministic grounded answer only) | async (skip + enqueue prose out-of-band). LLM
@@ -11312,6 +11320,8 @@ def suggest(
                         "entities": list(_workload_ctx.get("games") or []) + list(_workload_ctx.get("software") or []),
                         "floors": _wf_floors2, "verdicts": _v2, "pool": "step_up_panel",
                     }
+                    if _workload_ctx.get("steam_note"):
+                        payload["workload_fit"]["publisher_requirements"] = _workload_ctx["steam_note"]
     except Exception as _e_wf2:
         _record_partial_failure("workload_fit_second_chance", _e_wf2, trace_id=trace_id)
     # ── W3 override: off-catalog hardware class -> category honesty + supplier-ask, never a
