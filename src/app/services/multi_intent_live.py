@@ -31,7 +31,8 @@ from src.app.services.intent_decomposer import decompose_turn
 # 25 laptops"), which must NOT bind a prior shortlist. Verb + strong-lexical cues only.
 _FALLBACK_AMEND_CUE_RE = re.compile(
     r"\b(?:instead|actually|make\s+it|change\s+(?:it|that|to)|rather|nah|scratch\s+that|"
-    r"on\s+second\s+thought|reduce|lower|drop|cut|bump|bring\s+it|down\s+to|halve|double)\b", re.I)
+    r"on\s+second\s+thought|reduce|lower|drop|cut|bump|bring\s+it|down\s+to|halve|double|"
+    r"swap|switch|replace)\b", re.I)  # swap/replace bind to the just-shown shortlist (2026-07-09)
 from src.app.services.multi_intent_planner import plan_turn
 from src.app.services.scatter_gather_guard import _matches_category
 

@@ -64,6 +64,14 @@ _CHANGE_VERB_RE = re.compile(
 # clause). "get rid off" (common typo) is covered by of+.
 _REMOVE_VERB_RE = re.compile(
     r"\b(?:remove|get\s+rid\s+of+|delete|take\s+out|take\s+off|ditch|scrap|do\s+away\s+with)\b", re.I)
+# SWAP a cart line for another ("swap the dell for a lenovo", "replace the HP with an Asus",
+# "change the monitor to a Dell"). Composite = remove old + add new; reuses the amendment(qty-0) +
+# new-line machinery + the existing human-confirm card (no new execution/schema). obj/repl run to
+# a clause boundary. (2026-07-09 — the one cart intent that had no parser anywhere.)
+_SWAP_RE = re.compile(
+    r"\b(?:swap|switch|replace|change)\s+(?:the\s+|my\s+|that\s+|a\s+)?"
+    r"(?P<obj>[^,;?!]{2,50}?)\s+(?:for|with|to|->|→)\s+(?:a\s+|an\s+|the\s+|some\s+)?"
+    r"(?P<repl>[^,;?!]{2,50}?)(?=[,;?!]|\s+(?:instead|please|and|then)\b|$)", re.I)
 _REMOVE_STOP_RE = re.compile(
     r"[,;?!]|\b(?:reduce|change|set|make|lower|bump|cut|increase|update|add|get\s+me|then|instead|please)\b", re.I)
 # NAMED quantity amendment ("reduce the Alpha Slim 3 to 20") - binds the qty to a PRODUCT-NAME
@@ -163,6 +171,23 @@ def _decompose_deterministic(query: str, has_prior_selection: bool) -> TurnInten
     # ── amendment: an amendment cue + a BARE number that is NOT a new-line qty and NOT the budget ──────
     amendments: List[Amendment] = []
     consumed: List[Tuple[int, int]] = []   # spans claimed by removals/named refs; bare numbers inside are NOT quantities
+
+    # (a0) SWAP: "swap the dell for a lenovo" -> remove(dell) + add(lenovo). Runs BEFORE removals so
+    # the swap's object isn't double-claimed by _REMOVE_VERB_RE ("change/replace" aren't remove verbs).
+    for m in _SWAP_RE.finditer(q):
+        obj = _clean_ref(m.group("obj"))
+        repl = _clean_ref(m.group("repl"))
+        if len(obj) < 2 or len(repl) < 2 or obj.lower() in _REF_PRONOUNS or repl.lower() in _STOP_NOUNS:
+            continue
+        consumed.append((m.start(), m.end()))
+        if has_prior_selection:
+            amendments.append(Amendment(ref=obj, new_qty=0))          # remove the old line
+            new_lines.append(NewLine(category=repl, qty=None))         # add the replacement
+            notes.append(f"swap '{obj[:30]}' -> '{repl[:30]}' (remove + add, confirm required)")
+        else:
+            notes.append(f"swap '{obj[:30]}' ignored: no prior selection/cart to swap from.")
+        if len(amendments) >= 4:
+            break
 
     # (a) REMOVALS: "get rid of the Alpha X1 and the Beta Pro" -> one qty-0 amendment per named object.
     for m in _REMOVE_VERB_RE.finditer(q):

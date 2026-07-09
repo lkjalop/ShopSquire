@@ -265,9 +265,48 @@ def _is_budget_query_text(query: str | None) -> bool:
     )
 
 
+_DEFICIT_OBS_RE = re.compile(
+    r"only\s+have\s+a?\s*few|few\s+in\s+stock|limited\s+stock|not\s+enough\s+(?:in\s+)?stock|"
+    r"wait\w*\s+(?:for|on)\s+(?:a\s+)?(?:re-?order|re-?stock|restock|backorder|back-?order|the\s+rest|stock)|"
+    r"ok\s+(?:to\s+|with\s+)?wait|back-?order|re-?order",
+    re.I,
+)
+_BULK_QTY_RE = re.compile(r"\b(\d{2,5})\s+[a-z][a-z\s]{0,24}?(?:laptop|desktop|monitor|tablet|unit|machine|device|pc)s?\b", re.I)
+
+
+def _strip_deficit_observation(q: str) -> str:
+    """Remove the shortfall-observation tail from a deficit-reorder query so retrieval sees only
+    the bulk need. 'i need 50 dell laptops but you only have a few in stock, am i ok waiting for a
+    reorder?' -> 'i need 50 dell laptops'. Conservative: only cuts at an observation connector so
+    a plain bulk request is never truncated."""
+    cut = re.split(
+        r"\b(?:but|and)\s+(?:you|i|we)\s+(?:only\s+have|have\s+only|think|know)\b|"
+        r"\bbut\s+(?:you\s+)?(?:only\s+have|have\s+a?\s*few|few\s+in\s+stock|limited\s+stock)\b|"
+        r",?\s*(?:am\s+i\s+ok|is\s+it\s+ok|ok\s+(?:to\s+|with\s+)?wait)\b",
+        q, maxsplit=1, flags=re.I,
+    )[0].strip().rstrip(",")
+    return cut if len(cut) >= 6 else q
+
+
+def _is_deficit_reorder_query(q: str) -> bool:
+    """A bulk QUANTITY need + a deficit/reorder OBSERVATION ("i need 50 dell laptops but you only
+    have a few in stock, ok waiting for a reorder?"). The buyer is acknowledging a shortfall and
+    asking about backorder — NOT requesting a low-stock filter. Without this it hit
+    _classify_turn_intent's `"only " in q` -> FILTER -> the "few in stock" filter zeroed retrieval
+    (live: 0 products, backorder capability fact never reached the answer). Routing it to SEARCH
+    lets the bulk-sourcing path run (products + sourcing preview + the reorder-consent narration)."""
+    if not _DEFICIT_OBS_RE.search(q):
+        return False
+    return bool(_BULK_QTY_RE.search(q)) or bool(re.search(r"\b\d{2,5}\b", q))
+
+
 def _classify_turn_intent(query: str) -> str:
     q = str(query or "").strip().lower()
     if not q:
+        return "SEARCH"
+    # Deficit/reorder-consent BEFORE the FILTER branch: a "you only have a few in stock, ok to
+    # wait for a reorder?" turn is a bulk-sourcing intent, not a stock filter (2026-07-09).
+    if _is_deficit_reorder_query(q):
         return "SEARCH"
     # CLAIM-CHECKED support detection (shared predicate with recommend.py's classifier): only a genuine
     # post-purchase claim routes to the support lane. The old bare keyword list here hijacked pre-sales
@@ -1292,6 +1331,15 @@ async def chat_query(
     except Exception as _inj_exc:
         logger.debug("injection ledger write failed: %s", _inj_exc)
     turn_intent = _classify_turn_intent(q)
+    # Deficit-reorder: the buyer's shortfall OBSERVATION ("but you only have a few in stock, am i
+    # ok waiting for a reorder?") is not a retrieval constraint — suggest()'s parser reads
+    # "few in stock" as a low-stock filter and zeroes results. Strip the observation so retrieval
+    # sees the clean bulk request ("50 dell laptops" -> products + sourcing preview); the reorder
+    # intent is preserved via _deficit_reorder so the availability/backorder answer still fires.
+    _deficit_reorder = _is_deficit_reorder_query(q)
+    _query_for_retrieval = q
+    if _deficit_reorder:
+        _query_for_retrieval = _strip_deficit_observation(q)
     copywriting_requested = bool((payload or {}).get("copywriting_enabled") is True)
     copy_profile_id = str((payload or {}).get("copy_profile_id") or "").strip() or None
     copy_surface = str((payload or {}).get("copy_surface") or "storefront").strip() or "storefront"
@@ -1697,7 +1745,9 @@ async def chat_query(
     # Call internal recommend endpoint to leverage agentic pipeline
     base = str(request.base_url).rstrip("/")
     url = f"{base}/api/v1/recommend/suggest"
-    params = {"uid": uid, "query": q}
+    params = {"uid": uid, "query": _query_for_retrieval}
+    if _deficit_reorder:
+        params["reorder_consent_intent"] = "true"  # emphasize the backorder-consent answer downstream
     if turn_intent and turn_intent != "SEARCH":
         params["turn_intent"] = turn_intent
     # N3 Mode-B consent passthrough: the chip's explicit per-turn opt-in rides to the evidence
