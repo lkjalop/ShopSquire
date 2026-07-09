@@ -10751,35 +10751,14 @@ def suggest(
                 payload["next_questions"] = [_viability_q] + list(_nq)
     except Exception:
         pass
-    try:
-        _spec_blocks = _parse_explicit_spec_blocks(query)
-        payload["explicit_spec_blocks"] = _spec_blocks
-        _tiers = _build_minimum_recommended_tiers(
-            results if isinstance(results, list) else [],
-            budget_min=constraints.get("budget_min"),
-            budget_max=constraints.get("budget_max"),
-            use_case=constraints.get("use_case"),
-            query=query,
-        )
-        if bool(_spec_blocks.get("has_explicit_blocks")):
-            _tiers["show_split"] = True
-            if _spec_blocks.get("minimum"):
-                _tiers["minimum_explanation"] = (
-                    "Aligned to your minimum spec block. These are closest budget-fit matches to the baseline."
-                )
-            if _spec_blocks.get("recommended"):
-                _tiers["recommended_explanation"] = (
-                    "Aligned to your recommended spec block. These prioritize stronger long-term headroom."
-                )
-        payload["recommendation_tiers"] = {
-            "minimum": _tiers.get("minimum", []),
-            "recommended": _tiers.get("recommended", []),
-            "show_split": bool(_tiers.get("show_split")),
-            "minimum_explanation": _tiers.get("minimum_explanation"),
-            "recommended_explanation": _tiers.get("recommended_explanation"),
-        }
-    except Exception:
-        payload["recommendation_tiers"] = {"minimum": [], "recommended": [], "show_split": False}
+    # Tier split extracted to recommend_response_shape.apply_recommendation_tiers (E1) —
+    # behavior byte-identical, parity-verified (scripts/suggest_parity_capture).
+    from src.app.services.recommend_response_shape import apply_recommendation_tiers as _apply_tiers
+    _apply_tiers(
+        payload, results=results, constraints=constraints, query=query,
+        parse_explicit_spec_blocks=_parse_explicit_spec_blocks,
+        build_minimum_recommended_tiers=_build_minimum_recommended_tiers,
+    )
 
     # ── Recommendation finalizer ──────────────────────────────────────────────
     # CRITICAL: runs before _summarize_results() so the LLM, trace, and payload
