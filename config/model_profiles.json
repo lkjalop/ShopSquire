@@ -15,9 +15,14 @@
     "narration_timeout_s": 45,
     "think_mode": "off",
     "keep_alive": "30m",
-    "certified_roles": ["narrator", "planner", "binder", "knowledge"],
+    "certified_roles": [
+      "narrator",
+      "planner",
+      "binder",
+      "knowledge"
+    ],
     "warm_latency_class": "6-20s",
-    "notes": "DEFAULT all roles. 4-round A/B: only config with zero flow breakage on 12GB; no invented products. think auto-fires on enough/why/compare (30-60s) so think stays off for narration; cold load ~20-40s -> warm on deploy."
+    "notes": "DEFAULT all roles. 4-round A/B: only config with zero flow breakage on 12GB; no invented products. think auto-fires on enough/why/compare (30-60s) so think stays off for narration; cold load ~20-40s -> warm on deploy. | CERT 2026-07-09 (production flags, post-W preamble): guard-pass 5/6 prose queries (1 reject: ungrounded_product on empty-result AI query — guard correct). DEFAULT confirmed."
   },
   "gemma3:12b": {
     "resident_footprint_gb": 8.5,
@@ -25,9 +30,11 @@
     "narration_timeout_s": 45,
     "think_mode": "off",
     "keep_alive": "30m",
-    "certified_roles": ["narrator"],
+    "certified_roles": [
+      "narrator"
+    ],
     "warm_latency_class": "7-26s",
-    "notes": "CHALLENGER config (all-roles, single-resident only — cannot co-reside with qwen3:14b on 12GB). Most honest narrator of the A/B (IT-DEPENDS hedging, correct specs, best challenge-defense)."
+    "notes": "CHALLENGER config (all-roles, single-resident only — cannot co-reside with qwen3:14b on 12GB). Most honest narrator of the A/B (IT-DEPENDS hedging, correct specs, best challenge-defense). | CERT 2026-07-09: guard-pass 4/6 (rejects: ungrounded_spec on knowledge, ungrounded_product on empty-result AI). Challenger does NOT displace qwen3 under guard-pass-rate criterion."
   },
   "granite4:micro": {
     "resident_footprint_gb": 2.5,
