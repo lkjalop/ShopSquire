@@ -52,19 +52,24 @@ def apply_workload_requirements(
         from src.app.flows.nqe import detect_games_in_text, detect_software_in_text
         ctx["games"] = detect_games_in_text(query_effective)
         ctx["software"] = detect_software_in_text(query_effective)
+        # HARD-FILTER ON MINIMUM ONLY (GPT-5.6 P0, 2026-07-10): the hard spec filter used the
+        # RECOMMENDED floor as *_min, so Cyberpunk's recommended 32GB RAM zeroed every laptop
+        # instead of showing "meets minimum / below recommended / step-up". Retrieval filters on
+        # the MINIMUM; the recommended floor stays in ctx["floors"] and drives the workload_fit
+        # verdicts (meets_minimum vs meets_recommended) + scoring, not retrieval elimination.
         if ctx["games"]:
             from src.app.services.use_case_advisor import match_game_requirements
             _game_reqs = match_game_requirements(ctx["games"])
             ctx["game_reqs"] = _game_reqs or {}
-            if _game_reqs.get("recommended_ram_gb"):
+            if _game_reqs.get("min_ram_gb"):
                 constraints.setdefault("specs", [])
-                constraints["specs"].append(f"ram_gb_min:{_game_reqs['recommended_ram_gb']}")
+                constraints["specs"].append(f"ram_gb_min:{_game_reqs['min_ram_gb']}")
             if _game_reqs.get("gpu_needed"):
                 constraints["must_have_gpu"] = True
                 constraints["gpu_preference"] = "with_discrete"
-            if _game_reqs.get("recommended_gpu_vram_gb"):
+            if _game_reqs.get("min_gpu_vram_gb"):
                 constraints.setdefault("specs", [])
-                constraints["specs"].append(f"gpu_vram_gb_min:{_game_reqs['recommended_gpu_vram_gb']}")
+                constraints["specs"].append(f"gpu_vram_gb_min:{_game_reqs['min_gpu_vram_gb']}")
             if _game_reqs.get("min_refresh_hz", 60) > 60:
                 constraints.setdefault("specs", [])
                 constraints["specs"].append(f"refresh_hz_min:{_game_reqs['min_refresh_hz']}")
@@ -72,9 +77,9 @@ def apply_workload_requirements(
             from src.app.services.use_case_advisor import match_software_requirements
             _sw_reqs = match_software_requirements(ctx["software"])
             ctx["sw_reqs"] = _sw_reqs or {}
-            if _sw_reqs.get("recommended_ram_gb"):
+            if _sw_reqs.get("min_ram_gb"):
                 constraints.setdefault("specs", [])
-                constraints["specs"].append(f"ram_gb_min:{_sw_reqs['recommended_ram_gb']}")
+                constraints["specs"].append(f"ram_gb_min:{_sw_reqs['min_ram_gb']}")
             if _sw_reqs.get("gpu_needed"):
                 constraints["must_have_gpu"] = True
                 constraints["gpu_preference"] = "with_discrete"

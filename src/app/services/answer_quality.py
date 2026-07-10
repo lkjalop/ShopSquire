@@ -28,8 +28,16 @@ def _extract_price_range_from_message(message: str) -> Tuple[int | None, int | N
     return (min(lo, hi), max(lo, hi))
 
 
+_NEGATED_OVER_RE = re.compile(r"\b(?:nothing|not|no|none|never|under|below|max|at most|no more than|no higher than)\b[^.?!]{0,20}?\b(?:over|above|more than|greater than)\b")
+
+
 def _extract_budget_threshold(query: str) -> int | None:
+    """A genuine 'is it over $X?' binary question. Returns None when 'over/above' is NEGATED
+    ('nothing over $1,900', 'not above $2000') — those are CAPS, not over-thresholds (GPT-5.6 #4,
+    2026-07-10: the negated form produced a nonsensical 'Usually no.' binary answer)."""
     q = str(query or "").lower()
+    if _NEGATED_OVER_RE.search(q):
+        return None
     m = re.search(r"(?:over|above|more than|greater than)\s*\$?\s*([\d,]{3,6})", q)
     if m:
         return _to_int(m.group(1))

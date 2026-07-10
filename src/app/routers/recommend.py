@@ -5048,6 +5048,26 @@ def suggest(
         'which payload branch has refusal_note?' bug class). Reads suggest()'s locals via closure at
         CALL time — the refusal/qty are set by the early parse above."""
         if isinstance(p, dict):
+            # OFF-CATALOG at the UNIVERSAL choke point (GPT-5.6 P0, 2026-07-10): a declared non-sold
+            # class (rack-mount/A100 servers) must produce category honesty + supplier-RFQ offer on
+            # EVERY return path — the tail-only override at ~11355 was bypassed by the early
+            # no-results returns (9302), so a paraphrase leaked an unrelated laptop/Apple fallback.
+            # Detection ran at ~7017 (constraints["_off_catalog"]); apply it here for all branches.
+            try:
+                _ocg = constraints.get("_off_catalog") if isinstance(constraints, dict) else None
+                if _ocg and not p.get("off_catalog"):
+                    from src.app.services.off_catalog_gate import off_catalog_message
+                    _msg = off_catalog_message(_ocg, query)
+                    p["assistant_message"] = _msg
+                    p["message"] = _msg
+                    p["off_catalog"] = {**_ocg, "supplier_rfq_offer": True}
+                    p["products"] = []
+                    p["results"] = []
+                    p.pop("right_panel", None)
+                    p.pop("llm_summary_job_id", None)  # no prose swap over a refusal
+                    p["summary_pending"] = False
+            except Exception as _e_ocg_fin:
+                _record_partial_failure("off_catalog_finalize", _e_ocg_fin, trace_id=trace_id)
             if _qty_refusal_note and not p.get("refusal_note"):
                 p["refusal_note"] = _qty_refusal_note
                 _am = p.get("assistant_message")
@@ -11348,24 +11368,10 @@ def suggest(
                         payload["workload_fit"]["publisher_requirements"] = _workload_ctx["steam_note"]
     except Exception as _e_wf2:
         _record_partial_failure("workload_fit_second_chance", _e_wf2, trace_id=trace_id)
-    # ── W3 override: off-catalog hardware class -> category honesty + supplier-ask, never a
-    # confident laptop sale ("$80k A100 servers -> gaming laptops", both audits' headline).
-    # Whatever retrieval pattern-matched is noise: clear products, suppress the prose swap.
-    try:
-        _ocg = constraints.get("_off_catalog") if isinstance(constraints, dict) else None
-        if _ocg:
-            from src.app.services.off_catalog_gate import off_catalog_message
-            _ocg_msg = off_catalog_message(_ocg, query)
-            payload["assistant_message"] = _ocg_msg
-            assistant_message = _ocg_msg
-            payload["off_catalog"] = {**_ocg, "supplier_rfq_offer": True}
-            payload["products"] = []
-            payload["results"] = []
-            payload.pop("right_panel", None)  # tier panels would reseed laptop noise downstream
-            results = []
-            llm_summary_job_id = None
-    except Exception as _e_ocg:
-        _record_partial_failure("off_catalog_gate", _e_ocg, trace_id=trace_id)
+    # W3 off-catalog override REMOVED here (2026-07-10): it was a tail-only handler that the early
+    # no-results returns bypassed (GPT-5.6 P0). It now lives in _finalize_payload — the UNIVERSAL
+    # choke point every return path passes through — so it applies once, everywhere. Net: this
+    # inline block deleted, suggest() shrinks, and the honesty can no longer be bypassed.
     # HONESTY SUPPRESSION (audit 2026-07-08 #10, live-observed): when the deterministic answer
     # carries a refusal/contradiction the guard cannot arithmetically verify ("12 x $629 =
     # $7,548 — over your $1,500"), the async prose swap must NOT replace it — the swap may only
