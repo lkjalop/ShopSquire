@@ -1,0 +1,110 @@
+[
+  {"id": "search_budget", "lane": "search",
+   "turns": [{"query": "gaming laptop under $2000"}]},
+
+  {"id": "search_university", "lane": "search",
+   "turns": [{"query": "recommend a laptop for university"}]},
+
+  {"id": "budget_cap_negated", "lane": "budget",
+   "notes": "PX2 + answer_quality negation fix — 'nothing over' is a CAP, must never leak items above $1900 or answer as a binary over-$X question",
+   "turns": [{"query": "show me laptops but nothing over $1900"}]},
+
+  {"id": "budget_binary_floor", "lane": "budget",
+   "notes": "genuine binary over-$X question — the lane the negation guard must NOT break",
+   "turns": [{"query": "is $1800 enough for a gaming laptop?"}]},
+
+  {"id": "budget_band", "lane": "budget",
+   "turns": [{"query": "laptop between $1200 and $1800"}]},
+
+  {"id": "offcatalog_a100", "lane": "off_catalog",
+   "notes": "the audit headline case — must be honest + supplier RFQ offer + 0 products",
+   "turns": [{"query": "need five rack-mount A100 GPU servers under $80,000"}]},
+
+  {"id": "offcatalog_paraphrase", "lane": "off_catalog",
+   "notes": "paraphrase that bypassed the tail-only override before the finalizer fix",
+   "turns": [{"query": "quote me a couple of rackmount GPU nodes for our datacenter"}]},
+
+  {"id": "offcatalog_never_listed", "lane": "off_catalog",
+   "notes": "category the store never carried at all (vs a form-factor variant)",
+   "known_wrong": {
+     "recorded": "sells 13 laptops ('I've found 13 options... Dell G16') for a forklift question",
+     "why_wrong": "off_catalog_classes is a NEGATIVE list — never-listed categories aren't on it, so the gate can't fire",
+     "desired": "honest 'we don't sell forklifts' + optional supplier-RFQ offer; V2: deterministic is_sold(taxonomy_node) returns False",
+     "fixed_by": "T1 sold-taxonomy (roadmap Phase 2)"},
+   "turns": [{"query": "do you sell forklifts?"}]},
+
+  {"id": "spec_not_formfactor", "lane": "off_catalog_boundary",
+   "notes": "A100 used as a SPEC reference for an in-catalog form factor — must SELL, not refuse; the category-x-variant distinction the V2 taxonomy makes structural",
+   "known_wrong": {
+     "recorded": "refused as off_catalog datacenter_gpu_server with 0 products",
+     "why_wrong": "the regex gate keys on the token 'A100'; the wanted form-factor is a LAPTOP (in catalog) — over-block, GPT-5.5 finding #3",
+     "desired": "sell laptops, treating A100 as a performance reference (VRAM ladder step-up honesty in prose)",
+     "fixed_by": "V2 turn_router: taxonomy-grounded category+variant judgment (roadmap Phase 4)"},
+   "turns": [{"query": "a laptop with performance close to an A100 for local AI work"}]},
+
+  {"id": "workload_cyberpunk", "lane": "workload",
+   "notes": "min-vs-recommended P0 fix — retrieval filters on MINIMUM, recommended stays in verdicts",
+   "turns": [{"query": "laptop that can run cyberpunk 2077"}]},
+
+  {"id": "workload_valorant_fps", "lane": "workload",
+   "notes": "Steam publisher floors + refresh requirement",
+   "known_wrong": {
+     "recorded": "0 products AND assistant_message=null — refresh_hz_min:144 zeroed retrieval with no message at all",
+     "why_wrong": "a hard spec floor with no catalog match must degrade to closest-match honesty, never a silent empty response",
+     "desired": "nearest-capable laptops (e.g. 120Hz+) + honest 'no 144Hz model in catalog; closest options are...'",
+     "fixed_by": "V2 core recovery-answer guarantee (roadmap Phase 4; same class as the _finalize_answer never-empty rule)"},
+   "turns": [{"query": "i want to play valorant at 144fps"}]},
+
+  {"id": "workload_ai_finetune", "lane": "workload",
+   "notes": "AI VRAM floors; historically zeroed retrieval then leaked accessories (fixed be37d83)",
+   "turns": [{"query": "laptop for fine-tuning small language models locally"}]},
+
+  {"id": "compare_two_models", "lane": "compare",
+   "turns": [{"query": "compare the dell g16 against the lenovo legion for gaming"}]},
+
+  {"id": "explain_followup", "lane": "explain_multiturn",
+   "notes": "multi-turn: session memory must carry the shortlist into the why-question",
+   "turns": [{"query": "gaming laptop under $2000"},
+             {"query": "why is the first one better for me?"}]},
+
+  {"id": "filter_followup", "lane": "filter_multiturn",
+   "notes": "multi-turn narrowing — the FILTER lane",
+   "turns": [{"query": "show me gaming laptops"},
+             {"query": "only ones with 16GB RAM or more"}]},
+
+  {"id": "brand_negation", "lane": "constraints",
+   "notes": "the 'but not Apple' bug class (fixed 2026-06-24)",
+   "turns": [{"query": "a good laptop but not Apple"}]},
+
+  {"id": "deficit_reorder", "lane": "procurement",
+   "notes": "CONTRACT FORK ON RECORD: this query hits the INVENTORY FAST-PATH, which returns a different top-level shape (answer/recommendations/inventory/nqe/timing) than the full pipeline (assistant_message/products). The X9 deficit routing fix lives on the chat lane, not this endpoint. V2 must unify or deliberately honor this fork.",
+   "turns": [{"query": "I need 50 units but you only have a few in stock, am I ok waiting for a reorder?"}]},
+
+  {"id": "procurement_bulk", "lane": "procurement",
+   "turns": [{"query": "we need 25 laptops for our new office, can you do a bulk quote?"}]},
+
+  {"id": "cart_swap_via_suggest", "lane": "cart",
+   "notes": "cart mutation phrased at /suggest — records what THIS endpoint does with it (the full swap flow lives on the chat lane)",
+   "turns": [{"query": "swap the dell for a lenovo legion in my cart"}]},
+
+  {"id": "policy_payment_plans", "lane": "policy",
+   "notes": "capability-registry honesty (B1) — declared does_not_offer must answer honestly",
+   "turns": [{"query": "do you offer payment plans?"}]},
+
+  {"id": "policy_returns", "lane": "policy",
+   "turns": [{"query": "what is your returns policy?"}]},
+
+  {"id": "support_claim_damage", "lane": "support_claim",
+   "notes": "post-purchase damage claim — claims/refund rail, not retrieval",
+   "turns": [{"query": "my laptop arrived with a cracked screen and I want a refund"}]},
+
+  {"id": "off_domain", "lane": "off_domain",
+   "notes": "fully off-domain — expect graceful honesty, not a laptop grid",
+   "turns": [{"query": "recommend a good pizza place near me"}]},
+
+  {"id": "accessory_bag", "lane": "accessory",
+   "turns": [{"query": "a laptop bag that fits a 16 inch laptop"}]},
+
+  {"id": "persona_creator", "lane": "persona",
+   "turns": [{"query": "laptop for video editing and streaming on twitch"}]}
+]

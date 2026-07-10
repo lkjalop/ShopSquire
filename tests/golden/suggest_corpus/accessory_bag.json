@@ -1,0 +1,307 @@
+{
+ "id": "accessory_bag",
+ "lane": "accessory",
+ "notes": null,
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:46:03.415228+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-accessory_bag-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "a laptop bag that fits a 16 inch laptop",
+     "uid": "corpus-accessory_bag-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 3985,
+   "response": {
+    "results": [],
+    "proposal": {
+     "decision_mode": "rules",
+     "ranked_skus": []
+    },
+    "constraints_used": {
+     "uid_hash": "d6e0265812cc8a59",
+     "budget_max": null,
+     "budget_min": null,
+     "brands": [],
+     "specs": [],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "multi_intent_query",
+     "use_case": null,
+     "use_case_tags": [],
+     "locale": null,
+     "query": "a laptop bag that fits a 16 inch laptop",
+     "slots": {
+      "price_min": null,
+      "price_max": null,
+      "budget": null,
+      "specs": {},
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "SEARCH",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "unknown",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_neutral",
+     "accessory_affinities": [
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "multi_intent_query",
+      "secondary_needs": [],
+      "budget_min": null,
+      "budget_max": null,
+      "budget_tier": "unknown",
+      "price_sensitivity": "medium",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": null,
+      "accessory_affinities": [
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 0.75,
+      "warranty_tag": "warranty_candidate_neutral"
+     }
+    },
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 5
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": true,
+     "steps": [
+      {
+       "step": 1,
+       "intent": "sizing_fit_advice",
+       "confidence": 0.306,
+       "route": "recommendation",
+       "status": "planned"
+      },
+      {
+       "step": 2,
+       "intent": "best_overall_in_category",
+       "confidence": 0.262,
+       "route": "recommendation",
+       "status": "planned"
+      },
+      {
+       "step": 3,
+       "intent": "use_case_match",
+       "confidence": 0.257,
+       "route": "recommendation",
+       "status": "planned"
+      },
+      {
+       "step": 4,
+       "intent": "product_search",
+       "confidence": 0.175,
+       "route": "recommendation",
+       "status": "planned"
+      }
+     ]
+    },
+    "policy_version": "v1",
+    "refusal_note": null,
+    "assistant_message": "I can narrow this quickly with one or two details. If you skip details, I'll assume sensible defaults and show constrained alternatives.",
+    "next_questions": [
+     {
+      "id": "ask_budget_tier",
+      "text": "Do you have a price tier in mind (Under $1000, $1000–$1500, $1500+)?",
+      "goal": "clarify_details",
+      "evidence_needed": [
+       "none"
+      ],
+      "stop_condition": null,
+      "source": "template",
+      "options": [],
+      "question_slot": "budget"
+     },
+     {
+      "id": "ask_use_case",
+      "text": "To avoid guessing, what will you mostly do: general office/school work, creator/engineering tools, or gaming?",
+      "goal": "resolve_use_case",
+      "question_slot": "use_case",
+      "options": [
+       {
+        "id": "use_case_general",
+        "label": "General office/school"
+       },
+       {
+        "id": "use_case_creator",
+        "label": "Creator/engineering tools"
+       },
+       {
+        "id": "use_case_gaming",
+        "label": "Gaming"
+       }
+      ]
+     }
+    ],
+    "needs_disambiguation": true,
+    "agent_chain": [
+     {
+      "agent": "NQE_Agent",
+      "confidence": null,
+      "duration_ms": null
+     }
+    ],
+    "question_plan": {
+     "mode": "alternative",
+     "missing_fields": [
+      "budget",
+      "specs",
+      "use_case",
+      "brand_preference"
+     ],
+     "confidence_band": "high",
+     "ambiguity_reason": "no_relevant_results"
+    },
+    "confidence_band": "high",
+    "ambiguity_reason": "no_relevant_results",
+    "view_mode": "grid",
+    "view_reason": "Default product layout",
+    "trace_tags": [
+     "nlu:intent_present",
+     "nlu:intent_conf_high",
+     "lifecycle:new_user",
+     "payments:single_provider",
+     "i18n:english_path",
+     "slsa:level_unknown",
+     "platform:caching_partial",
+     "platform:async_partial",
+     "platform:zero_trust_not_done",
+     "platform:advanced_anomaly_partial",
+     "platform:chaos_partial",
+     "platform:observability_slo_partial",
+     "platform:ai_act_partial"
+    ],
+    "drilldown_hidden_tags": {
+     "domains": {
+      "nlu": {
+       "intent": "multi_intent_query",
+       "intent_confidence": 0.75,
+       "entity_count": 0,
+       "slot_keys": [
+        "availability",
+        "brand_excludes",
+        "brand_includes",
+        "budget",
+        "condition",
+        "price_max",
+        "price_min",
+        "quantity",
+        "shipping_deadline",
+        "specs"
+       ]
+      },
+      "lifecycle": {
+       "segment": "new_user",
+       "total_orders": 0,
+       "lifetime_value_cents": 0
+      },
+      "payments": {
+       "enabled_providers": [],
+       "enabled_count": 0,
+       "provider_concentration_risk": "high"
+      },
+      "i18n": {
+       "locale": null,
+       "non_english_detected": false,
+       "query_len": 39
+      },
+      "slsa": {
+       "slsa_level": null,
+       "sbom_ready_signal": false
+      },
+      "platform_readiness": {
+       "caching": "partial",
+       "async_processing": "partial",
+       "zero_trust": "not_done",
+       "advanced_anomaly_detection": "partial",
+       "chaos_engineering": "partial",
+       "observability_slo": "partial",
+       "ai_act": "partial"
+      }
+     },
+     "reasoning": {
+      "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+     }
+    },
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [],
+     "conjunction_count": 0,
+     "score": 0
+    },
+    "nqe_selection_applied": {},
+    "turn_type": "zero_result_turn",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.75,
+    "trace_id": "943aefcb-e695-42ca-b375-9166ab379837",
+    "decision_trace_id": "943aefcb-e695-42ca-b375-9166ab379837",
+    "evidence_items": [],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 0.0,
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "buyer_persona": null,
+    "buyer_persona_candidate": null,
+    "buyer_persona_confidence": null,
+    "decision_id": "943aefcb-e695-42ca-b375-9166ab379837",
+    "_trace_recommendation_persisted": true
+   },
+   "narration": null,
+   "contract_violations": [
+    "missing core field: degraded",
+    "missing core field: eligible",
+    "missing core field: products",
+    "unknown field (contract addition?): nqe_selection_applied"
+   ]
+  }
+ ]
+}

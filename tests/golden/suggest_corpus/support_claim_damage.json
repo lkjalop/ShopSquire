@@ -1,0 +1,223 @@
+{
+ "id": "support_claim_damage",
+ "lane": "support_claim",
+ "notes": "post-purchase damage claim — claims/refund rail, not retrieval",
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:45:55.868509+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-support_claim_damage-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "my laptop arrived with a cracked screen and I want a refund",
+     "uid": "corpus-support_claim_damage-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 4375,
+   "response": {
+    "status": "support_claim",
+    "results": [],
+    "proposal": {
+     "decision_mode": "support",
+     "ranked_skus": []
+    },
+    "constraints_used": {
+     "uid_hash": "af3d25ce14675d93",
+     "budget_max": null,
+     "budget_min": null,
+     "brands": [],
+     "specs": [],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "multi_intent_query",
+     "use_case": null,
+     "use_case_tags": [],
+     "locale": null,
+     "query": "my laptop arrived with a cracked screen and I want a refund",
+     "slots": {
+      "price_min": null,
+      "price_max": null,
+      "budget": null,
+      "specs": {},
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "SUPPORT_CLAIM",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "unknown",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_neutral",
+     "accessory_affinities": [
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "multi_intent_query",
+      "secondary_needs": [],
+      "budget_min": null,
+      "budget_max": null,
+      "budget_tier": "unknown",
+      "price_sensitivity": "medium",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": null,
+      "accessory_affinities": [
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 0.75,
+      "warranty_tag": "warranty_candidate_neutral"
+     }
+    },
+    "assistant_message": "30-day returns on unopened items; change-of-mind on opened items within 14 days with a 10% restocking fee. Faulty items are always replaced or refunded in full. To proceed, reply with your order number (a receipt, order email, or bank statement all work as proof of purchase).",
+    "right_panel": {
+     "mode": "support",
+     "title": "Return Request",
+     "options": [
+      {
+       "id": "open_return_portal",
+       "title": "Open Returns Portal",
+       "status": "available",
+       "message": "Start your return or exchange online."
+      },
+      {
+       "id": "human_agent",
+       "title": "Talk to a Human Agent",
+       "status": "available",
+       "message": "A support agent can help with complex claims."
+      },
+      {
+       "id": "upload_damage_photo",
+       "title": "Upload Damage Photo",
+       "status": "review",
+       "message": "Upload a clear photo for CV triage and claim assessment."
+      }
+     ],
+     "faq_playbooks": [
+      {
+       "id": "faq_return_policy",
+       "title": "Return Request",
+       "steps": [
+        "Locate order confirmation",
+        "Check return window",
+        "Submit return via portal or order number"
+       ]
+      }
+     ],
+     "parallel_agents": [
+      "CV_Triage_Agent",
+      "Warranty_Agent",
+      "Support_Playbook_Agent"
+     ]
+    },
+    "turn_type": "explain_turn",
+    "turn_intent": "SUPPORT_CLAIM",
+    "next_questions": [
+     {
+      "id": "provide_order_number",
+      "text": "Share your order number or serial number for faster resolution.",
+      "goal": "clarify_details"
+     },
+     {
+      "id": "upload_damage_photo",
+      "text": "Upload a clear photo of the damage or fault (speeds up claim assessment).",
+      "goal": "clarify_details"
+     }
+    ],
+    "view_mode": "support",
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [],
+     "conjunction_count": 1,
+     "score": 0
+    },
+    "nqe_selection_applied": {},
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.75,
+    "trace_id": "93f383f4-bd90-4a11-8577-20208530ed05",
+    "decision_trace_id": "93f383f4-bd90-4a11-8577-20208530ed05",
+    "policy_version": "v1",
+    "evidence_items": [],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 0.0,
+    "question_plan": {
+     "mode": "clarify",
+     "missing_fields": [
+      "budget",
+      "use_case"
+     ],
+     "confidence_band": "low",
+     "ambiguity_reason": "insufficient_context"
+    },
+    "confidence_band": "low",
+    "ambiguity_reason": "insufficient_context",
+    "needs_disambiguation": true,
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 0
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": false,
+     "steps": []
+    },
+    "buyer_persona": null,
+    "buyer_persona_candidate": null,
+    "buyer_persona_confidence": null,
+    "decision_id": "93f383f4-bd90-4a11-8577-20208530ed05",
+    "_trace_recommendation_persisted": true
+   },
+   "narration": null,
+   "contract_violations": [
+    "missing core field: agent_chain",
+    "missing core field: degraded",
+    "missing core field: eligible",
+    "missing core field: products",
+    "missing core field: view_reason",
+    "unknown field (contract addition?): nqe_selection_applied",
+    "unknown field (contract addition?): status"
+   ]
+  }
+ ]
+}

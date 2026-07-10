@@ -1,0 +1,220 @@
+{
+ "id": "offcatalog_a100",
+ "lane": "off_catalog",
+ "notes": "the audit headline case — must be honest + supplier RFQ offer + 0 products",
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:43:36.279475+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-offcatalog_a100-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "need five rack-mount A100 GPU servers under $80,000",
+     "uid": "corpus-offcatalog_a100-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 250,
+   "response": {
+    "results": [],
+    "proposal": {
+     "decision_mode": "rules",
+     "ranked_skus": []
+    },
+    "constraints_used": {
+     "uid_hash": "53f6b2042e61de33",
+     "budget_max": 80000,
+     "budget_min": null,
+     "brands": [],
+     "specs": [
+      "gpu:discrete",
+      "ram_gb_min:8",
+      "refresh_hz_min:60"
+     ],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "multi_intent_query",
+     "use_case": "gaming",
+     "use_case_tags": [],
+     "locale": null,
+     "query": "need five rack-mount A100 GPU servers under $80,000",
+     "slots": {
+      "price_min": null,
+      "price_max": 80000,
+      "budget": null,
+      "specs": {
+       "gpu_class": "discrete"
+      },
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "FILTER",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "workstation_pro",
+     "budget_tier_tags": [
+      "overspend_risk_check"
+     ],
+     "warranty_candidate": "warranty_candidate_high",
+     "_hard_budget_cap": true,
+     "accessory_affinities": [
+      "gaming_mouse",
+      "headset",
+      "cooling_pad",
+      "laptop_stand",
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "multi_intent_query",
+      "secondary_needs": [],
+      "budget_min": null,
+      "budget_max": 80000,
+      "budget_tier": "workstation_pro",
+      "price_sensitivity": "low",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": "gaming",
+      "accessory_affinities": [
+       "gaming_mouse",
+       "headset",
+       "cooling_pad",
+       "laptop_stand",
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 0.79,
+      "warranty_tag": "warranty_candidate_high"
+     },
+     "gpu_preference": "with_discrete",
+     "must_have_gpu": true,
+     "_image_os_hint": "windows",
+     "_off_catalog": {
+      "class": "datacenter_gpu_server",
+      "label": "rack-mount or datacenter GPU servers (A100/H100-class)"
+     }
+    },
+    "policy_version": "v1",
+    "message": "Honest answer: we don't stock rack-mount or datacenter GPU servers (A100/H100-class) in our catalog, and I won't pretend a laptop is a substitute. What I CAN do: send a request-for-quote to our suppliers for exactly what you described — you review the draft before anything is sent, and nothing is ordered without your confirmation. Since this is a $80,000 request (above our $20,000 threshold), I'll also bring a human account manager into the loop before anything is finalized.",
+    "degraded": false,
+    "eligible": true,
+    "view_mode": "grid",
+    "view_reason": "Price range detected",
+    "buyer_persona": null,
+    "buyer_persona_candidate": null,
+    "buyer_persona_confidence": null,
+    "agent_chain": [
+     {
+      "agent": "Security_Observer_Agent",
+      "confidence": null,
+      "duration_ms": null,
+      "severity": "info"
+     },
+     {
+      "agent": "Candidate_Retrieval_Agent",
+      "candidates": 7,
+      "duration_ms": 34
+     },
+     {
+      "agent": "Spec_Filter_Agent",
+      "candidates": 0,
+      "constraints": {}
+     },
+     {
+      "agent": "Inventory_Agent",
+      "candidates_evaluated": 0,
+      "status": "evaluated_pre_spec_filter"
+     }
+    ],
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [
+      "gpu"
+     ],
+     "conjunction_count": 0,
+     "score": 2
+    },
+    "trace_id": "0b8309ea-2972-42b2-b753-bb7f73044788",
+    "decision_trace_id": "0b8309ea-2972-42b2-b753-bb7f73044788",
+    "evidence_items": [],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 0.0,
+    "question_plan": {
+     "mode": "clarify",
+     "missing_fields": [
+      "budget",
+      "use_case"
+     ],
+     "confidence_band": "low",
+     "ambiguity_reason": "insufficient_context"
+    },
+    "confidence_band": "low",
+    "ambiguity_reason": "insufficient_context",
+    "needs_disambiguation": true,
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 0
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": false,
+     "steps": []
+    },
+    "turn_type": "unknown_turn",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.5,
+    "assistant_message": "Honest answer: we don't stock rack-mount or datacenter GPU servers (A100/H100-class) in our catalog, and I won't pretend a laptop is a substitute. What I CAN do: send a request-for-quote to our suppliers for exactly what you described — you review the draft before anything is sent, and nothing is ordered without your confirmation. Since this is a $80,000 request (above our $20,000 threshold), I'll also bring a human account manager into the loop before anything is finalized.",
+    "off_catalog": {
+     "class": "datacenter_gpu_server",
+     "label": "rack-mount or datacenter GPU servers (A100/H100-class)",
+     "supplier_rfq_offer": true
+    },
+    "products": [],
+    "summary_pending": false,
+    "decision_id": "0b8309ea-2972-42b2-b753-bb7f73044788",
+    "_trace_recommendation_persisted": true
+   },
+   "narration": null,
+   "contract_violations": []
+  }
+ ]
+}

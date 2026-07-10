@@ -1,0 +1,239 @@
+{
+ "id": "workload_valorant_fps",
+ "lane": "workload",
+ "notes": "Steam publisher floors + refresh requirement",
+ "known_wrong": {
+  "recorded": "0 products AND assistant_message=null — refresh_hz_min:144 zeroed retrieval with no message at all",
+  "why_wrong": "a hard spec floor with no catalog match must degrade to closest-match honesty, never a silent empty response",
+  "desired": "nearest-capable laptops (e.g. 120Hz+) + honest 'no 144Hz model in catalog; closest options are...'",
+  "fixed_by": "V2 core recovery-answer guarantee (roadmap Phase 4; same class as the _finalize_answer never-empty rule)"
+ },
+ "meta": {
+  "recorded_at": "2026-07-10T23:51:29.289379+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-workload_valorant_fps-0710235123"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "i want to play valorant at 144fps",
+     "uid": "corpus-workload_valorant_fps-0710235123"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 5641,
+   "response": {
+    "results": [],
+    "proposal": {
+     "decision_mode": "rules",
+     "ranked_skus": []
+    },
+    "constraints_used": {
+     "uid_hash": "aa12427d405b3285",
+     "budget_max": null,
+     "budget_min": null,
+     "brands": [],
+     "specs": [
+      "ram_gb_min:8",
+      "gpu_vram_gb_min:4",
+      "refresh_hz_min:144"
+     ],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "product_search",
+     "use_case": "gaming",
+     "use_case_tags": [
+      "gaming"
+     ],
+     "locale": null,
+     "query": "i want to play valorant at 144fps",
+     "slots": {
+      "price_min": null,
+      "price_max": null,
+      "budget": null,
+      "specs": {},
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "SEARCH",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "buyer_persona": "gamer",
+     "buyer_persona_confidence": 0.5,
+     "buyer_persona_scores": {
+      "gamer": 1
+     },
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "unknown",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_neutral",
+     "accessory_affinities": [
+      "gaming_mouse",
+      "headset",
+      "cooling_pad",
+      "laptop_stand",
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "product_search",
+      "secondary_needs": [],
+      "budget_min": null,
+      "budget_max": null,
+      "budget_tier": "unknown",
+      "price_sensitivity": "medium",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": "gaming",
+      "accessory_affinities": [
+       "gaming_mouse",
+       "headset",
+       "cooling_pad",
+       "laptop_stand",
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 1.0,
+      "warranty_tag": "warranty_candidate_neutral"
+     },
+     "gpu_preference": "with_discrete",
+     "must_have_gpu": true
+    },
+    "policy_version": "v1",
+    "message": "No products found in the current filters. Try widening budget slightly, broadening brand choices, or relaxing one requirement.",
+    "degraded": false,
+    "eligible": true,
+    "view_mode": "grid",
+    "view_reason": "Default product layout",
+    "buyer_persona": "gamer",
+    "buyer_persona_candidate": null,
+    "buyer_persona_confidence": 0.5,
+    "agent_chain": [
+     {
+      "agent": "Security_Observer_Agent",
+      "confidence": null,
+      "duration_ms": null,
+      "severity": "info"
+     },
+     {
+      "agent": "Candidate_Retrieval_Agent",
+      "candidates": 0,
+      "duration_ms": 4
+     },
+     {
+      "agent": "Spec_Filter_Agent",
+      "candidates": 0,
+      "constraints": {
+       "specs": [
+        "ram_gb_min:8",
+        "gpu_vram_gb_min:4",
+        "refresh_hz_min:144"
+       ],
+       "candidates_before": 0,
+       "candidates_after": 90,
+       "fallback": "spec_recall_recovery"
+      }
+     },
+     {
+      "agent": "Inventory_Agent",
+      "candidates_evaluated": 90,
+      "status": "evaluated_pre_spec_filter"
+     }
+    ],
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [
+      "fps"
+     ],
+     "conjunction_count": 0,
+     "score": 1
+    },
+    "trace_id": "a52bb7ec-948a-4e2f-81a8-fc07620b26f6",
+    "decision_trace_id": "a52bb7ec-948a-4e2f-81a8-fc07620b26f6",
+    "evidence_items": [],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 0.0,
+    "question_plan": {
+     "mode": "clarify",
+     "missing_fields": [
+      "budget",
+      "use_case"
+     ],
+     "confidence_band": "low",
+     "ambiguity_reason": "insufficient_context"
+    },
+    "confidence_band": "low",
+    "ambiguity_reason": "insufficient_context",
+    "needs_disambiguation": true,
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "workload_fit": {
+     "entities": [
+      "valorant"
+     ],
+     "floors": {
+      "min_ram_gb": 8.0,
+      "recommended_ram_gb": 16.0,
+      "min_gpu_vram_gb": 4.0,
+      "gpu_needed": true
+     },
+     "verdicts": [],
+     "publisher_requirements": "PUBLISHER-STATED GAME REQUIREMENTS (Steam store pages — cite freely):\n- Valorant: minimum 4GB RAM; minimum graphics Intel HD 4000 / Radeon R5 200 (laptop-equivalent: Intel HD Graphics, Intel UHD Graphics); recommended 4GB RAM; recommended graphics GeForce GT 730 / Radeon R7 240. [steam:valorant]"
+    },
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 0
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": false,
+     "steps": []
+    },
+    "turn_type": "unknown_turn",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.5,
+    "decision_id": "a52bb7ec-948a-4e2f-81a8-fc07620b26f6",
+    "_trace_recommendation_persisted": true
+   },
+   "narration": null,
+   "contract_violations": [
+    "missing core field: assistant_message",
+    "missing core field: products"
+   ]
+  }
+ ]
+}

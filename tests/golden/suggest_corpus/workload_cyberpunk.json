@@ -1,0 +1,4829 @@
+{
+ "id": "workload_cyberpunk",
+ "lane": "workload",
+ "notes": "min-vs-recommended P0 fix — retrieval filters on MINIMUM, recommended stays in verdicts",
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:44:03.970729+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-workload_cyberpunk-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "laptop that can run cyberpunk 2077",
+     "uid": "corpus-workload_cyberpunk-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 797,
+   "response": {
+    "results": [
+     {
+      "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+      "sku": "GAM-0006",
+      "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 169900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0006.svg",
+      "stock": 17,
+      "specs": {
+       "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+       "display_inches": 16,
+       "refresh_hz": 240,
+       "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.6,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C (Thunderbolt 4)",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.6,
+       "shipping_days": 2,
+       "display_name": "Dell G16 7630",
+       "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.075,
+        "supplier_performance": 0.201,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.77601013560964,
+      "score_norm": 100.0,
+      "rank_delta": 0.0,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+      "delta_vs_anchor": {},
+      "baseline_rank": 1,
+      "rerank_delta": 1,
+      "price": 1699.0,
+      "stock_level": 17,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$1,699 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "17 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "basic",
+        "detail": "webcam not specified"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "use_case_suitability": {
+       "use_case": "gaming_aaa_heavy",
+       "suitable": true,
+       "verdict": "fully_suitable",
+       "gaps": [],
+       "strengths": [
+        "Storage 1024GB sufficient",
+        "Has dedicated GPU as required"
+       ],
+       "excess": [],
+       "overkill_score": 0.0
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "b36808bd-f287-4088-917b-cf1460c38018",
+      "sku": "GAM-0002",
+      "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 149900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0002.svg",
+      "stock": 13,
+      "specs": {
+       "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 15.6,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.1,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.4,
+       "shipping_days": 3,
+       "display_name": "MSI Katana 15 B13VGK",
+       "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.077,
+        "supplier_performance": 0.146,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.72276338669276,
+      "score_norm": 99.88,
+      "rank_delta": 0.05,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "12% cheaper ($1,499 vs $1,699)"
+      },
+      "baseline_rank": 16,
+      "rerank_delta": 15,
+      "price": 1499.0,
+      "stock_level": 13,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$1,499 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "13 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "basic",
+        "detail": "webcam not specified"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "use_case_suitability": {
+       "use_case": "gaming_aaa_heavy",
+       "suitable": true,
+       "verdict": "fully_suitable",
+       "gaps": [],
+       "strengths": [
+        "Storage 1024GB sufficient",
+        "Has dedicated GPU as required"
+       ],
+       "excess": [],
+       "overkill_score": 0.0
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+      "sku": "LAP-647D08E6",
+      "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+      "price_cents": 289900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-647D08E6.svg",
+      "stock": 18,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 165,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5060",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 8,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "gaming"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.114,
+        "supplier_performance": 0.09,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.70403239009501,
+      "score_norm": 99.83,
+      "rank_delta": 0.07,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "71% more expensive ($2,899 vs $1,699)"
+      },
+      "baseline_rank": 3,
+      "rerank_delta": 1,
+      "price": 2899.0,
+      "stock_level": 18,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$2,899 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "18 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "use_case_suitability": {
+       "use_case": "gaming_aaa_heavy",
+       "suitable": true,
+       "verdict": "fully_suitable",
+       "gaps": [],
+       "strengths": [
+        "Storage 1024GB sufficient",
+        "Has dedicated GPU as required"
+       ],
+       "excess": [],
+       "overkill_score": 0.0
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "3f3fe2cc-50cf-42cb-a0d7-c6fed5d46346",
+      "sku": "LAP-788760E4",
+      "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+      "price_cents": 389900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-788760E4.svg",
+      "stock": 9,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 240,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5060",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 8,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "use_case": "gaming"
+      },
+      "confidence": 0.999317,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.117,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.61664236870396,
+      "score_norm": 99.63,
+      "rank_delta": 0.16,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]: vs the top pick — 129% more expensive ($3,899 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "129% more expensive ($3,899 vs $1,699)"
+      },
+      "baseline_rank": 15,
+      "rerank_delta": 12,
+      "price": 3899.0,
+      "stock_level": 9,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "9 units remaining",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$3,899 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "low_stock",
+        "detail": "9 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "unmanaged",
+        "detail": "no fleet-management markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "4e577d9c-7a0b-4a8a-ba5e-291acbfb4d4e",
+      "sku": "LAP-BCBAFE20",
+      "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+      "price_cents": 449900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-BCBAFE20.svg",
+      "stock": 10,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 32,
+       "storage_gb": 1024,
+       "refresh_hz": 240,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5080",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "gaming",
+       "gpu_vram_gb": 16
+      },
+      "confidence": 0.978272,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.111,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.61111111111111,
+      "score_norm": 99.62,
+      "rank_delta": 0.16,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]: vs the top pick — 165% more expensive ($4,499 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "165% more expensive ($4,499 vs $1,699)"
+      },
+      "baseline_rank": 10,
+      "rerank_delta": 6,
+      "price": 4499.0,
+      "stock_level": 10,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "10 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "3427d136-b828-4e3f-96c9-7cbc2ebdf36d",
+      "sku": "LAP-858DC749",
+      "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+      "price_cents": 599900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-858DC749.svg",
+      "stock": 11,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 64,
+       "storage_gb": 1024,
+       "refresh_hz": 240,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5090",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 24,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "gaming"
+      },
+      "confidence": 0.978272,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.11,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.610096376512637,
+      "score_norm": 99.61,
+      "rank_delta": 0.17,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "253% more expensive ($5,999 vs $1,699)"
+      },
+      "baseline_rank": 11,
+      "rerank_delta": 6,
+      "price": 5999.0,
+      "stock_level": 11,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "ac85ed66-47bc-4c69-b20f-8a7b3a76c7a2",
+      "sku": "LAP-0A1191AB",
+      "name": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]",
+      "price_cents": 349900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-0A1191AB.svg",
+      "stock": 20,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 32,
+       "storage_gb": 1024,
+       "refresh_hz": 120,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5060",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 8,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "use_case": "gaming"
+      },
+      "confidence": 0.999317,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.118,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.1
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000",
+       "market-intel (demand-aware) ↑"
+      ],
+      "score": 18.85785113019776,
+      "score_norm": 97.76,
+      "rank_delta": 0.96,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]: vs the top pick — 106% more expensive ($3,499 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "106% more expensive ($3,499 vs $1,699)"
+      },
+      "baseline_rank": 9,
+      "rerank_delta": 3,
+      "price": 3499.0,
+      "_sales_response_delta": 0.04,
+      "stock_level": 20,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     }
+    ],
+    "products": [
+     {
+      "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+      "sku": "GAM-0006",
+      "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 169900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0006.svg",
+      "stock": 17,
+      "specs": {
+       "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+       "display_inches": 16,
+       "refresh_hz": 240,
+       "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.6,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C (Thunderbolt 4)",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.6,
+       "shipping_days": 2,
+       "display_name": "Dell G16 7630",
+       "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.075,
+        "supplier_performance": 0.201,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.77601013560964,
+      "score_norm": 100.0,
+      "rank_delta": 0.0,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+      "delta_vs_anchor": {},
+      "baseline_rank": 1,
+      "rerank_delta": 1,
+      "price": 1699.0,
+      "stock_level": 17,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$1,699 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "17 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "basic",
+        "detail": "webcam not specified"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "use_case_suitability": {
+       "use_case": "gaming_aaa_heavy",
+       "suitable": true,
+       "verdict": "fully_suitable",
+       "gaps": [],
+       "strengths": [
+        "Storage 1024GB sufficient",
+        "Has dedicated GPU as required"
+       ],
+       "excess": [],
+       "overkill_score": 0.0
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "b36808bd-f287-4088-917b-cf1460c38018",
+      "sku": "GAM-0002",
+      "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+      "price_cents": 149900,
+      "currency": "USD",
+      "image_url": "/static/images/GAM-0002.svg",
+      "stock": 13,
+      "specs": {
+       "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+       "display_inches": 15.6,
+       "refresh_hz": 144,
+       "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "storage": "1TB PCIe NVMe SSD",
+       "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+       "gpu_model": "RTX 4070",
+       "gpu_vram_gb": 8,
+       "os": "Windows 11 Home",
+       "wifi": "Wi-Fi 6E (802.11ax)",
+       "bluetooth": "Bluetooth 5.3",
+       "battery_wh": 86,
+       "weight_kg": 2.1,
+       "ports": [
+        "3x USB-A 3.2",
+        "1x USB-C",
+        "HDMI 2.1",
+        "SD card reader",
+        "RJ45"
+       ],
+       "gaming_style": true,
+       "use_case": "gaming",
+       "rating": 4.4,
+       "shipping_days": 3,
+       "display_name": "MSI Katana 15 B13VGK",
+       "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.077,
+        "supplier_performance": 0.146,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.72276338669276,
+      "score_norm": 99.88,
+      "rank_delta": 0.05,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "12% cheaper ($1,499 vs $1,699)"
+      },
+      "baseline_rank": 16,
+      "rerank_delta": 15,
+      "price": 1499.0,
+      "stock_level": 13,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$1,499 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "13 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "basic",
+        "detail": "webcam not specified"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "use_case_suitability": {
+       "use_case": "gaming_aaa_heavy",
+       "suitable": true,
+       "verdict": "fully_suitable",
+       "gaps": [],
+       "strengths": [
+        "Storage 1024GB sufficient",
+        "Has dedicated GPU as required"
+       ],
+       "excess": [],
+       "overkill_score": 0.0
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+      "sku": "LAP-647D08E6",
+      "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+      "price_cents": 289900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-647D08E6.svg",
+      "stock": 18,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 165,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5060",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 8,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 6E",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "gaming"
+      },
+      "confidence": 1.0,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+supplier_performance"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.114,
+        "supplier_performance": 0.09,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.70403239009501,
+      "score_norm": 99.83,
+      "rank_delta": 0.07,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "71% more expensive ($2,899 vs $1,699)"
+      },
+      "baseline_rank": 3,
+      "rerank_delta": 1,
+      "price": 2899.0,
+      "stock_level": 18,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$2,899 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "in_stock",
+        "detail": "18 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "managed",
+        "detail": "vPro/TPM/docking/warranty markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "yes",
+        "detail": "docking/Thunderbolt"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "use_case_suitability": {
+       "use_case": "gaming_aaa_heavy",
+       "suitable": true,
+       "verdict": "fully_suitable",
+       "gaps": [],
+       "strengths": [
+        "Storage 1024GB sufficient",
+        "Has dedicated GPU as required"
+       ],
+       "excess": [],
+       "overkill_score": 0.0
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "3f3fe2cc-50cf-42cb-a0d7-c6fed5d46346",
+      "sku": "LAP-788760E4",
+      "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+      "price_cents": 389900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-788760E4.svg",
+      "stock": 9,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 16,
+       "storage_gb": 1024,
+       "refresh_hz": 240,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5060",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 8,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "use_case": "gaming"
+      },
+      "confidence": 0.999317,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.117,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.61664236870396,
+      "score_norm": 99.63,
+      "rank_delta": 0.16,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]: vs the top pick — 129% more expensive ($3,899 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "129% more expensive ($3,899 vs $1,699)"
+      },
+      "baseline_rank": 15,
+      "rerank_delta": 12,
+      "price": 3899.0,
+      "stock_level": 9,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "9 units remaining",
+      "evidence": {
+       "price_fit": {
+        "status": "unknown",
+        "detail": "$3,899 (no budget given)"
+       },
+       "inventory_fit": {
+        "status": "low_stock",
+        "detail": "9 in stock"
+       },
+       "office_fit": {
+        "status": "consumer",
+        "detail": "consumer build"
+       },
+       "fleet_fit": {
+        "status": "unmanaged",
+        "detail": "no fleet-management markers"
+       },
+       "portability": {
+        "status": "standard",
+        "detail": "standard chassis"
+       },
+       "docking": {
+        "status": "no",
+        "detail": "none stated"
+       },
+       "warranty": {
+        "status": "standard",
+        "detail": "standard warranty"
+       },
+       "camera": {
+        "status": "conferencing",
+        "detail": "1080p/IR webcam (Windows Hello)"
+       },
+       "wifi": {
+        "status": "wifi6plus",
+        "detail": "Wi-Fi 6/6E/7"
+       },
+       "storage": {
+        "status": "ample",
+        "detail": "1024GB SSD"
+       },
+       "os_ecosystem": {
+        "status": "Windows",
+        "detail": "Windows ecosystem"
+       },
+       "risk_penalties": {
+        "status": "present",
+        "detail": "gpu_vram_gb_min:8"
+       }
+      },
+      "product_type": "laptop"
+     },
+     {
+      "id": "4e577d9c-7a0b-4a8a-ba5e-291acbfb4d4e",
+      "sku": "LAP-BCBAFE20",
+      "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+      "price_cents": 449900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-BCBAFE20.svg",
+      "stock": 10,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 32,
+       "storage_gb": 1024,
+       "refresh_hz": 240,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5080",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "gaming",
+       "gpu_vram_gb": 16
+      },
+      "confidence": 0.978272,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.111,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.61111111111111,
+      "score_norm": 99.62,
+      "rank_delta": 0.16,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]: vs the top pick — 165% more expensive ($4,499 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "165% more expensive ($4,499 vs $1,699)"
+      },
+      "baseline_rank": 10,
+      "rerank_delta": 6,
+      "price": 4499.0,
+      "stock_level": 10,
+      "cart_eligible": true,
+      "stock_status": "low_stock",
+      "stock_urgency": "10 units remaining",
+      "product_type": "laptop"
+     },
+     {
+      "id": "3427d136-b828-4e3f-96c9-7cbc2ebdf36d",
+      "sku": "LAP-858DC749",
+      "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+      "price_cents": 599900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-858DC749.svg",
+      "stock": 11,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 64,
+       "storage_gb": 1024,
+       "refresh_hz": 240,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5090",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 24,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "docking": "Thunderbolt 4",
+       "use_case": "gaming"
+      },
+      "confidence": 0.978272,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.11,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.9
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000"
+      ],
+      "score": 19.610096376512637,
+      "score_norm": 99.61,
+      "rank_delta": 0.17,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]: vs the top pick — 253% more expensive ($5,999 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "253% more expensive ($5,999 vs $1,699)"
+      },
+      "baseline_rank": 11,
+      "rerank_delta": 6,
+      "price": 5999.0,
+      "stock_level": 11,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     },
+     {
+      "id": "ac85ed66-47bc-4c69-b20f-8a7b3a76c7a2",
+      "sku": "LAP-0A1191AB",
+      "name": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]",
+      "price_cents": 349900,
+      "currency": "AUD",
+      "image_url": "/static/images/LAP-0A1191AB.svg",
+      "stock": 20,
+      "specs": {
+       "category": "laptop",
+       "ram_gb": 32,
+       "storage_gb": 1024,
+       "refresh_hz": 120,
+       "display_inches": 16.0,
+       "gpu": "GeForce RTX 5060",
+       "gpu_discrete": true,
+       "gaming_style": true,
+       "gpu_vram_gb": 8,
+       "os": "Windows 11",
+       "wifi": "Wi-Fi 7",
+       "webcam": "HD webcam",
+       "use_case": "gaming"
+      },
+      "confidence": 0.999317,
+      "factors": {
+       "positive": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000",
+        "+ram_gb_min:16",
+        "+embedding_similarity",
+        "+cross_encoder"
+       ],
+       "negative": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "checks": [
+        "use_case:gaming_aaa_heavy"
+       ],
+       "weights": {
+        "in_stock": 10.0,
+        "ram_gb_min:16": 1.5,
+        "storage_gb_min:1000": 1.5,
+        "gpu_vram_gb_min:8": -0.5,
+        "use_case:gaming_aaa_heavy": 0.5,
+        "embedding_similarity": 0.118,
+        "cross_encoder": 0.1
+       },
+       "use_case_bonus": 4.1
+      },
+      "why": [
+       "+in_stock",
+       "+ram_gb_min:16",
+       "+storage_gb_min:1000",
+       "market-intel (demand-aware) ↑"
+      ],
+      "score": 18.85785113019776,
+      "score_norm": 97.76,
+      "rank_delta": 0.96,
+      "why_not": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "contrastive_why": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]: vs the top pick — 106% more expensive ($3,499 vs $1,699).",
+      "delta_vs_anchor": {
+       "price": "106% more expensive ($3,499 vs $1,699)"
+      },
+      "baseline_rank": 9,
+      "rerank_delta": 3,
+      "price": 3499.0,
+      "_sales_response_delta": 0.04,
+      "stock_level": 20,
+      "cart_eligible": true,
+      "stock_status": "in_stock",
+      "product_type": "laptop"
+     }
+    ],
+    "price_filter": {},
+    "price_buckets": {
+     "within_budget": [],
+     "closest_above_budget": [],
+     "closest_below_budget": []
+    },
+    "proposal": {
+     "decision_mode": "agent_rerank",
+     "ranked_skus": [
+      "GAM-0006",
+      "GAM-0002",
+      "LAP-647D08E6",
+      "LAP-788760E4",
+      "LAP-BCBAFE20",
+      "LAP-858DC749",
+      "LAP-0A1191AB",
+      "LAP-031E526F",
+      "LAP-433AB371",
+      "LAP-93108E47",
+      "LAP-5DEB73EF",
+      "LAP-E6B9B4C2",
+      "LAP-FF99E9FD",
+      "LAP-29EA2785",
+      "LAP-B8D8576C",
+      "LAP-1886C355",
+      "LAP-81D63A08",
+      "LAP-8ACB29B4",
+      "LAP-01B48B57"
+     ],
+     "rationale": "Intent=multi_intent_query; query=laptop that can run cyberpunk 2077",
+     "per_sku_rationale": {
+      "GAM-0006": [
+       "equipped with RTX 4070",
+       "16GB RAM"
+      ],
+      "GAM-0002": [
+       "equipped with RTX 4070",
+       "16GB RAM"
+      ],
+      "LAP-647D08E6": [
+       "16GB RAM"
+      ],
+      "LAP-788760E4": [
+       "16GB RAM"
+      ],
+      "LAP-BCBAFE20": [
+       "32GB RAM"
+      ],
+      "LAP-858DC749": [
+       "64GB RAM"
+      ]
+     },
+     "factor_telemetry": {
+      "decision_mode": "agent_rerank",
+      "window_precision": "na",
+      "context_multipliers": "default",
+      "factor_rankings": []
+     },
+     "nlp": {
+      "intent": "multi_intent_query",
+      "intent_confidence": 0.75,
+      "intent_chain": [
+       {
+        "intent": "multi_intent_query",
+        "confidence": 0.75
+       },
+       {
+        "intent": "best_overall_in_category",
+        "confidence": 0.6
+       },
+       {
+        "intent": "product_search",
+        "confidence": 0.4
+       }
+      ],
+      "intent_evidence": {
+       "rules": {
+        "best_overall_in_category": [
+         "best_keywords"
+        ]
+       },
+       "semantic": {}
+      },
+      "entities": {
+       "brands": [],
+       "specs": [],
+       "use_case": null,
+       "buyer_type": "consumer",
+       "compliance_requested": false
+      },
+      "use_case_tags": [],
+      "preferences": {
+       "brands": [],
+       "specs": [],
+       "budget_max": null,
+       "budget_min": null,
+       "use_case": null,
+       "use_case_tags": [],
+       "intent": "multi_intent_query",
+       "brand_excludes": [],
+       "availability": null,
+       "condition": null,
+       "buyer_type": "consumer",
+       "compliance_requested": false,
+       "quantity": null,
+       "locale": "en",
+       "lifecycle_signal": null
+      },
+      "context_pack": {
+       "intent": "multi_intent_query",
+       "use_case": null,
+       "use_case_tags": [],
+       "quantity": null,
+       "constraints": {
+        "price_min": null,
+        "price_max": null,
+        "budget": null,
+        "specs": {},
+        "availability": null,
+        "condition": null
+       },
+       "state": null,
+       "risk_band": null,
+       "buyer_type": "consumer",
+       "locale": "en",
+       "lifecycle_signal": null
+      },
+      "locale": "en",
+      "followups": [
+       "What is your budget range?",
+       "Any must-have specs (RAM, screen size, OS)?",
+       "What will you use the laptop for (work, travel, gaming)?"
+      ],
+      "slots": {
+       "price_min": null,
+       "price_max": null,
+       "budget": null,
+       "specs": {},
+       "brand_includes": [],
+       "brand_excludes": [],
+       "condition": null,
+       "availability": null,
+       "shipping_deadline": null,
+       "quantity": null
+      },
+      "llm_fallback": false,
+      "trace_tags": [
+       "nlu:intent_present",
+       "nlu:intent_conf_high",
+       "lifecycle:new_user",
+       "payments:single_provider",
+       "i18n:english_path",
+       "slsa:level_unknown",
+       "platform:caching_partial",
+       "platform:async_partial",
+       "platform:zero_trust_not_done",
+       "platform:advanced_anomaly_partial",
+       "platform:chaos_partial",
+       "platform:observability_slo_partial",
+       "platform:ai_act_partial"
+      ],
+      "trace_hidden": {
+       "domains": {
+        "nlu": {
+         "intent": "multi_intent_query",
+         "intent_confidence": 0.75,
+         "entity_count": 0,
+         "slot_keys": [
+          "availability",
+          "brand_excludes",
+          "brand_includes",
+          "budget",
+          "condition",
+          "price_max",
+          "price_min",
+          "quantity",
+          "shipping_deadline",
+          "specs"
+         ]
+        },
+        "lifecycle": {
+         "segment": "new_user",
+         "total_orders": 0,
+         "lifetime_value_cents": 0
+        },
+        "payments": {
+         "enabled_providers": [],
+         "enabled_count": 0,
+         "provider_concentration_risk": "high"
+        },
+        "i18n": {
+         "locale": null,
+         "non_english_detected": false,
+         "query_len": 34
+        },
+        "slsa": {
+         "slsa_level": null,
+         "sbom_ready_signal": false
+        },
+        "platform_readiness": {
+         "caching": "partial",
+         "async_processing": "partial",
+         "zero_trust": "not_done",
+         "advanced_anomaly_detection": "partial",
+         "chaos_engineering": "partial",
+         "observability_slo": "partial",
+         "ai_act": "partial"
+        }
+       },
+       "reasoning": {
+        "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+       }
+      },
+      "followup_contract": {
+       "deictic_reference_detected": false,
+       "comparative_followup_detected": false,
+       "memory_carry_forward_required": false,
+       "coreference_mode": "none",
+       "intent_chain_size": 3
+      },
+      "intent_execution_plan": {
+       "plan_version": "intent_split_v1",
+       "is_multi_intent": true,
+       "steps": [
+        {
+         "step": 1,
+         "intent": "best_overall_in_category",
+         "confidence": 0.6,
+         "route": "recommendation",
+         "status": "planned"
+        },
+        {
+         "step": 2,
+         "intent": "product_search",
+         "confidence": 0.4,
+         "route": "recommendation",
+         "status": "planned"
+        }
+       ]
+      }
+     },
+     "evidence": [
+      {
+       "sku": "GAM-0006",
+       "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 169900
+      },
+      {
+       "sku": "GAM-0002",
+       "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 149900
+      },
+      {
+       "sku": "LAP-647D08E6",
+       "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+       "price_cents": 289900
+      },
+      {
+       "sku": "LAP-788760E4",
+       "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+       "price_cents": 389900
+      },
+      {
+       "sku": "LAP-BCBAFE20",
+       "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+       "price_cents": 449900
+      }
+     ]
+    },
+    "constraints_used": {
+     "uid_hash": "58140bc05a3c8d65",
+     "budget_max": null,
+     "budget_min": null,
+     "brands": [],
+     "specs": [
+      "ram_gb_min:16",
+      "storage_gb_min:1000",
+      "ram_gb_min:16",
+      "gpu_vram_gb_min:8"
+     ],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "multi_intent_query",
+     "use_case": "gaming_aaa_heavy",
+     "use_case_tags": [
+      "gaming_aaa_heavy"
+     ],
+     "locale": null,
+     "query": "laptop that can run cyberpunk 2077",
+     "slots": {
+      "price_min": null,
+      "price_max": null,
+      "budget": null,
+      "specs": {},
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "SEARCH",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "buyer_persona": "gamer",
+     "buyer_persona_confidence": 0.5,
+     "buyer_persona_scores": {
+      "gamer": 1
+     },
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "unknown",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_neutral",
+     "inferred_persona": "gamer",
+     "priority_factors": [
+      "gpu",
+      "gpu_vram",
+      "cooling",
+      "cpu"
+     ],
+     "accessory_affinities": [
+      "gaming_mouse",
+      "headset",
+      "cooling_pad",
+      "extended_warranty",
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "gamer",
+      "primary_intent": "multi_intent_query",
+      "secondary_needs": [
+       "gpu",
+       "gpu_vram",
+       "cooling"
+      ],
+      "budget_min": null,
+      "budget_max": null,
+      "budget_tier": "unknown",
+      "price_sensitivity": "medium",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": "gaming_aaa_heavy",
+      "accessory_affinities": [
+       "gaming_mouse",
+       "headset",
+       "cooling_pad",
+       "extended_warranty",
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [
+       "gpu",
+       "gpu_vram",
+       "cooling",
+       "cpu"
+      ],
+      "confidence": 0.75,
+      "warranty_tag": "warranty_candidate_neutral"
+     },
+     "gpu_preference": "with_discrete",
+     "must_have_gpu": true,
+     "constraint_status": {
+      "exact_match": true
+     },
+     "use_case_fit_status": {
+      "exact_fit": true,
+      "conflicts": []
+     }
+    },
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 3
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": true,
+     "steps": [
+      {
+       "step": 1,
+       "intent": "best_overall_in_category",
+       "confidence": 0.6,
+       "route": "recommendation",
+       "status": "planned"
+      },
+      {
+       "step": 2,
+       "intent": "product_search",
+       "confidence": 0.4,
+       "route": "recommendation",
+       "status": "planned"
+      }
+     ]
+    },
+    "policy_version": "v1",
+    "decision_id": "9691bd44-3f6f-437a-9565-a2c2f9027cbb",
+    "risk_score": 4.320000000000001,
+    "why_not": [
+     {
+      "sku": "LAP-788760E4",
+      "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+      "reasons": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "score": 19.61664236870396
+     },
+     {
+      "sku": "LAP-BCBAFE20",
+      "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+      "reasons": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "score": 19.61111111111111
+     },
+     {
+      "sku": "LAP-858DC749",
+      "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+      "reasons": [
+       "-gpu_vram_gb_min:8"
+      ],
+      "score": 19.610096376512637
+     }
+    ],
+    "degraded": false,
+    "eligible": true,
+    "notice": null,
+    "approval_id": null,
+    "trace_id": "9691bd44-3f6f-437a-9565-a2c2f9027cbb",
+    "persona_tone": "neutral",
+    "buyer_persona": "gamer",
+    "buyer_persona_confidence": 0.5,
+    "buyer_persona_candidate": null,
+    "budget_fitness": {
+     "status": "unknown"
+    },
+    "requested_quantity": null,
+    "refusal_note": null,
+    "learn_more_url": "/ui/status",
+    "agent_chain": [
+     {
+      "agent": "Security_Observer_Agent",
+      "confidence": null,
+      "duration_ms": null,
+      "severity": "info"
+     },
+     {
+      "agent": "NLP_Search_Agent",
+      "confidence": 0.75,
+      "duration_ms": 2
+     },
+     {
+      "agent": "Candidate_Retrieval_Agent",
+      "candidates": 48,
+      "duration_ms": 3
+     },
+     {
+      "agent": "Spec_Filter_Agent",
+      "candidates": 19,
+      "constraints": {
+       "specs": [
+        "ram_gb_min:16",
+        "storage_gb_min:1000",
+        "ram_gb_min:16",
+        "gpu_vram_gb_min:8"
+       ],
+       "candidates_before": 48,
+       "candidates_after": 25
+      }
+     },
+     {
+      "agent": "Product_Ranking_Agent",
+      "candidates": 19,
+      "duration_ms": 56,
+      "decision_mode": "agent_rerank"
+     }
+    ],
+    "trace_tags": [
+     "nlu:intent_present",
+     "nlu:intent_conf_high",
+     "lifecycle:new_user",
+     "payments:single_provider",
+     "i18n:english_path",
+     "slsa:level_unknown",
+     "platform:caching_partial",
+     "platform:async_partial",
+     "platform:zero_trust_not_done",
+     "platform:advanced_anomaly_partial",
+     "platform:chaos_partial",
+     "platform:observability_slo_partial",
+     "platform:ai_act_partial"
+    ],
+    "drilldown_hidden_tags": {
+     "domains": {
+      "nlu": {
+       "intent": "multi_intent_query",
+       "intent_confidence": 0.75,
+       "entity_count": 0,
+       "slot_keys": [
+        "availability",
+        "brand_excludes",
+        "brand_includes",
+        "budget",
+        "condition",
+        "price_max",
+        "price_min",
+        "quantity",
+        "shipping_deadline",
+        "specs"
+       ]
+      },
+      "lifecycle": {
+       "segment": "new_user",
+       "total_orders": 0,
+       "lifetime_value_cents": 0
+      },
+      "payments": {
+       "enabled_providers": [],
+       "enabled_count": 0,
+       "provider_concentration_risk": "high"
+      },
+      "i18n": {
+       "locale": null,
+       "non_english_detected": false,
+       "query_len": 34
+      },
+      "slsa": {
+       "slsa_level": null,
+       "sbom_ready_signal": false
+      },
+      "platform_readiness": {
+       "caching": "partial",
+       "async_processing": "partial",
+       "zero_trust": "not_done",
+       "advanced_anomaly_detection": "partial",
+       "chaos_engineering": "partial",
+       "observability_slo": "partial",
+       "ai_act": "partial"
+      }
+     },
+     "reasoning": {
+      "summary": "Tags correlate NLU extraction quality, lifecycle segment, payment diversity, i18n signals, supply-chain integrity posture, and platform-readiness gaps for decision-trace drilldown."
+     }
+    },
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [],
+     "conjunction_count": 0,
+     "score": 0
+    },
+    "timing_breakdown": {
+     "ollama_summary_ms": null,
+     "guard_ms": 0,
+     "catalog_profile_ms": 0,
+     "catalog_profile_cache_hit": true,
+     "security_analysis_ms": 20,
+     "seg_security_join_ms": 19.9,
+     "seg_policy_gate_and_session_ms": 21.8,
+     "seg_fraud_scoring_ms": 2.7,
+     "seg_budget_and_rollout_gates_ms": 3.5,
+     "nlp_ms": 2,
+     "seg_session_memory_loads_ms": 11.3,
+     "seg_intent_routing_ms": 0.5,
+     "seg_nlp_and_setup_ms": 0.0,
+     "budget_resolution_ms": 0.01,
+     "retrieve_ms": 3,
+     "seg_retrieve_ms": 13.6,
+     "seg_filter_cascades_ms": 1.3,
+     "seg_inventory_handoff_ms": 0.6,
+     "retrieval_mode": "shadow",
+     "rerank_ms": 56,
+     "seg_rerank_ms": 67.6,
+     "seg_decision_log_and_annotation_ms": 53.2,
+     "route_total_ms": 748,
+     "accounted_ms": 271,
+     "unaccounted_ms": 0,
+     "seg_intelligence_stage_ms": 312.3,
+     "narration_mode": "async",
+     "summary_ms": 0,
+     "narration_pending": true,
+     "seg_narration_ms": 41.7,
+     "copywriting_ms": 0,
+     "seg_post_policy_ms": 6.7,
+     "seg_post_redaction_ms": 26.6,
+     "seg_post_watermark_theft_probe_ms": 0.4,
+     "seg_post_output_security_ms": 62.4,
+     "seg_post_incident_review_ms": 0.0,
+     "seg_post_final_transforms_ms": 0.9,
+     "compound_needed": false,
+     "compound_ms": 0
+    },
+    "source_statuses": [
+     {
+      "source": "catalog_db",
+      "status": "full",
+      "hit_count": 7,
+      "latency_ms": 3,
+      "error": null
+     }
+    ],
+    "fraud": {
+     "score": 0.0,
+     "level": "minimal",
+     "signals": {
+      "image_hash_match_fraud_db": false
+     },
+     "ja3_hash": null,
+     "ja4_hash": null,
+     "source_ip": "[REDACTED_IP]",
+     "ip_country": "ZZ",
+     "asn": null,
+     "gnn_score": 0.1,
+     "gnn_method": "heuristic",
+     "gnn_ring_detected": false
+    },
+    "turn_type": "zero_result_turn",
+    "turn_intent": "SEARCH",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.75,
+    "view_mode": "grid",
+    "view_reason": "Default product layout",
+    "security": {
+     "severity": "info",
+     "mitre": [],
+     "owasp": [],
+     "stride": [],
+     "signals": {
+      "jailbreak": false,
+      "embedding_jailbreak": false,
+      "unicode_obfuscation": false,
+      "pii": false,
+      "api_key": false,
+      "pci": false,
+      "prompt_injection": false,
+      "agentic_tool_abuse": false,
+      "data_exfiltration": false,
+      "supply_chain": false,
+      "training_poisoning": false,
+      "poisoning_attempt": false,
+      "model_drift": false,
+      "model_dos": false,
+      "plugin_insecure": false,
+      "overreliance": false,
+      "embedding_weakness": false,
+      "identity_abuse": false,
+      "unexpected_code_exec": false,
+      "cascading_failure": false,
+      "rogue_agent": false,
+      "pcap_dns_tunnel": false,
+      "pcap_high_entropy_dns": false,
+      "cv_prompt_injection": false,
+      "deception": false,
+      "authority_impersonation": false,
+      "social_engineering": false
+     },
+     "risk_adj": 4.320000000000001,
+     "cvss": {
+      "score": 0.2
+     },
+     "dread": {
+      "damage": 2.0,
+      "reproducibility": 3.0,
+      "exploitability": 3.0,
+      "affected_users": 3.0,
+      "discoverability": 5.0,
+      "avg": 3.2,
+      "weighted_avg": 3.56,
+      "kill_chain_stage": "Reconnaissance",
+      "kill_chain_stage_index": 0,
+      "stage_weights": {
+       "damage": 1,
+       "reproducibility": 2,
+       "exploitability": 2,
+       "affected_users": 1,
+       "discoverability": 3
+      },
+      "evidence": [
+       {
+        "signal": "severity:info",
+        "component": "damage",
+        "contribution": 2.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "severity",
+        "signal_quality": "heuristic"
+       },
+       {
+        "signal": "signal_count:0",
+        "component": "reproducibility",
+        "contribution": 3.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "heuristic",
+        "signal_quality": "heuristic"
+       }
+      ]
+     },
+     "pasta": {
+      "current_stage": "Stage1",
+      "stages": [
+       {
+        "id": "Stage1",
+        "name": "DefineObjectives",
+        "status": "current"
+       },
+       {
+        "id": "Stage2",
+        "name": "DefineTechnicalScope",
+        "status": "pending"
+       },
+       {
+        "id": "Stage3",
+        "name": "ApplicationDecomposition",
+        "status": "pending"
+       },
+       {
+        "id": "Stage4",
+        "name": "ThreatAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage5",
+        "name": "VulnerabilityAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage6",
+        "name": "ModellingAndSimulation",
+        "status": "pending"
+       },
+       {
+        "id": "Stage7",
+        "name": "RiskAndImpactAnalysis",
+        "status": "pending"
+       }
+      ],
+      "evidence_tags": []
+     },
+     "kev": [],
+     "maestro": [],
+     "cyber_risk_quantification": {
+      "model": "crq_v1",
+      "likelihood": 0.17,
+      "impact": 0.15,
+      "risk_score": 2.55,
+      "risk_band": "low",
+      "inputs": {
+       "security_risk": 0.04320000000000001,
+       "cv_risk": 0.3,
+       "fraud_risk": 0.2,
+       "history_risk": 0.2,
+       "monetary_exposure": null,
+       "policy_impact": 0.3,
+       "data_impact": 0.3
+      },
+      "weights": {
+       "likelihood": {
+        "security": 0.35,
+        "cv": 0.25,
+        "fraud": 0.25,
+        "history": 0.15
+       },
+       "impact": {
+        "monetary": 0.5,
+        "policy": 0.3,
+        "data": 0.2
+       }
+      }
+     },
+     "tls_fingerprint": null,
+     "gnn_fraud": {
+      "score": 0.1,
+      "method": "heuristic",
+      "ring_detected": false
+     },
+     "policy_route": "allow",
+     "route": "allow",
+     "image_untrusted": false,
+     "image_trust_channels": {
+      "visual_embedding_trusted": true,
+      "ocr_trusted": true,
+      "qr_trusted": true
+     },
+     "qr": {
+      "destination_url": null,
+      "final_url": null,
+      "redirect_hops": 0,
+      "reputation_verdict": "benign",
+      "confidence": 0.35,
+      "intel_pending": false,
+      "intel_risk": null,
+      "intel_sources": []
+     }
+    },
+    "policy_notes": {
+     "no_training_on_pii": true,
+     "retention_policy": {
+      "chat_ttl_hours": 2,
+      "cv_evidence_days": 30,
+      "audit_days": 90,
+      "consent_extended": false
+     },
+     "opt_out_automated_decisions": false,
+     "compliance_tags": []
+    },
+    "image_lane_fill": {
+     "applied": false,
+     "added": 0,
+     "reason": "not_image_flow"
+    },
+    "escalation": null,
+    "decision_trace_id": "9691bd44-3f6f-437a-9565-a2c2f9027cbb",
+    "_trace_recommendation_persisted": true,
+    "hippograph_insights_shadow": [
+     {
+      "id": "asus",
+      "kind": "brand",
+      "label": "asus",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "dell",
+      "kind": "brand",
+      "label": "dell",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "hp",
+      "kind": "brand",
+      "label": "hp",
+      "score": 0.25,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-01B48B57",
+      "kind": "product",
+      "label": "LAP-01B48B57",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-031E526F",
+      "kind": "product",
+      "label": "Dell DB16255 16\" WUXGA Copilot+ PC Laptop (Ryzen AI 7)[1TB]",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-0A1191AB",
+      "kind": "product",
+      "label": "Alienware 16 Aurora 16\" WQXGA 120Hz Gaming Laptop (Intel Core 7)[GeForce RTX 5060]",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-234E845E",
+      "kind": "product",
+      "label": "HP Laptop 15-fc0433AU 15.6\" FHD Laptop (Ryzen 5)[512GB]",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     },
+     {
+      "id": "LAP-29EA2785",
+      "kind": "product",
+      "label": "HP OmniBook Ultra 14\" 2.2K Laptop (Ryzen 9 AI HX 375)[1TB]",
+      "score": 0.0156,
+      "reward_weight": 0.0
+     }
+    ],
+    "hippograph_shadow_counterfactual": {
+     "would_boost": [
+      "LAP-0A1191AB"
+     ],
+     "would_move_positions": 0,
+     "top_result_would_change": false,
+     "recall_products": 5,
+     "in_result_set": 1
+    },
+    "sales_response_nudge": {
+     "applied": 1,
+     "demand_trend": "falling",
+     "boosted": 1,
+     "suppressed": 0,
+     "gate": "allow"
+    },
+    "evidence_items": [
+     {
+      "type": "candidate",
+      "id": "GAM-0006",
+      "score": 19.77601013560964
+     },
+     {
+      "type": "candidate",
+      "id": "GAM-0002",
+      "score": 19.72276338669276
+     },
+     {
+      "type": "candidate",
+      "id": "LAP-647D08E6",
+      "score": 19.70403239009501
+     }
+    ],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 1.0,
+    "price_range": {
+     "min": 1499.0,
+     "max": 5999.0,
+     "median": 3499.0,
+     "count": 7
+    },
+    "question_plan": {
+     "mode": "assume",
+     "missing_fields": [
+      "budget",
+      "brand_preference"
+     ],
+     "confidence_band": "high",
+     "ambiguity_reason": "missing_budget"
+    },
+    "confidence_band": "high",
+    "ambiguity_reason": "missing_budget",
+    "assumptions_applied": [
+     "retain_spec_preference"
+    ],
+    "next_questions": [
+     {
+      "id": "ask_budget_tier",
+      "text": "Do you have a price tier in mind (Under $1000, $1000–$1500, $1500+)?",
+      "goal": "clarify_details",
+      "evidence_needed": [
+       "none"
+      ],
+      "stop_condition": null,
+      "source": "template",
+      "options": [],
+      "question_slot": "budget"
+     },
+     {
+      "id": "ask_brand_pref",
+      "text": "Any brand preference (Apple, Dell, Lenovo, ASUS, etc.)?",
+      "goal": "clarify_details",
+      "evidence_needed": [
+       "none"
+      ],
+      "stop_condition": null,
+      "source": "template",
+      "options": [],
+      "question_slot": "brand_preference"
+     }
+    ],
+    "needs_disambiguation": true,
+    "budget_viability": {
+     "status": "unknown"
+    },
+    "explicit_spec_blocks": {
+     "minimum": {},
+     "recommended": {},
+     "has_explicit_blocks": false
+    },
+    "recommendation_tiers": {
+     "minimum": [
+      {
+       "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+       "sku": "GAM-0006",
+       "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 169900,
+       "currency": "USD",
+       "image_url": "/static/images/GAM-0006.svg",
+       "stock": 17,
+       "specs": {
+        "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+        "display_inches": 16,
+        "refresh_hz": 240,
+        "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "storage": "1TB PCIe NVMe SSD",
+        "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+        "gpu_model": "RTX 4070",
+        "gpu_vram_gb": 8,
+        "os": "Windows 11 Home",
+        "wifi": "Wi-Fi 6E (802.11ax)",
+        "bluetooth": "Bluetooth 5.3",
+        "battery_wh": 86,
+        "weight_kg": 2.6,
+        "ports": [
+         "3x USB-A 3.2",
+         "1x USB-C (Thunderbolt 4)",
+         "HDMI 2.1",
+         "SD card reader",
+         "RJ45"
+        ],
+        "gaming_style": true,
+        "use_case": "gaming",
+        "rating": 4.6,
+        "shipping_days": 2,
+        "display_name": "Dell G16 7630",
+        "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+       },
+       "confidence": 0.999,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000",
+         "+ram_gb_min:16",
+         "+embedding_similarity",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "checks": [
+         "use_case:gaming_aaa_heavy"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "ram_gb_min:16": 1.5,
+         "storage_gb_min:1000": 1.5,
+         "gpu_vram_gb_min:8": -0.5,
+         "use_case:gaming_aaa_heavy": 0.5,
+         "embedding_similarity": 0.075,
+         "supplier_performance": 0.201,
+         "cross_encoder": 0.1
+        },
+        "use_case_bonus": 4.9
+       },
+       "why": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000"
+       ],
+       "score": 19.77601013560964,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+       "delta_vs_anchor": {},
+       "baseline_rank": 1,
+       "rerank_delta": 1,
+       "price": 1699.0,
+       "stock_level": 17,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,699 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "17 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "basic",
+         "detail": "webcam not specified"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "gpu_vram_gb_min:8"
+        }
+       },
+       "use_case_suitability": {
+        "use_case": "gaming_aaa_heavy",
+        "suitable": true,
+        "verdict": "fully_suitable",
+        "gaps": [],
+        "strengths": [
+         "Storage 1024GB sufficient",
+         "Has dedicated GPU as required"
+        ],
+        "excess": [],
+        "overkill_score": 0.0
+       }
+      },
+      {
+       "id": "b36808bd-f287-4088-917b-cf1460c38018",
+       "sku": "GAM-0002",
+       "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 149900,
+       "currency": "USD",
+       "image_url": "/static/images/GAM-0002.svg",
+       "stock": 13,
+       "specs": {
+        "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+        "display_inches": 15.6,
+        "refresh_hz": 144,
+        "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "storage": "1TB PCIe NVMe SSD",
+        "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+        "gpu_model": "RTX 4070",
+        "gpu_vram_gb": 8,
+        "os": "Windows 11 Home",
+        "wifi": "Wi-Fi 6E (802.11ax)",
+        "bluetooth": "Bluetooth 5.3",
+        "battery_wh": 86,
+        "weight_kg": 2.1,
+        "ports": [
+         "3x USB-A 3.2",
+         "1x USB-C",
+         "HDMI 2.1",
+         "SD card reader",
+         "RJ45"
+        ],
+        "gaming_style": true,
+        "use_case": "gaming",
+        "rating": 4.4,
+        "shipping_days": 3,
+        "display_name": "MSI Katana 15 B13VGK",
+        "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+       },
+       "confidence": 0.996,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000",
+         "+ram_gb_min:16",
+         "+embedding_similarity",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "checks": [
+         "use_case:gaming_aaa_heavy"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "ram_gb_min:16": 1.5,
+         "storage_gb_min:1000": 1.5,
+         "gpu_vram_gb_min:8": -0.5,
+         "use_case:gaming_aaa_heavy": 0.5,
+         "embedding_similarity": 0.077,
+         "supplier_performance": 0.146,
+         "cross_encoder": 0.1
+        },
+        "use_case_bonus": 4.9
+       },
+       "why": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000"
+       ],
+       "score": 19.72276338669276,
+       "score_norm": 99.88,
+       "rank_delta": 0.05,
+       "why_not": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+       "delta_vs_anchor": {
+        "price": "12% cheaper ($1,499 vs $1,699)"
+       },
+       "baseline_rank": 16,
+       "rerank_delta": 15,
+       "price": 1499.0,
+       "stock_level": 13,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,499 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "13 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "no",
+         "detail": "none stated"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "basic",
+         "detail": "webcam not specified"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "gpu_vram_gb_min:8"
+        }
+       },
+       "use_case_suitability": {
+        "use_case": "gaming_aaa_heavy",
+        "suitable": true,
+        "verdict": "fully_suitable",
+        "gaps": [],
+        "strengths": [
+         "Storage 1024GB sufficient",
+         "Has dedicated GPU as required"
+        ],
+        "excess": [],
+        "overkill_score": 0.0
+       }
+      },
+      {
+       "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+       "sku": "LAP-647D08E6",
+       "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+       "price_cents": 289900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-647D08E6.svg",
+       "stock": 18,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "refresh_hz": 165,
+        "display_inches": 16.0,
+        "gpu": "GeForce RTX 5060",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "gpu_vram_gb": 8,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "gaming"
+       },
+       "confidence": 0.994,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000",
+         "+ram_gb_min:16",
+         "+embedding_similarity",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "checks": [
+         "use_case:gaming_aaa_heavy"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "ram_gb_min:16": 1.5,
+         "storage_gb_min:1000": 1.5,
+         "gpu_vram_gb_min:8": -0.5,
+         "use_case:gaming_aaa_heavy": 0.5,
+         "embedding_similarity": 0.114,
+         "supplier_performance": 0.09,
+         "cross_encoder": 0.1
+        },
+        "use_case_bonus": 4.9
+       },
+       "why": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000"
+       ],
+       "score": 19.70403239009501,
+       "score_norm": 99.83,
+       "rank_delta": 0.07,
+       "why_not": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+       "delta_vs_anchor": {
+        "price": "71% more expensive ($2,899 vs $1,699)"
+       },
+       "baseline_rank": 3,
+       "rerank_delta": 1,
+       "price": 2899.0,
+       "stock_level": 18,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$2,899 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "18 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "gpu_vram_gb_min:8"
+        }
+       },
+       "use_case_suitability": {
+        "use_case": "gaming_aaa_heavy",
+        "suitable": true,
+        "verdict": "fully_suitable",
+        "gaps": [],
+        "strengths": [
+         "Storage 1024GB sufficient",
+         "Has dedicated GPU as required"
+        ],
+        "excess": [],
+        "overkill_score": 0.0
+       }
+      }
+     ],
+     "recommended": [
+      {
+       "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+       "sku": "GAM-0006",
+       "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 169900,
+       "currency": "USD",
+       "image_url": "/static/images/GAM-0006.svg",
+       "stock": 17,
+       "specs": {
+        "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+        "display_inches": 16,
+        "refresh_hz": 240,
+        "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "storage": "1TB PCIe NVMe SSD",
+        "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+        "gpu_model": "RTX 4070",
+        "gpu_vram_gb": 8,
+        "os": "Windows 11 Home",
+        "wifi": "Wi-Fi 6E (802.11ax)",
+        "bluetooth": "Bluetooth 5.3",
+        "battery_wh": 86,
+        "weight_kg": 2.6,
+        "ports": [
+         "3x USB-A 3.2",
+         "1x USB-C (Thunderbolt 4)",
+         "HDMI 2.1",
+         "SD card reader",
+         "RJ45"
+        ],
+        "gaming_style": true,
+        "use_case": "gaming",
+        "rating": 4.6,
+        "shipping_days": 2,
+        "display_name": "Dell G16 7630",
+        "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+       },
+       "confidence": 0.999,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000",
+         "+ram_gb_min:16",
+         "+embedding_similarity",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "checks": [
+         "use_case:gaming_aaa_heavy"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "ram_gb_min:16": 1.5,
+         "storage_gb_min:1000": 1.5,
+         "gpu_vram_gb_min:8": -0.5,
+         "use_case:gaming_aaa_heavy": 0.5,
+         "embedding_similarity": 0.075,
+         "supplier_performance": 0.201,
+         "cross_encoder": 0.1
+        },
+        "use_case_bonus": 4.9
+       },
+       "why": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000"
+       ],
+       "score": 19.77601013560964,
+       "score_norm": 100.0,
+       "rank_delta": 0.0,
+       "why_not": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+       "delta_vs_anchor": {},
+       "baseline_rank": 1,
+       "rerank_delta": 1,
+       "price": 1699.0,
+       "stock_level": 17,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,699 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "17 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "basic",
+         "detail": "webcam not specified"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "gpu_vram_gb_min:8"
+        }
+       },
+       "use_case_suitability": {
+        "use_case": "gaming_aaa_heavy",
+        "suitable": true,
+        "verdict": "fully_suitable",
+        "gaps": [],
+        "strengths": [
+         "Storage 1024GB sufficient",
+         "Has dedicated GPU as required"
+        ],
+        "excess": [],
+        "overkill_score": 0.0
+       }
+      },
+      {
+       "id": "b36808bd-f287-4088-917b-cf1460c38018",
+       "sku": "GAM-0002",
+       "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+       "price_cents": 149900,
+       "currency": "USD",
+       "image_url": "/static/images/GAM-0002.svg",
+       "stock": 13,
+       "specs": {
+        "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+        "display_inches": 15.6,
+        "refresh_hz": 144,
+        "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "storage": "1TB PCIe NVMe SSD",
+        "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+        "gpu_model": "RTX 4070",
+        "gpu_vram_gb": 8,
+        "os": "Windows 11 Home",
+        "wifi": "Wi-Fi 6E (802.11ax)",
+        "bluetooth": "Bluetooth 5.3",
+        "battery_wh": 86,
+        "weight_kg": 2.1,
+        "ports": [
+         "3x USB-A 3.2",
+         "1x USB-C",
+         "HDMI 2.1",
+         "SD card reader",
+         "RJ45"
+        ],
+        "gaming_style": true,
+        "use_case": "gaming",
+        "rating": 4.4,
+        "shipping_days": 3,
+        "display_name": "MSI Katana 15 B13VGK",
+        "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+       },
+       "confidence": 0.996,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000",
+         "+ram_gb_min:16",
+         "+embedding_similarity",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "checks": [
+         "use_case:gaming_aaa_heavy"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "ram_gb_min:16": 1.5,
+         "storage_gb_min:1000": 1.5,
+         "gpu_vram_gb_min:8": -0.5,
+         "use_case:gaming_aaa_heavy": 0.5,
+         "embedding_similarity": 0.077,
+         "supplier_performance": 0.146,
+         "cross_encoder": 0.1
+        },
+        "use_case_bonus": 4.9
+       },
+       "why": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000"
+       ],
+       "score": 19.72276338669276,
+       "score_norm": 99.88,
+       "rank_delta": 0.05,
+       "why_not": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+       "delta_vs_anchor": {
+        "price": "12% cheaper ($1,499 vs $1,699)"
+       },
+       "baseline_rank": 16,
+       "rerank_delta": 15,
+       "price": 1499.0,
+       "stock_level": 13,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$1,499 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "13 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "no",
+         "detail": "none stated"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "basic",
+         "detail": "webcam not specified"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "gpu_vram_gb_min:8"
+        }
+       },
+       "use_case_suitability": {
+        "use_case": "gaming_aaa_heavy",
+        "suitable": true,
+        "verdict": "fully_suitable",
+        "gaps": [],
+        "strengths": [
+         "Storage 1024GB sufficient",
+         "Has dedicated GPU as required"
+        ],
+        "excess": [],
+        "overkill_score": 0.0
+       }
+      },
+      {
+       "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+       "sku": "LAP-647D08E6",
+       "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+       "price_cents": 289900,
+       "currency": "AUD",
+       "image_url": "/static/images/LAP-647D08E6.svg",
+       "stock": 18,
+       "specs": {
+        "category": "laptop",
+        "ram_gb": 16,
+        "storage_gb": 1024,
+        "refresh_hz": 165,
+        "display_inches": 16.0,
+        "gpu": "GeForce RTX 5060",
+        "gpu_discrete": true,
+        "gaming_style": true,
+        "gpu_vram_gb": 8,
+        "os": "Windows 11",
+        "wifi": "Wi-Fi 6E",
+        "webcam": "HD webcam",
+        "docking": "Thunderbolt 4",
+        "use_case": "gaming"
+       },
+       "confidence": 0.994,
+       "factors": {
+        "positive": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000",
+         "+ram_gb_min:16",
+         "+embedding_similarity",
+         "+supplier_performance"
+        ],
+        "negative": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "checks": [
+         "use_case:gaming_aaa_heavy"
+        ],
+        "weights": {
+         "in_stock": 10.0,
+         "ram_gb_min:16": 1.5,
+         "storage_gb_min:1000": 1.5,
+         "gpu_vram_gb_min:8": -0.5,
+         "use_case:gaming_aaa_heavy": 0.5,
+         "embedding_similarity": 0.114,
+         "supplier_performance": 0.09,
+         "cross_encoder": 0.1
+        },
+        "use_case_bonus": 4.9
+       },
+       "why": [
+        "+in_stock",
+        "+ram_gb_min:16",
+        "+storage_gb_min:1000"
+       ],
+       "score": 19.70403239009501,
+       "score_norm": 99.83,
+       "rank_delta": 0.07,
+       "why_not": [
+        "-gpu_vram_gb_min:8"
+       ],
+       "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+       "delta_vs_anchor": {
+        "price": "71% more expensive ($2,899 vs $1,699)"
+       },
+       "baseline_rank": 3,
+       "rerank_delta": 1,
+       "price": 2899.0,
+       "stock_level": 18,
+       "cart_eligible": true,
+       "stock_status": "in_stock",
+       "evidence": {
+        "price_fit": {
+         "status": "unknown",
+         "detail": "$2,899 (no budget given)"
+        },
+        "inventory_fit": {
+         "status": "in_stock",
+         "detail": "18 in stock"
+        },
+        "office_fit": {
+         "status": "consumer",
+         "detail": "consumer build"
+        },
+        "fleet_fit": {
+         "status": "managed",
+         "detail": "vPro/TPM/docking/warranty markers"
+        },
+        "portability": {
+         "status": "standard",
+         "detail": "standard chassis"
+        },
+        "docking": {
+         "status": "yes",
+         "detail": "docking/Thunderbolt"
+        },
+        "warranty": {
+         "status": "standard",
+         "detail": "standard warranty"
+        },
+        "camera": {
+         "status": "conferencing",
+         "detail": "1080p/IR webcam (Windows Hello)"
+        },
+        "wifi": {
+         "status": "wifi6plus",
+         "detail": "Wi-Fi 6/6E/7"
+        },
+        "storage": {
+         "status": "ample",
+         "detail": "1024GB SSD"
+        },
+        "os_ecosystem": {
+         "status": "Windows",
+         "detail": "Windows ecosystem"
+        },
+        "risk_penalties": {
+         "status": "present",
+         "detail": "gpu_vram_gb_min:8"
+        }
+       },
+       "use_case_suitability": {
+        "use_case": "gaming_aaa_heavy",
+        "suitable": true,
+        "verdict": "fully_suitable",
+        "gaps": [],
+        "strengths": [
+         "Storage 1024GB sufficient",
+         "Has dedicated GPU as required"
+        ],
+        "excess": [],
+        "overkill_score": 0.0
+       }
+      }
+     ],
+     "show_split": true,
+     "minimum_explanation": "Meets practical baseline with better value and battery/cost balance.",
+     "recommended_explanation": "Adds performance headroom for heavier tasks and longer-term use."
+    },
+    "workload_fit": {
+     "entities": [
+      "cyberpunk_2077"
+     ],
+     "floors": {
+      "min_ram_gb": 16.0,
+      "recommended_ram_gb": 32.0,
+      "min_gpu_vram_gb": 8.0,
+      "gpu_needed": true,
+      "recommended_gpu_vram_gb": 6.0
+     },
+     "verdicts": [
+      {
+       "sku": "GAM-0006",
+       "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+       "meets_minimum": true,
+       "meets_recommended": false,
+       "missing_specs": [],
+       "why_fit": [
+        "RAM 16GB meets the 16GB minimum",
+        "GPU memory 8GB meets the 8GB minimum",
+        "GPU memory 8GB meets the 6GB recommended"
+       ],
+       "why_not_fit": [
+        "RAM 16GB is below the 32GB recommended"
+       ]
+      },
+      {
+       "sku": "GAM-0002",
+       "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+       "meets_minimum": true,
+       "meets_recommended": false,
+       "missing_specs": [],
+       "why_fit": [
+        "RAM 16GB meets the 16GB minimum",
+        "GPU memory 8GB meets the 8GB minimum",
+        "GPU memory 8GB meets the 6GB recommended"
+       ],
+       "why_not_fit": [
+        "RAM 16GB is below the 32GB recommended"
+       ]
+      },
+      {
+       "sku": "LAP-647D08E6",
+       "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+       "meets_minimum": true,
+       "meets_recommended": false,
+       "missing_specs": [],
+       "why_fit": [
+        "RAM 16GB meets the 16GB minimum",
+        "GPU memory 8GB meets the 8GB minimum",
+        "GPU memory 8GB meets the 6GB recommended"
+       ],
+       "why_not_fit": [
+        "RAM 16GB is below the 32GB recommended"
+       ]
+      },
+      {
+       "sku": "LAP-788760E4",
+       "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce ",
+       "meets_minimum": true,
+       "meets_recommended": false,
+       "missing_specs": [],
+       "why_fit": [
+        "RAM 16GB meets the 16GB minimum",
+        "GPU memory 8GB meets the 8GB minimum",
+        "GPU memory 8GB meets the 6GB recommended"
+       ],
+       "why_not_fit": [
+        "RAM 16GB is below the 32GB recommended"
+       ]
+      },
+      {
+       "sku": "LAP-BCBAFE20",
+       "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce ",
+       "meets_minimum": true,
+       "meets_recommended": true,
+       "missing_specs": [],
+       "why_fit": [
+        "RAM 32GB meets the 16GB minimum",
+        "RAM 32GB meets the 32GB recommended",
+        "GPU memory 16GB meets the 8GB minimum",
+        "GPU memory 16GB meets the 6GB recommended"
+       ],
+       "why_not_fit": []
+      }
+     ],
+     "publisher_requirements": "PUBLISHER-STATED GAME REQUIREMENTS (Steam store pages — cite freely):\n- Cyberpunk 2077: minimum 12GB RAM; minimum graphics GeForce GTX 1060 6GB / Radeon RX 580 8GB / Arc A380 (laptop-equivalent: RTX 3050, RTX 2050); recommended 16GB RAM; recommended graphics GeForce RTX 2060 / Radeon RX 5700 XT / Arc A770. [steam:1091500]"
+    },
+    "intent_router_model": "rule-based (prefer_small)",
+    "narration_model": "qwen3:14b",
+    "narration_mode": "async",
+    "claim_guard_result": "skipped",
+    "b2b_assessment": {
+     "verdict": "consumer",
+     "quantity": 1,
+     "is_bulk": false,
+     "business_signal": false,
+     "discount_eligible": false,
+     "escalate": false,
+     "reasons": [
+      "consumer-scale purchase"
+     ]
+    },
+    "escalation_assessment": {
+     "escalate": false,
+     "band": "auto",
+     "score": 0.073,
+     "reasons": [],
+     "factors": {
+      "fraud": 0.0,
+      "uncertainty": 0.28,
+      "constraint_conflict": 0.0,
+      "claim_guard_rejected": 0.0,
+      "bulk_exposure": 0.1699,
+      "irreversibility": 0.0
+     },
+     "talk_to_client": false
+    },
+    "use_case_analysis": {
+     "use_case_key": "gaming_aaa_heavy",
+     "label": "AAA Gaming — GPU-Heavy Titles",
+     "suitable_count": 3,
+     "total_assessed": 3,
+     "apps": [
+      "Steam",
+      "Epic Games",
+      "Discord",
+      "GeForce Experience"
+     ],
+     "priority_factors": [
+      "gpu",
+      "gpu_vram",
+      "cooling",
+      "cpu"
+     ]
+    },
+    "image_reupload_reasons": [],
+    "right_panel": {
+     "mode": "shopping",
+     "show_tiers": true,
+     "budget_status": "unknown",
+     "image_untrusted": false,
+     "image_degraded_mode": false,
+     "security_route": "allow",
+     "security_summary": null,
+     "lower_tier": {
+      "title": "Minimum / budget-fit",
+      "items": [
+       {
+        "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+        "sku": "GAM-0006",
+        "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+        "price_cents": 169900,
+        "currency": "USD",
+        "image_url": "/static/images/GAM-0006.svg",
+        "stock": 17,
+        "specs": {
+         "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+         "display_inches": 16,
+         "refresh_hz": 240,
+         "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "storage": "1TB PCIe NVMe SSD",
+         "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+         "gpu_model": "RTX 4070",
+         "gpu_vram_gb": 8,
+         "os": "Windows 11 Home",
+         "wifi": "Wi-Fi 6E (802.11ax)",
+         "bluetooth": "Bluetooth 5.3",
+         "battery_wh": 86,
+         "weight_kg": 2.6,
+         "ports": [
+          "3x USB-A 3.2",
+          "1x USB-C (Thunderbolt 4)",
+          "HDMI 2.1",
+          "SD card reader",
+          "RJ45"
+         ],
+         "gaming_style": true,
+         "use_case": "gaming",
+         "rating": 4.6,
+         "shipping_days": 2,
+         "display_name": "Dell G16 7630",
+         "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+        },
+        "confidence": 0.999,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000",
+          "+ram_gb_min:16",
+          "+embedding_similarity",
+          "+supplier_performance"
+         ],
+         "negative": [
+          "-gpu_vram_gb_min:8"
+         ],
+         "checks": [
+          "use_case:gaming_aaa_heavy"
+         ],
+         "weights": {
+          "in_stock": 10.0,
+          "ram_gb_min:16": 1.5,
+          "storage_gb_min:1000": 1.5,
+          "gpu_vram_gb_min:8": -0.5,
+          "use_case:gaming_aaa_heavy": 0.5,
+          "embedding_similarity": 0.075,
+          "supplier_performance": 0.201,
+          "cross_encoder": 0.1
+         },
+         "use_case_bonus": 4.9
+        },
+        "why": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000"
+        ],
+        "score": 19.77601013560964,
+        "score_norm": 100.0,
+        "rank_delta": 0.0,
+        "why_not": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+        "delta_vs_anchor": {},
+        "baseline_rank": 1,
+        "rerank_delta": 1,
+        "price": 1699.0,
+        "stock_level": 17,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "unknown",
+          "detail": "$1,699 (no budget given)"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "17 in stock"
+         },
+         "office_fit": {
+          "status": "consumer",
+          "detail": "consumer build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "yes",
+          "detail": "docking/Thunderbolt"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "basic",
+          "detail": "webcam not specified"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "present",
+          "detail": "gpu_vram_gb_min:8"
+         }
+        },
+        "use_case_suitability": {
+         "use_case": "gaming_aaa_heavy",
+         "suitable": true,
+         "verdict": "fully_suitable",
+         "gaps": [],
+         "strengths": [
+          "Storage 1024GB sufficient",
+          "Has dedicated GPU as required"
+         ],
+         "excess": [],
+         "overkill_score": 0.0
+        }
+       },
+       {
+        "id": "b36808bd-f287-4088-917b-cf1460c38018",
+        "sku": "GAM-0002",
+        "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+        "price_cents": 149900,
+        "currency": "USD",
+        "image_url": "/static/images/GAM-0002.svg",
+        "stock": 13,
+        "specs": {
+         "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+         "display_inches": 15.6,
+         "refresh_hz": 144,
+         "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "storage": "1TB PCIe NVMe SSD",
+         "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+         "gpu_model": "RTX 4070",
+         "gpu_vram_gb": 8,
+         "os": "Windows 11 Home",
+         "wifi": "Wi-Fi 6E (802.11ax)",
+         "bluetooth": "Bluetooth 5.3",
+         "battery_wh": 86,
+         "weight_kg": 2.1,
+         "ports": [
+          "3x USB-A 3.2",
+          "1x USB-C",
+          "HDMI 2.1",
+          "SD card reader",
+          "RJ45"
+         ],
+         "gaming_style": true,
+         "use_case": "gaming",
+         "rating": 4.4,
+         "shipping_days": 3,
+         "display_name": "MSI Katana 15 B13VGK",
+         "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+        },
+        "confidence": 0.996,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000",
+          "+ram_gb_min:16",
+          "+embedding_similarity",
+          "+supplier_performance"
+         ],
+         "negative": [
+          "-gpu_vram_gb_min:8"
+         ],
+         "checks": [
+          "use_case:gaming_aaa_heavy"
+         ],
+         "weights": {
+          "in_stock": 10.0,
+          "ram_gb_min:16": 1.5,
+          "storage_gb_min:1000": 1.5,
+          "gpu_vram_gb_min:8": -0.5,
+          "use_case:gaming_aaa_heavy": 0.5,
+          "embedding_similarity": 0.077,
+          "supplier_performance": 0.146,
+          "cross_encoder": 0.1
+         },
+         "use_case_bonus": 4.9
+        },
+        "why": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000"
+        ],
+        "score": 19.72276338669276,
+        "score_norm": 99.88,
+        "rank_delta": 0.05,
+        "why_not": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+        "delta_vs_anchor": {
+         "price": "12% cheaper ($1,499 vs $1,699)"
+        },
+        "baseline_rank": 16,
+        "rerank_delta": 15,
+        "price": 1499.0,
+        "stock_level": 13,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "unknown",
+          "detail": "$1,499 (no budget given)"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "13 in stock"
+         },
+         "office_fit": {
+          "status": "consumer",
+          "detail": "consumer build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "no",
+          "detail": "none stated"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "basic",
+          "detail": "webcam not specified"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "present",
+          "detail": "gpu_vram_gb_min:8"
+         }
+        },
+        "use_case_suitability": {
+         "use_case": "gaming_aaa_heavy",
+         "suitable": true,
+         "verdict": "fully_suitable",
+         "gaps": [],
+         "strengths": [
+          "Storage 1024GB sufficient",
+          "Has dedicated GPU as required"
+         ],
+         "excess": [],
+         "overkill_score": 0.0
+        }
+       },
+       {
+        "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+        "sku": "LAP-647D08E6",
+        "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+        "price_cents": 289900,
+        "currency": "AUD",
+        "image_url": "/static/images/LAP-647D08E6.svg",
+        "stock": 18,
+        "specs": {
+         "category": "laptop",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "refresh_hz": 165,
+         "display_inches": 16.0,
+         "gpu": "GeForce RTX 5060",
+         "gpu_discrete": true,
+         "gaming_style": true,
+         "gpu_vram_gb": 8,
+         "os": "Windows 11",
+         "wifi": "Wi-Fi 6E",
+         "webcam": "HD webcam",
+         "docking": "Thunderbolt 4",
+         "use_case": "gaming"
+        },
+        "confidence": 0.994,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000",
+          "+ram_gb_min:16",
+          "+embedding_similarity",
+          "+supplier_performance"
+         ],
+         "negative": [
+          "-gpu_vram_gb_min:8"
+         ],
+         "checks": [
+          "use_case:gaming_aaa_heavy"
+         ],
+         "weights": {
+          "in_stock": 10.0,
+          "ram_gb_min:16": 1.5,
+          "storage_gb_min:1000": 1.5,
+          "gpu_vram_gb_min:8": -0.5,
+          "use_case:gaming_aaa_heavy": 0.5,
+          "embedding_similarity": 0.114,
+          "supplier_performance": 0.09,
+          "cross_encoder": 0.1
+         },
+         "use_case_bonus": 4.9
+        },
+        "why": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000"
+        ],
+        "score": 19.70403239009501,
+        "score_norm": 99.83,
+        "rank_delta": 0.07,
+        "why_not": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+        "delta_vs_anchor": {
+         "price": "71% more expensive ($2,899 vs $1,699)"
+        },
+        "baseline_rank": 3,
+        "rerank_delta": 1,
+        "price": 2899.0,
+        "stock_level": 18,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "unknown",
+          "detail": "$2,899 (no budget given)"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "18 in stock"
+         },
+         "office_fit": {
+          "status": "consumer",
+          "detail": "consumer build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "yes",
+          "detail": "docking/Thunderbolt"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "conferencing",
+          "detail": "1080p/IR webcam (Windows Hello)"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "present",
+          "detail": "gpu_vram_gb_min:8"
+         }
+        },
+        "use_case_suitability": {
+         "use_case": "gaming_aaa_heavy",
+         "suitable": true,
+         "verdict": "fully_suitable",
+         "gaps": [],
+         "strengths": [
+          "Storage 1024GB sufficient",
+          "Has dedicated GPU as required"
+         ],
+         "excess": [],
+         "overkill_score": 0.0
+        }
+       }
+      ],
+      "explanation": "Meets practical baseline with better value and battery/cost balance."
+     },
+     "higher_tier": {
+      "title": "Recommended / performance-fit",
+      "items": [
+       {
+        "id": "d7b583d6-1ae1-4d9b-872b-387cde22b777",
+        "sku": "GAM-0006",
+        "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+        "price_cents": 169900,
+        "currency": "USD",
+        "image_url": "/static/images/GAM-0006.svg",
+        "stock": 17,
+        "specs": {
+         "display": "16\" QHD+ (2560x1600) 240Hz IPS",
+         "display_inches": 16,
+         "refresh_hz": 240,
+         "cpu": "Intel Core i7-13650HX (14-core, up to 4.9GHz)",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "storage": "1TB PCIe NVMe SSD",
+         "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+         "gpu_model": "RTX 4070",
+         "gpu_vram_gb": 8,
+         "os": "Windows 11 Home",
+         "wifi": "Wi-Fi 6E (802.11ax)",
+         "bluetooth": "Bluetooth 5.3",
+         "battery_wh": 86,
+         "weight_kg": 2.6,
+         "ports": [
+          "3x USB-A 3.2",
+          "1x USB-C (Thunderbolt 4)",
+          "HDMI 2.1",
+          "SD card reader",
+          "RJ45"
+         ],
+         "gaming_style": true,
+         "use_case": "gaming",
+         "rating": 4.6,
+         "shipping_days": 2,
+         "display_name": "Dell G16 7630",
+         "subtitle": "RTX 4070 | 16GB RAM | 240Hz QHD+"
+        },
+        "confidence": 0.999,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000",
+          "+ram_gb_min:16",
+          "+embedding_similarity",
+          "+supplier_performance"
+         ],
+         "negative": [
+          "-gpu_vram_gb_min:8"
+         ],
+         "checks": [
+          "use_case:gaming_aaa_heavy"
+         ],
+         "weights": {
+          "in_stock": 10.0,
+          "ram_gb_min:16": 1.5,
+          "storage_gb_min:1000": 1.5,
+          "gpu_vram_gb_min:8": -0.5,
+          "use_case:gaming_aaa_heavy": 0.5,
+          "embedding_similarity": 0.075,
+          "supplier_performance": 0.201,
+          "cross_encoder": 0.1
+         },
+         "use_case_bonus": 4.9
+        },
+        "why": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000"
+        ],
+        "score": 19.77601013560964,
+        "score_norm": 100.0,
+        "rank_delta": 0.0,
+        "why_not": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria.",
+        "delta_vs_anchor": {},
+        "baseline_rank": 1,
+        "rerank_delta": 1,
+        "price": 1699.0,
+        "stock_level": 17,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "unknown",
+          "detail": "$1,699 (no budget given)"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "17 in stock"
+         },
+         "office_fit": {
+          "status": "consumer",
+          "detail": "consumer build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "yes",
+          "detail": "docking/Thunderbolt"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "basic",
+          "detail": "webcam not specified"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "present",
+          "detail": "gpu_vram_gb_min:8"
+         }
+        },
+        "use_case_suitability": {
+         "use_case": "gaming_aaa_heavy",
+         "suitable": true,
+         "verdict": "fully_suitable",
+         "gaps": [],
+         "strengths": [
+          "Storage 1024GB sufficient",
+          "Has dedicated GPU as required"
+         ],
+         "excess": [],
+         "overkill_score": 0.0
+        }
+       },
+       {
+        "id": "b36808bd-f287-4088-917b-cf1460c38018",
+        "sku": "GAM-0002",
+        "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+        "price_cents": 149900,
+        "currency": "USD",
+        "image_url": "/static/images/GAM-0002.svg",
+        "stock": 13,
+        "specs": {
+         "display": "15.6\" FHD (1920x1080) 144Hz IPS",
+         "display_inches": 15.6,
+         "refresh_hz": 144,
+         "cpu": "Intel Core i7-13620H (10-core, up to 4.9GHz)",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "storage": "1TB PCIe NVMe SSD",
+         "gpu": "NVIDIA GeForce RTX 4070 8GB GDDR6",
+         "gpu_model": "RTX 4070",
+         "gpu_vram_gb": 8,
+         "os": "Windows 11 Home",
+         "wifi": "Wi-Fi 6E (802.11ax)",
+         "bluetooth": "Bluetooth 5.3",
+         "battery_wh": 86,
+         "weight_kg": 2.1,
+         "ports": [
+          "3x USB-A 3.2",
+          "1x USB-C",
+          "HDMI 2.1",
+          "SD card reader",
+          "RJ45"
+         ],
+         "gaming_style": true,
+         "use_case": "gaming",
+         "rating": 4.4,
+         "shipping_days": 3,
+         "display_name": "MSI Katana 15 B13VGK",
+         "subtitle": "RTX 4070 | 16GB RAM | 144Hz"
+        },
+        "confidence": 0.996,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000",
+          "+ram_gb_min:16",
+          "+embedding_similarity",
+          "+supplier_performance"
+         ],
+         "negative": [
+          "-gpu_vram_gb_min:8"
+         ],
+         "checks": [
+          "use_case:gaming_aaa_heavy"
+         ],
+         "weights": {
+          "in_stock": 10.0,
+          "ram_gb_min:16": 1.5,
+          "storage_gb_min:1000": 1.5,
+          "gpu_vram_gb_min:8": -0.5,
+          "use_case:gaming_aaa_heavy": 0.5,
+          "embedding_similarity": 0.077,
+          "supplier_performance": 0.146,
+          "cross_encoder": 0.1
+         },
+         "use_case_bonus": 4.9
+        },
+        "why": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000"
+        ],
+        "score": 19.72276338669276,
+        "score_norm": 99.88,
+        "rank_delta": 0.05,
+        "why_not": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699).",
+        "delta_vs_anchor": {
+         "price": "12% cheaper ($1,499 vs $1,699)"
+        },
+        "baseline_rank": 16,
+        "rerank_delta": 15,
+        "price": 1499.0,
+        "stock_level": 13,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "unknown",
+          "detail": "$1,499 (no budget given)"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "13 in stock"
+         },
+         "office_fit": {
+          "status": "consumer",
+          "detail": "consumer build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "no",
+          "detail": "none stated"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "basic",
+          "detail": "webcam not specified"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "present",
+          "detail": "gpu_vram_gb_min:8"
+         }
+        },
+        "use_case_suitability": {
+         "use_case": "gaming_aaa_heavy",
+         "suitable": true,
+         "verdict": "fully_suitable",
+         "gaps": [],
+         "strengths": [
+          "Storage 1024GB sufficient",
+          "Has dedicated GPU as required"
+         ],
+         "excess": [],
+         "overkill_score": 0.0
+        }
+       },
+       {
+        "id": "c8b25450-5a14-45ca-93c2-bdbaedea8a15",
+        "sku": "LAP-647D08E6",
+        "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+        "price_cents": 289900,
+        "currency": "AUD",
+        "image_url": "/static/images/LAP-647D08E6.svg",
+        "stock": 18,
+        "specs": {
+         "category": "laptop",
+         "ram_gb": 16,
+         "storage_gb": 1024,
+         "refresh_hz": 165,
+         "display_inches": 16.0,
+         "gpu": "GeForce RTX 5060",
+         "gpu_discrete": true,
+         "gaming_style": true,
+         "gpu_vram_gb": 8,
+         "os": "Windows 11",
+         "wifi": "Wi-Fi 6E",
+         "webcam": "HD webcam",
+         "docking": "Thunderbolt 4",
+         "use_case": "gaming"
+        },
+        "confidence": 0.994,
+        "factors": {
+         "positive": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000",
+          "+ram_gb_min:16",
+          "+embedding_similarity",
+          "+supplier_performance"
+         ],
+         "negative": [
+          "-gpu_vram_gb_min:8"
+         ],
+         "checks": [
+          "use_case:gaming_aaa_heavy"
+         ],
+         "weights": {
+          "in_stock": 10.0,
+          "ram_gb_min:16": 1.5,
+          "storage_gb_min:1000": 1.5,
+          "gpu_vram_gb_min:8": -0.5,
+          "use_case:gaming_aaa_heavy": 0.5,
+          "embedding_similarity": 0.114,
+          "supplier_performance": 0.09,
+          "cross_encoder": 0.1
+         },
+         "use_case_bonus": 4.9
+        },
+        "why": [
+         "+in_stock",
+         "+ram_gb_min:16",
+         "+storage_gb_min:1000"
+        ],
+        "score": 19.70403239009501,
+        "score_norm": 99.83,
+        "rank_delta": 0.07,
+        "why_not": [
+         "-gpu_vram_gb_min:8"
+        ],
+        "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699).",
+        "delta_vs_anchor": {
+         "price": "71% more expensive ($2,899 vs $1,699)"
+        },
+        "baseline_rank": 3,
+        "rerank_delta": 1,
+        "price": 2899.0,
+        "stock_level": 18,
+        "cart_eligible": true,
+        "stock_status": "in_stock",
+        "evidence": {
+         "price_fit": {
+          "status": "unknown",
+          "detail": "$2,899 (no budget given)"
+         },
+         "inventory_fit": {
+          "status": "in_stock",
+          "detail": "18 in stock"
+         },
+         "office_fit": {
+          "status": "consumer",
+          "detail": "consumer build"
+         },
+         "fleet_fit": {
+          "status": "managed",
+          "detail": "vPro/TPM/docking/warranty markers"
+         },
+         "portability": {
+          "status": "standard",
+          "detail": "standard chassis"
+         },
+         "docking": {
+          "status": "yes",
+          "detail": "docking/Thunderbolt"
+         },
+         "warranty": {
+          "status": "standard",
+          "detail": "standard warranty"
+         },
+         "camera": {
+          "status": "conferencing",
+          "detail": "1080p/IR webcam (Windows Hello)"
+         },
+         "wifi": {
+          "status": "wifi6plus",
+          "detail": "Wi-Fi 6/6E/7"
+         },
+         "storage": {
+          "status": "ample",
+          "detail": "1024GB SSD"
+         },
+         "os_ecosystem": {
+          "status": "Windows",
+          "detail": "Windows ecosystem"
+         },
+         "risk_penalties": {
+          "status": "present",
+          "detail": "gpu_vram_gb_min:8"
+         }
+        },
+        "use_case_suitability": {
+         "use_case": "gaming_aaa_heavy",
+         "suitable": true,
+         "verdict": "fully_suitable",
+         "gaps": [],
+         "strengths": [
+          "Storage 1024GB sufficient",
+          "Has dedicated GPU as required"
+         ],
+         "excess": [],
+         "overkill_score": 0.0
+        }
+       }
+      ],
+      "explanation": "Adds performance headroom for heavier tasks and longer-term use."
+     },
+     "device_lanes": [
+      {
+       "key": "high_performance_gpu",
+       "title": "High-performance (discrete GPU)",
+       "explanation": "Powerful discrete-GPU laptops — the right pick for GPU-heavy work (AI/ML model training, content/video editing, 3D/CAD) and gaming. For normal office work they are a poor fit (thermals, battery, weight, webcam/conferencing), so they are demoted there.",
+       "metrics": [
+        "gpu",
+        "performance",
+        "vram"
+       ],
+       "primary": false,
+       "non_primary": true,
+       "count": 7,
+       "price_min": 1499.0,
+       "price_max": 5999.0,
+       "skus": [
+        "GAM-0006",
+        "GAM-0002",
+        "LAP-647D08E6",
+        "LAP-788760E4",
+        "LAP-BCBAFE20",
+        "LAP-858DC749",
+        "LAP-0A1191AB"
+       ],
+       "products": [
+        {
+         "sku": "GAM-0006",
+         "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+         "price": 1699.0,
+         "why": [
+          "+in_stock",
+          "+ram_gb_min:16"
+         ]
+        },
+        {
+         "sku": "GAM-0002",
+         "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+         "price": 1499.0,
+         "why": [
+          "+in_stock",
+          "+ram_gb_min:16"
+         ]
+        },
+        {
+         "sku": "LAP-647D08E6",
+         "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+         "price": 2899.0,
+         "why": [
+          "+in_stock",
+          "+ram_gb_min:16"
+         ]
+        },
+        {
+         "sku": "LAP-788760E4",
+         "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+         "price": 3899.0,
+         "why": [
+          "+in_stock",
+          "+ram_gb_min:16"
+         ]
+        },
+        {
+         "sku": "LAP-BCBAFE20",
+         "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+         "price": 4499.0,
+         "why": [
+          "+in_stock",
+          "+ram_gb_min:16"
+         ]
+        },
+        {
+         "sku": "LAP-858DC749",
+         "name": "Lenovo Legion Pro 7 16IAX10H 16\" WQXGA 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5090]",
+         "price": 5999.0,
+         "why": [
+          "+in_stock",
+          "+ram_gb_min:16"
+         ]
+        }
+       ]
+      }
+     ],
+     "fleet_advisory": {
+      "coverage": "none",
+      "message": "The closest in-stock matches are performance/specialty units rather than a standard fit for this use-case. Tell me your exact use to refine — or, for a bulk order, I can source units to spec from an approved supplier.",
+      "non_primary_lanes": [
+       "high_performance_gpu"
+      ],
+      "suggest_procurement": true
+     },
+     "anchor_sections": [
+      {
+       "title": "Top Recommendations",
+       "match_basis": [
+        "query_match",
+        "budget_fit"
+       ],
+       "summary": "Matched to your query and budget.",
+       "top_products": [
+        {
+         "sku": "GAM-0006",
+         "name": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070)",
+         "price_cents": 169900,
+         "price": 1699.0,
+         "score_norm": 100.0,
+         "reasons": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000"
+         ],
+         "contrastive_why": "Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070): top pick — the strongest overall score across your criteria."
+        },
+        {
+         "sku": "GAM-0002",
+         "name": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070)",
+         "price_cents": 149900,
+         "price": 1499.0,
+         "score_norm": 99.88,
+         "reasons": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000"
+         ],
+         "contrastive_why": "MSI Katana 15 B13VGK 15.6\" FHD 144Hz Gaming Laptop (RTX 4070): vs the top pick — 12% cheaper ($1,499 vs $1,699)."
+        },
+        {
+         "sku": "LAP-647D08E6",
+         "name": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]",
+         "price_cents": 289900,
+         "price": 2899.0,
+         "score_norm": 99.83,
+         "reasons": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000"
+         ],
+         "contrastive_why": "Asus TUF F16 16\" FHD+ 165Hz Gaming Laptop (Intel Core i7)[GeForce RTX 5060]: vs the top pick — 71% more expensive ($2,899 vs $1,699)."
+        },
+        {
+         "sku": "LAP-788760E4",
+         "name": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]",
+         "price_cents": 389900,
+         "price": 3899.0,
+         "score_norm": 99.63,
+         "reasons": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000"
+         ],
+         "contrastive_why": "Alienware 16X Aurora 16\" WQXGA 240Hz Gaming Laptop (Intel Core Ultra 7)[GeForce RTX 5060]: vs the top pick — 129% more expensive ($3,899 vs $1,699)."
+        },
+        {
+         "sku": "LAP-BCBAFE20",
+         "name": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]",
+         "price_cents": 449900,
+         "price": 4499.0,
+         "score_norm": 99.62,
+         "reasons": [
+          "+in_stock",
+          "+ram_gb_min:16",
+          "+storage_gb_min:1000"
+         ],
+         "contrastive_why": "HP OMEN MAX 16\" UWVA 2.5K 240Hz OLED Gaming Laptop (Intel Core Ultra 9)[GeForce RTX 5080]: vs the top pick — 165% more expensive ($4,499 vs $1,699)."
+        }
+       ]
+      }
+     ]
+    },
+    "storefront_emphasis": {
+     "experiment_id": "storefront_emphasis_v1",
+     "variant": "control",
+     "live": true,
+     "applied": false
+    },
+    "autonomy_tier": "caution",
+    "autonomy_badge": "CAUTION",
+    "intent_confidence": 0.75,
+    "assistant_message": "Yes — the Dell G16 7630 16\" QHD+ 240Hz Gaming Laptop (RTX 4070) has a dedicated GPU, so it handles gaming well, including demanding titles.\n\nBest fits for AAA gaming: Dell G16 7630 ($1,699) and MSI Katana 15 B13VGK ($1,499).\n\nWant a detailed list or comparison?\n\n💰 Price range: $1,499 – $5,999 (median $3,499) across 7 results.",
+    "catalog_profile": {
+     "primary_category": "laptop",
+     "dominant_categories": [
+      "laptop",
+      "general",
+      "accessory"
+     ],
+     "is_mixed_catalog": true,
+     "category_counts": {
+      "laptop": 45,
+      "fresh_produce": 10,
+      "monitor": 8,
+      "phone": 4,
+      "tablet": 1,
+      "general": 25,
+      "accessory": 13,
+      "desktop": 2,
+      "clothing": 6
+     },
+     "total_products": 114
+    },
+    "catalog_relevance": {
+     "off_domain": false,
+     "low_support": false,
+     "soft_warning": null,
+     "image_category": "laptop",
+     "catalog_primary": "laptop",
+     "dominant_categories": [
+      "laptop",
+      "general",
+      "accessory"
+     ],
+     "is_mixed_catalog": true,
+     "catalog_category_count": 45,
+     "catalog_category_share": 0.3947
+    },
+    "llm_summary_job_id": "2dfbe2ef7f864468bbe2df57246bb84d",
+    "turn_envelope_diff": {
+     "changed_fields": [
+      "brands",
+      "specs",
+      "shortlist_locked",
+      "shortlist_size"
+     ],
+     "expanded": true,
+     "narrowed": false,
+     "reason": "candidate_or_result_envelope_expanded",
+     "previous": {},
+     "current": {
+      "budget_min": null,
+      "budget_max": null,
+      "brands": [],
+      "specs": [
+       "ram_gb_min:16",
+       "storage_gb_min:1000",
+       "ram_gb_min:16",
+       "gpu_vram_gb_min:8"
+      ],
+      "candidates_count": 19,
+      "results_count": 7,
+      "shortlist_locked": false,
+      "shortlist_size": 0
+     }
+    },
+    "memory_health": {
+     "memory_confidence": 0.75,
+     "summary_age_sec": null,
+     "stale_slots": [],
+     "shortlist_lock_active": false,
+     "turn_type": "result_turn"
+    },
+    "session_summary": {
+     "ts": 1783727036,
+     "turn_type": "result_turn",
+     "goals": [
+      "gaming_aaa_heavy"
+     ],
+     "hard_constraints": {
+      "budget_min": null,
+      "budget_max": null,
+      "brands": [],
+      "gpu_preference": "with_discrete"
+     },
+     "soft_preferences": {
+      "specs": [
+       "ram_gb_min:16",
+       "storage_gb_min:1000",
+       "ram_gb_min:16",
+       "gpu_vram_gb_min:8"
+      ],
+      "use_case_tags": [
+       "gaming_aaa_heavy"
+      ]
+     },
+     "current_shortlist": [
+      "GAM-0006",
+      "GAM-0002",
+      "LAP-647D08E6",
+      "LAP-788760E4",
+      "LAP-BCBAFE20",
+      "LAP-858DC749",
+      "LAP-0A1191AB"
+     ],
+     "pinned_context": {
+      "budget": {
+       "value": {
+        "min": null,
+        "max": null
+       },
+       "ts": 1783727036,
+       "source_turn_type": "result_turn"
+      },
+      "use_case": {
+       "value": "gaming_aaa_heavy",
+       "ts": 1783727036,
+       "source_turn_type": "result_turn"
+      },
+      "gpu_preference": {
+       "value": "with_discrete",
+       "ts": 1783727036,
+       "source_turn_type": "result_turn"
+      },
+      "selected_skus": {
+       "value": [
+        "GAM-0006",
+        "GAM-0002",
+        "LAP-647D08E6",
+        "LAP-788760E4",
+        "LAP-BCBAFE20",
+        "LAP-858DC749",
+        "LAP-0A1191AB"
+       ],
+       "ts": 1783727036,
+       "source_turn_type": "result_turn"
+      }
+     },
+     "referents": {
+      "has_reference": false,
+      "source": "none",
+      "skus": []
+     },
+     "unresolved_questions": [
+      "Do you have a price tier in mind (Under $1000, $1000–$1500, $1500+)?",
+      "Any brand preference (Apple, Dell, Lenovo, ASUS, etc.)?"
+     ]
+    },
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "model_watermark": "sqwm_eb296c8062887daf",
+    "model_output_fingerprint": "sqfp_896ed0fb78ff00039901b79a"
+   },
+   "narration": {
+    "job_id": "2dfbe2ef7f864468bbe2df57246bb84d",
+    "final_status": "done",
+    "meta": {
+     "storage_backend": "redis"
+    },
+    "prose_len": 261,
+    "prose": "YES, the Dell G16 7630 runs Cyberpunk 2077 smoothly at high settings with its RTX 4070 GPU and 240Hz display. The MSI Katana 15 also works well, but its 144Hz screen may limit ultra settings performance. Both have 16GB RAM, meeting the game’s recommended specs."
+   },
+   "contract_violations": []
+  }
+ ]
+}

@@ -1,0 +1,332 @@
+{
+ "id": "policy_payment_plans",
+ "lane": "policy",
+ "notes": "capability-registry honesty (B1) — declared does_not_offer must answer honestly",
+ "known_wrong": null,
+ "meta": {
+  "recorded_at": "2026-07-10T23:45:48.066539+00:00",
+  "git_sha": "c84d43f",
+  "base_url": "http://127.0.0.1:8080",
+  "uid": "corpus-policy_payment_plans-0710234255"
+ },
+ "turns": [
+  {
+   "turn": 0,
+   "request": {
+    "path": "/api/v1/recommend/suggest",
+    "params": {
+     "query": "do you offer payment plans?",
+     "uid": "corpus-policy_payment_plans-0710234255"
+    }
+   },
+   "status_code": 200,
+   "elapsed_ms": 3967,
+   "response": {
+    "results": [],
+    "proposal": {
+     "decision_mode": "rules",
+     "ranked_skus": []
+    },
+    "constraints_used": {
+     "uid_hash": "690706fbe93529d1",
+     "budget_max": null,
+     "budget_min": null,
+     "brands": [],
+     "specs": [],
+     "brand_excludes": [],
+     "availability": null,
+     "condition": null,
+     "intent": "product_search",
+     "use_case": null,
+     "use_case_tags": [],
+     "locale": null,
+     "query": "do you offer payment plans?",
+     "slots": {
+      "price_min": null,
+      "price_max": null,
+      "budget": null,
+      "specs": {},
+      "brand_includes": [],
+      "brand_excludes": [],
+      "condition": null,
+      "availability": null,
+      "shipping_deadline": null,
+      "quantity": null
+     },
+     "shortlist_lock_active": false,
+     "turn_intent": "SEARCH",
+     "_request_budget_max": null,
+     "_request_budget_min": null,
+     "budget_fitness": {
+      "status": "unknown"
+     },
+     "budget_tier": "unknown",
+     "budget_tier_tags": [],
+     "warranty_candidate": "warranty_candidate_neutral",
+     "accessory_affinities": [
+      "screen_protector",
+      "cleaning_kit",
+      "laptop_sleeve",
+      "usb_hub"
+     ],
+     "urgency": "normal",
+     "bundle_receptivity": "medium",
+     "shopper_intent": {
+      "persona": "unknown",
+      "primary_intent": "product_search",
+      "secondary_needs": [],
+      "budget_min": null,
+      "budget_max": null,
+      "budget_tier": "unknown",
+      "price_sensitivity": "medium",
+      "urgency": "normal",
+      "bundle_receptivity": "medium",
+      "brands_positive": [],
+      "brands_negative": [],
+      "use_case_key": null,
+      "accessory_affinities": [
+       "screen_protector",
+       "cleaning_kit",
+       "laptop_sleeve",
+       "usb_hub"
+      ],
+      "priority_factors": [],
+      "confidence": 1.0,
+      "warranty_tag": "warranty_candidate_neutral"
+     }
+    },
+    "policy_version": "v1",
+    "message": "No in-stock match right now. You can raise your budget, allow other brands, or I can show the nearest in-stock options.",
+    "assistant_message": "No in-stock match right now. You can raise your budget, allow other brands, or I can show the nearest in-stock options.",
+    "source_statuses": [
+     {
+      "source": "catalog_db",
+      "status": "empty",
+      "hit_count": 0,
+      "latency_ms": 4,
+      "error": null
+     }
+    ],
+    "degraded": false,
+    "eligible": true,
+    "view_mode": "grid",
+    "view_reason": "Default product layout",
+    "agent_chain": [
+     {
+      "agent": "Security_Observer_Agent",
+      "confidence": null,
+      "duration_ms": null,
+      "severity": "info"
+     },
+     {
+      "agent": "Inventory_Agent",
+      "candidates_evaluated": 0,
+      "status": "skipped_no_candidates"
+     }
+    ],
+    "llm_model": "rule-based (prefer_small)",
+    "model_tier": "small",
+    "complexity_signals": {
+     "length_trigger": false,
+     "matched_keywords": [],
+     "conjunction_count": 0,
+     "score": 0
+    },
+    "security": {
+     "severity": "info",
+     "mitre": [],
+     "owasp": [],
+     "stride": [],
+     "signals": {
+      "jailbreak": false,
+      "embedding_jailbreak": false,
+      "unicode_obfuscation": false,
+      "pii": false,
+      "api_key": false,
+      "pci": false,
+      "prompt_injection": false,
+      "agentic_tool_abuse": false,
+      "data_exfiltration": false,
+      "supply_chain": false,
+      "training_poisoning": false,
+      "poisoning_attempt": false,
+      "model_drift": false,
+      "model_dos": false,
+      "plugin_insecure": false,
+      "overreliance": false,
+      "embedding_weakness": false,
+      "identity_abuse": false,
+      "unexpected_code_exec": false,
+      "cascading_failure": false,
+      "rogue_agent": false,
+      "pcap_dns_tunnel": false,
+      "pcap_high_entropy_dns": false,
+      "cv_prompt_injection": false,
+      "deception": false,
+      "authority_impersonation": false,
+      "social_engineering": false
+     },
+     "risk_adj": 4.320000000000001,
+     "cvss": {
+      "score": 0.2
+     },
+     "dread": {
+      "damage": 2.0,
+      "reproducibility": 3.0,
+      "exploitability": 3.0,
+      "affected_users": 3.0,
+      "discoverability": 5.0,
+      "avg": 3.2,
+      "weighted_avg": 3.56,
+      "kill_chain_stage": "Reconnaissance",
+      "kill_chain_stage_index": 0,
+      "stage_weights": {
+       "damage": 1,
+       "reproducibility": 2,
+       "exploitability": 2,
+       "affected_users": 1,
+       "discoverability": 3
+      },
+      "evidence": [
+       {
+        "signal": "severity:info",
+        "component": "damage",
+        "contribution": 2.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "severity",
+        "signal_quality": "heuristic"
+       },
+       {
+        "signal": "signal_count:0",
+        "component": "reproducibility",
+        "contribution": 3.0,
+        "mitre": "",
+        "owasp": "",
+        "kill_chain": "",
+        "source": "heuristic",
+        "signal_quality": "heuristic"
+       }
+      ]
+     },
+     "pasta": {
+      "current_stage": "Stage1",
+      "stages": [
+       {
+        "id": "Stage1",
+        "name": "DefineObjectives",
+        "status": "current"
+       },
+       {
+        "id": "Stage2",
+        "name": "DefineTechnicalScope",
+        "status": "pending"
+       },
+       {
+        "id": "Stage3",
+        "name": "ApplicationDecomposition",
+        "status": "pending"
+       },
+       {
+        "id": "Stage4",
+        "name": "ThreatAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage5",
+        "name": "VulnerabilityAnalysis",
+        "status": "pending"
+       },
+       {
+        "id": "Stage6",
+        "name": "ModellingAndSimulation",
+        "status": "pending"
+       },
+       {
+        "id": "Stage7",
+        "name": "RiskAndImpactAnalysis",
+        "status": "pending"
+       }
+      ],
+      "evidence_tags": []
+     },
+     "kev": [],
+     "maestro": [],
+     "cyber_risk_quantification": null,
+     "tls_fingerprint": null,
+     "gnn_fraud": null,
+     "policy_route": "allow",
+     "route": "allow",
+     "image_untrusted": false,
+     "image_trust_channels": {
+      "visual_embedding_trusted": true,
+      "ocr_trusted": true,
+      "qr_trusted": true
+     },
+     "qr": {
+      "destination_url": null,
+      "final_url": null,
+      "redirect_hops": 0,
+      "reputation_verdict": "benign",
+      "confidence": 0.35,
+      "intel_pending": false,
+      "intel_risk": null,
+      "intel_sources": []
+     }
+    },
+    "image_reupload_reasons": [],
+    "trace_id": "2e7d81e8-f2be-4a12-b0ac-fc8441b461fa",
+    "decision_trace_id": "2e7d81e8-f2be-4a12-b0ac-fc8441b461fa",
+    "evidence_items": [],
+    "evidence_weighting": {
+     "retrieval": 0.5,
+     "rules": 0.3,
+     "policy": 0.2
+    },
+    "confidence_calibrated": 0.0,
+    "question_plan": {
+     "mode": "clarify",
+     "missing_fields": [
+      "budget",
+      "use_case"
+     ],
+     "confidence_band": "low",
+     "ambiguity_reason": "insufficient_context"
+    },
+    "confidence_band": "low",
+    "ambiguity_reason": "insufficient_context",
+    "needs_disambiguation": true,
+    "counterfactual": "Different budget/spec constraints or stock availability could change top recommendations.",
+    "followup_contract": {
+     "deictic_reference_detected": false,
+     "comparative_followup_detected": false,
+     "memory_carry_forward_required": false,
+     "coreference_mode": "none",
+     "intent_chain_size": 0
+    },
+    "intent_execution_plan": {
+     "plan_version": "intent_split_v1",
+     "is_multi_intent": false,
+     "steps": []
+    },
+    "turn_type": "unknown_turn",
+    "referents": {
+     "has_reference": false,
+     "source": "none",
+     "skus": []
+    },
+    "memory_confidence": 0.5,
+    "buyer_persona": null,
+    "buyer_persona_candidate": null,
+    "buyer_persona_confidence": null,
+    "decision_id": "2e7d81e8-f2be-4a12-b0ac-fc8441b461fa",
+    "_trace_recommendation_persisted": true
+   },
+   "narration": null,
+   "contract_violations": [
+    "missing core field: products"
+   ]
+  }
+ ]
+}
