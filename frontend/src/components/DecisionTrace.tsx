@@ -547,6 +547,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
     loadProcurementDetail();
   }, [activeTab, effectiveTraceId, procurementCaseId, loadProcurementDetail]);
 
+  // Each trace resolves its own procurement case. Drop any prior turn's resolved case id when the trace
+  // changes so a normal (no-procurement) trace doesn't inherit a stale case id — which would keep the tab
+  // badged AND (via the guard below) re-fire the case lookup. FulfilmentTraceLink re-resolves when the new
+  // trace genuinely carries procurement signals.
+  useEffect(() => { setProcurementCaseId(null); }, [effectiveTraceId]);
+
   useEffect(() => {
     if (traceId && traceId.trim()) {
       setFallbackTraceId(null);
@@ -1474,8 +1480,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                   No decision trace yet. Run a query (chat) or submit/analyze a CV case to generate a trace id.
                 </div>
               )}
-              {/* Links this decision to the procurement journey it opened (renders only when one exists) */}
-              <FulfilmentTraceLink traceId={effectiveTraceId || undefined} onResolved={setProcurementCaseId} />
+              {/* Links this decision to the procurement journey it opened. Only mount it (and fire the case
+                  lookup) when this trace actually carries a procurement signal — a normal recommendation
+                  trace has no case, so an unconditional lookup just 404s in the console every turn. */}
+              {hasProcurementSignal && (
+                <FulfilmentTraceLink traceId={effectiveTraceId || undefined} onResolved={setProcurementCaseId} />
+              )}
               {activeTab === 'events' && (
                 <>
                   <div className={styles.eventFilterRow}>
@@ -1817,7 +1827,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                         <div className={styles.sectionTitle}>{sec?.title || `Image ${idx + 1}`}</div>
                         <div className={styles.kvRow}>
                           <span>Match basis</span>
-                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ') : '?'}</span>
+                          <span>{Array.isArray(sec?.match_basis) ? sec.match_basis.join(' · ') : '?'}</span>
                         </div>
                         {sec?.summary && <div className={styles.whyNarrative}>{sec.summary}</div>}
                         {Array.isArray(sec?.top_products) && sec.top_products.slice(0, 3).map((p: any, pIdx: number) => (
@@ -2140,7 +2150,12 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                     const timingEvt = events.find(e => eventMatches(e, 'timing_breakdown'));
                     const msTr = trace?.model_selection || {};
                     const timing = (timingEvt?.payload || (trace as any)?.timing_breakdown || {}) as Record<string, any>;
-                    const score = cxEvt?.payload?.score ?? cxEvt?.payload?.complexity_score ?? (msTr as any).tier;
+                    // Prefer the dedicated complexity-score event (the one whose payload the Events table
+                    // renders as the real score) so the header never shows a placeholder while the table has
+                    // a value — falling back to whatever cxEvt/model-selection carries.
+                    const scoreEvt = events.find(e => eventMatches(e, 'tier_complexity_score'));
+                    const score = scoreEvt?.payload?.score ?? scoreEvt?.payload?.complexity_score
+                      ?? cxEvt?.payload?.score ?? cxEvt?.payload?.complexity_score ?? (msTr as any).tier;
                     const hasModelFallback = Boolean(
                       (msTr as any)?.selected ||
                       (msTr as any)?.model ||
@@ -3379,7 +3394,7 @@ export default function DecisionTrace({ traceId, onClose, imageTriage, initialTa
                             </div>
                           </div>
                         )}
-                        {procEvents.length === 0 && !procCase && pendingSplit?.split ? (
+                        {procEvents.length === 0 && !procCase && hasProcurementSignal && pendingSplit?.split ? (
                           <div data-testid="proc-pending-plan" style={{ border: '1px solid #fcd34d', background: '#fffbeb', borderRadius: 10, padding: '10px 12px', fontSize: 13 }}>
                             <div style={{ fontWeight: 700, marginBottom: 4 }}>⏳ Pending sourcing plan — nothing confirmed, no supplier contacted</div>
                             <div style={{ color: '#92400e', marginBottom: 8 }}>

@@ -1743,10 +1743,21 @@ export default function App() {
         setRightPanelContract(panelContract);
         setTraceEvidence(data.evidence || null);
         const nextTraceId = normalizeTraceId(data.decision_trace_id || data.trace_id || data.decision_id || data.case_id || null);
-        // Pin the sourcing trace to THIS turn only when this turn produced a sourcing preview; otherwise
-        // leave the previously-pinned one intact so a later plain query doesn't unlink the confirm.
-        if (data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines) && (data.sourcing_intent as any).lines.length > 0) {
+        // Pin the sourcing trace to THIS turn when it produced a sourcing preview. If the turn carries NO
+        // procurement context at all (no sourcing preview, no open case, no bulk options/quantity), RELEASE
+        // the sticky pin — otherwise a later single-unit query would still resolve the prior bulk turn's
+        // Procurement tab and show its stale split. A turn that still carries procurement context (an open
+        // case or bulk options) keeps the pin so an active plan isn't unlinked.
+        const turnHasSourcingPreview = Boolean(
+          data.sourcing_intent && Array.isArray((data.sourcing_intent as any).lines) && (data.sourcing_intent as any).lines.length > 0);
+        const turnHasProcurementContext = turnHasSourcingPreview
+          || Boolean(data.fulfillment_case && (data.fulfillment_case as any).case_id)
+          || (Array.isArray(data.fulfillment_options) && data.fulfillment_options.length > 0)
+          || (Number((data as any).requested_quantity) > 1);
+        if (turnHasSourcingPreview) {
           setSourcingTraceId(nextTraceId);
+        } else if (!turnHasProcurementContext) {
+          setSourcingTraceId(null);
         }
         persistOperatorMetrics(data.timing_breakdown, nextTraceId, Array.isArray(chatPayload.images) && chatPayload.images.length > 0 ? 'chat+image' : 'chat');
         try {
